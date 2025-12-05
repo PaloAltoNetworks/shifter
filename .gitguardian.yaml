@@ -6,4 +6,3 @@ version: v1
 
 # Ignore only CTF scenarios (files/* already in .gitignore)
 paths-ignore:
-  - "ctf_scenarios/**"  # CTF scenarios with test credentials

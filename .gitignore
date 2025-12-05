@@ -340,7 +340,6 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-lab_connections.txt
 
 # QRadar files
 files/*
@@ -372,29 +371,9 @@ build/
 .DS_Store
 Thumbs.db
 
-# Terraform output files containing IP addresses
-infrastructure/lab_connections.txt
-infrastructure/lab_config.json
-
-# Generated backend.tf files with hardcoded bucket names
-**/backend.tf
-
 # Log files
 *.log
-
-archive/
-
-keys/*
-
-config/wazuh_indexer_ssl_certs/*
 
 .cursor/mcp.json
 
 notes/
-
-ctf_scenarios/gaming/behavioural_analysis/data/
-data/
-
-# Exception: include gaming api data
-!containers/gaming-api/api/data/
-ctf_scenarios/gaming/

@@ -20,7 +20,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
+          cache: 'npm'
+          cache-dependency-path: |
+            mcp/aptl-mcp-common/package-lock.json
+            mcp/mcp-red/package-lock.json
       - name: Build and test aptl-mcp-common
         working-directory: mcp/aptl-mcp-common
         run: |

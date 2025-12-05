@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.1] - 2024-12-04
 
 ### Added
+- SonarCloud integration
+- Build and test workflow
+- Quality gate badge to README
+
+### Fixed
+- npm version mismatch
+- test broken by npm version upgrade
+
+## [0.1.0] - 2024-12-04
+
+### Added
 - Initial Shifter architecture for self-service cyber range platform
 - Core MCP library (`mcp/aptl-mcp-common`) with SSH session management
 - Reference MCP server (`mcp/mcp-red`) as template for new MCPs
@@ -24,5 +35,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CTF scenarios (will be AI-generated dynamically)
 - Local deployment scripts
 
-[Unreleased]: https://github.com/your-org/shifter/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/your-org/shifter/releases/tag/v0.1.0

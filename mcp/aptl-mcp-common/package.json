@@ -22,8 +22,9 @@
     },
     "devDependencies": {
         "@types/node": "^20.11.24",
+        "@vitest/coverage-v8": "^4.0.15",
         "typescript": "^5.3.3",
-        "vitest": "^1.0.0"
+        "vitest": "^4.0.15"
     },
     "scripts": {
         "build": "tsc",

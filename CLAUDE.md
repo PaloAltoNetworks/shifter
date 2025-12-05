@@ -4,205 +4,586 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-APTL (Advanced Purple Team Lab) is a local Docker-based purple team lab infrastructure. It deploys Wazuh SIEM stack along with containerized victim machines and Kali Linux red team instances for security training and testing.
+**Shifter** is a fork of APTL (Advanced Purple Team Lab) adapted for PANW SecOps Domain Consultants. While APTL is a local Docker-based purple team lab with Wazuh SIEM, Shifter is a cloud-hosted XDR/XSIAM demo and attack testing environment deployed to AWS.
 
-## Key Architecture
+### Target Users
 
-- **Docker Compose Infrastructure**: Complete lab environment defined in `docker-compose.yml`
-  - Wazuh Manager: SIEM backend and API (172.20.0.10)
-  - Wazuh Indexer: OpenSearch-based data storage (172.20.0.12)
-  - Wazuh Dashboard: Web interface (172.20.0.11)
-  - Victim Container: Target machine with services (172.20.0.20)
-  - Kali Container: Red team platform (172.20.0.30)
-- **Red Team MCP**: TypeScript MCP server in `mcp/` providing AI agents controlled access to lab containers
-- **Log Integration**: Victim containers forward logs to Wazuh Manager via rsyslog on port 514
-- **Container Network**: Isolated Docker network (172.20.0.0/16) for all lab communications
+PANW SecOps Domain Consultants who need to:
+- Run demos in XDR or XSIAM for customers
+- Test different attack scenarios against XDR-protected victims
+- Cannot install tools locally on their work Windows laptops
 
-## Development Commands
+### Key Difference from APTL
 
-### Lab Operations
+| Aspect | APTL | Shifter |
+|--------|------|---------|
+| Deployment | Local Docker | AWS CloudFormation |
+| SIEM | Wazuh (self-hosted) | XDR/XSIAM (DC's tenant) |
+| Workstation | User's laptop | Windows EC2 via RDP |
+| Target Users | Security researchers | PANW Domain Consultants |
+| Setup | `./start-lab.sh` | AWS Console (zero install) |
 
-#### Start Complete Lab
+---
 
-```bash
-# Start entire lab environment (recommended)
-./start-lab.sh
+## Shifter Architecture
+
+### High-Level Design
+
+```
+DC's Windows Laptop (browser + RDP client only)
+         │
+         │ RDP (3389)
+         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  AWS VPC: 10.0.0.0/16                                           │
+│  Subnet: 10.0.1.0/24                                            │
+│                                                                 │
+│  ┌───────────────┐    ┌───────────────┐    ┌───────────────┐    │
+│  │   Windows     │    │     Kali      │    │    Victim     │    │
+│  │  Workstation  │    │   (headless)  │    │    (Linux)    │    │
+│  │  t3.xlarge    │    │   t3.medium   │    │   t3.medium   │    │
+│  │               │    │               │    │               │    │
+│  │  • Cursor IDE │───▶│  • Kali tools │───▶│  • XDR agent  │    │
+│  │  • mcp-kali   │SSH │  • SSH server │    │  • Vuln apps  │    │
+│  │  • mcp-victim │───▶│               │    │  • SSH server │    │
+│  │  • Node.js    │SSH │               │    │               │    │
+│  └───────┬───────┘    └───────────────┘    └───────┬───────┘    │
+│          │                                         │            │
+│          │ Elastic IP (stable RDP)                 │ XDR Agent  │
+│          ▼                                         ▼            │
+└──────────────────────────────────────────────────────────────────┘
+                                                     │
+                                                     ▼
+                                            DC's XSIAM Tenant
+                                            (alerts, detections)
 ```
 
-#### Manual Docker Operations
+### Why This Architecture
 
-```bash
-# Start lab manually
-docker compose up -d
+1. **Windows Workstation + Headless Kali** (vs Kali with GUI):
+   - Cheaper: ~$0.25/hr vs ~$0.57/hr (no GPU instance needed)
+   - Familiar: DCs know Windows RDP (vs NICE DCV on Linux)
+   - Same pattern as APTL: Cursor + MCPs controlling remote boxes via SSH
+   - Realistic: Operator controlling attack infrastructure remotely
 
-# View service logs
-docker compose logs -f [service_name]
+2. **CloudFormation** (vs Terraform):
+   - Zero install: DCs deploy from AWS Console (browser only)
+   - No tooling on locked-down laptops required
+   - One-click stack deletion for cleanup
 
-# Stop lab
-docker compose down
+3. **Reuses APTL MCP Architecture**:
+   - Same `aptl-mcp-common` library
+   - Config-driven MCP servers (just change JSON target)
+   - Minimal new code required
 
-# Cleanup (removes all data)
-docker compose down -v
+---
 
-# Restart specific service
-docker compose restart [service_name]
-```
+## Components
 
-#### Container Development
+### 1. Windows Workstation (t3.xlarge)
 
-```bash
-# Build Kali container image
-cd containers/kali
-docker build -t aptl-kali .
+**Purpose**: DC's cloud desktop with AI-assisted attack control
 
-# Build victim container image
-cd containers/victim
-docker build -t aptl-victim .
+**Specifications**:
+- Instance: t3.xlarge (4 vCPU, 16GB RAM)
+- OS: Windows Server 2022
+- Access: RDP on port 3389 (restricted to DC's IP)
 
-# Build MCP server
-cd mcp
-npm run build
-npm test
-npm run watch  # Development mode
+**Installed Software** (via user_data PowerShell):
+- Cursor IDE (AI coding assistant)
+- Node.js 20.x LTS
+- Git
+- MCP servers (mcp-kali, mcp-victim)
+- OpenSSH client
 
-# Test MCP server
-npx @modelcontextprotocol/inspector dist/index.js
-```
-
-## Configuration
-
-### Primary Configuration
-
-- **docker-compose.yml**: Main lab environment configuration
-- **config/**: Wazuh configuration files
-  - `wazuh_cluster/wazuh_manager.conf`: Manager configuration
-  - `wazuh_dashboard/`: Dashboard and UI configuration
-  - `wazuh_indexer/`: OpenSearch indexer configuration
-- **Environment Variables**: Container-specific settings in docker-compose.yml
-
-### MCP Server Setup
-
-For AI agents to access lab containers via MCP:
-
-**Cursor**: Create `.cursor/mcp.json`:
-
+**MCP Configuration** (`C:\Users\Administrator\.cursor\mcp.json`):
 ```json
 {
     "mcpServers": {
-        "aptl-lab": {
+    "kali": {
+      "command": "node",
+      "args": ["C:\\Shifter\\mcp\\mcp-kali\\build\\index.js"]
+    },
+    "victim": {
             "command": "node",
-            "args": ["./mcp/dist/index.js"],
-            "cwd": "."
+      "args": ["C:\\Shifter\\mcp\\mcp-victim\\build\\index.js"]
         }
     }
 }
 ```
 
-**Cline**: Add to MCP settings:
+### 2. Kali Attack Box (t3.medium)
 
-```json
-"aptl-lab": {
-    "command": "node",
-    "args": ["./mcp/dist/index.js"],
-    "cwd": "/path/to/aptl"
-}
+**Purpose**: Headless Kali Linux for attack execution
+
+**Specifications**:
+- Instance: t3.medium (2 vCPU, 4GB RAM)
+- OS: Kali Linux (AWS Marketplace AMI)
+- Access: SSH only (from Windows Workstation)
+
+**Installed Software** (via user_data bash):
+- kali-linux-headless metapackage
+- Common attack tools (nmap, metasploit, hydra, sqlmap, etc.)
+- SSH server configured for key-only auth
+
+**MCP Tools Available**:
+- `kali_info` - Get Kali instance information
+- `kali_run_command` - Execute single command
+- `kali_interactive_session` - Persistent SSH session
+- `kali_background_session` - Long-running processes (msfconsole, etc.)
+- Session management tools (list, close, get output)
+
+### 3. Victim Linux (t3.medium)
+
+**Purpose**: Target system with XDR/XSIAM agent for demo scenarios
+
+**Specifications**:
+- Instance: t3.medium (2 vCPU, 4GB RAM)
+- OS: Amazon Linux 2023
+- Access: SSH only (from Windows Workstation or Kali)
+
+**Installed Software** (via user_data bash):
+- XDR/XSIAM agent (downloaded from DC-provided URL)
+- Apache + PHP (vulnerable web services)
+- SSH server
+- Basic network tools
+
+**MCP Tools Available**:
+- `victim_info` - Get victim instance information
+- `victim_run_command` - Execute single command
+- `victim_interactive_session` - Persistent SSH session
+- Session management tools
+
+### 4. Networking
+
+**VPC Configuration**:
+- VPC CIDR: 10.0.0.0/16
+- Public Subnet: 10.0.1.0/24
+- Internet Gateway for outbound access
+
+**Security Group (shared by all instances)**:
+
+| Direction | Port | Protocol | Source | Purpose |
+|-----------|------|----------|--------|---------|
+| Inbound | 3389 | TCP | DC's IP | RDP to Windows |
+| Inbound | 22 | TCP | DC's IP | SSH backup |
+| Inbound | ALL | ALL | Self (SG) | Inter-instance traffic |
+| Outbound | ALL | ALL | 0.0.0.0/0 | Internet access |
+
+The self-referencing rule enables unrestricted Kali ↔ Victim traffic for attack scenarios (any port, any protocol).
+
+### 5. Auto-Shutdown (Cost Control)
+
+**Lambda + EventBridge**:
+- EventBridge rule triggers Lambda at configured time (default: 7pm UTC)
+- Lambda stops all three EC2 instances
+- DC can restart from AWS Console next day
+- Prevents overnight/weekend charges
+
+---
+
+## CloudFormation Parameters
+
+```yaml
+Parameters:
+  YourIPCIDR:
+    Type: String
+    Description: "Your IP in CIDR format (e.g., 203.0.113.50/32)"
+    
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "Existing EC2 key pair for SSH access"
+    
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    Description: "Password for Windows Administrator account"
+    
+  XDRAgentURL:
+    Type: String
+    Description: "URL to download XDR/XSIAM agent (S3 presigned or public)"
+    Default: ""
+    
+  ShutdownTimeUTC:
+    Type: String
+    Default: "19:00"
+    Description: "Daily auto-shutdown time in UTC (HH:MM)"
 ```
 
-## Important Notes
+---
 
-### CRITICAL: Docker Operations
+## User Experience
 
-- **Use `./start-lab.sh` for initial setup** - handles all prerequisites and startup
-- **Use `docker compose` commands for manual operations** when needed
-- **Always check container status** with `docker compose ps` before troubleshooting
+### Deployment (One-Time)
 
-### Security Context
+1. DC logs into AWS Console
+2. CloudFormation → Create Stack → Upload template (or from S3 URL)
+3. Fill in parameters:
+   - Their public IP (for RDP/SSH access)
+   - Key pair name (create one if needed)
+   - Windows admin password
+   - XDR agent download URL (from their XSIAM tenant)
+4. Create stack → Wait ~15 minutes
+5. Get outputs: Windows IP, Kali internal IP, Victim internal IP
 
-- This is a legitimate security research and training lab
-- All attacks are contained within the lab environment
-- Victim machines are purpose-built targets for testing
-- Red team logging helps track attack activities for analysis
+### Daily Usage
 
-### Wazuh Features
+1. Start instances from EC2 Console (if stopped by auto-shutdown)
+2. RDP to Windows Workstation
+3. Open Cursor IDE
+4. Use AI to configure attack scenarios:
+   > "Set up a PHP command injection vulnerability on the victim"
+5. Use AI to run attacks from Kali:
+   > "From Kali, scan the victim and exploit the web vulnerability"
+6. Show XDR/XSIAM console to customer (detections)
+7. Instances auto-stop at 7pm UTC
 
-- **Red Team Logging**: Custom rules for red team activity classification
-- **Log Sources**: Container-based log routing for attack separation
-- **Custom Fields**: RedTeamActivity, RedTeamCommand, RedTeamTarget metadata
-- **Real-time Monitoring**: Live dashboard showing attack progression
+### Cleanup
 
-### System Requirements
+1. CloudFormation → Delete Stack
+2. All resources removed (VPC, instances, security groups, etc.)
 
-- **Docker**: Docker Engine and Docker Compose
-- **System**: 8GB+ RAM, 20GB+ disk space
-- **Ports**: 443, 2022, 2023, 9200, 55000 must be available
-- **OS**: Linux, macOS, or Windows with WSL2
+---
 
-### Startup Timing
+## File Structure (Planned)
 
-- Container startup: 2-3 minutes
-- Wazuh Indexer initialization: 3-5 minutes
-- Complete lab ready: 5-10 minutes
-- SSH services available: 1-2 minutes after startup
+```
+shifter/
+├── CLAUDE.md                          # This file
+├── README.md                          # Updated for Shifter
+├── cloudformation/
+│   ├── shifter-stack.yaml             # Main CloudFormation template
+│   └── shifter-stack-params.json      # Example parameters
+├── scripts/
+│   ├── windows-user-data.ps1          # Windows provisioning
+│   ├── kali-user-data.sh              # Kali provisioning
+│   └── victim-user-data.sh            # Victim provisioning
+├── mcp/
+│   ├── aptl-mcp-common/               # (existing) Shared MCP library
+│   ├── mcp-kali/                      # (new) Kali MCP for Shifter
+│   │   ├── src/index.ts
+│   │   ├── aws-lab-config.json        # Points to Kali EC2
+│   │   └── package.json
+│   └── mcp-victim/                    # (new) Victim MCP for Shifter
+│       ├── src/index.ts
+│       ├── aws-lab-config.json        # Points to Victim EC2
+│       └── package.json
+├── lambda/
+│   └── auto-shutdown/
+│       ├── index.py                   # Lambda function
+│       └── requirements.txt
+├── docs/
+│   └── shifter-setup-guide.md         # Step-by-step with screenshots
+└── archive/                           # Old APTL Docker content (reference)
+```
 
-## Common Development Workflows
+---
 
-### Starting the Lab
+## Implementation Plan
 
-1. Clone repository and navigate to directory
-2. Run `./start-lab.sh` (handles all setup automatically)
-3. Wait for all services to become ready
-4. Access services via connection details in `lab_connections.txt`
+### Phase 1: Repository Cleanup
 
-### Testing Red Team Integration
+**Goal**: Remove all APTL Docker/Wazuh code that won't be used, leaving only what Shifter needs.
 
-1. Start lab: `./start-lab.sh`
-2. Build MCP server: `cd mcp && npm run build`
-3. Configure MCP client (Cursor/Cline) with local container configuration
-4. Test with AI agents using `kali_info` and `run_command` tools
-5. Verify container connectivity: `ssh -i ~/.ssh/aptl_lab_key kali@localhost -p 2023`
+#### Files/Directories to DELETE
 
-### Verifying SIEM Integration
+| Path | Reason |
+|------|--------|
+| `docker-compose.yml` | Docker lab definition - not used |
+| `start-lab.sh` | Docker startup script - not used |
+| `generate-indexer-certs.yml` | Wazuh certificate generation - not used |
+| `aptl.json` | Docker lab configuration - not used |
+| `mkdocs.yml` | APTL documentation site config - not used |
+| `CHANGELOG.md` | APTL changelog - start fresh |
+| `config/` | **Entire directory** - Wazuh configuration |
+| `config/certs.yml` | Wazuh cert config |
+| `config/wazuh_cluster/` | Wazuh manager config |
+| `config/wazuh_dashboard/` | Wazuh dashboard config |
+| `config/wazuh_indexer/` | Wazuh indexer config |
+| `containers/` | **Entire directory** - Docker container definitions |
+| `containers/gaming-api/` | Game API container |
+| `containers/kali/` | Docker Kali (will use AWS AMI instead) |
+| `containers/minecraft-server/` | Minecraft container |
+| `containers/minetest-client/` | Minetest client container |
+| `containers/minetest-server/` | Minetest server container |
+| `containers/reverse/` | Reverse engineering container |
+| `containers/victim/` | Docker victim (will use AWS AMI instead) |
+| `docs/` | **Entire directory** - APTL-specific docs |
+| `docs/architecture/` | Docker architecture docs |
+| `docs/components/` | Docker component docs |
+| `docs/containers/` | Container docs |
+| `docs/deployment.md` | Docker deployment |
+| `docs/getting-started/` | Docker getting started |
+| `docs/index.md` | APTL doc index |
+| `docs/troubleshooting/` | Docker troubleshooting |
+| `assets/` | **Entire directory** - APTL screenshots/docs |
+| `assets/docs/` | APTL PDF docs |
+| `assets/images/` | APTL screenshots |
+| `archive/` | **Entire directory** - old roadmap docs |
+| `scripts/generate-ssh-keys.sh` | Docker-specific key generation |
+| `vms/` | **Entire directory** - Proxmox Terraform (not AWS) |
+| `vms/windows/` | Proxmox Windows VM |
+| `mcp/mcp-wazuh/` | Wazuh API MCP - replaced by XSIAM |
+| `mcp/mcp-minetest-client/` | Game-specific MCP - not needed |
+| `mcp/mcp-minetest-server/` | Game-specific MCP - not needed |
+| `mcp/mcp-reverse/` | Container-specific MCP - not needed |
+| `mcp/mcp-windows-re/` | Hardcoded IP config - needs rewrite |
+| `mcp/build-all-mcps.sh` | References removed MCPs |
+| `mcp/package-lock.json` | Root lock file - MCPs have their own |
 
-1. Access Wazuh Dashboard: <https://localhost:443> (admin/SecretPassword)
-2. SSH to victim container: `ssh -i ~/.ssh/aptl_lab_key labadmin@localhost -p 2022`
-3. Generate test logs: `logger "Test message from victim"`
-4. Verify logs appear in Wazuh with proper indexing and routing
-5. Check red team logging from Kali container activities
+#### Files/Directories to KEEP
 
-## Troubleshooting
+| Path | Reason |
+|------|--------|
+| `CLAUDE.md` | This file - project guidance |
+| `LICENSE` | MIT license - required |
+| `README.md` | Will rewrite for Shifter |
+| `mcp/aptl-mcp-common/` | **Core MCP library** - directly reused |
+| `mcp/mcp-red/` | **Example MCP server** - reference implementation |
+| `ctf_scenarios/` | **Attack scenarios** - deployable on victim |
+| `infra/windows_re/` | **Reference only** - Terraform patterns for CloudFormation |
 
-Key troubleshooting commands:
+#### Cleanup Commands
 
-- Container status: `docker compose ps`
-- Service logs: `docker compose logs -f [service]`
-- Container shell access: `docker exec -it [container] /bin/bash`
-- Network connectivity: `docker network inspect aptl_aptl-network`
-- Port connectivity: `netstat -tlnp | grep [port]`
-- Log forwarding test: `docker exec aptl-victim logger "Test message"`
+```bash
+# Run from repo root
 
-Common log locations in containers:
-- Wazuh Manager: `docker compose logs wazuh.manager`
-- Victim logs: `docker compose logs victim`
-- Kali operations: `docker exec aptl-kali cat /home/kali/operations/activity.log`
+# Delete Docker/Wazuh files
+rm -f docker-compose.yml
+rm -f start-lab.sh
+rm -f generate-indexer-certs.yml
+rm -f aptl.json
+rm -f mkdocs.yml
+rm -f CHANGELOG.md
 
-See docs/troubleshooting/ for detailed debugging procedures.
+# Delete Docker-specific directories
+rm -rf config/
+rm -rf containers/
+rm -rf docs/
+rm -rf assets/
+rm -rf archive/
+rm -rf vms/
 
-## Code Cleanup Protocol
+# Delete scripts directory (only has Docker-specific script)
+rm -rf scripts/
 
-When changing approaches or trying new solutions:
-1. ALWAYS clean up abandoned code before implementing new approach
-2. Remove unused imports, functions, variables from failed attempts  
-3. Delete temporary files, test code, or experimental implementations
-4. Never leave commented-out code "just in case"
-5. If approach fails, revert changes completely before trying next approach
+# Delete unused MCP servers (keep mcp-red as example)
+rm -rf mcp/mcp-wazuh/
+rm -rf mcp/mcp-minetest-client/
+rm -rf mcp/mcp-minetest-server/
+rm -rf mcp/mcp-reverse/
+rm -rf mcp/mcp-windows-re/
+rm -f mcp/build-all-mcps.sh
+rm -f mcp/package-lock.json
+```
 
-## Git Commit Protocol
+#### Post-Cleanup Structure
 
-NEVER make commits without explicit user permission:
+```
+shifter/
+├── CLAUDE.md                    # Project guidance (this file)
+├── LICENSE                      # MIT license
+├── README.md                    # To be rewritten
+├── ctf_scenarios/               # Attack scenarios for victim
+│   ├── basic/
+│   ├── intermediate/
+│   ├── hard/
+│   ├── README.md
+│   ├── scenarios.json
+│   └── SCHEMA.md
+├── infra/                       # Reference patterns
+│   └── windows_re/              # Terraform → CloudFormation reference
+│       ├── main.tf
+│       ├── outputs.tf
+│       ├── README.md
+│       ├── terraform.tfvars.example
+│       ├── user_data.ps1
+│       └── variables.tf
+└── mcp/
+    ├── aptl-mcp-common/         # Core MCP library
+    │   ├── src/
+    │   ├── tests/
+    │   ├── package.json
+    │   ├── package-lock.json
+    │   ├── tsconfig.json
+    │   └── vitest.config.ts
+    └── mcp-red/                 # Example MCP server implementation
+        ├── src/index.ts
+        ├── docker-lab-config.json
+        ├── package.json
+        └── tsconfig.json
+```
+
+#### Verification After Cleanup
+
+```bash
+# Verify structure
+find . -type f -name "*.yml" | grep -v node_modules  # Should only show ctf_scenarios files
+find . -type f -name "docker*"                        # Should return nothing
+find . -type d -name "wazuh*"                         # Should return nothing
+ls mcp/                                               # Should show aptl-mcp-common/ and mcp-red/
+
+# Verify MCP common still builds
+cd mcp/aptl-mcp-common && npm install && npm run build && npm test
+
+# Verify mcp-red still builds
+cd mcp/mcp-red && npm install && npm run build
+```
+
+---
+
+### Phase 2: Build Shifter Infrastructure
+
+**Goal**: Create AWS CloudFormation stack and new MCP servers
+
+1. **CloudFormation Template** (`cloudformation/shifter-stack.yaml`)
+   - VPC, subnet, internet gateway, route table
+   - Security group with self-referencing rule
+   - Three EC2 instances (Windows, Kali, Victim)
+   - Elastic IP for Windows
+   - IAM role for instances
+   - Lambda + EventBridge for auto-shutdown
+
+2. **User Data Scripts** (`scripts/`)
+   - `windows-user-data.ps1`: RDP, Cursor, Node.js, Git, MCP setup
+   - `kali-user-data.sh`: SSH, kali-linux-headless, tools
+   - `victim-user-data.sh`: SSH, Apache, PHP, XDR agent install
+
+3. **MCP Servers** (`mcp/`)
+   - `mcp-kali/`: New MCP with config pointing to Kali private IP
+   - `mcp-victim/`: New MCP with config pointing to Victim private IP
+   - Both reuse `aptl-mcp-common` (no changes to common needed)
+
+4. **Documentation**
+   - Rewrite `README.md` for Shifter
+   - Create `docs/setup-guide.md` with screenshots
+
+### Phase 3: Enhanced Scenarios (Future)
+
+- Pre-configured vulnerable applications (DVWA, Juice Shop)
+- Windows victim option (for EDR demos)
+- CTF scenario deployment scripts adapted for AWS
+- Multiple victim instances option
+
+### Phase 4: Full Purple Team (Future)
+
+- XSIAM API MCP (query alerts, search XQL)
+- Complete attack → detection → investigation loop
+- DC provides XSIAM API credentials
+- AI can verify detections after attacks
+
+---
+
+## Development Commands
+
+### Building MCP Common Library
+
+```bash
+cd mcp/aptl-mcp-common && npm install && npm run build
+```
+
+### Testing MCP Common
+
+```bash
+cd mcp/aptl-mcp-common && npm test
+```
+
+### Building New MCP Servers (After Phase 2)
+
+```bash
+# Build Kali MCP
+cd mcp/mcp-kali && npm install && npm run build
+
+# Build Victim MCP  
+cd mcp/mcp-victim && npm install && npm run build
+
+# Test with MCP Inspector
+cd mcp/mcp-kali
+npx @modelcontextprotocol/inspector build/index.js
+```
+
+### CloudFormation Deployment (After Phase 2)
+
+```bash
+# Validate template
+aws cloudformation validate-template --template-body file://cloudformation/shifter-stack.yaml
+
+# Create stack
+aws cloudformation create-stack \
+  --stack-name shifter-test \
+  --template-body file://cloudformation/shifter-stack.yaml \
+  --parameters file://cloudformation/shifter-stack-params.json \
+  --capabilities CAPABILITY_IAM
+
+# Delete stack
+aws cloudformation delete-stack --stack-name shifter-test
+```
+
+---
+
+## Reference Code (infra/windows_re/)
+
+The `infra/windows_re/` directory contains Terraform patterns useful as reference for building CloudFormation:
+
+| Terraform File | CloudFormation Equivalent |
+|----------------|---------------------------|
+| `main.tf` (VPC, SG, EC2) | `AWS::EC2::VPC`, `AWS::EC2::SecurityGroup`, `AWS::EC2::Instance` |
+| `user_data.ps1` | Will adapt for Windows workstation provisioning |
+| `variables.tf` | CloudFormation Parameters |
+| `outputs.tf` | CloudFormation Outputs |
+
+This directory will be removed after CloudFormation is built, or kept as reference.
+
+---
+
+## Security Considerations
+
+1. **IP Whitelisting**: RDP/SSH only from DC's IP
+2. **Key-Only SSH**: Password auth disabled on all Linux instances
+3. **No Public Access**: Kali and Victim have no inbound from internet
+4. **Auto-Shutdown**: Reduces attack surface when not in use
+5. **Stack Deletion**: Clean removal of all resources
+
+---
+
+## Cost Estimate
+
+| Resource | Type | Hourly | 8hr/day |
+|----------|------|--------|---------|
+| Windows Workstation | t3.xlarge | $0.1664 | $1.33 |
+| Kali | t3.medium | $0.0416 | $0.33 |
+| Victim | t3.medium | $0.0416 | $0.33 |
+| **Total** | | **$0.2496** | **$2.00** |
+
+With auto-shutdown, a DC using the lab 8 hours/day costs ~$2/day or ~$40/month.
+
+---
+
+## Git Workflow
+
+### Branch Strategy
+
+- `main` - Stable Shifter releases
+- `develop` - Integration branch
+- `feature/*` - New features
+
+### Commit Protocol
+
+**NEVER make commits without explicit user permission:**
 1. ALWAYS ask before creating commits
 2. Show user what will be committed first
 3. Let user review changes before committing
 4. Only commit when user explicitly requests it
 5. NEVER include Claude attribution or co-authored-by tags
 
-This prevents code accumulation and maintains clean, maintainable codebase.
+---
+
+## What NOT To Do
+
+Per project rules:
+- Do NOT add features not explicitly requested
+- Do NOT create documentation for unbuilt features
+- Do NOT assume requirements - ask for clarification
+- Do NOT add "helpful" extras beyond the request
+- Keep responses focused and concise
+- Write for technical audience (no marketing language)

@@ -4,8 +4,16 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'mcp/**'
+      - '.github/workflows/sonar.yml'
+      - 'sonar-project.properties'
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - 'mcp/**'
+      - '.github/workflows/sonar.yml'
+      - 'sonar-project.properties'
 
 jobs:
   build:

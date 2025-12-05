@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.2] - 2025-12-04
 
-### [Added]
+### Added
 
 - Image assets for docs
 
-### [Changed]
+### Changed
 - Updated CLAUDE.md to reflect new architecture
 - Removed unused files from .gitignore
 - Only run mcp tests on code change

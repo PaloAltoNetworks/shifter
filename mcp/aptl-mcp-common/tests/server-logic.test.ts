@@ -1,12 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock all dependencies
-vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
-  Server: vi.fn().mockImplementation(() => ({
-    setRequestHandler: vi.fn(),
-    connect: vi.fn().mockResolvedValue(undefined)
-  }))
-}));
+vi.mock('@modelcontextprotocol/sdk/server/index.js', () => {
+  const MockServer = vi.fn(function(this: any) {
+    this.setRequestHandler = vi.fn();
+    this.connect = vi.fn().mockResolvedValue(undefined);
+  });
+  return { Server: MockServer };
+});
 
 vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
   StdioServerTransport: vi.fn()

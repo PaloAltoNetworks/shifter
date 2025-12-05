@@ -1,0 +1,45 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    name: Build and Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            mcp/aptl-mcp-common/package-lock.json
+            mcp/mcp-red/package-lock.json
+      - name: Build and test aptl-mcp-common
+        working-directory: mcp/aptl-mcp-common
+        run: |
+          npm ci
+          npm run build
+          npm run test -- --coverage
+
+      - name: Build mcp-red
+        working-directory: mcp/mcp-red
+        run: |
+          npm ci
+          npm run build
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+

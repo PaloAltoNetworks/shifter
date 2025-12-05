@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial Shifter architecture for self-service cyber range platform
 - Core MCP library (`mcp/aptl-mcp-common`) with SSH session management
 - Reference MCP server (`mcp/mcp-red`) as template for new MCPs
-- Sonar
+- SonarCloud integration with automated code quality scanning
+- Test coverage reporting via vitest with lcov output
 
 ### Changed
 - Forked from APTL (Advanced Purple Team Lab) with new direction

@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - npm version mismatch
-- test broken by npm version upgrade
 
+### Changed
+- Upgraded vitest from 1.x to 4.x (required code changes to test files due to breaking changes)
 ## [0.1.0] - 2024-12-04
 
 ### Added

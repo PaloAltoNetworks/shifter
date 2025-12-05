@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2025-12-05
+
+### Added
+- MkDocs with Material theme
+- Documentation site (architecture, setup, API reference)
+- GitHub Actions workflow for automatic GitHub Pages deployment
+- Mermaid.js diagrams in architecture docs
+
 ## [0.1.2] - 2025-12-04
 
 ### Added

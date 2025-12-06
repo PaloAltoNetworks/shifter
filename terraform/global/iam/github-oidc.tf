@@ -85,6 +85,7 @@ resource "aws_iam_role_policy" "terraform_permissions" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "ECRRepositoryManagement"
         Effect = "Allow"
         Action = [
           "ecr:*"
@@ -94,6 +95,7 @@ resource "aws_iam_role_policy" "terraform_permissions" {
         ]
       },
       {
+        Sid    = "ECRAuth"
         Effect = "Allow"
         Action = [
           "ecr:GetAuthorizationToken"
@@ -101,6 +103,7 @@ resource "aws_iam_role_policy" "terraform_permissions" {
         Resource = "*"
       },
       {
+        Sid    = "TerraformStateS3"
         Effect = "Allow"
         Action = [
           "s3:ListBucket",
@@ -114,6 +117,7 @@ resource "aws_iam_role_policy" "terraform_permissions" {
         ]
       },
       {
+        Sid    = "TerraformStateLocking"
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
@@ -121,6 +125,120 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "dynamodb:DeleteItem"
         ]
         Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/shifter-terraform-29548208-505d-49da-87be-1c937681d079"
+      },
+      {
+        Sid    = "VPCNetworking"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateVpc",
+          "ec2:DeleteVpc",
+          "ec2:DescribeVpcs",
+          "ec2:ModifyVpcAttribute",
+          "ec2:CreateSubnet",
+          "ec2:DeleteSubnet",
+          "ec2:DescribeSubnets",
+          "ec2:CreateRouteTable",
+          "ec2:DeleteRouteTable",
+          "ec2:DescribeRouteTables",
+          "ec2:AssociateRouteTable",
+          "ec2:DisassociateRouteTable",
+          "ec2:CreateRoute",
+          "ec2:DeleteRoute",
+          "ec2:CreateInternetGateway",
+          "ec2:DeleteInternetGateway",
+          "ec2:AttachInternetGateway",
+          "ec2:DetachInternetGateway",
+          "ec2:DescribeInternetGateways",
+          "ec2:CreateNatGateway",
+          "ec2:DeleteNatGateway",
+          "ec2:DescribeNatGateways",
+          "ec2:AllocateAddress",
+          "ec2:ReleaseAddress",
+          "ec2:DescribeAddresses",
+          "ec2:DescribeAddressesAttribute",
+          "ec2:CreateSecurityGroup",
+          "ec2:DeleteSecurityGroup",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSecurityGroupRules",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:AuthorizeSecurityGroupEgress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupEgress",
+          "ec2:CreateTags",
+          "ec2:DeleteTags",
+          "ec2:DescribeTags",
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeNetworkAcls",
+          "ec2:DescribeVpcAttribute",
+          "ec2:DescribeAccountAttributes",
+          "ec2:DescribeNetworkInterfaces"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "RDSManagement"
+        Effect = "Allow"
+        Action = [
+          "rds:CreateDBInstance",
+          "rds:DeleteDBInstance",
+          "rds:DescribeDBInstances",
+          "rds:ModifyDBInstance",
+          "rds:RebootDBInstance",
+          "rds:StartDBInstance",
+          "rds:StopDBInstance",
+          "rds:CreateDBSubnetGroup",
+          "rds:DeleteDBSubnetGroup",
+          "rds:DescribeDBSubnetGroups",
+          "rds:ModifyDBSubnetGroup",
+          "rds:CreateDBParameterGroup",
+          "rds:DeleteDBParameterGroup",
+          "rds:DescribeDBParameterGroups",
+          "rds:ModifyDBParameterGroup",
+          "rds:DescribeDBParameters",
+          "rds:AddTagsToResource",
+          "rds:RemoveTagsFromResource",
+          "rds:ListTagsForResource",
+          "rds:DescribeDBEngineVersions",
+          "rds:DescribeOrderableDBInstanceOptions"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "SecretsManagerDBCredentials"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:CreateSecret",
+          "secretsmanager:DeleteSecret",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:UpdateSecret",
+          "secretsmanager:TagResource",
+          "secretsmanager:UntagResource",
+          "secretsmanager:GetResourcePolicy",
+          "secretsmanager:PutResourcePolicy",
+          "secretsmanager:DeleteResourcePolicy",
+          "secretsmanager:GetRandomPassword"
+        ]
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:shifter-*"
+      },
+      {
+        Sid    = "KMSForRDSEncryption"
+        Effect = "Allow"
+        Action = [
+          "kms:CreateKey",
+          "kms:DescribeKey",
+          "kms:CreateAlias",
+          "kms:DeleteAlias",
+          "kms:ListAliases",
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:TagResource",
+          "kms:UntagResource",
+          "kms:ScheduleKeyDeletion"
+        ]
+        Resource = "*"
       }
     ]
   })

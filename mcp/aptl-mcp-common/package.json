@@ -1,6 +1,6 @@
 {
     "name": "aptl-mcp-common",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "Common library extracted from APTL MCP servers",
     "type": "module",
     "main": "./build/index.js",

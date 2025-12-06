@@ -1,0 +1,15 @@
+# Portal Infrastructure Configuration
+# Copy to terraform.tfvars and fill in values
+# DO NOT commit terraform.tfvars - sync to PORTAL_TFVARS secret
+
+environment        = ""
+aws_region         = ""
+vpc_cidr           = ""
+az_count           = 0
+enable_nat_gateway = false
+
+tags = {
+  Project     = ""
+  Environment = ""
+  ManagedBy   = ""
+}

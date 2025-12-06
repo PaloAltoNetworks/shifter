@@ -45,6 +45,9 @@ jobs:
         with:
           terraform_version: "1.14.1"
 
+      - name: Write tfvars from secret
+        run: echo '${{ secrets.TF_VARS_PROD_FOUNDATION }}' > terraform.tfvars
+
       - name: Terraform Format Check
         run: terraform fmt -check -recursive
         working-directory: terraform
@@ -108,6 +111,9 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.14.1"
+
+      - name: Write tfvars from secret
+        run: echo '${{ secrets.TF_VARS_PROD_FOUNDATION }}' > terraform.tfvars
 
       - name: Terraform Init
         run: terraform init

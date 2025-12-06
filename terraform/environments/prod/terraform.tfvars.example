@@ -1,0 +1,5 @@
+# AWS Configuration
+aws_region = "us-east-2"
+
+# ECR Repository Names
+portal_repository_name = "shifter-portal"

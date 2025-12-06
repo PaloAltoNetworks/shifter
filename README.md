@@ -7,7 +7,7 @@
 
 # Shifter
 
-Self-service cyber range for PANW SecOps demos. AI-driven vulnerability deployment and attack simulation against XDR/XSIAM-protected targets.
+Self-service cyber range for autonomous cyber demos. AI-driven vulnerability deployment and attack simulation against XDR/XSIAM-protected targets.
 
 **Status:** In development
 

@@ -229,6 +229,63 @@ npx @modelcontextprotocol/inspector build/index.js
 
 ---
 
+## Current Work: Portal EC2 + ALB (Issue #36)
+
+### Architecture
+
+```
+Internet → ALB (public subnets) → EC2 (private subnet) → RDS (private subnet)
+           │                      │
+           └─ ACM cert            └─ Docker → ECR image
+              WAF (future)            IAM role → Secrets Manager
+```
+
+### Modules to Create
+
+1. **modules/portal/ec2** - [ ] Created - [ ] Validated - [ ] Committed
+   - EC2 instance (Amazon Linux 2023)
+   - Security group: 8000 from ALB SG, 22 from admin CIDR
+   - IAM instance profile: ECR pull, Secrets Manager read
+   - User data: Docker setup, ECR login
+   - Private subnet placement
+
+2. **modules/portal/alb** - [ ] Created - [ ] Validated - [ ] Committed
+   - ALB in public subnets
+   - ACM certificate (DNS validation)
+   - HTTPS listener (443) → target group → EC2:8000
+   - HTTP listener (80) → redirect HTTPS
+   - Security group: 443/80 from internet
+
+3. **Environment wiring** - [ ] Created - [ ] Validated - [ ] Committed
+   - Update environments/prod/portal/main.tf
+   - Add new variables
+   - Update tfvars files
+
+4. **IAM permissions** - [ ] Created - [ ] Validated - [ ] Committed
+   - EC2 instance management
+   - IAM role/instance profile
+   - ELB management
+   - ACM management
+
+### New Variables Needed
+
+- `domain_name` - for ACM cert
+- `ec2_instance_type`
+- `ec2_key_name` (optional SSH)
+- `admin_cidr_blocks` (SSH access)
+- `ecr_repository_url`
+
+### Future: NGFW Integration
+
+When adding PANW NGFW, insert firewall subnet tier:
+- Public: ALB, NAT Gateway
+- Firewall: NGFW interfaces (new)
+- Private: EC2, RDS
+
+Route: ALB → NGFW → EC2
+
+---
+
 ## Git Workflow
 
 ### Branch Strategy

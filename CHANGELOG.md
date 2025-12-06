@@ -10,9 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.5] - 2025-12-05
 
 ### Added
-- CI/CD permissions for portal data layer
-- utility script for pushing terraform.tfvars to GitHub secrets
-- Portal VPC infrastructure and CI/CD workflow
+- Portal VPC module (public/private subnets, NAT gateway)
+- Portal RDS module (PostgreSQL, Secrets Manager credentials)
+- Namespaced tfvars sync script (`TF_VARS_{ENV}_{COMPONENT}`)
+- IAM permissions for VPC, RDS, Secrets Manager, KMS
 
 ## [0.1.4] - 2025-12-05
 

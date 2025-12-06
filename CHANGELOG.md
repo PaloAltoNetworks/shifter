@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Portal EC2 module (Docker host, SSM access, ECR/Secrets Manager IAM)
+- Portal ALB module (ACM certificate, HTTPS listener, target group)
 
 ## [0.1.6] - 2025-12-05
 

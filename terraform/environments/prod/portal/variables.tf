@@ -1,5 +1,8 @@
 # Environment variables - NO DEFAULTS
-# All values provided via terraform.tfvars (synced to GitHub secrets)
+
+# ------------------------------------------------------------------------------
+# General
+# ------------------------------------------------------------------------------
 
 variable "environment" {
   description = "Environment name (e.g., prod, dev)"
@@ -10,6 +13,15 @@ variable "aws_region" {
   description = "AWS region"
   type        = string
 }
+
+variable "tags" {
+  description = "Common tags to apply to all resources"
+  type        = map(string)
+}
+
+# ------------------------------------------------------------------------------
+# VPC
+# ------------------------------------------------------------------------------
 
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
@@ -26,7 +38,56 @@ variable "enable_nat_gateway" {
   type        = bool
 }
 
-variable "tags" {
-  description = "Common tags to apply to all resources"
-  type        = map(string)
+# ------------------------------------------------------------------------------
+# RDS
+# ------------------------------------------------------------------------------
+
+variable "db_name" {
+  description = "Name of the database to create"
+  type        = string
+}
+
+variable "db_username" {
+  description = "Master username for the database"
+  type        = string
+}
+
+variable "db_engine_version" {
+  description = "PostgreSQL engine version"
+  type        = string
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class"
+  type        = string
+}
+
+variable "db_allocated_storage" {
+  description = "Initial allocated storage in GB"
+  type        = number
+}
+
+variable "db_max_allocated_storage" {
+  description = "Maximum storage for autoscaling in GB"
+  type        = number
+}
+
+variable "db_multi_az" {
+  description = "Enable Multi-AZ deployment"
+  type        = bool
+}
+
+variable "db_backup_retention_days" {
+  description = "Number of days to retain backups"
+  type        = number
+}
+
+variable "db_deletion_protection" {
+  description = "Enable deletion protection"
+  type        = bool
+}
+
+variable "db_skip_final_snapshot" {
+  description = "Skip final snapshot on deletion"
+  type        = bool
 }

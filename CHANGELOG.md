@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2025-12-05
+
+### Added
+- CI/CD permissions for portal data layer
+- utility script for pushing terraform.tfvars to GitHub secrets
+- Portal VPC infrastructure and CI/CD workflow
+
 ## [0.1.4] - 2025-12-05
 
 ### Added

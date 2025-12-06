@@ -137,6 +137,7 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "ec2:CreateSubnet",
           "ec2:DeleteSubnet",
           "ec2:DescribeSubnets",
+          "ec2:ModifySubnetAttribute",
           "ec2:CreateRouteTable",
           "ec2:DeleteRouteTable",
           "ec2:DescribeRouteTables",
@@ -239,6 +240,19 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "kms:ScheduleKeyDeletion"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "IAMServiceLinkedRoles"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateServiceLinkedRole"
+        ]
+        Resource = "arn:aws:iam::*:role/aws-service-role/rds.amazonaws.com/AWSServiceRoleForRDS"
+        Condition = {
+          StringEquals = {
+            "iam:AWSServiceName" = "rds.amazonaws.com"
+          }
+        }
       }
     ]
   })

@@ -118,6 +118,7 @@ resource "aws_lb_target_group" "this" {
 }
 
 resource "aws_lb_target_group_attachment" "this" {
+  count            = var.ec2_instance_id != null ? 1 : 0
   target_group_arn = aws_lb_target_group.this.arn
   target_id        = var.ec2_instance_id
   port             = var.app_port

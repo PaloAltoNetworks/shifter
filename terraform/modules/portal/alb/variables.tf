@@ -29,8 +29,9 @@ variable "health_check_path" {
 }
 
 variable "ec2_instance_id" {
-  description = "EC2 instance ID to register with target group"
+  description = "EC2 instance ID to register with target group (optional, can attach later)"
   type        = string
+  default     = null
 }
 
 variable "tags" {

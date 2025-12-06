@@ -52,3 +52,31 @@ output "db_security_group_id" {
   description = "ID of the RDS security group"
   value       = module.rds.db_security_group_id
 }
+
+# ------------------------------------------------------------------------------
+# EC2
+# ------------------------------------------------------------------------------
+
+output "ec2_instance_id" {
+  description = "ID of the EC2 instance"
+  value       = module.ec2.instance_id
+}
+
+output "ec2_private_ip" {
+  description = "Private IP of the EC2 instance"
+  value       = module.ec2.private_ip
+}
+
+# ------------------------------------------------------------------------------
+# ALB
+# ------------------------------------------------------------------------------
+
+output "alb_dns_name" {
+  description = "DNS name of the ALB (create CNAME pointing to this)"
+  value       = module.alb.alb_dns_name
+}
+
+output "acm_validation_records" {
+  description = "DNS records to create for ACM certificate validation"
+  value       = module.alb.acm_validation_records
+}

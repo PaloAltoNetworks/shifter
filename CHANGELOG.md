@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-12-05
+
+### Added
+- Terraform foundation infrastructure (ECR module, global IAM, environment structure)
+- GitHub Actions OIDC authentication for AWS
+- CI/CD workflow for infrastructure deployment
+- Version bump script
+
 ## [0.1.3] - 2025-12-05
 
 ### Added

@@ -1,13 +1,7 @@
-# Portal module variables - NO DEFAULTS
-# All values must be provided via tfvars
+# VPC module variables - NO DEFAULTS
 
-variable "environment" {
-  description = "Environment name (e.g., prod, dev)"
-  type        = string
-}
-
-variable "aws_region" {
-  description = "AWS region"
+variable "name_prefix" {
+  description = "Prefix for resource names (e.g., prod-portal)"
   type        = string
 }
 

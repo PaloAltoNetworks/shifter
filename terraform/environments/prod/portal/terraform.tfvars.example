@@ -1,0 +1,39 @@
+# Portal Infrastructure Configuration
+# Copy to terraform.tfvars and fill in values
+# DO NOT commit terraform.tfvars - sync to TF_VARS_PROD_PORTAL secret
+
+# ------------------------------------------------------------------------------
+# General
+# ------------------------------------------------------------------------------
+
+environment = ""
+aws_region  = ""
+
+tags = {
+  Project     = ""
+  Environment = ""
+  ManagedBy   = ""
+}
+
+# ------------------------------------------------------------------------------
+# VPC
+# ------------------------------------------------------------------------------
+
+vpc_cidr           = ""
+az_count           = 0
+enable_nat_gateway = false
+
+# ------------------------------------------------------------------------------
+# RDS
+# ------------------------------------------------------------------------------
+
+db_name                  = ""
+db_username              = ""
+db_engine_version        = ""
+db_instance_class        = ""
+db_allocated_storage     = 0
+db_max_allocated_storage = 0
+db_multi_az              = false
+db_backup_retention_days = 0
+db_deletion_protection   = false
+db_skip_final_snapshot   = false

@@ -16,6 +16,8 @@ permissions:
 env:
   AWS_REGION: us-east-2
   ECR_REPOSITORY: shifter-portal
+  DB_SECRET_ARN: arn:aws:secretsmanager:us-east-2:${{ secrets.AWS_ACCOUNT_ID }}:secret:shifter-prod-portal-db-credentials
+  APP_SECRET_ARN: arn:aws:secretsmanager:us-east-2:${{ secrets.AWS_ACCOUNT_ID }}:secret:shifter-prod-portal-app
 
 jobs:
   build-and-push:
@@ -82,6 +84,8 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          PORTAL_AWS_ACCESS_KEY_ID: ${{ secrets.PORTAL_PROD_AWS_ACCESS_KEY_ID }}
+          PORTAL_AWS_SECRET_ACCESS_KEY: ${{ secrets.PORTAL_PROD_AWS_SECRET_ACCESS_KEY }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
@@ -92,7 +96,15 @@ jobs:
               'docker pull \$IMAGE',
               'docker stop portal 2>/dev/null || true',
               'docker rm portal 2>/dev/null || true',
-              'docker run -d --name portal --restart unless-stopped -p 8000:8000 --env-file /etc/portal.env \$IMAGE'
+              'docker run -d --name portal --restart unless-stopped -p 8000:8000 \
+                -e AWS_ACCESS_KEY_ID=${PORTAL_AWS_ACCESS_KEY_ID} \
+                -e AWS_SECRET_ACCESS_KEY=${PORTAL_AWS_SECRET_ACCESS_KEY} \
+                -e AWS_REGION=${AWS_REGION} \
+                -e DB_SECRET_ARN=${DB_SECRET_ARN} \
+                -e APP_SECRET_ARN=${APP_SECRET_ARN} \
+                -e DJANGO_ALLOWED_HOSTS=shifter.panw.dev \
+                -e DJANGO_CSRF_TRUSTED_ORIGINS=https://shifter.panw.dev \
+                \$IMAGE'
             ]" \
             --timeout-seconds 300 \
             --query "Command.CommandId" \

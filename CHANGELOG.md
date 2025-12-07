@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Makefile with dev commands (up, down, build, logs, shell, migrate, init)
 - GitHub Actions workflow for portal build, ECR push, SSM deploy
 - Portal dev documentation (docs/portal-dev.md)
+- Secrets management: IAM user for prod, Secrets Manager for DB + app secrets
 
 ### Changed
 - Architecture docs updated with portal deployment pipeline

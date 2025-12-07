@@ -34,24 +34,29 @@ graph TB
 graph TB
     subgraph "Portal VPC (10.0.0.0/16)"
         subgraph "Public Subnets (2 AZs)"
+            ALB[ALB]
             NAT[NAT Gateway]
         end
         subgraph "Private Subnets (2 AZs)"
-            ECS[Django on ECS]
+            EC2[Django on EC2]
             RDS[(RDS PostgreSQL)]
         end
-        ECS --> RDS
-        ECS --> NAT
+        ALB --> EC2
+        EC2 --> RDS
+        EC2 --> NAT
     end
-    NAT --> Internet((Internet))
+    Internet((Internet)) --> ALB
+    NAT --> Internet
 ```
 
-Two AZs required for RDS subnet group. Single NAT gateway for cost optimization.
+Two AZs required for RDS subnet group. ALB in public subnets with ACM cert. EC2 in private subnet pulls container from ECR.
 
 ### Components
 
 | Component | Purpose |
 |-----------|---------|
+| ALB | HTTPS termination, routes to EC2 |
+| EC2 | Runs Django container, pulls from ECR |
 | ECR | Container registry for Django image |
 | VPC | Network isolation, public/private subnet separation |
 | RDS | PostgreSQL 16, encrypted, credentials in Secrets Manager |

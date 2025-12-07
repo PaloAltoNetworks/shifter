@@ -1,7 +1,52 @@
 #!/bin/bash
 set -euo pipefail
 
+# ------------------------------------------------------------------------------
+# Fetch secrets from AWS Secrets Manager (prod only)
+# ------------------------------------------------------------------------------
+
+if [ -n "${DB_SECRET_ARN:-}" ] && [ -n "${APP_SECRET_ARN:-}" ]; then
+    echo "Fetching secrets from AWS Secrets Manager..."
+
+    # Fetch DB secret
+    DB_SECRET=$(python -c "
+import boto3
+import json
+import os
+
+client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
+response = client.get_secret_value(SecretId=os.environ['DB_SECRET_ARN'])
+print(response['SecretString'])
+")
+
+    # Export DB credentials
+    export DB_HOST=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")
+    export DB_PORT=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")
+    export DB_NAME=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['dbname'])")
+    export DB_USER=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['username'])")
+    export DB_PASSWORD=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
+
+    # Fetch App secret
+    APP_SECRET=$(python -c "
+import boto3
+import json
+import os
+
+client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
+response = client.get_secret_value(SecretId=os.environ['APP_SECRET_ARN'])
+print(response['SecretString'])
+")
+
+    # Export Django secret key
+    export DJANGO_SECRET_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['django_secret_key'])")
+
+    echo "Secrets loaded successfully"
+fi
+
+# ------------------------------------------------------------------------------
 # Wait for database
+# ------------------------------------------------------------------------------
+
 echo "Waiting for database..."
 while ! python -c "
 import os
@@ -23,6 +68,10 @@ except Exception as e:
     echo "Database not ready, waiting..."
     sleep 2
 done
+
+# ------------------------------------------------------------------------------
+# Django setup
+# ------------------------------------------------------------------------------
 
 # Run migrations
 echo "Running migrations..."

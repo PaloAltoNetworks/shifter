@@ -28,12 +28,6 @@ variable "health_check_path" {
   type        = string
 }
 
-variable "ec2_instance_id" {
-  description = "EC2 instance ID to register with target group (optional, can attach later)"
-  type        = string
-  default     = null
-}
-
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

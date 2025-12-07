@@ -91,3 +91,38 @@ variable "db_skip_final_snapshot" {
   description = "Skip final snapshot on deletion"
   type        = bool
 }
+
+# ------------------------------------------------------------------------------
+# EC2
+# ------------------------------------------------------------------------------
+
+variable "ec2_instance_type" {
+  description = "EC2 instance type for Django portal"
+  type        = string
+}
+
+variable "ec2_root_volume_size" {
+  description = "Size of EC2 root volume in GB"
+  type        = number
+}
+
+# ECR values come from terraform_remote_state.foundation
+
+# ------------------------------------------------------------------------------
+# ALB
+# ------------------------------------------------------------------------------
+
+variable "domain_name" {
+  description = "Domain name for ACM certificate (e.g., shifter.keplerops.com)"
+  type        = string
+}
+
+variable "app_port" {
+  description = "Port the Django application listens on"
+  type        = number
+}
+
+variable "health_check_path" {
+  description = "Health check path for ALB target group"
+  type        = string
+}

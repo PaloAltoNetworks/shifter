@@ -21,6 +21,19 @@ locals {
 }
 
 # ------------------------------------------------------------------------------
+# Remote State - Foundation (ECR)
+# ------------------------------------------------------------------------------
+
+data "terraform_remote_state" "foundation" {
+  backend = "s3"
+  config = {
+    bucket = "shifter-infra-eedf1871-f634-4712-981a-5c6ba0738704"
+    key    = "shifter/prod/terraform.tfstate"
+    region = "us-east-2"
+  }
+}
+
+# ------------------------------------------------------------------------------
 # VPC
 # ------------------------------------------------------------------------------
 
@@ -58,4 +71,53 @@ module "rds" {
   skip_final_snapshot   = var.db_skip_final_snapshot
 
   tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# ALB (created first, target attached after EC2)
+# ------------------------------------------------------------------------------
+
+module "alb" {
+  source = "../../../modules/portal/alb"
+
+  name_prefix       = local.name_prefix
+  vpc_id            = module.vpc.vpc_id
+  public_subnet_ids = module.vpc.public_subnet_ids
+  domain_name       = var.domain_name
+  app_port          = var.app_port
+  health_check_path = var.health_check_path
+
+  tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# EC2
+# ------------------------------------------------------------------------------
+
+module "ec2" {
+  source = "../../../modules/portal/ec2"
+
+  aws_region            = var.aws_region
+  name_prefix           = local.name_prefix
+  vpc_id                = module.vpc.vpc_id
+  subnet_id             = module.vpc.private_subnet_ids[0]
+  alb_security_group_id = module.alb.security_group_id
+  instance_type         = var.ec2_instance_type
+  ecr_repository_arn    = data.terraform_remote_state.foundation.outputs.portal_ecr_arn
+  ecr_repository_url    = data.terraform_remote_state.foundation.outputs.portal_ecr_url
+  db_secret_arn         = module.rds.db_credentials_secret_arn
+  app_port              = var.app_port
+  root_volume_size      = var.ec2_root_volume_size
+
+  tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# ALB Target Attachment (after EC2 is created)
+# ------------------------------------------------------------------------------
+
+resource "aws_lb_target_group_attachment" "portal" {
+  target_group_arn = module.alb.target_group_arn
+  target_id        = module.ec2.instance_id
+  port             = var.app_port
 }

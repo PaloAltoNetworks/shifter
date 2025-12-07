@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2025-12-07
+
+### Added
+- Portal EC2 module (Docker host, SSM access, ECR/Secrets Manager IAM)
+- Portal ALB module (ACM certificate, HTTPS listener, target group)
+- Environment wiring with terraform_remote_state for ECR
+- IAM permissions for EC2, ELB, ACM
+- Security documentation (docs/security.md)
+- Ethics documentation (docs/ethics.md)
+- Disclaimer in README
+
+### Changed
+- Architecture docs updated for EC2+ALB (was ECS)
+- ECR authentication via credential helper (replaces manual docker login)
+
+### Security
+- IMDSv2 enforced on EC2 (SSRF mitigation)
+- ALB drops invalid HTTP headers
+- ACM certificate validation with 45m timeout
+
 ## [0.1.6] - 2025-12-05
 
 ### Fixed

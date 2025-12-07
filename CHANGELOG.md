@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2025-12-07
+
+### Added
+- Django portal Docker setup (multi-stage Dockerfile with uv)
+- Container entrypoint with DB wait, migrations, gunicorn
+- docker-compose.yml for local dev with Postgres
+- Makefile with dev commands (up, down, build, logs, shell, migrate, init)
+- GitHub Actions workflow for portal build, ECR push, SSM deploy
+- Portal dev documentation (docs/portal-dev.md)
+- Secrets management: IAM user for prod, Secrets Manager for DB + app secrets
+
+### Changed
+- Architecture docs updated with portal deployment pipeline
+- GitHub OIDC role gets SSM permissions for deployments
+
 ## [0.1.7] - 2025-12-07
 
 ### Added

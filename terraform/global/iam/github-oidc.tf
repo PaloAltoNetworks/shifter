@@ -312,8 +312,7 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "iam:AddRoleToInstanceProfile",
           "iam:RemoveRoleFromInstanceProfile",
           "iam:TagInstanceProfile",
-          "iam:UntagInstanceProfile",
-          "iam:PassRole"
+          "iam:UntagInstanceProfile"
         ]
         Resource = [
           "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*-ec2-role",

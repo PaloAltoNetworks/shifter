@@ -12,7 +12,9 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Security
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "insecure-dev-key-change-in-prod")
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("DJANGO_SECRET_KEY environment variable is required")
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")

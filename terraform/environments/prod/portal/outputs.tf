@@ -80,3 +80,12 @@ output "acm_validation_records" {
   description = "DNS records to create for ACM certificate validation"
   value       = module.alb.acm_validation_records
 }
+
+# ------------------------------------------------------------------------------
+# App Secrets
+# ------------------------------------------------------------------------------
+
+output "app_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing Django app secrets"
+  value       = aws_secretsmanager_secret.app.arn
+}

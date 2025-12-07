@@ -12,10 +12,11 @@ Local development setup for the Django portal.
 **First time:**
 ```bash
 cd portal
+cp .env.example .env
 make init
 ```
 
-This starts the services and prompts you to create an admin user.
+This creates your local environment file, starts the services, and prompts you to create an admin user.
 
 **Every time after:**
 ```bash
@@ -46,7 +47,7 @@ Access the portal at [http://localhost:8000](http://localhost:8000).
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` to customize:
+The `.env` file configures the local development environment. Copy `.env.example` to `.env`:
 
 ```bash
 cp .env.example .env
@@ -54,14 +55,15 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DJANGO_SECRET_KEY` | Django secret key | dev key |
+| `DJANGO_SECRET_KEY` | Django secret key | (set in .env.example) |
 | `DJANGO_DEBUG` | Enable debug mode | `true` |
 | `DJANGO_ALLOWED_HOSTS` | Allowed hosts | `localhost,127.0.0.1` |
-| `DB_HOST` | Database host | `db` |
-| `DB_PORT` | Database port | `5432` |
 | `DB_NAME` | Database name | `shifter` |
 | `DB_USER` | Database user | `postgres` |
-| `DB_PASSWORD` | Database password | `postgres` |
+| `DB_PASSWORD` | Database password | (set in .env.example) |
+| `DB_PORT` | Database port | `5432` |
+
+Note: `DB_HOST` is set automatically by docker-compose (`db` for the web container).
 
 ## Endpoints
 
@@ -93,3 +95,47 @@ cd portal
 uv add <package>
 make build
 ```
+
+## Production Secrets
+
+Production uses a different secrets flow than local development:
+
+| Environment | Secrets Source |
+|-------------|----------------|
+| Local dev | `.env` file (local Postgres, no AWS) |
+| Production | AWS Secrets Manager (fetched at container startup) |
+
+### How Production Works
+
+1. GitHub Actions deploys the container to EC2 via SSM
+2. Container receives AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) as env vars
+3. `entrypoint.sh` detects `DB_SECRET_ARN` and `APP_SECRET_ARN` env vars
+4. Fetches both secrets from AWS Secrets Manager using boto3
+5. Exports DB credentials and Django secret key before starting gunicorn
+
+### Secrets Manager Structure
+
+**DB Secret** (`shifter-prod-portal-db-credentials`):
+```json
+{
+  "host": "...",
+  "port": "5432",
+  "dbname": "...",
+  "username": "...",
+  "password": "..."
+}
+```
+
+**App Secret** (`shifter-prod-portal-app`):
+```json
+{
+  "django_secret_key": "..."
+}
+```
+
+### IAM User
+
+The `shifter-portal-prod` IAM user has minimal permissions:
+- `secretsmanager:GetSecretValue` on `shifter-prod-portal-*` secrets only
+
+Access keys are stored in GitHub Secrets and injected at deploy time.

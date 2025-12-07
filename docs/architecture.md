@@ -78,7 +78,9 @@ Isolated from portal VPC. No peering.
 
 ## Deployment Pipeline
 
-GitHub Actions deploys via Terraform on merge to main.
+### Infrastructure
+
+GitHub Actions deploys infra via Terraform on merge to main.
 
 ```mermaid
 graph LR
@@ -86,6 +88,20 @@ graph LR
     GHA -->|OIDC| AWS[AWS]
     GHA -->|terraform apply| Infra[Infrastructure]
 ```
+
+### Portal Application
+
+Portal deploys on push to `portal/**`:
+
+```mermaid
+graph LR
+    Push[Push portal/*] --> Build[Build Docker]
+    Build --> ECR[Push to ECR]
+    ECR --> SSM[SSM Run Command]
+    SSM --> EC2[Pull + Restart]
+```
+
+EC2 user data bootstraps Docker and ECR auth. SSM pulls new image and restarts container.
 
 IAM via OIDC federation. No static credentials. Role permissions scoped to shifter-* resources.
 

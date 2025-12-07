@@ -121,3 +121,29 @@ resource "aws_lb_target_group_attachment" "portal" {
   target_id        = module.ec2.instance_id
   port             = var.app_port
 }
+
+# ------------------------------------------------------------------------------
+# App Secret (Django secret key)
+# ------------------------------------------------------------------------------
+
+resource "random_password" "django_secret_key" {
+  length  = 50
+  special = true
+}
+
+resource "aws_secretsmanager_secret" "app" {
+  name                    = "shifter-${local.name_prefix}-app"
+  description             = "Django application secrets"
+  recovery_window_in_days = 0
+
+  tags = merge(var.tags, {
+    Name = "shifter-${local.name_prefix}-app"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "app" {
+  secret_id = aws_secretsmanager_secret.app.id
+  secret_string = jsonencode({
+    django_secret_key = random_password.django_secret_key.result
+  })
+}

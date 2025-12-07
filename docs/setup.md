@@ -67,25 +67,23 @@ This creates `TF_VARS_PROD_PORTAL` and `TF_VARS_PROD_FOUNDATION` secrets automat
 
 Push branch and create PR. GitHub Actions runs `terraform plan`. Merge to main for `terraform apply`.
 
-### 6. ACM Certificate Validation (Required for HTTPS)
+### 6. ACM Certificate Validation (First Deploy Only)
 
-After the ALB module deploys, the ACM certificate requires DNS validation before HTTPS works:
+On first deploy, Terraform will pause waiting for ACM certificate validation (up to 45 minutes):
 
-1. **Get the validation records:**
-   ```bash
-   cd terraform/environments/prod/portal
-   terraform output acm_validation_records
-   ```
+1. **Watch the CI logs** - Terraform will output the validation CNAME records needed
+2. **Create CNAME records** in your DNS provider (Route53, Cloudflare, etc.) using those values
+3. **Wait** - AWS validates within ~5 minutes once DNS propagates, then Terraform continues
 
-2. **Create CNAME records** in your DNS provider (Route53, Cloudflare, etc.) using the values from the output.
-
-3. **Wait for validation** - AWS validates within minutes once DNS propagates.
+After validation completes:
 
 4. **Point your domain to the ALB:**
    ```bash
    terraform output alb_dns_name
    ```
    Create a CNAME record for your domain (e.g., `shifter.keplerops.com`) pointing to this ALB DNS name.
+
+Subsequent deploys will complete immediately since the certificate is already validated.
 
 ## Manual Deployment
 

@@ -42,8 +42,8 @@ db_skip_final_snapshot   = false
 # EC2
 # ------------------------------------------------------------------------------
 
-ec2_instance_type    = ""
-ec2_root_volume_size = 0
+ec2_instance_type    = "t3.small"
+ec2_root_volume_size = 20
 
 # ECR values come from terraform_remote_state.foundation (no need to set here)
 
@@ -51,6 +51,6 @@ ec2_root_volume_size = 0
 # ALB
 # ------------------------------------------------------------------------------
 
-domain_name       = ""
-app_port          = 0
-health_check_path = ""
+domain_name       = "shifter.example.com"
+app_port          = 8000
+health_check_path = "/health"

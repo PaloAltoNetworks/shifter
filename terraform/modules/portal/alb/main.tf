@@ -92,11 +92,12 @@ resource "aws_acm_certificate_validation" "this" {
 # ------------------------------------------------------------------------------
 
 resource "aws_lb" "this" {
-  name               = "${var.name_prefix}-alb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.this.id]
-  subnets            = var.public_subnet_ids
+  name                       = "${var.name_prefix}-alb"
+  internal                   = false
+  load_balancer_type         = "application"
+  security_groups            = [aws_security_group.this.id]
+  subnets                    = var.public_subnet_ids
+  drop_invalid_header_fields = true
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-alb"

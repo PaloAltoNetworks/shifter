@@ -394,6 +394,32 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "acm:RemoveTagsFromCertificate"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "SSMDeployment"
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations"
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript",
+          "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/Project" = "shifter"
+          }
+        }
+      },
+      {
+        Sid    = "SSMWaitForCommand"
+        Effect = "Allow"
+        Action = [
+          "ssm:DescribeInstanceInformation"
+        ]
+        Resource = "*"
       }
     ]
   })

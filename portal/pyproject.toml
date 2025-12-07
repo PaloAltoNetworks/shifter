@@ -1,0 +1,27 @@
+[project]
+name = "shifter-portal"
+version = "0.1.0"
+description = "Self-service cyber range portal"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.42.4",
+    "django>=6.0",
+    "django-health-check>=3.20.0",
+    "gunicorn>=23.0.0",
+    "psycopg>=3.3.2",
+    "python-dotenv>=1.2.1",
+    "whitenoise>=6.11.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.0.0",
+    "pytest>=9.0.2",
+    "pytest-django>=4.11.1",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests"]
+addopts = "--cov=config --cov-report=term-missing"

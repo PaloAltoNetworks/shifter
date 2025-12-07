@@ -40,7 +40,7 @@ createsuperuser:
 
 # Run tests
 test:
-	docker compose exec web python manage.py test
+	docker compose exec web pytest
 
 # Clean up volumes
 clean:

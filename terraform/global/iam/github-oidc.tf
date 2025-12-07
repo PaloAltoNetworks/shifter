@@ -352,6 +352,7 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "elasticloadbalancing:CreateListener",
           "elasticloadbalancing:DeleteListener",
           "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeListenerAttributes",
           "elasticloadbalancing:ModifyListener",
           "elasticloadbalancing:CreateRule",
           "elasticloadbalancing:DeleteRule",

@@ -41,7 +41,6 @@ export interface LabConfig {
       header?: string;
     };
     timeout?: number;
-    verify_ssl?: boolean;
     default_headers?: Record<string, string>;
   };
   queries?: {
@@ -60,7 +59,6 @@ export interface LabConfig {
       body?: any;
       description: string;
       response_type?: 'json' | 'text';
-      verify_ssl?: boolean;
     };
   };
   mcp: {

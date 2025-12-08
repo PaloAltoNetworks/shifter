@@ -152,6 +152,30 @@ resource "aws_lb_listener" "https" {
   tags = local.common_tags
 }
 
+# Block /admin from public access - only accessible via SSM tunnel
+resource "aws_lb_listener_rule" "block_admin" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 1
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Forbidden"
+      status_code  = "403"
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/admin", "/admin/*"]
+    }
+  }
+
+  tags = local.common_tags
+}
+
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.this.arn
   port              = 80

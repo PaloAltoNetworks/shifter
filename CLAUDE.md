@@ -156,89 +156,22 @@ class Range(models.Model):
 
 ## Mission Control (Post-Login Portal)
 
-The authenticated area of the Django portal. Design matches the landing page aesthetic (cyberpunk/hacker theme).
+The authenticated area of the Django portal. See full documentation:
 
-### Design System
+- [docs/mission-control.md](docs/mission-control.md) - Pages, layout, user flows
+- [docs/design-system.md](docs/design-system.md) - Colors, typography, effects
+- [docs/user-stories.md](docs/user-stories.md) - User stories US-1 through US-10
 
-- **Colors**: neon pink (#FF1B6B), cyan (#00FFFF), purple (#7F00FF), deep blue (#0A0A1A)
-- **Fonts**: Share Tech Mono (body), Orbitron (headings)
-- **Effects**: glitch text, scanlines, noise texture, glow pulses
+**Key Routes:**
 
-### Routes
+| Route | Page |
+|-------|------|
+| `/mission-control/` | Dashboard (launch/manage ranges) |
+| `/mission-control/agents/` | Agent management |
+| `/mission-control/history/` | Range history |
+| `/mission-control/settings/` | Account settings |
 
-| Route | Page | User Stories |
-|-------|------|--------------|
-| `/mission-control/` | Dashboard | US-2, US-3, US-4, US-5 |
-| `/mission-control/agents/` | Agents | US-1, US-7 |
-| `/mission-control/history/` | History | US-6 |
-| `/mission-control/settings/` | Settings | US-8, US-9, US-10 |
-
-### Layout Structure
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ SHIFTER // MISSION CONTROL           [user] [settings]  │  ← Header
-├─────────────────────────────────────────────────────────┤
-│ ┌───────┐                                               │
-│ │ NAV   │  Main Content Area                            │
-│ │       │                                               │
-│ │ Home  │  (Dashboard / Agents / History / etc)         │
-│ │ Agents│                                               │
-│ │ History                                               │
-│ │       │                                               │
-│ └───────┘                                               │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Dashboard States
-
-**No Active Range:**
-```
-┌─────────────────────────────────────────────────────────┐
-│  RANGE STATUS                                           │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │  ● No Active Range                                  ││
-│  │                                                     ││
-│  │  [Select Agent ▼]  [ LAUNCH RANGE ]                 ││
-│  └─────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────┘
-```
-
-**Active Range:**
-```
-┌─────────────────────────────────────────────────────────┐
-│  RANGE STATUS                                           │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │  ● Range Active                                     ││
-│  │  Agent: Acme Corp XSIAM                             ││
-│  │  Victim: 10.0.1.42                                  ││
-│  │  Started: 2h 34m ago                                ││
-│  │                                                     ││
-│  │  [ OPEN WORKSPACE ]  [ PAUSE ]  [ DESTROY ]         ││
-│  └─────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────┘
-```
-
-**Paused Range:**
-```
-┌─────────────────────────────────────────────────────────┐
-│  RANGE STATUS                                           │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │  ● Range Paused                                     ││
-│  │  Agent: Acme Corp XSIAM                             ││
-│  │  Paused: 1d 3h ago                                  ││
-│  │                                                     ││
-│  │  [ RESUME ]  [ DESTROY ]                            ││
-│  └─────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────┘
-```
-
-### Range Architecture Clarification
-
-DC accesses a **control workspace** (Kasm container with Cursor + MCPs), not Kali directly:
-- Control box: Cursor IDE with MCP servers configured
-- MCPs connect to: Kali (attack box) + Victim (target)
-- DC interacts with AI in Cursor; AI uses MCPs to execute commands
+**Architecture Note:** DC accesses a control workspace (Kasm + Cursor + MCPs), not Kali directly. MCPs connect to Kali and victim.
 
 ---
 

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] - 2025-12-07
+
+### Fixed
+- Cognito secret retrieval from Secrets Manager
+
 ## [0.1.12] - 2025-12-07
 
 ### Added

@@ -29,8 +29,8 @@ Post-authentication user flows for Domain Consultants.
 - Select which agent to install on victim
 - Click "Launch Range"
 - See provisioning status (spinner/progress)
-- Receive browser link to Kali desktop when ready
-- Range includes: Kali (Kasm), victim EC2 with agent installed
+- Receive browser link to control workspace when ready
+- Range includes: control box (Kasm with Cursor + MCPs), Kali (attack box), victim EC2 with agent installed
 
 ---
 
@@ -49,7 +49,38 @@ Post-authentication user flows for Domain Consultants.
 
 ---
 
-### US-4: View Range History
+### US-4: Pause Range
+
+**As a** DC taking a break from a demo
+**I want to** pause my range
+**So that** I can reduce costs without losing my setup
+
+**Acceptance Criteria:**
+- Click "Pause Range" from portal
+- Victim EC2 stopped (not terminated)
+- Kasm session suspended
+- Status updated to "paused"
+- Can resume range later (EC2 starts, Kasm reconnects)
+- Paused ranges still count toward any limits
+
+---
+
+### US-5: Resume Range
+
+**As a** DC returning to a paused demo
+**I want to** resume my range
+**So that** I can continue where I left off
+
+**Acceptance Criteria:**
+- Click "Resume Range" from portal (only visible for paused ranges)
+- Victim EC2 started
+- Kasm session resumed
+- Status updated to "active"
+- Workspace state preserved from before pause
+
+---
+
+### US-6: View Range History
 
 **As a** DC
 **I want to** see my past ranges
@@ -62,7 +93,7 @@ Post-authentication user flows for Domain Consultants.
 
 ---
 
-### US-5: Manage Agents
+### US-7: Manage Agents
 
 **As a** DC
 **I want to** manage my uploaded agents
@@ -76,7 +107,7 @@ Post-authentication user flows for Domain Consultants.
 
 ---
 
-### US-6: Logout
+### US-8: Logout
 
 **As a** DC
 **I want to** log out of the portal
@@ -89,7 +120,7 @@ Post-authentication user flows for Domain Consultants.
 
 ---
 
-### US-7: Change Password
+### US-9: Change Password
 
 **As a** DC
 **I want to** change my password
@@ -102,7 +133,7 @@ Post-authentication user flows for Domain Consultants.
 
 ---
 
-### US-8: Delete Account
+### US-10: Delete Account
 
 **As a** DC
 **I want to** delete my account

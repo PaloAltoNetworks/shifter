@@ -7,11 +7,23 @@ on:
     paths:
       - 'portal/**'
       - '.github/workflows/portal-deploy.yml'
+  # Also run after infra workflow completes to ensure secrets are up to date
+  workflow_run:
+    workflows: ["Deploy Portal Infrastructure"]
+    types:
+      - completed
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
+
+# Prevent concurrent deployments and duplicate runs from push + workflow_run
+concurrency:
+  group: portal-deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   AWS_REGION: us-east-2
@@ -24,6 +36,10 @@ jobs:
   build-and-push:
     name: Build and Push
     runs-on: ubuntu-latest
+    # Skip if triggered by failed infra workflow
+    if: >
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     outputs:
       image_tag: ${{ steps.build.outputs.image_tag }}
 

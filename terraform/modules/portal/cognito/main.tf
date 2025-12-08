@@ -201,6 +201,6 @@ resource "aws_secretsmanager_secret_version" "cognito_client" {
     client_secret = aws_cognito_user_pool_client.portal.client_secret
     user_pool_id  = aws_cognito_user_pool.main.id
     domain        = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
-    issuer        = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
+    issuer_url    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
   })
 }

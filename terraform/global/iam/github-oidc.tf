@@ -470,6 +470,7 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "lambda:DeleteFunction",
           "lambda:GetFunction",
           "lambda:GetFunctionConfiguration",
+          "lambda:GetFunctionCodeSigningConfig",
           "lambda:UpdateFunctionCode",
           "lambda:UpdateFunctionConfiguration",
           "lambda:ListVersionsByFunction",

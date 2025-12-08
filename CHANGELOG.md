@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Cognito Terraform module (user pool, client, hosted UI domain)
 - Pre-signup Lambda for email domain restriction
-- Auth architecture docs (security.md, architecture.md)
+- Auth architecture docs
 - Wire Cognito into portal environment
 - EC2 module accepts list of secret ARNs
+- IAM permissions for Cognito and Lambda
 
 ## [0.1.10] - 2025-12-07
 
@@ -35,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docker-compose.yml for local dev with Postgres
 - Makefile with dev commands (up, down, build, logs, shell, migrate, init)
 - GitHub Actions workflow for portal build, ECR push, SSM deploy
-- Portal dev documentation (docs/portal-dev.md)
+- Portal dev documentation 
 - Secrets management: IAM user for prod, Secrets Manager for DB + app secrets
 
 ### Changed
@@ -49,8 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Portal ALB module (ACM certificate, HTTPS listener, target group)
 - Environment wiring with terraform_remote_state for ECR
 - IAM permissions for EC2, ELB, ACM
-- Security documentation (docs/security.md)
-- Ethics documentation (docs/ethics.md)
+- Security documentation
+- Ethics documentation
 - Disclaimer in README
 
 ### Changed

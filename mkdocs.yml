@@ -30,6 +30,8 @@ theme:
 nav:
   - Home: index.md
   - User Stories: user-stories.md
+  - Mission Control: mission-control.md
+  - Design System: design-system.md
   - Architecture: architecture.md
   - Range: range.md
   - Setup: setup.md

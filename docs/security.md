@@ -31,6 +31,12 @@
 - ECR credential helper (no stored Docker tokens)
 - SSM Session Manager for access (no SSH key management)
 
+## Admin Access
+
+- Django `/admin` blocked at ALB level (returns 403)
+- Admin access via SSM port forwarding only: `./scripts/portal-admin-tunnel.sh`
+- Tunnel forwards localhost:9000 → EC2:8000, requires AWS credentials with SSM access
+
 ## Secrets
 
 - RDS credentials in Secrets Manager, auto-generated
@@ -77,4 +83,3 @@ AWS Cognito handles all authentication. Django is a relying party only.
 - ALB access logging
 - Cloudflare proxy with IP allowlisting
 - VPC Flow Logs
-- Admin panel restricted to bastion/SSM tunnel (#80)

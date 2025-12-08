@@ -1,0 +1,37 @@
+{% extends "mission_control/base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">History</h1>
+    <p class="page-subtitle">View your past range sessions</p>
+</div>
+
+<div class="card">
+    <!-- Empty state -->
+    <div class="empty-state" id="history-empty">
+        <div class="empty-state-icon">[ ]</div>
+        <p>No range history yet</p>
+        <p style="font-size: 0.75rem; margin-top: 0.5rem;">
+            Your past ranges will appear here
+        </p>
+    </div>
+
+    <!-- History list (hidden when empty) -->
+    <div id="history-list" style="display: none;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">DATE</th>
+                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">AGENT</th>
+                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">STATUS</th>
+                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">DURATION</th>
+                    <th style="text-align: right; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">ACTIONS</th>
+                </tr>
+            </thead>
+            <tbody id="history-tbody">
+                <!-- Will be populated dynamically -->
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

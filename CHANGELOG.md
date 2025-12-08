@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2025-12-07
+
+### Added
+- Cognito Terraform module (user pool, client, hosted UI domain)
+- Pre-signup Lambda for email domain restriction
+- Auth architecture docs (security.md, architecture.md)
+
 ## [0.1.10] - 2025-12-07
 
 ### Fixed

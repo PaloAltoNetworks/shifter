@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "health_check.db",
     "health_check.cache",
     "health_check.storage",
+    "mozilla_django_oidc",
 ]
 
 MIDDLEWARE = [
@@ -43,6 +44,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "mozilla_django_oidc.middleware.SessionRefresh",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -111,3 +113,40 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ------------------------------------------------------------------------------
+# OIDC Authentication (Cognito)
+# ------------------------------------------------------------------------------
+
+AUTHENTICATION_BACKENDS = [
+    "mozilla_django_oidc.auth.OIDCAuthenticationBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
+# Cognito OIDC settings - loaded from environment
+OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "")
+OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "")
+
+# Cognito endpoints - constructed from issuer URL
+_oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
+if _oidc_issuer:
+    OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_issuer}/oauth2/authorize"
+    OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_issuer}/oauth2/token"
+    OIDC_OP_USER_ENDPOINT = f"{_oidc_issuer}/oauth2/userInfo"
+    OIDC_OP_JWKS_ENDPOINT = f"{_oidc_issuer}/.well-known/jwks.json"
+
+# Token verification
+OIDC_RP_SIGN_ALGO = "RS256"
+
+# User mapping - Cognito uses 'email' claim
+OIDC_RP_SCOPES = "openid email profile"
+
+# Redirect after login/logout
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/"
+
+# Create users on first login
+OIDC_CREATE_USER = True
+
+# Use email as username
+OIDC_USERNAME_ALGO = "config.oidc.generate_username"

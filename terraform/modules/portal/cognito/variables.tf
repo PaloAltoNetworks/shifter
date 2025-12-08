@@ -26,13 +26,11 @@ variable "logout_urls" {
 variable "allowed_email_domains" {
   description = "List of allowed email domains for signup (e.g., paloaltonetworks.com)"
   type        = list(string)
-  default     = []
 }
 
 variable "allowed_emails" {
   description = "List of specific allowed emails (for external users)"
   type        = list(string)
-  default     = []
 }
 
 variable "deletion_protection" {

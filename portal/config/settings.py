@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "health_check.cache",
     "health_check.storage",
     "mozilla_django_oidc",
+    "mission_control",
 ]
 
 MIDDLEWARE = [
@@ -158,7 +159,7 @@ OIDC_RP_SIGN_ALGO = "RS256"
 OIDC_RP_SCOPES = "openid email profile"
 
 # Redirect after login/logout
-LOGIN_REDIRECT_URL = "/"
+LOGIN_REDIRECT_URL = "/mission-control/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Create users on first login

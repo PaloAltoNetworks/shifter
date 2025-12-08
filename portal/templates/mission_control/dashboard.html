@@ -1,0 +1,99 @@
+{% extends "mission_control/base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">Launch and manage your cyber ranges</p>
+</div>
+
+<!-- No Active Range State -->
+<div class="card" id="no-range-state">
+    <div class="card-title">Launch a Range</div>
+    <p style="color: rgba(255,255,255,0.7); margin-bottom: 1.5rem;">
+        Select an agent and launch a new cyber range environment.
+    </p>
+
+    <div class="form-group">
+        <label class="form-label">Select Agent</label>
+        <select class="form-input" id="agent-select">
+            <option value="">-- Select an agent --</option>
+            <!-- Will be populated dynamically -->
+        </select>
+    </div>
+
+    <button class="btn btn-primary" id="launch-btn" disabled>
+        Launch Range
+    </button>
+
+    <p style="margin-top: 1rem; font-size: 0.75rem; color: rgba(255,255,255,0.4);">
+        No agents yet? <a href="{% url 'mission_control:agents' %}" style="color: var(--neon-green);">Upload one first</a>
+    </p>
+</div>
+
+<!-- Active Range State (hidden by default) -->
+<div class="card" id="active-range-state" style="display: none;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <div class="card-title">Active Range</div>
+            <div class="status status-active" style="margin-bottom: 1rem;">
+                <span class="status-dot"></span>
+                <span>Running</span>
+            </div>
+        </div>
+        <div style="text-align: right; font-size: 0.75rem; color: rgba(255,255,255,0.5);">
+            <div>Started: <span id="range-started">--</span></div>
+            <div>Agent: <span id="range-agent">--</span></div>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+        <a href="#" class="btn btn-primary" id="open-workspace-btn">
+            Open Workspace
+        </a>
+        <button class="btn btn-secondary" id="pause-btn">
+            Pause
+        </button>
+        <button class="btn btn-danger" id="destroy-btn">
+            Destroy
+        </button>
+    </div>
+</div>
+
+<!-- Provisioning State (hidden by default) -->
+<div class="card" id="provisioning-state" style="display: none;">
+    <div class="card-title">Provisioning Range</div>
+    <div class="status status-provisioning" style="margin-bottom: 1rem;">
+        <span class="status-dot"></span>
+        <span>Setting up infrastructure...</span>
+    </div>
+    <p style="color: rgba(255,255,255,0.5); font-size: 0.875rem;">
+        This usually takes 2-3 minutes. You'll be notified when ready.
+    </p>
+</div>
+
+<!-- Paused Range State (hidden by default) -->
+<div class="card" id="paused-range-state" style="display: none;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <div class="card-title">Paused Range</div>
+            <div class="status status-paused" style="margin-bottom: 1rem;">
+                <span class="status-dot"></span>
+                <span>Paused</span>
+            </div>
+        </div>
+        <div style="text-align: right; font-size: 0.75rem; color: rgba(255,255,255,0.5);">
+            <div>Paused: <span id="range-paused-at">--</span></div>
+            <div>Agent: <span id="paused-range-agent">--</span></div>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+        <button class="btn btn-primary" id="resume-btn">
+            Resume
+        </button>
+        <button class="btn btn-danger" id="destroy-paused-btn">
+            Destroy
+        </button>
+    </div>
+</div>
+{% endblock %}

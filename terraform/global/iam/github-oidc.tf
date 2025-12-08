@@ -396,15 +396,12 @@ resource "aws_iam_role_policy" "terraform_permissions" {
         Resource = "*"
       },
       {
-        Sid    = "SSMDeployment"
+        Sid    = "SSMSendCommandToInstances"
         Effect = "Allow"
         Action = [
-          "ssm:SendCommand",
-          "ssm:GetCommandInvocation",
-          "ssm:ListCommandInvocations"
+          "ssm:SendCommand"
         ]
         Resource = [
-          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript",
           "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*"
         ]
         Condition = {
@@ -412,6 +409,25 @@ resource "aws_iam_role_policy" "terraform_permissions" {
             "aws:ResourceTag/Project" = "shifter"
           }
         }
+      },
+      {
+        Sid    = "SSMSendCommandDocument"
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand"
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript"
+        ]
+      },
+      {
+        Sid    = "SSMGetCommandStatus"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations"
+        ]
+        Resource = "*"
       },
       {
         Sid    = "SSMWaitForCommand"

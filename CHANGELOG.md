@@ -10,9 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.12] - 2025-12-07
 
 ### Added
-- Range VPC module (`modules/range/vpc/`) - stable VPC, IGW, route table
-- Range environment config (`environments/prod/range/`)
-- Range infrastructure documentation (`docs/range.md`)
+- Range VPC module - stable VPC, IGW, route table
+- Range environment config
+- Range infrastructure workflow
+- Range infrastructure documentation
 
 ## [0.1.10] - 2025-12-07
 

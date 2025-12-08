@@ -127,21 +127,29 @@ AUTHENTICATION_BACKENDS = [
 OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "")
 OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "")
 
-# Cognito endpoints - constructed from issuer URL
+# Cognito endpoints
+# Cognito has two different base URLs:
+# - Auth domain: for OAuth endpoints (authorize, token, userInfo)
+# - Issuer URL: for JWKS (token verification)
+_oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "")
 _oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
+
 # Always define OIDC_OP_* variables to avoid runtime errors
 OIDC_OP_AUTHORIZATION_ENDPOINT = ""
 OIDC_OP_TOKEN_ENDPOINT = ""
 OIDC_OP_USER_ENDPOINT = ""
 OIDC_OP_JWKS_ENDPOINT = ""
-if _oidc_issuer:
-    OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_issuer}/oauth2/authorize"
-    OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_issuer}/oauth2/token"
-    OIDC_OP_USER_ENDPOINT = f"{_oidc_issuer}/oauth2/userInfo"
+
+if _oidc_auth_domain and _oidc_issuer:
+    # OAuth endpoints use the auth domain
+    OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_auth_domain}/oauth2/authorize"
+    OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_auth_domain}/oauth2/token"
+    OIDC_OP_USER_ENDPOINT = f"{_oidc_auth_domain}/oauth2/userInfo"
+    # JWKS uses the issuer URL
     OIDC_OP_JWKS_ENDPOINT = f"{_oidc_issuer}/.well-known/jwks.json"
 else:
     import warnings
-    warnings.warn("OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.", RuntimeWarning)
+    warnings.warn("OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.", RuntimeWarning)
 # Token verification
 OIDC_RP_SIGN_ALGO = "RS256"
 

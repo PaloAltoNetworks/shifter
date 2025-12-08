@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Insecure TLS config in MCP HTTP client (removed global NODE_TLS_REJECT_UNAUTHORIZED)
 - Portal deploy/infra workflow race condition (workflow_run trigger + concurrency)
+- MCP build workflow running on every PR (dorny/paths-filter for reliable change detection)
+
+### Security
+- Upgraded @modelcontextprotocol/sdk to 1.24.3 (CVE-2025-66414 DNS rebinding fix)
 
 ## [0.1.16] - 2025-12-08
 

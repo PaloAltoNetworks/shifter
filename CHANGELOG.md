@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wire Cognito into portal environment
 - EC2 module accepts list of secret ARNs
 - IAM permissions for Cognito and Lambda
+- Django OIDC integration (mozilla-django-oidc)
+- Entrypoint fetches Cognito secrets from Secrets Manager
 
 ## [0.1.10] - 2025-12-07
 

@@ -7,14 +7,15 @@
     <title>SHIFTER // Coming Soon</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
-    <link rel="icon" type="image/png" href="{% static 'images/logo-icon.png' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/png" href="{% static 'images/logo-transparent.png' %}">
     <style>
         :root {
-            --neon-pink: #FF1B6B;
-            --cyan: #00FFFF;
-            --purple: #7F00FF;
-            --deep-blue: #0A0A1A;
+            --neon-green: #39FF14;
+            --palo-orange: #FA582D;
+            --black: #000000;
+            --surface: #0D0D0D;
+            --white: #FFFFFF;
         }
 
         * {
@@ -29,16 +30,15 @@
         }
 
         body {
-            font-family: 'Share Tech Mono', monospace;
-            background: var(--deep-blue);
-            color: #fff;
+            font-family: 'Roboto', sans-serif;
+            background: var(--black);
+            color: var(--white);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             min-height: 100vh;
             position: relative;
-            cursor: crosshair;
         }
 
         /* Dark gradient with vignette */
@@ -49,9 +49,9 @@
             width: 100%;
             height: 100%;
             background:
-                radial-gradient(ellipse at center, transparent 0%, var(--deep-blue) 70%),
-                radial-gradient(ellipse at 30% 70%, rgba(127, 0, 255, 0.08) 0%, transparent 50%),
-                radial-gradient(ellipse at 70% 30%, rgba(255, 27, 107, 0.06) 0%, transparent 50%);
+                radial-gradient(ellipse at center, transparent 0%, var(--black) 70%),
+                radial-gradient(ellipse at 30% 70%, rgba(57, 255, 20, 0.03) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 30%, rgba(250, 88, 45, 0.02) 0%, transparent 50%);
             pointer-events: none;
             z-index: 0;
         }
@@ -63,7 +63,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            opacity: 0.03;
+            opacity: 0.02;
             pointer-events: none;
             z-index: 1;
             background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
@@ -80,8 +80,8 @@
             z-index: 100;
             background: repeating-linear-gradient(
                 0deg,
-                rgba(0, 0, 0, 0.015) 0px,
-                rgba(0, 0, 0, 0.015) 1px,
+                rgba(0, 0, 0, 0.02) 0px,
+                rgba(0, 0, 0, 0.02) 1px,
                 transparent 1px,
                 transparent 3px
             );
@@ -98,113 +98,147 @@
             max-width: 600px;
         }
 
-        /* Logo icon with glow pulse */
-        .logo-icon {
-            width: 180px;
+        /* Logo with glow pulse */
+        .logo {
+            width: 160px;
             height: auto;
-            margin-bottom: 1.5rem;
+            margin-bottom: 2rem;
             animation: logoPulse 4s ease-in-out infinite;
-            filter: drop-shadow(0 0 25px rgba(255, 27, 107, 0.4));
+            filter: drop-shadow(0 0 20px rgba(57, 255, 20, 0.4));
         }
 
         @keyframes logoPulse {
             0%, 100% {
-                filter: drop-shadow(0 0 25px rgba(255, 27, 107, 0.4));
+                filter: drop-shadow(0 0 20px rgba(57, 255, 20, 0.4));
             }
             50% {
-                filter: drop-shadow(0 0 40px rgba(255, 27, 107, 0.6))
-                        drop-shadow(0 0 60px rgba(127, 0, 255, 0.3));
+                filter: drop-shadow(0 0 35px rgba(57, 255, 20, 0.6))
+                        drop-shadow(0 0 50px rgba(57, 255, 20, 0.3));
             }
         }
 
-        /* CSS Glitch text wordmark */
+        /* Wordmark with glitch effect */
         .wordmark {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 4rem;
-            font-weight: 900;
-            letter-spacing: 0.2em;
-            color: #fff;
-            position: relative;
+            width: 320px;
+            height: auto;
             margin-bottom: 1.5rem;
-            text-shadow:
-                0 0 10px rgba(255, 27, 107, 0.5),
-                0 0 30px rgba(127, 0, 255, 0.3);
+            position: relative;
         }
 
-        .wordmark::before,
-        .wordmark::after {
-            content: 'SHIFTER';
+        .wordmark-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        .wordmark-container::before,
+        .wordmark-container::after {
+            content: '';
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            opacity: 0.9;
+            background: url("{% static 'images/wordmark-transparent.png' %}") no-repeat center;
+            background-size: contain;
+            opacity: 0;
         }
 
-        .wordmark::before {
-            color: var(--neon-pink);
-            animation: glitch-1 4s infinite linear alternate-reverse;
-            clip-path: polygon(0 0, 100% 0, 100% 35%, 0 35%);
-            text-shadow: none;
+        .wordmark-container::before {
+            filter: hue-rotate(90deg) brightness(1.5);
         }
 
-        .wordmark::after {
-            color: var(--purple);
-            animation: glitch-2 4s infinite linear alternate-reverse;
-            clip-path: polygon(0 65%, 100% 65%, 100% 100%, 0 100%);
-            text-shadow: none;
+        .wordmark-container::after {
+            filter: hue-rotate(-30deg) brightness(1.2);
         }
 
-        @keyframes glitch-1 {
-            0%, 88%, 100% { transform: translate(0); opacity: 0; }
-            90% { transform: translate(-4px, -1px); opacity: 0.9; }
-            92% { transform: translate(4px, 1px); opacity: 0.9; }
-            94% { transform: translate(-3px, 0); opacity: 0.9; }
-            96% { transform: translate(5px, -1px); opacity: 0.9; }
-            98% { transform: translate(-2px, 1px); opacity: 0.9; }
+        /* Glitch styles applied via JS */
+        .wordmark-container.glitch-shift::before {
+            opacity: 0.6;
+            transform: translate(-4px, -2px);
+        }
+        .wordmark-container.glitch-shift::after {
+            opacity: 0.5;
+            transform: translate(4px, 2px);
         }
 
-        @keyframes glitch-2 {
-            0%, 88%, 100% { transform: translate(0); opacity: 0; }
-            89% { transform: translate(4px, 1px); opacity: 0.9; }
-            91% { transform: translate(-4px, -1px); opacity: 0.9; }
-            93% { transform: translate(3px, 0); opacity: 0.9; }
-            95% { transform: translate(-5px, 1px); opacity: 0.9; }
-            97% { transform: translate(2px, -1px); opacity: 0.9; }
+        .wordmark-container.glitch-horizontal::before {
+            opacity: 0.6;
+            transform: translate(-5px, 0);
+        }
+        .wordmark-container.glitch-horizontal::after {
+            opacity: 0.5;
+            transform: translate(5px, 0);
         }
 
-        .wordmark:hover::before,
-        .wordmark:hover::after {
-            animation-duration: 0.3s;
+        .wordmark-container.glitch-vertical::before {
+            opacity: 0.5;
+            transform: translate(0, -3px);
+        }
+        .wordmark-container.glitch-vertical::after {
+            opacity: 0.4;
+            transform: translate(0, 3px);
+        }
+
+        .wordmark-container.glitch-up::before {
+            opacity: 0.6;
+            transform: translate(-3px, -4px);
+        }
+        .wordmark-container.glitch-up::after {
+            opacity: 0.5;
+            transform: translate(3px, -2px);
+        }
+
+        .wordmark-container.glitch-skew::before {
+            opacity: 0.5;
+            transform: skewX(-3deg) translate(-2px, 0);
+        }
+        .wordmark-container.glitch-skew::after {
+            opacity: 0.4;
+            transform: skewX(3deg) translate(2px, 0);
+        }
+
+        .wordmark-container.glitch-slice::before {
+            opacity: 0.7;
+            clip-path: polygon(0 30%, 100% 30%, 100% 50%, 0 50%);
+            transform: translate(-6px, 0);
+        }
+        .wordmark-container.glitch-slice::after {
+            opacity: 0.6;
+            clip-path: polygon(0 60%, 100% 60%, 100% 80%, 0 80%);
+            transform: translate(6px, 0);
+        }
+
+        .wordmark-container.glitch-flash::before {
+            opacity: 0.8;
+            filter: hue-rotate(180deg) brightness(2);
+            transform: translate(0);
+        }
+        .wordmark-container.glitch-flash::after {
+            opacity: 0;
+        }
+
+        .wordmark-container::before,
+        .wordmark-container::after {
+            transition: none;
         }
 
         .tagline {
-            font-size: 0.9rem;
-            color: var(--cyan);
-            opacity: 0.85;
-            margin-bottom: 2rem;
-            letter-spacing: 0.08em;
+            font-size: 1rem;
+            font-weight: 400;
+            color: var(--neon-green);
+            opacity: 0.9;
+            margin-bottom: 2.5rem;
+            letter-spacing: 0.05em;
             line-height: 1.6;
             max-width: 480px;
         }
 
         .launch-date {
-            font-family: 'Share Tech Mono', monospace;
-            font-size: 1.1rem;
-            color: var(--neon-pink);
-            letter-spacing: 0.15em;
-            opacity: 0.9;
-        }
-
-        /* Footer */
-        .footer {
-            position: fixed;
-            bottom: 1.5rem;
-            font-size: 0.7rem;
-            color: rgba(255, 255, 255, 0.2);
-            letter-spacing: 0.15em;
-            z-index: 10;
+            font-family: 'Roboto', sans-serif;
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--palo-orange);
+            letter-spacing: 0.1em;
         }
 
         /* Terminal blink cursor */
@@ -212,7 +246,7 @@
             display: inline-block;
             width: 8px;
             height: 1em;
-            background: var(--cyan);
+            background: var(--neon-green);
             margin-left: 4px;
             animation: blink 1s infinite;
             vertical-align: middle;
@@ -223,35 +257,43 @@
             51%, 100% { opacity: 0; }
         }
 
+        /* Footer */
+        .footer {
+            position: fixed;
+            bottom: 1.5rem;
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.25);
+            letter-spacing: 0.1em;
+            z-index: 10;
+        }
+
         /* Mobile responsive */
         @media (max-width: 600px) {
-            .logo-icon {
-                width: 140px;
+            .logo {
+                width: 120px;
             }
 
             .wordmark {
-                font-size: 2.5rem;
-                letter-spacing: 0.15em;
+                width: 240px;
             }
 
             .tagline {
-                font-size: 0.8rem;
-                padding: 0 1rem;
-            }
-
-            .notify-form {
+                font-size: 0.9rem;
                 padding: 0 1rem;
             }
         }
 
         @media (max-width: 400px) {
-            .logo-icon {
-                width: 110px;
+            .logo {
+                width: 100px;
             }
 
             .wordmark {
-                font-size: 1.8rem;
-                letter-spacing: 0.1em;
+                width: 200px;
+            }
+
+            .tagline {
+                font-size: 0.85rem;
             }
         }
     </style>
@@ -262,9 +304,11 @@
     <div class="scanlines"></div>
 
     <div class="container">
-        <img src="{% static 'images/logo-icon.png' %}" alt="Shifter" class="logo-icon">
+        <img src="{% static 'images/logo-transparent.png' %}" alt="Shifter" class="logo">
 
-        <h1 class="wordmark">SHIFTER</h1>
+        <div class="wordmark-container">
+            <img src="{% static 'images/wordmark-transparent.png' %}" alt="SHIFTER" class="wordmark">
+        </div>
 
         <p class="tagline">
             Autonomous AI adversaries. Real infrastructure. Controlled environments.<span class="cursor"></span>
@@ -274,5 +318,46 @@
     </div>
 
     <footer class="footer">&copy; 2025 Brad Edwards</footer>
+
+    <script>
+        (function() {
+            const wordmark = document.querySelector('.wordmark-container');
+            const glitchStyles = [
+                'glitch-shift', 'glitch-horizontal', 'glitch-vertical',
+                'glitch-up', 'glitch-skew', 'glitch-slice', 'glitch-flash'
+            ];
+
+            function triggerGlitch() {
+                // Pick random style
+                const style = glitchStyles[Math.floor(Math.random() * glitchStyles.length)];
+
+                // Apply glitch
+                wordmark.classList.add(style);
+
+                // Random duration 50-150ms
+                const duration = 50 + Math.random() * 100;
+
+                setTimeout(() => {
+                    wordmark.classList.remove(style);
+
+                    // Sometimes do a quick double-glitch
+                    if (Math.random() < 0.3) {
+                        setTimeout(() => {
+                            const style2 = glitchStyles[Math.floor(Math.random() * glitchStyles.length)];
+                            wordmark.classList.add(style2);
+                            setTimeout(() => wordmark.classList.remove(style2), 30 + Math.random() * 50);
+                        }, 30 + Math.random() * 50);
+                    }
+                }, duration);
+
+                // Schedule next glitch (random 1-4 seconds)
+                const nextDelay = 1000 + Math.random() * 3000;
+                setTimeout(triggerGlitch, nextDelay);
+            }
+
+            // Start after random initial delay
+            setTimeout(triggerGlitch, 500 + Math.random() * 1000);
+        })();
+    </script>
 </body>
 </html>

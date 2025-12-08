@@ -146,3 +146,49 @@ Post-authentication user flows for Domain Consultants.
 - Deletes all uploaded agents from S3
 - Removes user from Cognito
 - Removes user record from database
+
+---
+
+### US-11: Get Help
+
+**As a** DC
+**I want to** access help and documentation
+**So that** I can learn how to use Shifter and troubleshoot issues
+
+**Acceptance Criteria:**
+- Help link visible in navigation or header
+- Quick start guide for first-time users
+- Documentation on how to upload agents
+- Documentation on launching/managing ranges
+- FAQ for common issues
+- Contact/support info for further assistance
+
+---
+
+### US-12: Change Language
+
+**As a** DC
+**I want to** change the interface language
+**So that** I can use Shifter in my preferred language
+
+**Acceptance Criteria:**
+- Language selector in settings
+- Persists language preference across sessions
+- All UI text translatable
+- Initially supported: English (default)
+- Additional languages added based on demand
+
+---
+
+### US-13: Receive Notifications
+
+**As a** DC
+**I want to** receive notifications about my range status
+**So that** I know when my range is ready or requires attention
+
+**Acceptance Criteria:**
+- Notification when range provisioning completes
+- Notification when range is destroyed (manual or auto-timeout)
+- Notification if range encounters an error
+- In-app notifications visible in Mission Control
+- Optional: email notifications for critical events

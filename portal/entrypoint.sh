@@ -40,6 +40,24 @@ print(response['SecretString'])
     # Export Django secret key
     export DJANGO_SECRET_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['django_secret_key'])")
 
+    # Fetch Cognito secret if ARN provided
+    if [ -n "${COGNITO_SECRET_ARN:-}" ]; then
+        COGNITO_SECRET=$(python -c "
+import boto3
+import json
+import os
+
+client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
+response = client.get_secret_value(SecretId=os.environ['COGNITO_SECRET_ARN'])
+print(response['SecretString'])
+")
+
+        # Export OIDC credentials
+        export OIDC_RP_CLIENT_ID=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_id'])")
+        export OIDC_RP_CLIENT_SECRET=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_secret'])")
+        export OIDC_ISSUER_URL=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['issuer_url'])")
+    fi
+
     echo "Secrets loaded successfully"
 fi
 

@@ -8,6 +8,7 @@ dependencies = [
     "django>=6.0",
     "django-health-check>=3.20.0",
     "gunicorn>=23.0.0",
+    "mozilla-django-oidc>=4.0.1",
     "psycopg>=3.3.2",
     "python-dotenv>=1.2.1",
     "whitenoise>=6.11.0",

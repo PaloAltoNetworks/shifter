@@ -37,9 +37,44 @@
 - Terraform variables in GitHub Secrets, synced via `sync-tfvars.sh`
 - `.tfvars` files gitignored
 
+## Authentication
+
+AWS Cognito handles all authentication. Django is a relying party only.
+
+**Why Cognito over Django auth:**
+
+- SOC 2, ISO 27001, PCI DSS compliant
+- No password storage in our DB
+- MFA implementation is AWS's problem
+- Brute force protection, rate limiting built-in
+- Security patches handled by AWS
+
+**Configuration:**
+
+- User pool with email as username
+- MFA required (TOTP)
+- Email verification required
+- Pre-signup Lambda enforces `@paloaltonetworks.com` domain
+- External users: allowlist specific emails in Lambda
+
+**Django integration:**
+
+- OIDC callback validates Cognito JWT
+- Creates minimal local User record (email only)
+- No password fields, no reset flows, no MFA code
+- `mozilla-django-oidc` for token handling
+
+**Token flow:**
+
+1. User hits protected route → redirect to Cognito hosted UI
+2. User authenticates + MFA → Cognito redirects with auth code
+3. Django exchanges code for tokens, validates JWT signature
+4. Django creates session, stores user email from token claims
+
 ## Not Yet Implemented
 
 - WAF on ALB
 - ALB access logging
 - Cloudflare proxy with IP allowlisting
 - VPC Flow Logs
+- Admin panel restricted to bastion/SSM tunnel (#80)

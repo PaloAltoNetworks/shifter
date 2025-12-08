@@ -1,0 +1,389 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHIFTER // {{ page_title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/png" href="{% static 'images/logo-transparent.png' %}">
+    <style>
+        :root {
+            --neon-green: #39FF14;
+            --palo-orange: #FA582D;
+            --black: #000000;
+            --surface: #0D0D0D;
+            --surface-light: #1A1A1A;
+            --white: #FFFFFF;
+            --red: #FF4444;
+            --gray: #666666;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: var(--black);
+            color: var(--white);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--surface);
+            border-bottom: 1px solid rgba(57, 255, 20, 0.15);
+            padding: 0 1.5rem;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .header-logo {
+            height: 32px;
+            width: auto;
+        }
+
+        .header-title {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.7);
+            letter-spacing: 0.1em;
+        }
+
+        .header-title span {
+            color: var(--neon-green);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .user-info {
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .btn-logout {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: var(--white);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: border-color 0.2s;
+            text-decoration: none;
+        }
+
+        .btn-logout:hover {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+        }
+
+        /* Layout */
+        .layout {
+            display: flex;
+            padding-top: 60px;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 200px;
+            background: var(--surface);
+            border-right: 1px solid rgba(57, 255, 20, 0.15);
+            position: fixed;
+            top: 60px;
+            left: 0;
+            bottom: 0;
+            padding: 1.5rem 0;
+        }
+
+        .nav-item {
+            display: block;
+            padding: 0.75rem 1.5rem;
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            font-size: 0.875rem;
+            border-left: 3px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .nav-item:hover {
+            color: var(--white);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-item.active {
+            color: var(--neon-green);
+            border-left-color: var(--neon-green);
+            background: rgba(57, 255, 20, 0.05);
+        }
+
+        /* Main content */
+        .main {
+            flex: 1;
+            margin-left: 200px;
+            padding: 2rem;
+            min-height: calc(100vh - 60px);
+        }
+
+        .page-header {
+            margin-bottom: 2rem;
+        }
+
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--white);
+            margin-bottom: 0.5rem;
+        }
+
+        .page-subtitle {
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border: 1px solid rgba(57, 255, 20, 0.15);
+            border-radius: 4px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .card:hover {
+            border-color: rgba(57, 255, 20, 0.3);
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--neon-green);
+            color: var(--black);
+        }
+
+        .btn-primary:hover {
+            filter: brightness(1.1);
+            box-shadow: 0 0 20px rgba(57, 255, 20, 0.4);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: var(--white);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+        }
+
+        .btn-danger {
+            background: transparent;
+            border: 1px solid rgba(255, 68, 68, 0.5);
+            color: var(--red);
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 68, 68, 0.15);
+        }
+
+        /* Status indicators */
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-active .status-dot {
+            background: var(--neon-green);
+            box-shadow: 0 0 8px var(--neon-green);
+            animation: pulse 2s infinite;
+        }
+
+        .status-paused .status-dot {
+            background: var(--palo-orange);
+        }
+
+        .status-provisioning .status-dot {
+            background: var(--neon-green);
+            animation: spin 1s linear infinite;
+        }
+
+        .status-error .status-dot {
+            background: var(--red);
+        }
+
+        .status-destroyed .status-dot {
+            background: var(--gray);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Form elements */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 0.5rem;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--surface);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            color: var(--white);
+            font-size: 0.875rem;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--neon-green);
+            box-shadow: 0 0 0 2px rgba(57, 255, 20, 0.1);
+        }
+
+        .form-input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+
+            .main {
+                margin-left: 0;
+            }
+
+            .header-title {
+                display: none;
+            }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <img src="{% static 'images/logo-transparent.png' %}" alt="Shifter" class="header-logo">
+            <span class="header-title">// <span>MISSION CONTROL</span></span>
+        </div>
+        <div class="header-right">
+            <span class="user-info">{{ request.user.email }}</span>
+            <form action="{% url 'oidc_logout' %}" method="post" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn-logout">Logout</button>
+            </form>
+        </div>
+    </header>
+
+    <div class="layout">
+        <nav class="sidebar">
+            <a href="{% url 'mission_control:dashboard' %}" class="nav-item {% if active_nav == 'dashboard' %}active{% endif %}">
+                Dashboard
+            </a>
+            <a href="{% url 'mission_control:agents' %}" class="nav-item {% if active_nav == 'agents' %}active{% endif %}">
+                Agents
+            </a>
+            <a href="{% url 'mission_control:history' %}" class="nav-item {% if active_nav == 'history' %}active{% endif %}">
+                History
+            </a>
+            <a href="{% url 'mission_control:settings' %}" class="nav-item {% if active_nav == 'settings' %}active{% endif %}">
+                Settings
+            </a>
+            <a href="{% url 'mission_control:help' %}" class="nav-item {% if active_nav == 'help' %}active{% endif %}">
+                Help
+            </a>
+        </nav>
+
+        <main class="main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

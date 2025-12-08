@@ -55,7 +55,7 @@ AWS Cognito handles all authentication. Django is a relying party only.
 - MFA required (TOTP)
 - Email verification required
 - Pre-signup Lambda enforces `@paloaltonetworks.com` domain
-- External users: whitelist specific emails in Lambda
+- External users: allowlist specific emails in Lambda
 
 **Django integration:**
 

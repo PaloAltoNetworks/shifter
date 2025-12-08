@@ -29,6 +29,7 @@ theme:
 
 nav:
   - Home: index.md
+  - User Stories: user-stories.md
   - Architecture: architecture.md
   - Range: range.md
   - Setup: setup.md

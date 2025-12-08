@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - IAM permissions for Cognito and Lambda
 - Django OIDC integration (mozilla-django-oidc)
 - Entrypoint fetches Cognito secrets from Secrets Manager
+- Deploy workflow passes COGNITO_SECRET_ARN to container
 
 ## [0.1.10] - 2025-12-07
 

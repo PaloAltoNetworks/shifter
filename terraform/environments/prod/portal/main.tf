@@ -147,3 +147,4 @@ resource "aws_secretsmanager_secret_version" "app" {
     django_secret_key = random_password.django_secret_key.result
   })
 }
+

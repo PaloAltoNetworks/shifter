@@ -18,6 +18,7 @@ env:
   ECR_REPOSITORY: shifter-portal
   DB_SECRET_ARN: arn:aws:secretsmanager:us-east-2:${{ secrets.AWS_ACCOUNT_ID }}:secret:shifter-prod-portal-db-credentials
   APP_SECRET_ARN: arn:aws:secretsmanager:us-east-2:${{ secrets.AWS_ACCOUNT_ID }}:secret:shifter-prod-portal-app
+  COGNITO_SECRET_ARN: arn:aws:secretsmanager:us-east-2:${{ secrets.AWS_ACCOUNT_ID }}:secret:shifter-prod-portal-cognito
 
 jobs:
   build-and-push:
@@ -113,6 +114,7 @@ jobs:
                 -e AWS_REGION=${AWS_REGION} \
                 -e DB_SECRET_ARN=${DB_SECRET_ARN} \
                 -e APP_SECRET_ARN=${APP_SECRET_ARN} \
+                -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
                 -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
                 -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
                 \$IMAGE'

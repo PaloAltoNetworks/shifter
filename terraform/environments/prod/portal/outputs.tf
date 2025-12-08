@@ -89,3 +89,27 @@ output "app_secret_arn" {
   description = "ARN of the Secrets Manager secret containing Django app secrets"
   value       = aws_secretsmanager_secret.app.arn
 }
+
+# ------------------------------------------------------------------------------
+# Cognito
+# ------------------------------------------------------------------------------
+
+output "cognito_user_pool_id" {
+  description = "Cognito user pool ID"
+  value       = module.cognito.user_pool_id
+}
+
+output "cognito_client_id" {
+  description = "Cognito user pool client ID"
+  value       = module.cognito.client_id
+}
+
+output "cognito_domain" {
+  description = "Cognito hosted UI domain"
+  value       = module.cognito.cognito_domain
+}
+
+output "cognito_issuer_url" {
+  description = "OIDC issuer URL"
+  value       = module.cognito.issuer_url
+}

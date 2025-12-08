@@ -145,3 +145,12 @@ variable "allowed_emails" {
   description = "List of specific allowed emails (for external users)"
   type        = list(string)
 }
+
+# ------------------------------------------------------------------------------
+# S3
+# ------------------------------------------------------------------------------
+
+variable "user_storage_bucket" {
+  description = "S3 bucket name for user file storage (must be globally unique)"
+  type        = string
+}

@@ -117,6 +117,32 @@ resource "aws_iam_role_policy" "terraform_permissions" {
         ]
       },
       {
+        Sid    = "UserStorageS3"
+        Effect = "Allow"
+        Action = [
+          "s3:CreateBucket",
+          "s3:DeleteBucket",
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+          "s3:GetBucketPolicy",
+          "s3:PutBucketPolicy",
+          "s3:DeleteBucketPolicy",
+          "s3:GetBucketAcl",
+          "s3:PutBucketAcl",
+          "s3:GetBucketVersioning",
+          "s3:PutBucketVersioning",
+          "s3:GetBucketTagging",
+          "s3:PutBucketTagging",
+          "s3:GetBucketPublicAccessBlock",
+          "s3:PutBucketPublicAccessBlock",
+          "s3:GetBucketOwnershipControls",
+          "s3:PutBucketOwnershipControls"
+        ]
+        Resource = [
+          "arn:aws:s3:::shifter-user-storage-*"
+        ]
+      },
+      {
         Sid    = "TerraformStateLocking"
         Effect = "Allow"
         Action = [

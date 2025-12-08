@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Shifter** is a self-service cyber range platform for PANW SecOps Domain Consultants. DCs access a browser-based Kali desktop with Cursor IDE, connected to dynamically provisioned victim infrastructure. AI + MCP enables on-the-fly vulnerability deployment and attack simulation against XDR/XSIAM-protected targets.
+**Shifter** is a self-service cyber range platform for PANW SecOps Domain Consultants. DCs access a browser-based control workspace (Cursor IDE + MCPs), which connects to Kali (attack box) and dynamically provisioned victim infrastructure. AI + MCP enables on-the-fly vulnerability deployment and attack simulation against XDR/XSIAM-protected targets.
 
 ### Target Users
 
@@ -67,7 +67,7 @@ DC's Work Laptop (browser only)
    - Installs DC's agent on victim
    - Spins up Kasm container with Cursor + MCPs
    - Injects victim IP into MCP config
-5. **DC gets browser link** to Kali desktop
+5. **DC gets browser link** to control workspace
 6. **AI-driven scenarios:**
    - "Set up a PHP command injection vuln" → MCP configures victim
    - New chat: "Exploit the web server" → MCP attacks from Kali
@@ -154,6 +154,27 @@ class Range(models.Model):
 
 ---
 
+## Mission Control (Post-Login Portal)
+
+The authenticated area of the Django portal. See full documentation:
+
+- [docs/mission-control.md](docs/mission-control.md) - Pages, layout, user flows
+- [docs/design-system.md](docs/design-system.md) - Colors, typography, effects
+- [docs/user-stories.md](docs/user-stories.md) - User stories US-1 through US-10
+
+**Key Routes:**
+
+| Route | Page |
+|-------|------|
+| `/mission-control/` | Dashboard (launch/manage ranges) |
+| `/mission-control/agents/` | Agent management |
+| `/mission-control/history/` | Range history |
+| `/mission-control/settings/` | Account settings |
+
+**Architecture Note:** DC accesses a control workspace (Kasm + Cursor + MCPs), not Kali directly. MCPs connect to Kali and victim.
+
+---
+
 ## File Structure
 
 ```
@@ -229,52 +250,6 @@ npx @modelcontextprotocol/inspector build/index.js
 
 ---
 
-## Current Work: Portal EC2 + ALB (Issue #36)
-
-### Architecture
-
-```
-Internet → ALB (public subnets) → EC2 (private subnet) → RDS (private subnet)
-           │                      │
-           └─ ACM cert            └─ Docker → ECR image
-              WAF (future)            IAM role → Secrets Manager
-```
-
-### Modules to Create
-
-1. **modules/portal/ec2** - [ ] Created - [ ] Validated - [ ] Committed
-   - EC2 instance (Amazon Linux 2023)
-   - Security group: 8000 from ALB SG, 22 from admin CIDR
-   - IAM instance profile: ECR pull, Secrets Manager read
-   - User data: Docker setup, ECR login
-   - Private subnet placement
-
-2. **modules/portal/alb** - [ ] Created - [ ] Validated - [ ] Committed
-   - ALB in public subnets
-   - ACM certificate (DNS validation)
-   - HTTPS listener (443) → target group → EC2:8000
-   - HTTP listener (80) → redirect HTTPS
-   - Security group: 443/80 from internet
-
-3. **Environment wiring** - [ ] Created - [ ] Validated - [ ] Committed
-   - Update environments/prod/portal/main.tf
-   - Add new variables
-   - Update tfvars files
-
-4. **IAM permissions** - [ ] Created - [ ] Validated - [ ] Committed
-   - EC2 instance management
-   - IAM role/instance profile
-   - ELB management
-   - ACM management
-
-### New Variables Needed
-
-- `domain_name` - for ACM cert
-- `ec2_instance_type`
-- `ec2_key_name` (optional SSH)
-- `admin_cidr_blocks` (SSH access)
-- `ecr_repository_url`
-
 ### Future: NGFW Integration
 
 When adding PANW NGFW, insert firewall subnet tier:
@@ -291,8 +266,8 @@ Route: ALB → NGFW → EC2
 ### Branch Strategy
 
 - `main` - Stable releases
-- `dev` - Integration
-- `feature/*` - New features
+- `dev` - Integration (not currently in use)
+- `feature/*` - New features (not currently in use)
 
 ### Commit Protocol
 

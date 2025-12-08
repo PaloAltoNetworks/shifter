@@ -129,12 +129,19 @@ OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "")
 
 # Cognito endpoints - constructed from issuer URL
 _oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
+# Always define OIDC_OP_* variables to avoid runtime errors
+OIDC_OP_AUTHORIZATION_ENDPOINT = ""
+OIDC_OP_TOKEN_ENDPOINT = ""
+OIDC_OP_USER_ENDPOINT = ""
+OIDC_OP_JWKS_ENDPOINT = ""
 if _oidc_issuer:
     OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_issuer}/oauth2/authorize"
     OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_issuer}/oauth2/token"
     OIDC_OP_USER_ENDPOINT = f"{_oidc_issuer}/oauth2/userInfo"
     OIDC_OP_JWKS_ENDPOINT = f"{_oidc_issuer}/.well-known/jwks.json"
-
+else:
+    import warnings
+    warnings.warn("OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.", RuntimeWarning)
 # Token verification
 OIDC_RP_SIGN_ALGO = "RS256"
 

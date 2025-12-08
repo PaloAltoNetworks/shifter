@@ -38,9 +38,9 @@ variable "ecr_repository_url" {
   type        = string
 }
 
-variable "db_secret_arn" {
-  description = "ARN of the Secrets Manager secret for RDS credentials"
-  type        = string
+variable "secret_arns" {
+  description = "List of Secrets Manager secret ARNs the EC2 instance can read"
+  type        = list(string)
 }
 
 variable "app_port" {

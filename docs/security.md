@@ -62,7 +62,7 @@ AWS Cognito handles all authentication. Django is a relying party only.
 - OIDC callback validates Cognito JWT
 - Creates minimal local User record (email only)
 - No password fields, no reset flows, no MFA code
-- `mozilla-django-oidc` or `django-allauth` for token handling
+- `mozilla-django-oidc` for token handling
 
 **Token flow:**
 

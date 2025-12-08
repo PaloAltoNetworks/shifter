@@ -1,0 +1,87 @@
+{% extends "mission_control/base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Help</h1>
+    <p class="page-subtitle">Learn how to use Shifter</p>
+</div>
+
+<!-- Quick Start -->
+<div class="card">
+    <div class="card-title">Quick Start</div>
+    <ol style="color: rgba(255,255,255,0.7); padding-left: 1.5rem; line-height: 1.8;">
+        <li><strong>Upload an agent</strong> - Go to Agents and upload your XDR or XSIAM agent installer</li>
+        <li><strong>Launch a range</strong> - Return to Dashboard, select your agent, and click Launch Range</li>
+        <li><strong>Wait for provisioning</strong> - Your range will be ready in a few minutes</li>
+        <li><strong>Open your workspace</strong> - Click the link to access your control environment</li>
+        <li><strong>Run scenarios</strong> - Use AI to configure vulnerabilities and run attacks</li>
+    </ol>
+</div>
+
+<!-- Agents -->
+<div class="card">
+    <div class="card-title">Managing Agents</div>
+    <p style="color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+        Agents are XDR or XSIAM installers that get deployed to your victim machines.
+    </p>
+    <ul style="color: rgba(255,255,255,0.7); padding-left: 1.5rem; line-height: 1.8;">
+        <li>Download your agent installer from your XDR/XSIAM console</li>
+        <li>Supported formats: .msi (Windows), .sh (Linux), .deb, .rpm</li>
+        <li>Give each agent a memorable name (e.g., "Acme Corp XSIAM")</li>
+        <li>You can upload multiple agents for different customers</li>
+    </ul>
+</div>
+
+<!-- Ranges -->
+<div class="card">
+    <div class="card-title">Working with Ranges</div>
+    <p style="color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+        A range is your isolated demo environment with a victim machine and attack tools.
+    </p>
+    <ul style="color: rgba(255,255,255,0.7); padding-left: 1.5rem; line-height: 1.8;">
+        <li><strong>Active</strong> - Range is running and ready to use</li>
+        <li><strong>Paused</strong> - Range is stopped to save costs, can be resumed</li>
+        <li><strong>Provisioning</strong> - Range is being set up, wait a few minutes</li>
+        <li><strong>Destroyed</strong> - Range has been terminated</li>
+    </ul>
+    <p style="color: rgba(255,255,255,0.7); margin-top: 1rem;">
+        <strong>Tip:</strong> Pause your range when taking breaks to save costs. Destroy it when completely done.
+    </p>
+</div>
+
+<!-- FAQ -->
+<div class="card">
+    <div class="card-title">FAQ</div>
+
+    <div style="margin-bottom: 1.5rem;">
+        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">How long does provisioning take?</p>
+        <p style="color: rgba(255,255,255,0.7);">Usually 2-5 minutes depending on the agent type.</p>
+    </div>
+
+    <div style="margin-bottom: 1.5rem;">
+        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">Can I have multiple ranges at once?</p>
+        <p style="color: rgba(255,255,255,0.7);">Currently limited to one active range at a time.</p>
+    </div>
+
+    <div style="margin-bottom: 1.5rem;">
+        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">What happens if I forget to destroy my range?</p>
+        <p style="color: rgba(255,255,255,0.7);">Ranges auto-destroy after 8 hours of inactivity to prevent cost overruns.</p>
+    </div>
+
+    <div>
+        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">Where do alerts appear?</p>
+        <p style="color: rgba(255,255,255,0.7);">In your XDR/XSIAM console - the same one you downloaded the agent from.</p>
+    </div>
+</div>
+
+<!-- Contact -->
+<div class="card">
+    <div class="card-title">Need More Help?</div>
+    <p style="color: rgba(255,255,255,0.7);">
+        Contact the Shifter team for support or to report issues.
+    </p>
+    <p style="margin-top: 1rem;">
+        <a href="mailto:shifter-support@paloaltonetworks.com" class="btn btn-secondary">Contact Support</a>
+    </p>
+</div>
+{% endblock %}

@@ -30,6 +30,7 @@ theme:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Range: range.md
   - Setup: setup.md
   - Portal Dev: portal-dev.md
   - API Reference: api.md

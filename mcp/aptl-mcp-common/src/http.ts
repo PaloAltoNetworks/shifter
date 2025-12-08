@@ -60,7 +60,11 @@ export class HTTPClient {
   }
 
   /**
-   * Make HTTP request with automatic auth and error handling
+   * Make HTTP request with automatic auth and error handling.
+   *
+   * Note: TLS certificate verification is always enabled. For self-signed
+   * certificates, use the NODE_EXTRA_CA_CERTS environment variable to add
+   * trusted CA certificates.
    */
   async makeRequest(
     endpoint: string,
@@ -72,8 +76,8 @@ export class HTTPClient {
       responseType?: 'json' | 'text';
     } = {}
   ): Promise<HTTPResponse> {
-    const { baseUrl, timeout = 30000, verify_ssl = true, default_headers = {} } = this.config!;
-    
+    const { baseUrl, timeout = 30000, default_headers = {} } = this.config!;
+
     // Build URL with params - handle both full URLs and endpoint paths
     let url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
     if (options.params) {
@@ -96,11 +100,6 @@ export class HTTPClient {
       ...authHeaders,
       ...options.headers,
     };
-
-    // Configure SSL verification
-    if (!verify_ssl) {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-    }
 
     try {
       const controller = new AbortController();
@@ -142,11 +141,6 @@ export class HTTPClient {
         throw new Error(`Request timeout after ${timeout}ms`);
       }
       throw error;
-    } finally {
-      // Reset SSL verification
-      if (!verify_ssl) {
-        delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      }
     }
   }
 }

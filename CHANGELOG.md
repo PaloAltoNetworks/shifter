@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cognito Terraform module (user pool, client, hosted UI domain)
 - Pre-signup Lambda for email domain restriction
 - Auth architecture docs (security.md, architecture.md)
+- Wire Cognito into portal environment
+- EC2 module accepts list of secret ARNs
 
 ## [0.1.10] - 2025-12-07
 

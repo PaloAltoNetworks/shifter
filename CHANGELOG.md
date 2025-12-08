@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.10] - 2025-12-07
 
 ### Fixed
-- Deploy workflow reads domain from tfvars secret instead of SSM parameter
+- Hardcoded domain in Django ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS replaced with domain from tfvars secret
 
 ## [0.1.9] - 2025-12-07
 

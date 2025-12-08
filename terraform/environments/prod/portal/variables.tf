@@ -126,3 +126,12 @@ variable "health_check_path" {
   description = "Health check path for ALB target group"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# S3
+# ------------------------------------------------------------------------------
+
+variable "user_storage_bucket" {
+  description = "S3 bucket name for user file storage (must be globally unique)"
+  type        = string
+}

@@ -2,8 +2,10 @@
 
 
 def generate_username(email: str) -> str:
-    """Generate username from email address.
+    """Use email as username instead of default sha1 hash.
 
-    Cognito provides email in claims, use it as the username.
+    mozilla-django-oidc defaults to base64(sha1(email)) for privacy
+    (usernames are often public). For this internal tool, readable
+    emails in admin/logs/queries are more useful than hash obfuscation.
     """
     return email

@@ -16,9 +16,14 @@ Located in `assets/images/`:
 |------|-----|-------|
 | Neon Green | `#39FF14` | Primary accent, CTAs, active states, logo |
 | Palo Orange | `#FA582D` | Secondary accent, warnings, highlights |
-| Circuit Dark Blue | `#0A0A2A` | Primary background |
-| Circuit Background | `#111122` | Secondary background, cards |
+| Black | `#000000` | Primary background |
+| Surface | `#0D0D0D` | Cards, elevated surfaces |
+| Surface Light | `#1A1A1A` | Hover states, subtle borders |
 | White | `#FFFFFF` | Primary text |
+
+Official PANW brand colors from [brand guidelines](https://www.paloaltonetworks.com/company/brand):
+- Black `#000000`
+- Orange `#FA582D`
 
 ### CSS Variables
 
@@ -26,15 +31,16 @@ Located in `assets/images/`:
 :root {
     --neon-green: #39FF14;
     --palo-orange: #FA582D;
-    --circuit-dark: #0A0A2A;
-    --circuit-bg: #111122;
+    --black: #000000;
+    --surface: #0D0D0D;
+    --surface-light: #1A1A1A;
     --white: #FFFFFF;
 }
 ```
 
 ### Color Application
 
-- **Backgrounds**: Circuit dark blue (`#0A0A2A`) as base, circuit background (`#111122`) for cards/elevated surfaces
+- **Backgrounds**: Pure black (`#000000`) as base, surface (`#0D0D0D`) for cards/elevated surfaces
 - **Text**: White for primary, neon green for emphasis/links
 - **Borders**: Neon green at varying opacity (20-50%)
 - **Buttons**: Neon green fill with dark text, or outlined with green border
@@ -171,7 +177,7 @@ Subtle CRT-style scanlines for retro effect:
 
 Container for grouped content:
 
-- Background: Circuit background (`#111122`)
+- Background: Surface (`#0D0D0D`)
 - Border: 1px neon green at 15% opacity
 - Border-radius: 4px
 - Padding: 1.5rem
@@ -189,7 +195,7 @@ Dot + label for range/system status:
 
 ### Form Inputs
 
-- Background: Circuit dark blue (`#0A0A2A`)
+- Background: Surface (`#0D0D0D`)
 - Border: 1px white at 20% opacity
 - Text: White, Roboto 400
 - Focus: Border neon green, subtle glow
@@ -197,7 +203,7 @@ Dot + label for range/system status:
 
 ### Navigation
 
-- Background: Circuit background (`#111122`)
+- Background: Surface (`#0D0D0D`)
 - Active item: Neon green left border, green text
 - Inactive: White text at 70% opacity
 - Hover: White text at 100%

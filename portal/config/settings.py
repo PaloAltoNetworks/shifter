@@ -148,5 +148,5 @@ LOGOUT_REDIRECT_URL = "/"
 # Create users on first login
 OIDC_CREATE_USER = True
 
-# Use email as username
+# Use email as username (default is sha1 hash of email)
 OIDC_USERNAME_ALGO = "config.oidc.generate_username"

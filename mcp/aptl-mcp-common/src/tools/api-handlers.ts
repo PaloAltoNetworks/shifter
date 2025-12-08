@@ -102,7 +102,6 @@ const baseAPIHandlers = {
         const queryAPIConfig = {
           baseUrl: '', // Not used since we have full URL
           auth: queryConfig.auth,
-          verify_ssl: queryConfig.verify_ssl !== false
         };
         const queryClient = new HTTPClient(queryAPIConfig);
         result = await queryClient.makeRequest(queryConfig.url, queryConfig.method, {

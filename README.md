@@ -35,7 +35,7 @@ Everything runs in the cloud. Open your browser, launch a range, and start.
 
 ## How It Works
 
-1. Log into the portal and launch a range (contact [Brad Edwards](mailto:bedwards@paloaltonetworks.com) for access)
+1. Log into the portal and launch a range (PANW - Slack Brad Edwards for access)
 2. Open the control box—a browser-based desktop with an AI agent
 3. Tell the agent what to do: *"Set up a vulnerable web server"* or *"Attack the target and get root"*
 4. Watch the AI autonomously configure, exploit, and pivot

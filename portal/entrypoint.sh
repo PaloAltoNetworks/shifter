@@ -56,6 +56,7 @@ print(response['SecretString'])
         export OIDC_RP_CLIENT_ID=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_id'])")
         export OIDC_RP_CLIENT_SECRET=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_secret'])")
         export OIDC_ISSUER_URL=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['issuer_url'])")
+        export OIDC_AUTH_DOMAIN=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['domain'])")
     fi
 
     echo "Secrets loaded successfully"

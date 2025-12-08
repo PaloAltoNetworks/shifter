@@ -91,6 +91,25 @@ module "alb" {
 }
 
 # ------------------------------------------------------------------------------
+# Cognito
+# ------------------------------------------------------------------------------
+
+module "cognito" {
+  source = "../../../modules/portal/cognito"
+
+  name_prefix           = local.name_prefix
+  aws_region            = var.aws_region
+  cognito_domain_prefix = var.cognito_domain_prefix
+  callback_urls         = ["https://${var.domain_name}/oidc/callback/"]
+  logout_urls           = ["https://${var.domain_name}/"]
+  allowed_email_domains = var.allowed_email_domains
+  allowed_emails        = var.allowed_emails
+  deletion_protection   = true
+
+  tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
 # EC2
 # ------------------------------------------------------------------------------
 
@@ -105,9 +124,13 @@ module "ec2" {
   instance_type         = var.ec2_instance_type
   ecr_repository_arn    = data.terraform_remote_state.foundation.outputs.portal_ecr_arn
   ecr_repository_url    = data.terraform_remote_state.foundation.outputs.portal_ecr_url
-  db_secret_arn         = module.rds.db_credentials_secret_arn
-  app_port              = var.app_port
-  root_volume_size      = var.ec2_root_volume_size
+  secret_arns = [
+    module.rds.db_credentials_secret_arn,
+    aws_secretsmanager_secret.app.arn,
+    module.cognito.cognito_secret_arn,
+  ]
+  app_port         = var.app_port
+  root_volume_size = var.ec2_root_volume_size
 
   tags = var.tags
 }
@@ -158,3 +181,4 @@ resource "aws_secretsmanager_secret_version" "app" {
     django_secret_key = random_password.django_secret_key.result
   })
 }
+

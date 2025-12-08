@@ -60,6 +60,35 @@ Two AZs required for RDS subnet group. ALB in public subnets with ACM cert. EC2 
 | ECR | Container registry for Django image |
 | VPC | Network isolation, public/private subnet separation |
 | RDS | PostgreSQL 16, encrypted, credentials in Secrets Manager |
+| Cognito | User authentication, MFA, email verification |
+
+### Authentication
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Django
+    participant Cognito
+
+    User->>Django: GET /protected
+    Django->>User: 302 → Cognito hosted UI
+    User->>Cognito: Login + MFA
+    Cognito->>User: 302 → /callback?code=xxx
+    User->>Django: GET /callback?code=xxx
+    Django->>Cognito: Exchange code for tokens
+    Cognito->>Django: JWT (id_token, access_token)
+    Django->>Django: Validate JWT, create session
+    Django->>User: 302 → /protected (with session cookie)
+```
+
+Cognito user pool configured with:
+
+- Email as username
+- MFA required (TOTP)
+- Pre-signup Lambda for domain restriction (`@paloaltonetworks.com`)
+- Email verification required
+
+Django stores minimal user data (email from token claims). No passwords in DB.
 
 ### Secrets Management
 

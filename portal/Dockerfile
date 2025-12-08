@@ -33,6 +33,9 @@ COPY --from=builder /usr/local/bin/gunicorn /usr/local/bin/django-admin /usr/loc
 # Copy application code
 COPY --chown=appuser:appgroup . .
 
+# Create staticfiles directory for collectstatic
+RUN mkdir -p /app/staticfiles && chown appuser:appgroup /app/staticfiles
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

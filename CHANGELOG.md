@@ -13,6 +13,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - S3 user storage module for file uploads (agents, etc.)
 - GitHub Actions IAM permissions for S3 bucket management
 
+## [0.1.12] - 2025-12-07
+
+### Added
+- Range VPC module - stable VPC, IGW, route table
+- Range environment config
+- Range infrastructure workflow
+- Range infrastructure documentation
+
+## [0.1.11] - 2025-12-07
+
+### Added
+- Cognito Terraform module (user pool, client, hosted UI domain)
+- Pre-signup Lambda for email domain restriction
+- Auth architecture docs
+- Wire Cognito into portal environment
+- EC2 module accepts list of secret ARNs
+- IAM permissions for Cognito and Lambda
+- Django OIDC integration (mozilla-django-oidc)
+- Entrypoint fetches Cognito secrets from Secrets Manager
+- Deploy workflow passes COGNITO_SECRET_ARN to container
+
+## [0.1.10] - 2025-12-07
+
+### Fixed
+- Hardcoded domain in Django ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS replaced with domain from tfvars secret
+
+## [0.1.9] - 2025-12-07
+
+### Fixed
+- IAM permissions for SSM SendCommandToInstances
+- Staticfiles directory permission error in container
+
+## [0.1.13] - 2025-12-07
+
+### Added
+- S3 user storage module for file uploads (agents, etc.)
+- GitHub Actions IAM permissions for S3 bucket management
+
 ## [0.1.8] - 2025-12-07
 
 ### Added
@@ -21,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docker-compose.yml for local dev with Postgres
 - Makefile with dev commands (up, down, build, logs, shell, migrate, init)
 - GitHub Actions workflow for portal build, ECR push, SSM deploy
-- Portal dev documentation (docs/portal-dev.md)
+- Portal dev documentation 
 - Secrets management: IAM user for prod, Secrets Manager for DB + app secrets
 
 ### Changed
@@ -35,8 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Portal ALB module (ACM certificate, HTTPS listener, target group)
 - Environment wiring with terraform_remote_state for ECR
 - IAM permissions for EC2, ELB, ACM
-- Security documentation (docs/security.md)
-- Ethics documentation (docs/ethics.md)
+- Security documentation
+- Ethics documentation
 - Disclaimer in README
 
 ### Changed

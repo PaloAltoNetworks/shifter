@@ -44,10 +44,18 @@ def verify_callback_token(range_id: int, token: str) -> bool:
 
 
 def _get_callback_url() -> str:
-    """Get the URL for the range callback endpoint."""
-    # In production, this would be the public Portal URL
-    # For local dev, use localhost
-    base_url = getattr(settings, "SITE_URL", "http://localhost:8000")
+    """Get the URL for the range callback endpoint.
+
+    Raises:
+        ValueError: If SITE_URL is not configured in settings.
+    """
+    base_url = getattr(settings, "SITE_URL", None)
+    if not base_url:
+        raise ValueError(
+            "SITE_URL must be configured in settings. "
+            "Set SITE_URL environment variable (e.g., http://localhost:8000 for local dev, "
+            "https://your-domain.com for production)."
+        )
     return f"{base_url}/mission-control/api/range/callback/"
 
 

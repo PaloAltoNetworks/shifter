@@ -95,7 +95,17 @@ class AgentConfig(models.Model):
 
 
 class Range(models.Model):
-    """Stub model for range - FK target for history tracking."""
+    """User's cyber range instance with lifecycle management."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROVISIONING = "provisioning", "Provisioning"
+        READY = "ready", "Ready"
+        PAUSED = "paused", "Paused"
+        RESUMING = "resuming", "Resuming"
+        DESTROYING = "destroying", "Destroying"
+        DESTROYED = "destroyed", "Destroyed"
+        FAILED = "failed", "Failed"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges"
@@ -107,17 +117,69 @@ class Range(models.Model):
         blank=True,
         related_name="ranges",
     )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    victim_ip = models.GenericIPAddressField(null=True, blank=True)
+    chat_url = models.URLField(max_length=500, null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    # TODO: Add remaining fields when implementing range lifecycle
-    # status, victim_ip, kasm_session_id, paused_at, destroyed_at
+    ready_at = models.DateTimeField(null=True, blank=True)
+    paused_at = models.DateTimeField(null=True, blank=True)
+    destroyed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
 
     def __str__(self):
         agent_name = self.agent.name if self.agent else "Unknown Agent"
-        return f"Range {self.id} ({agent_name})"
+        return f"Range {self.id} ({agent_name}) - {self.status}"
+
+    @property
+    def is_active(self):
+        """Return True if range is in an active/usable state."""
+        return self.status in (self.Status.READY, self.Status.PAUSED)
+
+    @property
+    def is_terminal(self):
+        """Return True if range has reached a final state."""
+        return self.status in (self.Status.DESTROYED, self.Status.FAILED)
+
+    @classmethod
+    def get_active_for_user(cls, user):
+        """Return the user's active range, or None.
+
+        Includes DESTROYING to prevent launching a new range while one is being torn down.
+        """
+        return cls.objects.filter(
+            user=user,
+            status__in=[
+                cls.Status.PENDING,
+                cls.Status.PROVISIONING,
+                cls.Status.READY,
+                cls.Status.PAUSED,
+                cls.Status.RESUMING,
+                cls.Status.DESTROYING,
+            ],
+        ).first()
+
+    @classmethod
+    def get_destroyable_for_user(cls, user):
+        """Return a range that can be destroyed (active or failed), or None."""
+        return cls.objects.filter(
+            user=user,
+            status__in=[
+                cls.Status.PENDING,
+                cls.Status.PROVISIONING,
+                cls.Status.READY,
+                cls.Status.PAUSED,
+                cls.Status.RESUMING,
+                cls.Status.FAILED,
+            ],
+        ).first()
 
 
 class ActivityLog(models.Model):

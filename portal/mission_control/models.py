@@ -150,7 +150,10 @@ class Range(models.Model):
 
     @classmethod
     def get_active_for_user(cls, user):
-        """Return the user's active range, or None."""
+        """Return the user's active range, or None.
+
+        Includes DESTROYING to prevent launching a new range while one is being torn down.
+        """
         return cls.objects.filter(
             user=user,
             status__in=[
@@ -159,6 +162,22 @@ class Range(models.Model):
                 cls.Status.READY,
                 cls.Status.PAUSED,
                 cls.Status.RESUMING,
+                cls.Status.DESTROYING,
+            ],
+        ).first()
+
+    @classmethod
+    def get_destroyable_for_user(cls, user):
+        """Return a range that can be destroyed (active or failed), or None."""
+        return cls.objects.filter(
+            user=user,
+            status__in=[
+                cls.Status.PENDING,
+                cls.Status.PROVISIONING,
+                cls.Status.READY,
+                cls.Status.PAUSED,
+                cls.Status.RESUMING,
+                cls.Status.FAILED,
             ],
         ).first()
 

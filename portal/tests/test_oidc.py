@@ -255,26 +255,26 @@ class TestProviderLogoutUrl:
 
         assert "logout_uri=http%3A%2F%2Flocalhost%3A8000%2F" in url
 
-    def test_returns_none_when_auth_domain_missing(self, monkeypatch):
-        """Returns None when OIDC_AUTH_DOMAIN is not set."""
+    def test_returns_home_when_auth_domain_missing(self, monkeypatch):
+        """Returns '/' (home) when OIDC_AUTH_DOMAIN is not set (local dev)."""
         monkeypatch.delenv("OIDC_AUTH_DOMAIN", raising=False)
         monkeypatch.setenv("OIDC_RP_CLIENT_ID", "test-client-id")
 
         request = MagicMock()
-        assert provider_logout_url(request) is None
+        assert provider_logout_url(request) == "/"
 
-    def test_returns_none_when_client_id_missing(self, monkeypatch):
-        """Returns None when OIDC_RP_CLIENT_ID is not set."""
+    def test_returns_home_when_client_id_missing(self, monkeypatch):
+        """Returns '/' (home) when OIDC_RP_CLIENT_ID is not set (local dev)."""
         monkeypatch.setenv("OIDC_AUTH_DOMAIN", "https://auth.example.com")
         monkeypatch.delenv("OIDC_RP_CLIENT_ID", raising=False)
 
         request = MagicMock()
-        assert provider_logout_url(request) is None
+        assert provider_logout_url(request) == "/"
 
-    def test_returns_none_when_both_missing(self, monkeypatch):
-        """Returns None when both env vars are missing."""
+    def test_returns_home_when_both_missing(self, monkeypatch):
+        """Returns '/' (home) when both env vars are missing (local dev)."""
         monkeypatch.delenv("OIDC_AUTH_DOMAIN", raising=False)
         monkeypatch.delenv("OIDC_RP_CLIENT_ID", raising=False)
 
         request = MagicMock()
-        assert provider_logout_url(request) is None
+        assert provider_logout_url(request) == "/"

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2025-12-08
+
+### Fixed
+- Upload lock clears on page navigation/error (beforeunload + 30s timeout fallback)
+
 ## [0.2.5] - 2025-12-08
 
 ### Added

@@ -24,6 +24,31 @@ class DirectUploader {
         this.uploadToken = null;
         this.xhr = null;
         this.cancelled = false;
+        this._boundBeforeUnload = null;
+    }
+
+    /**
+     * Register beforeunload handler to cancel upload on page navigation
+     */
+    _registerBeforeUnload() {
+        this._boundBeforeUnload = () => {
+            if (this.uploadToken && !this.cancelled) {
+                // Use sendBeacon for reliable delivery during page unload
+                const data = JSON.stringify({ upload_token: this.uploadToken });
+                navigator.sendBeacon(this.cancelUrl, new Blob([data], { type: 'application/json' }));
+            }
+        };
+        window.addEventListener('beforeunload', this._boundBeforeUnload);
+    }
+
+    /**
+     * Remove beforeunload handler
+     */
+    _unregisterBeforeUnload() {
+        if (this._boundBeforeUnload) {
+            window.removeEventListener('beforeunload', this._boundBeforeUnload);
+            this._boundBeforeUnload = null;
+        }
     }
 
     /**
@@ -33,6 +58,7 @@ class DirectUploader {
      */
     async upload(file, agentName) {
         this.cancelled = false;
+        this._registerBeforeUnload();
 
         // Validate file size
         const maxBytes = this.maxSizeMB * 1024 * 1024;
@@ -60,10 +86,12 @@ class DirectUploader {
             this.onProgress(100, 'Finalizing...');
             const result = await this._completeUpload();
 
+            this._unregisterBeforeUnload();
             this.onProgress(100, 'Complete');
             this.onSuccess(result);
 
         } catch (error) {
+            this._unregisterBeforeUnload();
             if (!this.cancelled) {
                 this.onError(error.message || 'Upload failed');
                 // Try to cancel/cleanup on error
@@ -77,6 +105,7 @@ class DirectUploader {
      */
     cancel() {
         this.cancelled = true;
+        this._unregisterBeforeUnload();
 
         if (this.xhr) {
             this.xhr.abort();

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 
 from django.conf import settings as django_settings
 from django.contrib import messages
@@ -11,6 +12,7 @@ from django.db.models import Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import ActivityLog, AgentConfig, OperatingSystem
@@ -228,14 +230,28 @@ def _get_user_storage_used(user) -> int:
     return result["total"] or 0
 
 
+# Upload lock timeout in seconds (fallback for browser crash, network loss)
+UPLOAD_LOCK_TIMEOUT = 30
+
+
 def _check_upload_in_progress(request) -> bool:
     """Check if user has an upload in progress (stored in session)."""
-    return request.session.get("upload_in_progress", False)
+    lock_data = request.session.get("upload_lock")
+    if not lock_data:
+        return False
+    # Auto-expire stale locks
+    if time.time() - lock_data.get("started_at", 0) > UPLOAD_LOCK_TIMEOUT:
+        _set_upload_in_progress(request, False)
+        return False
+    return True
 
 
 def _set_upload_in_progress(request, in_progress: bool):
     """Set upload in progress flag in session."""
-    request.session["upload_in_progress"] = in_progress
+    if in_progress:
+        request.session["upload_lock"] = {"started_at": time.time()}
+    else:
+        request.session.pop("upload_lock", None)
 
 
 @login_required
@@ -462,6 +478,7 @@ def complete_upload(request):
     )
 
 
+@csrf_exempt  # Allow sendBeacon on page unload (no custom headers)
 @login_required
 @require_POST
 def cancel_upload(request):
@@ -472,6 +489,9 @@ def cancel_upload(request):
         - upload_token: Token from initiate response (optional)
 
     Cleans up S3 object if it exists and clears upload lock.
+
+    Note: CSRF exempt to support navigator.sendBeacon() on page unload.
+    Security maintained via @login_required and HMAC-signed upload_token.
     """
     try:
         data = json.loads(request.body)

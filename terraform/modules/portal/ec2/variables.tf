@@ -53,6 +53,12 @@ variable "root_volume_size" {
   type        = number
 }
 
+variable "s3_bucket_arn" {
+  description = "ARN of the S3 bucket for user storage"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

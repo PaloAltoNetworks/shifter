@@ -1,7 +1,9 @@
 """OIDC utilities for Cognito integration."""
 
 import logging
+import os
 import re
+from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
@@ -46,3 +48,34 @@ def generate_username(email: str) -> str:
         )
 
     return email
+
+
+def provider_logout_url(request):
+    """Return Cognito logout URL to clear the identity provider session.
+
+    Called by mozilla-django-oidc's OIDCLogoutView when OIDC_OP_LOGOUT_URL_METHOD
+    is configured. Redirects to Cognito's /logout endpoint which clears the
+    Cognito session cookie, then redirects back to our logout_uri.
+
+    In local dev (no OIDC env vars), returns "/" to skip Cognito and go home.
+
+    See: https://docs.aws.amazon.com/cognito/latest/developerguide/logout-endpoint.html
+    """
+    auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "")
+    client_id = os.environ.get("OIDC_RP_CLIENT_ID", "")
+
+    if not auth_domain or not client_id:
+        # Local dev - just redirect home, no Cognito to log out of
+        return "/"
+
+    # Build the post-logout redirect URL
+    scheme = "https" if request.is_secure() else "http"
+    host = request.get_host()
+    logout_uri = f"{scheme}://{host}/"
+
+    params = urlencode({
+        "client_id": client_id,
+        "logout_uri": logout_uri,
+    })
+
+    return f"{auth_domain}/logout?{params}"

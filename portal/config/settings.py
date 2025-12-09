@@ -57,6 +57,7 @@ TEMPLATES = [
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
+                "django.template.context_processors.debug",
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
@@ -161,6 +162,9 @@ OIDC_RP_SCOPES = "openid email profile"
 # Redirect after login/logout
 LOGIN_REDIRECT_URL = "/mission-control/"
 LOGOUT_REDIRECT_URL = "/"
+
+# Cognito logout endpoint - clears Cognito session in addition to Django session
+OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url"
 
 # Create users on first login
 OIDC_CREATE_USER = True

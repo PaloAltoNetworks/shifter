@@ -141,6 +141,7 @@ jobs:
                 -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
                 -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
                 -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
+                -e SITE_URL=https://${PORTAL_DOMAIN} \
                 \$IMAGE'
             ]" \
             --timeout-seconds 300 \

@@ -50,7 +50,7 @@ class TestRangeStatus:
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.READY,
-            victim_ip="10.0.1.100",
+            victim_ip="10.0.1.100",  # Stored in DB but not exposed to client
             chat_url="http://localhost:3000/chat/1",
         )
 
@@ -60,7 +60,9 @@ class TestRangeStatus:
         assert data["has_range"] is True
         assert data["range"]["id"] == range_obj.id
         assert data["range"]["status"] == "ready"
-        assert data["range"]["victim_ip"] == "10.0.1.100"
+        assert data["range"]["chat_url"] == "http://localhost:3000/chat/1"
+        # victim_ip intentionally not exposed to client (internal infra detail)
+        assert "victim_ip" not in data["range"]
 
 
 @pytest.mark.django_db

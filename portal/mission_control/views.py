@@ -1,9 +1,12 @@
 """Mission Control views."""
 
+import ipaddress
 import json
 import logging
 import os
+import re
 import time
+from urllib.parse import urlparse
 
 from django.conf import settings as django_settings
 from django.contrib import messages
@@ -525,13 +528,16 @@ def cancel_upload(request):
 
 
 def _range_to_json(range_obj):
-    """Serialize a Range object to JSON-compatible dict."""
+    """Serialize a Range object to JSON-compatible dict for client.
+
+    Note: victim_ip is intentionally excluded - it's internal infrastructure
+    detail stored in DB for provisioner use, not exposed to browser.
+    """
     return {
         "id": range_obj.id,
         "status": range_obj.status,
         "agent_id": range_obj.agent_id,
         "agent_name": range_obj.agent.name if range_obj.agent else None,
-        "victim_ip": range_obj.victim_ip,
         "chat_url": range_obj.chat_url,
         "error_message": range_obj.error_message,
         "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
@@ -775,10 +781,28 @@ def range_callback(request):
 
     # Process callback based on status
     if status == "ready":
+        victim_ip = data.get("victim_ip")
+        chat_url = data.get("chat_url")
+
+        # Validate victim_ip format (defense-in-depth)
+        if victim_ip:
+            try:
+                ipaddress.ip_address(victim_ip)
+            except ValueError:
+                logger.warning("Invalid victim_ip format in callback: %s", victim_ip)
+                return JsonResponse({"error": "Invalid victim_ip format"}, status=400)
+
+        # Validate chat_url format and domain (defense-in-depth)
+        if chat_url:
+            parsed = urlparse(chat_url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                logger.warning("Invalid chat_url format in callback: %s", chat_url)
+                return JsonResponse({"error": "Invalid chat_url format"}, status=400)
+
         range_obj.status = Range.Status.READY
         range_obj.ready_at = timezone.now()
-        range_obj.victim_ip = data.get("victim_ip")
-        range_obj.chat_url = data.get("chat_url")
+        range_obj.victim_ip = victim_ip
+        range_obj.chat_url = chat_url
         range_obj.save(update_fields=["status", "ready_at", "victim_ip", "chat_url"])
 
         ActivityLog.log(
@@ -796,8 +820,16 @@ def range_callback(request):
         )
 
     elif status == "failed":
+        # Sanitize error message: truncate and strip any HTML (defense-in-depth)
+        error_message = data.get("error_message", "Unknown error")
+        if error_message:
+            # Truncate to reasonable length
+            error_message = str(error_message)[:1000]
+            # Strip HTML tags (basic sanitization)
+            error_message = re.sub(r"<[^>]+>", "", error_message)
+
         range_obj.status = Range.Status.FAILED
-        range_obj.error_message = data.get("error_message", "Unknown error")
+        range_obj.error_message = error_message
         range_obj.save(update_fields=["status", "error_message"])
 
         ActivityLog.log(

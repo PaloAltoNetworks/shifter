@@ -108,9 +108,9 @@ Production uses a different secrets flow than local development:
 ### How Production Works
 
 1. GitHub Actions deploys the container to EC2 via SSM
-2. Container receives AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) as env vars
+2. Container uses EC2 instance role credentials via IMDSv2 (hop limit=2)
 3. `entrypoint.sh` detects `DB_SECRET_ARN` and `APP_SECRET_ARN` env vars
-4. Fetches both secrets from AWS Secrets Manager using boto3
+4. Fetches secrets from AWS Secrets Manager using boto3 (instance role creds)
 5. Exports DB credentials and Django secret key before starting gunicorn
 
 ### Secrets Manager Structure
@@ -133,9 +133,9 @@ Production uses a different secrets flow than local development:
 }
 ```
 
-### IAM User
+### IAM
 
-The `shifter-portal-prod` IAM user has minimal permissions:
-- `secretsmanager:GetSecretValue` on `shifter-prod-portal-*` secrets only
-
-Access keys are stored in GitHub Secrets and injected at deploy time.
+The container inherits EC2 instance role permissions:
+- `secretsmanager:GetSecretValue` on `shifter-prod-portal-*` secrets
+- `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` on user storage bucket
+- No static IAM user credentials needed

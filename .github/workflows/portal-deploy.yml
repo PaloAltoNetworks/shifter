@@ -107,11 +107,20 @@ jobs:
           fi
           echo "domain=${PORTAL_DOMAIN}" >> $GITHUB_OUTPUT
 
+          # Extract S3 bucket name from tfvars secret
+          S3_BUCKET=$(echo "$TF_VARS" | grep '^user_storage_bucket' | sed 's/.*= *"\([^"]*\)".*/\1/')
+          if [ -z "$S3_BUCKET" ]; then
+            echo "Error: Failed to extract user_storage_bucket from tfvars"
+            exit 1
+          fi
+          echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
+
       - name: Deploy via SSM
         env:
           ECR_REGISTRY: ${{ steps.config.outputs.registry }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           PORTAL_DOMAIN: ${{ steps.config.outputs.domain }}
+          S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
           PORTAL_AWS_ACCESS_KEY_ID: ${{ secrets.PORTAL_PROD_AWS_ACCESS_KEY_ID }}
           PORTAL_AWS_SECRET_ACCESS_KEY: ${{ secrets.PORTAL_PROD_AWS_SECRET_ACCESS_KEY }}
         run: |
@@ -128,6 +137,7 @@ jobs:
                 -e AWS_ACCESS_KEY_ID=${PORTAL_AWS_ACCESS_KEY_ID} \
                 -e AWS_SECRET_ACCESS_KEY=${PORTAL_AWS_SECRET_ACCESS_KEY} \
                 -e AWS_REGION=${AWS_REGION} \
+                -e AWS_S3_BUCKET_NAME=${S3_BUCKET} \
                 -e DB_SECRET_ARN=${DB_SECRET_ARN} \
                 -e APP_SECRET_ARN=${APP_SECRET_ARN} \
                 -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \

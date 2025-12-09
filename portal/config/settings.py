@@ -173,3 +173,13 @@ OIDC_USERNAME_ALGO = "config.oidc.generate_username"
 # ------------------------------------------------------------------------------
 
 SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "bedwards@paloaltonetworks.com")
+
+# ------------------------------------------------------------------------------
+# AWS S3 Configuration
+# ------------------------------------------------------------------------------
+
+AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
+AWS_S3_REGION = os.environ.get("AWS_S3_REGION", "us-east-2")
+
+# Agent upload limits
+AGENT_MAX_FILE_SIZE_MB = 200

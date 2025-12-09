@@ -35,8 +35,8 @@ Everything runs in the cloud. Open your browser, launch a range, and start.
 
 ## How It Works
 
-1. Log into the portal and launch a range (PANW - Slack Brad Edwards for access)
-2. Open the control box—a browser-based desktop with an AI agent
+1. Log into the portal and launch a range
+2. Open the chat interface
 3. Tell the agent what to do: *"Set up a vulnerable web server"* or *"Attack the target and get root"*
 4. Watch the AI autonomously configure, exploit, and pivot
 5. See detections in your security tooling
@@ -48,22 +48,20 @@ You direct. The agent executes.
 ```mermaid
 flowchart LR
     Browser --> Portal[Portal]
-    Browser --> Kasm[Control Box<br/>Agent + MCPs]
-    Kasm -->|MCP| Kali[Kali]
-    Kasm -->|MCP| Victim[Victim VM]
+    Browser --> Chat[LibreChat<br/>Agent + MCPs]
+    Chat -->|MCP| Victim[Victim VM]
 ```
 
 - **Portal**: Authentication and range management
-- **Control Box**: Browser-based desktop with AI agent
-- **Kali**: Attack platform
-- **Victim**: Target infrastructure
+- **LibreChat**: Browser-based chat with AI agent and MCP tools
+- **Victim**: Target infrastructure with your XDR agent
 
 ## Under the Hood
 
-- **AI Integration**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) gives the agent real tools—SSH, kali command execution, file ops. Works with Claude, GPT, Gemini, or any MCP-compatible model
+- **AI Integration**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) gives the agent real tools—SSH, command execution, file ops
 - **Infrastructure**: Terraform-managed AWS (VPCs, EC2, ALB, Cognito auth)
-- **Control Box**: Kasm containerized desktops with Cursor IDE and Cline
-- **Zero local install**: Everything browser-based, nothing on your laptop
+- **Chat UI**: LibreChat with agent loops and MCP tool use
+- **Zero local install**: Everything browser-based
 
 Full technical docs: [docs/](docs/)
 

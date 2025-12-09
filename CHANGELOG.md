@@ -16,7 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stub provisioner service with HMAC-signed callback tokens
 - Client-side DashboardManager for state management
 - State transition validation to prevent callback replay attacks
-- Range API tests (19 new tests)
 
 ## [0.2.6] - 2025-12-08
 

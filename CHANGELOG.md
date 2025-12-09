@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-12-08
+
+### Added
+- Mission Control data models (OperatingSystem, UserProfile, AgentConfig, Range, ActivityLog)
+- Django admin registration for all models
+- UserProfile auto-creation signal
+- Model unit tests (21 tests, 100% coverage)
+
 ## [0.2.0] - 2025-12-08
 
 ### Added

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2025-12-09
+
+### Fixed
+- Range provisioner missing env var for domain
+- Remove default site url for range provisioner
+
 ## [0.2.7] - 2025-12-09
 
 ### Added

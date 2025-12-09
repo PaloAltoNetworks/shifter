@@ -153,8 +153,9 @@ resource "aws_lb_target_group_attachment" "portal" {
 module "s3" {
   source = "../../../modules/portal/s3"
 
-  bucket_name = var.user_storage_bucket
-  tags        = var.tags
+  bucket_name          = var.user_storage_bucket
+  cors_allowed_origins = ["https://${var.domain_name}"]
+  tags                 = var.tags
 }
 
 # ------------------------------------------------------------------------------

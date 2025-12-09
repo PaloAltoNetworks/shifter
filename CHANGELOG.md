@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2025-12-09
+
+### Added
+- Dashboard Range launch flow with live status polling
+- Range API endpoints (status, launch, cancel, destroy, callback)
+- Range model status fields (pending, provisioning, ready, paused, resuming, destroying, destroyed, failed)
+- Stub provisioner service with HMAC-signed callback tokens
+- Client-side DashboardManager for state management
+- State transition validation to prevent callback replay attacks
+
 ## [0.2.6] - 2025-12-08
 
 ### Fixed

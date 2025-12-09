@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2025-12-08
+
+### Fixed
+- Logout now clears Cognito session (redirects to Cognito /logout endpoint)
+- Local dev logout uses dev_logout instead of OIDC logout
+
 ## [0.2.3] - 2025-12-08
 
 ### Fixed

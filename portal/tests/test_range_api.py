@@ -135,6 +135,50 @@ class TestLaunchRange:
 
 
 @pytest.mark.django_db
+class TestCancelRange:
+    def test_requires_login(self, client):
+        response = client.post(reverse("mission_control:cancel_range"))
+        assert response.status_code == 302
+
+    def test_returns_404_when_no_range(self, client, test_agent):
+        client.force_login(test_agent.user)
+        response = client.post(reverse("mission_control:cancel_range"))
+        assert response.status_code == 404
+
+    def test_successful_cancel_provisioning(self, client, test_agent):
+        client.force_login(test_agent.user)
+
+        # Create a provisioning range
+        range_obj = Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.PROVISIONING,
+        )
+
+        response = client.post(reverse("mission_control:cancel_range"))
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+
+        range_obj.refresh_from_db()
+        assert range_obj.status == Range.Status.DESTROYED
+        assert range_obj.destroyed_at is not None
+
+    def test_cannot_cancel_ready_range(self, client, test_agent):
+        client.force_login(test_agent.user)
+
+        # Create a ready range (can't cancel, must destroy)
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.READY,
+        )
+
+        response = client.post(reverse("mission_control:cancel_range"))
+        assert response.status_code == 400
+        assert "Cannot cancel" in response.json()["error"]
+
+
+@pytest.mark.django_db
 class TestDestroyRange:
     def test_requires_login(self, client):
         response = client.post(reverse("mission_control:destroy_range"))

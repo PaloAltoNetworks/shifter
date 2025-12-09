@@ -1,4 +1,78 @@
 {% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<style>
+    /* Upload progress UI */
+    .upload-progress {
+        display: none;
+        margin-top: 1rem;
+    }
+
+    .upload-progress.active {
+        display: block;
+    }
+
+    .progress-bar-container {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        height: 8px;
+        overflow: hidden;
+        margin-bottom: 0.5rem;
+    }
+
+    .progress-bar {
+        background: var(--neon-green);
+        height: 100%;
+        width: 0%;
+        transition: width 0.3s ease;
+    }
+
+    .progress-bar.error {
+        background: #ef4444;
+    }
+
+    .progress-status {
+        font-size: 0.875rem;
+        color: rgba(255, 255, 255, 0.7);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .btn-cancel {
+        background: transparent;
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        color: #ef4444;
+        padding: 0.25rem 0.75rem;
+        font-size: 0.75rem;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    .btn-cancel:hover {
+        background: rgba(239, 68, 68, 0.15);
+    }
+
+    .upload-error {
+        color: #ef4444;
+        font-size: 0.875rem;
+        margin-top: 0.5rem;
+        display: none;
+    }
+
+    .upload-error.visible {
+        display: block;
+    }
+
+    /* Disable form during upload */
+    .upload-form.uploading input,
+    .upload-form.uploading button[type="submit"] {
+        pointer-events: none;
+        opacity: 0.5;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -20,7 +94,7 @@
 <!-- Upload Card -->
 <div class="card">
     <div class="card-title">Upload Agent</div>
-    <form method="post" action="{% url 'mission_control:upload_agent' %}" enctype="multipart/form-data">
+    <form id="upload-form" class="upload-form">
         {% csrf_token %}
         <div class="form-group">
             <label class="form-label" for="agent-name">Agent Name</label>
@@ -30,10 +104,24 @@
             <label class="form-label" for="agent-file">Installer File</label>
             <input type="file" class="form-input" id="agent-file" name="file" accept=".msi,.zip,.tar.gz,.tgz,.deb,.rpm" required>
             <p style="margin-top: 0.5rem; font-size: 0.75rem; color: rgba(255,255,255,0.4);">
-                Supported formats: {{ allowed_extensions }}
+                Supported formats: {{ allowed_extensions }} (max 2GB per file, 5GB total)
             </p>
         </div>
-        <button type="submit" class="btn btn-primary">Upload Agent</button>
+
+        <!-- Progress indicator -->
+        <div id="upload-progress" class="upload-progress">
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div class="progress-status">
+                <span id="progress-text">Preparing...</span>
+                <button type="button" id="cancel-btn" class="btn-cancel">Cancel</button>
+            </div>
+        </div>
+
+        <div id="upload-error" class="upload-error"></div>
+
+        <button type="submit" class="btn btn-primary" id="upload-btn">Upload Agent</button>
     </form>
 </div>
 
@@ -93,4 +181,97 @@
     </div>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/upload.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('upload-form');
+    const fileInput = document.getElementById('agent-file');
+    const nameInput = document.getElementById('agent-name');
+    const progressContainer = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const uploadBtn = document.getElementById('upload-btn');
+    const errorDiv = document.getElementById('upload-error');
+
+    let uploader = null;
+
+    // Get CSRF token
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const file = fileInput.files[0];
+        const agentName = nameInput.value.trim();
+
+        if (!file || !agentName) {
+            showError('Please provide both a name and file.');
+            return;
+        }
+
+        // Create uploader instance
+        uploader = new DirectUploader({
+            initiateUrl: '{% url "mission_control:initiate_upload" %}',
+            completeUrl: '{% url "mission_control:complete_upload" %}',
+            cancelUrl: '{% url "mission_control:cancel_upload" %}',
+            csrfToken: csrfToken,
+            maxSizeMB: 2048,
+
+            onProgress: function(percent, message) {
+                progressBar.style.width = percent + '%';
+                progressText.textContent = message;
+            },
+
+            onSuccess: function(result) {
+                // Reload page to show new agent
+                window.location.reload();
+            },
+
+            onError: function(message) {
+                showError(message);
+                resetForm();
+            },
+
+            onCancel: function() {
+                resetForm();
+            }
+        });
+
+        // Show progress UI
+        form.classList.add('uploading');
+        progressContainer.classList.add('active');
+        errorDiv.classList.remove('visible');
+        progressBar.classList.remove('error');
+        uploadBtn.textContent = 'Uploading...';
+
+        // Start upload
+        uploader.upload(file, agentName);
+    });
+
+    cancelBtn.addEventListener('click', function() {
+        if (uploader) {
+            uploader.cancel();
+        }
+    });
+
+    function showError(message) {
+        errorDiv.textContent = message;
+        errorDiv.classList.add('visible');
+        progressBar.classList.add('error');
+    }
+
+    function resetForm() {
+        form.classList.remove('uploading');
+        progressContainer.classList.remove('active');
+        progressBar.style.width = '0%';
+        progressBar.classList.remove('error');
+        uploadBtn.textContent = 'Upload Agent';
+        uploader = null;
+    }
+});
+</script>
 {% endblock %}

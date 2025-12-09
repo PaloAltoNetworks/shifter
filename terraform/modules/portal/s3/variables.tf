@@ -9,3 +9,9 @@ variable "tags" {
   default     = {}
 }
 
+variable "cors_allowed_origins" {
+  description = "Origins allowed to make CORS requests (for presigned URL uploads)"
+  type        = list(string)
+  default     = []
+}
+

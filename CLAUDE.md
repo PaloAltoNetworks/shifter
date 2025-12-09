@@ -32,7 +32,7 @@ PANW SecOps Domain Consultants who need to:
 │       Portal        │            │    Provisioning Service     │
 │     (Django)        │            │   (Step Functions / ECS)    │
 │                     │            │                             │
-│ • Auth (Cognito)    │            │ • Polls for status=pending  │
+│ • Auth (Cognito)    │───SQS────▶│ • Consumes from queue       │
 │ • Agent upload      │            │ • Terraform apply (VPC/EC2) │
 │ • Launch range UI   │            │ • Deploy LibreChat instance │
 │ • Show range status │            │ • Generate MCP config       │
@@ -57,8 +57,8 @@ PANW SecOps Domain Consultants who need to:
 
 1. **User logs into Portal** (Cognito, paloaltonetworks.com email)
 2. **Uploads XDR/XSIAM agent installer** (stored in S3)
-3. **Clicks "Launch Range"** → Portal writes `Range(status='pending')` to DB
-4. **Provisioning service picks up request:**
+3. **Clicks "Launch Range"** → Portal writes `Range(status='pending')` to DB, pushes to SQS
+4. **Provisioning service consumes from SQS:**
    - Terraform: VPC + victim EC2 + agent install
    - Generates MCP config JSON with victim IP
    - Deploys LibreChat with MCP servers
@@ -74,7 +74,7 @@ PANW SecOps Domain Consultants who need to:
 | Component | Choice | Reason |
 |-----------|--------|--------|
 | Chat UI | LibreChat | MCP support, agent loops, Cognito OIDC, open source |
-| Decoupling | RDS as contract | Portal and provisioning share data model, not APIs |
+| Decoupling | SQS + RDS | SQS triggers provisioning, RDS stores state |
 | Infra Provisioning | Terraform via service | Users don't touch IaC |
 | Auth | Cognito SSO | Same identity across Portal and LibreChat |
 | Victim VMs | Real EC2 | XDR agent requires real OS |
@@ -98,9 +98,9 @@ Portal does NOT provision infrastructure. It writes requests to DB.
 
 ### 2. Provisioning Service
 
-**Purpose**: Watch for pending ranges, provision infra, deploy LibreChat
+**Purpose**: Provision range infra, deploy LibreChat
 
-**Trigger**: Polls RDS for `Range.status='pending'` (or EventBridge)
+**Trigger**: SQS FIFO queue (Portal pushes `{ range_id }` after DB write)
 
 **Actions**:
 1. Terraform apply: VPC, EC2 victim, security groups

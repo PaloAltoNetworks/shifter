@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2025-12-08
+
+### Added
+- 2GB file upload via presigned S3 URLs with progress indicator
+- 5GB per-user storage quota
+- Upload cancel/abort support
+- S3 CORS configuration for browser uploads
+- S3 lifecycle rule for orphan cleanup
+
 ## [0.2.4] - 2025-12-08
 
 ### Fixed

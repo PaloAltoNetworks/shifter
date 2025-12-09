@@ -199,4 +199,6 @@ AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
 AWS_S3_REGION = os.environ.get("AWS_S3_REGION", "us-east-2")
 
 # Agent upload limits
-AGENT_MAX_FILE_SIZE_MB = 200
+AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
+AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
+AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL

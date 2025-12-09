@@ -676,41 +676,36 @@ def cancel_range(request):
 @require_POST
 def destroy_range(request):
     """
-    Destroy an active or paused range.
+    Destroy an active, paused, or failed range.
     """
-    active_range = Range.get_active_for_user(request.user)
-    if not active_range:
-        return JsonResponse({"error": "No active range"}, status=404)
-
-    if active_range.status in (Range.Status.DESTROYING, Range.Status.DESTROYED):
-        return JsonResponse(
-            {"error": f"Range is already {active_range.status}"},
-            status=400,
-        )
+    # Use get_destroyable_for_user to include FAILED ranges
+    range_to_destroy = Range.get_destroyable_for_user(request.user)
+    if not range_to_destroy:
+        return JsonResponse({"error": "No range to destroy"}, status=404)
 
     # Mark as destroying (real impl would trigger teardown)
-    active_range.status = Range.Status.DESTROYING
-    active_range.save(update_fields=["status"])
+    range_to_destroy.status = Range.Status.DESTROYING
+    range_to_destroy.save(update_fields=["status"])
 
     ActivityLog.log(
         "range_destroy_started",
         user=request.user,
-        range_id=active_range.id,
+        range_id=range_to_destroy.id,
     )
 
     logger.info(
         "Range destroy started: user=%s range_id=%s",
         request.user.email,
-        active_range.id,
+        range_to_destroy.id,
     )
 
     # Trigger teardown (stub for now - immediately marks destroyed)
     from .services.provisioner import start_teardown
-    start_teardown(active_range.id)
+    start_teardown(range_to_destroy.id)
 
     return JsonResponse({
         "success": True,
-        "range": _range_to_json(active_range),
+        "range": _range_to_json(range_to_destroy),
     })
 
 

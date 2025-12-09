@@ -1,0 +1,58 @@
+{% extends "mission_control/base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Agents</h1>
+    <p class="page-subtitle">Manage your XDR/XSIAM agent installers</p>
+</div>
+
+<!-- Upload Card -->
+<div class="card">
+    <div class="card-title">Upload Agent</div>
+    <form id="upload-form">
+        <div class="form-group">
+            <label class="form-label">Agent Name</label>
+            <input type="text" class="form-input" placeholder="e.g., Acme Corp XSIAM" id="agent-name">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Installer File</label>
+            <input type="file" class="form-input" id="agent-file" accept=".msi,.sh,.deb,.rpm">
+            <p style="margin-top: 0.5rem; font-size: 0.75rem; color: rgba(255,255,255,0.4);">
+                Supported formats: .msi, .sh, .deb, .rpm
+            </p>
+        </div>
+        <button type="submit" class="btn btn-primary">Upload Agent</button>
+    </form>
+</div>
+
+<!-- Agent List -->
+<div class="card">
+    <div class="card-title">Your Agents</div>
+
+    <!-- Empty state -->
+    <div class="empty-state" id="agents-empty">
+        <div class="empty-state-icon">[ ]</div>
+        <p>No agents uploaded yet</p>
+        <p style="font-size: 0.75rem; margin-top: 0.5rem;">
+            Upload an XDR or XSIAM agent installer to get started
+        </p>
+    </div>
+
+    <!-- Agent list (hidden when empty) -->
+    <div id="agents-list" style="display: none;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">NAME</th>
+                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">UPLOADED</th>
+                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">RANGES</th>
+                    <th style="text-align: right; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">ACTIONS</th>
+                </tr>
+            </thead>
+            <tbody id="agents-tbody">
+                <!-- Will be populated dynamically -->
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

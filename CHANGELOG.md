@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-12-08
+
+### Added
+- Mission Control UI shell (Dashboard, Agents, History, Settings, Help)
+- Dev auth bypass for local testing
+- User stories: Help, Language, Notifications
+
 ## [0.1.19] - 2025-12-08
 
 ### Changed

@@ -209,6 +209,57 @@ class TestDestroyRange:
         assert data["success"] is True
         assert data["range"]["status"] == "destroying"
 
+    def test_can_destroy_failed_range(self, client, test_agent, monkeypatch):
+        """Failed ranges can be destroyed to clean up."""
+        monkeypatch.setattr(
+            "mission_control.services.provisioner.threading.Thread",
+            lambda *args, **kwargs: type("MockThread", (), {"start": lambda self: None})()
+        )
+        client.force_login(test_agent.user)
+
+        # Create a failed range
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.FAILED,
+            error_message="Provisioning timed out",
+        )
+
+        response = client.post(reverse("mission_control:destroy_range"))
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["range"]["status"] == "destroying"
+
+
+@pytest.mark.django_db
+class TestLaunchRangeWhileDestroying:
+    """Test that users cannot launch while a range is being destroyed."""
+
+    def test_cannot_launch_while_destroying(self, client, test_agent, monkeypatch):
+        monkeypatch.setattr(
+            "mission_control.services.provisioner.threading.Thread",
+            lambda *args, **kwargs: type("MockThread", (), {"start": lambda self: None})()
+        )
+        client.force_login(test_agent.user)
+
+        # Create a range being destroyed
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.DESTROYING,
+        )
+
+        # Try to launch a new range
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={"agent_id": test_agent.id},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 409
+        assert "already have an active range" in response.json()["error"]
+
 
 @pytest.mark.django_db
 class TestListAgents:

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2025-12-08
+
+### Fixed
+- Agent uploads failing: container now uses EC2 instance role via IMDSv2
+
+### Removed
+- Static IAM user credentials for portal container
+
 ## [0.2.2] - 2025-12-08
 
 ### Added

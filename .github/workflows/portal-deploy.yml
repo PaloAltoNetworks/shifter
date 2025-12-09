@@ -121,9 +121,9 @@ jobs:
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           PORTAL_DOMAIN: ${{ steps.config.outputs.domain }}
           S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
-          PORTAL_AWS_ACCESS_KEY_ID: ${{ secrets.PORTAL_PROD_AWS_ACCESS_KEY_ID }}
-          PORTAL_AWS_SECRET_ACCESS_KEY: ${{ secrets.PORTAL_PROD_AWS_SECRET_ACCESS_KEY }}
         run: |
+          # Container uses EC2 instance role for AWS credentials via IMDSv2
+          # (hop limit=2 configured in Terraform). No explicit IAM user creds needed.
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=tag:Name,Values=prod-portal-ec2" \
@@ -134,8 +134,6 @@ jobs:
               'docker stop portal 2>/dev/null || true',
               'docker rm portal 2>/dev/null || true',
               'docker run -d --name portal --restart unless-stopped -p 8000:8000 \
-                -e AWS_ACCESS_KEY_ID=${PORTAL_AWS_ACCESS_KEY_ID} \
-                -e AWS_SECRET_ACCESS_KEY=${PORTAL_AWS_SECRET_ACCESS_KEY} \
                 -e AWS_REGION=${AWS_REGION} \
                 -e AWS_S3_BUCKET_NAME=${S3_BUCKET} \
                 -e DB_SECRET_ARN=${DB_SECRET_ARN} \

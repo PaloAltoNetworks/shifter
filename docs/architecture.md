@@ -2,10 +2,10 @@
 
 ## Infrastructure Overview
 
-Three components, decoupled via RDS:
+Three components, decoupled via RDS + SQS:
 
-- **Portal**: Django app for auth, agent upload, range status UI
-- **Provisioning Service**: Watches DB, provisions infra, deploys LibreChat
+- **Portal**: Django app for auth, agent upload, range status UI. Pushes to SQS on launch.
+- **Provisioning Service**: Consumes SQS, provisions infra, deploys LibreChat
 - **Range**: Per-user VPC with LibreChat + MCPs and victim EC2
 
 ```mermaid
@@ -13,8 +13,11 @@ graph TB
     subgraph "Portal VPC"
         Portal[Django Portal]
         RDS[(PostgreSQL)]
+        SQS[[SQS FIFO]]
         Provisioner[Provisioning Service]
         Portal --> RDS
+        Portal -->|push| SQS
+        SQS -->|consume| Provisioner
         Provisioner --> RDS
     end
 
@@ -30,7 +33,7 @@ graph TB
     Victim -->|Telemetry| XDR[XDR/XSIAM]
 ```
 
-Portal and Provisioner share the `Range` table. Portal writes requests, Provisioner fulfills them.
+Portal writes to RDS and pushes to SQS. Provisioner consumes queue and updates RDS when done.
 
 ## Portal Infrastructure
 
@@ -107,15 +110,17 @@ Per-user ephemeral VPCs provisioned by the Provisioning Service.
 ### Provisioning Flow
 
 1. Portal writes `Range(status='pending', agent_id=X)` to RDS
-2. Provisioning Service polls for pending ranges
-3. Terraform apply:
+2. Portal pushes `{ range_id }` to SQS FIFO queue
+3. Provisioning Service consumes message
+4. Terraform apply:
    - VPC + subnet
    - Security group (SSH from LibreChat)
    - EC2 victim instance
    - User-data installs XDR agent from S3
-4. Generate MCP config JSON with victim IP
-5. Deploy LibreChat instance (ECS or EC2) with MCP servers
-6. Update Range row: `status='ready'`, `victim_ip`, `chat_url`
+5. Generate MCP config JSON with victim IP
+6. Deploy LibreChat instance (ECS or EC2) with MCP servers
+7. Update Range row: `status='ready'`, `victim_ip`, `chat_url`
+8. Delete message from queue (success) or send to DLQ (failure)
 
 ### Components
 

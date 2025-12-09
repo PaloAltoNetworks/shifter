@@ -17,6 +17,7 @@ if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY environment variable is required")
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
 
@@ -45,8 +46,14 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "mozilla_django_oidc.middleware.SessionRefresh",
 ]
+
+# OIDC SessionRefresh middleware - only in production
+# In DEBUG mode, we use dev_login bypass. In production, OIDC must be configured.
+if not DEBUG:
+    if not os.environ.get("OIDC_RP_CLIENT_ID"):
+        raise ValueError("OIDC_RP_CLIENT_ID required in production (DEBUG=False)")
+    MIDDLEWARE.append("mozilla_django_oidc.middleware.SessionRefresh")
 
 ROOT_URLCONF = "config.urls"
 
@@ -162,6 +169,12 @@ OIDC_RP_SCOPES = "openid email profile"
 # Redirect after login/logout
 LOGIN_REDIRECT_URL = "/mission-control/"
 LOGOUT_REDIRECT_URL = "/"
+
+# Login URL - dev bypass in DEBUG, OIDC in production
+if DEBUG:
+    LOGIN_URL = "/dev-login/"
+else:
+    LOGIN_URL = "oidc_authentication_init"
 
 # Cognito logout endpoint - clears Cognito session in addition to Django session
 OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url"

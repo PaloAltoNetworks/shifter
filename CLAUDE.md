@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Shifter** is a self-service cyber range platform for PANW SecOps Domain Consultants. DCs access a browser-based control workspace (Cursor IDE + MCPs), which connects to Kali (attack box) and dynamically provisioned victim infrastructure. AI + MCP enables on-the-fly vulnerability deployment and attack simulation against XDR/XSIAM-protected targets.
+**Shifter** is a self-service cyber range platform. Users access a browser-based chat interface (LibreChat + MCPs) to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.
 
 ### Target Users
 
@@ -21,67 +21,64 @@ PANW SecOps Domain Consultants who need to:
 ### High-Level Design
 
 ```
-DC's Work Laptop (browser only)
-         │
-         │ HTTPS
-         ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Shifter Platform                                                        │
-│                                                                          │
-│  ┌─────────────┐     ┌─────────────────┐     ┌────────────────────────┐ │
-│  │   Django    │     │      Kasm       │     │   Terraform Backend    │ │
-│  │   Portal    │────▶│   Workspaces    │     │   (Step Functions)     │ │
-│  │             │     │                 │     │                        │ │
-│  │ • Auth      │     │ • Kali Desktop  │     │ • Provisions VPC       │ │
-│  │ • Agent     │     │ • Cursor + MCPs │     │ • Spins up Victim VM   │ │
-│  │   Upload    │     │ • Browser-based │     │ • Injects MCP config   │ │
-│  └─────────────┘     └────────┬────────┘     └────────────────────────┘ │
-│                               │                                          │
-└───────────────────────────────┼──────────────────────────────────────────┘
-                                │ SSH/MCP
-                                ▼
+│                         RDS (PostgreSQL)                                │
+│            Range table: user_id, status, victim_ip, chat_url            │
+└─────────────────────────────────────────────────────────────────────────┘
+         │                                    │
+         │ writes                             │ reads/writes
+         ▼                                    ▼
+┌─────────────────────┐            ┌─────────────────────────────┐
+│       Portal        │            │    Provisioning Service     │
+│     (Django)        │            │   (Step Functions / ECS)    │
+│                     │            │                             │
+│ • Auth (Cognito)    │            │ • Polls for status=pending  │
+│ • Agent upload      │            │ • Terraform apply (VPC/EC2) │
+│ • Launch range UI   │            │ • Deploy LibreChat instance │
+│ • Show range status │            │ • Generate MCP config       │
+└─────────────────────┘            └─────────────────────────────┘
+                                              │
+                                              ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Per-DC Victim VPC (Terraform-provisioned)                              │
+│  Per-User Range                                                         │
 │                                                                          │
-│  ┌───────────────────┐                                                  │
-│  │   Victim VM       │                                                  │
-│  │   (EC2)           │◀──── DC's XDR Agent (uploaded via portal)        │
-│  │                   │                                                  │
-│  │   • Blank canvas  │                                                  │
-│  │   • AI configures │                                                  │
-│  │     vulns on-fly  │                                                  │
-│  └─────────┬─────────┘                                                  │
-│            │                                                             │
-│            ▼                                                             │
-│     DC's XSIAM Tenant (alerts, detections)                              │
+│  ┌─────────────────┐     ┌─────────────────┐                           │
+│  │   LibreChat     │────▶│   Victim VM     │                           │
+│  │   + MCPs        │     │   (EC2)         │                           │
+│  │                 │     │                 │                           │
+│  │ • Agent loop    │     │ • XDR agent     │──▶ User's XSIAM Tenant   │
+│  │ • Chat history  │     │ • AI-configured │                           │
+│  │ • Tool use      │     │   vulns         │                           │
+│  └─────────────────┘     └─────────────────┘                           │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### How It Works
 
-1. **DC logs into portal** (paloaltonetworks.com email required)
-2. **Uploads their XDR/XSIAM agent installer** (stored in S3)
-3. **Clicks "Launch Range"** - selects which agent to use
-4. **Backend provisions:**
-   - Victim VPC + EC2 instance
-   - Installs DC's agent on victim
-   - Spins up Kasm container with Cursor + MCPs
-   - Injects victim IP into MCP config
-5. **DC gets browser link** to control workspace
-6. **AI-driven scenarios:**
-   - "Set up a PHP command injection vuln" → MCP configures victim
-   - New chat: "Exploit the web server" → MCP attacks from Kali
-   - XDR/XSIAM detects, DC shows customer
+1. **User logs into Portal** (Cognito, paloaltonetworks.com email)
+2. **Uploads XDR/XSIAM agent installer** (stored in S3)
+3. **Clicks "Launch Range"** → Portal writes `Range(status='pending')` to DB
+4. **Provisioning service picks up request:**
+   - Terraform: VPC + victim EC2 + agent install
+   - Generates MCP config JSON with victim IP
+   - Deploys LibreChat with MCP servers
+   - Writes `status='ready'` + `chat_url` back to DB
+5. **Portal shows "Open Range"** → user clicks, lands in LibreChat
+6. **Two-context workflow:**
+   - Chat 1: "Set up a command injection vuln" → MCP configures victim
+   - Chat 2: "Hack the target" → MCP runs attack autonomously
+   - XDR/XSIAM detects, user demos to customer
 
 ### Why This Architecture
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Desktop Delivery | Kasm (containers) | Seconds to spin up, scales horizontally, browser-only access |
-| Infra Provisioning | Terraform via backend | DCs don't touch IaC, platform orchestrates |
-| Auth | Django + paloaltonetworks.com | Restrict to internal users |
-| Victim VMs | Real EC2 | XDR agent requires real OS, not container |
-| Scenario Setup | AI + MCP | Dynamic, not canned demos |
+| Chat UI | LibreChat | MCP support, agent loops, Cognito OIDC, open source |
+| Decoupling | RDS as contract | Portal and provisioning share data model, not APIs |
+| Infra Provisioning | Terraform via service | Users don't touch IaC |
+| Auth | Cognito SSO | Same identity across Portal and LibreChat |
+| Victim VMs | Real EC2 | XDR agent requires real OS |
+| Tool Execution | MCP (stdio) | Config-driven, no Lambda wrapper needed |
 
 ---
 

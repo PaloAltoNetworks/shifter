@@ -146,6 +146,16 @@
             background: rgba(57, 255, 20, 0.05);
         }
 
+        .sidebar-footer {
+            position: absolute;
+            bottom: 1.5rem;
+            left: 0;
+            right: 0;
+            padding: 0 1.5rem;
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.3);
+        }
+
         /* Main content */
         .main {
             flex: 1;
@@ -377,6 +387,9 @@
             <a href="{% url 'mission_control:help' %}" class="nav-item {% if active_nav == 'help' %}active{% endif %}">
                 Help
             </a>
+            <div class="sidebar-footer">
+                &copy; 2025 Brad Edwards
+            </div>
         </nav>
 
         <main class="main">

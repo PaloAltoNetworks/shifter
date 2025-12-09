@@ -21,6 +21,10 @@ INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
 
+# Site URL for internal callbacks (e.g., provisioner callback)
+# Required in all environments - no default fallback
+SITE_URL = os.environ.get("SITE_URL")
+
 # Application definition
 INSTALLED_APPS = [
     "django.contrib.admin",

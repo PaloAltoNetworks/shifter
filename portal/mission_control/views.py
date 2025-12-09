@@ -47,8 +47,11 @@ def settings(request):
 @login_required
 def help_page(request):
     """Help and documentation."""
+    from django.conf import settings as django_settings
+
     context = {
         "page_title": "Help",
         "active_nav": "help",
+        "support_email": django_settings.SHIFTER_SUPPORT_EMAIL,
     }
     return render(request, "mission_control/help.html", context)

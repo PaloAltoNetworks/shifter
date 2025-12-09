@@ -1,8 +1,10 @@
 """Tests for OIDC utilities."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
-from config.oidc import generate_username
+from config.oidc import generate_username, provider_logout_url
 
 
 class TestGenerateUsername:
@@ -220,3 +222,59 @@ class TestGenerateUsername:
         """Single character local part is valid."""
         email = "a@paloaltonetworks.com"
         assert generate_username(email) == email
+
+
+class TestProviderLogoutUrl:
+    """Tests for provider_logout_url function."""
+
+    def test_returns_cognito_logout_url(self, monkeypatch):
+        """Returns properly formatted Cognito logout URL."""
+        monkeypatch.setenv("OIDC_AUTH_DOMAIN", "https://auth.example.com")
+        monkeypatch.setenv("OIDC_RP_CLIENT_ID", "test-client-id")
+
+        request = MagicMock()
+        request.is_secure.return_value = True
+        request.get_host.return_value = "portal.example.com"
+
+        url = provider_logout_url(request)
+
+        assert url.startswith("https://auth.example.com/logout?")
+        assert "client_id=test-client-id" in url
+        assert "logout_uri=https%3A%2F%2Fportal.example.com%2F" in url
+
+    def test_returns_http_logout_uri_when_not_secure(self, monkeypatch):
+        """Uses http scheme when request is not secure."""
+        monkeypatch.setenv("OIDC_AUTH_DOMAIN", "https://auth.example.com")
+        monkeypatch.setenv("OIDC_RP_CLIENT_ID", "test-client-id")
+
+        request = MagicMock()
+        request.is_secure.return_value = False
+        request.get_host.return_value = "localhost:8000"
+
+        url = provider_logout_url(request)
+
+        assert "logout_uri=http%3A%2F%2Flocalhost%3A8000%2F" in url
+
+    def test_returns_none_when_auth_domain_missing(self, monkeypatch):
+        """Returns None when OIDC_AUTH_DOMAIN is not set."""
+        monkeypatch.delenv("OIDC_AUTH_DOMAIN", raising=False)
+        monkeypatch.setenv("OIDC_RP_CLIENT_ID", "test-client-id")
+
+        request = MagicMock()
+        assert provider_logout_url(request) is None
+
+    def test_returns_none_when_client_id_missing(self, monkeypatch):
+        """Returns None when OIDC_RP_CLIENT_ID is not set."""
+        monkeypatch.setenv("OIDC_AUTH_DOMAIN", "https://auth.example.com")
+        monkeypatch.delenv("OIDC_RP_CLIENT_ID", raising=False)
+
+        request = MagicMock()
+        assert provider_logout_url(request) is None
+
+    def test_returns_none_when_both_missing(self, monkeypatch):
+        """Returns None when both env vars are missing."""
+        monkeypatch.delenv("OIDC_AUTH_DOMAIN", raising=False)
+        monkeypatch.delenv("OIDC_RP_CLIENT_ID", raising=False)
+
+        request = MagicMock()
+        assert provider_logout_url(request) is None

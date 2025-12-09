@@ -235,10 +235,24 @@ class DashboardManager {
             rangeAgent.textContent = this.currentRange.agent_name;
         }
 
-        // Set workspace URL
+        // Set workspace URL (validate protocol for defense-in-depth)
         if (this.openWorkspaceBtn && this.currentRange.chat_url) {
-            this.openWorkspaceBtn.href = this.currentRange.chat_url;
-            this.openWorkspaceBtn.target = '_blank';
+            if (this._isValidHttpUrl(this.currentRange.chat_url)) {
+                this.openWorkspaceBtn.href = this.currentRange.chat_url;
+                this.openWorkspaceBtn.target = '_blank';
+            } else {
+                this.openWorkspaceBtn.removeAttribute('href');
+                this.openWorkspaceBtn.removeAttribute('target');
+            }
+        }
+    }
+
+    _isValidHttpUrl(urlString) {
+        try {
+            const url = new URL(urlString);
+            return url.protocol === 'http:' || url.protocol === 'https:';
+        } catch {
+            return false;
         }
     }
 

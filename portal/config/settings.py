@@ -42,6 +42,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "config.middleware.HealthCheckMiddleware",  # Must be first to bypass ALLOWED_HOSTS for ALB
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -200,7 +201,7 @@ SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "bedwards@paloal
 # ------------------------------------------------------------------------------
 
 AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
-AWS_S3_REGION = os.environ.get("AWS_S3_REGION", "us-east-2")
+AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
 
 # Agent upload limits
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file

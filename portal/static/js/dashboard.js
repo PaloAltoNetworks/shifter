@@ -40,6 +40,24 @@ class DashboardManager {
         this.dismissErrorBtn = document.getElementById('dismiss-error-btn');
 
         this._bindEvents();
+        this._bindCleanup();
+    }
+
+    _bindCleanup() {
+        // Clean up polling on page unload to prevent memory leaks
+        window.addEventListener('beforeunload', () => {
+            this._stopPolling();
+        });
+
+        // Also clean up on visibility change (tab hidden)
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this._stopPolling();
+            } else if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
+                // Resume polling when tab becomes visible again if in transitional state
+                this._startPolling();
+            }
+        });
     }
 
     _bindEvents() {

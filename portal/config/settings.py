@@ -33,7 +33,7 @@ INSTALLED_APPS = [
     "health_check.cache",
     "health_check.storage",
     "mozilla_django_oidc",
-    "mission_control",
+    "mission_control.apps.MissionControlConfig",
 ]
 
 MIDDLEWARE = [

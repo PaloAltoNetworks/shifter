@@ -83,6 +83,11 @@ class AgentConfig(models.Model):
     def is_deleted(self):
         return self.deleted_at is not None
 
+    @property
+    def file_size_mb(self):
+        """Return file size in megabytes, rounded to 1 decimal."""
+        return round(self.file_size_bytes / (1024 * 1024), 1)
+
     @classmethod
     def active_for_user(cls, user):
         """Return non-deleted agents for a user."""

@@ -1,4 +1,5 @@
 {% extends "mission_control/base.html" %}
+{% load static %}
 
 {% block content %}
 <div class="page-header">
@@ -30,6 +31,21 @@
     </p>
 </div>
 
+<!-- Provisioning State (hidden by default) -->
+<div class="card" id="provisioning-state" style="display: none;">
+    <div class="card-title">Provisioning Range</div>
+    <div class="status status-provisioning" style="margin-bottom: 1rem;">
+        <span class="status-dot"></span>
+        <span>Setting up infrastructure...</span>
+    </div>
+    <p style="color: rgba(255,255,255,0.5); font-size: 0.875rem; margin-bottom: 1.5rem;">
+        This usually takes 2-3 minutes. You'll be notified when ready.
+    </p>
+    <button class="btn btn-danger" id="cancel-btn">
+        Cancel
+    </button>
+</div>
+
 <!-- Active Range State (hidden by default) -->
 <div class="card" id="active-range-state" style="display: none;">
     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -47,28 +63,16 @@
     </div>
 
     <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-        <a href="#" class="btn btn-primary" id="open-workspace-btn">
+        <a href="#" class="btn btn-primary" id="open-workspace-btn" target="_blank">
             Open Workspace
         </a>
-        <button class="btn btn-secondary" id="pause-btn">
+        <button class="btn btn-secondary" id="pause-btn" disabled title="Coming soon">
             Pause
         </button>
         <button class="btn btn-danger" id="destroy-btn">
             Destroy
         </button>
     </div>
-</div>
-
-<!-- Provisioning State (hidden by default) -->
-<div class="card" id="provisioning-state" style="display: none;">
-    <div class="card-title">Provisioning Range</div>
-    <div class="status status-provisioning" style="margin-bottom: 1rem;">
-        <span class="status-dot"></span>
-        <span>Setting up infrastructure...</span>
-    </div>
-    <p style="color: rgba(255,255,255,0.5); font-size: 0.875rem;">
-        This usually takes 2-3 minutes. You'll be notified when ready.
-    </p>
 </div>
 
 <!-- Paused Range State (hidden by default) -->
@@ -88,7 +92,7 @@
     </div>
 
     <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-        <button class="btn btn-primary" id="resume-btn">
+        <button class="btn btn-primary" id="resume-btn" disabled title="Coming soon">
             Resume
         </button>
         <button class="btn btn-danger" id="destroy-paused-btn">
@@ -96,4 +100,36 @@
         </button>
     </div>
 </div>
+
+<!-- Failed State (hidden by default) -->
+<div class="card" id="failed-state" style="display: none;">
+    <div class="card-title">Range Failed</div>
+    <div class="status status-error" style="margin-bottom: 1rem;">
+        <span class="status-dot"></span>
+        <span>Provisioning Failed</span>
+    </div>
+    <p style="color: rgba(255,255,255,0.7); font-size: 0.875rem; margin-bottom: 1.5rem;">
+        <strong>Error:</strong> <span id="error-message">Unknown error occurred</span>
+    </p>
+    <button class="btn btn-secondary" id="dismiss-error-btn">
+        Dismiss
+    </button>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/dashboard.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dashboard = new DashboardManager({
+        csrfToken: '{{ csrf_token }}',
+        statusUrl: '{% url "mission_control:range_status" %}',
+        launchUrl: '{% url "mission_control:launch_range" %}',
+        cancelUrl: '{% url "mission_control:cancel_range" %}',
+        destroyUrl: '{% url "mission_control:destroy_range" %}',
+        agentsUrl: '{% url "mission_control:list_agents" %}',
+    });
+    dashboard.init();
+});
+</script>
 {% endblock %}

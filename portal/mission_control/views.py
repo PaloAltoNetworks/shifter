@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import ActivityLog, AgentConfig, OperatingSystem
+from .models import ActivityLog, AgentConfig, OperatingSystem, Range
 from .services.s3 import (
     S3Error,
     delete_agent as s3_delete,
@@ -517,3 +517,343 @@ def cancel_upload(request):
     _set_upload_in_progress(request, False)
 
     return JsonResponse({"success": True})
+
+
+# -----------------------------------------------------------------------------
+# Range API
+# -----------------------------------------------------------------------------
+
+
+def _range_to_json(range_obj):
+    """Serialize a Range object to JSON-compatible dict."""
+    return {
+        "id": range_obj.id,
+        "status": range_obj.status,
+        "agent_id": range_obj.agent_id,
+        "agent_name": range_obj.agent.name if range_obj.agent else None,
+        "victim_ip": range_obj.victim_ip,
+        "chat_url": range_obj.chat_url,
+        "error_message": range_obj.error_message,
+        "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
+        "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
+        "paused_at": range_obj.paused_at.isoformat() if range_obj.paused_at else None,
+    }
+
+
+@login_required
+@require_GET
+def get_range_status(request):
+    """
+    Get the current user's active range status.
+
+    Response (JSON):
+        - has_range: true/false
+        - range: Range object (if exists)
+    """
+    active_range = Range.get_active_for_user(request.user)
+
+    if not active_range:
+        return JsonResponse({"has_range": False, "range": None})
+
+    return JsonResponse({
+        "has_range": True,
+        "range": _range_to_json(active_range),
+    })
+
+
+@login_required
+@require_POST
+def launch_range(request):
+    """
+    Launch a new cyber range.
+
+    Request body (JSON):
+        - agent_id: ID of agent to use
+
+    Response (JSON):
+        - success: true
+        - range: Range object
+    """
+    # Check for existing active range
+    active_range = Range.get_active_for_user(request.user)
+    if active_range:
+        return JsonResponse(
+            {"error": "You already have an active range. Destroy it first."},
+            status=409,
+        )
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    agent_id = data.get("agent_id")
+    if not agent_id:
+        return JsonResponse({"error": "agent_id is required"}, status=400)
+
+    # Verify agent belongs to user and is not deleted
+    agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).first()
+    if not agent:
+        return JsonResponse({"error": "Agent not found"}, status=404)
+
+    # Create range record
+    range_obj = Range.objects.create(
+        user=request.user,
+        agent=agent,
+        status=Range.Status.PROVISIONING,
+    )
+
+    # Log activity
+    ActivityLog.log(
+        "range_launched",
+        user=request.user,
+        range_id=range_obj.id,
+        agent_id=agent.id,
+        agent_name=agent.name,
+    )
+
+    logger.info(
+        "Range launched: user=%s range_id=%s agent=%s",
+        request.user.email,
+        range_obj.id,
+        agent.name,
+    )
+
+    # Trigger provisioning (stub for now - immediately schedules callback)
+    from .services.provisioner import start_provisioning
+    start_provisioning(range_obj.id)
+
+    return JsonResponse({
+        "success": True,
+        "range": _range_to_json(range_obj),
+    })
+
+
+@login_required
+@require_POST
+def cancel_range(request):
+    """
+    Cancel a provisioning range.
+
+    Only works for ranges in PENDING or PROVISIONING status.
+    """
+    active_range = Range.get_active_for_user(request.user)
+    if not active_range:
+        return JsonResponse({"error": "No active range"}, status=404)
+
+    if active_range.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
+        return JsonResponse(
+            {"error": f"Cannot cancel range in {active_range.status} status"},
+            status=400,
+        )
+
+    active_range.status = Range.Status.DESTROYED
+    active_range.destroyed_at = timezone.now()
+    active_range.save(update_fields=["status", "destroyed_at"])
+
+    ActivityLog.log(
+        "range_cancelled",
+        user=request.user,
+        range_id=active_range.id,
+    )
+
+    logger.info(
+        "Range cancelled: user=%s range_id=%s",
+        request.user.email,
+        active_range.id,
+    )
+
+    return JsonResponse({"success": True})
+
+
+@login_required
+@require_POST
+def destroy_range(request):
+    """
+    Destroy an active or paused range.
+    """
+    active_range = Range.get_active_for_user(request.user)
+    if not active_range:
+        return JsonResponse({"error": "No active range"}, status=404)
+
+    if active_range.status in (Range.Status.DESTROYING, Range.Status.DESTROYED):
+        return JsonResponse(
+            {"error": f"Range is already {active_range.status}"},
+            status=400,
+        )
+
+    # Mark as destroying (real impl would trigger teardown)
+    active_range.status = Range.Status.DESTROYING
+    active_range.save(update_fields=["status"])
+
+    ActivityLog.log(
+        "range_destroy_started",
+        user=request.user,
+        range_id=active_range.id,
+    )
+
+    logger.info(
+        "Range destroy started: user=%s range_id=%s",
+        request.user.email,
+        active_range.id,
+    )
+
+    # Trigger teardown (stub for now - immediately marks destroyed)
+    from .services.provisioner import start_teardown
+    start_teardown(active_range.id)
+
+    return JsonResponse({
+        "success": True,
+        "range": _range_to_json(active_range),
+    })
+
+
+@csrf_exempt
+@require_POST
+def range_callback(request):
+    """
+    Callback endpoint for provisioner (Step Functions or stub).
+
+    This endpoint is called by the provisioning system when infrastructure
+    is ready or has failed. It does NOT require login since it's called
+    by backend services.
+
+    Request body (JSON):
+        - range_id: Range ID
+        - status: "ready" or "failed"
+        - callback_token: HMAC-signed token for verification
+        - victim_ip: IP address (if ready)
+        - chat_url: LibreChat URL (if ready)
+        - error_message: Error details (if failed)
+
+    Security: Uses HMAC-signed callback_token to verify authenticity.
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    range_id = data.get("range_id")
+    status = data.get("status")
+    callback_token = data.get("callback_token")
+
+    if not all([range_id, status, callback_token]):
+        return JsonResponse({"error": "Missing required fields"}, status=400)
+
+    # Verify callback token
+    from .services.provisioner import verify_callback_token
+    if not verify_callback_token(range_id, callback_token):
+        logger.warning("Invalid callback token for range_id=%s", range_id)
+        return JsonResponse({"error": "Invalid callback token"}, status=403)
+
+    # Get the range
+    try:
+        range_obj = Range.objects.get(id=range_id)
+    except Range.DoesNotExist:
+        return JsonResponse({"error": "Range not found"}, status=404)
+
+    # Validate state transitions to prevent replay attacks
+    valid_transitions = {
+        "ready": [Range.Status.PROVISIONING, Range.Status.RESUMING],
+        "failed": [Range.Status.PROVISIONING, Range.Status.RESUMING],
+        "destroyed": [Range.Status.DESTROYING],
+    }
+
+    allowed_states = valid_transitions.get(status, [])
+    if range_obj.status not in allowed_states:
+        logger.warning(
+            "Invalid state transition for range_id=%s: %s -> %s (expected from %s)",
+            range_id,
+            range_obj.status,
+            status,
+            allowed_states,
+        )
+        return JsonResponse(
+            {"error": f"Invalid state transition: {range_obj.status} -> {status}"},
+            status=409,
+        )
+
+    # Process callback based on status
+    if status == "ready":
+        range_obj.status = Range.Status.READY
+        range_obj.ready_at = timezone.now()
+        range_obj.victim_ip = data.get("victim_ip")
+        range_obj.chat_url = data.get("chat_url")
+        range_obj.save(update_fields=["status", "ready_at", "victim_ip", "chat_url"])
+
+        ActivityLog.log(
+            "range_ready",
+            user=range_obj.user,
+            range_id=range_obj.id,
+            victim_ip=range_obj.victim_ip,
+        )
+
+        logger.info(
+            "Range ready: range_id=%s user=%s victim_ip=%s",
+            range_obj.id,
+            range_obj.user.email,
+            range_obj.victim_ip,
+        )
+
+    elif status == "failed":
+        range_obj.status = Range.Status.FAILED
+        range_obj.error_message = data.get("error_message", "Unknown error")
+        range_obj.save(update_fields=["status", "error_message"])
+
+        ActivityLog.log(
+            "range_failed",
+            user=range_obj.user,
+            range_id=range_obj.id,
+            error=range_obj.error_message,
+        )
+
+        logger.error(
+            "Range failed: range_id=%s user=%s error=%s",
+            range_obj.id,
+            range_obj.user.email,
+            range_obj.error_message,
+        )
+
+    elif status == "destroyed":
+        range_obj.status = Range.Status.DESTROYED
+        range_obj.destroyed_at = timezone.now()
+        range_obj.save(update_fields=["status", "destroyed_at"])
+
+        ActivityLog.log(
+            "range_destroyed",
+            user=range_obj.user,
+            range_id=range_obj.id,
+        )
+
+        logger.info(
+            "Range destroyed: range_id=%s user=%s",
+            range_obj.id,
+            range_obj.user.email,
+        )
+
+    else:
+        return JsonResponse({"error": f"Unknown status: {status}"}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
+@require_GET
+def list_agents_for_launch(request):
+    """
+    Get user's agents for the launch dropdown.
+
+    Response (JSON):
+        - agents: List of {id, name, os_name, file_size_mb}
+    """
+    agents = AgentConfig.active_for_user(request.user).select_related("os")
+    agent_list = [
+        {
+            "id": agent.id,
+            "name": agent.name,
+            "os_name": agent.os.name,
+            "file_size_mb": agent.file_size_mb,
+        }
+        for agent in agents
+    ]
+    return JsonResponse({"agents": agent_list})

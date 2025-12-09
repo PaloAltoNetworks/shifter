@@ -198,7 +198,7 @@ resource "aws_instance" "this" {
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required" # Enforce IMDSv2
-    http_put_response_hop_limit = 1
+    http_put_response_hop_limit = 2          # Allow containers to access IMDS
     instance_metadata_tags      = "enabled"
   }
 

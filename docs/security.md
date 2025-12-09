@@ -22,14 +22,17 @@
 - IAM role scoped to `shifter-*` resources
 - EC2 instance profile with least-privilege policies:
   - ECR pull (specific repository)
-  - Secrets Manager read (specific secret ARN)
+  - Secrets Manager read (specific secret ARNs)
+  - S3 access (user storage bucket only)
   - SSM Session Manager access
 
 ## Instance Hardening
 
 - IMDSv2 required (mitigates SSRF attacks against metadata service)
+- IMDSv2 hop limit=2 (allows containers to access instance role credentials)
 - ECR credential helper (no stored Docker tokens)
 - SSM Session Manager for access (no SSH key management)
+- Containers use instance role, no static IAM user credentials
 
 ## Admin Access
 

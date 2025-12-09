@@ -45,7 +45,7 @@
         <li><strong>Destroyed</strong> - Range has been terminated</li>
     </ul>
     <p style="color: rgba(255,255,255,0.7); margin-top: 1rem;">
-        <strong>Tip:</strong> Pause your range when taking breaks to save costs. Destroy it when completely done.
+        <strong>Tip:</strong> Pause your range when taking breaks to save costs. Your setup persists across sessions.
     </p>
 </div>
 
@@ -64,8 +64,8 @@
     </div>
 
     <div style="margin-bottom: 1.5rem;">
-        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">What happens if I forget to destroy my range?</p>
-        <p style="color: rgba(255,255,255,0.7);">Ranges auto-destroy after 8 hours of inactivity to prevent cost overruns.</p>
+        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">What happens if I leave my range idle?</p>
+        <p style="color: rgba(255,255,255,0.7);">Ranges auto-hibernate after 8 hours of inactivity to save costs. You can resume anytime.</p>
     </div>
 
     <div>
@@ -81,7 +81,7 @@
         Contact the Shifter team for support or to report issues.
     </p>
     <p style="margin-top: 1rem;">
-        <a href="mailto:shifter-support@paloaltonetworks.com" class="btn btn-secondary">Contact Support</a>
+        <a href="mailto:{{ support_email }}" class="btn btn-secondary">Contact Support</a>
     </p>
 </div>
 {% endblock %}

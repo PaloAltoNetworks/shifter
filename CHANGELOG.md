@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2025-12-08
+
+### Added
+- Agent upload to S3 with magic byte validation
+- File type validation (.msi, .zip, .tar.gz, .tgz, .deb, .rpm)
+- Agent delete with S3 cleanup
+- S3 bucket env var in deploy workflow
+
 ## [0.2.1] - 2025-12-08
 
 ### Added

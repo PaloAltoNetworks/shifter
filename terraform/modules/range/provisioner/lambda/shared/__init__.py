@@ -6,7 +6,7 @@ from .db import (
     get_db_connection,
     get_range,
     update_range,
-    validate_uuid,
+    validate_range_id,
 )
 from .tagging import get_resource_tags, get_resource_tags_dict
 
@@ -16,7 +16,7 @@ __all__ = [
     "get_range",
     "get_agent_config",
     "update_range",
-    "validate_uuid",
+    "validate_range_id",
     "get_resource_tags",
     "get_resource_tags_dict",
 ]

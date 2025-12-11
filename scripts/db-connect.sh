@@ -57,11 +57,8 @@ start_port_forward() {
     echo "RDS Host: $rds_host"
     echo "Starting port forwarding on localhost:${LOCAL_PORT}..."
     echo ""
-    echo "To connect with psql:"
-    echo "  PGPASSWORD='<password>' psql -h localhost -p ${LOCAL_PORT} -U shifter_admin -d shifter"
-    echo ""
-    echo "Or use Python:"
-    echo "  python scripts/db-query.py \"SELECT rolname FROM pg_roles\""
+    echo "In another terminal, run queries with:"
+    echo "  ./scripts/db-connect.sh --query \"SELECT version()\""
     echo ""
 
     aws ssm start-session \

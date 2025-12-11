@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Lambda packages with shared code included
+# Build Lambda packages with shared code and dependencies
 # Run this BEFORE terraform plan/apply
 
 set -e
@@ -26,6 +26,16 @@ echo "Output: ${BUILD_DIR}"
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 
+# Install dependencies once to a shared location
+echo "  Installing Python dependencies..."
+DEPS_DIR="${BUILD_DIR}/_deps"
+pip install --target "${DEPS_DIR}" --quiet \
+    --platform manylinux2014_x86_64 \
+    --implementation cp \
+    --python-version 3.12 \
+    --only-binary=:all: \
+    psycopg[binary]
+
 for lambda in "${LAMBDAS[@]}"; do
     echo "  Packaging ${lambda}..."
     pkg_dir="${BUILD_DIR}/${lambda}_pkg"
@@ -36,6 +46,12 @@ for lambda in "${LAMBDAS[@]}"; do
 
     # Copy shared module
     cp -r "${LAMBDA_DIR}/shared" "${pkg_dir}/"
+
+    # Copy dependencies
+    cp -r "${DEPS_DIR}"/* "${pkg_dir}/"
 done
+
+# Clean up shared deps directory
+rm -rf "${DEPS_DIR}"
 
 echo "Done. Lambda packages ready in ${BUILD_DIR}/"

@@ -14,7 +14,7 @@ import sys
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared import get_db_connection, get_range, update_range, validate_env_vars
+from shared import get_db_connection, get_range, validate_env_vars
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

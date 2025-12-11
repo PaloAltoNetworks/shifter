@@ -17,6 +17,7 @@ services:
       - mongodb
     env_file:
       - .env
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./images:/app/client/public/images
       - ./logs:/app/logs
@@ -27,6 +28,7 @@ services:
   mongodb:
     container_name: librechat-mongodb
     image: mongo:7
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./data/mongodb:/data/db
     command: mongod --noauth

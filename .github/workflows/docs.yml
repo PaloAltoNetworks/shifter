@@ -6,8 +6,6 @@ on:
       - main
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
-      - 'requirements-docs.txt'
       - '.github/workflows/docs.yml'
 
 permissions:
@@ -16,6 +14,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
     steps:
       - uses: actions/checkout@v4
 
@@ -23,10 +24,10 @@ jobs:
         with:
           python-version: 3.x
           cache: 'pip'
-          cache-dependency-path: requirements-docs.txt
+          cache-dependency-path: docs/requirements.txt
 
       - name: Install documentation dependencies
-        run: pip install -r requirements-docs.txt
+        run: pip install -r requirements.txt
 
       - name: Deploy documentation to GitHub Pages
         run: mkdocs gh-deploy --force

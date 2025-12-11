@@ -53,3 +53,35 @@ resource "aws_route" "public_internet" {
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.this.id
 }
+
+# ------------------------------------------------------------------------------
+# Victim Security Group (shared by all victim EC2 instances)
+# ------------------------------------------------------------------------------
+
+resource "aws_security_group" "victim" {
+  name        = "${var.name_prefix}-victim"
+  description = "Security group for victim EC2 instances"
+  vpc_id      = aws_vpc.this.id
+
+  # SSH from within VPC (for MCP access)
+  ingress {
+    description = "SSH from VPC"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Allow all outbound (for agent installation, updates)
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-victim-sg"
+  })
+}

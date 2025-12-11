@@ -52,3 +52,19 @@ output "lambda_function_names" {
     cleanup             = aws_lambda_function.cleanup.function_name
   }
 }
+
+# Step Functions State Machine ARNs
+output "provision_range_state_machine_arn" {
+  description = "ARN of the provision range state machine"
+  value       = aws_sfn_state_machine.provision_range.arn
+}
+
+output "teardown_range_state_machine_arn" {
+  description = "ARN of the teardown range state machine"
+  value       = aws_sfn_state_machine.teardown_range.arn
+}
+
+output "step_functions_role_arn" {
+  description = "ARN of the Step Functions execution role"
+  value       = aws_iam_role.step_functions.arn
+}

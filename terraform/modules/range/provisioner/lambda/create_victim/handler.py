@@ -17,13 +17,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from shared import (
     get_agent_config,
     get_db_connection,
+    get_env,
     get_range,
     get_resource_tags,
     update_range,
+    validate_env_vars,
 )
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Required environment variables for this Lambda
+REQUIRED_ENV_VARS = [
+    "VICTIM_AMI_ID",
+    "VICTIM_SECURITY_GROUP_ID",
+    "AGENT_S3_BUCKET",
+    "DB_HOST",
+    "DB_NAME",
+]
 
 
 def validate_s3_path(value: str) -> bool:
@@ -92,15 +103,18 @@ def handler(event: dict, context) -> dict:
     4. Tag with shifter:range_id, shifter:user_id
     5. Update Range: victim_ip, victim_instance_id
     """
+    # Validate required environment variables early
+    validate_env_vars(REQUIRED_ENV_VARS)
+
     range_id = event["range_id"]
     logger.info(f"Creating victim instance for range {range_id}")
 
     # Get configuration from environment
-    victim_ami_id = os.environ["VICTIM_AMI_ID"]
-    victim_instance_type = os.environ.get("VICTIM_INSTANCE_TYPE", "t3.micro")
-    victim_security_group_id = os.environ["VICTIM_SECURITY_GROUP_ID"]
-    s3_bucket = os.environ["AGENT_S3_BUCKET"]
-    environment = os.environ.get("ENVIRONMENT", "prod")
+    victim_ami_id = get_env("VICTIM_AMI_ID")
+    victim_instance_type = get_env("VICTIM_INSTANCE_TYPE", "t3.micro")
+    victim_security_group_id = get_env("VICTIM_SECURITY_GROUP_ID")
+    s3_bucket = get_env("AGENT_S3_BUCKET")
+    environment = get_env("ENVIRONMENT", "prod")
 
     # Connect to database
     conn = get_db_connection()
@@ -109,6 +123,12 @@ def handler(event: dict, context) -> dict:
         range_data = get_range(conn, range_id)
         if not range_data:
             raise ValueError(f"Range {range_id} not found")
+
+        # Validate range is in provisioning state
+        if range_data["status"] != "provisioning":
+            raise ValueError(
+                f"Range {range_id} is not in provisioning state: {range_data['status']}"
+            )
 
         subnet_id = range_data["subnet_id"]
         if not subnet_id:
@@ -172,9 +192,13 @@ def handler(event: dict, context) -> dict:
         private_ip = instance.get("PrivateIpAddress")
 
         # If no private IP yet, wait for it
+        # Use explicit timeout to stay within Lambda limits (5 sec delay × 50 attempts = 250 sec max)
         if not private_ip:
             waiter = ec2.get_waiter("instance_running")
-            waiter.wait(InstanceIds=[instance_id])
+            waiter.wait(
+                InstanceIds=[instance_id],
+                WaiterConfig={"Delay": 5, "MaxAttempts": 50},
+            )
 
             describe_response = ec2.describe_instances(InstanceIds=[instance_id])
             instance = describe_response["Reservations"][0]["Instances"][0]

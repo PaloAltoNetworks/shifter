@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-12-10
+
+### Added
+- Provisioner fields on Range model (subnet_id, subnet_cidr, subnet_index, victim_instance_id, step_function_execution_arn)
+- IAM Database Authentication on RDS for Lambda provisioner
+- Django migration to create provisioner_lambda PostgreSQL user with minimal permissions
+- Provisioner Lambda functions (create_subnet, create_victim, create_kali, configure_librechat, cleanup)
+- Step Functions state machines for provisioning and teardown with error handling and timeouts
+- Victim security group in Range VPC
+- Provisioner module wiring to Portal VPC with remote state references
+- Portal integration with Step Functions (replaces callback-based stub)
+- EC2 IAM permissions for Step Functions execution
+- Range failure alarms
+- Stale range cleanup  
+
+### Removed
+- Callback endpoint for provisioner (Lambda writes directly to DB)
+
 ## [0.2.9] - 2025-12-09
 
 ### Fixed

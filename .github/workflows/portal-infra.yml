@@ -4,15 +4,14 @@ on:
   pull_request:
     paths:
       - 'terraform/modules/portal/**'
+      - 'terraform/modules/range/provisioner/**'
       - 'terraform/environments/*/portal/**'
       - '.github/workflows/portal-infra.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'terraform/modules/portal/**'
-      - 'terraform/environments/*/portal/**'
-      - '.github/workflows/portal-infra.yml'
+  # Trigger after range infra completes (portal depends on range outputs)
+  workflow_run:
+    workflows: ["Deploy Range Infrastructure"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -109,7 +108,10 @@ jobs:
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Run on workflow_run (after range completes successfully) or manual dispatch with apply
+    if: >
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
     defaults:
       run:
         working-directory: terraform/environments/prod/portal

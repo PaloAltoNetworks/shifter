@@ -1,0 +1,54 @@
+# Provisioner Module Outputs
+
+output "lambda_role_arn" {
+  description = "ARN of the Lambda execution role"
+  value       = aws_iam_role.lambda.arn
+}
+
+output "lambda_role_name" {
+  description = "Name of the Lambda execution role"
+  value       = aws_iam_role.lambda.name
+}
+
+output "lambda_security_group_id" {
+  description = "Security group ID for Lambda functions"
+  value       = aws_security_group.lambda.id
+}
+
+# Lambda Function ARNs (for Step Functions)
+output "create_subnet_lambda_arn" {
+  description = "ARN of the create_subnet Lambda function"
+  value       = aws_lambda_function.create_subnet.arn
+}
+
+output "create_victim_lambda_arn" {
+  description = "ARN of the create_victim Lambda function"
+  value       = aws_lambda_function.create_victim.arn
+}
+
+output "create_kali_lambda_arn" {
+  description = "ARN of the create_kali Lambda function"
+  value       = aws_lambda_function.create_kali.arn
+}
+
+output "configure_librechat_lambda_arn" {
+  description = "ARN of the configure_librechat Lambda function"
+  value       = aws_lambda_function.configure_librechat.arn
+}
+
+output "cleanup_lambda_arn" {
+  description = "ARN of the cleanup Lambda function"
+  value       = aws_lambda_function.cleanup.arn
+}
+
+# Lambda Function Names (for logging/monitoring)
+output "lambda_function_names" {
+  description = "Names of all Lambda functions"
+  value = {
+    create_subnet       = aws_lambda_function.create_subnet.function_name
+    create_victim       = aws_lambda_function.create_victim.function_name
+    create_kali         = aws_lambda_function.create_kali.function_name
+    configure_librechat = aws_lambda_function.configure_librechat.function_name
+    cleanup             = aws_lambda_function.cleanup.function_name
+  }
+}

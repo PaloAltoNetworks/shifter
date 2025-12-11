@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Lambda DB queries: `agent_config_id` → `agent_id`, `os_type_id` → `os_id` (Django FK naming)
+- Lambda handlers: `range_id[:8]` slice on integer (range_id is int, not UUID)
+- db-connect.sh: Added autocommit for INSERT/UPDATE queries
+
+### Added
+- docs/maintenance.md: RDS maintenance window reference
+
 ## [0.3.0] - 2025-12-10
 
 ### Added

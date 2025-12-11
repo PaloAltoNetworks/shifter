@@ -132,3 +132,8 @@ output "provisioner_lambda_role_arn" {
   description = "ARN of the Lambda execution role for provisioner functions"
   value       = module.provisioner.lambda_role_arn
 }
+
+output "provisioner_alerts_sns_topic_arn" {
+  description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"
+  value       = module.provisioner.alerts_sns_topic_arn
+}

@@ -97,8 +97,8 @@ resource "aws_iam_role_policy" "lambda_rds" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "rds-db:connect"
+        Effect   = "Allow"
+        Action   = "rds-db:connect"
         Resource = "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${var.db_resource_id}/provisioner_lambda"
       }
     ]
@@ -165,8 +165,8 @@ resource "aws_iam_role_policy" "lambda_ec2" {
         ]
       },
       {
-        Effect = "Allow"
-        Action = "ec2:RunInstances"
+        Effect   = "Allow"
+        Action   = "ec2:RunInstances"
         Resource = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/*"
         Condition = {
           StringEquals = {
@@ -176,8 +176,8 @@ resource "aws_iam_role_policy" "lambda_ec2" {
       },
       # Terminate instances - only those managed by provisioner
       {
-        Effect = "Allow"
-        Action = "ec2:TerminateInstances"
+        Effect   = "Allow"
+        Action   = "ec2:TerminateInstances"
         Resource = "*"
         Condition = {
           StringEquals = {
@@ -187,8 +187,8 @@ resource "aws_iam_role_policy" "lambda_ec2" {
       },
       # Tagging
       {
-        Effect = "Allow"
-        Action = "ec2:CreateTags"
+        Effect   = "Allow"
+        Action   = "ec2:CreateTags"
         Resource = "*"
         Condition = {
           StringEquals = {

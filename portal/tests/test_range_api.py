@@ -307,3 +307,141 @@ class TestListAgents:
         assert len(data["agents"]) == 1
         assert data["agents"][0]["id"] == test_agent.id
         assert data["agents"][0]["name"] == "Test XDR Agent"
+
+
+@pytest.mark.django_db
+class TestSubnetIndexAllocation:
+    """Tests for subnet_index allocation in Range model."""
+
+    def test_allocates_index_on_launch(self, client, test_agent, settings):
+        """Launch should allocate a subnet_index."""
+        settings.PROVISION_STATE_MACHINE_ARN = ""
+        client.force_login(test_agent.user)
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={"agent_id": test_agent.id},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        range_obj = Range.objects.get(id=response.json()["range"]["id"])
+        assert range_obj.subnet_index is not None
+        assert 1 <= range_obj.subnet_index <= 254
+
+    def test_first_allocation_returns_one(self, test_agent):
+        """First allocation should return index 1."""
+        index = Range.allocate_subnet_index()
+        assert index == 1
+
+    def test_allocates_sequential_indices(self, test_agent):
+        """Allocations should fill gaps."""
+        # Create range with index 1
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.PROVISIONING,
+            subnet_index=1,
+        )
+
+        # Next allocation should be 2
+        index = Range.allocate_subnet_index()
+        assert index == 2
+
+    def test_reuses_destroyed_indices(self, test_agent):
+        """Destroyed ranges should free up their indices."""
+        # Create and destroy a range with index 1
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.DESTROYED,
+            subnet_index=1,
+        )
+
+        # Should reuse index 1
+        index = Range.allocate_subnet_index()
+        assert index == 1
+
+    def test_fills_gaps(self, test_agent):
+        """Should fill gaps in index sequence."""
+        # Create ranges with indices 1 and 3 (gap at 2)
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.READY,
+            subnet_index=1,
+        )
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.READY,
+            subnet_index=3,
+        )
+
+        # Should fill gap at index 2
+        index = Range.allocate_subnet_index()
+        assert index == 2
+
+    def test_skips_active_indices(self, test_agent):
+        """Should not reuse indices from non-destroyed ranges."""
+        # Create ranges in various active states
+        for i, status in enumerate([
+            Range.Status.PROVISIONING,
+            Range.Status.READY,
+            Range.Status.PAUSED,
+            Range.Status.DESTROYING,
+            Range.Status.FAILED,
+        ], start=1):
+            Range.objects.create(
+                user=test_agent.user,
+                agent=test_agent,
+                status=status,
+                subnet_index=i,
+            )
+
+        # Next allocation should be 6
+        index = Range.allocate_subnet_index()
+        assert index == 6
+
+    def test_raises_when_exhausted(self, test_agent):
+        """Should raise ValueError when all indices are used."""
+        # Create ranges for all 254 indices
+        for i in range(1, 255):
+            Range.objects.create(
+                user=test_agent.user,
+                agent=test_agent,
+                status=Range.Status.READY,
+                subnet_index=i,
+            )
+
+        with pytest.raises(ValueError, match="No subnet indices available"):
+            Range.allocate_subnet_index()
+
+    def test_capacity_error_returns_503(self, client, test_agent, settings, django_user_model):
+        """API should return 503 when no capacity available."""
+        settings.PROVISION_STATE_MACHINE_ARN = ""
+        client.force_login(test_agent.user)
+
+        # Create a different user to hold the 254 ranges (so test_agent.user has no active range)
+        other_user = django_user_model.objects.create_user(
+            username="capacitytest", email="capacitytest@example.com", password="testpass"
+        )
+
+        # Create ranges for all 254 indices (owned by other_user, all DESTROYED so they don't block)
+        # Actually we need ACTIVE ranges to block the indices
+        for i in range(1, 255):
+            Range.objects.create(
+                user=other_user,
+                agent=test_agent,
+                status=Range.Status.READY,
+                subnet_index=i,
+            )
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={"agent_id": test_agent.id},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 503
+        assert "No capacity available" in response.json()["error"]

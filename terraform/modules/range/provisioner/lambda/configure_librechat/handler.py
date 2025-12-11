@@ -15,10 +15,16 @@ from datetime import datetime, timezone
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared import get_db_connection, get_range, update_range
+from shared import get_db_connection, get_env, get_range, update_range, validate_env_vars
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Required environment variables for this Lambda
+REQUIRED_ENV_VARS = [
+    "DB_HOST",
+    "DB_NAME",
+]
 
 
 def handler(event: dict, context) -> dict:
@@ -32,11 +38,14 @@ def handler(event: dict, context) -> dict:
 
     For now, this updates status to ready with a placeholder URL.
     """
+    # Validate required environment variables early
+    validate_env_vars(REQUIRED_ENV_VARS)
+
     range_id = event["range_id"]
     logger.info(f"Configuring LibreChat for range {range_id} (stub)")
 
     # Get configuration from environment
-    librechat_base_url = os.environ.get("LIBRECHAT_BASE_URL", "https://chat.example.com")
+    librechat_base_url = get_env("LIBRECHAT_BASE_URL", "https://chat.example.com")
 
     # Connect to database
     conn = get_db_connection()

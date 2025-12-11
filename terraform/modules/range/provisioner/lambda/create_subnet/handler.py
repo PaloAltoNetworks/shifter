@@ -13,10 +13,26 @@ import boto3
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared import get_db_connection, get_range, get_resource_tags, update_range
+from shared import (
+    get_db_connection,
+    get_env,
+    get_range,
+    get_resource_tags,
+    update_range,
+    validate_env_vars,
+)
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Required environment variables for this Lambda
+REQUIRED_ENV_VARS = [
+    "RANGE_VPC_ID",
+    "RANGE_ROUTE_TABLE_ID",
+    "RANGE_CIDR_PREFIX",
+    "DB_HOST",
+    "DB_NAME",
+]
 
 
 def handler(event: dict, context) -> dict:
@@ -29,16 +45,18 @@ def handler(event: dict, context) -> dict:
     4. Associate with route table
     5. Update Range: subnet_id, subnet_cidr
     """
+    # Validate required environment variables early
+    validate_env_vars(REQUIRED_ENV_VARS)
+
     range_id = event["range_id"]
     logger.info(f"Creating subnet for range {range_id}")
 
     # Get configuration from environment
-    range_vpc_id = os.environ["RANGE_VPC_ID"]
-    range_route_table_id = os.environ["RANGE_ROUTE_TABLE_ID"]
-    availability_zone = os.environ.get("AVAILABILITY_ZONE", "us-east-2a")
-    environment = os.environ.get("ENVIRONMENT", "prod")
-    # CIDR prefix for range subnets (e.g., "10.1" for 10.1.0.0/16 VPC)
-    range_cidr_prefix = os.environ["RANGE_CIDR_PREFIX"]
+    range_vpc_id = get_env("RANGE_VPC_ID")
+    range_route_table_id = get_env("RANGE_ROUTE_TABLE_ID")
+    range_cidr_prefix = get_env("RANGE_CIDR_PREFIX")
+    availability_zone = get_env("AVAILABILITY_ZONE", "us-east-2a")
+    environment = get_env("ENVIRONMENT", "prod")
 
     # Connect to database
     conn = get_db_connection()

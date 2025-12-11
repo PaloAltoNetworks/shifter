@@ -19,7 +19,7 @@ def validate_env_vars(required: List[str]) -> None:
         raise EnvironmentError(f"Missing required environment variables: {missing}")
 
 
-def get_env(name: str, default: str = None) -> str:
+def get_env(name: str, default: str | None = None) -> str:
     """
     Get an environment variable with optional default.
 

@@ -75,7 +75,7 @@ def handler(event: dict, context) -> dict:
         # 2. Configure MCP routing
         # 3. Return real chat URL
 
-        chat_url = f"{librechat_base_url}/c/range-{range_id[:8]}"
+        chat_url = f"{librechat_base_url}/c/range-{range_id}"
         logger.info(f"Generated chat URL: {chat_url}")
 
         # Update database - mark as ready

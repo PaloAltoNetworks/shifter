@@ -94,13 +94,17 @@ conn = psycopg.connect(
     user=secret['username'],
     password=secret['password'],
     dbname=secret['dbname'],
-    sslmode='require'
+    sslmode='require',
+    autocommit=True
 )
 
 cur = conn.cursor()
 cur.execute("""${query}""")
-for row in cur.fetchall():
-    print(row)
+try:
+    for row in cur.fetchall():
+        print(row)
+except psycopg.ProgrammingError:
+    pass  # No results to fetch (INSERT/UPDATE/DELETE)
 EOF
 }
 

@@ -95,7 +95,7 @@ def handler(event: dict, context) -> dict:
         # Create subnet
         ec2 = boto3.client("ec2")
         tags = get_resource_tags(range_id, user_id, environment)
-        tags.append({"Key": "Name", "Value": f"shifter-range-{range_id[:8]}"})
+        tags.append({"Key": "Name", "Value": f"shifter-range-{range_id}"})
 
         response = ec2.create_subnet(
             VpcId=range_vpc_id,

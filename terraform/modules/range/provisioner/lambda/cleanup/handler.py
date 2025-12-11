@@ -54,6 +54,15 @@ def handler(event: dict, context) -> dict:
             logger.warning(f"Range {range_id} not found - nothing to clean up")
             return {"range_id": range_id, "cleaned_up": []}
 
+        # Validate range is in a state that allows cleanup
+        # Valid states: destroying (user-initiated), provisioning (failure), failed (stale cleanup)
+        valid_cleanup_states = {"destroying", "provisioning", "failed"}
+        if range_data["status"] not in valid_cleanup_states:
+            raise ValueError(
+                f"Range {range_id} cannot be cleaned up in state: {range_data['status']}. "
+                f"Valid states: {valid_cleanup_states}"
+            )
+
         # 1. Terminate victim EC2 instance
         victim_instance_id = range_data.get("victim_instance_id")
         if victim_instance_id:

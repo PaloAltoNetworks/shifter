@@ -46,6 +46,12 @@ def handler(event: dict, context) -> dict:
         if not range_data:
             raise ValueError(f"Range {range_id} not found")
 
+        # Validate range is in provisioning state
+        if range_data["status"] != "provisioning":
+            raise ValueError(
+                f"Range {range_id} is not in provisioning state: {range_data['status']}"
+            )
+
         subnet_index = range_data["subnet_index"]
         if subnet_index is None:
             raise ValueError(f"Range {range_id} has no subnet_index assigned")

@@ -602,11 +602,22 @@ def launch_range(request):
     if not agent:
         return JsonResponse({"error": "Agent not found"}, status=404)
 
-    # Create range record
+    # Allocate subnet index for this range
+    try:
+        subnet_index = Range.allocate_subnet_index()
+    except ValueError as e:
+        logger.error("Failed to allocate subnet index: %s", e)
+        return JsonResponse(
+            {"error": "No capacity available. Please try again later or destroy existing ranges."},
+            status=503,
+        )
+
+    # Create range record with allocated subnet index
     range_obj = Range.objects.create(
         user=request.user,
         agent=agent,
         status=Range.Status.PROVISIONING,
+        subnet_index=subnet_index,
     )
 
     # Log activity

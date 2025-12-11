@@ -46,6 +46,7 @@ resource "aws_iam_role_policy" "step_functions_lambda" {
           aws_lambda_function.create_kali.arn,
           aws_lambda_function.configure_librechat.arn,
           aws_lambda_function.cleanup.arn,
+          aws_lambda_function.find_stale_ranges.arn,
         ]
       }
     ]
@@ -263,7 +264,7 @@ resource "aws_sfn_state_machine" "provision_range" {
       }
 
       Failed = {
-        Type = "Fail"
+        Type  = "Fail"
         Error = "ProvisioningFailed"
         Cause = "Range provisioning failed, resources have been cleaned up"
       }
@@ -349,5 +350,195 @@ resource "aws_sfn_state_machine" "teardown_range" {
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-teardown-range"
     Module = "provisioner"
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Cleanup Stale Ranges State Machine
+# ------------------------------------------------------------------------------
+
+resource "aws_sfn_state_machine" "cleanup_stale_ranges" {
+  name     = "${var.name_prefix}-cleanup-stale-ranges"
+  role_arn = aws_iam_role.step_functions.arn
+
+  definition = jsonencode({
+    Comment = "Find and clean up stale ranges stuck in transitional states"
+    StartAt = "FindStaleRanges"
+    # Timeout after 30 minutes
+    TimeoutSeconds = 1800
+    States = {
+      FindStaleRanges = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.find_stale_ranges.arn
+          Payload      = {}
+        }
+        ResultPath = "$.find_result"
+        ResultSelector = {
+          "stale_ranges.$" = "$.Payload.stale_ranges"
+          "checked_at.$"   = "$.Payload.checked_at"
+        }
+        Next = "CheckForStaleRanges"
+        Retry = [
+          {
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
+            IntervalSeconds = 2
+            MaxAttempts     = 3
+            BackoffRate     = 2
+          }
+        ]
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            ResultPath  = "$.error"
+            Next        = "Failed"
+          }
+        ]
+      }
+
+      CheckForStaleRanges = {
+        Type = "Choice"
+        Choices = [
+          {
+            Variable  = "$.find_result.stale_ranges[0]"
+            IsPresent = true
+            Next      = "CleanupStaleRanges"
+          }
+        ]
+        Default = "NoStaleRanges"
+      }
+
+      CleanupStaleRanges = {
+        Type           = "Map"
+        ItemsPath      = "$.find_result.stale_ranges"
+        MaxConcurrency = 2
+        ItemProcessor = {
+          ProcessorConfig = {
+            Mode = "INLINE"
+          }
+          StartAt = "CleanupRange"
+          States = {
+            CleanupRange = {
+              Type     = "Task"
+              Resource = "arn:aws:states:::lambda:invoke"
+              Parameters = {
+                FunctionName = aws_lambda_function.cleanup.arn
+                Payload = {
+                  "range_id.$"    = "$.range_id"
+                  "mark_failed"   = true
+                  "error_message" = "Stale range cleanup - stuck in transitional state"
+                }
+              }
+              ResultPath = "$.cleanup_result"
+              End        = true
+              Retry = [
+                {
+                  ErrorEquals     = ["States.ALL"]
+                  IntervalSeconds = 5
+                  MaxAttempts     = 3
+                  BackoffRate     = 2
+                }
+              ]
+            }
+          }
+        }
+        ResultPath = "$.cleanup_results"
+        Next       = "Success"
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            ResultPath  = "$.error"
+            Next        = "Failed"
+          }
+        ]
+      }
+
+      NoStaleRanges = {
+        Type = "Succeed"
+      }
+
+      Success = {
+        Type = "Succeed"
+      }
+
+      Failed = {
+        Type  = "Fail"
+        Error = "StaleCleanupFailed"
+        Cause = "Stale range cleanup failed"
+      }
+    }
+  })
+
+  logging_configuration {
+    log_destination        = "${aws_cloudwatch_log_group.step_functions.arn}:*"
+    include_execution_data = true
+    level                  = "ERROR"
+  }
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-cleanup-stale-ranges"
+    Module = "provisioner"
+  })
+}
+
+# ------------------------------------------------------------------------------
+# EventBridge Rule to Trigger Stale Cleanup
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_event_rule" "stale_cleanup" {
+  name                = "${var.name_prefix}-stale-range-cleanup"
+  description         = "Trigger stale range cleanup every 15 minutes"
+  schedule_expression = "rate(15 minutes)"
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-stale-range-cleanup"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_cloudwatch_event_target" "stale_cleanup" {
+  rule      = aws_cloudwatch_event_rule.stale_cleanup.name
+  target_id = "cleanup-stale-ranges"
+  arn       = aws_sfn_state_machine.cleanup_stale_ranges.arn
+  role_arn  = aws_iam_role.eventbridge.arn
+}
+
+# IAM Role for EventBridge to invoke Step Functions
+resource "aws_iam_role" "eventbridge" {
+  name = "${var.name_prefix}-provisioner-eventbridge"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-provisioner-eventbridge"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_iam_role_policy" "eventbridge_sfn" {
+  name = "invoke-step-functions"
+  role = aws_iam_role.eventbridge.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "states:StartExecution"
+        Resource = aws_sfn_state_machine.cleanup_stale_ranges.arn
+      }
+    ]
   })
 }

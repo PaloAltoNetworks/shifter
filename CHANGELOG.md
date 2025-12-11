@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lambda handlers: `range_id[:8]` slice on integer (range_id is int, not UUID)
 - db-connect.sh: Added autocommit for INSERT/UPDATE queries
 - IAM policy: Fix `ec2:CreateSubnet` permission (unsupported `ec2:Vpc` condition key)
+- Cleanup Lambda: Allow teardown from `ready` state (mark_failed=false)
 
 ### Removed
 - Callback endpoint for provisioner (Lambda writes directly to DB)

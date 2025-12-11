@@ -39,6 +39,11 @@ variable "range_route_table_id" {
   type        = string
 }
 
+variable "range_cidr_prefix" {
+  description = "CIDR prefix for range subnets (e.g., '10.1' for 10.1.0.0/16 VPC)"
+  type        = string
+}
+
 variable "availability_zone" {
   description = "Availability zone for range subnets"
   type        = string

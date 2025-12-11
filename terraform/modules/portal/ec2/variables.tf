@@ -63,3 +63,9 @@ variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
 }
+
+variable "step_function_arns" {
+  description = "List of Step Function state machine ARNs the EC2 instance can execute"
+  type        = list(string)
+  default     = []
+}

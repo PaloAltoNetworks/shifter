@@ -3,6 +3,9 @@ site_description: Self-service cyber range platform for PANW SecOps DCs
 repo_url: https://github.com/Brad-Edwards/shifter
 repo_name: Brad-Edwards/shifter
 
+docs_dir: src
+site_dir: site
+
 theme:
   name: material
   palette:

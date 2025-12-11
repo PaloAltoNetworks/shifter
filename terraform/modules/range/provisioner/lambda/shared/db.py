@@ -55,27 +55,33 @@ def get_db_connection():
     if RDS_CA_BUNDLE_PATH.exists():
         ssl_context.load_verify_locations(cafile=str(RDS_CA_BUNDLE_PATH))
 
-    conn = psycopg.connect(
-        host=host,
-        port=port,
-        dbname=dbname,
-        user=user,
-        password=token,
-        sslmode="verify-full",  # Full verification with CA bundle
-        sslrootcert=str(RDS_CA_BUNDLE_PATH) if RDS_CA_BUNDLE_PATH.exists() else None,
-        connect_timeout=10,
-    )
+    # Build connection parameters
+    conn_params = {
+        "host": host,
+        "port": port,
+        "dbname": dbname,
+        "user": user,
+        "password": token,
+        "sslmode": "verify-full",
+        "connect_timeout": 10,
+    }
+
+    # Only include sslrootcert if CA bundle exists
+    if RDS_CA_BUNDLE_PATH.exists():
+        conn_params["sslrootcert"] = str(RDS_CA_BUNDLE_PATH)
+
+    conn = psycopg.connect(**conn_params)
 
     return conn
 
 
-def get_range(conn, range_id: str) -> dict | None:
+def get_range(conn, range_id) -> dict | None:
     """
     Fetch a Range record from the database.
 
     Args:
         conn: Database connection
-        range_id: UUID of the range
+        range_id: ID of the range (positive integer)
 
     Returns:
         dict with range fields, or None if not found
@@ -177,7 +183,7 @@ def validate_range_id(value) -> bool:
         return False
 
 
-def update_range(conn, range_id: str, **fields) -> None:
+def update_range(conn, range_id, **fields) -> None:
     """
     Update specific fields on a Range record.
 
@@ -187,11 +193,11 @@ def update_range(conn, range_id: str, **fields) -> None:
 
     Args:
         conn: Database connection
-        range_id: UUID of the range
+        range_id: ID of the range (positive integer)
         **fields: Field names and values to update
 
     Raises:
-        ValueError: If range_id is not a valid UUID or field name is not allowed
+        ValueError: If range_id is not a valid positive integer or field name is not allowed
     """
     if not fields:
         return

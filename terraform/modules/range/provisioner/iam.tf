@@ -136,12 +136,10 @@ resource "aws_iam_role_policy" "lambda_ec2" {
           "ec2:DeleteSubnet",
           "ec2:ModifySubnetAttribute"
         ]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "ec2:Vpc" = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:vpc/${var.range_vpc_id}"
-          }
-        }
+        Resource = [
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:subnet/*",
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:vpc/${var.range_vpc_id}"
+        ]
       },
       # Route table association
       {

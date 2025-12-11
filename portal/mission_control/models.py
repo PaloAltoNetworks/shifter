@@ -123,8 +123,28 @@ class Range(models.Model):
         default=Status.PENDING,
         db_index=True,
     )
+    # AWS resource IDs (populated by provisioner Lambda)
+    subnet_id = models.CharField(
+        max_length=50, null=True, blank=True, help_text="AWS subnet ID (e.g., subnet-abc123)"
+    )
+    subnet_cidr = models.CharField(
+        max_length=18, null=True, blank=True, help_text="Subnet CIDR (e.g., 10.1.5.0/24)"
+    )
+    subnet_index = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Unique index for CIDR allocation"
+    )
     victim_ip = models.GenericIPAddressField(null=True, blank=True)
+    victim_instance_id = models.CharField(
+        max_length=50, null=True, blank=True, help_text="EC2 instance ID (e.g., i-abc123)"
+    )
     chat_url = models.URLField(max_length=500, null=True, blank=True)
+
+    # Step Functions tracking
+    step_function_execution_arn = models.CharField(
+        max_length=500, null=True, blank=True, help_text="Step Functions execution ARN"
+    )
+
+    # Status and timestamps
     error_message = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     ready_at = models.DateTimeField(null=True, blank=True)

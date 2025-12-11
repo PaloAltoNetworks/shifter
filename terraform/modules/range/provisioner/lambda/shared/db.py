@@ -153,14 +153,17 @@ ALLOWED_UPDATE_FIELDS = frozenset({
 })
 
 
-def validate_uuid(value: str) -> bool:
-    """Validate that a string is a valid UUID format."""
-    import re
-    uuid_pattern = re.compile(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        re.IGNORECASE,
-    )
-    return bool(uuid_pattern.match(value))
+def validate_range_id(value) -> bool:
+    """
+    Validate that a value is a valid range_id (positive integer).
+
+    The Range model uses BigAutoField (integer primary key), not UUID.
+    """
+    try:
+        int_value = int(value)
+        return int_value > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def update_range(conn, range_id: str, **fields) -> None:
@@ -182,8 +185,8 @@ def update_range(conn, range_id: str, **fields) -> None:
     if not fields:
         return
 
-    # Validate range_id is a UUID
-    if not validate_uuid(range_id):
+    # Validate range_id is a positive integer
+    if not validate_range_id(range_id):
         raise ValueError(f"Invalid range_id format: {range_id}")
 
     # Validate field names against whitelist (prevents SQL injection)

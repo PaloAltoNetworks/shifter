@@ -113,3 +113,22 @@ output "cognito_issuer_url" {
   description = "OIDC issuer URL"
   value       = module.cognito.issuer_url
 }
+
+# ------------------------------------------------------------------------------
+# Provisioner (Step Functions)
+# ------------------------------------------------------------------------------
+
+output "provision_range_state_machine_arn" {
+  description = "ARN of the provision range Step Functions state machine"
+  value       = module.provisioner.provision_range_state_machine_arn
+}
+
+output "teardown_range_state_machine_arn" {
+  description = "ARN of the teardown range Step Functions state machine"
+  value       = module.provisioner.teardown_range_state_machine_arn
+}
+
+output "provisioner_lambda_role_arn" {
+  description = "ARN of the Lambda execution role for provisioner functions"
+  value       = module.provisioner.lambda_role_arn
+}

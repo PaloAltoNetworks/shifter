@@ -154,3 +154,24 @@ variable "user_storage_bucket" {
   description = "S3 bucket name for user file storage (must be globally unique)"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# Provisioner
+# ------------------------------------------------------------------------------
+
+variable "victim_ami_id" {
+  description = "AMI ID for victim EC2 instances"
+  type        = string
+}
+
+variable "victim_instance_type" {
+  description = "Instance type for victim EC2 instances"
+  type        = string
+  default     = "t3.micro"
+}
+
+variable "librechat_base_url" {
+  description = "Base URL for LibreChat"
+  type        = string
+  default     = ""
+}

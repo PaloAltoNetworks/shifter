@@ -19,3 +19,8 @@ output "public_route_table_id" {
   description = "ID of the public route table (for user subnet associations)"
   value       = aws_route_table.public.id
 }
+
+output "victim_security_group_id" {
+  description = "ID of the security group for victim EC2 instances"
+  value       = aws_security_group.victim.id
+}

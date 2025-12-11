@@ -175,3 +175,15 @@ variable "librechat_base_url" {
   type        = string
   default     = ""
 }
+
+variable "enable_provisioner_alarms" {
+  description = "Enable CloudWatch alarms for provisioner Step Functions and Lambda"
+  type        = bool
+  default     = true
+}
+
+variable "provisioner_alarm_email" {
+  description = "Email address for provisioner alarm notifications (leave empty to skip)"
+  type        = string
+  default     = ""
+}

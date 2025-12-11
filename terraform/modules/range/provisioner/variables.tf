@@ -114,3 +114,16 @@ variable "lambda_memory" {
   type        = number
   default     = 256
 }
+
+# Monitoring Configuration
+variable "enable_alarms" {
+  description = "Enable CloudWatch alarms for Step Functions and Lambda"
+  type        = bool
+  default     = true
+}
+
+variable "alarm_email" {
+  description = "Email address for alarm notifications (leave empty to skip email subscription)"
+  type        = string
+  default     = ""
+}

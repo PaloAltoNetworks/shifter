@@ -41,6 +41,11 @@ output "cleanup_lambda_arn" {
   value       = aws_lambda_function.cleanup.arn
 }
 
+output "find_stale_ranges_lambda_arn" {
+  description = "ARN of the find_stale_ranges Lambda function"
+  value       = aws_lambda_function.find_stale_ranges.arn
+}
+
 # Lambda Function Names (for logging/monitoring)
 output "lambda_function_names" {
   description = "Names of all Lambda functions"
@@ -50,6 +55,7 @@ output "lambda_function_names" {
     create_kali         = aws_lambda_function.create_kali.function_name
     configure_librechat = aws_lambda_function.configure_librechat.function_name
     cleanup             = aws_lambda_function.cleanup.function_name
+    find_stale_ranges   = aws_lambda_function.find_stale_ranges.function_name
   }
 }
 
@@ -64,7 +70,18 @@ output "teardown_range_state_machine_arn" {
   value       = aws_sfn_state_machine.teardown_range.arn
 }
 
+output "cleanup_stale_ranges_state_machine_arn" {
+  description = "ARN of the cleanup stale ranges state machine"
+  value       = aws_sfn_state_machine.cleanup_stale_ranges.arn
+}
+
 output "step_functions_role_arn" {
   description = "ARN of the Step Functions execution role"
   value       = aws_iam_role.step_functions.arn
+}
+
+# Monitoring
+output "alerts_sns_topic_arn" {
+  description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"
+  value       = var.enable_alarms ? aws_sns_topic.alerts[0].arn : null
 }

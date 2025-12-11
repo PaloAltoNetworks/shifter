@@ -192,9 +192,13 @@ def handler(event: dict, context) -> dict:
         private_ip = instance.get("PrivateIpAddress")
 
         # If no private IP yet, wait for it
+        # Use explicit timeout to stay within Lambda limits (5 sec delay × 50 attempts = 250 sec max)
         if not private_ip:
             waiter = ec2.get_waiter("instance_running")
-            waiter.wait(InstanceIds=[instance_id])
+            waiter.wait(
+                InstanceIds=[instance_id],
+                WaiterConfig={"Delay": 5, "MaxAttempts": 50},
+            )
 
             describe_response = ec2.describe_instances(InstanceIds=[instance_id])
             instance = describe_response["Reservations"][0]["Instances"][0]

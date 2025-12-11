@@ -138,7 +138,7 @@ def get_agent_config(conn, agent_config_id: int) -> dict | None:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id, name, s3_key, os_type_id
+            SELECT id, name, s3_key, os_id
             FROM mission_control_agentconfig
             WHERE id = %s
             """,
@@ -152,7 +152,7 @@ def get_agent_config(conn, agent_config_id: int) -> dict | None:
             "id": row[0],
             "name": row[1],
             "s3_key": row[2],
-            "os_type_id": row[3],
+            "os_id": row[3],
         }
 
 

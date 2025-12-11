@@ -6,9 +6,14 @@ Uses generate_db_auth_token() to connect without stored passwords.
 
 import os
 import ssl
+from pathlib import Path
 
 import boto3
 import psycopg
+
+# Path to RDS CA bundle - bundled in Lambda layer
+# AWS global bundle covers all regions: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
+RDS_CA_BUNDLE_PATH = Path(__file__).parent / "certs" / "global-bundle.pem"
 
 
 def get_db_connection():
@@ -41,30 +46,42 @@ def get_db_connection():
     )
 
     # RDS requires SSL for IAM auth
+    # Load AWS RDS CA bundle for proper certificate verification
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = True
     ssl_context.verify_mode = ssl.CERT_REQUIRED
 
-    conn = psycopg.connect(
-        host=host,
-        port=port,
-        dbname=dbname,
-        user=user,
-        password=token,
-        sslmode="require",
-        connect_timeout=10,
-    )
+    # Load RDS CA bundle if available, fall back to system CAs
+    if RDS_CA_BUNDLE_PATH.exists():
+        ssl_context.load_verify_locations(cafile=str(RDS_CA_BUNDLE_PATH))
+
+    # Build connection parameters
+    conn_params = {
+        "host": host,
+        "port": port,
+        "dbname": dbname,
+        "user": user,
+        "password": token,
+        "sslmode": "verify-full",
+        "connect_timeout": 10,
+    }
+
+    # Only include sslrootcert if CA bundle exists
+    if RDS_CA_BUNDLE_PATH.exists():
+        conn_params["sslrootcert"] = str(RDS_CA_BUNDLE_PATH)
+
+    conn = psycopg.connect(**conn_params)
 
     return conn
 
 
-def get_range(conn, range_id: str) -> dict | None:
+def get_range(conn, range_id) -> dict | None:
     """
     Fetch a Range record from the database.
 
     Args:
         conn: Database connection
-        range_id: UUID of the range
+        range_id: ID of the range (positive integer)
 
     Returns:
         dict with range fields, or None if not found
@@ -153,17 +170,20 @@ ALLOWED_UPDATE_FIELDS = frozenset({
 })
 
 
-def validate_uuid(value: str) -> bool:
-    """Validate that a string is a valid UUID format."""
-    import re
-    uuid_pattern = re.compile(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        re.IGNORECASE,
-    )
-    return bool(uuid_pattern.match(value))
+def validate_range_id(value) -> bool:
+    """
+    Validate that a value is a valid range_id (positive integer).
+
+    The Range model uses BigAutoField (integer primary key), not UUID.
+    """
+    try:
+        int_value = int(value)
+        return int_value > 0
+    except (TypeError, ValueError):
+        return False
 
 
-def update_range(conn, range_id: str, **fields) -> None:
+def update_range(conn, range_id, **fields) -> None:
     """
     Update specific fields on a Range record.
 
@@ -173,17 +193,17 @@ def update_range(conn, range_id: str, **fields) -> None:
 
     Args:
         conn: Database connection
-        range_id: UUID of the range
+        range_id: ID of the range (positive integer)
         **fields: Field names and values to update
 
     Raises:
-        ValueError: If range_id is not a valid UUID or field name is not allowed
+        ValueError: If range_id is not a valid positive integer or field name is not allowed
     """
     if not fields:
         return
 
-    # Validate range_id is a UUID
-    if not validate_uuid(range_id):
+    # Validate range_id is a positive integer
+    if not validate_range_id(range_id):
         raise ValueError(f"Invalid range_id format: {range_id}")
 
     # Validate field names against whitelist (prevents SQL injection)

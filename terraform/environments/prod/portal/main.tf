@@ -9,6 +9,14 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -219,7 +227,9 @@ module "provisioner" {
   # Range VPC (where resources are created)
   range_vpc_id         = data.terraform_remote_state.range.outputs.vpc_id
   range_route_table_id = data.terraform_remote_state.range.outputs.public_route_table_id
-  availability_zone    = module.vpc.availability_zones[0]
+  # Extract CIDR prefix from VPC CIDR (e.g., "10.1.0.0/16" -> "10.1")
+  range_cidr_prefix = join(".", slice(split(".", data.terraform_remote_state.range.outputs.vpc_cidr), 0, 2))
+  availability_zone = module.vpc.availability_zones[0]
 
   # RDS Configuration (IAM DB auth)
   db_host               = module.rds.db_instance_address

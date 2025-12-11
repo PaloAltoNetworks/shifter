@@ -26,22 +26,56 @@ locals {
 }
 
 # ------------------------------------------------------------------------------
-# Lambda Layer for shared code and dependencies
+# Lambda packaging with shared code
 # ------------------------------------------------------------------------------
+# Each Lambda includes the shared module directly rather than using a layer.
+# This is simpler and avoids layer path complexity.
 
-data "archive_file" "shared_layer" {
-  type        = "zip"
-  source_dir  = "${local.lambda_source_dir}/shared"
-  output_path = "${path.module}/.terraform/shared_layer.zip"
-}
+# Build script to create Lambda packages with shared code included
+resource "null_resource" "build_lambdas" {
+  triggers = {
+    # Rebuild when any Lambda or shared code changes
+    shared_hash = sha256(join("", [
+      for f in fileset("${local.lambda_source_dir}/shared", "**/*.py") :
+      filesha256("${local.lambda_source_dir}/shared/${f}")
+    ]))
+    create_subnet_hash = sha256(join("", [
+      for f in fileset("${local.lambda_source_dir}/create_subnet", "**/*.py") :
+      filesha256("${local.lambda_source_dir}/create_subnet/${f}")
+    ]))
+    create_victim_hash = sha256(join("", [
+      for f in fileset("${local.lambda_source_dir}/create_victim", "**/*.py") :
+      filesha256("${local.lambda_source_dir}/create_victim/${f}")
+    ]))
+    create_kali_hash = sha256(join("", [
+      for f in fileset("${local.lambda_source_dir}/create_kali", "**/*.py") :
+      filesha256("${local.lambda_source_dir}/create_kali/${f}")
+    ]))
+    configure_librechat_hash = sha256(join("", [
+      for f in fileset("${local.lambda_source_dir}/configure_librechat", "**/*.py") :
+      filesha256("${local.lambda_source_dir}/configure_librechat/${f}")
+    ]))
+    cleanup_hash = sha256(join("", [
+      for f in fileset("${local.lambda_source_dir}/cleanup", "**/*.py") :
+      filesha256("${local.lambda_source_dir}/cleanup/${f}")
+    ]))
+    find_stale_ranges_hash = sha256(join("", [
+      for f in fileset("${local.lambda_source_dir}/find_stale_ranges", "**/*.py") :
+      filesha256("${local.lambda_source_dir}/find_stale_ranges/${f}")
+    ]))
+  }
 
-resource "aws_lambda_layer_version" "shared" {
-  layer_name          = "${var.name_prefix}-provisioner-shared"
-  filename            = data.archive_file.shared_layer.output_path
-  source_code_hash    = data.archive_file.shared_layer.output_base64sha256
-  compatible_runtimes = [local.lambda_runtime]
-
-  description = "Shared utilities for provisioner Lambda functions"
+  provisioner "local-exec" {
+    command = <<-EOT
+      cd ${local.lambda_source_dir}
+      for lambda_dir in create_subnet create_victim create_kali configure_librechat cleanup find_stale_ranges; do
+        rm -rf "${path.module}/.terraform/$${lambda_dir}_pkg"
+        mkdir -p "${path.module}/.terraform/$${lambda_dir}_pkg"
+        cp -r "$${lambda_dir}"/* "${path.module}/.terraform/$${lambda_dir}_pkg/"
+        cp -r shared "${path.module}/.terraform/$${lambda_dir}_pkg/"
+      done
+    EOT
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -50,8 +84,9 @@ resource "aws_lambda_layer_version" "shared" {
 
 data "archive_file" "create_subnet" {
   type        = "zip"
-  source_dir  = "${local.lambda_source_dir}/create_subnet"
+  source_dir  = "${path.module}/.terraform/create_subnet_pkg"
   output_path = "${path.module}/.terraform/create_subnet.zip"
+  depends_on  = [null_resource.build_lambdas]
 }
 
 resource "aws_lambda_function" "create_subnet" {
@@ -65,8 +100,6 @@ resource "aws_lambda_function" "create_subnet" {
   filename         = data.archive_file.create_subnet.output_path
   source_code_hash = data.archive_file.create_subnet.output_base64sha256
 
-  layers = [aws_lambda_layer_version.shared.arn]
-
   vpc_config {
     subnet_ids         = var.portal_subnet_ids
     security_group_ids = [aws_security_group.lambda.id]
@@ -76,6 +109,7 @@ resource "aws_lambda_function" "create_subnet" {
     variables = merge(local.common_env_vars, {
       RANGE_ROUTE_TABLE_ID = var.range_route_table_id
       AVAILABILITY_ZONE    = var.availability_zone
+      RANGE_CIDR_PREFIX    = var.range_cidr_prefix
     })
   }
 
@@ -91,8 +125,9 @@ resource "aws_lambda_function" "create_subnet" {
 
 data "archive_file" "create_victim" {
   type        = "zip"
-  source_dir  = "${local.lambda_source_dir}/create_victim"
+  source_dir  = "${path.module}/.terraform/create_victim_pkg"
   output_path = "${path.module}/.terraform/create_victim.zip"
+  depends_on  = [null_resource.build_lambdas]
 }
 
 resource "aws_lambda_function" "create_victim" {
@@ -105,8 +140,6 @@ resource "aws_lambda_function" "create_victim" {
 
   filename         = data.archive_file.create_victim.output_path
   source_code_hash = data.archive_file.create_victim.output_base64sha256
-
-  layers = [aws_lambda_layer_version.shared.arn]
 
   vpc_config {
     subnet_ids         = var.portal_subnet_ids
@@ -134,8 +167,9 @@ resource "aws_lambda_function" "create_victim" {
 
 data "archive_file" "create_kali" {
   type        = "zip"
-  source_dir  = "${local.lambda_source_dir}/create_kali"
+  source_dir  = "${path.module}/.terraform/create_kali_pkg"
   output_path = "${path.module}/.terraform/create_kali.zip"
+  depends_on  = [null_resource.build_lambdas]
 }
 
 resource "aws_lambda_function" "create_kali" {
@@ -148,8 +182,6 @@ resource "aws_lambda_function" "create_kali" {
 
   filename         = data.archive_file.create_kali.output_path
   source_code_hash = data.archive_file.create_kali.output_base64sha256
-
-  layers = [aws_lambda_layer_version.shared.arn]
 
   vpc_config {
     subnet_ids         = var.portal_subnet_ids
@@ -172,8 +204,9 @@ resource "aws_lambda_function" "create_kali" {
 
 data "archive_file" "configure_librechat" {
   type        = "zip"
-  source_dir  = "${local.lambda_source_dir}/configure_librechat"
+  source_dir  = "${path.module}/.terraform/configure_librechat_pkg"
   output_path = "${path.module}/.terraform/configure_librechat.zip"
+  depends_on  = [null_resource.build_lambdas]
 }
 
 resource "aws_lambda_function" "configure_librechat" {
@@ -186,8 +219,6 @@ resource "aws_lambda_function" "configure_librechat" {
 
   filename         = data.archive_file.configure_librechat.output_path
   source_code_hash = data.archive_file.configure_librechat.output_base64sha256
-
-  layers = [aws_lambda_layer_version.shared.arn]
 
   vpc_config {
     subnet_ids         = var.portal_subnet_ids
@@ -212,8 +243,9 @@ resource "aws_lambda_function" "configure_librechat" {
 
 data "archive_file" "cleanup" {
   type        = "zip"
-  source_dir  = "${local.lambda_source_dir}/cleanup"
+  source_dir  = "${path.module}/.terraform/cleanup_pkg"
   output_path = "${path.module}/.terraform/cleanup.zip"
+  depends_on  = [null_resource.build_lambdas]
 }
 
 resource "aws_lambda_function" "cleanup" {
@@ -226,8 +258,6 @@ resource "aws_lambda_function" "cleanup" {
 
   filename         = data.archive_file.cleanup.output_path
   source_code_hash = data.archive_file.cleanup.output_base64sha256
-
-  layers = [aws_lambda_layer_version.shared.arn]
 
   vpc_config {
     subnet_ids         = var.portal_subnet_ids
@@ -250,8 +280,9 @@ resource "aws_lambda_function" "cleanup" {
 
 data "archive_file" "find_stale_ranges" {
   type        = "zip"
-  source_dir  = "${local.lambda_source_dir}/find_stale_ranges"
+  source_dir  = "${path.module}/.terraform/find_stale_ranges_pkg"
   output_path = "${path.module}/.terraform/find_stale_ranges.zip"
+  depends_on  = [null_resource.build_lambdas]
 }
 
 resource "aws_lambda_function" "find_stale_ranges" {
@@ -264,8 +295,6 @@ resource "aws_lambda_function" "find_stale_ranges" {
 
   filename         = data.archive_file.find_stale_ranges.output_path
   source_code_hash = data.archive_file.find_stale_ranges.output_base64sha256
-
-  layers = [aws_lambda_layer_version.shared.arn]
 
   vpc_config {
     subnet_ids         = var.portal_subnet_ids

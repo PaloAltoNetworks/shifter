@@ -6,17 +6,20 @@ from .db import (
     get_db_connection,
     get_range,
     update_range,
-    validate_uuid,
+    validate_range_id,
 )
+from .env import get_env, validate_env_vars
 from .tagging import get_resource_tags, get_resource_tags_dict
 
 __all__ = [
     "ALLOWED_UPDATE_FIELDS",
     "get_db_connection",
+    "get_env",
     "get_range",
     "get_agent_config",
     "update_range",
-    "validate_uuid",
+    "validate_env_vars",
+    "validate_range_id",
     "get_resource_tags",
     "get_resource_tags_dict",
 ]

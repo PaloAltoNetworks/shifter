@@ -156,7 +156,7 @@ On any error:
 All Lambdas:
 - Run in Portal VPC (private subnets)
 - Have RDS access via security group
-- Get DB credentials from Secrets Manager
+- Use IAM Database Authentication (no stored passwords)
 - Are idempotent (safe to retry)
 
 ### create_subnet
@@ -248,8 +248,8 @@ No special requirements. Lambda creates resources here via AWS APIs (not network
 
 Lambda role needs:
 - EC2: CreateSubnet, DeleteSubnet, RunInstances, TerminateInstances, etc.
-- Secrets Manager: GetSecretValue (for DB credentials)
-- RDS: Network access (via security group, not IAM)
+- RDS: `rds-db:connect` (for IAM Database Authentication)
+- RDS: Network access (via security group)
 - S3: GetObject (for agent installers)
 
 ## Local Development
@@ -318,13 +318,19 @@ resource "aws_iam_policy" "provisioner_lambda" {
 - Dedicated DB user for Lambda (not the Django app user)
 - Permissions limited to `mission_control_range` table only
 - Only UPDATE on specific columns (no DELETE, no schema changes)
-- Credentials in Secrets Manager with automatic rotation
+- IAM Database Authentication (no passwords to manage or rotate)
 
 ```sql
--- Lambda DB user permissions
-CREATE USER provisioner_lambda WITH PASSWORD '...';
-GRANT SELECT, UPDATE (status, subnet_id, subnet_cidr, victim_ip,
-                      victim_instance_id, chat_url, error_message, ready_at)
+-- Lambda DB user permissions (created via Django migration for simplicity)
+-- IAM auth eliminates password management - Lambda uses generate_db_auth_token()
+CREATE USER provisioner_lambda;
+GRANT rds_iam TO provisioner_lambda;
+GRANT CONNECT ON DATABASE shifter TO provisioner_lambda;
+GRANT USAGE ON SCHEMA public TO provisioner_lambda;
+GRANT SELECT ON mission_control_range TO provisioner_lambda;
+GRANT SELECT ON mission_control_agentconfig TO provisioner_lambda;
+GRANT UPDATE (status, subnet_id, subnet_cidr, victim_ip, victim_instance_id,
+              chat_url, error_message, ready_at, destroyed_at)
 ON mission_control_range TO provisioner_lambda;
 -- No INSERT, DELETE, or access to other tables
 ```
@@ -375,9 +381,11 @@ This enables:
 
 | Secret | Storage | Rotation | Access |
 |--------|---------|----------|--------|
-| DB credentials (Lambda) | Secrets Manager | 30 days | Lambda IAM role only |
+| DB credentials (Lambda) | IAM DB Auth | N/A (token-based) | Lambda IAM role only |
 | DB credentials (Portal) | Secrets Manager | 30 days | EC2 IAM role only |
 | Django SECRET_KEY | Secrets Manager | Manual | EC2 IAM role only |
+
+**Note:** Lambda uses IAM Database Authentication instead of stored passwords. The PostgreSQL user is created via Django migration (runs on deploy), eliminating the need for a separate secrets management Lambda or manual user creation.
 
 ### 7. Network Security
 

@@ -90,7 +90,7 @@ def get_range(conn, range_id) -> dict | None:
         cur.execute(
             """
             SELECT
-                id, user_id, agent_config_id, status,
+                id, user_id, agent_id, status,
                 subnet_id, subnet_cidr, subnet_index,
                 victim_ip, victim_instance_id,
                 chat_url, error_message,
@@ -108,7 +108,7 @@ def get_range(conn, range_id) -> dict | None:
         return {
             "id": row[0],
             "user_id": row[1],
-            "agent_config_id": row[2],
+            "agent_id": row[2],
             "status": row[3],
             "subnet_id": row[4],
             "subnet_cidr": row[5],

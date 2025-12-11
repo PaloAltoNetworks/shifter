@@ -69,6 +69,9 @@ jobs:
         run: terraform fmt -check -recursive
         working-directory: terraform
 
+      - name: Build Lambda packages
+        run: bash ../../../modules/range/provisioner/build-lambdas.sh
+
       - name: Terraform Init
         run: terraform init
 
@@ -135,6 +138,9 @@ jobs:
       - name: Write tfvars from secret
         run: echo '${{ secrets.TF_VARS_PROD_PORTAL }}' > terraform.tfvars
 
+      - name: Build Lambda packages
+        run: bash ../../../modules/range/provisioner/build-lambdas.sh
+
       - name: Terraform Init
         run: terraform init
 
@@ -172,6 +178,9 @@ jobs:
         env:
           TF_VARS: ${{ github.event.inputs.environment == 'dev' && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
         run: echo "$TF_VARS" > terraform.tfvars
+
+      - name: Build Lambda packages
+        run: bash ../../../modules/range/provisioner/build-lambdas.sh
 
       - name: Terraform Init
         run: terraform init

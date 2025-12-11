@@ -1,6 +1,5 @@
 """Tests for environment variable utilities."""
 
-import os
 
 import pytest
 

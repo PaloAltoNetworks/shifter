@@ -76,34 +76,31 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 
-# Policy for Terraform operations
-resource "aws_iam_role_policy" "terraform_permissions" {
-  name = "terraform-permissions"
-  role = aws_iam_role.github_actions.id
+# ------------------------------------------------------------------------------
+# Managed IAM Policies (split to avoid size limits)
+# ------------------------------------------------------------------------------
+
+# Core Infrastructure: ECR, S3 state, DynamoDB locking
+resource "aws_iam_policy" "core_infrastructure" {
+  name = "shifter-core-infrastructure"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ECRRepositoryManagement"
-        Effect = "Allow"
-        Action = [
-          "ecr:*"
-        ]
-        Resource = [
-          "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/shifter-*"
-        ]
+        Sid      = "ECR"
+        Effect   = "Allow"
+        Action   = ["ecr:*"]
+        Resource = "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/shifter-*"
       },
       {
-        Sid    = "ECRAuth"
-        Effect = "Allow"
-        Action = [
-          "ecr:GetAuthorizationToken"
-        ]
+        Sid      = "ECRAuth"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
         Resource = "*"
       },
       {
-        Sid    = "TerraformStateS3"
+        Sid    = "S3State"
         Effect = "Allow"
         Action = [
           "s3:ListBucket",
@@ -112,78 +109,312 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "s3:DeleteObject"
         ]
         Resource = [
-          "arn:aws:s3:::shifter-infra-eedf1871-f634-4712-981a-5c6ba0738704",
-          "arn:aws:s3:::shifter-infra-eedf1871-f634-4712-981a-5c6ba0738704/*"
+          "arn:aws:s3:::shifter-infra-*",
+          "arn:aws:s3:::shifter-infra-*/*"
         ]
       },
       {
-        Sid      = "UserStorageS3"
+        Sid      = "S3UserStorage"
         Effect   = "Allow"
-        Action   = "s3:*"
+        Action   = ["s3:*"]
         Resource = "arn:aws:s3:::shifter-user-storage-*"
       },
       {
-        Sid    = "TerraformStateLocking"
+        Sid    = "DynamoDB"
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:DeleteItem"
         ]
-        Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/shifter-terraform-29548208-505d-49da-87be-1c937681d079"
-      },
+        Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/shifter-terraform-*"
+      }
+    ]
+  })
+}
+
+# VPC Networking
+resource "aws_iam_policy" "vpc_networking" {
+  name = "shifter-vpc-networking"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
-        Sid    = "VPCNetworking"
+        Sid    = "VPC"
         Effect = "Allow"
         Action = [
-          "ec2:CreateVpc",
-          "ec2:DeleteVpc",
-          "ec2:DescribeVpcs",
-          "ec2:ModifyVpcAttribute",
-          "ec2:CreateSubnet",
-          "ec2:DeleteSubnet",
-          "ec2:DescribeSubnets",
-          "ec2:ModifySubnetAttribute",
-          "ec2:CreateRouteTable",
-          "ec2:DeleteRouteTable",
-          "ec2:DescribeRouteTables",
-          "ec2:AssociateRouteTable",
-          "ec2:DisassociateRouteTable",
-          "ec2:CreateRoute",
-          "ec2:DeleteRoute",
-          "ec2:CreateInternetGateway",
-          "ec2:DeleteInternetGateway",
-          "ec2:AttachInternetGateway",
-          "ec2:DetachInternetGateway",
-          "ec2:DescribeInternetGateways",
-          "ec2:CreateNatGateway",
-          "ec2:DeleteNatGateway",
-          "ec2:DescribeNatGateways",
-          "ec2:AllocateAddress",
-          "ec2:ReleaseAddress",
-          "ec2:DescribeAddresses",
-          "ec2:DescribeAddressesAttribute",
-          "ec2:CreateSecurityGroup",
-          "ec2:DeleteSecurityGroup",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeSecurityGroupRules",
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:AuthorizeSecurityGroupEgress",
-          "ec2:RevokeSecurityGroupIngress",
-          "ec2:RevokeSecurityGroupEgress",
+          "ec2:*Vpc*",
+          "ec2:*Subnet*",
+          "ec2:*RouteTable*",
+          "ec2:*Route",
+          "ec2:*InternetGateway*",
+          "ec2:*NatGateway*",
+          "ec2:*Address*",
+          "ec2:*SecurityGroup*",
+          "ec2:*Tags",
+          "ec2:Describe*",
           "ec2:CreateTags",
-          "ec2:DeleteTags",
-          "ec2:DescribeTags",
-          "ec2:DescribeAvailabilityZones",
-          "ec2:DescribeNetworkAcls",
-          "ec2:DescribeVpcAttribute",
-          "ec2:DescribeAccountAttributes",
-          "ec2:DescribeNetworkInterfaces"
+          "ec2:DeleteTags"
         ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# EC2 Instances
+resource "aws_iam_policy" "ec2_instances" {
+  name = "shifter-ec2-instances"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EC2"
+        Effect = "Allow"
+        Action = [
+          "ec2:RunInstances",
+          "ec2:TerminateInstances",
+          "ec2:StartInstances",
+          "ec2:StopInstances",
+          "ec2:RebootInstances",
+          "ec2:DescribeInstances",
+          "ec2:DescribeInstanceStatus",
+          "ec2:DescribeInstanceTypes",
+          "ec2:DescribeInstanceAttribute",
+          "ec2:ModifyInstanceAttribute",
+          "ec2:DescribeImages",
+          "ec2:DescribeVolumes",
+          "ec2:CreateVolume",
+          "ec2:DeleteVolume",
+          "ec2:AttachVolume",
+          "ec2:DetachVolume",
+          "ec2:DescribeInstanceCreditSpecifications",
+          "ec2:DescribeKeyPairs",
+          "ec2:CreateKeyPair",
+          "ec2:DeleteKeyPair"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# ELB and ACM
+resource "aws_iam_policy" "elb_acm" {
+  name = "shifter-elb-acm"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ELB"
+        Effect   = "Allow"
+        Action   = ["elasticloadbalancing:*"]
         Resource = "*"
       },
       {
-        Sid    = "RDSManagement"
+        Sid      = "ACM"
+        Effect   = "Allow"
+        Action   = ["acm:*"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# IAM Scoped (roles and instance profiles)
+resource "aws_iam_policy" "iam_scoped" {
+  name = "shifter-iam-scoped"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "IAMRoles"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateRole",
+          "iam:DeleteRole",
+          "iam:GetRole",
+          "iam:UpdateRole",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListInstanceProfilesForRole",
+          "iam:PutRolePolicy",
+          "iam:GetRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:AttachRolePolicy",
+          "iam:DetachRolePolicy"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+      },
+      {
+        Sid    = "IAMInstanceProfiles"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateInstanceProfile",
+          "iam:DeleteInstanceProfile",
+          "iam:GetInstanceProfile",
+          "iam:AddRoleToInstanceProfile",
+          "iam:RemoveRoleFromInstanceProfile",
+          "iam:TagInstanceProfile",
+          "iam:UntagInstanceProfile"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/*"
+      },
+      {
+        Sid      = "IAMPassRole"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+      },
+      {
+        Sid      = "IAMServiceLinkedRoles"
+        Effect   = "Allow"
+        Action   = ["iam:CreateServiceLinkedRole"]
+        Resource = "arn:aws:iam::*:role/aws-service-role/*"
+      }
+    ]
+  })
+}
+
+# Lambda and Step Functions
+resource "aws_iam_policy" "lambda_sfn" {
+  name = "shifter-lambda-sfn"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Lambda"
+        Effect = "Allow"
+        Action = [
+          "lambda:CreateFunction",
+          "lambda:DeleteFunction",
+          "lambda:GetFunction",
+          "lambda:GetFunctionConfiguration",
+          "lambda:GetFunctionCodeSigningConfig",
+          "lambda:UpdateFunctionCode",
+          "lambda:UpdateFunctionConfiguration",
+          "lambda:ListVersionsByFunction",
+          "lambda:PublishVersion",
+          "lambda:AddPermission",
+          "lambda:RemovePermission",
+          "lambda:GetPolicy",
+          "lambda:TagResource",
+          "lambda:UntagResource",
+          "lambda:ListTags"
+        ]
+        Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:*"
+      },
+      {
+        Sid    = "LambdaLayers"
+        Effect = "Allow"
+        Action = [
+          "lambda:PublishLayerVersion",
+          "lambda:GetLayerVersion",
+          "lambda:DeleteLayerVersion",
+          "lambda:ListLayerVersions"
+        ]
+        Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:layer:*"
+      },
+      {
+        Sid    = "StepFunctions"
+        Effect = "Allow"
+        Action = [
+          "states:CreateStateMachine",
+          "states:DeleteStateMachine",
+          "states:DescribeStateMachine",
+          "states:UpdateStateMachine",
+          "states:ListStateMachines",
+          "states:TagResource",
+          "states:UntagResource",
+          "states:ListTagsForResource"
+        ]
+        Resource = "arn:aws:states:${var.aws_region}:${data.aws_caller_identity.current.account_id}:stateMachine:*"
+      },
+      {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:DeleteLogGroup",
+          "logs:DescribeLogGroups",
+          "logs:PutRetentionPolicy",
+          "logs:TagLogGroup",
+          "logs:UntagLogGroup",
+          "logs:ListTagsLogGroup",
+          "logs:ListTagsForResource",
+          "logs:TagResource",
+          "logs:UntagResource"
+        ]
+        Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:*"
+      },
+      {
+        Sid    = "CloudWatchAlarms"
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricAlarm",
+          "cloudwatch:DeleteAlarms",
+          "cloudwatch:DescribeAlarms",
+          "cloudwatch:ListTagsForResource",
+          "cloudwatch:TagResource",
+          "cloudwatch:UntagResource"
+        ]
+        Resource = "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:*"
+      },
+      {
+        Sid    = "SNS"
+        Effect = "Allow"
+        Action = [
+          "sns:CreateTopic",
+          "sns:DeleteTopic",
+          "sns:GetTopicAttributes",
+          "sns:SetTopicAttributes",
+          "sns:ListTagsForResource",
+          "sns:TagResource",
+          "sns:UntagResource",
+          "sns:Subscribe",
+          "sns:Unsubscribe",
+          "sns:GetSubscriptionAttributes"
+        ]
+        Resource = "arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:shifter-*"
+      },
+      {
+        Sid    = "EventBridge"
+        Effect = "Allow"
+        Action = [
+          "events:PutRule",
+          "events:DeleteRule",
+          "events:DescribeRule",
+          "events:EnableRule",
+          "events:DisableRule",
+          "events:PutTargets",
+          "events:RemoveTargets",
+          "events:ListTargetsByRule",
+          "events:ListTagsForResource",
+          "events:TagResource",
+          "events:UntagResource"
+        ]
+        Resource = "arn:aws:events:${var.aws_region}:${data.aws_caller_identity.current.account_id}:rule/shifter-*"
+      }
+    ]
+  })
+}
+
+# RDS
+resource "aws_iam_policy" "rds" {
+  name = "shifter-rds"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "RDS"
         Effect = "Allow"
         Action = [
           "rds:CreateDBInstance",
@@ -209,9 +440,20 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "rds:DescribeOrderableDBInstanceOptions"
         ]
         Resource = "*"
-      },
+      }
+    ]
+  })
+}
+
+# Secrets Manager and KMS
+resource "aws_iam_policy" "secrets_kms" {
+  name = "shifter-secrets-kms"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
-        Sid    = "SecretsManagerDBCredentials"
+        Sid    = "SecretsManager"
         Effect = "Allow"
         Action = [
           "secretsmanager:CreateSecret",
@@ -229,15 +471,13 @@ resource "aws_iam_role_policy" "terraform_permissions" {
         Resource = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:shifter-*"
       },
       {
-        Sid    = "SecretsManagerRandomPassword"
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetRandomPassword"
-        ]
+        Sid      = "SecretsManagerRandom"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetRandomPassword"]
         Resource = "*"
       },
       {
-        Sid    = "KMSForRDSEncryption"
+        Sid    = "KMS"
         Effect = "Allow"
         Action = [
           "kms:CreateKey",
@@ -253,281 +493,92 @@ resource "aws_iam_role_policy" "terraform_permissions" {
           "kms:ScheduleKeyDeletion"
         ]
         Resource = "*"
-      },
-      {
-        Sid    = "IAMServiceLinkedRoles"
-        Effect = "Allow"
-        Action = [
-          "iam:CreateServiceLinkedRole"
-        ]
-        Resource = "arn:aws:iam::*:role/aws-service-role/rds.amazonaws.com/AWSServiceRoleForRDS"
-        Condition = {
-          StringEquals = {
-            "iam:AWSServiceName" = "rds.amazonaws.com"
-          }
-        }
-      },
-      {
-        Sid    = "EC2InstanceManagement"
-        Effect = "Allow"
-        Action = [
-          "ec2:RunInstances",
-          "ec2:TerminateInstances",
-          "ec2:StartInstances",
-          "ec2:StopInstances",
-          "ec2:RebootInstances",
-          "ec2:DescribeInstances",
-          "ec2:DescribeInstanceStatus",
-          "ec2:DescribeInstanceTypes",
-          "ec2:DescribeInstanceAttribute",
-          "ec2:ModifyInstanceAttribute",
-          "ec2:DescribeImages",
-          "ec2:DescribeVolumes",
-          "ec2:CreateVolume",
-          "ec2:DeleteVolume",
-          "ec2:AttachVolume",
-          "ec2:DetachVolume",
-          "ec2:DescribeInstanceCreditSpecifications",
-          "ec2:DescribeKeyPairs",
-          "ec2:CreateKeyPair",
-          "ec2:DeleteKeyPair"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "IAMRolesForEC2"
-        Effect = "Allow"
-        Action = [
-          "iam:CreateRole",
-          "iam:DeleteRole",
-          "iam:GetRole",
-          "iam:UpdateRole",
-          "iam:TagRole",
-          "iam:UntagRole",
-          "iam:ListRolePolicies",
-          "iam:ListAttachedRolePolicies",
-          "iam:ListInstanceProfilesForRole",
-          "iam:PutRolePolicy",
-          "iam:GetRolePolicy",
-          "iam:DeleteRolePolicy",
-          "iam:AttachRolePolicy",
-          "iam:DetachRolePolicy",
-          "iam:CreateInstanceProfile",
-          "iam:DeleteInstanceProfile",
-          "iam:GetInstanceProfile",
-          "iam:AddRoleToInstanceProfile",
-          "iam:RemoveRoleFromInstanceProfile",
-          "iam:TagInstanceProfile",
-          "iam:UntagInstanceProfile"
-        ]
-        Resource = [
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*-ec2-role",
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/*-ec2-profile"
-        ]
-      },
-      {
-        Sid    = "IAMPassRoleToEC2"
-        Effect = "Allow"
-        Action = [
-          "iam:PassRole"
-        ]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*-ec2-role"
-        Condition = {
-          StringEquals = {
-            "iam:PassedToService" = "ec2.amazonaws.com"
-          }
-        }
-      },
-      {
-        Sid    = "ELBManagement"
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:DeleteLoadBalancer",
-          "elasticloadbalancing:DescribeLoadBalancers",
-          "elasticloadbalancing:DescribeLoadBalancerAttributes",
-          "elasticloadbalancing:ModifyLoadBalancerAttributes",
-          "elasticloadbalancing:CreateTargetGroup",
-          "elasticloadbalancing:DeleteTargetGroup",
-          "elasticloadbalancing:DescribeTargetGroups",
-          "elasticloadbalancing:DescribeTargetGroupAttributes",
-          "elasticloadbalancing:ModifyTargetGroupAttributes",
-          "elasticloadbalancing:DescribeTargetHealth",
-          "elasticloadbalancing:RegisterTargets",
-          "elasticloadbalancing:DeregisterTargets",
-          "elasticloadbalancing:CreateListener",
-          "elasticloadbalancing:DeleteListener",
-          "elasticloadbalancing:DescribeListeners",
-          "elasticloadbalancing:DescribeListenerAttributes",
-          "elasticloadbalancing:ModifyListener",
-          "elasticloadbalancing:CreateRule",
-          "elasticloadbalancing:DeleteRule",
-          "elasticloadbalancing:DescribeRules",
-          "elasticloadbalancing:ModifyRule",
-          "elasticloadbalancing:AddTags",
-          "elasticloadbalancing:RemoveTags",
-          "elasticloadbalancing:DescribeTags",
-          "elasticloadbalancing:SetSecurityGroups",
-          "elasticloadbalancing:SetSubnets",
-          "elasticloadbalancing:DescribeSSLPolicies"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "IAMServiceLinkedRoleForELB"
-        Effect = "Allow"
-        Action = [
-          "iam:CreateServiceLinkedRole"
-        ]
-        Resource = "arn:aws:iam::*:role/aws-service-role/elasticloadbalancing.amazonaws.com/AWSServiceRoleForElasticLoadBalancing"
-        Condition = {
-          StringEquals = {
-            "iam:AWSServiceName" = "elasticloadbalancing.amazonaws.com"
-          }
-        }
-      },
-      {
-        Sid    = "ACMCertificateManagement"
-        Effect = "Allow"
-        Action = [
-          "acm:RequestCertificate",
-          "acm:DeleteCertificate",
-          "acm:DescribeCertificate",
-          "acm:ListCertificates",
-          "acm:GetCertificate",
-          "acm:ListTagsForCertificate",
-          "acm:AddTagsToCertificate",
-          "acm:RemoveTagsFromCertificate"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "SSMSendCommandToInstances"
-        Effect = "Allow"
-        Action = [
-          "ssm:SendCommand"
-        ]
-        Resource = [
-          "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*"
-        ]
-        Condition = {
-          StringEquals = {
-            "aws:ResourceTag/Project" = "shifter"
-          }
-        }
-      },
-      {
-        Sid    = "SSMSendCommandDocument"
-        Effect = "Allow"
-        Action = [
-          "ssm:SendCommand"
-        ]
-        Resource = [
-          "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript"
-        ]
-      },
-      {
-        Sid    = "SSMGetCommandStatus"
-        Effect = "Allow"
-        Action = [
-          "ssm:GetCommandInvocation",
-          "ssm:ListCommandInvocations"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "SSMWaitForCommand"
-        Effect = "Allow"
-        Action = [
-          "ssm:DescribeInstanceInformation"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "CognitoUserPoolManagement"
-        Effect = "Allow"
-        Action = [
-          "cognito-idp:CreateUserPool",
-          "cognito-idp:DeleteUserPool",
-          "cognito-idp:DescribeUserPool",
-          "cognito-idp:UpdateUserPool",
-          "cognito-idp:ListUserPools",
-          "cognito-idp:GetUserPoolMfaConfig",
-          "cognito-idp:SetUserPoolMfaConfig",
-          "cognito-idp:CreateUserPoolClient",
-          "cognito-idp:DeleteUserPoolClient",
-          "cognito-idp:DescribeUserPoolClient",
-          "cognito-idp:UpdateUserPoolClient",
-          "cognito-idp:ListUserPoolClients",
-          "cognito-idp:CreateUserPoolDomain",
-          "cognito-idp:DeleteUserPoolDomain",
-          "cognito-idp:DescribeUserPoolDomain",
-          "cognito-idp:TagResource",
-          "cognito-idp:UntagResource",
-          "cognito-idp:ListTagsForResource"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "LambdaManagement"
-        Effect = "Allow"
-        Action = [
-          "lambda:CreateFunction",
-          "lambda:DeleteFunction",
-          "lambda:GetFunction",
-          "lambda:GetFunctionConfiguration",
-          "lambda:GetFunctionCodeSigningConfig",
-          "lambda:UpdateFunctionCode",
-          "lambda:UpdateFunctionConfiguration",
-          "lambda:ListVersionsByFunction",
-          "lambda:PublishVersion",
-          "lambda:AddPermission",
-          "lambda:RemovePermission",
-          "lambda:GetPolicy",
-          "lambda:TagResource",
-          "lambda:UntagResource",
-          "lambda:ListTags"
-        ]
-        Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:*-cognito-*"
-      },
-      {
-        Sid    = "IAMRolesForLambda"
-        Effect = "Allow"
-        Action = [
-          "iam:CreateRole",
-          "iam:DeleteRole",
-          "iam:GetRole",
-          "iam:UpdateRole",
-          "iam:TagRole",
-          "iam:UntagRole",
-          "iam:ListRolePolicies",
-          "iam:ListAttachedRolePolicies",
-          "iam:PutRolePolicy",
-          "iam:GetRolePolicy",
-          "iam:DeleteRolePolicy",
-          "iam:AttachRolePolicy",
-          "iam:DetachRolePolicy"
-        ]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*-cognito-lambda-role"
-      },
-      {
-        Sid    = "IAMPassRoleToLambda"
-        Effect = "Allow"
-        Action = [
-          "iam:PassRole"
-        ]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*-cognito-lambda-role"
-        Condition = {
-          StringEquals = {
-            "iam:PassedToService" = "lambda.amazonaws.com"
-          }
-        }
       }
     ]
   })
 }
 
-# Output the role ARN for GitHub secrets
+# SSM and Cognito
+resource "aws_iam_policy" "ssm_cognito" {
+  name = "shifter-ssm-cognito"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "SSM"
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations",
+          "ssm:DescribeInstanceInformation"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid      = "Cognito"
+        Effect   = "Allow"
+        Action   = ["cognito-idp:*"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Policy Attachments
+# ------------------------------------------------------------------------------
+
+resource "aws_iam_role_policy_attachment" "core_infrastructure" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.core_infrastructure.arn
+}
+
+resource "aws_iam_role_policy_attachment" "vpc_networking" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.vpc_networking.arn
+}
+
+resource "aws_iam_role_policy_attachment" "ec2_instances" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.ec2_instances.arn
+}
+
+resource "aws_iam_role_policy_attachment" "elb_acm" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.elb_acm.arn
+}
+
+resource "aws_iam_role_policy_attachment" "iam_scoped" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.iam_scoped.arn
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_sfn" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.lambda_sfn.arn
+}
+
+resource "aws_iam_role_policy_attachment" "rds" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.rds.arn
+}
+
+resource "aws_iam_role_policy_attachment" "secrets_kms" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.secrets_kms.arn
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_cognito" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.ssm_cognito.arn
+}
+
+# ------------------------------------------------------------------------------
+# Outputs
+# ------------------------------------------------------------------------------
+
 output "github_actions_role_arn" {
   description = "ARN of the IAM role for GitHub Actions (add to GitHub secrets as AWS_ROLE_ARN)"
   value       = aws_iam_role.github_actions.arn

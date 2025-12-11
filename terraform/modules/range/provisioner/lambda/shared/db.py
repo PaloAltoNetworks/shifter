@@ -6,9 +6,14 @@ Uses generate_db_auth_token() to connect without stored passwords.
 
 import os
 import ssl
+from pathlib import Path
 
 import boto3
 import psycopg
+
+# Path to RDS CA bundle - bundled in Lambda layer
+# AWS global bundle covers all regions: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
+RDS_CA_BUNDLE_PATH = Path(__file__).parent / "certs" / "global-bundle.pem"
 
 
 def get_db_connection():
@@ -41,9 +46,14 @@ def get_db_connection():
     )
 
     # RDS requires SSL for IAM auth
+    # Load AWS RDS CA bundle for proper certificate verification
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = True
     ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+    # Load RDS CA bundle if available, fall back to system CAs
+    if RDS_CA_BUNDLE_PATH.exists():
+        ssl_context.load_verify_locations(cafile=str(RDS_CA_BUNDLE_PATH))
 
     conn = psycopg.connect(
         host=host,
@@ -51,7 +61,8 @@ def get_db_connection():
         dbname=dbname,
         user=user,
         password=token,
-        sslmode="require",
+        sslmode="verify-full",  # Full verification with CA bundle
+        sslrootcert=str(RDS_CA_BUNDLE_PATH) if RDS_CA_BUNDLE_PATH.exists() else None,
         connect_timeout=10,
     )
 

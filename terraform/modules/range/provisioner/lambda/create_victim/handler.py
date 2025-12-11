@@ -26,6 +26,23 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def validate_s3_path(value: str) -> bool:
+    """
+    Validate S3 bucket name or key doesn't contain shell injection characters.
+
+    Args:
+        value: S3 bucket name or key to validate
+
+    Returns:
+        True if safe, False if potentially dangerous
+    """
+    import re
+    # Allow alphanumeric, hyphens, underscores, forward slashes, dots, and equals
+    # This covers valid S3 bucket names and common key patterns
+    safe_pattern = re.compile(r"^[a-zA-Z0-9._/=-]+$")
+    return bool(safe_pattern.match(value))
+
+
 def get_user_data_script(s3_bucket: str, agent_s3_key: str) -> str:
     """
     Generate user data script to install XDR agent on boot.
@@ -36,7 +53,16 @@ def get_user_data_script(s3_bucket: str, agent_s3_key: str) -> str:
 
     Returns:
         Base64-encoded user data script
+
+    Raises:
+        ValueError: If s3_bucket or agent_s3_key contain unsafe characters
     """
+    # Validate inputs to prevent shell injection
+    if not validate_s3_path(s3_bucket):
+        raise ValueError(f"Invalid S3 bucket name: {s3_bucket}")
+    if not validate_s3_path(agent_s3_key):
+        raise ValueError(f"Invalid S3 key: {agent_s3_key}")
+
     script = f"""#!/bin/bash
 set -euo pipefail
 
@@ -45,7 +71,7 @@ exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting XDR agent installation..."
 
 # Download agent installer from S3
-aws s3 cp s3://{s3_bucket}/{agent_s3_key} /tmp/agent-installer
+aws s3 cp 's3://{s3_bucket}/{agent_s3_key}' /tmp/agent-installer
 
 # Make executable and run
 chmod +x /tmp/agent-installer

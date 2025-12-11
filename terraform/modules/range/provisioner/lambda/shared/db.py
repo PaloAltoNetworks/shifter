@@ -139,11 +139,35 @@ def get_agent_config(conn, agent_config_id: int) -> dict | None:
         }
 
 
+# Allowed fields for update_range() - prevents SQL injection via field names
+ALLOWED_UPDATE_FIELDS = frozenset({
+    "status",
+    "subnet_id",
+    "subnet_cidr",
+    "victim_ip",
+    "victim_instance_id",
+    "chat_url",
+    "error_message",
+    "ready_at",
+    "destroyed_at",
+})
+
+
+def validate_uuid(value: str) -> bool:
+    """Validate that a string is a valid UUID format."""
+    import re
+    uuid_pattern = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
+    return bool(uuid_pattern.match(value))
+
+
 def update_range(conn, range_id: str, **fields) -> None:
     """
     Update specific fields on a Range record.
 
-    Only allowed fields can be updated (enforced by DB permissions):
+    Only allowed fields can be updated (enforced by whitelist and DB permissions):
     - status, subnet_id, subnet_cidr, victim_ip, victim_instance_id,
     - chat_url, error_message, ready_at, destroyed_at
 
@@ -151,11 +175,23 @@ def update_range(conn, range_id: str, **fields) -> None:
         conn: Database connection
         range_id: UUID of the range
         **fields: Field names and values to update
+
+    Raises:
+        ValueError: If range_id is not a valid UUID or field name is not allowed
     """
     if not fields:
         return
 
-    # Build SET clause
+    # Validate range_id is a UUID
+    if not validate_uuid(range_id):
+        raise ValueError(f"Invalid range_id format: {range_id}")
+
+    # Validate field names against whitelist (prevents SQL injection)
+    invalid_fields = set(fields.keys()) - ALLOWED_UPDATE_FIELDS
+    if invalid_fields:
+        raise ValueError(f"Invalid field names: {invalid_fields}")
+
+    # Build SET clause - field names are now validated against whitelist
     set_parts = []
     values = []
     for field, value in fields.items():

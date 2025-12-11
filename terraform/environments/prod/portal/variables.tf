@@ -154,3 +154,36 @@ variable "user_storage_bucket" {
   description = "S3 bucket name for user file storage (must be globally unique)"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# Provisioner
+# ------------------------------------------------------------------------------
+
+variable "victim_ami_id" {
+  description = "AMI ID for victim EC2 instances"
+  type        = string
+}
+
+variable "victim_instance_type" {
+  description = "Instance type for victim EC2 instances"
+  type        = string
+  default     = "t3.micro"
+}
+
+variable "librechat_base_url" {
+  description = "Base URL for LibreChat"
+  type        = string
+  default     = ""
+}
+
+variable "enable_provisioner_alarms" {
+  description = "Enable CloudWatch alarms for provisioner Step Functions and Lambda"
+  type        = bool
+  default     = true
+}
+
+variable "provisioner_alarm_email" {
+  description = "Email address for provisioner alarm notifications (leave empty to skip)"
+  type        = string
+  default     = ""
+}

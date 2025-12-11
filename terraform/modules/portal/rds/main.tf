@@ -132,6 +132,9 @@ resource "aws_db_instance" "this" {
   performance_insights_enabled          = true
   performance_insights_retention_period = 7
 
+  # IAM Database Authentication (for Lambda provisioner)
+  iam_database_authentication_enabled = true
+
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-db"
     Module = "rds"

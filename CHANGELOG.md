@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Provisioner fields on Range model (subnet_id, subnet_cidr, subnet_index, victim_instance_id, step_function_execution_arn)
+- IAM Database Authentication on RDS for Lambda provisioner
+- Django migration to create provisioner_lambda PostgreSQL user with minimal permissions
 
 ## [0.2.9] - 2025-12-09
 

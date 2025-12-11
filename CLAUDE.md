@@ -269,11 +269,7 @@ Route: ALB → NGFW → EC2
 ### Commit Protocol
 
 **NEVER make commits without explicit user permission:**
-1. ALWAYS ask before creating commits
-2. Show user what will be committed first
-3. Let user review changes before committing
-4. Only commit when user explicitly requests it
-5. NEVER include Claude attribution or co-authored-by tags
+1. NEVER make commits, the user will do it and sign them
 
 ---
 

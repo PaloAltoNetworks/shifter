@@ -160,7 +160,7 @@ def handler(event: dict, context) -> dict:
         # Create instance
         ec2 = boto3.client("ec2")
         tags = get_resource_tags(range_id, user_id, environment)
-        tags.append({"Key": "Name", "Value": f"shifter-victim-{range_id[:8]}"})
+        tags.append({"Key": "Name", "Value": f"shifter-victim-{range_id}"})
 
         response = ec2.run_instances(
             ImageId=victim_ami_id,

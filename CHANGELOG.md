@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2025-12-10
+## [0.3.0] - 2025-12-11
 
 ### Added
 - Provisioner fields on Range model (subnet_id, subnet_cidr, subnet_index, victim_instance_id, step_function_execution_arn)
@@ -20,7 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Portal integration with Step Functions (replaces callback-based stub)
 - EC2 IAM permissions for Step Functions execution
 - Range failure alarms
-- Stale range cleanup  
+- Stale range cleanup
+- docs/maintenance.md: RDS maintenance window reference
+
+### Fixed
+- Lambda DB queries: `agent_config_id` → `agent_id`, `os_type_id` → `os_id` (Django FK naming)
+- Lambda handlers: `range_id[:8]` slice on integer (range_id is int, not UUID)
+- db-connect.sh: Added autocommit for INSERT/UPDATE queries
 
 ### Removed
 - Callback endpoint for provisioner (Lambda writes directly to DB)

@@ -20,10 +20,16 @@ from botocore.exceptions import ClientError
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared import get_db_connection, get_range, update_range
+from shared import get_db_connection, get_range, update_range, validate_env_vars
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Required environment variables for this Lambda
+REQUIRED_ENV_VARS = [
+    "DB_HOST",
+    "DB_NAME",
+]
 
 
 def handler(event: dict, context) -> dict:
@@ -36,6 +42,9 @@ def handler(event: dict, context) -> dict:
 
     All operations are idempotent - safe to retry.
     """
+    # Validate required environment variables early
+    validate_env_vars(REQUIRED_ENV_VARS)
+
     range_id = event["range_id"]
     mark_failed = event.get("mark_failed", True)
     error_message = event.get("error_message", "Provisioning failed")

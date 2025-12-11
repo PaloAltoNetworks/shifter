@@ -220,8 +220,8 @@ module "provisioner" {
   range_vpc_id         = data.terraform_remote_state.range.outputs.vpc_id
   range_route_table_id = data.terraform_remote_state.range.outputs.public_route_table_id
   # Extract CIDR prefix from VPC CIDR (e.g., "10.1.0.0/16" -> "10.1")
-  range_cidr_prefix    = join(".", slice(split(".", data.terraform_remote_state.range.outputs.vpc_cidr), 0, 2))
-  availability_zone    = module.vpc.availability_zones[0]
+  range_cidr_prefix = join(".", slice(split(".", data.terraform_remote_state.range.outputs.vpc_cidr), 0, 2))
+  availability_zone = module.vpc.availability_zones[0]
 
   # RDS Configuration (IAM DB auth)
   db_host               = module.rds.db_instance_address

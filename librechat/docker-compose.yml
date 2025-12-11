@@ -1,0 +1,36 @@
+# LibreChat Local Development Stack
+#
+# Usage:
+#   1. Copy env.example to .env and configure
+#   2. Run: docker compose up -d
+#   3. Access: http://localhost:3080
+#
+# This configuration mirrors the production deployment on EC2.
+
+services:
+  api:
+    container_name: librechat
+    image: ghcr.io/danny-avila/librechat:latest
+    ports:
+      - "3080:3080"
+    depends_on:
+      - mongodb
+    env_file:
+      - .env
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./images:/app/client/public/images
+      - ./logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  mongodb:
+    container_name: librechat-mongodb
+    image: mongo:7
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./data/mongodb:/data/db
+    command: mongod --noauth
+    restart: unless-stopped
+

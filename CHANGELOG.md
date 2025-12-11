@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Step Functions state machines for provisioning and teardown with error handling and timeouts
 - Victim security group in Range VPC
 - Provisioner module wiring to Portal VPC with remote state references
+- Portal integration with Step Functions (replaces callback-based stub)
+- EC2 IAM permissions for Step Functions execution
+
+### Removed
+- Callback endpoint for provisioner (Lambda writes directly to DB)
 
 ## [0.2.9] - 2025-12-09
 

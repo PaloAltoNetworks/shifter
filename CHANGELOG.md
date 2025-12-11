@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lambda DB queries: `agent_config_id` → `agent_id`, `os_type_id` → `os_id` (Django FK naming)
 - Lambda handlers: `range_id[:8]` slice on integer (range_id is int, not UUID)
 - db-connect.sh: Added autocommit for INSERT/UPDATE queries
+- IAM policy: Fix `ec2:CreateSubnet` permission (unsupported `ec2:Vpc` condition key)
 
 ### Removed
 - Callback endpoint for provisioner (Lambda writes directly to DB)

@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Provisioner module wiring to Portal VPC with remote state references
 - Portal integration with Step Functions (replaces callback-based stub)
 - EC2 IAM permissions for Step Functions execution
+- Range failure alarms
+- Stale range cleanup  
 
 ### Removed
 - Callback endpoint for provisioner (Lambda writes directly to DB)

@@ -7,8 +7,6 @@
 # - configure_librechat: Configures chat interface (stub)
 # - cleanup: Deletes all range resources
 
-data "aws_region" "current" {}
-
 locals {
   lambda_runtime = "python3.12"
 

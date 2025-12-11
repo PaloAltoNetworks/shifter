@@ -382,7 +382,7 @@ resource "aws_iam_policy" "lambda_sfn" {
           "sns:Unsubscribe",
           "sns:GetSubscriptionAttributes"
         ]
-        Resource = "arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:shifter-*"
+        Resource = "arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*-portal-*"
       },
       {
         Sid    = "EventBridge"
@@ -400,7 +400,7 @@ resource "aws_iam_policy" "lambda_sfn" {
           "events:TagResource",
           "events:UntagResource"
         ]
-        Resource = "arn:aws:events:${var.aws_region}:${data.aws_caller_identity.current.account_id}:rule/shifter-*"
+        Resource = "arn:aws:events:${var.aws_region}:${data.aws_caller_identity.current.account_id}:rule/*-portal-*"
       }
     ]
   })

@@ -37,6 +37,8 @@ def handler(event: dict, context) -> dict:
     range_route_table_id = os.environ["RANGE_ROUTE_TABLE_ID"]
     availability_zone = os.environ.get("AVAILABILITY_ZONE", "us-east-2a")
     environment = os.environ.get("ENVIRONMENT", "prod")
+    # CIDR prefix for range subnets (e.g., "10.1" for 10.1.0.0/16 VPC)
+    range_cidr_prefix = os.environ["RANGE_CIDR_PREFIX"]
 
     # Connect to database
     conn = get_db_connection()
@@ -68,8 +70,8 @@ def handler(event: dict, context) -> dict:
             }
 
         # Calculate CIDR block
-        # Range VPC is 10.1.0.0/16, each range gets 10.1.{index}.0/24
-        subnet_cidr = f"10.1.{subnet_index}.0/24"
+        # Range VPC uses {prefix}.0.0/16, each range gets {prefix}.{index}.0/24
+        subnet_cidr = f"{range_cidr_prefix}.{subnet_index}.0/24"
         logger.info(f"Creating subnet with CIDR {subnet_cidr}")
 
         # Create subnet

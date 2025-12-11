@@ -42,6 +42,12 @@ def handler(event: dict, context) -> dict:
         if not range_data:
             raise ValueError(f"Range {range_id} not found")
 
+        # Validate range is in provisioning state
+        if range_data["status"] != "provisioning":
+            raise ValueError(
+                f"Range {range_id} is not in provisioning state: {range_data['status']}"
+            )
+
         # Stub: Just log and pass through
         # In the future, this will:
         # 1. Create ECS task or EC2 for Kali

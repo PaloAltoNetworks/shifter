@@ -76,6 +76,7 @@ resource "aws_lambda_function" "create_subnet" {
     variables = merge(local.common_env_vars, {
       RANGE_ROUTE_TABLE_ID = var.range_route_table_id
       AVAILABILITY_ZONE    = var.availability_zone
+      RANGE_CIDR_PREFIX    = var.range_cidr_prefix
     })
   }
 

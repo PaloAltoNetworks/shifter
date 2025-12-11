@@ -107,6 +107,33 @@ resource "aws_iam_role_policy" "s3_access" {
   })
 }
 
+resource "aws_iam_role_policy" "step_functions" {
+  count = length(var.step_function_arns) > 0 ? 1 : 0
+  name  = "step-functions-execute"
+  role  = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "states:StartExecution"
+        ]
+        Resource = var.step_function_arns
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "states:DescribeExecution",
+          "states:StopExecution"
+        ]
+        Resource = [for arn in var.step_function_arns : "${arn}:*"]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.this.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"

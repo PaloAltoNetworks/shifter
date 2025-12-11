@@ -145,6 +145,10 @@ module "ec2" {
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port
   root_volume_size = var.ec2_root_volume_size
+  step_function_arns = [
+    module.provisioner.provision_range_state_machine_arn,
+    module.provisioner.teardown_range_state_machine_arn,
+  ]
 
   tags = var.tags
 }

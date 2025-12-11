@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-12-11
+
+### Added
+- LibreChat infrastructure (EC2, dedicated subnet, Secrets Manager, Docker Compose)
+- LibreChat CI/CD workflows (infra and deploy)
+- SSM tunnel script for LibreChat admin access
+
 ## [0.3.0] - 2025-12-11
 
 ### Added

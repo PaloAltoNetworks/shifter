@@ -115,12 +115,20 @@ jobs:
           fi
           echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
 
+          # Get Step Functions ARNs from Terraform outputs
+          PROVISION_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, 'prod-portal-provision-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
+          TEARDOWN_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, 'prod-portal-teardown-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
+          echo "provision_state_machine_arn=${PROVISION_ARN}" >> $GITHUB_OUTPUT
+          echo "teardown_state_machine_arn=${TEARDOWN_ARN}" >> $GITHUB_OUTPUT
+
       - name: Deploy via SSM
         env:
           ECR_REGISTRY: ${{ steps.config.outputs.registry }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           PORTAL_DOMAIN: ${{ steps.config.outputs.domain }}
           S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
+          PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.provision_state_machine_arn }}
+          TEARDOWN_STATE_MACHINE_ARN: ${{ steps.config.outputs.teardown_state_machine_arn }}
         run: |
           # Container uses EC2 instance role for AWS credentials via IMDSv2
           # (hop limit=2 configured in Terraform). No explicit IAM user creds needed.
@@ -142,6 +150,8 @@ jobs:
                 -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
                 -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
                 -e SITE_URL=https://${PORTAL_DOMAIN} \
+                -e PROVISION_STATE_MACHINE_ARN=${PROVISION_STATE_MACHINE_ARN} \
+                -e TEARDOWN_STATE_MACHINE_ARN=${TEARDOWN_STATE_MACHINE_ARN} \
                 \$IMAGE'
             ]" \
             --timeout-seconds 300 \

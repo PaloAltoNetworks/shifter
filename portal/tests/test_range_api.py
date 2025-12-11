@@ -1,5 +1,7 @@
 """Tests for Range API endpoints."""
 
+from unittest.mock import patch
+
 import pytest
 from django.urls import reverse
 
@@ -26,6 +28,16 @@ def test_agent(db, django_user_model, windows_os):
         sha256_hash="abc123",
     )
     return agent
+
+
+@pytest.fixture
+def mock_provisioner():
+    """Mock the provisioner service to avoid AWS calls."""
+    with patch("mission_control.services.provisioner.start_provisioning") as mock_provision, \
+         patch("mission_control.services.provisioner.start_teardown") as mock_teardown:
+        mock_provision.return_value = None  # No ARN in test mode
+        mock_teardown.return_value = None
+        yield {"provision": mock_provision, "teardown": mock_teardown}
 
 
 @pytest.mark.django_db
@@ -90,12 +102,9 @@ class TestLaunchRange:
         )
         assert response.status_code == 404
 
-    def test_successful_launch(self, client, test_agent, monkeypatch):
-        # Mock the provisioner to avoid threading
-        monkeypatch.setattr(
-            "mission_control.services.provisioner.threading.Thread",
-            lambda *args, **kwargs: type("MockThread", (), {"start": lambda self: None})()
-        )
+    def test_successful_launch(self, client, test_agent, settings):
+        # Ensure Step Functions ARN is not set (local dev mode)
+        settings.PROVISION_STATE_MACHINE_ARN = ""
 
         client.force_login(test_agent.user)
         response = client.post(
@@ -110,11 +119,42 @@ class TestLaunchRange:
         assert data["range"]["status"] == "provisioning"
         assert data["range"]["agent_id"] == test_agent.id
 
-    def test_rejects_when_range_exists(self, client, test_agent, monkeypatch):
-        monkeypatch.setattr(
-            "mission_control.services.provisioner.threading.Thread",
-            lambda *args, **kwargs: type("MockThread", (), {"start": lambda self: None})()
-        )
+    def test_successful_launch_with_step_functions(self, client, test_agent):
+        """Test launch with mocked Step Functions."""
+        with patch("mission_control.services.provisioner._get_sfn_client") as mock_client:
+            mock_client.return_value.start_execution.return_value = {
+                "executionArn": "arn:aws:states:us-east-2:123:execution:test:abc"
+            }
+
+            client.force_login(test_agent.user)
+            with patch.object(
+                client.session, "get", return_value=None
+            ):
+                # Need to patch settings for this test
+                from django.conf import settings
+                original_arn = getattr(settings, "PROVISION_STATE_MACHINE_ARN", "")
+                settings.PROVISION_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123:stateMachine:test"
+
+                try:
+                    response = client.post(
+                        reverse("mission_control:launch_range"),
+                        data={"agent_id": test_agent.id},
+                        content_type="application/json",
+                    )
+
+                    assert response.status_code == 200
+                    data = response.json()
+                    assert data["success"] is True
+                    assert data["range"]["status"] == "provisioning"
+
+                    # Verify execution ARN was stored
+                    range_obj = Range.objects.get(id=data["range"]["id"])
+                    assert range_obj.step_function_execution_arn == "arn:aws:states:us-east-2:123:execution:test:abc"
+                finally:
+                    settings.PROVISION_STATE_MACHINE_ARN = original_arn
+
+    def test_rejects_when_range_exists(self, client, test_agent, settings):
+        settings.PROVISION_STATE_MACHINE_ARN = ""
         client.force_login(test_agent.user)
 
         # Create existing range
@@ -189,11 +229,8 @@ class TestDestroyRange:
         response = client.post(reverse("mission_control:destroy_range"))
         assert response.status_code == 404
 
-    def test_successful_destroy(self, client, test_agent, monkeypatch):
-        monkeypatch.setattr(
-            "mission_control.services.provisioner.threading.Thread",
-            lambda *args, **kwargs: type("MockThread", (), {"start": lambda self: None})()
-        )
+    def test_successful_destroy(self, client, test_agent, settings):
+        settings.TEARDOWN_STATE_MACHINE_ARN = ""
         client.force_login(test_agent.user)
 
         # Create a ready range
@@ -209,12 +246,9 @@ class TestDestroyRange:
         assert data["success"] is True
         assert data["range"]["status"] == "destroying"
 
-    def test_can_destroy_failed_range(self, client, test_agent, monkeypatch):
+    def test_can_destroy_failed_range(self, client, test_agent, settings):
         """Failed ranges can be destroyed to clean up."""
-        monkeypatch.setattr(
-            "mission_control.services.provisioner.threading.Thread",
-            lambda *args, **kwargs: type("MockThread", (), {"start": lambda self: None})()
-        )
+        settings.TEARDOWN_STATE_MACHINE_ARN = ""
         client.force_login(test_agent.user)
 
         # Create a failed range
@@ -236,11 +270,8 @@ class TestDestroyRange:
 class TestLaunchRangeWhileDestroying:
     """Test that users cannot launch while a range is being destroyed."""
 
-    def test_cannot_launch_while_destroying(self, client, test_agent, monkeypatch):
-        monkeypatch.setattr(
-            "mission_control.services.provisioner.threading.Thread",
-            lambda *args, **kwargs: type("MockThread", (), {"start": lambda self: None})()
-        )
+    def test_cannot_launch_while_destroying(self, client, test_agent, settings):
+        settings.PROVISION_STATE_MACHINE_ARN = ""
         client.force_login(test_agent.user)
 
         # Create a range being destroyed
@@ -279,131 +310,138 @@ class TestListAgents:
 
 
 @pytest.mark.django_db
-class TestRangeCallback:
-    def test_missing_fields(self, client, test_agent):
+class TestSubnetIndexAllocation:
+    """Tests for subnet_index allocation in Range model."""
+
+    def test_allocates_index_on_launch(self, client, test_agent, settings):
+        """Launch should allocate a subnet_index."""
+        settings.PROVISION_STATE_MACHINE_ARN = ""
+        client.force_login(test_agent.user)
+
         response = client.post(
-            reverse("mission_control:range_callback"),
-            data={"range_id": 1},
+            reverse("mission_control:launch_range"),
+            data={"agent_id": test_agent.id},
             content_type="application/json",
         )
-        assert response.status_code == 400
-        assert "Missing required fields" in response.json()["error"]
 
-    def test_invalid_token(self, client, test_agent):
-        range_obj = Range.objects.create(
+        assert response.status_code == 200
+        range_obj = Range.objects.get(id=response.json()["range"]["id"])
+        assert range_obj.subnet_index is not None
+        assert 1 <= range_obj.subnet_index <= 254
+
+    def test_first_allocation_returns_one(self, test_agent):
+        """First allocation should return index 1."""
+        index = Range.allocate_subnet_index()
+        assert index == 1
+
+    def test_allocates_sequential_indices(self, test_agent):
+        """Allocations should fill gaps."""
+        # Create range with index 1
+        Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.PROVISIONING,
+            subnet_index=1,
         )
-        response = client.post(
-            reverse("mission_control:range_callback"),
-            data={
-                "range_id": range_obj.id,
-                "status": "ready",
-                "callback_token": "invalid_token",
-            },
-            content_type="application/json",
-        )
-        assert response.status_code == 403
-        assert "Invalid callback token" in response.json()["error"]
 
-    def test_valid_ready_callback(self, client, test_agent):
-        from mission_control.services.provisioner import _generate_callback_token
+        # Next allocation should be 2
+        index = Range.allocate_subnet_index()
+        assert index == 2
 
-        range_obj = Range.objects.create(
+    def test_reuses_destroyed_indices(self, test_agent):
+        """Destroyed ranges should free up their indices."""
+        # Create and destroy a range with index 1
+        Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
-            status=Range.Status.PROVISIONING,
+            status=Range.Status.DESTROYED,
+            subnet_index=1,
         )
-        token = _generate_callback_token(range_obj.id)
 
-        response = client.post(
-            reverse("mission_control:range_callback"),
-            data={
-                "range_id": range_obj.id,
-                "status": "ready",
-                "callback_token": token,
-                "victim_ip": "10.0.1.50",
-                "chat_url": "http://localhost:3000/chat/test",
-            },
-            content_type="application/json",
-        )
-        assert response.status_code == 200
+        # Should reuse index 1
+        index = Range.allocate_subnet_index()
+        assert index == 1
 
-        range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.READY
-        assert range_obj.victim_ip == "10.0.1.50"
-        assert range_obj.chat_url == "http://localhost:3000/chat/test"
-
-    def test_rejects_invalid_state_transition(self, client, test_agent):
-        """Callback should reject transitions from unexpected states (replay protection)."""
-        from mission_control.services.provisioner import _generate_callback_token
-
-        # Create a range that's already READY
-        range_obj = Range.objects.create(
+    def test_fills_gaps(self, test_agent):
+        """Should fill gaps in index sequence."""
+        # Create ranges with indices 1 and 3 (gap at 2)
+        Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.READY,
+            subnet_index=1,
         )
-        token = _generate_callback_token(range_obj.id)
-
-        # Try to transition to READY again (replay attack)
-        response = client.post(
-            reverse("mission_control:range_callback"),
-            data={
-                "range_id": range_obj.id,
-                "status": "ready",
-                "callback_token": token,
-            },
-            content_type="application/json",
-        )
-        assert response.status_code == 409
-        assert "Invalid state transition" in response.json()["error"]
-
-    def test_destroyed_callback_requires_destroying_state(self, client, test_agent):
-        """destroyed callback only valid when range is in DESTROYING state."""
-        from mission_control.services.provisioner import _generate_callback_token
-
-        # Range is READY, not DESTROYING
-        range_obj = Range.objects.create(
+        Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.READY,
+            subnet_index=3,
         )
-        token = _generate_callback_token(range_obj.id)
+
+        # Should fill gap at index 2
+        index = Range.allocate_subnet_index()
+        assert index == 2
+
+    def test_skips_active_indices(self, test_agent):
+        """Should not reuse indices from non-destroyed ranges."""
+        # Create ranges in various active states
+        for i, status in enumerate([
+            Range.Status.PROVISIONING,
+            Range.Status.READY,
+            Range.Status.PAUSED,
+            Range.Status.DESTROYING,
+            Range.Status.FAILED,
+        ], start=1):
+            Range.objects.create(
+                user=test_agent.user,
+                agent=test_agent,
+                status=status,
+                subnet_index=i,
+            )
+
+        # Next allocation should be 6
+        index = Range.allocate_subnet_index()
+        assert index == 6
+
+    def test_raises_when_exhausted(self, test_agent):
+        """Should raise ValueError when all indices are used."""
+        # Create ranges for all 254 indices
+        for i in range(1, 255):
+            Range.objects.create(
+                user=test_agent.user,
+                agent=test_agent,
+                status=Range.Status.READY,
+                subnet_index=i,
+            )
+
+        with pytest.raises(ValueError, match="No subnet indices available"):
+            Range.allocate_subnet_index()
+
+    def test_capacity_error_returns_503(self, client, test_agent, settings, django_user_model):
+        """API should return 503 when no capacity available."""
+        settings.PROVISION_STATE_MACHINE_ARN = ""
+        client.force_login(test_agent.user)
+
+        # Create a different user to hold the 254 ranges (so test_agent.user has no active range)
+        other_user = django_user_model.objects.create_user(
+            username="capacitytest", email="capacitytest@example.com", password="testpass"
+        )
+
+        # Create ranges for all 254 indices (owned by other_user, all DESTROYED so they don't block)
+        # Actually we need ACTIVE ranges to block the indices
+        for i in range(1, 255):
+            Range.objects.create(
+                user=other_user,
+                agent=test_agent,
+                status=Range.Status.READY,
+                subnet_index=i,
+            )
 
         response = client.post(
-            reverse("mission_control:range_callback"),
-            data={
-                "range_id": range_obj.id,
-                "status": "destroyed",
-                "callback_token": token,
-            },
+            reverse("mission_control:launch_range"),
+            data={"agent_id": test_agent.id},
             content_type="application/json",
         )
-        assert response.status_code == 409
 
-    def test_valid_destroyed_callback(self, client, test_agent):
-        from mission_control.services.provisioner import _generate_callback_token
-
-        range_obj = Range.objects.create(
-            user=test_agent.user,
-            agent=test_agent,
-            status=Range.Status.DESTROYING,
-        )
-        token = _generate_callback_token(range_obj.id)
-
-        response = client.post(
-            reverse("mission_control:range_callback"),
-            data={
-                "range_id": range_obj.id,
-                "status": "destroyed",
-                "callback_token": token,
-            },
-            content_type="application/json",
-        )
-        assert response.status_code == 200
-
-        range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYED
-        assert range_obj.destroyed_at is not None
+        assert response.status_code == 503
+        assert "No capacity available" in response.json()["error"]

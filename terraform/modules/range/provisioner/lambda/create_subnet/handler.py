@@ -13,10 +13,26 @@ import boto3
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared import get_db_connection, get_range, get_resource_tags, update_range
+from shared import (
+    get_db_connection,
+    get_env,
+    get_range,
+    get_resource_tags,
+    update_range,
+    validate_env_vars,
+)
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Required environment variables for this Lambda
+REQUIRED_ENV_VARS = [
+    "RANGE_VPC_ID",
+    "RANGE_ROUTE_TABLE_ID",
+    "RANGE_CIDR_PREFIX",
+    "DB_HOST",
+    "DB_NAME",
+]
 
 
 def handler(event: dict, context) -> dict:
@@ -29,14 +45,18 @@ def handler(event: dict, context) -> dict:
     4. Associate with route table
     5. Update Range: subnet_id, subnet_cidr
     """
+    # Validate required environment variables early
+    validate_env_vars(REQUIRED_ENV_VARS)
+
     range_id = event["range_id"]
     logger.info(f"Creating subnet for range {range_id}")
 
     # Get configuration from environment
-    range_vpc_id = os.environ["RANGE_VPC_ID"]
-    range_route_table_id = os.environ["RANGE_ROUTE_TABLE_ID"]
-    availability_zone = os.environ.get("AVAILABILITY_ZONE", "us-east-2a")
-    environment = os.environ.get("ENVIRONMENT", "prod")
+    range_vpc_id = get_env("RANGE_VPC_ID")
+    range_route_table_id = get_env("RANGE_ROUTE_TABLE_ID")
+    range_cidr_prefix = get_env("RANGE_CIDR_PREFIX")
+    availability_zone = get_env("AVAILABILITY_ZONE", "us-east-2a")
+    environment = get_env("ENVIRONMENT", "prod")
 
     # Connect to database
     conn = get_db_connection()
@@ -45,6 +65,12 @@ def handler(event: dict, context) -> dict:
         range_data = get_range(conn, range_id)
         if not range_data:
             raise ValueError(f"Range {range_id} not found")
+
+        # Validate range is in provisioning state
+        if range_data["status"] != "provisioning":
+            raise ValueError(
+                f"Range {range_id} is not in provisioning state: {range_data['status']}"
+            )
 
         subnet_index = range_data["subnet_index"]
         if subnet_index is None:
@@ -62,8 +88,8 @@ def handler(event: dict, context) -> dict:
             }
 
         # Calculate CIDR block
-        # Range VPC is 10.1.0.0/16, each range gets 10.1.{index}.0/24
-        subnet_cidr = f"10.1.{subnet_index}.0/24"
+        # Range VPC uses {prefix}.0.0/16, each range gets {prefix}.{index}.0/24
+        subnet_cidr = f"{range_cidr_prefix}.{subnet_index}.0/24"
         logger.info(f"Creating subnet with CIDR {subnet_cidr}")
 
         # Create subnet

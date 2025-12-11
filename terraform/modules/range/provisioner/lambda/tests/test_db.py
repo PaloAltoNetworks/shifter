@@ -6,41 +6,47 @@ import os
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "shared"))
-from db import validate_uuid, ALLOWED_UPDATE_FIELDS, update_range
+from db import validate_range_id, ALLOWED_UPDATE_FIELDS, update_range
 
 
-class TestValidateUuid:
-    """Tests for UUID validation."""
+class TestValidateRangeId:
+    """Tests for range_id validation (positive integer)."""
 
-    def test_valid_uuid_lowercase(self):
-        assert validate_uuid("12345678-1234-1234-1234-123456789abc") is True
+    def test_valid_integer(self):
+        assert validate_range_id(123) is True
 
-    def test_valid_uuid_uppercase(self):
-        assert validate_uuid("12345678-1234-1234-1234-123456789ABC") is True
+    def test_valid_integer_string(self):
+        assert validate_range_id("456") is True
 
-    def test_valid_uuid_mixed_case(self):
-        assert validate_uuid("12345678-ABCD-1234-abcd-123456789AbC") is True
+    def test_valid_large_integer(self):
+        assert validate_range_id(9223372036854775807) is True  # BigInt max
 
-    def test_invalid_uuid_too_short(self):
-        assert validate_uuid("12345678-1234-1234-1234-12345678") is False
+    def test_invalid_zero(self):
+        assert validate_range_id(0) is False
 
-    def test_invalid_uuid_too_long(self):
-        assert validate_uuid("12345678-1234-1234-1234-123456789abcdef") is False
+    def test_invalid_negative(self):
+        assert validate_range_id(-1) is False
 
-    def test_invalid_uuid_wrong_format(self):
-        assert validate_uuid("not-a-valid-uuid-at-all") is False
+    def test_invalid_string(self):
+        assert validate_range_id("not-a-number") is False
 
-    def test_invalid_uuid_no_hyphens(self):
-        assert validate_uuid("123456781234123412341234567890ab") is False
+    def test_invalid_uuid(self):
+        # UUIDs are not valid range_ids (we use integer PKs)
+        assert validate_range_id("12345678-1234-1234-1234-123456789abc") is False
 
-    def test_invalid_uuid_sql_injection(self):
-        assert validate_uuid("'; DROP TABLE users; --") is False
+    def test_invalid_sql_injection(self):
+        assert validate_range_id("'; DROP TABLE users; --") is False
 
-    def test_invalid_uuid_empty(self):
-        assert validate_uuid("") is False
+    def test_invalid_empty(self):
+        assert validate_range_id("") is False
 
-    def test_invalid_uuid_spaces(self):
-        assert validate_uuid("12345678-1234-1234-1234-123456789abc ") is False
+    def test_invalid_none(self):
+        assert validate_range_id(None) is False
+
+    def test_invalid_float(self):
+        # Float values are coerced to int, so 1.5 -> 1 which is valid
+        # But we should ensure the type handling is consistent
+        assert validate_range_id(1.5) is True  # int(1.5) = 1 > 0
 
 
 class TestAllowedUpdateFields:
@@ -69,17 +75,22 @@ class TestAllowedUpdateFields:
 class TestUpdateRangeValidation:
     """Tests for update_range input validation (without DB connection)."""
 
-    def test_rejects_invalid_uuid(self):
+    def test_rejects_invalid_range_id(self):
         """Should reject SQL injection in range_id."""
         with pytest.raises(ValueError, match="Invalid range_id format"):
             update_range(None, "'; DROP TABLE ranges; --", status="ready")
+
+    def test_rejects_negative_range_id(self):
+        """Should reject negative range_id."""
+        with pytest.raises(ValueError, match="Invalid range_id format"):
+            update_range(None, -1, status="ready")
 
     def test_rejects_invalid_field_name(self):
         """Should reject SQL injection in field names."""
         with pytest.raises(ValueError, match="Invalid field names"):
             update_range(
                 None,
-                "12345678-1234-1234-1234-123456789abc",
+                123,
                 **{"status; DROP TABLE ranges; --": "ready"}
             )
 
@@ -88,11 +99,11 @@ class TestUpdateRangeValidation:
         with pytest.raises(ValueError, match="Invalid field names"):
             update_range(
                 None,
-                "12345678-1234-1234-1234-123456789abc",
+                123,
                 user_id=999,  # Not allowed
             )
 
     def test_empty_fields_returns_early(self):
         """Should return without error if no fields provided."""
         # Should not raise - returns early before validation
-        update_range(None, "invalid-uuid")  # UUID not checked if no fields
+        update_range(None, "invalid")  # range_id not checked if no fields

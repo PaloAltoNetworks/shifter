@@ -229,12 +229,16 @@ module "provisioner" {
   rds_security_group_id = module.rds.db_security_group_id
 
   # Victim Configuration
-  victim_ami_id           = var.victim_ami_id
-  victim_instance_type    = var.victim_instance_type
+  victim_ami_id            = var.victim_ami_id
+  victim_instance_type     = var.victim_instance_type
   victim_security_group_id = data.terraform_remote_state.range.outputs.victim_security_group_id
-  agent_s3_bucket         = var.user_storage_bucket
+  agent_s3_bucket          = var.user_storage_bucket
 
   # LibreChat Configuration
   librechat_base_url = var.librechat_base_url
+
+  # Monitoring Configuration
+  enable_alarms = var.enable_provisioner_alarms
+  alarm_email   = var.provisioner_alarm_email
 }
 

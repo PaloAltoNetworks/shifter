@@ -1,7 +1,7 @@
 """Mission Control models."""
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 
 class OperatingSystem(models.Model):
@@ -147,6 +147,7 @@ class Range(models.Model):
     # Status and timestamps
     error_message = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     ready_at = models.DateTimeField(null=True, blank=True)
     paused_at = models.DateTimeField(null=True, blank=True)
     destroyed_at = models.DateTimeField(null=True, blank=True)
@@ -200,6 +201,46 @@ class Range(models.Model):
                 cls.Status.FAILED,
             ],
         ).first()
+
+    # Subnet index allocation constants
+    # Range VPC uses 10.1.0.0/16, each range gets 10.1.{index}.0/24
+    # Reserve index 0 (network) and 255 (broadcast), use 1-254
+    SUBNET_INDEX_MIN = 1
+    SUBNET_INDEX_MAX = 254
+
+    @classmethod
+    def allocate_subnet_index(cls) -> int:
+        """
+        Allocate the next available subnet index for a new range.
+
+        Uses SELECT FOR UPDATE to prevent race conditions when multiple
+        ranges are being created concurrently.
+
+        Returns:
+            int: The allocated subnet index (1-254)
+
+        Raises:
+            ValueError: If no subnet indices are available (254 active ranges)
+        """
+        with transaction.atomic():
+            # Lock rows to prevent race conditions
+            # Get all subnet_index values currently in use by non-destroyed ranges
+            used_indices = set(
+                cls.objects.select_for_update()
+                .exclude(status=cls.Status.DESTROYED)
+                .exclude(subnet_index__isnull=True)
+                .values_list("subnet_index", flat=True)
+            )
+
+            # Find the first available index
+            for index in range(cls.SUBNET_INDEX_MIN, cls.SUBNET_INDEX_MAX + 1):
+                if index not in used_indices:
+                    return index
+
+            raise ValueError(
+                f"No subnet indices available. Maximum {cls.SUBNET_INDEX_MAX} "
+                "concurrent ranges supported. Destroy some ranges first."
+            )
 
 
 class ActivityLog(models.Model):

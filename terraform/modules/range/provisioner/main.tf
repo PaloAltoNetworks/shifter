@@ -14,13 +14,13 @@ locals {
 
   # Common environment variables for all Lambdas
   common_env_vars = {
-    DB_HOST       = var.db_host
-    DB_PORT       = tostring(var.db_port)
-    DB_NAME       = var.db_name
-    DB_USER       = "provisioner_lambda"
-    AWS_REGION    = data.aws_region.current.name
-    ENVIRONMENT   = var.environment
-    RANGE_VPC_ID  = var.range_vpc_id
+    DB_HOST      = var.db_host
+    DB_PORT      = tostring(var.db_port)
+    DB_NAME      = var.db_name
+    DB_USER      = "provisioner_lambda"
+    AWS_REGION   = data.aws_region.current.name
+    ENVIRONMENT  = var.environment
+    RANGE_VPC_ID = var.range_vpc_id
   }
 
   # Lambda source directories
@@ -242,6 +242,44 @@ resource "aws_lambda_function" "cleanup" {
 
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-cleanup"
+    Module = "provisioner"
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Find Stale Ranges Lambda
+# ------------------------------------------------------------------------------
+
+data "archive_file" "find_stale_ranges" {
+  type        = "zip"
+  source_dir  = "${local.lambda_source_dir}/find_stale_ranges"
+  output_path = "${path.module}/.terraform/find_stale_ranges.zip"
+}
+
+resource "aws_lambda_function" "find_stale_ranges" {
+  function_name = "${var.name_prefix}-find-stale-ranges"
+  role          = aws_iam_role.lambda.arn
+  handler       = "handler.handler"
+  runtime       = local.lambda_runtime
+  timeout       = 60 # Shorter timeout for this lightweight function
+  memory_size   = 128
+
+  filename         = data.archive_file.find_stale_ranges.output_path
+  source_code_hash = data.archive_file.find_stale_ranges.output_base64sha256
+
+  layers = [aws_lambda_layer_version.shared.arn]
+
+  vpc_config {
+    subnet_ids         = var.portal_subnet_ids
+    security_group_ids = [aws_security_group.lambda.id]
+  }
+
+  environment {
+    variables = local.common_env_vars
+  }
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-find-stale-ranges"
     Module = "provisioner"
   })
 }

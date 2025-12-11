@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared import get_db_connection
+from shared import get_db_connection, validate_env_vars
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -25,6 +25,12 @@ logger.setLevel(logging.INFO)
 PROVISIONING_TIMEOUT_MINUTES = 60  # 1 hour
 DESTROYING_TIMEOUT_MINUTES = 30  # 30 minutes
 
+# Required environment variables for this Lambda
+REQUIRED_ENV_VARS = [
+    "DB_HOST",
+    "DB_NAME",
+]
+
 
 def handler(event: dict, context) -> dict:
     """
@@ -32,6 +38,9 @@ def handler(event: dict, context) -> dict:
 
     Returns list of stale ranges with their IDs and reasons.
     """
+    # Validate required environment variables early
+    validate_env_vars(REQUIRED_ENV_VARS)
+
     logger.info("Checking for stale ranges")
 
     stale_ranges = []

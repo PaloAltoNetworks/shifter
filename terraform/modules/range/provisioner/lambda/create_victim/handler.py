@@ -17,13 +17,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from shared import (
     get_agent_config,
     get_db_connection,
+    get_env,
     get_range,
     get_resource_tags,
     update_range,
+    validate_env_vars,
 )
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Required environment variables for this Lambda
+REQUIRED_ENV_VARS = [
+    "VICTIM_AMI_ID",
+    "VICTIM_SECURITY_GROUP_ID",
+    "AGENT_S3_BUCKET",
+    "DB_HOST",
+    "DB_NAME",
+]
 
 
 def validate_s3_path(value: str) -> bool:
@@ -92,15 +103,18 @@ def handler(event: dict, context) -> dict:
     4. Tag with shifter:range_id, shifter:user_id
     5. Update Range: victim_ip, victim_instance_id
     """
+    # Validate required environment variables early
+    validate_env_vars(REQUIRED_ENV_VARS)
+
     range_id = event["range_id"]
     logger.info(f"Creating victim instance for range {range_id}")
 
     # Get configuration from environment
-    victim_ami_id = os.environ["VICTIM_AMI_ID"]
-    victim_instance_type = os.environ.get("VICTIM_INSTANCE_TYPE", "t3.micro")
-    victim_security_group_id = os.environ["VICTIM_SECURITY_GROUP_ID"]
-    s3_bucket = os.environ["AGENT_S3_BUCKET"]
-    environment = os.environ.get("ENVIRONMENT", "prod")
+    victim_ami_id = get_env("VICTIM_AMI_ID")
+    victim_instance_type = get_env("VICTIM_INSTANCE_TYPE", "t3.micro")
+    victim_security_group_id = get_env("VICTIM_SECURITY_GROUP_ID")
+    s3_bucket = get_env("AGENT_S3_BUCKET")
+    environment = get_env("ENVIRONMENT", "prod")
 
     # Connect to database
     conn = get_db_connection()

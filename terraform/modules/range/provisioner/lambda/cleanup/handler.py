@@ -64,12 +64,17 @@ def handler(event: dict, context) -> dict:
             return {"range_id": range_id, "cleaned_up": []}
 
         # Validate range is in a state that allows cleanup
-        # Valid states: destroying (user-initiated), provisioning (failure), failed (stale cleanup)
-        valid_cleanup_states = {"destroying", "provisioning", "failed"}
+        # Valid states for mark_failed=true: provisioning, failed (error cleanup)
+        # Valid states for mark_failed=false: ready, destroying (user-initiated teardown)
+        if mark_failed:
+            valid_cleanup_states = {"provisioning", "failed"}
+        else:
+            valid_cleanup_states = {"ready", "destroying"}
+
         if range_data["status"] not in valid_cleanup_states:
             raise ValueError(
                 f"Range {range_id} cannot be cleaned up in state: {range_data['status']}. "
-                f"Valid states: {valid_cleanup_states}"
+                f"Valid states for mark_failed={mark_failed}: {valid_cleanup_states}"
             )
 
         # 1. Terminate victim EC2 instance

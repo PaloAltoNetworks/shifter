@@ -23,6 +23,5 @@ urlpatterns = [
     path("api/range/launch/", views.launch_range, name="launch_range"),
     path("api/range/cancel/", views.cancel_range, name="cancel_range"),
     path("api/range/destroy/", views.destroy_range, name="destroy_range"),
-    path("api/range/callback/", views.range_callback, name="range_callback"),
     path("api/agents/", views.list_agents_for_launch, name="list_agents"),
 ]

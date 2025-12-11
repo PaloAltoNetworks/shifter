@@ -602,11 +602,22 @@ def launch_range(request):
     if not agent:
         return JsonResponse({"error": "Agent not found"}, status=404)
 
-    # Create range record
+    # Allocate subnet index for this range
+    try:
+        subnet_index = Range.allocate_subnet_index()
+    except ValueError as e:
+        logger.error("Failed to allocate subnet index: %s", e)
+        return JsonResponse(
+            {"error": "No capacity available. Please try again later or destroy existing ranges."},
+            status=503,
+        )
+
+    # Create range record with allocated subnet index
     range_obj = Range.objects.create(
         user=request.user,
         agent=agent,
         status=Range.Status.PROVISIONING,
+        subnet_index=subnet_index,
     )
 
     # Log activity
@@ -625,9 +636,14 @@ def launch_range(request):
         agent.name,
     )
 
-    # Trigger provisioning (stub for now - immediately schedules callback)
+    # Trigger provisioning via Step Functions
     from .services.provisioner import start_provisioning
-    start_provisioning(range_obj.id)
+    execution_arn = start_provisioning(range_obj.id)
+
+    # Store execution ARN if returned (None in local dev without Step Functions)
+    if execution_arn:
+        range_obj.step_function_execution_arn = execution_arn
+        range_obj.save(update_fields=["step_function_execution_arn"])
 
     return JsonResponse({
         "success": True,
@@ -699,169 +715,19 @@ def destroy_range(request):
         range_to_destroy.id,
     )
 
-    # Trigger teardown (stub for now - immediately marks destroyed)
+    # Trigger teardown via Step Functions
     from .services.provisioner import start_teardown
-    start_teardown(range_to_destroy.id)
+    execution_arn = start_teardown(range_to_destroy.id)
+
+    # Store execution ARN if returned (None in local dev without Step Functions)
+    if execution_arn:
+        range_to_destroy.step_function_execution_arn = execution_arn
+        range_to_destroy.save(update_fields=["step_function_execution_arn"])
 
     return JsonResponse({
         "success": True,
         "range": _range_to_json(range_to_destroy),
     })
-
-
-@csrf_exempt
-@require_POST
-def range_callback(request):
-    """
-    Callback endpoint for provisioner (Step Functions or stub).
-
-    This endpoint is called by the provisioning system when infrastructure
-    is ready or has failed. It does NOT require login since it's called
-    by backend services.
-
-    Request body (JSON):
-        - range_id: Range ID
-        - status: "ready" or "failed"
-        - callback_token: HMAC-signed token for verification
-        - victim_ip: IP address (if ready)
-        - chat_url: LibreChat URL (if ready)
-        - error_message: Error details (if failed)
-
-    Security: Uses HMAC-signed callback_token to verify authenticity.
-    """
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    range_id = data.get("range_id")
-    status = data.get("status")
-    callback_token = data.get("callback_token")
-
-    if not all([range_id, status, callback_token]):
-        return JsonResponse({"error": "Missing required fields"}, status=400)
-
-    # Verify callback token
-    from .services.provisioner import verify_callback_token
-    if not verify_callback_token(range_id, callback_token):
-        logger.warning("Invalid callback token for range_id=%s", range_id)
-        return JsonResponse({"error": "Invalid callback token"}, status=403)
-
-    # Get the range
-    try:
-        range_obj = Range.objects.get(id=range_id)
-    except Range.DoesNotExist:
-        return JsonResponse({"error": "Range not found"}, status=404)
-
-    # Validate state transitions to prevent replay attacks
-    valid_transitions = {
-        "ready": [Range.Status.PROVISIONING, Range.Status.RESUMING],
-        "failed": [Range.Status.PROVISIONING, Range.Status.RESUMING],
-        "destroyed": [Range.Status.DESTROYING],
-    }
-
-    allowed_states = valid_transitions.get(status, [])
-    if range_obj.status not in allowed_states:
-        logger.warning(
-            "Invalid state transition for range_id=%s: %s -> %s (expected from %s)",
-            range_id,
-            range_obj.status,
-            status,
-            allowed_states,
-        )
-        return JsonResponse(
-            {"error": f"Invalid state transition: {range_obj.status} -> {status}"},
-            status=409,
-        )
-
-    # Process callback based on status
-    if status == "ready":
-        victim_ip = data.get("victim_ip")
-        chat_url = data.get("chat_url")
-
-        # Validate victim_ip format (defense-in-depth)
-        if victim_ip:
-            try:
-                ipaddress.ip_address(victim_ip)
-            except ValueError:
-                logger.warning("Invalid victim_ip format in callback: %s", victim_ip)
-                return JsonResponse({"error": "Invalid victim_ip format"}, status=400)
-
-        # Validate chat_url format and domain (defense-in-depth)
-        if chat_url:
-            parsed = urlparse(chat_url)
-            if parsed.scheme not in ("http", "https") or not parsed.netloc:
-                logger.warning("Invalid chat_url format in callback: %s", chat_url)
-                return JsonResponse({"error": "Invalid chat_url format"}, status=400)
-
-        range_obj.status = Range.Status.READY
-        range_obj.ready_at = timezone.now()
-        range_obj.victim_ip = victim_ip
-        range_obj.chat_url = chat_url
-        range_obj.save(update_fields=["status", "ready_at", "victim_ip", "chat_url"])
-
-        ActivityLog.log(
-            "range_ready",
-            user=range_obj.user,
-            range_id=range_obj.id,
-            victim_ip=range_obj.victim_ip,
-        )
-
-        logger.info(
-            "Range ready: range_id=%s user=%s victim_ip=%s",
-            range_obj.id,
-            range_obj.user.email,
-            range_obj.victim_ip,
-        )
-
-    elif status == "failed":
-        # Sanitize error message: truncate and strip any HTML (defense-in-depth)
-        error_message = data.get("error_message", "Unknown error")
-        if error_message:
-            # Truncate to reasonable length
-            error_message = str(error_message)[:1000]
-            # Strip HTML tags (basic sanitization)
-            error_message = re.sub(r"<[^>]+>", "", error_message)
-
-        range_obj.status = Range.Status.FAILED
-        range_obj.error_message = error_message
-        range_obj.save(update_fields=["status", "error_message"])
-
-        ActivityLog.log(
-            "range_failed",
-            user=range_obj.user,
-            range_id=range_obj.id,
-            error=range_obj.error_message,
-        )
-
-        logger.error(
-            "Range failed: range_id=%s user=%s error=%s",
-            range_obj.id,
-            range_obj.user.email,
-            range_obj.error_message,
-        )
-
-    elif status == "destroyed":
-        range_obj.status = Range.Status.DESTROYED
-        range_obj.destroyed_at = timezone.now()
-        range_obj.save(update_fields=["status", "destroyed_at"])
-
-        ActivityLog.log(
-            "range_destroyed",
-            user=range_obj.user,
-            range_id=range_obj.id,
-        )
-
-        logger.info(
-            "Range destroyed: range_id=%s user=%s",
-            range_obj.id,
-            range_obj.user.email,
-        )
-
-    else:
-        return JsonResponse({"error": f"Unknown status: {status}"}, status=400)
-
-    return JsonResponse({"success": True})
 
 
 @login_required

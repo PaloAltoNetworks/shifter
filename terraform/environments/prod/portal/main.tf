@@ -34,6 +34,19 @@ data "terraform_remote_state" "foundation" {
 }
 
 # ------------------------------------------------------------------------------
+# Remote State - Range VPC
+# ------------------------------------------------------------------------------
+
+data "terraform_remote_state" "range" {
+  backend = "s3"
+  config = {
+    bucket = "shifter-infra-eedf1871-f634-4712-981a-5c6ba0738704"
+    key    = "prod/range/terraform.tfstate"
+    region = "us-east-2"
+  }
+}
+
+# ------------------------------------------------------------------------------
 # VPC
 # ------------------------------------------------------------------------------
 
@@ -132,6 +145,10 @@ module "ec2" {
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port
   root_volume_size = var.ec2_root_volume_size
+  step_function_arns = [
+    module.provisioner.provision_range_state_machine_arn,
+    module.provisioner.teardown_range_state_machine_arn,
+  ]
 
   tags = var.tags
 }
@@ -182,5 +199,46 @@ resource "aws_secretsmanager_secret_version" "app" {
   secret_string = jsonencode({
     django_secret_key = random_password.django_secret_key.result
   })
+}
+
+# ------------------------------------------------------------------------------
+# Provisioner (Step Functions + Lambda for range provisioning)
+# ------------------------------------------------------------------------------
+
+module "provisioner" {
+  source = "../../../modules/range/provisioner"
+
+  name_prefix = local.name_prefix
+  environment = var.environment
+  tags        = var.tags
+
+  # Portal VPC (where Lambda runs)
+  portal_vpc_id     = module.vpc.vpc_id
+  portal_subnet_ids = module.vpc.private_subnet_ids
+
+  # Range VPC (where resources are created)
+  range_vpc_id         = data.terraform_remote_state.range.outputs.vpc_id
+  range_route_table_id = data.terraform_remote_state.range.outputs.public_route_table_id
+  availability_zone    = module.vpc.availability_zones[0]
+
+  # RDS Configuration (IAM DB auth)
+  db_host               = module.rds.db_instance_address
+  db_port               = 5432
+  db_name               = var.db_name
+  db_resource_id        = module.rds.db_resource_id
+  rds_security_group_id = module.rds.db_security_group_id
+
+  # Victim Configuration
+  victim_ami_id            = var.victim_ami_id
+  victim_instance_type     = var.victim_instance_type
+  victim_security_group_id = data.terraform_remote_state.range.outputs.victim_security_group_id
+  agent_s3_bucket          = var.user_storage_bucket
+
+  # LibreChat Configuration
+  librechat_base_url = var.librechat_base_url
+
+  # Monitoring Configuration
+  enable_alarms = var.enable_provisioner_alarms
+  alarm_email   = var.provisioner_alarm_email
 }
 

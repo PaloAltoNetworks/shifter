@@ -45,3 +45,8 @@ output "db_credentials_secret_name" {
   description = "Name of the Secrets Manager secret containing DB credentials"
   value       = aws_secretsmanager_secret.db_credentials.name
 }
+
+output "db_resource_id" {
+  description = "Resource ID of the RDS instance (for IAM DB authentication)"
+  value       = aws_db_instance.this.resource_id
+}

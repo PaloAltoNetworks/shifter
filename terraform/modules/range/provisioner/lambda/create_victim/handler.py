@@ -135,7 +135,7 @@ def handler(event: dict, context) -> dict:
             raise ValueError(f"Range {range_id} has no subnet_id - run create_subnet first")
 
         user_id = range_data["user_id"]
-        agent_config_id = range_data["agent_config_id"]
+        agent_id = range_data["agent_id"]
 
         # Check if victim already exists (idempotent)
         if range_data["victim_instance_id"]:
@@ -147,9 +147,9 @@ def handler(event: dict, context) -> dict:
             }
 
         # Get agent config for S3 key
-        agent_config = get_agent_config(conn, agent_config_id)
+        agent_config = get_agent_config(conn, agent_id)
         if not agent_config:
-            raise ValueError(f"AgentConfig {agent_config_id} not found")
+            raise ValueError(f"AgentConfig {agent_id} not found")
 
         agent_s3_key = agent_config["s3_key"]
         logger.info(f"Using agent installer: s3://{s3_bucket}/{agent_s3_key}")

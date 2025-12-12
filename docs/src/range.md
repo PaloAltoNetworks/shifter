@@ -110,22 +110,38 @@ In Phase 2, Kali egress will be restricted to Victim only (no internet access fr
 
 ### Kali Linux
 
-The Kali box uses the **official Kali Linux AMI from Offensive Security** via AWS Marketplace.
+The Kali box uses a **pre-baked AMI** with pentesting tools already installed:
 
-1. **Subscribe** (free): [AWS Marketplace - Kali Linux](https://aws.amazon.com/marketplace/pp/prodview-fznsw3f7mq7to)
-2. **Query the latest AMI** after subscribing:
+| AMI | Description |
+|-----|-------------|
+| `ami-01ca670fc1154a1d6` | `shifter-kali-20251212` - Pre-baked with SSM, kali-linux-headless, hexstrike-ai |
 
-```bash
-aws ec2 describe-images --region us-east-2 \
-  --owners 679593333241 \
-  --filters "Name=name,Values=kali-last-snapshot-amd64-*-804fcc46-63fc-4eb6-85a1-50e66d6c7215" \
-  --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name]' \
-  --output table
-```
+**Included:**
+- AWS SSM Agent (for management without SSH keys)
+- `kali-linux-headless` metapackage (nmap, metasploit, hydra, etc.)
+- `hexstrike-ai` (AI-powered MCP pentesting)
+- 40GB root volume
 
-The product ID `804fcc46-63fc-4eb6-85a1-50e66d6c7215` is embedded in the AMI name — this verifies you're using the official image, not a lookalike.
+**To re-bake the AMI** (e.g., to update packages):
 
-> **Note:** The AMI won't appear in `describe-images` until you subscribe.
+1. Subscribe to [AWS Marketplace - Kali Linux](https://aws.amazon.com/marketplace/pp/prodview-fznsw3f7mq7to) (free)
+2. Launch from the marketplace AMI with a 40GB root volume
+3. Install SSM agent and packages:
+   ```bash
+   wget -q https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
+   sudo dpkg -i amazon-ssm-agent.deb
+   sudo systemctl enable amazon-ssm-agent
+   sudo apt update
+   sudo apt install -y kali-linux-headless hexstrike-ai
+   ```
+4. Harden for AMI:
+   ```bash
+   sudo shred -u /etc/ssh/*_key /etc/ssh/*_key.pub
+   rm -f ~/.ssh/authorized_keys
+   sudo truncate -s 0 /etc/machine-id
+   sudo apt clean
+   ```
+5. Create AMI: `aws ec2 create-image --instance-id <id> --name "shifter-kali-$(date +%Y%m%d)" --no-reboot`
 
 ### Victim
 

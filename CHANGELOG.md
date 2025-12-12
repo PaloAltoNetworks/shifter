@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - All workflows support environment selection via branch or manual dispatch
 - Streamline GitHub Actions workflows for consistency
+- Utility scripts work with dev and prod environments
 
 ## [0.3.6] - 2025-12-11
 

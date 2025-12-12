@@ -28,7 +28,7 @@
 
         html, body {
             height: 100%;
-            overflow: hidden;
+            overflow-x: hidden;
         }
 
         body {
@@ -328,7 +328,7 @@
             border-radius: 3px;
             padding: 0.25rem 0.5rem;
             margin: 0 0.25rem;
-            font-family: 'Roboto', monospace;
+            font-family: monospace;
         }
 
         /* CTA Button */
@@ -464,7 +464,7 @@
                 <ul class="feature-list">
                     <li>XDR or XSIAM tenant</li>
                     <li>XDR/XSIAM agent installer</li>
-                    <li>Browser</li>
+                    <li>Modern browser (Chrome, Firefox, Safari, Edge)</li>
                 </ul>
                 <p class="note-text">
                     That's it. No servers. No VPNs. No manual setup.
@@ -608,10 +608,8 @@
             goToSlide(index) {
                 if (index < 0 || index >= this.totalSlides) return;
                 
-                this.slides[this.currentSlide].classList.remove('active');
                 this.currentSlide = index;
-                this.slides[this.currentSlide].classList.add('active');
-                this.updateControls();
+                this.updateSlide();
             }
             
             nextSlide() {

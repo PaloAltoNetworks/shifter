@@ -7,18 +7,42 @@
     <title>SHIFTER // {{ page_title }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/png" href="{% static 'images/logo-transparent.png' %}">
     <style>
         :root {
-            --neon-green: #39FF14;
-            --palo-orange: #FA582D;
-            --black: #000000;
-            --surface: #0D0D0D;
-            --surface-light: #1A1A1A;
-            --white: #FFFFFF;
-            --red: #FF4444;
-            --gray: #666666;
+            /* Cortex XSIAM Color Palette */
+            --xsiam-bg-primary: #0A0C0F;
+            --xsiam-bg-secondary: #13151A;
+            --xsiam-bg-elevated: #1A1D24;
+            --xsiam-bg-hover: #21242C;
+            --xsiam-border: #2A2D35;
+            --xsiam-border-light: #35383F;
+            
+            --xsiam-purple: #8B5CF6;
+            --xsiam-purple-light: #A78BFA;
+            --xsiam-purple-dark: #7C3AED;
+            --xsiam-blue: #6366F1;
+            --xsiam-blue-light: #818CF8;
+            
+            --xsiam-text-primary: #F9FAFB;
+            --xsiam-text-secondary: #9CA3AF;
+            --xsiam-text-tertiary: #6B7280;
+            
+            --xsiam-success: #10B981;
+            --xsiam-warning: #F59E0B;
+            --xsiam-error: #EF4444;
+            --xsiam-info: #3B82F6;
+            
+            /* Legacy compatibility (for gradual migration) */
+            --neon-green: #10B981;
+            --palo-orange: #F59E0B;
+            --black: #0A0C0F;
+            --surface: #13151A;
+            --surface-light: #1A1D24;
+            --white: #F9FAFB;
+            --red: #EF4444;
+            --gray: #6B7280;
         }
 
         * {
@@ -32,20 +56,21 @@
         }
 
         body {
-            font-family: 'Roboto', sans-serif;
-            background: var(--black);
-            color: var(--white);
+            font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Roboto', sans-serif;
+            background: var(--xsiam-bg-primary);
+            color: var(--xsiam-text-primary);
             display: flex;
             flex-direction: column;
             min-height: 100vh;
+            line-height: 1.5;
         }
 
         /* Header */
         .header {
-            background: var(--surface);
-            border-bottom: 1px solid rgba(57, 255, 20, 0.15);
+            background: var(--xsiam-bg-secondary);
+            border-bottom: 1px solid var(--xsiam-border);
             padding: 0 1.5rem;
-            height: 60px;
+            height: 64px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -54,6 +79,7 @@
             left: 0;
             right: 0;
             z-index: 100;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
         }
 
         .header-left {
@@ -69,13 +95,14 @@
 
         .header-title {
             font-size: 0.875rem;
-            font-weight: 500;
-            color: rgba(255, 255, 255, 0.7);
-            letter-spacing: 0.1em;
+            font-weight: 600;
+            color: var(--xsiam-text-secondary);
+            letter-spacing: 0.025em;
         }
 
         .header-title span {
-            color: var(--neon-green);
+            color: var(--xsiam-purple);
+            font-weight: 700;
         }
 
         .header-right {
@@ -86,64 +113,71 @@
 
         .user-info {
             font-size: 0.875rem;
-            color: rgba(255, 255, 255, 0.7);
+            color: var(--xsiam-text-secondary);
+            font-weight: 500;
         }
 
         .btn-logout {
             background: transparent;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            color: var(--white);
+            border: 1px solid var(--xsiam-border-light);
+            color: var(--xsiam-text-primary);
             padding: 0.5rem 1rem;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 0.875rem;
+            font-weight: 500;
             cursor: pointer;
-            transition: border-color 0.2s;
+            transition: all 0.2s;
             text-decoration: none;
         }
 
         .btn-logout:hover {
-            border-color: var(--neon-green);
-            color: var(--neon-green);
+            background: var(--xsiam-bg-hover);
+            border-color: var(--xsiam-purple);
+            color: var(--xsiam-purple);
         }
 
         /* Layout */
         .layout {
             display: flex;
-            padding-top: 60px;
+            padding-top: 64px;
             min-height: 100vh;
         }
 
         /* Sidebar */
         .sidebar {
-            width: 200px;
-            background: var(--surface);
-            border-right: 1px solid rgba(57, 255, 20, 0.15);
+            width: 240px;
+            background: var(--xsiam-bg-secondary);
+            border-right: 1px solid var(--xsiam-border);
             position: fixed;
-            top: 60px;
+            top: 64px;
             left: 0;
             bottom: 0;
-            padding: 1.5rem 0 1.5rem 0.5rem;
+            padding: 1.5rem 0;
+            overflow-y: auto;
         }
 
         .nav-item {
-            display: block;
+            display: flex;
+            align-items: center;
             padding: 0.75rem 1.5rem;
-            color: rgba(255, 255, 255, 0.7);
+            color: var(--xsiam-text-secondary);
             text-decoration: none;
             font-size: 0.875rem;
+            font-weight: 500;
             border-left: 3px solid transparent;
             transition: all 0.2s;
+            margin: 0.125rem 0;
         }
 
         .nav-item:hover {
-            color: var(--white);
-            background: rgba(255, 255, 255, 0.05);
+            color: var(--xsiam-text-primary);
+            background: var(--xsiam-bg-hover);
         }
 
         .nav-item.active {
-            color: var(--neon-green);
-            border-left-color: var(--neon-green);
-            background: rgba(57, 255, 20, 0.05);
+            color: var(--xsiam-purple);
+            border-left-color: var(--xsiam-purple);
+            background: rgba(139, 92, 246, 0.1);
         }
 
         .sidebar-footer {
@@ -153,15 +187,16 @@
             right: 0;
             padding: 0 1.5rem;
             font-size: 0.75rem;
-            color: rgba(255, 255, 255, 0.3);
+            color: var(--xsiam-text-tertiary);
         }
 
         /* Main content */
         .main {
             flex: 1;
-            margin-left: 200px;
+            margin-left: 240px;
             padding: 2rem;
-            min-height: calc(100vh - 60px);
+            min-height: calc(100vh - 64px);
+            background: var(--xsiam-bg-primary);
         }
 
         .page-header {
@@ -169,35 +204,41 @@
         }
 
         .page-title {
-            font-size: 1.5rem;
-            font-weight: 500;
-            color: var(--white);
+            font-size: 1.875rem;
+            font-weight: 700;
+            color: var(--xsiam-text-primary);
             margin-bottom: 0.5rem;
+            letter-spacing: -0.025em;
         }
 
         .page-subtitle {
             font-size: 0.875rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: var(--xsiam-text-secondary);
+            font-weight: 400;
         }
 
         /* Cards */
         .card {
-            background: var(--surface);
-            border: 1px solid rgba(57, 255, 20, 0.15);
-            border-radius: 4px;
+            background: var(--xsiam-bg-secondary);
+            border: 1px solid var(--xsiam-border);
+            border-radius: 8px;
             padding: 1.5rem;
-            margin-bottom: 1rem;
-            transition: border-color 0.2s;
+            margin-bottom: 1.5rem;
+            transition: all 0.2s;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
         }
 
         .card:hover {
-            border-color: rgba(57, 255, 20, 0.3);
+            border-color: var(--xsiam-border-light);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
 
         .card-title {
-            font-size: 1rem;
-            font-weight: 500;
+            font-size: 1.125rem;
+            font-weight: 600;
             margin-bottom: 1rem;
+            color: var(--xsiam-text-primary);
+            letter-spacing: -0.025em;
         }
 
         /* Buttons */
@@ -205,45 +246,50 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 0.75rem 1.5rem;
-            border-radius: 4px;
+            padding: 0.625rem 1.25rem;
+            border-radius: 6px;
             font-size: 0.875rem;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
             text-decoration: none;
             border: none;
+            letter-spacing: 0.025em;
         }
 
         .btn-primary {
-            background: var(--neon-green);
-            color: var(--black);
+            background: linear-gradient(135deg, var(--xsiam-purple), var(--xsiam-purple-dark));
+            color: var(--xsiam-text-primary);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
         }
 
         .btn-primary:hover {
-            filter: brightness(1.1);
-            box-shadow: 0 0 20px rgba(57, 255, 20, 0.4);
+            background: linear-gradient(135deg, var(--xsiam-purple-light), var(--xsiam-purple));
+            box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.4), 0 2px 4px -1px rgba(139, 92, 246, 0.2);
+            transform: translateY(-1px);
         }
 
         .btn-secondary {
-            background: transparent;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            color: var(--white);
+            background: var(--xsiam-bg-elevated);
+            border: 1px solid var(--xsiam-border-light);
+            color: var(--xsiam-text-primary);
         }
 
         .btn-secondary:hover {
-            border-color: var(--neon-green);
-            color: var(--neon-green);
+            background: var(--xsiam-bg-hover);
+            border-color: var(--xsiam-purple);
+            color: var(--xsiam-purple);
         }
 
         .btn-danger {
             background: transparent;
-            border: 1px solid rgba(255, 68, 68, 0.5);
-            color: var(--red);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: var(--xsiam-error);
         }
 
         .btn-danger:hover {
-            background: rgba(255, 68, 68, 0.15);
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--xsiam-error);
         }
 
         /* Status indicators */
@@ -252,6 +298,9 @@
             align-items: center;
             gap: 0.5rem;
             font-size: 0.875rem;
+            padding: 0.375rem 0.75rem;
+            border-radius: 6px;
+            font-weight: 500;
         }
 
         .status-dot {
@@ -260,23 +309,48 @@
             border-radius: 50%;
         }
 
+        .status-active {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--xsiam-success);
+        }
+
         .status-active .status-dot {
-            background: var(--neon-green);
-            box-shadow: 0 0 8px var(--neon-green);
+            background: var(--xsiam-success);
+            box-shadow: 0 0 8px var(--xsiam-success);
             animation: pulse 2s infinite;
         }
 
+        .status-paused {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--xsiam-warning);
+        }
+
         .status-paused .status-dot {
-            background: var(--palo-orange);
+            background: var(--xsiam-warning);
+        }
+
+        .status-provisioning {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--xsiam-info);
         }
 
         .status-provisioning .status-dot {
-            background: var(--neon-green);
+            background: var(--xsiam-info);
             animation: spin 1s linear infinite;
         }
 
+        .status-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--xsiam-error);
+        }
+
         .status-error .status-dot {
-            background: var(--red);
+            background: var(--xsiam-error);
+        }
+
+        .status-destroyed {
+            background: rgba(107, 114, 128, 0.1);
+            color: var(--xsiam-text-tertiary);
         }
 
         .status-destroyed .status-dot {
@@ -295,47 +369,50 @@
 
         /* Form elements */
         .form-group {
-            margin-bottom: 1rem;
+            margin-bottom: 1.25rem;
         }
 
         .form-label {
             display: block;
             font-size: 0.875rem;
-            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+            color: var(--xsiam-text-primary);
             margin-bottom: 0.5rem;
         }
 
         .form-input {
             width: 100%;
-            padding: 0.75rem;
-            background: var(--surface);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 4px;
-            color: var(--white);
+            padding: 0.625rem 0.875rem;
+            background: var(--xsiam-bg-elevated);
+            border: 1px solid var(--xsiam-border);
+            border-radius: 6px;
+            color: var(--xsiam-text-primary);
             font-size: 0.875rem;
+            transition: all 0.2s;
         }
 
         .form-input:focus {
             outline: none;
-            border-color: var(--neon-green);
-            box-shadow: 0 0 0 2px rgba(57, 255, 20, 0.1);
+            border-color: var(--xsiam-purple);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
         }
 
         .form-input::placeholder {
-            color: rgba(255, 255, 255, 0.4);
+            color: var(--xsiam-text-tertiary);
         }
 
         /* Empty state */
         .empty-state {
             text-align: center;
             padding: 3rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: var(--xsiam-text-secondary);
         }
 
         .empty-state-icon {
             font-size: 3rem;
             margin-bottom: 1rem;
-            opacity: 0.3;
+            color: var(--xsiam-text-tertiary);
+            opacity: 0.5;
         }
 
         /* Mobile responsive */

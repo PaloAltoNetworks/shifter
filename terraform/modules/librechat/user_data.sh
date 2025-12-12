@@ -173,10 +173,16 @@ CONSOLE_JSON=true
 
 # AWS Bedrock (uses EC2 instance role - no static creds)
 BEDROCK_AWS_DEFAULT_REGION=${aws_region}
+BEDROCK_AWS_MODELS=us.anthropic.claude-3-haiku-20240307-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0
 ENV_EOF
 
 chmod 600 /opt/librechat/.env
-echo "Secrets refreshed successfully"
+
+# Recreate containers to pick up new env vars
+cd /opt/librechat
+docker compose up -d --force-recreate
+
+echo "Secrets refreshed and containers recreated"
 REFRESH_EOF
 
 chmod +x /opt/librechat/refresh-secrets.sh
@@ -222,7 +228,9 @@ DEBUG_CONSOLE=false
 CONSOLE_JSON=true
 
 # AWS Bedrock (uses EC2 instance role - no static creds)
+# Uses inference profile IDs (us. prefix) required for on-demand invocation
 BEDROCK_AWS_DEFAULT_REGION=${aws_region}
+BEDROCK_AWS_MODELS=us.anthropic.claude-3-haiku-20240307-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0
 ENV_EOF
 
 chmod 600 /opt/librechat/.env
@@ -238,7 +246,7 @@ endpoints:
   bedrock:
     availableRegions:
       - ${aws_region}
-    titleModel: anthropic.claude-3-haiku-20240307-v1:0
+    titleModel: us.anthropic.claude-3-haiku-20240307-v1:0
 YAML_EOF
 
 # ------------------------------------------------------------------------------

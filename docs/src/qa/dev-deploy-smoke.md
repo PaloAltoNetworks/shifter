@@ -111,51 +111,51 @@ LibreChat deploys automatically via terraform user_data. To redeploy:
 
 ### 3.1 Portal Smoke
 
-Run: [Portal Smoke Test](portal-smoke.md)
+Run automated checks from [Portal Smoke Test](portal-smoke.md), then manually:
 
-Checklist:
-- [ ] Health check passes
-- [ ] Static assets load
+- [ ] Health check: `curl https://dev.shifter.keplerops.com/health/`
+- [ ] Open portal in browser
 - [ ] Cognito redirect works
-- [ ] Can login with test user
-- [ ] Dashboard loads
+- [ ] Login with test user
+- [ ] Dashboard loads, shows your ranges
 
 ### 3.2 Provisioner Smoke
 
-Run: [Provisioner Smoke Test](provisioner-smoke.md)
+Run automated checks from [Provisioner Smoke Test](provisioner-smoke.md), then manually:
 
-Checklist:
-- [ ] State machines exist
-- [ ] Lambda functions exist
-- [ ] Can provision a test range
-- [ ] Victim EC2 created
-- [ ] Kali EC2 created
-- [ ] Can teardown range
-- [ ] Resources cleaned up
+- [ ] State machines exist (check Step Functions console)
+- [ ] Lambda functions exist (check Lambda console)
+- [ ] Launch a range from Portal UI
+- [ ] Verify victim EC2 created (check EC2 console, filter by range_id tag)
+- [ ] Verify Kali EC2 created
+- [ ] Teardown range from Portal UI
+- [ ] Verify resources cleaned up (EC2s terminated, subnet deleted)
 
 ### 3.3 LibreChat Smoke
 
-Run: [LibreChat Smoke Test](librechat-smoke.md)
+Run automated checks from [LibreChat Smoke Test](librechat-smoke.md), then manually:
 
-Checklist:
-- [ ] EC2 running
-- [ ] Docker containers healthy
-- [ ] Health endpoint responds
-- [ ] Can login
-- [ ] Bedrock chat works
+- [ ] EC2 running (check AWS console or CLI)
+- [ ] Docker containers healthy (via SSM)
+- [ ] Open LibreChat in browser
+- [ ] Register/login works
+- [ ] Send a chat message, Bedrock responds
 
-## Phase 4: End-to-End Test
+## Phase 4: End-to-End Test (Manual)
 
-Complete user journey:
+Complete user journey in browser:
 
-1. [ ] Login to Portal via Cognito
-2. [ ] Upload a test agent binary
-3. [ ] Click "Launch Range"
-4. [ ] Wait for range status = "ready"
-5. [ ] Access LibreChat via range URL
-6. [ ] Send a chat message, get response
-7. [ ] Teardown range from Portal
-8. [ ] Verify resources cleaned up
+1. [ ] Open `https://dev.shifter.keplerops.com/`
+2. [ ] Login via Cognito (use test account)
+3. [ ] Upload a test agent binary (any small file)
+4. [ ] Click "Launch Range"
+5. [ ] Wait for status to show "ready" (2-3 min)
+6. [ ] Click the LibreChat link from the range card
+7. [ ] Login to LibreChat, start a chat
+8. [ ] Send a message, verify Bedrock responds
+9. [ ] Return to Portal, click "Teardown Range"
+10. [ ] Verify status changes to "terminated"
+11. [ ] Confirm in AWS console: EC2s terminated, subnet deleted
 
 ## Summary Checklist
 

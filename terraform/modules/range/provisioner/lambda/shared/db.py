@@ -93,6 +93,7 @@ def get_range(conn, range_id) -> dict | None:
                 id, user_id, agent_id, status,
                 subnet_id, subnet_cidr, subnet_index,
                 victim_ip, victim_instance_id,
+                kali_ip, kali_instance_id,
                 chat_url, error_message,
                 created_at, ready_at, destroyed_at,
                 step_function_execution_arn
@@ -115,12 +116,14 @@ def get_range(conn, range_id) -> dict | None:
             "subnet_index": row[6],
             "victim_ip": row[7],
             "victim_instance_id": row[8],
-            "chat_url": row[9],
-            "error_message": row[10],
-            "created_at": row[11],
-            "ready_at": row[12],
-            "destroyed_at": row[13],
-            "step_function_execution_arn": row[14],
+            "kali_ip": row[9],
+            "kali_instance_id": row[10],
+            "chat_url": row[11],
+            "error_message": row[12],
+            "created_at": row[13],
+            "ready_at": row[14],
+            "destroyed_at": row[15],
+            "step_function_execution_arn": row[16],
         }
 
 
@@ -163,6 +166,8 @@ ALLOWED_UPDATE_FIELDS = frozenset({
     "subnet_cidr",
     "victim_ip",
     "victim_instance_id",
+    "kali_ip",
+    "kali_instance_id",
     "chat_url",
     "error_message",
     "ready_at",

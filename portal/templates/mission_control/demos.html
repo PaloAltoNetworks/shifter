@@ -349,6 +349,18 @@
             box-shadow: 0 0 30px rgba(57, 255, 20, 0.5);
         }
 
+        /* Additional text utilities */
+        .note-text {
+            margin-top: 2rem;
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .large-text {
+            font-size: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .slide {
@@ -454,7 +466,7 @@
                     <li>XDR/XSIAM agent installer</li>
                     <li>Browser</li>
                 </ul>
-                <p style="margin-top: 2rem; font-size: 1.1rem; color: rgba(255, 255, 255, 0.6);">
+                <p class="note-text">
                     That's it. No servers. No VPNs. No manual setup.
                 </p>
             </div>
@@ -534,8 +546,8 @@
                         <div class="value-item-text">Educate teams on AI-driven attacks and defensive strategies.</div>
                     </div>
                 </div>
-                <p style="margin-top: 2rem; font-size: 1.1rem; color: rgba(255, 255, 255, 0.6);">
-                    While AI hacking gets attention, the real value is <span style="color: var(--neon-green);">time to demo</span>.
+                <p class="note-text">
+                    While AI hacking gets attention, the real value is <span class="highlight">time to demo</span>.
                 </p>
             </div>
         </div>
@@ -544,7 +556,7 @@
         <div class="slide" data-slide="8">
             <h1 class="slide-title">Ready to <span class="highlight">Start</span>?</h1>
             <div class="slide-content">
-                <p style="font-size: 1.5rem; margin-bottom: 2rem;">
+                <p class="large-text">
                     Let's launch your first range and run a demo.
                 </p>
                 <a href="{% url 'mission_control:dashboard' %}" class="cta-button">

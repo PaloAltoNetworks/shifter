@@ -178,11 +178,7 @@ ENV_EOF
 
 chmod 600 /opt/librechat/.env
 
-# Recreate containers to pick up new env vars
-cd /opt/librechat
-docker compose up -d --force-recreate
-
-echo "Secrets refreshed and containers recreated"
+echo "Secrets refreshed. Run deploy workflow or 'docker compose up -d --force-recreate' to apply."
 REFRESH_EOF
 
 chmod +x /opt/librechat/refresh-secrets.sh
@@ -263,13 +259,10 @@ modelSpecs:
 YAML_EOF
 
 # ------------------------------------------------------------------------------
-# Start LibreChat
+# Ready for deployment
 # ------------------------------------------------------------------------------
 
-cd /opt/librechat
-docker compose pull
-docker compose up -d
-
-echo "LibreChat setup complete!"
+echo "LibreChat host setup complete!"
+echo "Container host ready - deploy workflow will start containers"
 echo "Access via SSM port forwarding on port 3080"
 

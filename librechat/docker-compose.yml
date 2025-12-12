@@ -1,11 +1,12 @@
-# LibreChat Local Development Stack
+# LibreChat Docker Compose
 #
-# Usage:
+# Works for both local development and EC2 deployment.
+# Deploy workflow copies this to EC2 and generates .env from secrets.
+#
+# Local usage:
 #   1. Copy env.example to .env and configure
 #   2. Run: docker compose up -d
 #   3. Access: http://localhost:3080
-#
-# This configuration mirrors the production deployment on EC2.
 
 services:
   api:
@@ -17,10 +18,10 @@ services:
       - mongodb
     env_file:
       - .env
-    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./images:/app/client/public/images
       - ./logs:/app/logs
+      - ./librechat.yaml:/app/librechat.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -28,9 +29,7 @@ services:
   mongodb:
     container_name: librechat-mongodb
     image: mongo:7
-    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./data/mongodb:/data/db
     command: mongod --noauth
     restart: unless-stopped
-

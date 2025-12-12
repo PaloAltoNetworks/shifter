@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - main
+      - dev
     paths:
       - 'terraform/modules/range/**'
       - 'terraform/environments/*/range/**'
@@ -20,18 +21,18 @@ on:
         required: true
         type: choice
         options:
-          - prod
           - dev
-        default: prod
+          - prod
+        default: dev
       action:
         description: 'Terraform action'
         required: true
         type: choice
         options:
-          - plan
           - apply
+          - plan
           - destroy
-        default: plan
+        default: apply
 
 permissions:
   id-token: write
@@ -39,13 +40,46 @@ permissions:
   pull-requests: write
 
 jobs:
-  terraform-plan:
-    name: Terraform Plan
+  # Set environment based on branch
+  set-env:
+    name: Set Environment
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    outputs:
+      environment: ${{ steps.set.outputs.environment }}
+      is_dev: ${{ steps.set.outputs.is_dev }}
+    steps:
+      - name: Determine environment
+        id: set
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            if [ "${{ github.base_ref }}" == "dev" ]; then
+              ENV="dev"
+            else
+              ENV="prod"
+            fi
+          elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+            ENV="dev"
+          else
+            ENV="prod"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          
+          if [ "$ENV" == "dev" ]; then
+            echo "is_dev=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_dev=false" >> $GITHUB_OUTPUT
+          fi
+
+  terraform-plan:
+    name: Terraform Plan (${{ needs.set-env.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: set-env
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'plan')
     defaults:
       run:
-        working-directory: terraform/environments/prod/range
+        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/range
 
     steps:
       - name: Checkout
@@ -54,8 +88,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
           role-session-name: GitHubActions-Terraform
 
       - name: Setup Terraform
@@ -64,9 +98,12 @@ jobs:
           terraform_version: "1.14.1"
 
       - name: Write tfvars from secret
-        run: echo '${{ secrets.TF_VARS_PROD_RANGE }}' > terraform.tfvars
+        env:
+          TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_RANGE || secrets.TF_VARS_PROD_RANGE }}
+        run: echo "$TF_VARS" > terraform.tfvars
 
       - name: Terraform Format Check
+        if: github.event_name == 'pull_request'
         run: terraform fmt -check -recursive
         working-directory: terraform
 
@@ -83,12 +120,14 @@ jobs:
           terraform show -no-color tfplan > plan.txt
 
       - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('terraform/environments/prod/range/plan.txt', 'utf8');
-            const output = `#### Terraform Plan - Range
+            const env = '${{ needs.set-env.outputs.environment }}';
+            const plan = fs.readFileSync(`terraform/environments/${env}/range/plan.txt`, 'utf8');
+            const output = `#### Terraform Plan - Range (${env})
             <details><summary>Show Plan</summary>
 
             \`\`\`terraform
@@ -106,13 +145,15 @@ jobs:
               body: output
             });
 
-  terraform-apply:
-    name: Terraform Apply
+  # Deploy on PR for dev only
+  terraform-apply-pr:
+    name: Terraform Apply PR (${{ needs.set-env.outputs.environment }})
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [set-env, terraform-plan]
+    if: github.event_name == 'pull_request' && needs.set-env.outputs.is_dev == 'true'
     defaults:
       run:
-        working-directory: terraform/environments/prod/range
+        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/range
 
     steps:
       - name: Checkout
@@ -121,8 +162,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-2
           role-session-name: GitHubActions-Terraform
 
       - name: Setup Terraform
@@ -131,7 +172,48 @@ jobs:
           terraform_version: "1.14.1"
 
       - name: Write tfvars from secret
-        run: echo '${{ secrets.TF_VARS_PROD_RANGE }}' > terraform.tfvars
+        env:
+          TF_VARS: ${{ secrets.TF_VARS_DEV_RANGE }}
+        run: echo "$TF_VARS" > terraform.tfvars
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+
+  # Deploy on merge/push
+  terraform-apply:
+    name: Terraform Apply (${{ needs.set-env.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: set-env
+    if: |
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/range
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+          role-session-name: GitHubActions-Terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.1"
+
+      - name: Write tfvars from secret
+        env:
+          TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_RANGE || secrets.TF_VARS_PROD_RANGE }}
+        run: echo "$TF_VARS" > terraform.tfvars
 
       - name: Terraform Init
         run: terraform init
@@ -142,13 +224,15 @@ jobs:
       - name: Output Range VPC Info
         run: terraform output -json
 
-  terraform-manual:
-    name: Terraform ${{ github.event.inputs.action }} (${{ github.event.inputs.environment }})
+  # Destroy (manual only)
+  terraform-destroy:
+    name: Terraform Destroy (${{ needs.set-env.outputs.environment }})
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    needs: set-env
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
     defaults:
       run:
-        working-directory: terraform/environments/${{ github.event.inputs.environment }}/range
+        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/range
 
     steps:
       - name: Checkout
@@ -157,8 +241,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
           role-session-name: GitHubActions-Terraform
 
       - name: Setup Terraform
@@ -168,21 +252,11 @@ jobs:
 
       - name: Write tfvars from secret
         env:
-          TF_VARS: ${{ github.event.inputs.environment == 'dev' && secrets.TF_VARS_DEV_RANGE || secrets.TF_VARS_PROD_RANGE }}
+          TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_RANGE || secrets.TF_VARS_PROD_RANGE }}
         run: echo "$TF_VARS" > terraform.tfvars
 
       - name: Terraform Init
         run: terraform init
 
-      - name: Terraform Plan
-        if: github.event.inputs.action == 'plan'
-        run: terraform plan -no-color
-
-      - name: Terraform Apply
-        if: github.event.inputs.action == 'apply'
-        run: terraform apply -auto-approve
-
       - name: Terraform Destroy
-        if: github.event.inputs.action == 'destroy'
         run: terraform destroy -auto-approve
-

@@ -1,0 +1,28 @@
+# LibreChat Configuration
+# https://www.librechat.ai/docs/configuration/librechat_yaml
+#
+# This file is copied to EC2 by the deploy workflow.
+# For local dev, place in librechat/ directory.
+
+version: 1.2.1
+
+endpoints:
+  bedrock:
+    availableRegions:
+      - us-east-2
+    # Uses inference profile ID for title generation
+    titleModel: us.anthropic.claude-3-haiku-20240307-v1:0
+  agents:
+    disableBuilder: true
+
+modelSpecs:
+  enforce: false
+  prioritize: true
+  list:
+    - name: "Claude Sonnet 4.5"
+      label: "Claude Sonnet 4.5"
+      default: true
+      preset:
+        endpoint: "bedrock"
+        model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+

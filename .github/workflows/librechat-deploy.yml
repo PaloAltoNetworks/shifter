@@ -27,6 +27,8 @@ concurrency:
 
 env:
   AWS_REGION: us-east-2
+  SECRET_NAME: shifter-prod-librechat-config
+  INSTANCE_TAG: prod-librechat-ec2
 
 jobs:
   deploy:
@@ -52,13 +54,13 @@ jobs:
         id: instance
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=prod-librechat-ec2" "Name=instance-state-name,Values=running" \
+            --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
             --query 'Reservations[0].Instances[0].InstanceId' \
             --output text \
             --region "$AWS_REGION")
 
           if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "Error: Could not find running LibreChat EC2 instance"
+            echo "Error: Could not find running LibreChat EC2 instance with tag: $INSTANCE_TAG"
             echo "Run librechat-infra.yml workflow first to create the instance"
             exit 1
           fi
@@ -66,7 +68,154 @@ jobs:
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Found instance: $INSTANCE_ID"
 
-      - name: Deploy via SSM
+      - name: Prepare config files
+        id: config
+        run: |
+          # Base64 encode config files for safe SSM transport
+          COMPOSE_B64=$(base64 -w0 librechat/docker-compose.yml)
+          YAML_B64=$(base64 -w0 librechat/librechat.yaml)
+          
+          echo "compose_b64=$COMPOSE_B64" >> $GITHUB_OUTPUT
+          echo "yaml_b64=$YAML_B64" >> $GITHUB_OUTPUT
+
+      - name: Deploy config files via SSM
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+          COMPOSE_B64: ${{ steps.config.outputs.compose_b64 }}
+          YAML_B64: ${{ steps.config.outputs.yaml_b64 }}
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "commands=[
+              \"set -e\",
+              \"cd /opt/librechat\",
+              \"echo Writing docker-compose.yml...\",
+              \"echo '$COMPOSE_B64' | base64 -d > docker-compose.yml\",
+              \"echo Writing librechat.yaml...\",
+              \"echo '$YAML_B64' | base64 -d > librechat.yaml\",
+              \"echo Config files written successfully\"
+            ]" \
+            --timeout-seconds 60 \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "Status" \
+            --output text)
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Config deployment failed!"
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "StandardErrorContent" \
+              --output text
+            exit 1
+          fi
+
+      - name: Generate .env from secrets via SSM
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+        run: |
+          # Create a script that generates .env, then execute it via SSM
+          # This avoids heredoc issues in SSM command arrays
+          ENV_SCRIPT=$(cat << 'SCRIPT_EOF'
+          set -e
+          cd /opt/librechat
+          echo "Fetching secrets from Secrets Manager..."
+          SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id SECRET_NAME_PLACEHOLDER --region AWS_REGION_PLACEHOLDER --query SecretString --output text)
+          JWT_SECRET=$(echo $SECRET_JSON | jq -r '.jwt_secret')
+          JWT_REFRESH_SECRET=$(echo $SECRET_JSON | jq -r '.jwt_refresh_secret')
+          CREDS_KEY=$(echo $SECRET_JSON | jq -r '.creds_key')
+          CREDS_IV=$(echo $SECRET_JSON | jq -r '.creds_iv')
+          ALLOW_REGISTRATION=$(echo $SECRET_JSON | jq -r '.allow_registration')
+          APP_TITLE=$(echo $SECRET_JSON | jq -r '.app_title')
+          
+          cat > .env.tmp << ENVEOF
+          HOST=0.0.0.0
+          PORT=3080
+          MONGO_URI=mongodb://mongodb:27017/LibreChat
+          ALLOW_EMAIL_LOGIN=true
+          ALLOW_REGISTRATION=${ALLOW_REGISTRATION}
+          ALLOW_SOCIAL_LOGIN=false
+          ALLOW_SOCIAL_REGISTRATION=false
+          ALLOW_PASSWORD_RESET=false
+          ALLOW_UNVERIFIED_EMAIL_LOGIN=true
+          SESSION_EXPIRY=900000
+          REFRESH_TOKEN_EXPIRY=604800000
+          JWT_SECRET=${JWT_SECRET}
+          JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+          CREDS_KEY=${CREDS_KEY}
+          CREDS_IV=${CREDS_IV}
+          APP_TITLE=${APP_TITLE}
+          NO_INDEX=true
+          SEARCH=false
+          DEBUG_LOGGING=false
+          DEBUG_CONSOLE=false
+          CONSOLE_JSON=true
+          BEDROCK_AWS_DEFAULT_REGION=AWS_REGION_PLACEHOLDER
+          BEDROCK_AWS_MODELS=us.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-haiku-20240307-v1:0
+          ENVEOF
+          
+          # Strip leading whitespace from heredoc
+          sed 's/^[[:space:]]*//' .env.tmp > .env
+          rm .env.tmp
+          chmod 600 .env
+          echo ".env file generated successfully"
+          SCRIPT_EOF
+          )
+          
+          # Replace placeholders with actual values
+          ENV_SCRIPT="${ENV_SCRIPT//SECRET_NAME_PLACEHOLDER/$SECRET_NAME}"
+          ENV_SCRIPT="${ENV_SCRIPT//AWS_REGION_PLACEHOLDER/$AWS_REGION}"
+          
+          # Base64 encode to avoid escaping issues
+          ENV_SCRIPT_B64=$(echo "$ENV_SCRIPT" | base64 -w0)
+          
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "commands=[
+              \"echo '$ENV_SCRIPT_B64' | base64 -d | bash\"
+            ]" \
+            --timeout-seconds 60 \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "Status" \
+            --output text)
+
+          if [ "$STATUS" != "Success" ]; then
+            echo ".env generation failed!"
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "StandardErrorContent" \
+              --output text
+            exit 1
+          fi
+
+      - name: Start containers via SSM
         env:
           INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
         run: |
@@ -93,13 +242,11 @@ jobs:
 
           echo "SSM Command ID: $COMMAND_ID"
 
-          # Wait for command to complete
           aws ssm wait command-executed \
             --command-id "$COMMAND_ID" \
             --instance-id "$INSTANCE_ID" \
             || true
 
-          # Get command status
           STATUS=$(aws ssm get-command-invocation \
             --command-id "$COMMAND_ID" \
             --instance-id "$INSTANCE_ID" \
@@ -109,8 +256,7 @@ jobs:
           echo "Command status: $STATUS"
 
           if [ "$STATUS" != "Success" ]; then
-            echo "Deployment failed!"
-            # Get error output
+            echo "Container startup failed!"
             aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "$INSTANCE_ID" \
@@ -147,4 +293,3 @@ jobs:
             --output text)
 
           echo "Health check result: $RESULT"
-

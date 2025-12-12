@@ -98,6 +98,7 @@ services:
     volumes:
       - ./images:/app/client/public/images
       - ./logs:/app/logs
+      - ./librechat.yaml:/app/librechat.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -169,6 +170,9 @@ SEARCH=false
 DEBUG_LOGGING=false
 DEBUG_CONSOLE=false
 CONSOLE_JSON=true
+
+# AWS Bedrock (uses EC2 instance role - no static creds)
+BEDROCK_AWS_DEFAULT_REGION=${aws_region}
 ENV_EOF
 
 chmod 600 /opt/librechat/.env
@@ -216,9 +220,26 @@ SEARCH=false
 DEBUG_LOGGING=false
 DEBUG_CONSOLE=false
 CONSOLE_JSON=true
+
+# AWS Bedrock (uses EC2 instance role - no static creds)
+BEDROCK_AWS_DEFAULT_REGION=${aws_region}
 ENV_EOF
 
 chmod 600 /opt/librechat/.env
+
+# ------------------------------------------------------------------------------
+# Create LibreChat YAML Configuration
+# ------------------------------------------------------------------------------
+
+cat > /opt/librechat/librechat.yaml << YAML_EOF
+version: 1.2.1
+
+endpoints:
+  bedrock:
+    availableRegions:
+      - ${aws_region}
+    titleModel: anthropic.claude-3-haiku-20240307-v1:0
+YAML_EOF
 
 # ------------------------------------------------------------------------------
 # Start LibreChat

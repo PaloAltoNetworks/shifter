@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LibreChat CI/CD workflows (infra and deploy)
 - SSM tunnel script for LibreChat admin access
 
+### Fixed
+- Portal/LibreChat infra workflows now trigger on direct push to main, not just upstream cascade
+
 ## [0.3.0] - 2025-12-11
 
 ### Added

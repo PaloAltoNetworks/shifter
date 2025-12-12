@@ -1,25 +1,18 @@
-name: Deploy Portal Infrastructure
+name: Range
 
 on:
   pull_request:
     paths:
-      - 'terraform/modules/portal/**'
-      - 'terraform/modules/range/provisioner/**'
-      - 'terraform/environments/*/portal/**'
-      - '.github/workflows/portal-infra.yml'
+      - 'terraform/modules/range/**'
+      - 'terraform/environments/*/range/**'
+      - '.github/workflows/range.yml'
   push:
     branches:
       - main
     paths:
-      - 'terraform/modules/portal/**'
-      - 'terraform/modules/range/provisioner/**'
-      - 'terraform/environments/*/portal/**'
-      - '.github/workflows/portal-infra.yml'
-  # Also trigger after range infra completes (portal may depend on range outputs)
-  workflow_run:
-    workflows: ["Deploy Range Infrastructure"]
-    types: [completed]
-    branches: [main]
+      - 'terraform/modules/range/**'
+      - 'terraform/environments/*/range/**'
+      - '.github/workflows/range.yml'
   workflow_dispatch:
     inputs:
       environment:
@@ -52,7 +45,7 @@ jobs:
     if: github.event_name == 'pull_request'
     defaults:
       run:
-        working-directory: terraform/environments/prod/portal
+        working-directory: terraform/environments/prod/range
 
     steps:
       - name: Checkout
@@ -71,14 +64,11 @@ jobs:
           terraform_version: "1.14.1"
 
       - name: Write tfvars from secret
-        run: echo '${{ secrets.TF_VARS_PROD_PORTAL }}' > terraform.tfvars
+        run: echo '${{ secrets.TF_VARS_PROD_RANGE }}' > terraform.tfvars
 
       - name: Terraform Format Check
         run: terraform fmt -check -recursive
         working-directory: terraform
-
-      - name: Build Lambda packages
-        run: bash ../../../modules/range/provisioner/build-lambdas.sh
 
       - name: Terraform Init
         run: terraform init
@@ -97,8 +87,8 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('terraform/environments/prod/portal/plan.txt', 'utf8');
-            const output = `#### Terraform Plan - Portal Infrastructure
+            const plan = fs.readFileSync('terraform/environments/prod/range/plan.txt', 'utf8');
+            const output = `#### Terraform Plan - Range
             <details><summary>Show Plan</summary>
 
             \`\`\`terraform
@@ -119,16 +109,10 @@ jobs:
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    # Run on push to main (if no Range changes) or workflow_run (after Range completes)
-    # Skip push if Range files changed - workflow_run will handle after Range completes
-    if: |
-      (github.event_name == 'push' &&
-       !contains(toJSON(github.event.commits.*.modified), 'terraform/modules/range/') &&
-       !contains(toJSON(github.event.commits.*.added), 'terraform/modules/range/')) ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     defaults:
       run:
-        working-directory: terraform/environments/prod/portal
+        working-directory: terraform/environments/prod/range
 
     steps:
       - name: Checkout
@@ -147,10 +131,7 @@ jobs:
           terraform_version: "1.14.1"
 
       - name: Write tfvars from secret
-        run: echo '${{ secrets.TF_VARS_PROD_PORTAL }}' > terraform.tfvars
-
-      - name: Build Lambda packages
-        run: bash ../../../modules/range/provisioner/build-lambdas.sh
+        run: echo '${{ secrets.TF_VARS_PROD_RANGE }}' > terraform.tfvars
 
       - name: Terraform Init
         run: terraform init
@@ -158,7 +139,7 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve
 
-      - name: Output Portal VPC Info
+      - name: Output Range VPC Info
         run: terraform output -json
 
   terraform-manual:
@@ -167,7 +148,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     defaults:
       run:
-        working-directory: terraform/environments/${{ github.event.inputs.environment }}/portal
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}/range
 
     steps:
       - name: Checkout
@@ -187,11 +168,8 @@ jobs:
 
       - name: Write tfvars from secret
         env:
-          TF_VARS: ${{ github.event.inputs.environment == 'dev' && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
+          TF_VARS: ${{ github.event.inputs.environment == 'dev' && secrets.TF_VARS_DEV_RANGE || secrets.TF_VARS_PROD_RANGE }}
         run: echo "$TF_VARS" > terraform.tfvars
-
-      - name: Build Lambda packages
-        run: bash ../../../modules/range/provisioner/build-lambdas.sh
 
       - name: Terraform Init
         run: terraform init
@@ -207,3 +185,4 @@ jobs:
       - name: Terraform Destroy
         if: github.event.inputs.action == 'destroy'
         run: terraform destroy -auto-approve
+

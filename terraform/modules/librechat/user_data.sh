@@ -173,7 +173,7 @@ CONSOLE_JSON=true
 
 # AWS Bedrock (uses EC2 instance role - no static creds)
 BEDROCK_AWS_DEFAULT_REGION=${aws_region}
-BEDROCK_AWS_MODELS=us.anthropic.claude-3-haiku-20240307-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0
+BEDROCK_AWS_MODELS=us.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-haiku-20240307-v1:0
 ENV_EOF
 
 chmod 600 /opt/librechat/.env
@@ -230,7 +230,7 @@ CONSOLE_JSON=true
 # AWS Bedrock (uses EC2 instance role - no static creds)
 # Uses inference profile IDs (us. prefix) required for on-demand invocation
 BEDROCK_AWS_DEFAULT_REGION=${aws_region}
-BEDROCK_AWS_MODELS=us.anthropic.claude-3-haiku-20240307-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0
+BEDROCK_AWS_MODELS=us.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-haiku-20240307-v1:0
 ENV_EOF
 
 chmod 600 /opt/librechat/.env
@@ -247,6 +247,19 @@ endpoints:
     availableRegions:
       - ${aws_region}
     titleModel: us.anthropic.claude-3-haiku-20240307-v1:0
+  agents:
+    disableBuilder: true
+
+modelSpecs:
+  enforce: false
+  prioritize: true
+  list:
+    - name: "Claude Sonnet 4.5"
+      label: "Claude Sonnet 4.5"
+      default: true
+      preset:
+        endpoint: "bedrock"
+        model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 YAML_EOF
 
 # ------------------------------------------------------------------------------

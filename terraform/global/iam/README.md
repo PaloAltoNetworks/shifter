@@ -60,15 +60,7 @@ All policies use least-privilege scoping:
 
 ### Deploy
 
-Global IAM is deployed once during initial setup and rarely changes.
-
-Manual deployment:
-
-```bash
-cd terraform/global/iam
-terraform init
-terraform apply
-```
+Global IAM is deployed once during initial setup and rarely changes. Manual deployment from terraform/global/iam directory using standard terraform workflow.
 
 ### Configuration
 
@@ -121,7 +113,7 @@ When adding new AWS resources:
 1. Identify the required IAM actions
 2. Add to appropriate policy by resource type
 3. Use least-privilege scoping (ARN patterns, conditions)
-4. Test with `terraform plan` in target environment
+4. Test in target environment before deployment
 5. Deploy to global IAM before dependent infrastructure
 
 ### Rotating OIDC Thumbprints
@@ -129,8 +121,8 @@ When adding new AWS resources:
 If GitHub rotates certificates:
 
 1. Obtain new thumbprints from GitHub's OIDC endpoint
-2. Update `thumbprint_list` in `github-oidc.tf`
-3. Apply changes: `terraform apply`
+2. Update thumbprint list in global IAM configuration
+3. Apply changes with terraform
 
 ### Auditing Access
 
@@ -138,18 +130,7 @@ Review CloudTrail logs for actions taken by the github-actions-shifter role. All
 
 ## Workflow Integration
 
-All infrastructure workflows use this IAM role via:
-
-```yaml
-- name: Configure AWS Credentials
-  uses: aws-actions/configure-aws-credentials@v4
-  with:
-    role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-    aws-region: ${{ secrets.AWS_REGION }}
-    role-session-name: GitHubActions-Terraform
-```
-
-No long-lived credentials in GitHub secrets. Credentials auto-expire after workflow completion.
+All infrastructure workflows use this IAM role via the `aws-actions/configure-aws-credentials` action with the role ARN and region from GitHub secrets. No long-lived credentials in GitHub secrets. Credentials auto-expire after workflow completion.
 
 ## Dependencies
 

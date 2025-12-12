@@ -40,19 +40,13 @@ State bucket and lock table use UUIDs to avoid naming conflicts across AWS accou
 
 ### Deploy
 
-Foundation infrastructure deploys automatically on merge to main via GitHub Actions workflow `infra-foundation.yml`.
+Foundation infrastructure deploys automatically on merge to main via GitHub Actions workflow.
 
-Manual deployment:
-
-```bash
-cd terraform/environments/prod
-terraform init
-terraform apply
-```
+Manual deployment from terraform/environments/prod directory using standard terraform workflow.
 
 ### Configuration
 
-Variables are managed via `terraform.tfvars` (gitignored) and synced to GitHub secrets using `scripts/sync-tfvars.sh`.
+Variables are managed via gitignored tfvars files and synced to GitHub secrets using sync script.
 
 Required variables:
 - `aws_region`: AWS region (default: us-east-2)
@@ -65,7 +59,7 @@ Required variables:
 
 ## Workflow Integration
 
-The `infra-foundation.yml` workflow:
+The foundation workflow:
 - Runs on changes to foundation terraform files
 - Plans on PR, applies on merge to main
 - Uses OIDC authentication (no static credentials)
@@ -85,6 +79,6 @@ No dependencies on other Shifter components.
 
 1. Create S3 bucket for state storage (encryption enabled, versioning enabled)
 2. Create DynamoDB table for locking (partition key: LockID)
-3. Update backend configuration in `backend.tf` with actual resource names
+3. Update backend configuration with actual resource names
 
 All subsequent terraform components reference the same backend.

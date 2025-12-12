@@ -1,6 +1,9 @@
 #!/bin/bash
 # Smoke Test for Shifter Provisioner Infrastructure
-# Run with: AWS_PROFILE=dev-workstation-user ./scripts/smoke-test-provisioner.sh
+#
+# Usage:
+#   ./scripts/smoke-test-provisioner.sh           # Test prod
+#   ./scripts/smoke-test-provisioner.sh -e dev    # Test dev
 #
 # Prerequisites:
 # - AWS CLI configured with dev-workstation-user profile
@@ -9,9 +12,32 @@
 
 set -e
 
+# Defaults
+ENV="prod"
 REGION="us-east-2"
 NAME_PREFIX="shifter"
 PROFILE="${AWS_PROFILE:-dev-workstation-user}"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -e|--env)
+            ENV="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [-e|--env <dev|prod>]"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate environment
+if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
+    echo "Error: Environment must be 'dev' or 'prod'"
+    exit 1
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -23,6 +49,8 @@ pass() { echo -e "${GREEN}✓ PASS${NC}: $1"; }
 fail() { echo -e "${RED}✗ FAIL${NC}: $1"; exit 1; }
 info() { echo -e "${YELLOW}→${NC} $1"; }
 section() { echo -e "\n${YELLOW}━━━ $1 ━━━${NC}"; }
+
+echo -e "${YELLOW}Environment: ${ENV}${NC}"
 
 # ------------------------------------------------------------------------------
 section "1. Lambda Functions"
@@ -338,7 +366,7 @@ fi
 section "Summary"
 # ------------------------------------------------------------------------------
 
-echo -e "\n${GREEN}━━━ SMOKE TEST COMPLETE ━━━${NC}"
+echo -e "\n${GREEN}━━━ SMOKE TEST COMPLETE (${ENV}) ━━━${NC}"
 echo ""
 echo "Infrastructure components verified:"
 echo "  - 6 Lambda functions"

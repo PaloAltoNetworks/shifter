@@ -7,16 +7,48 @@
 #   - psycopg[binary] or psql installed locally
 #
 # Usage:
-#   ./scripts/db-connect.sh          # Start port forwarding
-#   ./scripts/db-connect.sh --query  # Run a query directly
+#   ./scripts/db-connect.sh                     # Start port forwarding (prod)
+#   ./scripts/db-connect.sh -e dev              # Start port forwarding (dev)
+#   ./scripts/db-connect.sh --query "SELECT 1"  # Run a query directly
 
 set -e
 
+# Defaults
+ENV="prod"
 PROFILE="dev-workstation-user"
 REGION="us-east-2"
 LOCAL_PORT="15432"
-SECRET_ID="shifter-prod-portal-db-credentials"
-EC2_TAG_NAME="prod-portal-ec2"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -e|--env)
+            ENV="$2"
+            shift 2
+            ;;
+        --query)
+            shift
+            QUERY_MODE=1
+            QUERY="$*"
+            break
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [-e|--env <dev|prod>] [--query \"SQL\"]"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate environment
+if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
+    echo "Error: Environment must be 'dev' or 'prod'"
+    exit 1
+fi
+
+# Set environment-specific values
+SECRET_ID="shifter-${ENV}-portal-db-credentials"
+EC2_TAG_NAME="${ENV}-portal-ec2"
 
 # Get EC2 instance ID
 get_instance_id() {
@@ -33,7 +65,7 @@ get_rds_endpoint() {
     aws rds describe-db-instances \
         --region "$REGION" \
         --profile "$PROFILE" \
-        --query 'DBInstances[?contains(DBInstanceIdentifier, `portal`)].Endpoint.Address' \
+        --query "DBInstances[?contains(DBInstanceIdentifier, \`${ENV}-portal\`)].Endpoint.Address" \
         --output text
 }
 
@@ -53,12 +85,18 @@ start_port_forward() {
     instance_id=$(get_instance_id)
     rds_host=$(get_rds_endpoint)
 
+    if [ "$instance_id" == "None" ] || [ -z "$instance_id" ]; then
+        echo "Error: Could not find running ${ENV} portal EC2 instance"
+        exit 1
+    fi
+
+    echo "Environment: $ENV"
     echo "Instance ID: $instance_id"
     echo "RDS Host: $rds_host"
     echo "Starting port forwarding on localhost:${LOCAL_PORT}..."
     echo ""
     echo "In another terminal, run queries with:"
-    echo "  ./scripts/db-connect.sh --query \"SELECT version()\""
+    echo "  ./scripts/db-connect.sh -e $ENV --query \"SELECT version()\""
     echo ""
 
     aws ssm start-session \
@@ -108,12 +146,8 @@ except psycopg.ProgrammingError:
 EOF
 }
 
-case "${1:-}" in
-    --query)
-        shift
-        run_query "$*"
-        ;;
-    *)
-        start_port_forward
-        ;;
-esac
+if [ "${QUERY_MODE:-}" == "1" ]; then
+    run_query "$QUERY"
+else
+    start_port_forward
+fi

@@ -100,6 +100,23 @@ variable "agent_s3_bucket" {
   type        = string
 }
 
+# Kali Configuration
+variable "kali_ami_id" {
+  description = "AMI ID for Kali EC2 instances (official AWS Marketplace Kali)"
+  type        = string
+}
+
+variable "kali_instance_type" {
+  description = "Instance type for Kali EC2 instances"
+  type        = string
+  default     = "t3.small"
+}
+
+variable "kali_security_group_id" {
+  description = "Security group ID for Kali instances"
+  type        = string
+}
+
 # LibreChat Configuration
 variable "librechat_base_url" {
   description = "Base URL for LibreChat"

@@ -240,6 +240,11 @@ module "provisioner" {
   victim_security_group_id = data.terraform_remote_state.range.outputs.victim_security_group_id
   agent_s3_bucket          = var.user_storage_bucket
 
+  # Kali Configuration
+  kali_ami_id            = var.kali_ami_id
+  kali_instance_type     = var.kali_instance_type
+  kali_security_group_id = data.terraform_remote_state.range.outputs.kali_security_group_id
+
   # LibreChat Configuration
   librechat_base_url = var.librechat_base_url
 

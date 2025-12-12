@@ -4,10 +4,9 @@
 environment = "prod"
 aws_region  = "us-east-2"
 
-# LibreChat subnet within Portal VPC (10.0.0.0/16)
-# Choose a /24 that doesn't conflict with existing subnets
-# Portal uses 10.0.0.0/20 and 10.0.16.0/20 ranges
-subnet_cidr = "10.0.32.0/24"
+# LibreChat subnet within Portal VPC
+# Must not conflict with existing subnets - check AWS console
+subnet_cidr = "10.0.X.0/24"
 
 # EC2 Configuration
 instance_type    = "t3.small"

@@ -1,133 +1,127 @@
 # Mission Control
 
-The authenticated area of the Shifter portal where DCs manage their ranges and agents.
+Portal UI for range and agent management. Authenticated users only (Cognito OIDC).
 
-## Overview
-
-After authenticating via Cognito, users land in Mission Control - their command center for launching and managing cyber ranges. The interface maintains the same cyberpunk aesthetic as the landing page.
-
-## Navigation Structure
+## Routes
 
 ```
-/mission-control/           → Dashboard (default)
-/mission-control/agents/    → Agent Management
-/mission-control/history/   → Range History
-/mission-control/settings/  → Account Settings
+/mission-control/           → Dashboard
+/mission-control/agents/    → Agent management
+/mission-control/history/   → Range history
+/mission-control/settings/  → Account settings
+/mission-control/help/      → Documentation
 ```
 
-## Layout
+## UI Layout
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ SHIFTER // MISSION CONTROL           [user] [settings]  │
-├─────────────────────────────────────────────────────────┤
-│ ┌───────┐                                               │
-│ │ NAV   │  Main Content Area                            │
-│ │       │                                               │
-│ │ Home  │                                               │
-│ │ Agents│                                               │
-│ │ History                                               │
-│ │       │                                               │
-│ └───────┘                                               │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────┐
+│ Header: Logo | Page | User           │
+├───────┬───────────────────────────────┤
+│ Nav   │ Content                       │
+│       │                               │
+└───────┴───────────────────────────────┘
 ```
 
-- **Header**: Logo, page title, user menu
-- **Sidebar**: Navigation links (collapsible on mobile)
-- **Content**: Page-specific content
+Sidebar nav collapses on mobile. Base template: `templates/mission_control/base.html`.
 
-## Pages
+## Dashboard
 
-### Dashboard (`/mission-control/`)
+**Route**: `/mission-control/`
 
-Primary interface for range operations. Shows current range status and launch controls.
+Range launch and status management.
 
-**States:**
+**States**:
+- No active range: agent selector + launch button
+- Provisioning: spinner, status polling
+- Ready: chat URL, destroy button
+- Paused: resume + destroy buttons
+- Failed: error message, destroy button
 
-1. **No Active Range** - Shows agent selector and launch button
-2. **Provisioning** - Shows progress indicator during infrastructure spin-up
-3. **Active** - Shows range details with workspace link, pause, and destroy options
-4. **Paused** - Shows resume and destroy options
+**API calls**:
+- `GET /api/range/status/`: Poll current range
+- `POST /api/range/launch/`: Create new range with `agent_id`
+- `POST /api/range/destroy/`: Trigger teardown
 
-**User Stories:** US-2 (Launch), US-3 (Destroy), US-4 (Pause), US-5 (Resume)
+## Agents
 
-### Agents (`/mission-control/agents/`)
+**Route**: `/mission-control/agents/`
 
-Manage uploaded XDR/XSIAM agent installers.
+Agent installer management (XDR/XSIAM packages).
 
-**Features:**
+**Operations**:
+- Upload: Presigned S3 URL flow, client-side SHA256
+- List: User's agents with size, OS, creation date
+- Delete: Soft-delete (sets `deleted_at`)
 
-- List all uploaded agents with metadata
-- Upload new agent installer
-- Rename existing agents
-- Delete agents (with confirmation)
-- View which ranges used each agent
+**Upload flow**:
+1. `POST /api/upload/initiate/`: Get presigned URL + token
+2. Client: `PUT` to S3 directly
+3. `POST /api/upload/complete/`: Verify + create AgentConfig record
 
-**User Stories:** US-1 (First-Time Setup), US-7 (Manage Agents)
+**Limits**:
+- Max file: 2GB
+- User quota: 5GB
+- Allowed: `.msi`, `.deb`, `.rpm`, `.sh`
 
-### History (`/mission-control/history/`)
+## History
 
-View past range sessions.
+**Route**: `/mission-control/history/`
 
-**Columns:**
+List of past ranges (all statuses). Read-only view.
 
-- Date created
-- Agent used
-- Status (destroyed, active, paused)
-- Duration
-- Actions (re-launch with same agent)
+**Columns**: Created, Agent, Status, Duration, Actions
 
-**User Stories:** US-6 (View History)
+## Settings
 
-### Settings (`/mission-control/settings/`)
+**Route**: `/mission-control/settings/`
 
-Account management.
+Account info:
+- Email (read-only from Cognito)
+- Password change (redirects to Cognito)
+- Account deletion (sets `UserProfile.deleted_at`)
 
-**Sections:**
+## Authentication
 
-- **Account**: Email display (read-only, from Cognito)
-- **Security**: Change password link (redirects to Cognito)
-- **Danger Zone**: Delete account (with confirmation flow)
+**Flow**:
+1. Unauthenticated request to `/mission-control/*`
+2. Redirect to Cognito hosted UI (`/oauth2/authorize`)
+3. User login + MFA
+4. Callback to `/oidc/callback/` with auth code
+5. Django exchanges code for JWT (userInfo endpoint)
+6. User record upserted, session created
+7. Redirect to original URL
 
-**User Stories:** US-8 (Logout), US-9 (Change Password), US-10 (Delete Account)
+**Logout**: Clears Django session, optionally redirects to Cognito `/logout` endpoint.
 
-## Authentication Flow
-
-1. User visits any `/mission-control/*` route
-2. Django checks for valid session
-3. If no session, redirect to Cognito hosted UI
-4. After Cognito auth, redirect back to requested page
-5. Django creates/updates local user record from JWT claims
-
-Logout clears Django session and optionally redirects to Cognito logout.
+**Library**: `mozilla-django-oidc`
 
 ## Range Lifecycle
 
 ```
-┌──────────┐     ┌──────────────┐     ┌────────┐
-│ No Range │────▶│ Provisioning │────▶│ Active │
-└──────────┘     └──────────────┘     └────────┘
-                                          │
-                      ┌───────────────────┼───────────────────┐
-                      │                   │                   │
-                      ▼                   ▼                   ▼
-                 ┌────────┐          ┌────────┐          ┌───────────┐
-                 │ Paused │◀────────▶│ Active │─────────▶│ Destroyed │
-                 └────────┘          └────────┘          └───────────┘
-                      │                                       ▲
-                      └───────────────────────────────────────┘
+Pending → Provisioning → Ready → Destroying → Destroyed
+                           ↓
+                        Paused → Resuming → Ready
+                           ↓
+                        Failed
 ```
 
-- **Provisioning**: Terraform creating infrastructure, Kasm spinning up container
-- **Active**: Range ready, workspace accessible
-- **Paused**: EC2 stopped, Kasm suspended (cost savings)
-- **Destroyed**: All resources terminated
+**Statuses** (in `Range.Status` enum):
+- `PENDING`: Initial state before Step Functions trigger
+- `PROVISIONING`: Lambda creating VPC + EC2 + LibreChat
+- `READY`: Chat URL available, victim accessible
+- `PAUSED`: Suspended (not implemented)
+- `RESUMING`: Resuming from pause (not implemented)
+- `DESTROYING`: Teardown in progress
+- `DESTROYED`: Terminal state
+- `FAILED`: Provisioning/teardown error
 
-## Control Workspace
+**Provisioning**:
+1. `POST /api/range/launch/` → Create Range record, allocate subnet index
+2. Invoke Step Functions state machine (ARN in `PROVISION_STATE_MACHINE_ARN`)
+3. Lambda reads Range from RDS, provisions infra, updates `status`, `chat_url`, `victim_ip`
 
-When a range is active, the "Open Workspace" button links to a Kasm session running:
-
-- **Cursor IDE** with MCP servers configured
-- **MCPs** connected to Kali (attack box) and Victim (target)
-
-The DC interacts with AI in Cursor. The AI uses MCPs to execute commands on Kali and the victim - the DC never accesses Kali directly.
+**Teardown**:
+1. `POST /api/range/destroy/` → Set `status=DESTROYING`
+2. Invoke teardown Step Functions (ARN in `TEARDOWN_STATE_MACHINE_ARN`)
+3. Lambda destroys resources, sets `status=DESTROYED`

@@ -1,141 +1,99 @@
 # Portal Development
 
-Local development setup for the Django portal.
+Django application for user authentication, agent management, and range lifecycle control.
 
-## Prerequisites
+## Local Setup
 
-- Docker and Docker Compose
-- Make
-
-## Quick Start
-
-**First time:**
 ```bash
 cd portal
 cp .env.example .env
-make init
+make init  # First time: starts services + creates superuser
+make up    # Subsequent runs
 ```
 
-This creates your local environment file, starts the services, and prompts you to create an admin user.
+Access: `http://localhost:8000`
 
-**Every time after:**
-```bash
-cd portal
-make up
-```
+## Commands
 
-Access the portal at [http://localhost:8000](http://localhost:8000).
-
-## Available Commands
-
-| Command | Description |
-|---------|-------------|
-| `make init` | First-time setup (starts services + creates superuser) |
-| `make up` | Start services |
-| `make down` | Stop services |
-| `make build` | Rebuild and start |
-| `make logs` | Tail web container logs |
+| Command | Purpose |
+|---------|---------|
+| `make up/down` | Start/stop services |
+| `make build` | Rebuild container |
+| `make logs` | View logs |
 | `make shell` | Django shell |
 | `make dbshell` | PostgreSQL shell |
-| `make migrate` | Run migrations |
-| `make makemigrations` | Create new migrations |
-| `make createsuperuser` | Create admin user |
-| `make test` | Run tests |
-| `make clean` | Stop and delete volumes |
-| `make ps` | Show running containers |
-| `make restart` | Restart web service |
-
-## Environment Variables
-
-The `.env` file configures the local development environment. Copy `.env.example` to `.env`:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DJANGO_SECRET_KEY` | Django secret key | (set in .env.example) |
-| `DJANGO_DEBUG` | Enable debug mode | `true` |
-| `DJANGO_ALLOWED_HOSTS` | Allowed hosts | `localhost,127.0.0.1` |
-| `DB_NAME` | Database name | `shifter` |
-| `DB_USER` | Database user | `postgres` |
-| `DB_PASSWORD` | Database password | (set in .env.example) |
-| `DB_PORT` | Database port | `5432` |
-
-Note: `DB_HOST` is set automatically by docker-compose (`db` for the web container).
-
-## Endpoints
-
-| Path | Description |
-|------|-------------|
-| `/admin/` | Django admin |
-| `/health/` | Health check |
+| `make migrate` | Apply migrations |
+| `make test` | Run pytest |
+| `make clean` | Delete volumes |
 
 ## Architecture
 
+### Local (docker-compose)
 ```
-docker-compose.yml
-├── db (postgres:16-alpine)
-│   └── port 5432
-└── web (portal image)
-    └── port 8000
+web (Django) → db (PostgreSQL 16)
+Port 8000    → Port 5432
 ```
 
-The web container:
+Web container: hot-reload mounts, auto-migrates on start, gunicorn with 2 workers.
 
-- Mounts `./` to `/app` for hot reload
-- Runs migrations on startup
-- Starts gunicorn with 2 workers
-
-## Adding Dependencies
-
-```bash
-cd portal
-uv add <package>
-make build
+### Production
+```
+ALB → EC2 (Django container) → RDS PostgreSQL
+                             → S3 (agent uploads)
+                             → Step Functions (provisioning)
+                             → Cognito (auth)
 ```
 
-## Production Secrets
+**Secrets**: Fetched from AWS Secrets Manager at container startup via IMDSv2.
+- DB credentials: `shifter-prod-portal-db-credentials`
+- Django secret: `shifter-prod-portal-app`
 
-Production uses a different secrets flow than local development:
+**IAM**: EC2 instance role provides:
+- `secretsmanager:GetSecretValue` on portal secrets
+- `s3:*Object` on agent storage bucket
+- `states:StartExecution` on Step Functions state machines
 
-| Environment | Secrets Source |
-|-------------|----------------|
-| Local dev | `.env` file (local Postgres, no AWS) |
-| Production | AWS Secrets Manager (fetched at container startup) |
+## Django App Structure
 
-### How Production Works
+**mission_control** app:
+- `models.py`: Range, AgentConfig, OperatingSystem, UserProfile, ActivityLog
+- `views.py`: Dashboard, agents, API endpoints
+- `services/`: S3 uploads, provisioner integration, validation
+- `urls.py`: URL routing
 
-1. GitHub Actions deploys the container to EC2 via SSM
-2. Container uses EC2 instance role credentials via IMDSv2 (hop limit=2)
-3. `entrypoint.sh` detects `DB_SECRET_ARN` and `APP_SECRET_ARN` env vars
-4. Fetches secrets from AWS Secrets Manager using boto3 (instance role creds)
-5. Exports DB credentials and Django secret key before starting gunicorn
+**config** app:
+- `settings.py`: Environment config, OIDC, AWS clients
+- `urls.py`: Root routing
+- `middleware.py`: Health check bypass for ALB
+- `oidc.py`: Cognito integration
 
-### Secrets Manager Structure
+## Key Endpoints
 
-**DB Secret** (`shifter-prod-portal-db-credentials`):
-```json
-{
-  "host": "...",
-  "port": "5432",
-  "dbname": "...",
-  "username": "...",
-  "password": "..."
-}
-```
+| Path | Purpose |
+|------|---------|
+| `/mission-control/` | Dashboard |
+| `/mission-control/agents/` | Agent management |
+| `/mission-control/api/range/launch/` | Launch range (POST) |
+| `/mission-control/api/range/status/` | Range status (GET) |
+| `/mission-control/api/upload/initiate/` | Request presigned S3 URL |
+| `/admin/` | Django admin |
+| `/health/` | ALB health check |
 
-**App Secret** (`shifter-prod-portal-app`):
-```json
-{
-  "django_secret_key": "..."
-}
-```
+## Authentication
 
-### IAM
+**Local dev**: `/dev-login/` bypass (DEBUG=true only)
 
-The container inherits EC2 instance role permissions:
-- `secretsmanager:GetSecretValue` on `shifter-prod-portal-*` secrets
-- `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` on user storage bucket
-- No static IAM user credentials needed
+**Production**: Cognito OIDC flow
+1. Unauthenticated request → redirect to Cognito hosted UI
+2. User authenticates (email + MFA)
+3. Cognito callback with authorization code
+4. Django exchanges code for JWT
+5. JWT validated, session created, user record upserted
+
+Configuration: `mozilla-django-oidc` library, endpoints in `settings.py`.
+
+## Dependencies
+
+Add: `uv add <package>` → `make build`
+
+Lock file: `uv.lock` (committed)

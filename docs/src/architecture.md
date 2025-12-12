@@ -1,54 +1,51 @@
 # Architecture
 
-## Infrastructure Overview
+## System Overview
 
-Three components, decoupled via RDS + SQS:
+Three decoupled components:
 
-- **Portal**: Django app for auth, agent upload, range status UI. Pushes to SQS on launch.
-- **Provisioning Service**: Consumes SQS, provisions infra, deploys LibreChat
-- **Range**: Per-user VPC with LibreChat + MCPs and victim EC2
+- **Portal**: Django app (auth, agent upload, range UI)
+- **Provisioner**: Lambda-based Step Functions (infra provisioning)
+- **Range**: Per-user isolated VPC (LibreChat + victim VM)
+
+**Communication**: Portal → Step Functions → Lambda → RDS (no callback needed)
 
 ```mermaid
 graph TB
     subgraph "Portal VPC"
         Portal[Django Portal]
         RDS[(PostgreSQL)]
-        SQS[[SQS FIFO]]
-        Provisioner[Provisioning Service]
+        StepFn[Step Functions]
         Portal --> RDS
-        Portal -->|push| SQS
-        SQS -->|consume| Provisioner
-        Provisioner --> RDS
+        Portal -->|StartExecution| StepFn
+        StepFn -->|Lambda| RDS
     end
 
     subgraph "Range VPC (per-user)"
-        LibreChat[LibreChat + MCPs]
-        Victim[Victim Instance]
-        LibreChat -->|SSH/MCP| Victim
+        Chat[LibreChat + MCPs]
+        Victim[Victim EC2]
+        Chat -->|SSH/MCP| Victim
     end
 
     User((User)) -->|HTTPS| Portal
-    User -->|HTTPS| LibreChat
-    Provisioner -->|Terraform| Victim
+    User -->|HTTPS| Chat
     Victim -->|Telemetry| XDR[XDR/XSIAM]
 ```
 
-Portal writes to RDS and pushes to SQS. Provisioner consumes queue and updates RDS when done.
-
 ## Portal Infrastructure
 
-### Network
+**Network**: VPC 10.0.0.0/16, 2 AZs (for RDS)
 
 ```mermaid
 graph TB
-    subgraph "Portal VPC (10.0.0.0/16)"
-        subgraph "Public Subnets (2 AZs)"
+    subgraph "Portal VPC"
+        subgraph "Public (2 AZs)"
             ALB[ALB]
             NAT[NAT Gateway]
         end
-        subgraph "Private Subnets (2 AZs)"
-            EC2[Django on EC2]
-            RDS[(RDS PostgreSQL)]
+        subgraph "Private (2 AZs)"
+            EC2[Django EC2]
+            RDS[(RDS PG 16)]
         end
         ALB --> EC2
         EC2 --> RDS
@@ -58,161 +55,101 @@ graph TB
     NAT --> Internet
 ```
 
-Two AZs required for RDS subnet group. ALB in public subnets with ACM cert. EC2 in private subnet pulls container from ECR.
+**Components**:
 
-### Components
-
-| Component | Purpose |
+| Component | Details |
 |-----------|---------|
-| ALB | HTTPS termination, routes to EC2 |
-| EC2 | Runs Django container, pulls from ECR |
-| ECR | Container registry for Django image |
-| VPC | Network isolation, public/private subnet separation |
-| RDS | PostgreSQL 16, encrypted, credentials in Secrets Manager |
-| Cognito | User authentication, MFA, email verification |
+| ALB | HTTPS (ACM cert), health check `/health/` |
+| EC2 | Django container from ECR, IMDSv2 for secrets |
+| RDS | PostgreSQL 16, encrypted, Multi-AZ optional |
+| Cognito | OIDC auth, MFA required |
+| S3 | Agent uploads (presigned URLs) |
+| Step Functions | Provision/teardown state machines |
 
-### Authentication
+**Secrets**: RDS + Django secret in Secrets Manager. Retrieved by `entrypoint.sh` via IMDSv2.
+
+## Authentication Flow
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant Django
-    participant Cognito
-
-    User->>Django: GET /protected
-    Django->>User: 302 → Cognito hosted UI
+    User->>Portal: GET /mission-control/
+    Portal->>User: 302 Cognito /authorize
     User->>Cognito: Login + MFA
-    Cognito->>User: 302 → /callback?code=xxx
-    User->>Django: GET /callback?code=xxx
-    Django->>Cognito: Exchange code for tokens
-    Cognito->>Django: JWT (id_token, access_token)
-    Django->>Django: Validate JWT, create session
-    Django->>User: 302 → /protected (with session cookie)
+    Cognito->>User: 302 /callback?code=...
+    User->>Portal: GET /callback?code=...
+    Portal->>Cognito: POST /token (code)
+    Cognito->>Portal: JWT
+    Portal->>Portal: Validate, upsert user
+    Portal->>User: 302 /mission-control/ + session
 ```
 
-Cognito user pool configured with:
+**Cognito config**: Email username, TOTP MFA, email verification, domain restriction Lambda (`@paloaltonetworks.com`).
 
-- Email as username
-- MFA required (TOTP)
-- Pre-signup Lambda for domain restriction (`@paloaltonetworks.com`)
-- Email verification required
-
-Django stores minimal user data (email from token claims). No passwords in DB.
-
-### Secrets Management
-
-RDS credentials auto-generated at provision time, stored in Secrets Manager. Secret configured with `recovery_window_in_days = 0` to allow immediate deletion and avoid naming conflicts on destroy/recreate cycles.
+**Django**: `mozilla-django-oidc`, session-based, email from JWT claims.
 
 ## Range Infrastructure
 
-Per-user ephemeral VPCs provisioned by the Provisioning Service.
+Per-user VPC provisioned by Lambda via Step Functions.
 
-### Provisioning Flow
+**Provisioning**:
+1. Portal creates `Range(status='pending', subnet_index=X)`
+2. Invokes Step Functions (`PROVISION_STATE_MACHINE_ARN`)
+3. Lambda reads Range from RDS
+4. Terraform applies:
+   - VPC 10.1.{subnet_index}.0/24
+   - Victim EC2 + security group
+   - User-data downloads agent from S3
+   - LibreChat deployment (ECS or EC2)
+5. Lambda updates Range: `status='ready'`, `chat_url`, `victim_ip`
 
-1. Portal writes `Range(status='pending', agent_id=X)` to RDS
-2. Portal pushes `{ range_id }` to SQS FIFO queue
-3. Provisioning Service consumes message
-4. Terraform apply:
-   - VPC + subnet
-   - Security group (SSH from LibreChat)
-   - EC2 victim instance
-   - User-data installs XDR agent from S3
-5. Generate MCP config JSON with victim IP
-6. Deploy LibreChat instance (ECS or EC2) with MCP servers
-7. Update Range row: `status='ready'`, `victim_ip`, `chat_url`
-8. Delete message from queue (success) or send to DLQ (failure)
+**Teardown**:
+1. Portal sets `status='destroying'`, invokes teardown Step Functions
+2. Lambda runs `terraform destroy`
+3. Updates `status='destroyed'`
 
-### Components
+**Subnet allocation**: Range.allocate_subnet_index() uses SELECT FOR UPDATE to prevent race conditions. Indices 1-254 (max 254 concurrent ranges).
 
-| Component | Purpose |
-|-----------|---------|
-| LibreChat | Chat UI, agent loop, MCP tool use |
-| MCP Servers | SSH to victim, command execution |
-| Victim EC2 | Target for attacks, runs user's XDR agent |
+## Deployment
 
-### Isolation
+### Infrastructure (Terraform)
 
-- Each range is its own VPC (no peering to portal)
-- MCP config hardcodes victim IP (agent can't escape)
-- Cognito SSO ensures user identity across Portal and LibreChat
-
-## Deployment Pipeline
-
-### Infrastructure
-
-GitHub Actions deploys infra via Terraform on merge to main.
-
-```mermaid
-graph LR
-    Push[Push to main] --> GHA[GitHub Actions]
-    GHA -->|OIDC| AWS[AWS]
-    GHA -->|terraform apply| Infra[Infrastructure]
-```
+GitHub Actions: `terraform apply` on push to main via OIDC (no static creds).
 
 ### Portal Application
 
-Portal deploys on push to `portal/**`:
-
-```mermaid
-graph LR
-    Push[Push portal/*] --> Build[Build Docker]
-    Build --> ECR[Push to ECR]
-    ECR --> SSM[SSM Run Command]
-    SSM --> EC2[Pull + Restart]
-```
-
-EC2 user data bootstraps Docker and ECR auth. SSM pulls new image and restarts container.
-
-IAM via OIDC federation. No static credentials. Role permissions scoped to shifter-* resources.
+On push to `portal/**`:
+1. Build Docker image
+2. Push to ECR
+3. SSM Run Command on EC2: pull image, restart container
 
 ### Secrets Sync
 
-Terraform variables stored locally in `.tfvars` files (gitignored). Synced to GitHub secrets before PR:
-
+`.tfvars` files (gitignored) synced to GitHub secrets:
 ```bash
 ./scripts/sync-tfvars.sh
 ```
 
-Creates namespaced secrets: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_PORTAL`).
+Creates: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_PORTAL`).
 
-## Two-Context Pattern
+## MCP Integration
 
-MCP enables AI-driven scenario setup via separate LibreChat conversations:
-
-1. **Setup chat**: "Set up a PHP command injection on /cmd.php and a SUID privesc"
-   - AI uses victim MCP to configure vulnerabilities
-   - User can specify flags, locations, difficulty
-
-2. **Attack chat**: "Hack the target at 10.0.1.50, get root, find the flag"
-   - Fresh context (no memory of setup)
-   - AI uses attack methodology: recon → exploit → privesc
-   - XDR/XSIAM detects the attack chain
-
-User demos detections to customer.
-
-## MCP Configuration
-
-MCPs are config-driven. Provisioning service generates per-range config:
+LibreChat uses MCP servers to execute commands on victim VM. Configuration generated per-range by provisioner Lambda:
 
 ```json
 {
-  "server": {
-    "name": "shifter-range-${range_id}",
-    "toolPrefix": "victim"
-  },
+  "server": {"name": "range-{id}", "toolPrefix": "victim"},
   "containers": {
     "victim": {
-      "container_ip": "${victim_private_ip}",
-      "ssh_key": "/secrets/range-${range_id}.pem",
+      "container_ip": "{victim_ip}",
+      "ssh_key": "/secrets/range-{id}.pem",
       "ssh_user": "ubuntu",
       "ssh_port": 22
     }
   },
-  "mcp": {
-    "allowed_networks": ["${vpc_cidr}"],
-    "audit_enabled": true
-  }
+  "mcp": {"allowed_networks": ["{vpc_cidr}"], "audit_enabled": true}
 }
 ```
 
-Same MCP binary, different config per range. No code changes needed.
+**Tools**: `victim_run_command`, `victim_interactive_session`, `victim_upload_file`, etc.
+
+**Isolation**: MCP config limits access to victim IP only. No internet egress from range VPC.

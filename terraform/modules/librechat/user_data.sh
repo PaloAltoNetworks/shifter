@@ -183,53 +183,8 @@ REFRESH_EOF
 
 chmod +x /opt/librechat/refresh-secrets.sh
 
-# ------------------------------------------------------------------------------
-# Create Environment File
-# ------------------------------------------------------------------------------
-
-cat > /opt/librechat/.env << ENV_EOF
-# Server Configuration
-HOST=0.0.0.0
-PORT=3080
-MONGO_URI=mongodb://mongodb:27017/LibreChat
-
-# Authentication
-ALLOW_EMAIL_LOGIN=true
-ALLOW_REGISTRATION=$ALLOW_REGISTRATION
-ALLOW_SOCIAL_LOGIN=false
-ALLOW_SOCIAL_REGISTRATION=false
-ALLOW_PASSWORD_RESET=false
-ALLOW_UNVERIFIED_EMAIL_LOGIN=true
-
-# Session Configuration
-SESSION_EXPIRY=900000
-REFRESH_TOKEN_EXPIRY=604800000
-
-# Security Secrets
-JWT_SECRET=$JWT_SECRET
-JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET
-CREDS_KEY=$CREDS_KEY
-CREDS_IV=$CREDS_IV
-
-# UI Configuration
-APP_TITLE=$APP_TITLE
-NO_INDEX=true
-
-# Disable features not needed initially
-SEARCH=false
-
-# Debug (disable in production after testing)
-DEBUG_LOGGING=false
-DEBUG_CONSOLE=false
-CONSOLE_JSON=true
-
-# AWS Bedrock (uses EC2 instance role - no static creds)
-# Uses inference profile IDs (us. prefix) required for on-demand invocation
-BEDROCK_AWS_DEFAULT_REGION=${aws_region}
-BEDROCK_AWS_MODELS=us.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-haiku-20240307-v1:0
-ENV_EOF
-
-chmod 600 /opt/librechat/.env
+# Generate initial .env using refresh-secrets script (single source of truth)
+/opt/librechat/refresh-secrets.sh
 
 # ------------------------------------------------------------------------------
 # Create LibreChat YAML Configuration

@@ -82,22 +82,43 @@ def handler(event: dict, context) -> dict:
         if victim_instance_id:
             try:
                 ec2.terminate_instances(InstanceIds=[victim_instance_id])
-                logger.info(f"Terminated instance {victim_instance_id}")
-                cleaned_up.append(f"instance:{victim_instance_id}")
-
-                # Wait for termination to complete before deleting subnet
-                waiter = ec2.get_waiter("instance_terminated")
-                waiter.wait(
-                    InstanceIds=[victim_instance_id],
-                    WaiterConfig={"Delay": 5, "MaxAttempts": 60},
-                )
+                logger.info(f"Terminated victim instance {victim_instance_id}")
+                cleaned_up.append(f"victim:{victim_instance_id}")
             except ClientError as e:
                 if e.response["Error"]["Code"] == "InvalidInstanceID.NotFound":
-                    logger.info(f"Instance {victim_instance_id} already terminated")
+                    logger.info(f"Victim instance {victim_instance_id} already terminated")
                 else:
                     raise
 
-        # 2. Delete subnet
+        # 2. Terminate Kali EC2 instance
+        kali_instance_id = range_data.get("kali_instance_id")
+        if kali_instance_id:
+            try:
+                ec2.terminate_instances(InstanceIds=[kali_instance_id])
+                logger.info(f"Terminated Kali instance {kali_instance_id}")
+                cleaned_up.append(f"kali:{kali_instance_id}")
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "InvalidInstanceID.NotFound":
+                    logger.info(f"Kali instance {kali_instance_id} already terminated")
+                else:
+                    raise
+
+        # 3. Wait for all instances to terminate before deleting subnet
+        instances_to_wait = []
+        if victim_instance_id:
+            instances_to_wait.append(victim_instance_id)
+        if kali_instance_id:
+            instances_to_wait.append(kali_instance_id)
+
+        if instances_to_wait:
+            waiter = ec2.get_waiter("instance_terminated")
+            waiter.wait(
+                InstanceIds=instances_to_wait,
+                WaiterConfig={"Delay": 5, "MaxAttempts": 60},
+            )
+            logger.info(f"All instances terminated: {instances_to_wait}")
+
+        # 4. Delete subnet
         subnet_id = range_data.get("subnet_id")
         if subnet_id:
             try:
@@ -126,10 +147,12 @@ def handler(event: dict, context) -> dict:
                 else:
                     raise
 
-        # 3. Update database
+        # 5. Update database
         update_fields = {
             "victim_instance_id": None,
             "victim_ip": None,
+            "kali_instance_id": None,
+            "kali_ip": None,
             "subnet_id": None,
             "subnet_cidr": None,
             "chat_url": None,

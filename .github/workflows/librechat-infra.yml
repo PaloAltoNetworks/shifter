@@ -6,7 +6,14 @@ on:
       - 'terraform/modules/librechat/**'
       - 'terraform/environments/*/librechat/**'
       - '.github/workflows/librechat-infra.yml'
-  # Trigger after portal infra completes (librechat depends on portal VPC)
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/modules/librechat/**'
+      - 'terraform/environments/*/librechat/**'
+      - '.github/workflows/librechat-infra.yml'
+  # Also trigger after portal infra completes (librechat depends on portal VPC)
   workflow_run:
     workflows: ["Deploy Portal Infrastructure"]
     types: [completed]
@@ -107,8 +114,9 @@ jobs:
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    # Run on workflow_run (after portal completes successfully) or manual dispatch with apply
+    # Run on push to main, workflow_run (after portal completes successfully), or manual dispatch with apply
     if: >
+      github.event_name == 'push' ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
     defaults:

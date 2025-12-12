@@ -12,43 +12,25 @@
 
 ### 1. Bootstrap Terraform Backend
 
-Create S3 bucket and DynamoDB table for Terraform state. Run once per AWS account:
+Create S3 bucket, DynamoDB table, OIDC provider, and IAM role. Run once per AWS account:
 
 ```bash
-aws sso login
-
-aws s3 mb s3://shifter-infra-$(uuidgen | tr '[:upper:]' '[:lower:]') --region us-east-2
-
-aws dynamodb create-table \
-  --table-name shifter-terraform-$(uuidgen | tr '[:upper:]' '[:lower:]') \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST \
-  --region us-east-2
+AWS_PROFILE=<your-profile> ./scripts/bootstrap-dev.sh
 ```
 
-Update `terraform/environments/prod/*/backend.tf` with the bucket and table names.
+The script outputs the backend config. Update `terraform/environments/<env>/*/backend.tf` with the bucket and table names.
 
-### 2. Deploy Global IAM
-
-The OIDC provider and IAM role must exist before GitHub Actions can deploy:
-
-```bash
-cd terraform/global/iam
-terraform init
-terraform apply
-```
-
-### 3. Configure GitHub Secrets
+### 2. Configure GitHub Secrets
 
 Add these secrets in GitHub repository settings (Settings → Secrets and variables → Actions):
 
 | Secret | Value |
 |--------|-------|
-| `AWS_ROLE_ARN` | Copy from step 2 output: `github_actions_role_arn` |
-| `AWS_REGION` | Your AWS region (e.g., `us-east-2`) |
+| `AWS_ROLE_ARN` | Prod IAM role ARN from bootstrap output |
+| `AWS_ROLE_ARN_DEV` | Dev IAM role ARN from bootstrap output |
+| `AWS_REGION` | `us-east-2` |
 
-### 4. Create and Sync tfvars
+### 3. Create and Sync tfvars
 
 ```bash
 cp terraform/environments/prod/portal/terraform.tfvars.example \
@@ -63,11 +45,14 @@ Fill in values, then sync to GitHub secrets:
 
 This creates `TF_VARS_PROD_PORTAL` and `TF_VARS_PROD_FOUNDATION` secrets automatically.
 
-### 5. Deploy Infrastructure
+### 4. Deploy Infrastructure
 
-Push branch and create PR. GitHub Actions runs `terraform plan`. Merge to main for `terraform apply`.
+Branch-based deployments:
 
-### 6. ACM Certificate Validation (First Deploy Only)
+- **Dev:** PR to `dev` → plan + apply. Merge to `dev` → apply.
+- **Prod:** PR to `main` → plan only. Merge to `main` → apply.
+
+### 5. ACM Certificate Validation (First Deploy Only)
 
 On first deploy, Terraform will pause waiting for ACM certificate validation (up to 45 minutes):
 

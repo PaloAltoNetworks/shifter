@@ -49,13 +49,35 @@ Each user gets one subnet with three instances:
 
 ## Security Groups
 
+Current implementation (Phase 1 - no Control Box yet):
+
+| SG | Ingress | Egress |
+|----|---------|--------|
+| Kali | SSH from VPC CIDR, ALL from Victim SG | ALL (0.0.0.0/0) |
+| Victim | SSH from VPC CIDR, ALL from Kali SG | ALL (0.0.0.0/0) |
+
+**Traffic Matrix:**
+
+| Source → Dest | Allowed | Purpose |
+|---------------|---------|---------|
+| Kali → Victim | ✅ All ports/protocols | Attacks, exploits, scans |
+| Victim → Kali | ✅ All ports/protocols | Reverse shells, callbacks, C2 |
+| VPC → Kali | ✅ SSH (22) | MCP/LibreChat access |
+| VPC → Victim | ✅ SSH (22) | MCP configuration |
+| Kali → Internet | ✅ All | apt updates, tool downloads |
+| Victim → Internet | ✅ All | XDR agent callbacks, updates |
+
+Both instances have unrestricted egress for operational flexibility. Victim-Kali traffic is fully bidirectional to support all attack scenarios including reverse shells.
+
+**Future (Phase 2 - with Control Box):**
+
 | SG | Ingress | Egress |
 |----|---------|--------|
 | Control | HTTPS from internet | SSH to Kali SG, Victim SG |
-| Kali | SSH from Control SG | ALL to Victim SG only |
+| Kali | SSH from Control SG, ALL from Victim SG | ALL to Victim SG only |
 | Victim | ALL from Kali SG, SSH from Control SG | HTTPS (agent callbacks) |
 
-Kali has no egress to Control. SGs are default-deny and stateful—Kali can only respond to Control-initiated connections.
+In Phase 2, Kali egress will be restricted to Victim only (no internet access from Kali).
 
 ## CIDR
 
@@ -83,6 +105,31 @@ Kali has no egress to Control. SGs are default-deny and stateful—Kali can only
 | Subnet | `/24` per user |
 | Control/Kali/Victim EC2 | User instances |
 | 3x Security Groups | Traffic isolation |
+
+## AMI Prerequisites
+
+### Kali Linux
+
+The Kali box uses the **official Kali Linux AMI from Offensive Security** via AWS Marketplace.
+
+1. **Subscribe** (free): [AWS Marketplace - Kali Linux](https://aws.amazon.com/marketplace/pp/prodview-fznsw3f7mq7to)
+2. **Query the latest AMI** after subscribing:
+
+```bash
+aws ec2 describe-images --region us-east-2 \
+  --owners 679593333241 \
+  --filters "Name=name,Values=kali-last-snapshot-amd64-*-804fcc46-63fc-4eb6-85a1-50e66d6c7215" \
+  --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name]' \
+  --output table
+```
+
+The product ID `804fcc46-63fc-4eb6-85a1-50e66d6c7215` is embedded in the AMI name — this verifies you're using the official image, not a lookalike.
+
+> **Note:** The AMI won't appear in `describe-images` until you subscribe.
+
+### Victim
+
+Uses a standard Amazon Linux 2023 AMI (no subscription required).
 
 ## Terraform
 

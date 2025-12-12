@@ -119,11 +119,11 @@ jobs:
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    # Run on push to main, workflow_run (after range completes successfully), or manual dispatch with apply
+    # Run on push to main or workflow_run (after range completes successfully)
+    # Manual dispatch is handled by terraform-manual job
     if: >
       github.event_name == 'push' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     defaults:
       run:
         working-directory: terraform/environments/prod/portal

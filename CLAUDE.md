@@ -23,62 +23,61 @@ PANW SecOps Domain Consultants who need to:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         RDS (PostgreSQL)                                │
-│            Range table: user_id, status, victim_ip, chat_url            │
+│            Range table: user_id, status, kali_ip, victim_ip             │
 └─────────────────────────────────────────────────────────────────────────┘
          │                                    │
          │ writes                             │ reads/writes
          ▼                                    ▼
 ┌─────────────────────┐            ┌─────────────────────────────┐
 │       Portal        │            │    Provisioning Service     │
-│     (Django)        │            │   (Step Functions / ECS)    │
+│     (Django)        │            │   (Step Functions + Lambda) │
 │                     │            │                             │
-│ • Auth (Cognito)    │───SQS────▶│ • Consumes from queue       │
-│ • Agent upload      │            │ • Terraform apply (VPC/EC2) │
-│ • Launch range UI   │            │ • Deploy LibreChat instance │
-│ • Show range status │            │ • Generate MCP config       │
+│ • Auth (Cognito)    │──start───▶│ • create_subnet Lambda      │
+│ • Agent upload      │ execution  │ • create_kali Lambda        │
+│ • Launch range UI   │            │ • create_victim Lambda      │
+│ • Show range status │            │ • Updates RDS directly      │
+└─────────────────────┘            └─────────────────────────────┘
+         │                                    │
+         │                                    │ AWS APIs
+         ▼                                    ▼
+┌─────────────────────┐            ┌─────────────────────────────┐
+│  LibreChat          │            │  Range VPC (10.1.0.0/16)    │
+│  (shared instance)  │            │                             │
+│                     │            │  Per-user subnet:           │
+│ • Chat UI           │───SSH────▶│  • Kali EC2 (attack tools)  │
+│ • MCP (hexstrike)   │   /MCP     │  • Victim EC2 (XDR agent)   │
+│ • Agent loops       │            │                             │
 └─────────────────────┘            └─────────────────────────────┘
                                               │
                                               ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Per-User Range                                                         │
-│                                                                          │
-│  ┌─────────────────┐     ┌─────────────────┐                           │
-│  │   LibreChat     │────▶│   Victim VM     │                           │
-│  │   + MCPs        │     │   (EC2)         │                           │
-│  │                 │     │                 │                           │
-│  │ • Agent loop    │     │ • XDR agent     │──▶ User's XSIAM Tenant   │
-│  │ • Chat history  │     │ • AI-configured │                           │
-│  │ • Tool use      │     │   vulns         │                           │
-│  └─────────────────┘     └─────────────────┘                           │
-└─────────────────────────────────────────────────────────────────────────┘
+                                   User's XSIAM Tenant (telemetry)
 ```
 
 ### How It Works
 
 1. **User logs into Portal** (Cognito, paloaltonetworks.com email)
 2. **Uploads XDR/XSIAM agent installer** (stored in S3)
-3. **Clicks "Launch Range"** → Portal writes `Range(status='pending')` to DB, pushes to SQS
-4. **Provisioning service consumes from SQS:**
-   - Terraform: VPC + victim EC2 + agent install
-   - Generates MCP config JSON with victim IP
-   - Deploys LibreChat with MCP servers
-   - Writes `status='ready'` + `chat_url` back to DB
-5. **Portal shows "Open Range"** → user clicks, lands in LibreChat
-6. **Two-context workflow:**
-   - Chat 1: "Set up a command injection vuln" → MCP configures victim
-   - Chat 2: "Hack the target" → MCP runs attack autonomously
-   - XDR/XSIAM detects, user demos to customer
+3. **Clicks "Launch Range"** → Portal writes `Range(status='provisioning')` to DB, starts Step Functions
+4. **Step Functions orchestrates Lambda functions:**
+   - `create_subnet`: Creates /24 subnet in Range VPC
+   - `create_kali`: Launches Kali EC2 from pre-baked AMI
+   - `create_victim`: Launches Victim EC2, installs XDR agent from S3
+   - Each Lambda updates RDS directly with resource IDs
+5. **Portal shows "Ready"** → user clicks "Open Range", goes to LibreChat
+6. **User interacts with AI in LibreChat:**
+   - Uses hexstrike-ai MCP to control Kali instance
+   - Runs attacks against Victim, XDR/XSIAM detects
 
 ### Why This Architecture
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Chat UI | LibreChat | MCP support, agent loops, Cognito OIDC, open source |
-| Decoupling | SQS + RDS | SQS triggers provisioning, RDS stores state |
-| Infra Provisioning | Terraform via service | Users don't touch IaC |
-| Auth | Cognito SSO | Same identity across Portal and LibreChat |
+| Chat UI | LibreChat | MCP support, agent loops, open source |
+| Orchestration | Step Functions + Lambda | Reliable, retry logic, error handling |
+| State | RDS only | Single source of truth, no message queues |
+| Auth | Cognito | Same identity across Portal and LibreChat |
+| Attack Tools | Kali EC2 | Full Linux with hexstrike-ai pre-installed |
 | Victim VMs | Real EC2 | XDR agent requires real OS |
-| Tool Execution | MCP (stdio) | Config-driven, no Lambda wrapper needed |
 
 ---
 
@@ -98,54 +97,40 @@ Portal does NOT provision infrastructure. It writes requests to DB.
 
 ### 2. Provisioning Service
 
-**Purpose**: Provision range infra, deploy LibreChat
+**Purpose**: Provision range infra (subnet, Kali, Victim EC2)
 
-**Trigger**: SQS FIFO queue (Portal pushes `{ range_id }` after DB write)
+**Trigger**: Portal starts Step Functions execution with `{ range_id }`
 
-**Actions**:
-1. Terraform apply: VPC, EC2 victim, security groups
-2. Install user's XDR agent on victim (from S3)
-3. Generate MCP config JSON with victim IP
-4. Deploy LibreChat instance with MCP servers
-5. Update Range row: `status='ready'`, `chat_url`, `victim_ip`
+**Lambda Functions**:
+- `create_subnet`: Creates /24 subnet in Range VPC
+- `create_kali`: Launches Kali EC2 from pre-baked AMI
+- `create_victim`: Launches Victim EC2, installs XDR agent
+- `mark_ready`: Updates Range status to 'ready'
+- `cleanup`: Destroys resources on error
 
-**Implementation options**: Step Functions, ECS task, or Lambda.
+**Key Design**: Lambda functions run in Portal VPC, access RDS directly via IAM Database Auth, create Range resources via AWS APIs (no VPC peering needed).
 
 ### 3. LibreChat
 
 **Purpose**: Browser-based chat UI with agent loop and MCP tool use
 
 **Features used**:
-- Cognito OIDC (same as Portal, SSO)
-- MCP server integration (stdio transport)
-- Multi-turn conversations
+- MCP server integration (hexstrike-ai for Kali control)
+- Multi-turn conversations with agent loops
 - Chat history
+- AWS Bedrock for Claude models
 
-**Deployment**: Per-range instance or shared instance with per-user MCP config.
+**Deployment**: Shared multi-tenant instance in Portal VPC (EC2 + Docker Compose).
 
 ### 4. MCP Servers
 
-**Purpose**: Give AI tools to configure victims and run attacks
+**Purpose**: Give AI tools to control Kali and run attacks
 
-**Config-driven** via JSON (see `mcp/mcp-red/docker-lab-config.json`):
-```json
-{
-  "containers": {
-    "victim": {
-      "container_ip": "${victim_ip}",
-      "ssh_key": "/secrets/range-key.pem",
-      "ssh_user": "ubuntu",
-      "ssh_port": 22
-    }
-  }
-}
-```
-
-Provisioning service generates this per-range. Same MCP binary, different config.
+**Current**: Uses `hexstrike-ai` MCP for AI-driven pentesting, pre-installed on Kali AMI.
 
 **Two-Context Pattern**:
-- Chat 1: "Set up a vulnerable web server" → MCP configures victim
-- Chat 2: "Hack the target" → MCP attacks (no memory of setup)
+- Chat 1: "Set up a vulnerable web server" → AI configures victim via Kali
+- Chat 2: "Hack the target" → AI attacks (no memory of setup)
 
 ---
 
@@ -153,9 +138,9 @@ Provisioning service generates this per-range. Same MCP binary, different config
 
 The authenticated area of the Django portal. See full documentation:
 
-- [docs/mission-control.md](docs/mission-control.md) - Pages, layout, user flows
-- [docs/design-system.md](docs/design-system.md) - Colors, typography, effects
-- [docs/user-stories.md](docs/user-stories.md) - User stories US-1 through US-10
+- [docs/src/portal/index.md](docs/src/portal/index.md) - Pages, layout, user flows
+- [docs/src/portal/design-system.md](docs/src/portal/design-system.md) - Colors, typography, effects
+- [docs/src/portal/user-stories.md](docs/src/portal/user-stories.md) - User stories US-1 through US-10
 
 **Key Routes:**
 

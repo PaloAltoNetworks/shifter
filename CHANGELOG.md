@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2025-12-11
+
+### Fixed
+- Remove default value from s3_bucket_arn variable (module variables should have no defaults)
+
 ## [0.3.5] - 2025-12-11
 
 ### Changed

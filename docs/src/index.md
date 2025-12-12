@@ -12,6 +12,7 @@ Self-service cyber range platform for PANW SecOps Domain Consultants.
 ## Quick Links
 
 - [Architecture](architecture.md)
+- [LibreChat](librechat.md)
 - [Security](security.md)
 - [Setup](setup.md)
 - [API Reference](api.md)

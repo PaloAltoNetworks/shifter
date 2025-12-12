@@ -167,52 +167,31 @@ IAM via OIDC federation. No static credentials. Role permissions scoped to shift
 
 ### Secrets Sync
 
-Terraform variables stored locally in `.tfvars` files (gitignored). Synced to GitHub secrets before PR:
-
-```bash
-./scripts/sync-tfvars.sh
-```
+Terraform variables stored locally in `.tfvars` files (gitignored). Synced to GitHub secrets via script.
 
 Creates namespaced secrets: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_PORTAL`).
 
 ## Two-Context Pattern
 
-MCP enables AI-driven scenario setup via separate LibreChat conversations:
+MCP enables separate LibreChat conversations for scenario setup and execution:
 
-1. **Setup chat**: "Set up a PHP command injection on /cmd.php and a SUID privesc"
-   - AI uses victim MCP to configure vulnerabilities
-   - User can specify flags, locations, difficulty
+1. **Setup chat**: AI configures vulnerabilities on victim
+   - Uses victim MCP for file/service manipulation
+   - User specifies targets, difficulty, flags
 
-2. **Attack chat**: "Hack the target at 10.0.1.50, get root, find the flag"
-   - Fresh context (no memory of setup)
-   - AI uses attack methodology: recon → exploit → privesc
-   - XDR/XSIAM detects the attack chain
+2. **Attack chat**: AI executes attack chain
+   - Fresh context (no setup knowledge)
+   - Uses attack MCP for reconnaissance and exploitation
+   - XDR/XSIAM generates detections
 
-User demos detections to customer.
+Isolates setup from execution for realistic detection testing.
 
 ## MCP Configuration
 
-MCPs are config-driven. Provisioning service generates per-range config:
+Provisioning service generates per-range MCP config with:
+- Range-specific server name
+- Victim IP and SSH credentials
+- Network restrictions
+- Audit logging
 
-```json
-{
-  "server": {
-    "name": "shifter-range-${range_id}",
-    "toolPrefix": "victim"
-  },
-  "containers": {
-    "victim": {
-      "container_ip": "${victim_private_ip}",
-      "ssh_key": "/secrets/range-${range_id}.pem",
-      "ssh_user": "ubuntu",
-      "ssh_port": 22
-    }
-  },
-  "mcp": {
-    "allowed_networks": ["${vpc_cidr}"],
-    "audit_enabled": true
-  }
-}
-```
-
-Same MCP binary, different config per range. No code changes needed.
+Config-driven design allows single MCP binary to serve multiple ranges without code changes.

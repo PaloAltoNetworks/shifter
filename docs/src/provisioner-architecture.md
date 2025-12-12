@@ -210,24 +210,12 @@ All Lambdas:
 
 ## Timeout Handling
 
-**Problem:** What if provisioning gets stuck?
+**Problem:** Provisioning failures or hangs leave orphaned resources.
 
-**Solution:** Background cleanup job
-
-```python
-# Run every 5 minutes via cron/CloudWatch Events
-def cleanup_stale_ranges():
-    stale = Range.objects.filter(
-        status='provisioning',
-        created_at__lt=timezone.now() - timedelta(minutes=30)
-    )
-    for range in stale:
-        range.status = 'failed'
-        range.error_message = 'Provisioning timed out'
-        range.save()
-        # Trigger cleanup Step Function
-        start_cleanup(range.id)
-```
+**Solution:** Background cleanup job runs periodically (CloudWatch Events every 5 minutes):
+- Identifies ranges in `provisioning` state > 30 minutes
+- Marks as `failed` with timeout error
+- Triggers cleanup Step Function
 
 ## Infrastructure Requirements
 
@@ -254,23 +242,11 @@ Lambda role needs:
 
 ## Local Development
 
-For local dev, the stub provisioner simulates this flow:
-
-```python
-def start_provisioning(range_id):
-    # In production: start Step Functions
-    # In local dev: background thread that updates RDS directly
-    thread = threading.Thread(target=_stub_provision, args=(range_id,))
-    thread.start()
-
-def _stub_provision(range_id):
-    time.sleep(3)  # Simulate work
-    range = Range.objects.get(id=range_id)
-    range.status = 'ready'
-    range.victim_ip = '10.0.1.100'  # Fake
-    range.chat_url = f'http://localhost:3000/range-{range_id}'
-    range.save()
-```
+Stub provisioner simulates production flow:
+- Background thread instead of Step Functions
+- Direct RDS updates
+- Fake IPs and URLs for testing
+- 3-second delay to simulate provisioning
 
 ## Security Considerations
 
@@ -279,61 +255,20 @@ def _stub_provision(range_id):
 **Risk:** Lambda with broad EC2 permissions could affect Portal infrastructure.
 
 **Mitigations:**
-```hcl
-# Lambda can ONLY operate on Range VPC resources
-resource "aws_iam_policy" "provisioner_lambda" {
-  policy = jsonencode({
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["ec2:CreateSubnet", "ec2:DeleteSubnet", ...]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "ec2:Vpc" = var.range_vpc_id  # Range VPC only
-          }
-        }
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["ec2:RunInstances", "ec2:TerminateInstances"]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "ec2:Vpc" = var.range_vpc_id
-            "aws:RequestTag/shifter:range_id" = "*"  # Must be tagged
-          }
-        }
-      }
-    ]
-  })
-}
-```
+- IAM policy conditions restrict actions to Range VPC only
+- RunInstances/TerminateInstances require `shifter:range_id` tag
+- Terraform policy conditions enforce VPC and tag requirements
 
 ### 2. Database Access - Minimal Permissions
 
 **Risk:** Lambda could read/modify any database table.
 
 **Mitigations:**
-- Dedicated DB user for Lambda (not the Django app user)
-- Permissions limited to `mission_control_range` table only
-- Only UPDATE on specific columns (no DELETE, no schema changes)
-- IAM Database Authentication (no passwords to manage or rotate)
-
-```sql
--- Lambda DB user permissions (created via Django migration for simplicity)
--- IAM auth eliminates password management - Lambda uses generate_db_auth_token()
-CREATE USER provisioner_lambda;
-GRANT rds_iam TO provisioner_lambda;
-GRANT CONNECT ON DATABASE shifter TO provisioner_lambda;
-GRANT USAGE ON SCHEMA public TO provisioner_lambda;
-GRANT SELECT ON mission_control_range TO provisioner_lambda;
-GRANT SELECT ON mission_control_agentconfig TO provisioner_lambda;
-GRANT UPDATE (status, subnet_id, subnet_cidr, victim_ip, victim_instance_id,
-              chat_url, error_message, ready_at, destroyed_at)
-ON mission_control_range TO provisioner_lambda;
--- No INSERT, DELETE, or access to other tables
-```
+- Dedicated DB user for Lambda (separate from Django)
+- SELECT permissions on `mission_control_range` and `mission_control_agentconfig` only
+- UPDATE on specific columns (no DELETE, no schema changes)
+- IAM Database Authentication (token-based, no passwords)
+- User created via Django migration for simplicity
 
 ### 3. Range Isolation
 
@@ -358,20 +293,15 @@ ON mission_control_range TO provisioner_lambda;
 
 ### 5. Resource Tagging
 
-All provisioned resources MUST be tagged:
+All provisioned resources tagged with:
+- `shifter:range_id`: Range identifier
+- `shifter:user_id`: User identifier
+- `shifter:created_at`: Timestamp
+- `Project`: "shifter"
+- `Environment`: Environment name
+- `ManagedBy`: "provisioner-lambda"
 
-```python
-tags = {
-    "shifter:range_id": str(range_id),
-    "shifter:user_id": str(user_id),
-    "shifter:created_at": timestamp,
-    "Project": "shifter",
-    "Environment": "prod",
-    "ManagedBy": "provisioner-lambda"
-}
-```
-
-This enables:
+Enables:
 - Audit trail (who created what, when)
 - Cost allocation per user
 - Cleanup of orphaned resources
@@ -385,23 +315,21 @@ This enables:
 | DB credentials (Portal) | Secrets Manager | 30 days | EC2 IAM role only |
 | Django SECRET_KEY | Secrets Manager | Manual | EC2 IAM role only |
 
-**Note:** Lambda uses IAM Database Authentication instead of stored passwords. The PostgreSQL user is created via Django migration (runs on deploy), eliminating the need for a separate secrets management Lambda or manual user creation.
+Lambda uses IAM Database Authentication (token-based). PostgreSQL user created via Django migration.
 
 ### 7. Network Security
 
-```
-Portal VPC (10.0.0.0/16)
-├── Public subnet: ALB only
-├── Private subnet: EC2, RDS, Lambda
-└── No route to Range VPC
+Portal VPC (10.0.0.0/16):
+- Public subnet: ALB only
+- Private subnet: EC2, RDS, Lambda
+- No route to Range VPC
 
-Range VPC (10.1.0.0/16)
-├── Per-range subnets: Victim, Kali
-├── Internet Gateway: For XDR agent connectivity
-└── No route to Portal VPC
-```
+Range VPC (10.1.0.0/16):
+- Per-range subnets: Victim, Kali
+- Internet Gateway: XDR agent connectivity
+- No route to Portal VPC
 
-Lambda creates resources in Range VPC via **AWS APIs** (not network traffic). No VPC peering needed.
+Lambda creates resources in Range VPC via AWS APIs (no VPC peering needed).
 
 ### 8. Monitoring & Alerts
 

@@ -8,40 +8,26 @@
 
 # Shifter
 
-**Watch an AI hack. In your browser. Under your control.**
+AI-driven cyber range platform with autonomous agent capabilities.
 
-A SaaS cyber range for autonomous AI hacking agents.
+## Overview
 
-**Beta coming soon:** Cortex Catalyst - December 18, 2025
+Ephemeral cloud-based cyber range for AI agent attack simulation and XDR/XSIAM detection testing.
 
-## What is Shifter?
+**Use Cases:**
+- AI-driven attack demonstrations
+- XDR/XSIAM detection validation
+- Security tool testing
+- AI cyber capability research
 
-Shifter gives you a turnkey environment to experiment with AI-driven attacks. No setup, no infrastructure headaches—just log in and go.
+## Workflow
 
-- **Demo** AI cyber capabilities for customers, executives, or colleagues
-- **Experiment** with AI-driven attacks against victim infrastructure
-- **Educate** yourself on what autonomous offensive AI looks like in practice
-- **Research** AI cyber agent capabilities in an isolated environment
-
-Everything runs in the cloud. Open your browser, launch a range, and start.
-
-## Why Shifter?
-
-- **No infra to manage** — spin up a range in minutes, not days
-- **No tools to install** — everything's in the browser
-- **No scripts to write** — tell the AI what you want in plain English
-- **Your endpoint agent** — victim VMs run your XDR/XSIAM agent, detections in your tenant
-- **No cleanup** — tear down when you're done
-
-## How It Works
-
-1. Log into the portal and launch a range
-2. Open the chat interface
-3. Tell the agent what to do: *"Set up a vulnerable web server"* or *"Attack the target and get root"*
-4. Watch the AI autonomously configure, exploit, and pivot
-5. See detections in your security tooling
-
-You direct. The agent executes.
+1. Authenticate via portal (Cognito)
+2. Launch range (provisions VPC, victim VM, LibreChat instance)
+3. Interact via chat interface (natural language to AI agent)
+4. Agent executes via MCP tools (SSH, command execution, file ops)
+5. XDR/XSIAM detects activity
+6. Destroy range (tears down infrastructure)
 
 ## Architecture
 
@@ -52,42 +38,44 @@ flowchart LR
     Chat -->|MCP| Victim[Victim VM]
 ```
 
-- **Portal**: Authentication and range management
-- **LibreChat**: Browser-based chat with AI agent and MCP tools
-- **Victim**: Target infrastructure with your XDR agent
+**Components:**
+- **Portal**: Django app, Cognito auth, range provisioning
+- **LibreChat**: Chat UI, AI agent execution, MCP tool integration
+- **Victim**: EC2 target with XDR agent
 
-## Under the Hood
+## Infrastructure
 
-- **AI Integration**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) gives the agent real tools—SSH, command execution, file ops
-- **Infrastructure**: Terraform-managed AWS (VPCs, EC2, ALB, Cognito auth)
-- **Chat UI**: LibreChat with agent loops and MCP tool use
-- **Zero local install**: Everything browser-based
+- **AWS**: VPCs, EC2, RDS, Lambda, Step Functions
+- **IaC**: Terraform-managed
+- **Auth**: Cognito with MFA
+- **AI Tools**: Model Context Protocol (MCP) for agent capabilities
+- **Access**: Browser-based, no local dependencies
 
-Full technical docs: [docs/](docs/)
+Documentation: [docs/src/](docs/src/)
 
-## Roadmap
+## Limitations
 
-See [GitHub Issues](https://github.com/Brad-Edwards/shifter/issues).
+Initial release: single victim VM per range.
 
-**Note:** Initial release limits ranges to a single victim VM per user.
+See [GitHub Issues](https://github.com/Brad-Edwards/shifter/issues) for roadmap.
 
 ## Ethics
 
-AI-driven attack capabilities are already in adversary hands. Defenders need to catch up. [Read more](docs/ethics.md).
+AI-driven attack capabilities exist in adversary arsenals. Defensive practitioners require exposure to these techniques.
 
-## Safety
+See [docs/src/ethics.md](docs/src/ethics.md).
 
-- Ranges are isolated—no internet egress from victim VMs
-- Human oversight required—you direct every scenario
-- AI actions are logged and auditable
-- Users authenticate via Cognito with MFA required
-- Access restricted to authorized personnel
+## Security
+
+- Network isolation (no internet egress from victim VMs)
+- Cognito authentication with MFA enforcement
+- Human-in-the-loop (user directs all scenarios)
+- Audit logging enabled
+- Access control via IAM/Cognito
 
 ## Disclaimer
 
-This software is provided "as is" without warranty of any kind. The authors disclaim all liability for any damages or legal consequences arising from its use or misuse. You are solely responsible for ensuring your use complies with applicable laws and regulations.
-
-Do not f*** around and find out.
+Provided "as is" without warranty. Authors disclaim liability for damages or legal consequences. Users responsible for compliance with applicable laws.
 
 ## License
 
@@ -95,4 +83,4 @@ MIT
 
 ---
 
-10-23 AI hacker shenanigans 🚓
+Badge icons: [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)

@@ -87,7 +87,7 @@ Workflows use `aws-actions/configure-aws-credentials` to assume the role.
 
 ### OIDC Thumbprints
 
-Thumbprints verify GitHub's signing certificates. Current values are valid as of deployment. GitHub rotates certificates annually; update thumbprints if authentication fails after cert rotation.
+Thumbprints verify GitHub's signing certificates. Current values are valid as of deployment. GitHub rotates certificates periodically; update thumbprints if authentication fails after cert rotation.
 
 ### Scope Restrictions
 

@@ -149,11 +149,9 @@ graph LR
     GHA -->|terraform apply| Infra[Infrastructure]
 ```
 
-IAM via OIDC federation. No static credentials. Role permissions scoped to shifter-* resources.
-
 **Foundation Infrastructure:** ECR registry and terraform state backend. See `terraform/environments/prod/README.md`.
 
-**Global IAM:** GitHub Actions OIDC federation and permissions. See `terraform/global/iam/README.md`.
+**Global IAM:** GitHub Actions OIDC federation and permissions (no static credentials, role permissions scoped to shifter-* resources). See `terraform/global/iam/README.md`.
 
 ### Portal Application
 

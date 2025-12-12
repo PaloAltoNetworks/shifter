@@ -36,7 +36,6 @@ State bucket and lock table use UUIDs to avoid naming conflicts across AWS accou
 
 - AWS credentials configured via GitHub OIDC (see terraform/global/iam/)
 - Terraform >= 1.0
-- S3 bucket and DynamoDB table already provisioned (one-time manual setup)
 
 ### Deploy
 

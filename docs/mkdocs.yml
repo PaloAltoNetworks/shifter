@@ -40,6 +40,7 @@ nav:
   - Setup: setup.md
   - Portal Dev: portal-dev.md
   - API Reference: api.md
+  - Handoff Guide: handoff.md
 
 markdown_extensions:
   - pymdownx.highlight:

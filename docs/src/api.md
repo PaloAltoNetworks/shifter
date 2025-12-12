@@ -119,7 +119,7 @@ Cancel in-progress upload (cleans up S3).
 
 **Response**: `{"success": true}`
 
-CSRF exempt (supports `navigator.sendBeacon()`). Auth via `@login_required` + HMAC token.
+**Note**: CSRF exempt to support `navigator.sendBeacon()`. Auth via `@login_required` + HMAC-signed token.
 
 ## MCP Tools
 

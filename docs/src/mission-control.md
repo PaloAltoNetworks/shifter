@@ -101,8 +101,6 @@ Account info:
 ```
 Pending → Provisioning → Ready → Destroying → Destroyed
                            ↓
-                        Paused → Resuming → Ready
-                           ↓
                         Failed
 ```
 
@@ -110,8 +108,8 @@ Pending → Provisioning → Ready → Destroying → Destroyed
 - `PENDING`: Initial state before Step Functions trigger
 - `PROVISIONING`: Lambda creating VPC + EC2 + LibreChat
 - `READY`: Chat URL available, victim accessible
-- `PAUSED`: Suspended (not implemented)
-- `RESUMING`: Resuming from pause (not implemented)
+- `PAUSED`: Reserved for future use (not implemented)
+- `RESUMING`: Reserved for future use (not implemented)
 - `DESTROYING`: Teardown in progress
 - `DESTROYED`: Terminal state
 - `FAILED`: Provisioning/teardown error

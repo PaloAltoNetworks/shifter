@@ -7,8 +7,8 @@ Django application for user authentication, agent management, and range lifecycl
 ```bash
 cd portal
 cp .env.example .env
-make init  # First time: starts services + creates superuser
-make up    # Subsequent runs
+make init  # First time: start services + create superuser
+make up    # Subsequent runs: start services
 ```
 
 Access: `http://localhost:8000`
@@ -30,8 +30,7 @@ Access: `http://localhost:8000`
 
 ### Local (docker-compose)
 ```
-web (Django) → db (PostgreSQL 16)
-Port 8000    → Port 5432
+web (Django, :8000) → db (PostgreSQL 16, :5432)
 ```
 
 Web container: hot-reload mounts, auto-migrates on start, gunicorn with 2 workers.

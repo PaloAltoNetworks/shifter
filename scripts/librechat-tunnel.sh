@@ -9,10 +9,11 @@ AWS_REGION="${AWS_REGION:-us-east-2}"
 AWS_PROFILE="${AWS_PROFILE:-dev-workstation-user}"
 LOCAL_PORT="${LOCAL_PORT:-9090}"
 REMOTE_PORT="${REMOTE_PORT:-3080}"
+INSTANCE_TAG="${INSTANCE_TAG:-prod-librechat-ec2}"
 
 # Get the LibreChat EC2 instance ID
 INSTANCE_ID=$(aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=prod-librechat-ec2" "Name=instance-state-name,Values=running" \
+  --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
   --query 'Reservations[0].Instances[0].InstanceId' \
   --output text \
   --region "$AWS_REGION" \

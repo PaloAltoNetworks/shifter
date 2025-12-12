@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2025-12-11
+
+### Changed
+- Make no versioning on user data s3 bucket explicit
+
 ## [0.3.4] - 2025-12-11
 
 ### Added

@@ -11,12 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - AWS Bedrock as LibreChat LLM provider (#172)
-- Bedrock IAM policy (bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream) on LibreChat EC2 role
-- librechat.yaml with Bedrock endpoint configuration and titleModel
-- BEDROCK_AWS_DEFAULT_REGION environment variable in LibreChat .env
 
 ### Changed
-- LibreChat EC2 instance now rebuilds on user_data changes (user_data_replace_on_change = true)
+- LibreChat EC2 instance rebuilds on user_data changes
 
 ## [0.3.3] - 2025-12-11
 

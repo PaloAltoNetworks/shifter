@@ -233,8 +233,6 @@ resource "aws_instance" "this" {
   iam_instance_profile   = aws_iam_instance_profile.this.name
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
-    aws_region         = var.aws_region
-    secret_arn         = aws_secretsmanager_secret.librechat.arn
     data_volume_device = "/dev/xvdf"
   }))
   user_data_replace_on_change = true

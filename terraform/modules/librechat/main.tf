@@ -123,6 +123,25 @@ resource "aws_iam_role_policy" "cloudwatch_logs" {
   })
 }
 
+resource "aws_iam_role_policy" "bedrock" {
+  name = "bedrock-invoke"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = "arn:aws:bedrock:${var.aws_region}::foundation-model/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.this.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -215,6 +234,7 @@ resource "aws_instance" "this" {
     secret_arn         = aws_secretsmanager_secret.librechat.arn
     data_volume_device = "/dev/xvdf"
   }))
+  user_data_replace_on_change = true
 
   root_block_device {
     volume_type           = "gp3"

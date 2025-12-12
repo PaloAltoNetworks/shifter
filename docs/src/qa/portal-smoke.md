@@ -34,24 +34,20 @@ curl -sf "https://${DOMAIN}/static/css/styles.css" -o /dev/null && echo "PASS: S
 
 Expected: HTTP 200.
 
-### 3. Cognito Redirect
+### 3. Cognito Login (Manual)
 
-```bash
-REDIRECT=$(curl -sf -o /dev/null -w "%{redirect_url}" "https://${DOMAIN}/")
-echo "$REDIRECT" | grep -q "cognito" && echo "PASS: Cognito redirect" || echo "FAIL: Cognito redirect"
-```
+1. Open `https://${DOMAIN}/` in browser
+2. Verify redirect to Cognito hosted UI
+3. Login with test account
+4. Verify redirect back to portal dashboard
+5. Check session cookie is set
 
-Expected: Redirects to Cognito hosted UI for unauthenticated users.
+### 4. Admin Interface (Manual)
 
-### 4. Admin Interface
-
-After logging in as a staff user:
-
-```bash
-curl -sf "https://${DOMAIN}/admin/login/" -o /dev/null && echo "PASS: Admin accessible" || echo "FAIL: Admin not accessible"
-```
-
-Expected: HTTP 200, Django admin login page loads.
+1. Login as a staff user
+2. Navigate to `https://${DOMAIN}/admin/`
+3. Verify Django admin loads
+4. Check you can view models
 
 ### 5. EC2 Instance Health
 
@@ -77,25 +73,14 @@ aws ssm start-session --target "$INSTANCE_ID" --document-name AWS-StartInteracti
   --parameters command="docker exec portal python manage.py check --database default"
 ```
 
-## Quick Run
+## Checklist
 
-All checks in sequence:
-
-```bash
-#!/bin/bash
-set -e
-ENV=${1:-dev}
-DOMAIN="shifter.keplerops.com"
-[ "$ENV" == "dev" ] && DOMAIN="dev.shifter.keplerops.com"
-
-echo "Portal Smoke Test - $ENV"
-echo "========================"
-
-curl -sf "https://${DOMAIN}/health/" > /dev/null && echo "1. Health check: PASS" || { echo "1. Health check: FAIL"; exit 1; }
-curl -sf "https://${DOMAIN}/static/css/styles.css" -o /dev/null && echo "2. Static assets: PASS" || { echo "2. Static assets: FAIL"; exit 1; }
-curl -sf "https://${DOMAIN}/admin/login/" -o /dev/null && echo "3. Admin interface: PASS" || { echo "3. Admin interface: FAIL"; exit 1; }
-
-echo "========================"
-echo "All checks passed"
-```
+| Check | Method | Pass Criteria |
+|-------|--------|---------------|
+| Health check | `curl https://${DOMAIN}/health/` | 200 OK |
+| Static assets | `curl https://${DOMAIN}/static/css/styles.css` | 200 OK |
+| Cognito redirect | Browser | Redirects to Cognito |
+| Login flow | Browser | Can login, session created |
+| Admin access | Browser | Admin page loads for staff |
+| EC2 running | AWS CLI | Instance state = running |
 

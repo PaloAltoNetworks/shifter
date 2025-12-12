@@ -29,8 +29,8 @@ Post-authentication user flows for Domain Consultants.
 - Select which agent to install on victim
 - Click "Launch Range"
 - See provisioning status (spinner/progress)
-- Receive browser link to control workspace when ready
-- Range includes: control box (Kasm with Cursor + MCPs), Kali (attack box), victim EC2 with agent installed
+- Receive browser link to chat interface when ready
+- Range includes: victim EC2 with agent installed, LibreChat with MCP access
 
 ---
 
@@ -44,7 +44,7 @@ Post-authentication user flows for Domain Consultants.
 - Click "Destroy Range" from portal
 - Confirmation prompt
 - Victim EC2 terminated
-- Kasm session ended
+- LibreChat user removed
 - Status updated to "destroyed"
 
 ---
@@ -58,9 +58,8 @@ Post-authentication user flows for Domain Consultants.
 **Acceptance Criteria:**
 - Click "Pause Range" from portal
 - Victim EC2 stopped (not terminated)
-- Kasm session suspended
 - Status updated to "paused"
-- Can resume range later (EC2 starts, Kasm reconnects)
+- Can resume range later (EC2 starts)
 - Paused ranges still count toward any limits
 
 ---
@@ -74,9 +73,8 @@ Post-authentication user flows for Domain Consultants.
 **Acceptance Criteria:**
 - Click "Resume Range" from portal (only visible for paused ranges)
 - Victim EC2 started
-- Kasm session resumed
-- Status updated to "active"
-- Workspace state preserved from before pause
+- Status updated to "ready"
+- Chat interface accessible again
 
 ---
 

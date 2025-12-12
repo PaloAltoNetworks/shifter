@@ -1,6 +1,6 @@
 # Range Infrastructure
 
-Stable VPC with ephemeral per-user subnets for XDR/XSIAM demo environments.
+Shared VPC with per-user subnets. Each range contains a victim VM with user's XDR agent.
 
 ## Architecture
 
@@ -11,95 +11,85 @@ graph TB
         RT[Public Route Table]
 
         subgraph "User A Subnet (10.1.1.0/24)"
-            ControlA[Control Box]
-            KaliA[Kali Box]
-            VictimA[Victim Box]
-            ControlA -->|MCP| KaliA
-            ControlA -->|MCP| VictimA
-            KaliA -->|attacks| VictimA
-            KaliA -.-x|no egress| ControlA
+            VictimA[Victim VM]
         end
 
         subgraph "User B Subnet (10.1.2.0/24)"
-            ControlB[Control Box]
-            KaliB[Kali Box]
-            VictimB[Victim Box]
-            ControlB -->|MCP| KaliB
-            ControlB -->|MCP| VictimB
-            KaliB -->|attacks| VictimB
+            VictimB[Victim VM]
         end
     end
 
-    UserA((User A)) -->|HTTPS| ControlA
-    UserB((User B)) -->|HTTPS| ControlB
+    UserA((User A)) -->|HTTPS| LibreChatA[LibreChat]
+    UserB((User B)) -->|HTTPS| LibreChatB[LibreChat]
+    LibreChatA -->|SSH/MCP| VictimA
+    LibreChatB -->|SSH/MCP| VictimB
     VictimA -->|XDR Agent| XDR[XDR/XSIAM]
     VictimB -->|XDR Agent| XDR
     IGW <--> Internet((Internet))
 ```
 
-## Per-User Subnet
-
-Each user gets one subnet with three instances:
-
-| Instance | Purpose |
-|----------|---------|
-| Control Box | Kasm desktop, Cursor/Cline, MCP connections to Kali and Victim |
-| Kali Box | Attack tools, MCP-controlled from Control |
-| Victim Box | Target with XDR agent, MCP-configured from Control |
-
-## Security Groups
-
-| SG | Ingress | Egress |
-|----|---------|--------|
-| Control | HTTPS from internet | SSH to Kali SG, Victim SG |
-| Kali | SSH from Control SG | ALL to Victim SG only |
-| Victim | ALL from Kali SG, SSH from Control SG | HTTPS (agent callbacks) |
-
-Kali has no egress to Control. SGs are default-deny and stateful—Kali can only respond to Control-initiated connections.
-
-## CIDR
-
-| VPC | CIDR |
-|-----|------|
-| Portal | `10.0.0.0/16` |
-| Range | `10.1.0.0/16` |
-
-255 usable `/24` subnets. AWS default 200 subnets/VPC (adjustable to 500).
-
 ## Components
 
-### Stable
-
-| Resource | Purpose |
+| Component | Purpose |
 |----------|---------|
-| VPC | Network boundary |
-| Internet Gateway | Internet access |
-| Route Table | 0.0.0.0/0 → IGW |
+| Victim VM | Target EC2 instance with user's XDR agent |
+| Subnet | Isolated /24 network per user (10.1.{index}.0/24) |
+| LibreChat | Shared chat interface with MCP access to victim |
 
-### Ephemeral (per-user)
+## Security
 
-| Resource | Purpose |
-|----------|---------|
-| Subnet | `/24` per user |
-| Control/Kali/Victim EC2 | User instances |
-| 3x Security Groups | Traffic isolation |
+Victim security group allows SSH from VPC (for MCP) and all outbound (for XDR agent callbacks).
+
+## Provisioning
+
+Range provisioning is orchestrated by AWS Step Functions with Lambda handlers:
+
+1. **create_subnet** - Allocates subnet from 10.1.{1-254}.0/24 pool
+2. **create_victim** - Launches EC2 instance, installs XDR agent from S3
+3. **create_kali** - Configures attack container (future)
+4. **configure_librechat** - Sets up LibreChat user with MCP access to victim
+
+All state stored in Portal RDS (Range model). Lambdas read/write directly to database.
+
+## Lifecycle
+
+| Status | Description |
+|--------|-------------|
+| pending | Initial state after user creates range |
+| provisioning | Step Functions execution in progress |
+| ready | All resources created, chat_url available |
+| destroying | Teardown in progress |
+| destroyed | All resources deleted |
+| failed | Provisioning failed, resources cleaned up |
+
+Ranges stuck in transitional states >30min automatically cleaned up by scheduled Lambda.
+
+## Infrastructure
+
+**Stable Resources** (created once):
+- VPC (10.1.0.0/16)
+- Internet Gateway
+- Public route table (0.0.0.0/0 → IGW)
+- Victim security group (SSH from VPC, all outbound)
+
+**Ephemeral Resources** (per range):
+- Subnet (10.1.{index}.0/24, index 1-254)
+- EC2 victim instance
+- Kali container (future)
+
+Portal VPC = 10.0.0.0/16, Range VPC = 10.1.0.0/16. Max 254 concurrent ranges.
 
 ## Terraform
 
-Stable module: `modules/range/vpc/` (VPC, IGW, route table)
+Modules:
+- `modules/range/vpc` - VPC, IGW, route table, security groups
+- `modules/range/provisioner` - Step Functions, Lambda functions
 
-Environment: `environments/prod/range/`
+Environments: `environments/prod/range`
 
-Future: `modules/range/user-subnet/` for ephemeral per-user resources.
-
-## Deployment
-
-`range-infra.yml` workflow:
-
+GitHub Actions workflow `range-infra.yml`:
 - PR → `terraform plan`
 - Merge to main → `terraform apply`
 - Manual dispatch → plan/apply/destroy
 
-State: `s3://shifter-infra-xxx/prod/range/terraform.tfstate`
-
-Variables: `TF_VARS_PROD_RANGE` GitHub secret.
+State: S3 backend at `s3://shifter-infra-*/prod/range/terraform.tfstate`

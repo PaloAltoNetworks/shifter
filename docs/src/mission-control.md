@@ -46,7 +46,7 @@ Primary interface for range operations. Shows current range status and launch co
 
 1. **No Active Range** - Shows agent selector and launch button
 2. **Provisioning** - Shows progress indicator during infrastructure spin-up
-3. **Active** - Shows range details with workspace link, pause, and destroy options
+3. **Ready** - Shows range details with chat link, pause, and destroy options
 4. **Paused** - Shows resume and destroy options
 
 **User Stories:** US-2 (Launch), US-3 (Destroy), US-4 (Pause), US-5 (Resume)
@@ -104,30 +104,29 @@ Logout clears Django session and optionally redirects to Cognito logout.
 ## Range Lifecycle
 
 ```
-┌──────────┐     ┌──────────────┐     ┌────────┐
-│ No Range │────▶│ Provisioning │────▶│ Active │
-└──────────┘     └──────────────┘     └────────┘
+┌──────────┐     ┌──────────────┐     ┌───────┐
+│ No Range │────▶│ Provisioning │────▶│ Ready │
+└──────────┘     └──────────────┘     └───────┘
                                           │
                       ┌───────────────────┼───────────────────┐
                       │                   │                   │
                       ▼                   ▼                   ▼
-                 ┌────────┐          ┌────────┐          ┌───────────┐
-                 │ Paused │◀────────▶│ Active │─────────▶│ Destroyed │
-                 └────────┘          └────────┘          └───────────┘
+                 ┌────────┐          ┌───────┐          ┌───────────┐
+                 │ Paused │◀────────▶│ Ready │─────────▶│ Destroyed │
+                 └────────┘          └───────┘          └───────────┘
                       │                                       ▲
                       └───────────────────────────────────────┘
 ```
 
-- **Provisioning**: Terraform creating infrastructure, Kasm spinning up container
-- **Active**: Range ready, workspace accessible
-- **Paused**: EC2 stopped, Kasm suspended (cost savings)
+- **Provisioning**: Step Functions creating subnet, EC2, configuring LibreChat
+- **Ready**: Range ready, chat interface accessible
+- **Paused**: EC2 stopped (cost savings)
 - **Destroyed**: All resources terminated
 
-## Control Workspace
+## Chat Interface
 
-When a range is active, the "Open Workspace" button links to a Kasm session running:
+When a range is ready, the "Open Chat" button links to LibreChat with:
 
-- **Cursor IDE** with MCP servers configured
-- **MCPs** connected to Kali (attack box) and Victim (target)
-
-The DC interacts with AI in Cursor. The AI uses MCPs to execute commands on Kali and the victim - the DC never accesses Kali directly.
+- **MCP access** to victim VM for command execution
+- **AI agent** that can configure vulnerabilities or perform attacks
+- **Isolation** - MCP hardcoded to victim IP, cannot escape subnet

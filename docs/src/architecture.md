@@ -149,6 +149,12 @@ graph LR
     GHA -->|terraform apply| Infra[Infrastructure]
 ```
 
+IAM via OIDC federation. No static credentials. Role permissions scoped to shifter-* resources.
+
+**Foundation Infrastructure:** ECR registry and terraform state backend. See `terraform/environments/prod/README.md`.
+
+**Global IAM:** GitHub Actions OIDC federation and permissions. See `terraform/global/iam/README.md`.
+
 ### Portal Application
 
 Portal deploys on push to `portal/**`:
@@ -163,17 +169,9 @@ graph LR
 
 EC2 user data bootstraps Docker and ECR auth. SSM pulls new image and restarts container.
 
-IAM via OIDC federation. No static credentials. Role permissions scoped to shifter-* resources.
-
 ### Secrets Sync
 
-Terraform variables stored locally in `.tfvars` files (gitignored). Synced to GitHub secrets before PR:
-
-```bash
-./scripts/sync-tfvars.sh
-```
-
-Creates namespaced secrets: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_PORTAL`).
+Terraform variables stored locally in `.tfvars` files (gitignored). Synced to GitHub secrets before PR using `scripts/sync-tfvars.sh`. Creates namespaced secrets for each environment and component.
 
 ## Two-Context Pattern
 
@@ -192,27 +190,4 @@ User demos detections to customer.
 
 ## MCP Configuration
 
-MCPs are config-driven. Provisioning service generates per-range config:
-
-```json
-{
-  "server": {
-    "name": "shifter-range-${range_id}",
-    "toolPrefix": "victim"
-  },
-  "containers": {
-    "victim": {
-      "container_ip": "${victim_private_ip}",
-      "ssh_key": "/secrets/range-${range_id}.pem",
-      "ssh_user": "ubuntu",
-      "ssh_port": 22
-    }
-  },
-  "mcp": {
-    "allowed_networks": ["${vpc_cidr}"],
-    "audit_enabled": true
-  }
-}
-```
-
-Same MCP binary, different config per range. No code changes needed.
+MCPs are config-driven. Provisioning service generates per-range config with victim IP, SSH credentials, and network restrictions. Same MCP binary, different config per range. No code changes needed per deployment.

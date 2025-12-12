@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.4] - 2025-12-11
 
 ### Added
-- AWS Bedrock as LibreChat LLM provider (#172)
+- AWS Bedrock as LibreChat LLM provider
 
 ### Changed
 - LibreChat EC2 instance rebuilds on user_data changes

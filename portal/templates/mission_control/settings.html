@@ -12,7 +12,7 @@
     <div class="form-group">
         <label class="form-label">Email</label>
         <input type="email" class="form-input" value="{{ request.user.email }}" disabled style="opacity: 0.6;">
-        <p style="margin-top: 0.5rem; font-size: 0.75rem; color: rgba(255,255,255,0.4);">
+        <p style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--xsiam-text-tertiary);">
             Managed by your identity provider
         </p>
     </div>
@@ -21,7 +21,7 @@
 <!-- Security -->
 <div class="card">
     <div class="card-title">Security</div>
-    <p style="color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+    <p style="color: var(--xsiam-text-secondary); margin-bottom: 1rem;">
         Change your password through your identity provider.
     </p>
     <a href="#" class="btn btn-secondary" id="change-password-btn">
@@ -30,9 +30,9 @@
 </div>
 
 <!-- Danger Zone -->
-<div class="card" style="border-color: rgba(255, 68, 68, 0.3);">
-    <div class="card-title" style="color: var(--red);">Danger Zone</div>
-    <p style="color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+<div class="card" style="border-color: var(--xsiam-error);">
+    <div class="card-title" style="color: var(--xsiam-error);">Danger Zone</div>
+    <p style="color: var(--xsiam-text-secondary); margin-bottom: 1rem;">
         Permanently delete your account and all associated data. This action cannot be undone.
     </p>
     <button class="btn btn-danger" id="delete-account-btn">
@@ -41,19 +41,19 @@
 </div>
 
 <!-- Delete Confirmation Modal (hidden by default) -->
-<div id="delete-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+<div id="delete-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center;">
     <div class="card" style="max-width: 400px; margin: 2rem;">
-        <div class="card-title" style="color: var(--red);">Delete Account?</div>
-        <p style="color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+        <div class="card-title" style="color: var(--xsiam-error);">Delete Account?</div>
+        <p style="color: var(--xsiam-text-secondary); margin-bottom: 1rem;">
             This will:
         </p>
-        <ul style="color: rgba(255,255,255,0.7); margin-bottom: 1.5rem; padding-left: 1.5rem;">
+        <ul style="color: var(--xsiam-text-secondary); margin-bottom: 1.5rem; padding-left: 1.5rem;">
             <li>Destroy any active ranges</li>
             <li>Delete all uploaded agents</li>
             <li>Remove your account permanently</li>
         </ul>
-        <p style="color: rgba(255,255,255,0.7); margin-bottom: 1.5rem;">
-            Type <strong style="color: var(--red);">DELETE</strong> to confirm:
+        <p style="color: var(--xsiam-text-secondary); margin-bottom: 1.5rem;">
+            Type <strong style="color: var(--xsiam-error);">DELETE</strong> to confirm:
         </p>
         <div class="form-group">
             <input type="text" class="form-input" id="delete-confirm-input" placeholder="Type DELETE">

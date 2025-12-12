@@ -9,22 +9,22 @@
 <!-- Quick Start -->
 <div class="card">
     <div class="card-title">Quick Start</div>
-    <ol style="color: rgba(255,255,255,0.7); padding-left: 1.5rem; line-height: 1.8;">
-        <li><strong>Upload an agent</strong> - Go to Agents and upload your XDR or XSIAM agent installer</li>
-        <li><strong>Launch a range</strong> - Return to Dashboard, select your agent, and click Launch Range</li>
-        <li><strong>Wait for provisioning</strong> - Your range will be ready in a few minutes</li>
-        <li><strong>Open your workspace</strong> - Click the link to access your control environment</li>
-        <li><strong>Run scenarios</strong> - Use AI to configure vulnerabilities and run attacks</li>
+    <ol style="color: var(--xsiam-text-secondary); padding-left: 1.5rem; line-height: 1.8;">
+        <li><strong style="color: var(--xsiam-text-primary);">Upload an agent</strong> - Go to Agents and upload your XDR or XSIAM agent installer</li>
+        <li><strong style="color: var(--xsiam-text-primary);">Launch a range</strong> - Return to Dashboard, select your agent, and click Launch Range</li>
+        <li><strong style="color: var(--xsiam-text-primary);">Wait for provisioning</strong> - Your range will be ready in a few minutes</li>
+        <li><strong style="color: var(--xsiam-text-primary);">Open your workspace</strong> - Click the link to access your control environment</li>
+        <li><strong style="color: var(--xsiam-text-primary);">Run scenarios</strong> - Use AI to configure vulnerabilities and run attacks</li>
     </ol>
 </div>
 
 <!-- Agents -->
 <div class="card">
     <div class="card-title">Managing Agents</div>
-    <p style="color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+    <p style="color: var(--xsiam-text-secondary); margin-bottom: 1rem;">
         Agents are XDR or XSIAM installers that get deployed to your victim machines.
     </p>
-    <ul style="color: rgba(255,255,255,0.7); padding-left: 1.5rem; line-height: 1.8;">
+    <ul style="color: var(--xsiam-text-secondary); padding-left: 1.5rem; line-height: 1.8;">
         <li>Download your agent installer from your XDR/XSIAM console</li>
         <li>Supported formats: .msi (Windows), .sh (Linux), .deb, .rpm</li>
         <li>Give each agent a memorable name (e.g., "Acme Corp XSIAM")</li>
@@ -35,17 +35,17 @@
 <!-- Ranges -->
 <div class="card">
     <div class="card-title">Working with Ranges</div>
-    <p style="color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+    <p style="color: var(--xsiam-text-secondary); margin-bottom: 1rem;">
         A range is your isolated demo environment with a victim machine and attack tools.
     </p>
-    <ul style="color: rgba(255,255,255,0.7); padding-left: 1.5rem; line-height: 1.8;">
-        <li><strong>Active</strong> - Range is running and ready to use</li>
-        <li><strong>Paused</strong> - Range is stopped to save costs, can be resumed</li>
-        <li><strong>Provisioning</strong> - Range is being set up, wait a few minutes</li>
-        <li><strong>Destroyed</strong> - Range has been terminated</li>
+    <ul style="color: var(--xsiam-text-secondary); padding-left: 1.5rem; line-height: 1.8;">
+        <li><strong style="color: var(--xsiam-text-primary);">Active</strong> - Range is running and ready to use</li>
+        <li><strong style="color: var(--xsiam-text-primary);">Paused</strong> - Range is stopped to save costs, can be resumed</li>
+        <li><strong style="color: var(--xsiam-text-primary);">Provisioning</strong> - Range is being set up, wait a few minutes</li>
+        <li><strong style="color: var(--xsiam-text-primary);">Destroyed</strong> - Range has been terminated</li>
     </ul>
-    <p style="color: rgba(255,255,255,0.7); margin-top: 1rem;">
-        <strong>Tip:</strong> Pause your range when taking breaks to save costs. Your setup persists across sessions.
+    <p style="color: var(--xsiam-text-secondary); margin-top: 1rem;">
+        <strong style="color: var(--xsiam-text-primary);">Tip:</strong> Pause your range when taking breaks to save costs. Your setup persists across sessions.
     </p>
 </div>
 
@@ -54,30 +54,30 @@
     <div class="card-title">FAQ</div>
 
     <div style="margin-bottom: 1.5rem;">
-        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">How long does provisioning take?</p>
-        <p style="color: rgba(255,255,255,0.7);">Usually 2-5 minutes depending on the agent type.</p>
+        <p style="color: var(--xsiam-purple); margin-bottom: 0.5rem; font-weight: 600;">How long does provisioning take?</p>
+        <p style="color: var(--xsiam-text-secondary);">Usually 2-5 minutes depending on the agent type.</p>
     </div>
 
     <div style="margin-bottom: 1.5rem;">
-        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">Can I have multiple ranges at once?</p>
-        <p style="color: rgba(255,255,255,0.7);">Currently limited to one active range at a time.</p>
+        <p style="color: var(--xsiam-purple); margin-bottom: 0.5rem; font-weight: 600;">Can I have multiple ranges at once?</p>
+        <p style="color: var(--xsiam-text-secondary);">Currently limited to one active range at a time.</p>
     </div>
 
     <div style="margin-bottom: 1.5rem;">
-        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">What happens if I leave my range idle?</p>
-        <p style="color: rgba(255,255,255,0.7);">Ranges auto-hibernate after 8 hours of inactivity to save costs. You can resume anytime.</p>
+        <p style="color: var(--xsiam-purple); margin-bottom: 0.5rem; font-weight: 600;">What happens if I leave my range idle?</p>
+        <p style="color: var(--xsiam-text-secondary);">Ranges auto-hibernate after 8 hours of inactivity to save costs. You can resume anytime.</p>
     </div>
 
     <div>
-        <p style="color: var(--neon-green); margin-bottom: 0.5rem;">Where do alerts appear?</p>
-        <p style="color: rgba(255,255,255,0.7);">In your XDR/XSIAM console - the same one you downloaded the agent from.</p>
+        <p style="color: var(--xsiam-purple); margin-bottom: 0.5rem; font-weight: 600;">Where do alerts appear?</p>
+        <p style="color: var(--xsiam-text-secondary);">In your XDR/XSIAM console - the same one you downloaded the agent from.</p>
     </div>
 </div>
 
 <!-- Contact -->
 <div class="card">
     <div class="card-title">Need More Help?</div>
-    <p style="color: rgba(255,255,255,0.7);">
+    <p style="color: var(--xsiam-text-secondary);">
         Contact the Shifter team for support or to report issues.
     </p>
     <p style="margin-top: 1rem;">

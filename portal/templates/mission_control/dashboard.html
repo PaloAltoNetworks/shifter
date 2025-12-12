@@ -10,7 +10,7 @@
 <!-- No Active Range State -->
 <div class="card" id="no-range-state">
     <div class="card-title">Launch a Range</div>
-    <p style="color: rgba(255,255,255,0.7); margin-bottom: 1.5rem;">
+    <p style="color: var(--xsiam-text-secondary); margin-bottom: 1.5rem;">
         Select an agent and launch a new cyber range environment.
     </p>
 
@@ -26,8 +26,8 @@
         Launch Range
     </button>
 
-    <p style="margin-top: 1rem; font-size: 0.75rem; color: rgba(255,255,255,0.4);">
-        No agents yet? <a href="{% url 'mission_control:agents' %}" style="color: var(--neon-green);">Upload one first</a>
+    <p style="margin-top: 1rem; font-size: 0.75rem; color: var(--xsiam-text-tertiary);">
+        No agents yet? <a href="{% url 'mission_control:agents' %}" style="color: var(--xsiam-purple); text-decoration: underline;">Upload one first</a>
     </p>
 </div>
 
@@ -38,7 +38,7 @@
         <span class="status-dot"></span>
         <span>Setting up infrastructure...</span>
     </div>
-    <p style="color: rgba(255,255,255,0.5); font-size: 0.875rem; margin-bottom: 1.5rem;">
+    <p style="color: var(--xsiam-text-secondary); font-size: 0.875rem; margin-bottom: 1.5rem;">
         This usually takes 2-3 minutes. You'll be notified when ready.
     </p>
     <button class="btn btn-danger" id="cancel-btn">
@@ -56,7 +56,7 @@
                 <span>Running</span>
             </div>
         </div>
-        <div style="text-align: right; font-size: 0.75rem; color: rgba(255,255,255,0.5);">
+        <div style="text-align: right; font-size: 0.75rem; color: var(--xsiam-text-secondary);">
             <div>Started: <span id="range-started">--</span></div>
             <div>Agent: <span id="range-agent">--</span></div>
         </div>
@@ -85,7 +85,7 @@
                 <span>Paused</span>
             </div>
         </div>
-        <div style="text-align: right; font-size: 0.75rem; color: rgba(255,255,255,0.5);">
+        <div style="text-align: right; font-size: 0.75rem; color: var(--xsiam-text-secondary);">
             <div>Paused: <span id="range-paused-at">--</span></div>
             <div>Agent: <span id="paused-range-agent">--</span></div>
         </div>
@@ -108,7 +108,7 @@
         <span class="status-dot"></span>
         <span>Provisioning Failed</span>
     </div>
-    <p style="color: rgba(255,255,255,0.7); font-size: 0.875rem; margin-bottom: 1.5rem;">
+    <p style="color: var(--xsiam-text-secondary); font-size: 0.875rem; margin-bottom: 1.5rem;">
         <strong>Error:</strong> <span id="error-message">Unknown error occurred</span>
     </p>
     <button class="btn btn-secondary" id="dismiss-error-btn">

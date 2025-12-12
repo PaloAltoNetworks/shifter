@@ -185,7 +185,8 @@ resource "aws_sfn_state_machine" "provision_range" {
         }
         ResultPath = "$.create_kali_result"
         ResultSelector = {
-          "kali_info.$" = "$.Payload.kali_info"
+          "kali_instance_id.$" = "$.Payload.kali_instance_id"
+          "kali_ip.$"          = "$.Payload.kali_ip"
         }
         Next = "ConfigureLibreChat"
         Catch = [

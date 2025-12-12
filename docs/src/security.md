@@ -2,12 +2,39 @@
 
 ## Network
 
+### Portal VPC
+
 - EC2 and RDS in private subnets, no direct internet access
 - ALB in public subnets, only component with internet exposure
 - ALB security group: inbound 443/80 only
 - EC2 security group: inbound 8000 from ALB security group only
 - RDS security group: inbound 5432 from EC2 security group only
 - Egress via NAT Gateway
+
+### Range VPC
+
+Separate VPC (`10.1.0.0/16`) for attack lab environments.
+
+**Security Groups:**
+
+| SG | Ingress | Egress | Purpose |
+|----|---------|--------|---------|
+| Kali | SSH from VPC, ALL from Victim SG | ALL | Attack box |
+| Victim | SSH from VPC, ALL from Kali SG | ALL | Target with XDR agent |
+
+**Design Decisions:**
+
+- **Bidirectional Kali ↔ Victim traffic**: Required for reverse shells, C2 callbacks, and realistic attack scenarios
+- **Unrestricted egress**: Kali needs apt for tools; Victim needs internet for XDR agent callbacks
+- **SSH from VPC CIDR**: Allows MCP/LibreChat to manage both instances
+- **Security group references**: Traffic rules use SG IDs, not CIDR blocks—prevents cross-user subnet attacks
+
+**Isolation:**
+
+- Each user gets their own `/24` subnet
+- Kali/Victim can only talk to each other within the same subnet
+- No cross-subnet traffic possible (SG rules reference specific SGs, not VPC CIDR)
+- Range VPC has no peering to Portal VPC
 
 ## Encryption
 

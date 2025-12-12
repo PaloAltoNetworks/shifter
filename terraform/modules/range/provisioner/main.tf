@@ -118,7 +118,7 @@ resource "aws_lambda_function" "create_victim" {
 }
 
 # ------------------------------------------------------------------------------
-# Create Kali Lambda (stub)
+# Create Kali Lambda
 # ------------------------------------------------------------------------------
 
 data "archive_file" "create_kali" {
@@ -144,7 +144,11 @@ resource "aws_lambda_function" "create_kali" {
   }
 
   environment {
-    variables = local.common_env_vars
+    variables = merge(local.common_env_vars, {
+      KALI_AMI_ID            = var.kali_ami_id
+      KALI_INSTANCE_TYPE     = var.kali_instance_type
+      KALI_SECURITY_GROUP_ID = var.kali_security_group_id
+    })
   }
 
   tags = merge(var.tags, {

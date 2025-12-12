@@ -24,3 +24,8 @@ output "victim_security_group_id" {
   description = "ID of the security group for victim EC2 instances"
   value       = module.vpc.victim_security_group_id
 }
+
+output "kali_security_group_id" {
+  description = "ID of the security group for Kali attack instances"
+  value       = module.vpc.kali_security_group_id
+}

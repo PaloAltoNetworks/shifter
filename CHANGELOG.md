@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2025-12-11
+
+### Added
+- Kali EC2 provisioning Lambda (create_kali) with official AWS Marketplace AMI
+- Kali security group in Range VPC with bidirectional victim traffic
+- kali_instance_id and kali_ip fields on Range model
+- Kali cleanup in teardown Lambda
+- Range VPC security documentation (security groups, traffic matrix, isolation)
+
+### Changed
+- Victim security group now allows all inbound from Kali SG (for attacks)
+- Kali security group allows all inbound from Victim SG (reverse shells, C2)
+
 ## [0.3.1] - 2025-12-11
 
 ### Added

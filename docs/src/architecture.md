@@ -2,38 +2,44 @@
 
 ## Infrastructure Overview
 
-Three components, decoupled via RDS + SQS:
+Three components, decoupled via RDS:
 
-- **Portal**: Django app for auth, agent upload, range status UI. Pushes to SQS on launch.
-- **Provisioning Service**: Consumes SQS, provisions infra, deploys LibreChat
-- **Range**: Per-user VPC with LibreChat + MCPs and victim EC2
+- **Portal**: Django app for auth, agent upload, range status UI. Triggers Step Functions on launch.
+- **Provisioning Service**: Step Functions + Lambda, provisions range infra (subnet, Kali, Victim)
+- **LibreChat**: Shared multi-tenant chat UI in Portal VPC
+- **Range**: Per-user subnet in Range VPC with Kali + Victim EC2
 
 ```mermaid
 graph TB
     subgraph "Portal VPC"
         Portal[Django Portal]
         RDS[(PostgreSQL)]
-        SQS[[SQS FIFO]]
-        Provisioner[Provisioning Service]
+        StepFn[[Step Functions]]
+        Lambda[Lambda Functions]
+        LibreChat[LibreChat + MCPs]
         Portal --> RDS
-        Portal -->|push| SQS
-        SQS -->|consume| Provisioner
-        Provisioner --> RDS
+        Portal -->|start execution| StepFn
+        StepFn --> Lambda
+        Lambda --> RDS
     end
 
-    subgraph "Range VPC (per-user)"
-        LibreChat[LibreChat + MCPs]
-        Victim[Victim Instance]
-        LibreChat -->|SSH/MCP| Victim
+    subgraph "Range VPC (10.1.0.0/16)"
+        subgraph "User Subnet"
+            Kali[Kali Instance]
+            Victim[Victim Instance]
+            Kali -->|attacks| Victim
+        end
     end
 
     User((User)) -->|HTTPS| Portal
     User -->|HTTPS| LibreChat
-    Provisioner -->|Terraform| Victim
+    LibreChat -->|SSH/MCP| Kali
+    Lambda -->|AWS API| Kali
+    Lambda -->|AWS API| Victim
     Victim -->|Telemetry| XDR[XDR/XSIAM]
 ```
 
-Portal writes to RDS and pushes to SQS. Provisioner consumes queue and updates RDS when done.
+Portal writes to RDS and triggers Step Functions. Lambda functions create AWS resources and update RDS directly.
 
 ## Portal Infrastructure
 
@@ -105,36 +111,34 @@ RDS credentials auto-generated at provision time, stored in Secrets Manager. Sec
 
 ## Range Infrastructure
 
-Per-user ephemeral VPCs provisioned by the Provisioning Service.
+Per-user ephemeral subnets in Range VPC, provisioned by Step Functions + Lambda.
 
 ### Provisioning Flow
 
-1. Portal writes `Range(status='pending', agent_id=X)` to RDS
-2. Portal pushes `{ range_id }` to SQS FIFO queue
-3. Provisioning Service consumes message
-4. Terraform apply:
-   - VPC + subnet
-   - Security group (SSH from LibreChat)
-   - EC2 victim instance
-   - User-data installs XDR agent from S3
-5. Generate MCP config JSON with victim IP
-6. Deploy LibreChat instance (ECS or EC2) with MCP servers
-7. Update Range row: `status='ready'`, `victim_ip`, `chat_url`
-8. Delete message from queue (success) or send to DLQ (failure)
+1. Portal writes `Range(status='provisioning', agent_id=X)` to RDS
+2. Portal starts Step Functions execution with `{ range_id }`
+3. Lambda functions execute sequentially:
+   - `create_subnet`: Create /24 subnet in Range VPC
+   - `create_kali`: Launch Kali EC2 from pre-baked AMI
+   - `create_victim`: Launch Victim EC2, install XDR agent from S3
+   - `mark_ready`: Update Range status to 'ready'
+4. Each Lambda reads from RDS, creates AWS resources, writes back to RDS
+5. On error: `cleanup` Lambda destroys any created resources
 
 ### Components
 
-| Component | Purpose |
-|-----------|---------|
-| LibreChat | Chat UI, agent loop, MCP tool use |
-| MCP Servers | SSH to victim, command execution |
-| Victim EC2 | Target for attacks, runs user's XDR agent |
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| LibreChat | Portal VPC | Shared chat UI, agent loop, MCP tool use |
+| Kali EC2 | Range VPC | Attack tools, MCP-controlled |
+| Victim EC2 | Range VPC | Target with XDR agent |
 
 ### Isolation
 
-- Each range is its own VPC (no peering to portal)
-- MCP config hardcodes victim IP (agent can't escape)
-- Cognito SSO ensures user identity across Portal and LibreChat
+- Each user gets a dedicated /24 subnet in Range VPC
+- Security groups restrict traffic between subnets
+- Range VPC has no route to Portal VPC (Lambda uses AWS APIs)
+- Victim VMs have no IAM role (can't call AWS APIs)
 
 ## Deployment Pipeline
 
@@ -192,25 +196,29 @@ User demos detections to customer.
 
 ## MCP Configuration
 
-MCPs are config-driven. Provisioning service generates per-range config:
+MCPs connect LibreChat to range instances via SSH. Currently using hexstrike-ai MCP for Kali access.
+
+**Current State:** MCPs are configured manually in LibreChat. Users SSH into their Kali instance from LibreChat.
+
+**Future State:** Per-range MCP config will be auto-generated:
 
 ```json
 {
   "server": {
     "name": "shifter-range-${range_id}",
-    "toolPrefix": "victim"
+    "toolPrefix": "kali"
   },
-  "containers": {
+  "targets": {
+    "kali": {
+      "host": "${kali_private_ip}",
+      "ssh_user": "kali",
+      "ssh_port": 22
+    },
     "victim": {
-      "container_ip": "${victim_private_ip}",
-      "ssh_key": "/secrets/range-${range_id}.pem",
+      "host": "${victim_private_ip}",
       "ssh_user": "ubuntu",
       "ssh_port": 22
     }
-  },
-  "mcp": {
-    "allowed_networks": ["${vpc_cidr}"],
-    "audit_enabled": true
   }
 }
 ```

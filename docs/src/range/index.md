@@ -112,9 +112,10 @@ In Phase 2, Kali egress will be restricted to Victim only (no internet access fr
 
 The Kali box uses a **pre-baked AMI** with pentesting tools already installed:
 
-| AMI | Description |
-|-----|-------------|
-| `ami-01ca670fc1154a1d6` | `shifter-kali-20251212` - Pre-baked with SSM, kali-linux-headless, hexstrike-ai |
+| Account | AMI | Name |
+|---------|-----|------|
+| Prod (322748898657) | `ami-01ca670fc1154a1d6` | `shifter-kali-20251212` |
+| Dev (878848911818) | `ami-0a9c4fc63c42afb51` | `shifter-kali-20251212` |
 
 **Included:**
 - AWS SSM Agent (for management without SSH keys)

@@ -1,0 +1,410 @@
+name: LibreChat
+
+on:
+  pull_request:
+    paths:
+      - 'terraform/modules/librechat/**'
+      - 'terraform/environments/*/librechat/**'
+      - 'librechat/**'
+      - '.github/workflows/librechat.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/modules/librechat/**'
+      - 'terraform/environments/*/librechat/**'
+      - 'librechat/**'
+      - '.github/workflows/librechat.yml'
+  # Trigger after portal completes (librechat depends on portal VPC)
+  workflow_run:
+    workflows: ["Portal"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - infra-plan
+          - infra-apply
+          - infra-destroy
+        default: deploy
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+# Prevent concurrent runs
+concurrency:
+  group: librechat-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  SECRET_NAME: shifter-prod-librechat-config
+  INSTANCE_TAG: prod-librechat-ec2
+  TF_WORKING_DIR: terraform/environments/prod/librechat
+
+jobs:
+  # Detect what changed
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    # Skip for workflow_run (always run both) and workflow_dispatch (explicit action)
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    outputs:
+      infra: ${{ steps.changes.outputs.infra }}
+      app: ${{ steps.changes.outputs.app }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            infra:
+              - 'terraform/modules/librechat/**'
+              - 'terraform/environments/*/librechat/**'
+            app:
+              - 'librechat/**'
+              - '.github/workflows/librechat.yml'
+
+  # PR: Terraform Plan
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.infra == 'true'
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-LibreChat-Plan
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.1"
+
+      - name: Write tfvars
+        run: echo '${{ secrets.TF_VARS_PROD_LIBRECHAT }}' > terraform.tfvars
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+
+      - name: Comment PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ env.TF_WORKING_DIR }}/plan.txt', 'utf8');
+            const output = `#### Terraform Plan - LibreChat
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${plan.substring(0, 60000)}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+  # Push/workflow_run: Terraform Apply
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: |
+      (github.event_name == 'push' && needs.detect-changes.outputs.infra == 'true') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'infra-apply' || github.event.inputs.action == 'infra-destroy'))
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-LibreChat-Apply
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.1"
+
+      - name: Write tfvars
+        run: echo '${{ secrets.TF_VARS_PROD_LIBRECHAT }}' > terraform.tfvars
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        if: github.event.inputs.action != 'infra-destroy'
+        run: terraform apply -auto-approve
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'infra-destroy'
+        run: terraform destroy -auto-approve
+
+  # Manual: Terraform Plan only
+  terraform-plan-manual:
+    name: Terraform Plan (Manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'infra-plan'
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-LibreChat-Plan
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.1"
+
+      - name: Write tfvars
+        run: echo '${{ secrets.TF_VARS_PROD_LIBRECHAT }}' > terraform.tfvars
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -no-color
+
+  # Deploy application
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-apply]
+    # Run if:
+    # - App changed (push), regardless of infra
+    # - After successful infra apply
+    # - Manual deploy action
+    # - workflow_run (after portal infra)
+    if: |
+      always() &&
+      (
+        (github.event_name == 'push' && needs.detect-changes.outputs.app == 'true' && (needs.terraform-apply.result == 'success' || needs.terraform-apply.result == 'skipped')) ||
+        (github.event_name == 'push' && needs.terraform-apply.result == 'success') ||
+        (github.event_name == 'workflow_run' && needs.terraform-apply.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
+      )
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-LibreChat-Deploy
+
+      - name: Get Instance ID
+        id: instance
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text \
+            --region "$AWS_REGION")
+
+          if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
+            echo "Error: Could not find running LibreChat EC2 instance with tag: $INSTANCE_TAG"
+            exit 1
+          fi
+
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Found instance: $INSTANCE_ID"
+
+      - name: Prepare config files
+        id: config
+        run: |
+          COMPOSE_B64=$(base64 -w0 librechat/docker-compose.yml)
+          YAML_B64=$(base64 -w0 librechat/librechat.yaml)
+          echo "compose_b64=$COMPOSE_B64" >> $GITHUB_OUTPUT
+          echo "yaml_b64=$YAML_B64" >> $GITHUB_OUTPUT
+
+      - name: Deploy config files via SSM
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+          COMPOSE_B64: ${{ steps.config.outputs.compose_b64 }}
+          YAML_B64: ${{ steps.config.outputs.yaml_b64 }}
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "commands=[
+              \"set -e\",
+              \"cd /opt/librechat\",
+              \"echo Writing docker-compose.yml...\",
+              \"echo '$COMPOSE_B64' | base64 -d > docker-compose.yml\",
+              \"echo Writing librechat.yaml...\",
+              \"echo '$YAML_B64' | base64 -d > librechat.yaml\",
+              \"echo Config files written successfully\"
+            ]" \
+            --timeout-seconds 60 \
+            --query "Command.CommandId" \
+            --output text)
+
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+          STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
+          if [ "$STATUS" != "Success" ]; then
+            echo "Config deployment failed!"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "StandardErrorContent" --output text
+            exit 1
+          fi
+
+      - name: Generate .env from secrets via SSM
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+        run: |
+          ENV_SCRIPT=$(cat << 'SCRIPT_EOF'
+          set -e
+          cd /opt/librechat
+          echo "Fetching secrets from Secrets Manager..."
+          SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id SECRET_NAME_PLACEHOLDER --region AWS_REGION_PLACEHOLDER --query SecretString --output text)
+          JWT_SECRET=$(echo $SECRET_JSON | jq -r '.jwt_secret')
+          JWT_REFRESH_SECRET=$(echo $SECRET_JSON | jq -r '.jwt_refresh_secret')
+          CREDS_KEY=$(echo $SECRET_JSON | jq -r '.creds_key')
+          CREDS_IV=$(echo $SECRET_JSON | jq -r '.creds_iv')
+          ALLOW_REGISTRATION=$(echo $SECRET_JSON | jq -r '.allow_registration')
+          APP_TITLE=$(echo $SECRET_JSON | jq -r '.app_title')
+          
+          cat > .env.tmp << ENVEOF
+          HOST=0.0.0.0
+          PORT=3080
+          MONGO_URI=mongodb://mongodb:27017/LibreChat
+          ALLOW_EMAIL_LOGIN=true
+          ALLOW_REGISTRATION=${ALLOW_REGISTRATION}
+          ALLOW_SOCIAL_LOGIN=false
+          ALLOW_SOCIAL_REGISTRATION=false
+          ALLOW_PASSWORD_RESET=false
+          ALLOW_UNVERIFIED_EMAIL_LOGIN=true
+          SESSION_EXPIRY=900000
+          REFRESH_TOKEN_EXPIRY=604800000
+          JWT_SECRET=${JWT_SECRET}
+          JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+          CREDS_KEY=${CREDS_KEY}
+          CREDS_IV=${CREDS_IV}
+          APP_TITLE=${APP_TITLE}
+          NO_INDEX=true
+          SEARCH=false
+          DEBUG_LOGGING=false
+          DEBUG_CONSOLE=false
+          CONSOLE_JSON=true
+          BEDROCK_AWS_DEFAULT_REGION=AWS_REGION_PLACEHOLDER
+          BEDROCK_AWS_MODELS=us.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-haiku-20240307-v1:0
+          ENVEOF
+          
+          sed 's/^[[:space:]]*//' .env.tmp > .env
+          rm .env.tmp
+          chmod 600 .env
+          echo ".env file generated successfully"
+          SCRIPT_EOF
+          )
+          
+          ENV_SCRIPT="${ENV_SCRIPT//SECRET_NAME_PLACEHOLDER/$SECRET_NAME}"
+          ENV_SCRIPT="${ENV_SCRIPT//AWS_REGION_PLACEHOLDER/$AWS_REGION}"
+          ENV_SCRIPT_B64=$(echo "$ENV_SCRIPT" | base64 -w0)
+          
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "commands=[\"echo '$ENV_SCRIPT_B64' | base64 -d | bash\"]" \
+            --timeout-seconds 60 \
+            --query "Command.CommandId" \
+            --output text)
+
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+          STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
+          if [ "$STATUS" != "Success" ]; then
+            echo ".env generation failed!"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "StandardErrorContent" --output text
+            exit 1
+          fi
+
+      - name: Start containers via SSM
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters 'commands=[
+              "set -e",
+              "cd /opt/librechat",
+              "docker compose pull",
+              "docker compose down --remove-orphans || true",
+              "docker compose up -d",
+              "sleep 10",
+              "docker compose ps"
+            ]' \
+            --timeout-seconds 300 \
+            --query "Command.CommandId" \
+            --output text)
+
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+          STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
+          if [ "$STATUS" != "Success" ]; then
+            echo "Container startup failed!"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "StandardErrorContent" --output text
+            exit 1
+          fi
+
+      - name: Health Check
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters 'commands=["curl -sf http://localhost:3080/api/health || echo Health check pending..."]' \
+            --timeout-seconds 30 \
+            --query "Command.CommandId" \
+            --output text)
+
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+          RESULT=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "StandardOutputContent" --output text)
+          echo "Health check result: $RESULT"
+

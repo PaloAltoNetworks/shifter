@@ -1,0 +1,404 @@
+name: Portal
+
+on:
+  pull_request:
+    paths:
+      - 'terraform/modules/portal/**'
+      - 'terraform/modules/range/provisioner/**'
+      - 'terraform/environments/*/portal/**'
+      - 'portal/**'
+      - '.github/workflows/portal.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/modules/portal/**'
+      - 'terraform/modules/range/provisioner/**'
+      - 'terraform/environments/*/portal/**'
+      - 'portal/**'
+      - '.github/workflows/portal.yml'
+  # Trigger after range completes (portal depends on range outputs)
+  workflow_run:
+    workflows: ["Range"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - infra-plan
+          - infra-apply
+          - infra-destroy
+        default: deploy
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+# Prevent concurrent runs
+concurrency:
+  group: portal-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: shifter-portal
+  INSTANCE_TAG: prod-portal-ec2
+  TF_WORKING_DIR: terraform/environments/prod/portal
+
+jobs:
+  # Detect what changed
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    outputs:
+      infra: ${{ steps.changes.outputs.infra }}
+      app: ${{ steps.changes.outputs.app }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            infra:
+              - 'terraform/modules/portal/**'
+              - 'terraform/modules/range/provisioner/**'
+              - 'terraform/environments/*/portal/**'
+            app:
+              - 'portal/**'
+              - '.github/workflows/portal.yml'
+
+  # PR: Terraform Plan
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.infra == 'true'
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Portal-Plan
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.1"
+
+      - name: Write tfvars
+        run: echo '${{ secrets.TF_VARS_PROD_PORTAL }}' > terraform.tfvars
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: terraform
+
+      - name: Build Lambda packages
+        run: bash ../../../modules/range/provisioner/build-lambdas.sh
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+
+      - name: Comment PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ env.TF_WORKING_DIR }}/plan.txt', 'utf8');
+            const output = `#### Terraform Plan - Portal
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${plan.substring(0, 60000)}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+  # Push/workflow_run: Terraform Apply
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: |
+      (github.event_name == 'push' && needs.detect-changes.outputs.infra == 'true') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'infra-apply' || github.event.inputs.action == 'infra-destroy'))
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Portal-Apply
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.1"
+
+      - name: Write tfvars
+        run: echo '${{ secrets.TF_VARS_PROD_PORTAL }}' > terraform.tfvars
+
+      - name: Build Lambda packages
+        run: bash ../../../modules/range/provisioner/build-lambdas.sh
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        if: github.event.inputs.action != 'infra-destroy'
+        run: terraform apply -auto-approve
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'infra-destroy'
+        run: terraform destroy -auto-approve
+
+      - name: Output Portal Info
+        if: github.event.inputs.action != 'infra-destroy'
+        run: terraform output -json
+
+  # Manual: Terraform Plan only
+  terraform-plan-manual:
+    name: Terraform Plan (Manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'infra-plan'
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Portal-Plan
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.1"
+
+      - name: Write tfvars
+        run: echo '${{ secrets.TF_VARS_PROD_PORTAL }}' > terraform.tfvars
+
+      - name: Build Lambda packages
+        run: bash ../../../modules/range/provisioner/build-lambdas.sh
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -no-color
+
+  # Build Docker image and push to ECR
+  build-and-push:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-apply]
+    # Run if:
+    # - App changed (and infra skipped or succeeded)
+    # - After successful infra apply
+    # - Manual deploy action
+    if: |
+      always() &&
+      (
+        (github.event_name == 'push' && needs.detect-changes.outputs.app == 'true' && (needs.terraform-apply.result == 'success' || needs.terraform-apply.result == 'skipped')) ||
+        (github.event_name == 'push' && needs.terraform-apply.result == 'success') ||
+        (github.event_name == 'workflow_run' && needs.terraform-apply.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
+      )
+    outputs:
+      image_tag: ${{ steps.build.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Portal-Build
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        id: build
+        working-directory: portal
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY
+
+          docker build \
+            -t $IMAGE_URI:latest \
+            -t $IMAGE_URI:$SHORT_SHA \
+            .
+
+          docker push $IMAGE_URI:latest
+          docker push $IMAGE_URI:$SHORT_SHA
+
+          echo "image_tag=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Built and pushed $IMAGE_URI:$SHORT_SHA"
+
+  # Deploy to EC2
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Portal-Deploy
+
+      - name: Get deployment config
+        id: config
+        env:
+          TF_VARS: ${{ secrets.TF_VARS_PROD_PORTAL }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "registry=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> $GITHUB_OUTPUT
+
+          PORTAL_DOMAIN=$(echo "$TF_VARS" | grep '^domain_name' | sed 's/.*= *"\([^"]*\)".*/\1/')
+          if [ -z "$PORTAL_DOMAIN" ]; then
+            echo "Error: Failed to extract domain_name from tfvars"
+            exit 1
+          fi
+          echo "domain=${PORTAL_DOMAIN}" >> $GITHUB_OUTPUT
+
+          S3_BUCKET=$(echo "$TF_VARS" | grep '^user_storage_bucket' | sed 's/.*= *"\([^"]*\)".*/\1/')
+          if [ -z "$S3_BUCKET" ]; then
+            echo "Error: Failed to extract user_storage_bucket from tfvars"
+            exit 1
+          fi
+          echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
+
+          PROVISION_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, 'prod-portal-provision-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
+          TEARDOWN_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, 'prod-portal-teardown-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
+          echo "provision_state_machine_arn=${PROVISION_ARN}" >> $GITHUB_OUTPUT
+          echo "teardown_state_machine_arn=${TEARDOWN_ARN}" >> $GITHUB_OUTPUT
+
+      - name: Get Instance ID
+        id: instance
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
+
+          if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
+            echo "Error: Could not find running Portal EC2 instance with tag: $INSTANCE_TAG"
+            exit 1
+          fi
+
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Found instance: $INSTANCE_ID"
+
+      - name: Deploy via SSM
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+          ECR_REGISTRY: ${{ steps.config.outputs.registry }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          PORTAL_DOMAIN: ${{ steps.config.outputs.domain }}
+          S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
+          PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.provision_state_machine_arn }}
+          TEARDOWN_STATE_MACHINE_ARN: ${{ steps.config.outputs.teardown_state_machine_arn }}
+          DB_SECRET_ARN: arn:aws:secretsmanager:us-east-2:${{ secrets.AWS_ACCOUNT_ID }}:secret:shifter-prod-portal-db-credentials
+          APP_SECRET_ARN: arn:aws:secretsmanager:us-east-2:${{ secrets.AWS_ACCOUNT_ID }}:secret:shifter-prod-portal-app
+          COGNITO_SECRET_ARN: arn:aws:secretsmanager:us-east-2:${{ secrets.AWS_ACCOUNT_ID }}:secret:shifter-prod-portal-cognito
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "commands=[
+              'set -e',
+              'IMAGE=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}',
+              'docker pull \$IMAGE',
+              'docker stop portal 2>/dev/null || true',
+              'docker rm portal 2>/dev/null || true',
+              'docker run -d --name portal --restart unless-stopped -p 8000:8000 \
+                -e AWS_REGION=${AWS_REGION} \
+                -e AWS_S3_BUCKET_NAME=${S3_BUCKET} \
+                -e DB_SECRET_ARN=${DB_SECRET_ARN} \
+                -e APP_SECRET_ARN=${APP_SECRET_ARN} \
+                -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
+                -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
+                -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
+                -e SITE_URL=https://${PORTAL_DOMAIN} \
+                -e PROVISION_STATE_MACHINE_ARN=${PROVISION_STATE_MACHINE_ARN} \
+                -e TEARDOWN_STATE_MACHINE_ARN=${TEARDOWN_STATE_MACHINE_ARN} \
+                \$IMAGE'
+            ]" \
+            --timeout-seconds 300 \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "Status" \
+            --output text)
+
+          echo "Command status: $STATUS"
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Deployment failed!"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "StandardErrorContent" --output text
+            exit 1
+          fi
+
+          echo "Deployment successful!"
+

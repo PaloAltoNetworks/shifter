@@ -141,7 +141,7 @@ Future: `modules/range/user-subnet/` for ephemeral per-user resources.
 
 ## Deployment
 
-`range-infra.yml` workflow:
+`range.yml` workflow:
 
 - PR → `terraform plan`
 - Merge to main → `terraform apply`

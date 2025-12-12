@@ -41,14 +41,15 @@ for FUNC in create-subnet create-victim create-kali update-range cleanup-range; 
 done
 ```
 
-### 3. Provision a Test Range
+### 3. Provision a Test Range (Manual - Preferred)
 
-Via Portal UI (preferred):
-1. Login to portal
-2. Click "Launch Range"
-3. Wait for status to show "ready"
+1. Login to Portal at `https://${DOMAIN}/`
+2. Upload a test agent binary (any small file works)
+3. Click "Launch Range"
+4. Watch status change: pending → provisioning → ready
+5. Note the range_id from the URL or dashboard
 
-Or via CLI:
+Alternative via CLI:
 
 ```bash
 # Get a test range_id from the database or create via portal

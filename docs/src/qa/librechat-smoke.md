@@ -90,13 +90,18 @@ aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTAN
   && echo "PASS: Bedrock accessible" || echo "FAIL: Bedrock not accessible"
 ```
 
-### 6. Manual Chat Test
+### 6. Chat Test (Manual)
 
-1. Access LibreChat via ALB or SSH tunnel
-2. Login with email/password
-3. Start a new chat
-4. Send "Hello, respond with just 'OK'"
-5. Verify response received from Bedrock model
+1. Access LibreChat at `https://chat.${DOMAIN}/` (or via SSH tunnel to port 3080)
+2. Register or login with email/password
+3. Select a Bedrock model (Claude Sonnet recommended)
+4. Start a new chat
+5. Send: "Respond with just the word OK"
+6. Verify you get a response (confirms Bedrock integration works)
+
+If no response or error:
+- Check EC2 instance profile has `bedrock:InvokeModel` permission
+- Check CloudWatch logs for the LibreChat container
 
 ## Quick Run
 

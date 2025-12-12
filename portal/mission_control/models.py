@@ -137,6 +137,10 @@ class Range(models.Model):
     victim_instance_id = models.CharField(
         max_length=50, null=True, blank=True, help_text="EC2 instance ID (e.g., i-abc123)"
     )
+    kali_ip = models.GenericIPAddressField(null=True, blank=True)
+    kali_instance_id = models.CharField(
+        max_length=50, null=True, blank=True, help_text="Kali EC2 instance ID (e.g., i-abc123)"
+    )
     chat_url = models.URLField(max_length=500, null=True, blank=True)
 
     # Step Functions tracking

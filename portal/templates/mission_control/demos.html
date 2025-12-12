@@ -331,6 +331,24 @@
             font-family: 'Roboto', monospace;
         }
 
+        /* CTA Button */
+        .cta-button {
+            display: inline-block;
+            background: var(--neon-green);
+            color: var(--black);
+            padding: 1rem 2rem;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 1.1rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            box-shadow: 0 0 20px rgba(57, 255, 20, 0.3);
+        }
+
+        .cta-button:hover {
+            box-shadow: 0 0 30px rgba(57, 255, 20, 0.5);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .slide {
@@ -529,19 +547,7 @@
                 <p style="font-size: 1.5rem; margin-bottom: 2rem;">
                     Let's launch your first range and run a demo.
                 </p>
-                <a href="{% url 'mission_control:dashboard' %}" style="
-                    display: inline-block;
-                    background: var(--neon-green);
-                    color: var(--black);
-                    padding: 1rem 2rem;
-                    border-radius: 4px;
-                    text-decoration: none;
-                    font-size: 1.1rem;
-                    font-weight: 500;
-                    transition: all 0.2s;
-                    box-shadow: 0 0 20px rgba(57, 255, 20, 0.3);
-                " onmouseover="this.style.boxShadow='0 0 30px rgba(57, 255, 20, 0.5)'" 
-                   onmouseout="this.style.boxShadow='0 0 20px rgba(57, 255, 20, 0.3)'">
+                <a href="{% url 'mission_control:dashboard' %}" class="cta-button">
                     Go to Dashboard
                 </a>
             </div>

@@ -14,6 +14,7 @@ urlpatterns = [
     path("history/", views.history, name="history"),
     path("settings/", views.settings, name="settings"),
     path("help/", views.help_page, name="help"),
+    path("demos/", views.demos, name="demos"),
     # Presigned URL upload API
     path("api/upload/initiate/", views.initiate_upload, name="initiate_upload"),
     path("api/upload/complete/", views.complete_upload, name="complete_upload"),

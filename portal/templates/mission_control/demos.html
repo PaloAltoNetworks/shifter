@@ -1,0 +1,631 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHIFTER // Demos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/png" href="{% static 'images/logo-transparent.png' %}">
+    <style>
+        :root {
+            --neon-green: #39FF14;
+            --palo-orange: #FA582D;
+            --black: #000000;
+            --surface: #0D0D0D;
+            --surface-light: #1A1A1A;
+            --white: #FFFFFF;
+            --gray: #666666;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: var(--black);
+            color: var(--white);
+        }
+
+        /* Slide container */
+        .slides-container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+        }
+
+        .slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.5s ease, visibility 0.5s ease;
+        }
+
+        .slide.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Navigation controls */
+        .nav-controls {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .nav-btn {
+            background: transparent;
+            border: 1px solid rgba(57, 255, 20, 0.3);
+            color: var(--neon-green);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+        }
+
+        .nav-btn:hover:not(:disabled) {
+            background: rgba(57, 255, 20, 0.1);
+            border-color: var(--neon-green);
+        }
+
+        .nav-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .slide-indicator {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.875rem;
+        }
+
+        /* Exit button */
+        .exit-btn {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: var(--white);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            font-size: 0.875rem;
+            z-index: 1000;
+        }
+
+        .exit-btn:hover {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+        }
+
+        /* Logo */
+        .slide-logo {
+            height: 120px;
+            width: auto;
+            margin-bottom: 2rem;
+            filter: drop-shadow(0 0 20px rgba(57, 255, 20, 0.3));
+        }
+
+        /* Typography */
+        .slide-title {
+            font-size: 3.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            letter-spacing: 0.02em;
+        }
+
+        .slide-title .highlight {
+            color: var(--neon-green);
+        }
+
+        .slide-subtitle {
+            font-size: 1.5rem;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 2rem;
+            text-align: center;
+            max-width: 800px;
+        }
+
+        .slide-content {
+            max-width: 900px;
+            text-align: center;
+        }
+
+        .slide-content p {
+            font-size: 1.25rem;
+            line-height: 1.8;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 1.5rem;
+        }
+
+        /* Feature list */
+        .feature-list {
+            list-style: none;
+            margin: 2rem 0;
+            text-align: left;
+            display: inline-block;
+        }
+
+        .feature-list li {
+            font-size: 1.25rem;
+            line-height: 2;
+            padding-left: 2rem;
+            position: relative;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .feature-list li:before {
+            content: "›";
+            position: absolute;
+            left: 0;
+            color: var(--neon-green);
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        /* Value props */
+        .value-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin: 2rem 0;
+            max-width: 1000px;
+        }
+
+        .value-item {
+            background: var(--surface);
+            border: 1px solid rgba(57, 255, 20, 0.15);
+            border-radius: 4px;
+            padding: 2rem;
+            text-align: center;
+            transition: border-color 0.2s;
+        }
+
+        .value-item:hover {
+            border-color: rgba(57, 255, 20, 0.4);
+        }
+
+        .value-item-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .value-item-title {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--neon-green);
+            margin-bottom: 0.75rem;
+        }
+
+        .value-item-text {
+            font-size: 1rem;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* Architecture diagram */
+        .arch-diagram {
+            background: var(--surface);
+            border: 1px solid rgba(57, 255, 20, 0.15);
+            border-radius: 4px;
+            padding: 2rem;
+            margin: 2rem 0;
+            max-width: 800px;
+        }
+
+        .arch-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2rem;
+            margin: 1.5rem 0;
+        }
+
+        .arch-box {
+            background: var(--surface-light);
+            border: 1px solid rgba(57, 255, 20, 0.3);
+            border-radius: 4px;
+            padding: 1.5rem;
+            min-width: 180px;
+            text-align: center;
+        }
+
+        .arch-box-title {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: var(--neon-green);
+            margin-bottom: 0.5rem;
+        }
+
+        .arch-box-desc {
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.4;
+        }
+
+        .arch-arrow {
+            color: var(--neon-green);
+            font-size: 2rem;
+        }
+
+        /* Steps list */
+        .steps-list {
+            list-style: none;
+            margin: 2rem 0;
+            text-align: left;
+            display: inline-block;
+            counter-reset: step-counter;
+        }
+
+        .steps-list li {
+            font-size: 1.15rem;
+            line-height: 2;
+            padding-left: 3rem;
+            position: relative;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 0.5rem;
+        }
+
+        .steps-list li:before {
+            counter-increment: step-counter;
+            content: counter(step-counter);
+            position: absolute;
+            left: 0;
+            width: 2rem;
+            height: 2rem;
+            background: var(--neon-green);
+            color: var(--black);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1rem;
+            top: 0.25rem;
+        }
+
+        /* Keyboard hint */
+        .keyboard-hint {
+            position: fixed;
+            top: 2rem;
+            left: 2rem;
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.4);
+            z-index: 1000;
+        }
+
+        .keyboard-hint kbd {
+            background: var(--surface);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            padding: 0.25rem 0.5rem;
+            margin: 0 0.25rem;
+            font-family: 'Roboto', monospace;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .slide {
+                padding: 2rem;
+            }
+
+            .slide-title {
+                font-size: 2rem;
+            }
+
+            .slide-subtitle {
+                font-size: 1.1rem;
+            }
+
+            .slide-content p,
+            .feature-list li {
+                font-size: 1rem;
+            }
+
+            .value-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .arch-row {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .arch-arrow {
+                transform: rotate(90deg);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="keyboard-hint">
+        Use <kbd>←</kbd> <kbd>→</kbd> arrow keys to navigate
+    </div>
+
+    <a href="{% url 'mission_control:dashboard' %}" class="exit-btn">Exit to Dashboard</a>
+
+    <div class="slides-container">
+        <!-- Slide 1: Landing -->
+        <div class="slide active" data-slide="1">
+            <img src="{% static 'images/logo-transparent.png' %}" alt="Shifter" class="slide-logo">
+            <h1 class="slide-title"><span class="highlight">SHIFTER</span></h1>
+            <p class="slide-subtitle">Agentic Demo Environment for Offensive AI Cyber Capabilities</p>
+            <div class="slide-content">
+                <p>Watch AI hack. In your browser. Under your control.</p>
+            </div>
+        </div>
+
+        <!-- Slide 2: What is it? -->
+        <div class="slide" data-slide="2">
+            <h1 class="slide-title">What is <span class="highlight">Shifter</span>?</h1>
+            <div class="slide-content">
+                <p>Shifter is an agentic demo environment where AI configures and runs offensive cyber demonstrations for you.</p>
+                <ul class="feature-list">
+                    <li>AI-powered attack automation</li>
+                    <li>Zero infrastructure setup</li>
+                    <li>Browser-based interface</li>
+                    <li>Your XDR/XSIAM detections</li>
+                    <li>Complete isolation and control</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Slide 3: Why should you care? -->
+        <div class="slide" data-slide="3">
+            <h1 class="slide-title">Why <span class="highlight">Shifter</span>?</h1>
+            <div class="slide-content">
+                <div class="value-grid">
+                    <div class="value-item">
+                        <div class="value-item-icon">⚡</div>
+                        <div class="value-item-title">Time to Demo</div>
+                        <div class="value-item-text">Minutes, not hours or days. Launch fully configured environments instantly.</div>
+                    </div>
+                    <div class="value-item">
+                        <div class="value-item-icon">🎯</div>
+                        <div class="value-item-title">No Expertise Needed</div>
+                        <div class="value-item-text">No coding. No hacking knowledge. Just tell the AI what you want.</div>
+                    </div>
+                    <div class="value-item">
+                        <div class="value-item-icon">🔬</div>
+                        <div class="value-item-title">Rapid Experimentation</div>
+                        <div class="value-item-text">Test different attack scenarios quickly. Iterate and refine demos on the fly.</div>
+                    </div>
+                    <div class="value-item">
+                        <div class="value-item-icon">🛡️</div>
+                        <div class="value-item-title">Real Detections</div>
+                        <div class="value-item-text">Attacks run against your XDR agent. Show real alerts in your tenant.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 4: Requirements -->
+        <div class="slide" data-slide="4">
+            <h1 class="slide-title">What You <span class="highlight">Need</span></h1>
+            <div class="slide-content">
+                <ul class="feature-list">
+                    <li>XDR or XSIAM tenant</li>
+                    <li>XDR/XSIAM agent installer</li>
+                    <li>Browser</li>
+                </ul>
+                <p style="margin-top: 2rem; font-size: 1.1rem; color: rgba(255, 255, 255, 0.6);">
+                    That's it. No servers. No VPNs. No manual setup.
+                </p>
+            </div>
+        </div>
+
+        <!-- Slide 5: How to use it -->
+        <div class="slide" data-slide="5">
+            <h1 class="slide-title">How to <span class="highlight">Use</span> It</h1>
+            <div class="slide-content">
+                <ol class="steps-list">
+                    <li>Upload your XDR/XSIAM agent installer</li>
+                    <li>Launch a range</li>
+                    <li>Open the workspace</li>
+                    <li>Tell the AI what attack to run</li>
+                    <li>Watch detections in your tenant</li>
+                    <li>Destroy the range when done</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Slide 6: Architecture -->
+        <div class="slide" data-slide="6">
+            <h1 class="slide-title">High-Level <span class="highlight">Architecture</span></h1>
+            <div class="slide-content">
+                <div class="arch-diagram">
+                    <div class="arch-row">
+                        <div class="arch-box">
+                            <div class="arch-box-title">Portal</div>
+                            <div class="arch-box-desc">Authentication<br>Range Management<br>Agent Upload</div>
+                        </div>
+                    </div>
+                    <div class="arch-row">
+                        <div class="arch-arrow">↓</div>
+                    </div>
+                    <div class="arch-row">
+                        <div class="arch-box">
+                            <div class="arch-box-title">LibreChat + MCPs</div>
+                            <div class="arch-box-desc">AI Agent<br>Tool Integration<br>Attack Automation</div>
+                        </div>
+                        <div class="arch-arrow">→</div>
+                        <div class="arch-box">
+                            <div class="arch-box-title">Victim VM</div>
+                            <div class="arch-box-desc">Target Infrastructure<br>Your XDR Agent<br>Isolated Environment</div>
+                        </div>
+                    </div>
+                    <div class="arch-row">
+                        <div class="arch-arrow">↓</div>
+                    </div>
+                    <div class="arch-row">
+                        <div class="arch-box">
+                            <div class="arch-box-title">Your XDR/XSIAM Tenant</div>
+                            <div class="arch-box-desc">Real-time Telemetry<br>Attack Detections<br>Live Alerts</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 7: Demo use cases -->
+        <div class="slide" data-slide="7">
+            <h1 class="slide-title">Primary <span class="highlight">Use Cases</span></h1>
+            <div class="slide-content">
+                <div class="value-grid">
+                    <div class="value-item">
+                        <div class="value-item-icon">🎭</div>
+                        <div class="value-item-title">Customer Demos</div>
+                        <div class="value-item-text">Show offensive AI capabilities and your XDR response in minutes.</div>
+                    </div>
+                    <div class="value-item">
+                        <div class="value-item-icon">🧪</div>
+                        <div class="value-item-title">Internal Testing</div>
+                        <div class="value-item-text">Validate detection rules and response playbooks quickly.</div>
+                    </div>
+                    <div class="value-item">
+                        <div class="value-item-icon">📚</div>
+                        <div class="value-item-title">Training</div>
+                        <div class="value-item-text">Educate teams on AI-driven attacks and defensive strategies.</div>
+                    </div>
+                </div>
+                <p style="margin-top: 2rem; font-size: 1.1rem; color: rgba(255, 255, 255, 0.6);">
+                    While AI hacking gets attention, the real value is <span style="color: var(--neon-green);">time to demo</span>.
+                </p>
+            </div>
+        </div>
+
+        <!-- Slide 8: Ready to start -->
+        <div class="slide" data-slide="8">
+            <h1 class="slide-title">Ready to <span class="highlight">Start</span>?</h1>
+            <div class="slide-content">
+                <p style="font-size: 1.5rem; margin-bottom: 2rem;">
+                    Let's launch your first range and run a demo.
+                </p>
+                <a href="{% url 'mission_control:dashboard' %}" style="
+                    display: inline-block;
+                    background: var(--neon-green);
+                    color: var(--black);
+                    padding: 1rem 2rem;
+                    border-radius: 4px;
+                    text-decoration: none;
+                    font-size: 1.1rem;
+                    font-weight: 500;
+                    transition: all 0.2s;
+                    box-shadow: 0 0 20px rgba(57, 255, 20, 0.3);
+                " onmouseover="this.style.boxShadow='0 0 30px rgba(57, 255, 20, 0.5)'" 
+                   onmouseout="this.style.boxShadow='0 0 20px rgba(57, 255, 20, 0.3)'">
+                    Go to Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation Controls -->
+    <div class="nav-controls">
+        <button class="nav-btn" id="prev-btn">← Previous</button>
+        <span class="slide-indicator" id="slide-indicator">1 / 8</span>
+        <button class="nav-btn" id="next-btn">Next →</button>
+    </div>
+
+    <script>
+        class SlideShow {
+            constructor() {
+                this.slides = document.querySelectorAll('.slide');
+                this.currentSlide = 0;
+                this.totalSlides = this.slides.length;
+                
+                this.prevBtn = document.getElementById('prev-btn');
+                this.nextBtn = document.getElementById('next-btn');
+                this.indicator = document.getElementById('slide-indicator');
+                
+                this.init();
+            }
+            
+            init() {
+                // Keyboard navigation
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'ArrowLeft') {
+                        this.previousSlide();
+                    } else if (e.key === 'ArrowRight') {
+                        this.nextSlide();
+                    }
+                });
+                
+                // Button navigation
+                this.prevBtn.addEventListener('click', () => this.previousSlide());
+                this.nextBtn.addEventListener('click', () => this.nextSlide());
+                
+                // Initialize first slide
+                this.updateSlide();
+            }
+            
+            goToSlide(index) {
+                if (index < 0 || index >= this.totalSlides) return;
+                
+                this.slides[this.currentSlide].classList.remove('active');
+                this.currentSlide = index;
+                this.slides[this.currentSlide].classList.add('active');
+                this.updateControls();
+            }
+            
+            nextSlide() {
+                if (this.currentSlide < this.totalSlides - 1) {
+                    this.goToSlide(this.currentSlide + 1);
+                }
+            }
+            
+            previousSlide() {
+                if (this.currentSlide > 0) {
+                    this.goToSlide(this.currentSlide - 1);
+                }
+            }
+            
+            updateSlide() {
+                this.slides.forEach((slide, index) => {
+                    slide.classList.toggle('active', index === this.currentSlide);
+                });
+                this.updateControls();
+            }
+            
+            updateControls() {
+                this.prevBtn.disabled = this.currentSlide === 0;
+                this.nextBtn.disabled = this.currentSlide === this.totalSlides - 1;
+                this.indicator.textContent = `${this.currentSlide + 1} / ${this.totalSlides}`;
+            }
+        }
+        
+        // Initialize slideshow
+        document.addEventListener('DOMContentLoaded', () => {
+            new SlideShow();
+        });
+    </script>
+</body>
+</html>

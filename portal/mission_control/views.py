@@ -222,6 +222,17 @@ def help_page(request):
     return render(request, "mission_control/help.html", context)
 
 
+@login_required
+@require_GET
+def demos(request):
+    """Demo presentation - slide-based introduction to Shifter."""
+    context = {
+        "page_title": "Demos",
+        "active_nav": "demos",
+    }
+    return render(request, "mission_control/demos.html", context)
+
+
 # -----------------------------------------------------------------------------
 # Presigned URL Upload API
 # -----------------------------------------------------------------------------

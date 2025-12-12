@@ -119,10 +119,12 @@ jobs:
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    # Run on push to main or workflow_run (after range completes successfully)
-    # Manual dispatch is handled by terraform-manual job
-    if: >
-      github.event_name == 'push' ||
+    # Run on push to main (if no Range changes) or workflow_run (after Range completes)
+    # Skip push if Range files changed - workflow_run will handle after Range completes
+    if: |
+      (github.event_name == 'push' &&
+       !contains(toJSON(github.event.commits.*.modified), 'terraform/modules/range/') &&
+       !contains(toJSON(github.event.commits.*.added), 'terraform/modules/range/')) ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     defaults:
       run:

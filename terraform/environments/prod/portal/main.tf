@@ -245,9 +245,6 @@ module "provisioner" {
   kali_instance_type     = var.kali_instance_type
   kali_security_group_id = data.terraform_remote_state.range.outputs.kali_security_group_id
 
-  # LibreChat Configuration
-  librechat_base_url = var.librechat_base_url
-
   # Monitoring Configuration
   enable_alarms = var.enable_provisioner_alarms
   alarm_email   = var.provisioner_alarm_email

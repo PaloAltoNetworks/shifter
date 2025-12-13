@@ -62,7 +62,7 @@ Current implementation (Phase 1 - no Control Box yet):
 |---------------|---------|---------|
 | Kali → Victim | ✅ All ports/protocols | Attacks, exploits, scans |
 | Victim → Kali | ✅ All ports/protocols | Reverse shells, callbacks, C2 |
-| VPC → Kali | ✅ SSH (22) | MCP/LibreChat access |
+| VPC → Kali | ✅ SSH (22) | MCP/Chat UI access |
 | VPC → Victim | ✅ SSH (22) | MCP configuration |
 | Kali → Internet | ✅ All | apt updates, tool downloads |
 | Victim → Internet | ✅ All | XDR agent callbacks, updates |

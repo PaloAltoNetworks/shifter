@@ -13,12 +13,13 @@ locals {
   # Common environment variables for all Lambdas
   # Note: AWS_REGION is a reserved env var - Lambda sets it automatically
   common_env_vars = {
-    DB_HOST      = var.db_host
-    DB_PORT      = tostring(var.db_port)
-    DB_NAME      = var.db_name
-    DB_USER      = "provisioner_lambda"
-    ENVIRONMENT  = var.environment
-    RANGE_VPC_ID = var.range_vpc_id
+    DB_HOST                       = var.db_host
+    DB_PORT                       = tostring(var.db_port)
+    DB_NAME                       = var.db_name
+    DB_USER                       = "provisioner_lambda"
+    ENVIRONMENT                   = var.environment
+    RANGE_VPC_ID                  = var.range_vpc_id
+    RANGE_INSTANCE_PROFILE_NAME   = aws_iam_instance_profile.range_instance.name
   }
 
   # Lambda source directories

@@ -138,7 +138,10 @@ resource "aws_iam_role_policy" "bedrock" {
         ]
         Resource = [
           "arn:aws:bedrock:${var.aws_region}::foundation-model/*",
-          "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/*"
+          # Account-specific inference profiles
+          "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/*",
+          # Cross-region inference profiles (us.anthropic.*, eu.anthropic.*, etc.)
+          "arn:aws:bedrock:${var.aws_region}::inference-profile/*"
         ]
       }
     ]

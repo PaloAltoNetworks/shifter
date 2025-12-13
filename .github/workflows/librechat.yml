@@ -298,6 +298,7 @@ jobs:
           CONSOLE_JSON=true
           LITELLM_MASTER_KEY=${LITELLM_KEY}
           AWS_REGION=AWS_REGION_PLACEHOLDER
+          AWS_DEFAULT_REGION=AWS_REGION_PLACEHOLDER
           ENVEOF
 
           sed 's/^[[:space:]]*//' .env.tmp > .env

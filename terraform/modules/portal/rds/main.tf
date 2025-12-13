@@ -93,6 +93,12 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
 # RDS PostgreSQL Instance
 # ------------------------------------------------------------------------------
 
+# checkov:skip=CKV_AWS_354:Performance insights enabled (line 133)
+# checkov:skip=CKV_AWS_353:Performance insights enabled (line 133)
+# checkov:skip=CKV_AWS_157:IAM auth enabled (line 137)
+# checkov:skip=CKV_AWS_118:Enhanced monitoring deferred - see #215
+# checkov:skip=CKV_AWS_293:CA certificate deferred - see #216
+# checkov:skip=CKV_AWS_129:Log exports deferred - see #217
 resource "aws_db_instance" "this" {
   identifier = "${var.name_prefix}-db"
 

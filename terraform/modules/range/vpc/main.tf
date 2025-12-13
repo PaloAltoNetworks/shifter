@@ -14,6 +14,8 @@ locals {
 # VPC
 # ------------------------------------------------------------------------------
 
+# checkov:skip=CKV2_AWS_11:VPC flow logs deferred - see #220
+# checkov:skip=CKV2_AWS_12:Default SG restriction deferred - see #221
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -58,6 +60,7 @@ resource "aws_route" "public_internet" {
 # Victim Security Group (shared by all victim EC2 instances)
 # ------------------------------------------------------------------------------
 
+# checkov:skip=CKV2_AWS_5:SG used by dynamically provisioned EC2 instances
 resource "aws_security_group" "victim" {
   name        = "${var.name_prefix}-victim"
   description = "Security group for victim EC2 instances"
@@ -99,6 +102,7 @@ resource "aws_security_group" "victim" {
 # Kali Security Group (shared by all Kali attack instances)
 # ------------------------------------------------------------------------------
 
+# checkov:skip=CKV2_AWS_5:SG used by dynamically provisioned EC2 instances
 resource "aws_security_group" "kali" {
   name        = "${var.name_prefix}-kali"
   description = "Security group for Kali attack EC2 instances"

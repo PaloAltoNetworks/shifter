@@ -693,29 +693,35 @@ def cancel_range(request):
 def destroy_range(request):
     """
     Destroy an active, paused, or failed range.
+
+    Sets status to DESTROYED immediately so UI updates instantly.
+    Resource cleanup happens async via Step Functions.
     """
     # Use get_destroyable_for_user to include FAILED ranges
     range_to_destroy = Range.get_destroyable_for_user(request.user)
     if not range_to_destroy:
         return JsonResponse({"error": "No range to destroy"}, status=404)
 
-    # Mark as destroying (real impl would trigger teardown)
-    range_to_destroy.status = Range.Status.DESTROYING
-    range_to_destroy.save(update_fields=["status"])
+    # Mark as DESTROYED immediately - user gets instant feedback
+    # Resource cleanup happens async in Step Functions
+    range_to_destroy.status = Range.Status.DESTROYED
+    range_to_destroy.destroyed_at = timezone.now()
+    range_to_destroy.save(update_fields=["status", "destroyed_at"])
 
     ActivityLog.log(
-        "range_destroy_started",
+        "range_destroyed",
         user=request.user,
         range_id=range_to_destroy.id,
     )
 
     logger.info(
-        "Range destroy started: user=%s range_id=%s",
+        "Range destroyed: user=%s range_id=%s",
         request.user.email,
         range_to_destroy.id,
     )
 
-    # Trigger teardown via Step Functions
+    # Trigger async resource cleanup via Step Functions
+    # This runs in background - user doesn't wait for it
     from .services.provisioner import start_teardown
     execution_arn = start_teardown(range_to_destroy.id)
 
@@ -724,10 +730,8 @@ def destroy_range(request):
         range_to_destroy.step_function_execution_arn = execution_arn
         range_to_destroy.save(update_fields=["step_function_execution_arn"])
 
-    return JsonResponse({
-        "success": True,
-        "range": _range_to_json(range_to_destroy),
-    })
+    # Return success - no range data since it's now destroyed
+    return JsonResponse({"success": True})
 
 
 @login_required

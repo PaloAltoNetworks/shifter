@@ -21,13 +21,6 @@ on:
     types: [completed]
     branches: [main, dev]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy'
-        required: true
-        type: choice
-        options: [dev, prod]
-        default: dev
 
 permissions:
   id-token: write
@@ -50,22 +43,25 @@ jobs:
     steps:
       - name: Determine environment
         id: set
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          GIT_REF: ${{ github.ref }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.event_name }}" == "workflow_run" ]; then
-            if [ "${{ github.event.workflow_run.head_branch }}" == "dev" ]; then
+          if [ "$EVENT_NAME" == "workflow_run" ]; then
+            if [ "$WORKFLOW_RUN_BRANCH" == "dev" ]; then
               ENV="dev"
             else
               ENV="prod"
             fi
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            if [ "${{ github.base_ref }}" == "dev" ]; then
+          elif [ "$EVENT_NAME" == "pull_request" ]; then
+            if [ "$PR_BASE_REF" == "dev" ]; then
               ENV="dev"
             else
               ENV="prod"
             fi
-          elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+          elif [ "$GIT_REF" == "refs/heads/dev" ]; then
             ENV="dev"
           else
             ENV="prod"

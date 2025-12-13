@@ -142,4 +142,3 @@ output "provisioner_alerts_sns_topic_arn" {
   description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"
   value       = module.provisioner.alerts_sns_topic_arn
 }
-

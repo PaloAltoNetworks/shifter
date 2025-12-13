@@ -22,4 +22,3 @@ output "bag_api_key_secret_arn" {
   description = "ARN of the Secrets Manager secret containing the BAG API key"
   value       = aws_secretsmanager_secret.bag_api_key.arn
 }
-

@@ -61,4 +61,3 @@ aws ssm start-session --target $INSTANCE_ID --profile $AWS_PROFILE --region us-e
 | OpenWebUI loads | Yes |
 | Bedrock connection verifies | Yes |
 | Chat response | Received from Bedrock |
-

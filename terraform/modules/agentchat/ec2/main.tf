@@ -99,7 +99,7 @@ resource "random_password" "bag_api_key" {
   special = false
 }
 
-#checkov:skip=CKV_AWS_149:AWS-managed encryption acceptable for shifter unless compliance objects
+# checkov:skip=CKV_AWS_149:Deferred for MVP. AWS-managed keys sufficient for low-usage internal MVP. See #213
 resource "aws_secretsmanager_secret" "bag_api_key" {
   name                    = "shifter-${var.name_prefix}-bag-api-key"
   recovery_window_in_days = 0 # Immediate deletion for dev/test

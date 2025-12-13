@@ -47,25 +47,44 @@ jobs:
     steps:
       - name: Determine environment
         id: set
+        env:
+          # Use env vars to prevent script injection from untrusted inputs
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_ENV: ${{ github.event.inputs.environment }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          GIT_REF: ${{ github.ref }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.event_name }}" == "workflow_run" ]; then
-            if [ "${{ github.event.workflow_run.head_branch }}" == "dev" ]; then
+          if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+            # workflow_dispatch input is constrained to choice options (dev/prod)
+            ENV="$DISPATCH_ENV"
+          elif [ "$EVENT_NAME" == "workflow_run" ]; then
+            # Validate branch name matches expected pattern
+            if [ "$WORKFLOW_RUN_BRANCH" == "dev" ]; then
               ENV="dev"
-            else
+            elif [ "$WORKFLOW_RUN_BRANCH" == "main" ]; then
               ENV="prod"
+            else
+              echo "Error: Unexpected branch for workflow_run: $WORKFLOW_RUN_BRANCH"
+              exit 1
             fi
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            if [ "${{ github.base_ref }}" == "dev" ]; then
+          elif [ "$EVENT_NAME" == "pull_request" ]; then
+            # Validate base_ref matches expected pattern
+            if [ "$PR_BASE_REF" == "dev" ]; then
               ENV="dev"
-            else
+            elif [ "$PR_BASE_REF" == "main" ]; then
               ENV="prod"
+            else
+              echo "Error: PRs must target dev or main branch, got: $PR_BASE_REF"
+              exit 1
             fi
-          elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+          elif [ "$GIT_REF" == "refs/heads/dev" ]; then
             ENV="dev"
-          else
+          elif [ "$GIT_REF" == "refs/heads/main" ]; then
             ENV="prod"
+          else
+            echo "Error: Unexpected ref: $GIT_REF"
+            exit 1
           fi
           echo "environment=$ENV" >> $GITHUB_OUTPUT
 

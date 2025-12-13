@@ -24,4 +24,3 @@ provider "aws" {
     }
   }
 }
-

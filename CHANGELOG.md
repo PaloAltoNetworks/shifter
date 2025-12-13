@@ -260,7 +260,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docker-compose.yml for local dev with Postgres
 - Makefile with dev commands (up, down, build, logs, shell, migrate, init)
 - GitHub Actions workflow for portal build, ECR push, SSM deploy
-- Portal dev documentation 
+- Portal dev documentation
 - Secrets management: IAM user for prod, Secrets Manager for DB + app secrets
 
 ### Changed
@@ -356,4 +356,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Container definitions (kali, victim, gaming-api, minetest, minecraft, reverse)
 - CTF scenarios (will be AI-generated dynamically)
 - Local deployment scripts
-

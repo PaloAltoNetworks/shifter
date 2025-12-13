@@ -29,4 +29,3 @@ output "kali_security_group_id" {
   description = "ID of the security group for Kali attack instances"
   value       = module.vpc.kali_security_group_id
 }
-

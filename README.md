@@ -2,9 +2,13 @@
   <img src="assets/logo-wide-short.png" alt="Shifter">
 </p>
 
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Bugs](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=bugs)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Quality](https://github.com/Brad-Edwards/shifter/actions/workflows/quality.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/quality.yml)
+[![Portal](https://github.com/Brad-Edwards/shifter/actions/workflows/portal.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/portal.yml)
+[![Range](https://github.com/Brad-Edwards/shifter/actions/workflows/range.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/range.yml)
+[![AgentChat](https://github.com/Brad-Edwards/shifter/actions/workflows/agentchat.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/agentchat.yml)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
+[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
 
 # Shifter
 

@@ -12,4 +12,3 @@ output "security_group_id" {
   description = "AgentChat EC2 security group ID"
   value       = module.ec2.security_group_id
 }
-

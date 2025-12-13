@@ -33,8 +33,10 @@ def test_agent(db, django_user_model, windows_os):
 @pytest.fixture
 def mock_provisioner():
     """Mock the provisioner service to avoid AWS calls."""
-    with patch("mission_control.services.provisioner.start_provisioning") as mock_provision, \
-         patch("mission_control.services.provisioner.start_teardown") as mock_teardown:
+    with (
+        patch("mission_control.services.provisioner.start_provisioning") as mock_provision,
+        patch("mission_control.services.provisioner.start_teardown") as mock_teardown,
+    ):
         mock_provision.return_value = None  # No ARN in test mode
         mock_teardown.return_value = None
         yield {"provision": mock_provision, "teardown": mock_teardown}
@@ -127,11 +129,10 @@ class TestLaunchRange:
             }
 
             client.force_login(test_agent.user)
-            with patch.object(
-                client.session, "get", return_value=None
-            ):
+            with patch.object(client.session, "get", return_value=None):
                 # Need to patch settings for this test
                 from django.conf import settings
+
                 original_arn = getattr(settings, "PROVISION_STATE_MACHINE_ARN", "")
                 settings.PROVISION_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123:stateMachine:test"
 
@@ -385,13 +386,16 @@ class TestSubnetIndexAllocation:
     def test_skips_active_indices(self, test_agent):
         """Should not reuse indices from non-destroyed ranges."""
         # Create ranges in various active states
-        for i, status in enumerate([
-            Range.Status.PROVISIONING,
-            Range.Status.READY,
-            Range.Status.PAUSED,
-            Range.Status.DESTROYING,
-            Range.Status.FAILED,
-        ], start=1):
+        for i, status in enumerate(
+            [
+                Range.Status.PROVISIONING,
+                Range.Status.READY,
+                Range.Status.PAUSED,
+                Range.Status.DESTROYING,
+                Range.Status.FAILED,
+            ],
+            start=1,
+        ):
             Range.objects.create(
                 user=test_agent.user,
                 agent=test_agent,

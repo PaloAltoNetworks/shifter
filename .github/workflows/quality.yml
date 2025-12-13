@@ -49,19 +49,23 @@ jobs:
           npm ci
           npm run build
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: portal/requirements.txt
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Lint Python
+        working-directory: portal
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
 
       - name: Test portal
         working-directory: portal
-        run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-django
-          pytest --cov=. --cov-report=xml:coverage.xml
+        run: uv run pytest
+
+      - name: Lint TypeScript
+        working-directory: mcp/mcp-red
+        run: npm run lint
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master

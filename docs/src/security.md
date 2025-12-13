@@ -107,6 +107,12 @@ AWS Cognito handles all authentication. Django is a relying party only.
 3. Django exchanges code for tokens, validates JWT signature
 4. Django creates session, stores user email from token claims
 
+## Known Risks
+
+| Risk | Severity | Notes |
+|------|----------|-------|
+| Range instances can enumerate SSM documents | Low | `ssm:GetDocument` in managed policy. Audit for secrets in docs. |
+
 ## Not Yet Implemented
 
 - WAF on ALB

@@ -192,4 +192,3 @@ variable "provisioner_alarm_email" {
   type        = string
   default     = ""
 }
-

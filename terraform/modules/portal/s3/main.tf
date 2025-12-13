@@ -12,6 +12,11 @@ locals {
   })
 }
 
+# checkov:skip=CKV_AWS_21:Versioning intentionally disabled - ephemeral data, see #109
+# checkov:skip=CKV_AWS_145:KMS encryption deferred - see #218
+# checkov:skip=CKV_AWS_18:Access logging deferred - see #218
+# checkov:skip=CKV2_AWS_62:Event notifications deferred - see #218
+# checkov:skip=CKV_AWS_144:Cross-region replication deferred - see #219
 resource "aws_s3_bucket" "this" {
   bucket = var.bucket_name
 

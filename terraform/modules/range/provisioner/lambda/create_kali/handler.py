@@ -82,6 +82,7 @@ def handler(event: dict, context) -> dict:
     kali_instance_type = get_env("KALI_INSTANCE_TYPE", "t3.small")
     kali_security_group_id = get_env("KALI_SECURITY_GROUP_ID")
     environment = get_env("ENVIRONMENT", "prod")
+    instance_profile_name = get_env("RANGE_INSTANCE_PROFILE_NAME", "")
 
     # Connect to database
     conn = get_db_connection()
@@ -120,26 +121,32 @@ def handler(event: dict, context) -> dict:
         tags = get_resource_tags(range_id, user_id, environment)
         tags.append({"Key": "Name", "Value": f"shifter-kali-{range_id}"})
 
-        response = ec2.run_instances(
-            ImageId=kali_ami_id,
-            InstanceType=kali_instance_type,
-            MinCount=1,
-            MaxCount=1,
-            SubnetId=subnet_id,
-            SecurityGroupIds=[kali_security_group_id],
-            UserData=user_data,
-            TagSpecifications=[
+        # Build run_instances parameters
+        run_params = {
+            "ImageId": kali_ami_id,
+            "InstanceType": kali_instance_type,
+            "MinCount": 1,
+            "MaxCount": 1,
+            "SubnetId": subnet_id,
+            "SecurityGroupIds": [kali_security_group_id],
+            "UserData": user_data,
+            "TagSpecifications": [
                 {
                     "ResourceType": "instance",
                     "Tags": tags,
                 }
             ],
-            # No IAM role - Kali should not have AWS API access
-            MetadataOptions={
+            "MetadataOptions": {
                 "HttpTokens": "required",  # IMDSv2 only
                 "HttpPutResponseHopLimit": 1,
             },
-        )
+        }
+
+        # Add IAM instance profile if configured (enables SSM access)
+        if instance_profile_name:
+            run_params["IamInstanceProfile"] = {"Name": instance_profile_name}
+
+        response = ec2.run_instances(**run_params)
 
         instance = response["Instances"][0]
         instance_id = instance["InstanceId"]

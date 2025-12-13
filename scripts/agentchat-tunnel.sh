@@ -74,4 +74,3 @@ aws ssm start-session \
   --parameters "{\"portNumber\":[\"$REMOTE_PORT\"],\"localPortNumber\":[\"$LOCAL_PORT\"]}" \
   --region "$AWS_REGION" \
   --profile "$AWS_PROFILE"
-

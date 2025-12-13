@@ -260,11 +260,9 @@ jobs:
               "cd /opt",
               "# Clone or update BAG repo (forked for supply chain security)",
               "if [ -d bedrock-access-gateway ]; then cd bedrock-access-gateway && git pull; else git clone https://github.com/Brad-Edwards/bedrock-access-gateway.git && cd bedrock-access-gateway; fi",
-              "# Prepare Dockerfile",
-              "rm -f Dockerfile",
-              "cp Dockerfile_ecs Dockerfile",
-              "# Build BAG image",
-              "docker build -t bedrock-gateway .",
+              "# Build BAG image from src directory",
+              "cd src",
+              "docker build -f Dockerfile_ecs -t bedrock-gateway .",
               "# Stop existing containers",
               "docker stop open-webui bedrock-gateway 2>/dev/null || true",
               "docker rm open-webui bedrock-gateway 2>/dev/null || true",
@@ -310,4 +308,3 @@ jobs:
           fi
 
           echo "Deployment successful!"
-

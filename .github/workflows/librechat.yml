@@ -304,6 +304,10 @@ jobs:
           rm .env.tmp
           chmod 600 .env
           echo ".env file generated successfully"
+
+          # Inject the actual key into librechat.yaml (LibreChat doesn't do env var substitution)
+          sed -i "s|\${LITELLM_MASTER_KEY:sk-litellm-internal}|${LITELLM_KEY}|g" librechat.yaml
+          echo "librechat.yaml updated with LiteLLM key"
           SCRIPT_EOF
           )
 

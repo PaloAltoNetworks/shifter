@@ -77,6 +77,17 @@ def handler(event: dict, context) -> dict:
                 f"Valid states for mark_failed={mark_failed}: {valid_cleanup_states}"
             )
 
+        # Update DB status FIRST so user sees failure immediately
+        # Resource cleanup continues in background
+        if mark_failed:
+            update_range(
+                conn,
+                range_id,
+                status="failed",
+                error_message=error_message,
+            )
+            logger.info(f"Marked range {range_id} as failed - starting resource cleanup")
+
         # 1. Terminate victim EC2 instance
         victim_instance_id = range_data.get("victim_instance_id")
         if victim_instance_id:
@@ -147,7 +158,9 @@ def handler(event: dict, context) -> dict:
                 else:
                     raise
 
-        # 5. Update database
+        # 5. Update database - clear resource fields
+        # For mark_failed, status was already set at the start
+        # For user-initiated destroy, set status to destroyed now
         update_fields = {
             "victim_instance_id": None,
             "victim_ip": None,
@@ -158,15 +171,12 @@ def handler(event: dict, context) -> dict:
             "chat_url": None,
         }
 
-        if mark_failed:
-            update_fields["status"] = "failed"
-            update_fields["error_message"] = error_message
-        else:
+        if not mark_failed:
             update_fields["status"] = "destroyed"
             update_fields["destroyed_at"] = datetime.now(timezone.utc)
 
         update_range(conn, range_id, **update_fields)
-        logger.info(f"Updated range {range_id} status")
+        logger.info(f"Cleared resource fields for range {range_id}")
 
         return {
             "range_id": range_id,

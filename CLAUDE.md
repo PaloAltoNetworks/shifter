@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Shifter** is a self-service cyber range platform. Users access a browser-based chat interface (LibreChat + MCPs) to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.
+**Shifter** is a self-service cyber range platform. Users access a browser-based chat interface with MCPs to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.
 
 ### Target Users
 
@@ -41,10 +41,10 @@ PANW SecOps Domain Consultants who need to:
          │                                    │ AWS APIs
          ▼                                    ▼
 ┌─────────────────────┐            ┌─────────────────────────────┐
-│  LibreChat          │            │  Range VPC (10.1.0.0/16)    │
+│  Chat UI            │            │  Range VPC (10.1.0.0/16)    │
 │  (shared instance)  │            │                             │
 │                     │            │  Per-user subnet:           │
-│ • Chat UI           │───SSH────▶│  • Kali EC2 (attack tools)  │
+│ • Browser-based     │───SSH────▶│  • Kali EC2 (attack tools)  │
 │ • MCP (hexstrike)   │   /MCP     │  • Victim EC2 (XDR agent)   │
 │ • Agent loops       │            │                             │
 └─────────────────────┘            └─────────────────────────────┘
@@ -63,8 +63,8 @@ PANW SecOps Domain Consultants who need to:
    - `create_kali`: Launches Kali EC2 from pre-baked AMI
    - `create_victim`: Launches Victim EC2, installs XDR agent from S3
    - Each Lambda updates RDS directly with resource IDs
-5. **Portal shows "Ready"** → user clicks "Open Range", goes to LibreChat
-6. **User interacts with AI in LibreChat:**
+5. **Portal shows "Ready"** → user clicks "Open Range", goes to Chat UI
+6. **User interacts with AI in Chat:**
    - Uses hexstrike-ai MCP to control Kali instance
    - Runs attacks against Victim, XDR/XSIAM detects
 
@@ -72,10 +72,10 @@ PANW SecOps Domain Consultants who need to:
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Chat UI | LibreChat | MCP support, agent loops, open source |
+| Chat UI | TBD | MCP support, agent loops, open source |
 | Orchestration | Step Functions + Lambda | Reliable, retry logic, error handling |
 | State | RDS only | Single source of truth, no message queues |
-| Auth | Cognito | Same identity across Portal and LibreChat |
+| Auth | Cognito | Same identity across Portal and Chat |
 | Attack Tools | Kali EC2 | Full Linux with hexstrike-ai pre-installed |
 | Victim VMs | Real EC2 | XDR agent requires real OS |
 
@@ -91,7 +91,7 @@ PANW SecOps Domain Consultants who need to:
 - Cognito OIDC authentication
 - Agent config CRUD (upload installer to S3)
 - Write `Range(status='pending')` to DB on launch
-- Display range status, link to LibreChat when ready
+- Display range status, link to agentic chat
 
 Portal does NOT provision infrastructure. It writes requests to DB.
 
@@ -110,17 +110,17 @@ Portal does NOT provision infrastructure. It writes requests to DB.
 
 **Key Design**: Lambda functions run in Portal VPC, access RDS directly via IAM Database Auth, create Range resources via AWS APIs (no VPC peering needed).
 
-### 3. LibreChat
+### 3. Chat UI
 
 **Purpose**: Browser-based chat UI with agent loop and MCP tool use
 
-**Features used**:
+**Features needed**:
 - MCP server integration (hexstrike-ai for Kali control)
 - Multi-turn conversations with agent loops
 - Chat history
 - AWS Bedrock for Claude models
 
-**Deployment**: Shared multi-tenant instance in Portal VPC (EC2 + Docker Compose).
+**Status**: Chat UI component is being evaluated. See GitHub issue #209.
 
 ### 4. MCP Servers
 
@@ -151,7 +151,7 @@ The authenticated area of the Django portal. See full documentation:
 | `/mission-control/history/` | Range history |
 | `/mission-control/settings/` | Account settings |
 
-**Architecture Note:** Portal handles auth and status display. LibreChat handles the actual AI chat interaction. User clicks "Open Range" → redirects to LibreChat URL.
+**Architecture Note:** Portal handles auth and status display. Chat UI handles the actual AI chat interaction. User clicks "Open Range" → redirects to Chat URL.
 
 ---
 
@@ -216,8 +216,8 @@ npx @modelcontextprotocol/inspector build/index.js
 ### Phase 1: Core Platform (Target: Dec 18)
 - [x] Django portal (auth, agent upload, Mission Control UI)
 - [x] Portal infrastructure (VPC, RDS, ALB, Cognito)
-- [ ] Provisioning service (watch DB, Terraform, deploy LibreChat)
-- [ ] LibreChat deployment with MCP integration
+- [ ] Provisioning service (watch DB, Terraform)
+- [ ] Chat UI deployment with MCP integration
 - [ ] Range VPC + victim EC2 provisioning
 
 ### Phase 2: Polish

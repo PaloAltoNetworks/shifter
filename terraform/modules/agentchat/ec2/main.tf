@@ -100,7 +100,7 @@ resource "random_password" "bag_api_key" {
 }
 
 resource "aws_secretsmanager_secret" "bag_api_key" {
-  name                    = "${var.name_prefix}-bag-api-key"
+  name                    = "shifter-${var.name_prefix}-bag-api-key"
   recovery_window_in_days = 0 # Immediate deletion for dev/test
 
   tags = local.common_tags

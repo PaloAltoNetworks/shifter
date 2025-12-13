@@ -221,7 +221,7 @@ jobs:
       - name: Get BAG API Key from Secrets Manager
         id: secrets
         run: |
-          SECRET_NAME="${ENV}-agentchat-bag-api-key"
+          SECRET_NAME="shifter-${ENV}-agentchat-bag-api-key"
           BAG_API_KEY=$(aws secretsmanager get-secret-value \
             --secret-id "$SECRET_NAME" \
             --query 'SecretString' \

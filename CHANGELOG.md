@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-12-12
+
+### Added
+- Dev environment (`terraform/environments/dev/`)
+- Branch-based deployments: `dev` branch → dev, `main` branch → prod
+- Bootstrap script for new AWS accounts (`scripts/bootstrap-dev.sh`)
+
+### Changed
+- All workflows support environment selection via branch or manual dispatch
+- Streamline GitHub Actions workflows for consistency
+- Utility scripts work with dev and prod environments
+- User updated immediately when range deploy fails
+
 ## [0.3.6] - 2025-12-11
 
 ### Fixed

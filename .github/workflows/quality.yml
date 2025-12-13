@@ -68,6 +68,7 @@ jobs:
         working-directory: portal
         env:
           TF_VARS: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          DJANGO_DEBUG: "true"
         run: |
           export DJANGO_SECRET_KEY=$(echo "$TF_VARS" | grep '^django_secret_key_ci' | sed 's/.*= *"\([^"]*\)".*/\1/')
           uv run pytest

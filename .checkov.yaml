@@ -1,0 +1,39 @@
+# Checkov configuration - documented security exceptions
+# https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html
+
+framework:
+  - terraform
+  - dockerfile
+  - github_actions
+
+# Skip checks with documented rationale
+skip-check:
+  # AWS Secrets Manager - AWS-managed encryption is adequate for internal tool
+  # Not handling PCI/HIPAA data; CMK adds complexity/cost without significant benefit
+  - CKV_AWS_149  # Ensure that Secrets Manager secret is encrypted using KMS CMK
+
+  # ALB - Internal tool architecture decisions
+  - CKV2_AWS_5   # Ensure that ALB is associated with WAF (not required for internal tool)
+  - CKV_AWS_91   # Ensure that ALB has access logs enabled (cost vs benefit)
+  - CKV_AWS_2    # Ensure ALB protocol is HTTPS (using HTTP->HTTPS redirect)
+
+  # EC2 - Intentional architecture
+  - CKV_AWS_79   # Ensure Instance Metadata Service Version 1 is not enabled
+                 # IMDSv2 is enabled but hop limit is >1 for Docker compatibility
+  - CKV_AWS_88   # Ensure EC2 instances are in VPC (they are, false positive)
+
+  # RDS - Intentional for dev environment
+  - CKV_AWS_157  # Ensure RDS instances have IAM authentication enabled
+                 # Using IAM auth for Lambda, Secrets Manager for app
+  - CKV_AWS_353  # Ensure RDS instances have performance insights enabled
+                 # Not needed for dev environment
+
+  # GitHub Actions - Intentional flexibility for admin operations
+  - CKV_GHA_7    # workflow_dispatch inputs must have constraints
+                 # Admin-only triggers need flexibility for env/action selection
+
+  # GitHub Actions - Not applicable or false positives
+  - CKV2_GHA_1   # Ensure workflows have explicit permissions (already fixed in quality.yml)
+
+compact: true
+quiet: true

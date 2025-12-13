@@ -21,6 +21,8 @@ class DashboardManager {
         this.currentRange = null;
         this.pollInterval = null;
         this.pollIntervalMs = 2000; // Poll every 2 seconds
+        this.pollErrorCount = 0;
+        this.maxPollErrors = 5; // Force refresh after 5 consecutive errors
 
         // UI Elements
         this.noRangeState = document.getElementById('no-range-state');
@@ -55,7 +57,8 @@ class DashboardManager {
                 this._stopPolling();
             } else if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
                 // Resume polling when tab becomes visible again if in transitional state
-                this._startPolling();
+                // Do an immediate status check since state may have changed while hidden
+                this.loadStatus();
             }
         });
     }
@@ -387,12 +390,29 @@ class DashboardManager {
                     headers: { 'Accept': 'application/json' },
                 });
 
-                if (!response.ok) return;
+                if (!response.ok) {
+                    console.warn('Polling: response not ok', response.status);
+                    this.pollErrorCount++;
+                    if (this.pollErrorCount >= this.maxPollErrors) {
+                        console.error('Too many polling errors, reloading page');
+                        window.location.reload();
+                    }
+                    return;
+                }
+
+                // Reset error count on success
+                this.pollErrorCount = 0;
 
                 const data = await response.json();
                 const oldStatus = this.currentRange?.status;
+                const newStatus = data.range?.status;
                 this.currentRange = data.range;
                 this._updateUI();
+
+                // Log state transitions for debugging
+                if (oldStatus !== newStatus) {
+                    console.log(`Range status: ${oldStatus} → ${newStatus ?? 'null (no range)'}`);
+                }
 
                 // Stop polling if we've reached a stable state
                 if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {

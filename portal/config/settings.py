@@ -193,6 +193,12 @@ OIDC_CREATE_USER = True
 # Use email as username (default is sha1 hash of email)
 OIDC_USERNAME_ALGO = "config.oidc.generate_username"
 
+# URLs exempt from OIDC authentication (public pages)
+OIDC_EXEMPT_URLS = [
+    r"^/$",  # Landing page
+    r"^/oidc/",  # OIDC callback URLs
+]
+
 # ------------------------------------------------------------------------------
 # Shifter Configuration
 # ------------------------------------------------------------------------------

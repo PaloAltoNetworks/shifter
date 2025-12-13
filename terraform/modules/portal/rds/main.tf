@@ -65,7 +65,7 @@ resource "random_password" "db_password" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-#checkov:skip=CKV_AWS_149:AWS-managed encryption acceptable for shifter unless compliance objects
+# checkov:skip=CKV_AWS_149:Deferred for MVP. AWS-managed keys sufficient for low-usage internal MVP. See #213
 resource "aws_secretsmanager_secret" "db_credentials" {
   name                    = "shifter-${var.name_prefix}-db-credentials"
   description             = "RDS PostgreSQL credentials"

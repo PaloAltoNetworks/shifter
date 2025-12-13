@@ -188,6 +188,7 @@ resource "random_password" "django_secret_key" {
   special = true
 }
 
+#checkov:skip=CKV_AWS_149:AWS-managed encryption acceptable for shifter unless compliance objects
 resource "aws_secretsmanager_secret" "app" {
   name                    = "shifter-${local.name_prefix}-app"
   description             = "Django application secrets"

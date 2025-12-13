@@ -203,7 +203,9 @@ resource "aws_iam_policy" "ec2_instances" {
           "ec2:DescribeInstanceCreditSpecifications",
           "ec2:DescribeKeyPairs",
           "ec2:CreateKeyPair",
-          "ec2:DeleteKeyPair"
+          "ec2:DeleteKeyPair",
+          "ec2:MonitorInstances",
+          "ec2:UnmonitorInstances"
         ]
         Resource = "*"
       }

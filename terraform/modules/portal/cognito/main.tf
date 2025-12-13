@@ -186,6 +186,7 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
 # Store client secret in Secrets Manager
 # ------------------------------------------------------------------------------
 
+#checkov:skip=CKV_AWS_149:AWS-managed encryption acceptable for shifter unless compliance objects
 resource "aws_secretsmanager_secret" "cognito_client" {
   name                    = "shifter-${var.name_prefix}-cognito"
   description             = "Cognito client credentials"

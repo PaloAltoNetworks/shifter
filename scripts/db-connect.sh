@@ -14,8 +14,7 @@
 set -e
 
 # Defaults
-ENV="prod"
-PROFILE="dev-workstation-user"
+ENV="dev"
 REGION="us-east-2"
 LOCAL_PORT="15432"
 
@@ -49,6 +48,13 @@ fi
 # Set environment-specific values
 SECRET_ID="shifter-${ENV}-portal-db-credentials"
 EC2_TAG_NAME="${ENV}-portal-ec2"
+
+# Profile depends on environment
+if [[ "$ENV" == "dev" ]]; then
+    PROFILE="panw-shifter-dev-workstation"
+else
+    PROFILE="dev-workstation-user"
+fi
 
 # Get EC2 instance ID
 get_instance_id() {

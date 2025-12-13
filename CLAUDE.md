@@ -247,14 +247,29 @@ Route: ALB → NGFW → EC2
 
 ### Branch Strategy
 
-- `main` - Stable releases
-- `dev` - Integration (not currently in use)
-- `feature/*` - New features (not currently in use)
+- `main` - Production releases, deploys to prod AWS environment
+- `dev` - Integration branch, deploys to dev AWS environment
+- `feature/*` - Feature branches for development work
+
+**Branch Flow:** `feature/* → dev → main`
+
+All changes flow through pull requests. GitHub Actions workflows handle deployment:
+- PR to `dev` → deploys to dev environment on merge
+- PR to `main` → deploys to prod environment on merge
+
+### AWS Profiles
+
+When working locally with AWS CLI or Terraform:
+- `PANW_SHIFTER_DEV_PROFILE` - AWS profile for dev environment
+- `PANW_SHIFTER_PROD_PROFILE` - AWS profile for prod environment
 
 ### Commit Protocol
 
-**NEVER make commits without explicit user permission:**
-1. NEVER make commits, the user will do it and sign them
+**Git operations are user-only:**
+1. NEVER make commits - the user will do it and sign them
+2. NEVER create PRs - the user handles all PR creation
+3. NEVER merge branches - the user controls all merges
+4. NEVER deploy directly to prod - always go through `feature → dev → main` flow
 
 ---
 

@@ -235,6 +235,38 @@ jobs:
 
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
 
+      - name: Wait for cloud-init
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+        run: |
+          echo "Waiting for cloud-init to complete..."
+          for i in $(seq 1 30); do
+            RESULT=$(aws ssm send-command \
+              --document-name "AWS-RunShellScript" \
+              --instance-ids "$INSTANCE_ID" \
+              --parameters 'commands=["cloud-init status --wait || cloud-init status"]' \
+              --query "Command.CommandId" \
+              --output text 2>/dev/null) || true
+
+            if [ -n "$RESULT" ]; then
+              sleep 10
+              STATUS=$(aws ssm get-command-invocation \
+                --command-id "$RESULT" \
+                --instance-id "$INSTANCE_ID" \
+                --query "StandardOutputContent" \
+                --output text 2>/dev/null) || true
+
+              if echo "$STATUS" | grep -q "done"; then
+                echo "Cloud-init complete"
+                exit 0
+              fi
+            fi
+
+            echo "Attempt $i: Waiting for cloud-init..."
+            sleep 10
+          done
+          echo "Warning: cloud-init wait timed out, proceeding anyway"
+
       - name: Deploy via SSM
         env:
           INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}

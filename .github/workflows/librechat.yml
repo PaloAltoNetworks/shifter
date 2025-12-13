@@ -8,9 +8,7 @@ on:
       - 'librechat/**'
       - '.github/workflows/librechat.yml'
   push:
-    branches:
-      - main
-      - dev
+    branches: [main, dev]
     paths:
       - 'terraform/modules/librechat/**'
       - 'terraform/environments/*/librechat/**'
@@ -26,20 +24,8 @@ on:
         description: 'Environment to deploy'
         required: true
         type: choice
-        options:
-          - dev
-          - prod
+        options: [dev, prod]
         default: dev
-      action:
-        description: 'Action to perform'
-        required: true
-        type: choice
-        options:
-          - deploy
-          - infra-plan
-          - infra-apply
-          - infra-destroy
-        default: deploy
 
 permissions:
   id-token: write
@@ -51,7 +37,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Set environment based on branch
   set-env:
     name: Set Environment
     runs-on: ubuntu-latest
@@ -84,7 +69,7 @@ jobs:
             ENV="prod"
           fi
           echo "environment=$ENV" >> $GITHUB_OUTPUT
-          
+
           if [ "$ENV" == "dev" ]; then
             echo "is_dev=true" >> $GITHUB_OUTPUT
             echo "secret_name=shifter-dev-librechat-config" >> $GITHUB_OUTPUT
@@ -95,60 +80,24 @@ jobs:
             echo "instance_tag=prod-librechat-ec2" >> $GITHUB_OUTPUT
           fi
 
-  # Detect what changed
-  detect-changes:
-    name: Detect Changes
-    runs-on: ubuntu-latest
-    outputs:
-      infra: ${{ steps.changes.outputs.infra || steps.defaults.outputs.infra }}
-      app: ${{ steps.changes.outputs.app || steps.defaults.outputs.app }}
-    steps:
-      - name: Set defaults for workflow_run/dispatch
-        id: defaults
-        if: github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'
-        run: |
-          echo "infra=false" >> $GITHUB_OUTPUT
-          echo "app=false" >> $GITHUB_OUTPUT
-
-      - name: Checkout
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
-        uses: actions/checkout@v4
-
-      - name: Detect changed paths
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v3
-        id: changes
-        with:
-          filters: |
-            infra:
-              - 'terraform/modules/librechat/**'
-              - 'terraform/environments/*/librechat/**'
-            app:
-              - 'librechat/**'
-              - '.github/workflows/librechat.yml'
-
-  # PR: Terraform Plan
+  # PR: Show terraform plan
   terraform-plan:
-    name: Terraform Plan (${{ needs.set-env.outputs.environment }})
+    name: Terraform Plan
     runs-on: ubuntu-latest
-    needs: [set-env, detect-changes]
-    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.infra == 'true'
+    needs: set-env
+    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/librechat
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
-          role-session-name: GitHubActions-LibreChat-Plan
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.14.1"
 
@@ -157,11 +106,14 @@ jobs:
           TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_LIBRECHAT || secrets.TF_VARS_PROD_LIBRECHAT }}
         run: echo "$TF_VARS" > terraform.tfvars
 
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform fmt -check -recursive
+        working-directory: terraform
+
+      - run: terraform init
+
+      - run: terraform validate
 
       - name: Terraform Plan
-        id: plan
         run: |
           terraform plan -no-color -out=tfplan
           terraform show -no-color tfplan > plan.txt
@@ -173,85 +125,39 @@ jobs:
             const fs = require('fs');
             const env = '${{ needs.set-env.outputs.environment }}';
             const plan = fs.readFileSync(`terraform/environments/${env}/librechat/plan.txt`, 'utf8');
-            const output = `#### Terraform Plan - LibreChat (${env})
-            <details><summary>Show Plan</summary>
-
-            \`\`\`terraform
-            ${plan.substring(0, 60000)}
-            \`\`\`
-
-            </details>
-
-            *Pushed by: @${{ github.actor }}*`;
-
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: output
+              body: `#### Terraform Plan - LibreChat (${env})\n<details><summary>Show Plan</summary>\n\n\`\`\`terraform\n${plan.substring(0, 60000)}\n\`\`\`\n\n</details>`
             });
 
-  # Deploy infra on PR for dev only
-  terraform-apply-pr:
-    name: Terraform Apply PR (${{ needs.set-env.outputs.environment }})
-    runs-on: ubuntu-latest
-    needs: [set-env, detect-changes, terraform-plan]
-    if: github.event_name == 'pull_request' && needs.set-env.outputs.is_dev == 'true' && needs.detect-changes.outputs.infra == 'true'
-    defaults:
-      run:
-        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/librechat
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          aws-region: us-east-2
-          role-session-name: GitHubActions-LibreChat-Apply
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.14.1"
-
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ secrets.TF_VARS_DEV_LIBRECHAT }}
-        run: echo "$TF_VARS" > terraform.tfvars
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
-
-  # Push/workflow_run: Terraform Apply
+  # Apply terraform
   terraform-apply:
-    name: Terraform Apply (${{ needs.set-env.outputs.environment }})
+    name: Terraform Apply
     runs-on: ubuntu-latest
-    needs: [set-env, detect-changes]
+    needs: [set-env, terraform-plan]
     if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.infra == 'true') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'infra-apply' || github.event.inputs.action == 'infra-destroy'))
+      always() &&
+      (needs.terraform-plan.result == 'success' || needs.terraform-plan.result == 'skipped') &&
+      (
+        (github.event_name == 'pull_request' && needs.set-env.outputs.is_dev == 'true') ||
+        (github.event_name == 'push') ||
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+        (github.event_name == 'workflow_dispatch')
+      )
     defaults:
       run:
         working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/librechat
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
-          role-session-name: GitHubActions-LibreChat-Apply
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.14.1"
 
@@ -260,81 +166,26 @@ jobs:
           TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_LIBRECHAT || secrets.TF_VARS_PROD_LIBRECHAT }}
         run: echo "$TF_VARS" > terraform.tfvars
 
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform init
 
-      - name: Terraform Apply
-        if: github.event.inputs.action != 'infra-destroy'
-        run: terraform apply -auto-approve
-
-      - name: Terraform Destroy
-        if: github.event.inputs.action == 'infra-destroy'
-        run: terraform destroy -auto-approve
-
-  # Manual: Terraform Plan only
-  terraform-plan-manual:
-    name: Terraform Plan (Manual)
-    runs-on: ubuntu-latest
-    needs: set-env
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'infra-plan'
-    defaults:
-      run:
-        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/librechat
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-2
-          role-session-name: GitHubActions-LibreChat-Plan
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.14.1"
-
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_LIBRECHAT || secrets.TF_VARS_PROD_LIBRECHAT }}
-        run: echo "$TF_VARS" > terraform.tfvars
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Plan
-        run: terraform plan -no-color
+      - run: terraform apply -auto-approve
 
   # Deploy application
   deploy:
-    name: Deploy Application (${{ needs.set-env.outputs.environment }})
+    name: Deploy
     runs-on: ubuntu-latest
-    needs: [set-env, detect-changes, terraform-apply, terraform-apply-pr]
+    needs: [set-env, terraform-apply]
     env:
       AWS_REGION: us-east-2
       SECRET_NAME: ${{ needs.set-env.outputs.secret_name }}
       INSTANCE_TAG: ${{ needs.set-env.outputs.instance_tag }}
-    if: |
-      always() &&
-      (
-        (github.event_name == 'push' && needs.detect-changes.outputs.app == 'true' && (needs.terraform-apply.result == 'success' || needs.terraform-apply.result == 'skipped')) ||
-        (github.event_name == 'push' && needs.terraform-apply.result == 'success') ||
-        (github.event_name == 'pull_request' && needs.set-env.outputs.is_dev == 'true' && needs.detect-changes.outputs.app == 'true') ||
-        (github.event_name == 'workflow_run' && needs.terraform-apply.result == 'success') ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
-      )
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
-          role-session-name: GitHubActions-LibreChat-Deploy
 
       - name: Get Instance ID
         id: instance
@@ -342,8 +193,7 @@ jobs:
           INSTANCE_ID=$(aws ec2 describe-instances \
             --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
             --query 'Reservations[0].Instances[0].InstanceId' \
-            --output text \
-            --region "$AWS_REGION")
+            --output text)
 
           if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
             echo "Error: Could not find running LibreChat EC2 instance with tag: $INSTANCE_TAG"
@@ -351,7 +201,6 @@ jobs:
           fi
 
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-          echo "Found instance: $INSTANCE_ID"
 
       - name: Prepare config files
         id: config
@@ -406,7 +255,7 @@ jobs:
           CREDS_IV=$(echo $SECRET_JSON | jq -r '.creds_iv')
           ALLOW_REGISTRATION=$(echo $SECRET_JSON | jq -r '.allow_registration')
           APP_TITLE=$(echo $SECRET_JSON | jq -r '.app_title')
-          
+
           cat > .env.tmp << ENVEOF
           HOST=0.0.0.0
           PORT=3080
@@ -432,18 +281,18 @@ jobs:
           BEDROCK_AWS_DEFAULT_REGION=AWS_REGION_PLACEHOLDER
           BEDROCK_AWS_MODELS=us.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-haiku-20240307-v1:0
           ENVEOF
-          
+
           sed 's/^[[:space:]]*//' .env.tmp > .env
           rm .env.tmp
           chmod 600 .env
           echo ".env file generated successfully"
           SCRIPT_EOF
           )
-          
+
           ENV_SCRIPT="${ENV_SCRIPT//SECRET_NAME_PLACEHOLDER/$SECRET_NAME}"
           ENV_SCRIPT="${ENV_SCRIPT//AWS_REGION_PLACEHOLDER/$AWS_REGION}"
           ENV_SCRIPT_B64=$(echo "$ENV_SCRIPT" | base64 -w0)
-          
+
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --instance-ids "$INSTANCE_ID" \

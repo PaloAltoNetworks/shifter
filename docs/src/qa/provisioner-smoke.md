@@ -1,148 +1,61 @@
 # Provisioner Smoke Test
 
-Verify the Step Functions provisioner can create and teardown ranges.
-
-## Prerequisites
-
-- Portal and Range infrastructure deployed
-- At least one user account in Cognito
-- AWS CLI configured with appropriate profile
-
-## Environment Setup
+## Setup
 
 ```bash
-export ENV=dev  # or prod
-export AWS_PROFILE=panw-shifter-${ENV}-workstation
-export AWS_REGION=us-east-2
+# Dev
+export ENV=dev AWS_PROFILE=panw-shifter-dev-workstation
+
+# Prod
+export ENV=prod AWS_PROFILE=dev-workstation-user
 ```
 
-## Checks
-
-### 1. State Machines Exist
+## CLI Checks (Claude)
 
 ```bash
-PROVISION_ARN=$(aws stepfunctions list-state-machines \
-  --query "stateMachines[?contains(name, '${ENV}-portal-provision-range')].stateMachineArn | [0]" --output text)
+# State machines exist
+aws stepfunctions list-state-machines --profile $AWS_PROFILE --region us-east-2 \
+  --query "stateMachines[?contains(name, '${ENV}-portal')].name" --output table
 
-[ "$PROVISION_ARN" != "None" ] && echo "PASS: Provision state machine exists" || echo "FAIL: Provision state machine not found"
-
-TEARDOWN_ARN=$(aws stepfunctions list-state-machines \
-  --query "stateMachines[?contains(name, '${ENV}-portal-teardown-range')].stateMachineArn | [0]" --output text)
-
-[ "$TEARDOWN_ARN" != "None" ] && echo "PASS: Teardown state machine exists" || echo "FAIL: Teardown state machine not found"
+# Lambda functions exist
+aws lambda list-functions --profile $AWS_PROFILE --region us-east-2 \
+  --query "Functions[?contains(FunctionName, '${ENV}-portal')].FunctionName" --output table
 ```
 
-### 2. Lambda Functions Exist
+## Range Lifecycle Test
+
+### You: Launch range from Portal UI
+
+Note the range_id: ___
+
+### Claude: Verify resources
 
 ```bash
-for FUNC in create-subnet create-victim create-kali update-range cleanup-range; do
-  aws lambda get-function --function-name "${ENV}-portal-${FUNC}" > /dev/null 2>&1 \
-    && echo "PASS: Lambda ${FUNC} exists" || echo "FAIL: Lambda ${FUNC} not found"
-done
-```
+RANGE_ID=XXX
 
-### 3. Provision a Test Range (Manual - Preferred)
-
-1. Login to Portal at `https://${DOMAIN}/`
-2. Upload a test agent binary (any small file works)
-3. Click "Launch Range"
-4. Watch status change: pending → provisioning → ready
-5. Note the range_id from the URL or dashboard
-
-Alternative via CLI:
-
-```bash
-# Get a test range_id from the database or create via portal
-RANGE_ID=1  # adjust as needed
-
-# Execute provision state machine
-EXECUTION_ARN=$(aws stepfunctions start-execution \
-  --state-machine-arn "$PROVISION_ARN" \
-  --input "{\"range_id\": $RANGE_ID}" \
-  --query 'executionArn' --output text)
-
-echo "Started execution: $EXECUTION_ARN"
-
-# Wait for completion (up to 5 min)
-aws stepfunctions describe-execution --execution-arn "$EXECUTION_ARN" \
-  --query 'status' --output text
-```
-
-Expected: Status becomes `SUCCEEDED`.
-
-### 4. Verify Resources Created
-
-After provision completes:
-
-```bash
-# Check for user subnet
-aws ec2 describe-subnets \
+# Check EC2s
+aws ec2 describe-instances --profile $AWS_PROFILE --region us-east-2 \
   --filters "Name=tag:range_id,Values=$RANGE_ID" \
-  --query 'Subnets[0].SubnetId' --output text | grep -q "subnet-" \
-  && echo "PASS: Subnet created" || echo "FAIL: Subnet not found"
+  --query 'Reservations[].Instances[].[Tags[?Key==`Name`].Value|[0],State.Name,PrivateIpAddress]' --output table
 
-# Check for victim EC2
-aws ec2 describe-instances \
-  --filters "Name=tag:range_id,Values=$RANGE_ID" "Name=tag:role,Values=victim" \
-  --query 'Reservations[0].Instances[0].InstanceId' --output text | grep -q "i-" \
-  && echo "PASS: Victim EC2 created" || echo "FAIL: Victim EC2 not found"
-
-# Check for Kali EC2
-aws ec2 describe-instances \
-  --filters "Name=tag:range_id,Values=$RANGE_ID" "Name=tag:role,Values=kali" \
-  --query 'Reservations[0].Instances[0].InstanceId' --output text | grep -q "i-" \
-  && echo "PASS: Kali EC2 created" || echo "FAIL: Kali EC2 not found"
-```
-
-### 5. Teardown the Test Range
-
-```bash
-EXECUTION_ARN=$(aws stepfunctions start-execution \
-  --state-machine-arn "$TEARDOWN_ARN" \
-  --input "{\"range_id\": $RANGE_ID}" \
-  --query 'executionArn' --output text)
-
-echo "Started teardown: $EXECUTION_ARN"
-
-# Wait for completion
-aws stepfunctions describe-execution --execution-arn "$EXECUTION_ARN" \
-  --query 'status' --output text
-```
-
-Expected: Status becomes `SUCCEEDED`.
-
-### 6. Verify Resources Cleaned Up
-
-```bash
-# Subnet should be gone
-aws ec2 describe-subnets \
+# Check subnet
+aws ec2 describe-subnets --profile $AWS_PROFILE --region us-east-2 \
   --filters "Name=tag:range_id,Values=$RANGE_ID" \
-  --query 'Subnets[0].SubnetId' --output text | grep -q "None" \
-  && echo "PASS: Subnet cleaned up" || echo "FAIL: Subnet still exists"
+  --query 'Subnets[0].[SubnetId,CidrBlock]' --output text
+```
 
-# Instances should be terminated or gone
-aws ec2 describe-instances \
+### You: Teardown range from Portal UI
+
+### Claude: Verify cleanup
+
+```bash
+# Should show terminated or empty
+aws ec2 describe-instances --profile $AWS_PROFILE --region us-east-2 \
   --filters "Name=tag:range_id,Values=$RANGE_ID" "Name=instance-state-name,Values=running" \
-  --query 'Reservations[0].Instances[0].InstanceId' --output text | grep -q "None" \
-  && echo "PASS: Instances cleaned up" || echo "FAIL: Instances still running"
+  --query 'Reservations[].Instances[].InstanceId' --output text
+
+# Should be empty
+aws ec2 describe-subnets --profile $AWS_PROFILE --region us-east-2 \
+  --filters "Name=tag:range_id,Values=$RANGE_ID" \
+  --query 'Subnets[].SubnetId' --output text
 ```
-
-### 7. Check CloudWatch Logs
-
-```bash
-# Recent errors in provision Lambda
-aws logs filter-log-events \
-  --log-group-name "/aws/lambda/${ENV}-portal-create-victim" \
-  --filter-pattern "ERROR" \
-  --start-time $(($(date +%s) - 3600))000 \
-  --query 'events[*].message' --output text
-
-# Should return empty if no errors
-```
-
-## Notes
-
-- Provisioning takes 2-3 minutes typically
-- Teardown takes 1-2 minutes
-- If Step Function fails, check CloudWatch logs for the specific Lambda
-

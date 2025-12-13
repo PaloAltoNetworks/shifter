@@ -2,21 +2,20 @@
 # Smoke Test for Shifter Provisioner Infrastructure
 #
 # Usage:
-#   ./scripts/smoke-test-provisioner.sh           # Test prod
-#   ./scripts/smoke-test-provisioner.sh -e dev    # Test dev
+#   ./scripts/smoke-test-provisioner.sh           # Test dev (default)
+#   ./scripts/smoke-test-provisioner.sh -e prod   # Test prod
 #
 # Prerequisites:
-# - AWS CLI configured with dev-workstation-user profile
+# - AWS CLI configured with appropriate profile
 # - jq installed
 # - Provisioner infrastructure deployed
 
 set -e
 
 # Defaults
-ENV="prod"
+ENV="dev"
 REGION="us-east-2"
 NAME_PREFIX="shifter"
-PROFILE="${AWS_PROFILE:-dev-workstation-user}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -37,6 +36,13 @@ done
 if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
     echo "Error: Environment must be 'dev' or 'prod'"
     exit 1
+fi
+
+# Set profile based on environment
+if [[ "$ENV" == "dev" ]]; then
+    PROFILE="$PANW_SHIFTER_DEV_PROFILE"
+else
+    PROFILE="$PANW_SHIFTER_PROD_PROFILE"
 fi
 
 # Colors for output

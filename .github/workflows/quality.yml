@@ -1,4 +1,4 @@
-name: Build
+name: Quality
 
 on:
   push:
@@ -7,14 +7,15 @@ on:
       - dev
     paths:
       - 'mcp/**'
-      - '.github/workflows/sonar.yml'
-      - 'sonar-project.properties'
       - 'portal/**'
+      - '.github/workflows/quality.yml'
+      - 'sonar-project.properties'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
       - 'mcp/**'
-      - '.github/workflows/sonar.yml'
+      - 'portal/**'
+      - '.github/workflows/quality.yml'
       - 'sonar-project.properties'
 
 jobs:
@@ -34,6 +35,7 @@ jobs:
           cache-dependency-path: |
             mcp/aptl-mcp-common/package-lock.json
             mcp/mcp-red/package-lock.json
+
       - name: Build and test aptl-mcp-common
         working-directory: mcp/aptl-mcp-common
         run: |
@@ -47,9 +49,22 @@ jobs:
           npm ci
           npm run build
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: portal/requirements.txt
+
+      - name: Test portal
+        working-directory: portal
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-django
+          pytest --cov=. --cov-report=xml:coverage.xml
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-

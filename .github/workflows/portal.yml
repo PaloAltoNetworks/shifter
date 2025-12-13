@@ -9,9 +9,7 @@ on:
       - 'portal/**'
       - '.github/workflows/portal.yml'
   push:
-    branches:
-      - main
-      - dev
+    branches: [main, dev]
     paths:
       - 'terraform/modules/portal/**'
       - 'terraform/modules/range/provisioner/**'
@@ -28,20 +26,8 @@ on:
         description: 'Environment to deploy'
         required: true
         type: choice
-        options:
-          - dev
-          - prod
+        options: [dev, prod]
         default: dev
-      action:
-        description: 'Action to perform'
-        required: true
-        type: choice
-        options:
-          - deploy
-          - infra-plan
-          - infra-apply
-          - infra-destroy
-        default: deploy
 
 permissions:
   id-token: write
@@ -53,7 +39,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Set environment based on branch
   set-env:
     name: Set Environment
     runs-on: ubuntu-latest
@@ -86,7 +71,7 @@ jobs:
             ENV="prod"
           fi
           echo "environment=$ENV" >> $GITHUB_OUTPUT
-          
+
           if [ "$ENV" == "dev" ]; then
             echo "is_dev=true" >> $GITHUB_OUTPUT
             echo "ecr_repo=shifter-dev-portal" >> $GITHUB_OUTPUT
@@ -97,61 +82,24 @@ jobs:
             echo "instance_tag=prod-portal-ec2" >> $GITHUB_OUTPUT
           fi
 
-  # Detect what changed
-  detect-changes:
-    name: Detect Changes
-    runs-on: ubuntu-latest
-    outputs:
-      infra: ${{ steps.changes.outputs.infra || steps.defaults.outputs.infra }}
-      app: ${{ steps.changes.outputs.app || steps.defaults.outputs.app }}
-    steps:
-      - name: Set defaults for workflow_run/dispatch
-        id: defaults
-        if: github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'
-        run: |
-          echo "infra=false" >> $GITHUB_OUTPUT
-          echo "app=false" >> $GITHUB_OUTPUT
-
-      - name: Checkout
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
-        uses: actions/checkout@v4
-
-      - name: Detect changed paths
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v3
-        id: changes
-        with:
-          filters: |
-            infra:
-              - 'terraform/modules/portal/**'
-              - 'terraform/modules/range/provisioner/**'
-              - 'terraform/environments/*/portal/**'
-            app:
-              - 'portal/**'
-              - '.github/workflows/portal.yml'
-
-  # PR: Terraform Plan
+  # PR: Show terraform plan
   terraform-plan:
-    name: Terraform Plan (${{ needs.set-env.outputs.environment }})
+    name: Terraform Plan
     runs-on: ubuntu-latest
-    needs: [set-env, detect-changes]
-    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.infra == 'true'
+    needs: set-env
+    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/portal
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
-          role-session-name: GitHubActions-Portal-Plan
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.14.1"
 
@@ -160,21 +108,16 @@ jobs:
           TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
         run: echo "$TF_VARS" > terraform.tfvars
 
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive
+      - run: terraform fmt -check -recursive
         working-directory: terraform
 
-      - name: Build Lambda packages
-        run: bash ../../../modules/range/provisioner/build-lambdas.sh
+      - run: bash ../../../modules/range/provisioner/build-lambdas.sh
 
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform init
 
-      - name: Terraform Validate
-        run: terraform validate
+      - run: terraform validate
 
       - name: Terraform Plan
-        id: plan
         run: |
           terraform plan -no-color -out=tfplan
           terraform show -no-color tfplan > plan.txt
@@ -186,181 +129,69 @@ jobs:
             const fs = require('fs');
             const env = '${{ needs.set-env.outputs.environment }}';
             const plan = fs.readFileSync(`terraform/environments/${env}/portal/plan.txt`, 'utf8');
-            const output = `#### Terraform Plan - Portal (${env})
-            <details><summary>Show Plan</summary>
-
-            \`\`\`terraform
-            ${plan.substring(0, 60000)}
-            \`\`\`
-
-            </details>
-
-            *Pushed by: @${{ github.actor }}*`;
-
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: output
+              body: `#### Terraform Plan - Portal (${env})\n<details><summary>Show Plan</summary>\n\n\`\`\`terraform\n${plan.substring(0, 60000)}\n\`\`\`\n\n</details>`
             });
 
-  # Deploy infra on PR for dev only
-  terraform-apply-pr:
-    name: Terraform Apply PR (${{ needs.set-env.outputs.environment }})
-    runs-on: ubuntu-latest
-    needs: [set-env, detect-changes, terraform-plan]
-    if: github.event_name == 'pull_request' && needs.set-env.outputs.is_dev == 'true' && needs.detect-changes.outputs.infra == 'true'
-    defaults:
-      run:
-        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/portal
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          aws-region: us-east-2
-          role-session-name: GitHubActions-Portal-Apply
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.14.1"
-
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ secrets.TF_VARS_DEV_PORTAL }}
-        run: echo "$TF_VARS" > terraform.tfvars
-
-      - name: Build Lambda packages
-        run: bash ../../../modules/range/provisioner/build-lambdas.sh
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
-
-  # Push/workflow_run: Terraform Apply
+  # Apply terraform (PR to dev, push, workflow_run, workflow_dispatch)
   terraform-apply:
-    name: Terraform Apply (${{ needs.set-env.outputs.environment }})
+    name: Terraform Apply
     runs-on: ubuntu-latest
-    needs: [set-env, detect-changes]
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.infra == 'true') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'infra-apply' || github.event.inputs.action == 'infra-destroy'))
-    defaults:
-      run:
-        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/portal
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-2
-          role-session-name: GitHubActions-Portal-Apply
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.14.1"
-
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
-        run: echo "$TF_VARS" > terraform.tfvars
-
-      - name: Build Lambda packages
-        run: bash ../../../modules/range/provisioner/build-lambdas.sh
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Apply
-        if: github.event.inputs.action != 'infra-destroy'
-        run: terraform apply -auto-approve
-
-      - name: Terraform Destroy
-        if: github.event.inputs.action == 'infra-destroy'
-        run: terraform destroy -auto-approve
-
-      - name: Output Portal Info
-        if: github.event.inputs.action != 'infra-destroy'
-        run: terraform output -json
-
-  # Manual: Terraform Plan only
-  terraform-plan-manual:
-    name: Terraform Plan (Manual)
-    runs-on: ubuntu-latest
-    needs: set-env
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'infra-plan'
-    defaults:
-      run:
-        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/portal
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-2
-          role-session-name: GitHubActions-Portal-Plan
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.14.1"
-
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
-        run: echo "$TF_VARS" > terraform.tfvars
-
-      - name: Build Lambda packages
-        run: bash ../../../modules/range/provisioner/build-lambdas.sh
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Plan
-        run: terraform plan -no-color
-
-  # Build Docker image and push to ECR
-  build-and-push:
-    name: Build and Push (${{ needs.set-env.outputs.environment }})
-    runs-on: ubuntu-latest
-    needs: [set-env, detect-changes, terraform-apply, terraform-apply-pr]
+    needs: [set-env, terraform-plan]
     if: |
       always() &&
+      (needs.terraform-plan.result == 'success' || needs.terraform-plan.result == 'skipped') &&
       (
-        (github.event_name == 'push' && needs.detect-changes.outputs.app == 'true' && (needs.terraform-apply.result == 'success' || needs.terraform-apply.result == 'skipped')) ||
-        (github.event_name == 'push' && needs.terraform-apply.result == 'success') ||
-        (github.event_name == 'pull_request' && needs.set-env.outputs.is_dev == 'true' && needs.detect-changes.outputs.app == 'true') ||
-        (github.event_name == 'workflow_run' && needs.terraform-apply.result == 'success') ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
+        (github.event_name == 'pull_request' && needs.set-env.outputs.is_dev == 'true') ||
+        (github.event_name == 'push') ||
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+        (github.event_name == 'workflow_dispatch')
       )
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/portal
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.1"
+
+      - name: Write tfvars
+        env:
+          TF_VARS: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
+        run: echo "$TF_VARS" > terraform.tfvars
+
+      - run: bash ../../../modules/range/provisioner/build-lambdas.sh
+
+      - run: terraform init
+
+      - run: terraform apply -auto-approve
+
+  # Build and push Docker image
+  build-and-push:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    needs: [set-env, terraform-apply]
     outputs:
       image_tag: ${{ steps.build.outputs.image_tag }}
     env:
       ECR_REPOSITORY: ${{ needs.set-env.outputs.ecr_repo }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
-          role-session-name: GitHubActions-Portal-Build
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -375,20 +206,15 @@ jobs:
           SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
           IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY
 
-          docker build \
-            -t $IMAGE_URI:latest \
-            -t $IMAGE_URI:$SHORT_SHA \
-            .
-
+          docker build -t $IMAGE_URI:latest -t $IMAGE_URI:$SHORT_SHA .
           docker push $IMAGE_URI:latest
           docker push $IMAGE_URI:$SHORT_SHA
 
           echo "image_tag=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "Built and pushed $IMAGE_URI:$SHORT_SHA"
 
   # Deploy to EC2
   deploy:
-    name: Deploy Application (${{ needs.set-env.outputs.environment }})
+    name: Deploy
     runs-on: ubuntu-latest
     needs: [set-env, build-and-push]
     env:
@@ -397,12 +223,10 @@ jobs:
       INSTANCE_TAG: ${{ needs.set-env.outputs.instance_tag }}
       ENV: ${{ needs.set-env.outputs.environment }}
     steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ needs.set-env.outputs.is_dev == 'true' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
-          role-session-name: GitHubActions-Portal-Deploy
 
       - name: Get deployment config
         id: config
@@ -411,26 +235,18 @@ jobs:
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "registry=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> $GITHUB_OUTPUT
+          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
 
           PORTAL_DOMAIN=$(echo "$TF_VARS" | grep '^domain_name' | sed 's/.*= *"\([^"]*\)".*/\1/')
-          if [ -z "$PORTAL_DOMAIN" ]; then
-            echo "Error: Failed to extract domain_name from tfvars"
-            exit 1
-          fi
           echo "domain=${PORTAL_DOMAIN}" >> $GITHUB_OUTPUT
 
           S3_BUCKET=$(echo "$TF_VARS" | grep '^user_storage_bucket' | sed 's/.*= *"\([^"]*\)".*/\1/')
-          if [ -z "$S3_BUCKET" ]; then
-            echo "Error: Failed to extract user_storage_bucket from tfvars"
-            exit 1
-          fi
           echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
 
           PROVISION_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-provision-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
           TEARDOWN_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-teardown-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
           echo "provision_state_machine_arn=${PROVISION_ARN}" >> $GITHUB_OUTPUT
           echo "teardown_state_machine_arn=${TEARDOWN_ARN}" >> $GITHUB_OUTPUT
-          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
 
       - name: Get Instance ID
         id: instance
@@ -446,7 +262,6 @@ jobs:
           fi
 
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-          echo "Found instance: $INSTANCE_ID"
 
       - name: Deploy via SSM
         env:
@@ -490,7 +305,6 @@ jobs:
             --output text)
 
           echo "SSM Command ID: $COMMAND_ID"
-
           aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
 
           STATUS=$(aws ssm get-command-invocation \

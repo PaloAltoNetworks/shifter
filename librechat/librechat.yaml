@@ -6,6 +6,11 @@
 
 version: 1.2.1
 
+# Disable agents feature - it tries to use Bedrock directly
+# instead of our LiteLLM proxy endpoint
+interface:
+  agents: false
+
 endpoints:
   # Use LiteLLM proxy for Bedrock inference profile support
   # LiteLLM runs as sidecar container on port 4000
@@ -19,8 +24,6 @@ endpoints:
       titleConvo: true
       titleModel: "claude-sonnet-4.5"
       modelDisplayLabel: "Claude (Bedrock)"
-  agents:
-    disableBuilder: true
 
 modelSpecs:
   enforce: false

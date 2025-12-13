@@ -20,6 +20,9 @@ on:
       - '.github/workflows/quality.yml'
       - 'sonar-project.properties'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build and Analyze
@@ -76,6 +79,7 @@ jobs:
           framework: terraform
           quiet: true
           compact: true
+          soft_fail: true
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master

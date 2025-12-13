@@ -7,6 +7,8 @@ Output: { "stale_ranges": [{"range_id": "uuid", "status": "...", "reason": "..."
 Called by EventBridge on a schedule to find ranges that need cleanup:
 - PROVISIONING for more than 1 hour
 - DESTROYING for more than 30 minutes
+
+TODO: See issue #204 - rethink this to scan AWS resources first, then reconcile with DB.
 """
 
 import logging

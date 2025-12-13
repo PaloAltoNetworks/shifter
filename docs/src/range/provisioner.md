@@ -19,16 +19,17 @@ Portal VPC (10.0.0.0/16)
 │       ├── create_subnet
 │       ├── create_victim
 │       ├── create_kali
-│       ├── configure_librechat
+│       ├── mark_ready
 │       └── cleanup
 │
 └── (Lambda creates resources in Range VPC via AWS APIs)
 
 Range VPC (10.1.0.0/16)
 ├── Per-user subnets (10.1.{subnet_index}.0/24)
-├── Victim EC2 instances
-├── Kali containers
-└── LibreChat (shared, multi-tenant)
+├── Kali EC2 instances (pre-baked AMI)
+└── Victim EC2 instances (XDR agent installed)
+
+LibreChat runs in Portal VPC (shared, multi-tenant)
 ```
 
 ## Key Principles
@@ -56,12 +57,11 @@ Range VPC (10.1.0.0/16)
    └── Lambda: Read Range from RDS
    └── Lambda: Create subnet in Range VPC
    └── Lambda: UPDATE Range SET subnet_id=X, subnet_cidr=Y
-   └── Lambda: Create victim EC2
+   └── Lambda: Create Kali EC2
+   └── Lambda: UPDATE Range SET kali_ip=X, kali_instance_id=Y
+   └── Lambda: Create Victim EC2
    └── Lambda: UPDATE Range SET victim_ip=X, victim_instance_id=Y
-   └── Lambda: Create/configure Kali
-   └── Lambda: UPDATE Range SET kali_info=X
-   └── Lambda: Configure LibreChat user
-   └── Lambda: UPDATE Range SET chat_url=X, status='ready'
+   └── Lambda: UPDATE Range SET status='ready', ready_at=now()
 
 3. User sees "Ready" on dashboard
    └── Portal: Polls Range.status from RDS
@@ -76,12 +76,12 @@ Range VPC (10.1.0.0/16)
 
 2. Step Functions executes
    └── Lambda: Read Range from RDS (get resource IDs)
-   └── Lambda: Terminate victim EC2
+   └── Lambda: Terminate Kali EC2
+   └── Lambda: UPDATE Range SET kali_instance_id=NULL
+   └── Lambda: Terminate Victim EC2
    └── Lambda: UPDATE Range SET victim_instance_id=NULL
-   └── Lambda: Delete Kali container
-   └── Lambda: UPDATE Range SET kali_info=NULL
    └── Lambda: Delete subnet
-   └── Lambda: UPDATE Range SET subnet_id=NULL, status='destroyed'
+   └── Lambda: UPDATE Range SET subnet_id=NULL, status='destroyed', destroyed_at=now()
 
 3. User sees "Destroyed" on dashboard
 ```
@@ -97,17 +97,12 @@ Range VPC (10.1.0.0/16)
          │
          ▼
 ┌─────────────────┐
-│  CreateVictim   │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
 │   CreateKali    │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ConfigureLibreChat│
+│  CreateVictim   │
 └────────┬────────┘
          │
          ▼
@@ -132,12 +127,12 @@ On any error:
 
 ```
 ┌─────────────────┐
-│ TerminateVictim │
+│  TerminateKali  │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│   DeleteKali    │
+│TerminateVictim  │
 └────────┬────────┘
          │
          ▼
@@ -185,19 +180,16 @@ All Lambdas:
 **Input:** `{ range_id }`
 
 **Actions:**
-1. Read Range from RDS
-2. Create/configure Kali container
-3. Update Range: `kali_info`
+1. Read Range from RDS to get `subnet_id`
+2. Launch Kali EC2 from pre-baked AMI
+3. Update Range: `kali_ip`, `kali_instance_id`
 
-### configure_librechat
+### mark_ready
 
 **Input:** `{ range_id }`
 
 **Actions:**
-1. Read Range from RDS to get user info
-2. Create LibreChat user (if not exists)
-3. Configure MCP routing for this range
-4. Update Range: `chat_url`
+1. Update Range: `status='ready'`, `ready_at=now()`
 
 ### cleanup
 

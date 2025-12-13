@@ -19,13 +19,6 @@ on:
     types: [completed]
     branches: [main, dev]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy'
-        required: true
-        type: choice
-        options: [dev, prod]
-        default: dev
 
 permissions:
   id-token: write
@@ -50,15 +43,11 @@ jobs:
         env:
           # Use env vars to prevent script injection from untrusted inputs
           EVENT_NAME: ${{ github.event_name }}
-          DISPATCH_ENV: ${{ github.event.inputs.environment }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           PR_BASE_REF: ${{ github.base_ref }}
           GIT_REF: ${{ github.ref }}
         run: |
-          if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
-            # workflow_dispatch input is constrained to choice options (dev/prod)
-            ENV="$DISPATCH_ENV"
-          elif [ "$EVENT_NAME" == "workflow_run" ]; then
+          if [ "$EVENT_NAME" == "workflow_run" ]; then
             # Validate branch name matches expected pattern
             if [ "$WORKFLOW_RUN_BRANCH" == "dev" ]; then
               ENV="dev"

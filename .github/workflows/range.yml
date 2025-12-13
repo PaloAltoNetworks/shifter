@@ -1,3 +1,4 @@
+# checkov:skip=CKV_GHA_7:workflow_dispatch inputs required for manual destroy action
 name: Range
 
 on:

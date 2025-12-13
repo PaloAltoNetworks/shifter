@@ -8,6 +8,7 @@ on:
     paths:
       - 'mcp/**'
       - 'portal/**'
+      - 'terraform/**'
       - '.github/workflows/quality.yml'
       - 'sonar-project.properties'
   pull_request:
@@ -15,6 +16,7 @@ on:
     paths:
       - 'mcp/**'
       - 'portal/**'
+      - 'terraform/**'
       - '.github/workflows/quality.yml'
       - 'sonar-project.properties'
 
@@ -66,6 +68,14 @@ jobs:
       - name: Lint TypeScript
         working-directory: mcp/mcp-red
         run: npm run lint
+
+      - name: Checkov IaC Security
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform/
+          framework: terraform
+          quiet: true
+          compact: true
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master

@@ -344,7 +344,7 @@ jobs:
               "cd /opt/librechat",
               "docker compose pull",
               "docker compose down --remove-orphans || true",
-              "docker compose up -d",
+              "docker compose up -d --force-recreate",
               "sleep 10",
               "docker compose ps"
             ]' \

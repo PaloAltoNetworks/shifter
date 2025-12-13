@@ -173,6 +173,7 @@ class DashboardManager {
 
         if (!this.currentRange) {
             this.noRangeState.style.display = 'block';
+            this._resetLaunchButton();
             return;
         }
 
@@ -195,12 +196,12 @@ class DashboardManager {
 
             case 'resuming':
                 this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Resuming range...');
+                this._updateProvisioningState('Resuming Range', 'Starting instances...');
                 break;
 
             case 'destroying':
                 this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Destroying range...');
+                this._updateProvisioningState('Destroying Range', 'Cleaning up resources...');
                 break;
 
             case 'failed':
@@ -220,7 +221,11 @@ class DashboardManager {
         }
     }
 
-    _updateProvisioningState(message = 'Setting up infrastructure...') {
+    _updateProvisioningState(title = 'Provisioning Range', message = 'Setting up infrastructure...') {
+        const cardTitle = this.provisioningState.querySelector('.card-title');
+        if (cardTitle) {
+            cardTitle.textContent = title;
+        }
         const statusText = this.provisioningState.querySelector('.status span:last-child');
         if (statusText) {
             statusText.textContent = message;
@@ -281,6 +286,13 @@ class DashboardManager {
     _formatDate(isoString) {
         const date = new Date(isoString);
         return date.toLocaleString();
+    }
+
+    _resetLaunchButton() {
+        if (this.launchBtn) {
+            this.launchBtn.textContent = 'Launch Range';
+            this.launchBtn.disabled = !this.agentSelect?.value;
+        }
     }
 
     async launchRange() {
@@ -366,9 +378,10 @@ class DashboardManager {
                 throw new Error(data.error || 'Failed to destroy range');
             }
 
-            this.currentRange = data.range;
+            // Range is destroyed immediately - show no-range state
+            this._stopPolling();
+            this.currentRange = null;
             this._updateUI();
-            this._startPolling();
 
         } catch (error) {
             alert(error.message);

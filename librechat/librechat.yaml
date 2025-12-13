@@ -6,12 +6,22 @@
 
 version: 1.2.1
 
-# Disable agents feature - it tries to use Bedrock directly
-# instead of our LiteLLM proxy endpoint
+# Disable agents UI - users cannot access Agents tab
 interface:
   agents: false
 
 endpoints:
+  # Explicitly disable built-in Bedrock endpoint
+  # We use LiteLLM proxy instead (via custom endpoint)
+  bedrock: false
+
+  # Disable agents endpoint from calling Bedrock directly
+  # See: https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/agents
+  agents:
+    # Don't allow any providers - forces agents to be completely disabled
+    allowedProviders: []
+    disableBuilder: true
+
   # Use LiteLLM proxy for Bedrock inference profile support
   # LiteLLM runs as sidecar container on port 4000
   custom:

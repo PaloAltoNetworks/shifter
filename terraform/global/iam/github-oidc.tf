@@ -1,21 +1,16 @@
-terraform {
-  required_version = ">= 1.0"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "aws" {
-  region = var.aws_region
-}
-
 variable "aws_region" {
   description = "AWS region"
   type        = string
   default     = "us-east-2"
+}
+
+variable "environment" {
+  description = "Environment name (dev or prod)"
+  type        = string
+  validation {
+    condition     = contains(["dev", "prod"], var.environment)
+    error_message = "Environment must be 'dev' or 'prod'."
+  }
 }
 
 variable "github_org" {
@@ -47,7 +42,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 # IAM Role for GitHub Actions
 resource "aws_iam_role" "github_actions" {
-  name = "github-actions-shifter"
+  name = "github-actions-shifter-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -71,8 +66,9 @@ resource "aws_iam_role" "github_actions" {
   })
 
   tags = {
-    Name    = "github-actions-shifter"
-    Project = "shifter"
+    Name        = "github-actions-shifter-${var.environment}"
+    Project     = "shifter"
+    Environment = var.environment
   }
 }
 
@@ -82,7 +78,7 @@ resource "aws_iam_role" "github_actions" {
 
 # Core Infrastructure: ECR, S3 state, DynamoDB locking
 resource "aws_iam_policy" "core_infrastructure" {
-  name = "shifter-core-infrastructure"
+  name = "shifter-${var.environment}-core-infrastructure"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -135,7 +131,7 @@ resource "aws_iam_policy" "core_infrastructure" {
 
 # VPC Networking
 resource "aws_iam_policy" "vpc_networking" {
-  name = "shifter-vpc-networking"
+  name = "shifter-${var.environment}-vpc-networking"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -165,7 +161,7 @@ resource "aws_iam_policy" "vpc_networking" {
 
 # EC2 Instances
 resource "aws_iam_policy" "ec2_instances" {
-  name = "shifter-ec2-instances"
+  name = "shifter-${var.environment}-ec2-instances"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -190,6 +186,8 @@ resource "aws_iam_policy" "ec2_instances" {
           "ec2:DeleteVolume",
           "ec2:AttachVolume",
           "ec2:DetachVolume",
+          "ec2:ModifyVolume",
+          "ec2:DescribeVolumesModifications",
           "ec2:DescribeInstanceCreditSpecifications",
           "ec2:DescribeKeyPairs",
           "ec2:CreateKeyPair",
@@ -203,7 +201,7 @@ resource "aws_iam_policy" "ec2_instances" {
 
 # ELB and ACM
 resource "aws_iam_policy" "elb_acm" {
-  name = "shifter-elb-acm"
+  name = "shifter-${var.environment}-elb-acm"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -226,7 +224,7 @@ resource "aws_iam_policy" "elb_acm" {
 
 # IAM Scoped (roles and instance profiles)
 resource "aws_iam_policy" "iam_scoped" {
-  name = "shifter-iam-scoped"
+  name = "shifter-${var.environment}-iam-scoped"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -284,7 +282,7 @@ resource "aws_iam_policy" "iam_scoped" {
 
 # Lambda and Step Functions
 resource "aws_iam_policy" "lambda_sfn" {
-  name = "shifter-lambda-sfn"
+  name = "shifter-${var.environment}-lambda-sfn"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -417,7 +415,7 @@ resource "aws_iam_policy" "lambda_sfn" {
 
 # RDS
 resource "aws_iam_policy" "rds" {
-  name = "shifter-rds"
+  name = "shifter-${var.environment}-rds"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -456,7 +454,7 @@ resource "aws_iam_policy" "rds" {
 
 # Secrets Manager and KMS
 resource "aws_iam_policy" "secrets_kms" {
-  name = "shifter-secrets-kms"
+  name = "shifter-${var.environment}-secrets-kms"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -509,7 +507,7 @@ resource "aws_iam_policy" "secrets_kms" {
 
 # SSM and Cognito
 resource "aws_iam_policy" "ssm_cognito" {
-  name = "shifter-ssm-cognito"
+  name = "shifter-${var.environment}-ssm-cognito"
 
   policy = jsonencode({
     Version = "2012-10-17"

@@ -39,6 +39,13 @@ nav:
   - Range: range.md
   - Setup: setup.md
   - Portal Dev: portal-dev.md
+  - QA:
+    - Overview: qa/index.md
+    - Portal: qa/portal-smoke.md
+    - Range: qa/range-smoke.md
+    - Provisioner: qa/provisioner-smoke.md
+    - LibreChat: qa/librechat-smoke.md
+    - Dev Deploy: qa/dev-deploy-smoke.md
   - API Reference: api.md
 
 markdown_extensions:

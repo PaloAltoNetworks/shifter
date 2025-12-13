@@ -261,6 +261,15 @@ jobs:
           ALLOW_REGISTRATION=$(echo $SECRET_JSON | jq -r '.allow_registration')
           APP_TITLE=$(echo $SECRET_JSON | jq -r '.app_title')
 
+          # Generate or reuse LiteLLM master key (persist across deploys)
+          if [ -f /opt/librechat/.litellm_key ]; then
+            LITELLM_KEY=$(cat /opt/librechat/.litellm_key)
+          else
+            LITELLM_KEY="sk-$(openssl rand -hex 32)"
+            echo "$LITELLM_KEY" > /opt/librechat/.litellm_key
+            chmod 600 /opt/librechat/.litellm_key
+          fi
+
           cat > .env.tmp << ENVEOF
           HOST=0.0.0.0
           PORT=3080
@@ -283,7 +292,8 @@ jobs:
           DEBUG_LOGGING=false
           DEBUG_CONSOLE=false
           CONSOLE_JSON=true
-          LITELLM_MASTER_KEY=sk-litellm-internal
+          LITELLM_MASTER_KEY=${LITELLM_KEY}
+          AWS_REGION=AWS_REGION_PLACEHOLDER
           ENVEOF
 
           sed 's/^[[:space:]]*//' .env.tmp > .env

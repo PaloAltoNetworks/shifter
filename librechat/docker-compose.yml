@@ -32,12 +32,12 @@ services:
   litellm:
     container_name: litellm
     image: ghcr.io/berriai/litellm:main-latest
-    ports:
-      - "4000:4000"
+    # Port not exposed to host - accessed via Docker network only
     volumes:
       - ./litellm-config.yaml:/app/config.yaml:ro
     environment:
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-internal}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY must be set in .env}
+      - AWS_REGION=${AWS_REGION:?AWS_REGION must be set in .env}
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
 

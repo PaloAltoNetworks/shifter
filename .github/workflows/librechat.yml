@@ -207,14 +207,17 @@ jobs:
         run: |
           COMPOSE_B64=$(base64 -w0 librechat/docker-compose.yml)
           YAML_B64=$(base64 -w0 librechat/librechat.yaml)
+          LITELLM_B64=$(base64 -w0 librechat/litellm-config.yaml)
           echo "compose_b64=$COMPOSE_B64" >> $GITHUB_OUTPUT
           echo "yaml_b64=$YAML_B64" >> $GITHUB_OUTPUT
+          echo "litellm_b64=$LITELLM_B64" >> $GITHUB_OUTPUT
 
       - name: Deploy config files via SSM
         env:
           INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
           COMPOSE_B64: ${{ steps.config.outputs.compose_b64 }}
           YAML_B64: ${{ steps.config.outputs.yaml_b64 }}
+          LITELLM_B64: ${{ steps.config.outputs.litellm_b64 }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
@@ -226,6 +229,8 @@ jobs:
               \"echo '$COMPOSE_B64' | base64 -d > docker-compose.yml\",
               \"echo Writing librechat.yaml...\",
               \"echo '$YAML_B64' | base64 -d > librechat.yaml\",
+              \"echo Writing litellm-config.yaml...\",
+              \"echo '$LITELLM_B64' | base64 -d > litellm-config.yaml\",
               \"echo Config files written successfully\"
             ]" \
             --timeout-seconds 60 \
@@ -278,8 +283,7 @@ jobs:
           DEBUG_LOGGING=false
           DEBUG_CONSOLE=false
           CONSOLE_JSON=true
-          BEDROCK_AWS_DEFAULT_REGION=AWS_REGION_PLACEHOLDER
-          BEDROCK_AWS_MODELS=us.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-3-7-sonnet-20250219-v1:0,us.anthropic.claude-3-5-sonnet-20240620-v1:0,us.anthropic.claude-3-5-haiku-20241022-v1:0,us.anthropic.claude-3-haiku-20240307-v1:0
+          LITELLM_MASTER_KEY=sk-litellm-internal
           ENVEOF
 
           sed 's/^[[:space:]]*//' .env.tmp > .env

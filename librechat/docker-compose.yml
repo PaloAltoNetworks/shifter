@@ -16,6 +16,7 @@ services:
       - "3080:3080"
     depends_on:
       - mongodb
+      - litellm
     env_file:
       - .env
     volumes:
@@ -24,6 +25,20 @@ services:
       - ./librechat.yaml:/app/librechat.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # LiteLLM proxy for Bedrock inference profiles
+  # Translates OpenAI-compatible requests to AWS Bedrock
+  litellm:
+    container_name: litellm
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-internal}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
 
   mongodb:

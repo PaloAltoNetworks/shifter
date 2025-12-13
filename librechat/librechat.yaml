@@ -7,11 +7,18 @@
 version: 1.2.1
 
 endpoints:
-  bedrock:
-    availableRegions:
-      - us-east-2
-    # Uses inference profile ID for title generation
-    titleModel: us.anthropic.claude-3-haiku-20240307-v1:0
+  # Use LiteLLM proxy for Bedrock inference profile support
+  # LiteLLM runs as sidecar container on port 4000
+  custom:
+    - name: "Bedrock"
+      apiKey: "${LITELLM_MASTER_KEY:sk-litellm-internal}"
+      baseURL: "http://litellm:4000/v1"
+      models:
+        default: ["claude-sonnet-4.5"]
+        fetch: false
+      titleConvo: true
+      titleModel: "claude-sonnet-4.5"
+      modelDisplayLabel: "Claude (Bedrock)"
   agents:
     disableBuilder: true
 
@@ -23,6 +30,6 @@ modelSpecs:
       label: "Claude Sonnet 4.5"
       default: true
       preset:
-        endpoint: "bedrock"
-        model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        endpoint: "Bedrock"
+        model: "claude-sonnet-4.5"
 

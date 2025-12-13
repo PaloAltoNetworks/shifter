@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-12-12
+
+### Added
+- LiteLLM proxy sidecar for LibreChat to support AWS Bedrock inference profiles
+
+### Changed
+- LibreChat now routes to Bedrock via LiteLLM instead of direct connection
+
 ## [0.4.0] - 2025-12-12
 
 ### Added
-- Dev environment (`terraform/environments/dev/`)
-- Branch-based deployments: `dev` branch → dev, `main` branch → prod
-- Bootstrap script for new AWS accounts (`scripts/bootstrap-dev.sh`)
+- Dev environment
+- Branch-based deployments
+- Bootstrap script for new AWS accounts
 
 ### Changed
 - All workflows support environment selection via branch or manual dispatch

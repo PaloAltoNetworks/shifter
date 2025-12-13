@@ -1,0 +1,26 @@
+# LiteLLM Proxy Configuration for AWS Bedrock
+# https://docs.litellm.ai/docs/providers/bedrock
+#
+# This proxy translates OpenAI-compatible requests to AWS Bedrock,
+# enabling proper support for inference profiles (us.anthropic.* models).
+#
+# Deployed to EC2 by .github/workflows/librechat.yml
+
+model_list:
+  # Claude Sonnet 4.5
+  - model_name: claude-sonnet-4.5
+    litellm_params:
+      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      aws_region_name: us-east-2
+
+litellm_settings:
+  # Drop unsupported parameters instead of erroring
+  drop_params: true
+  # Retry failed requests
+  num_retries: 3
+  # Request timeout in seconds
+  request_timeout: 600
+
+general_settings:
+  # Master key for authentication (read from environment variable)
+  master_key: env/LITELLM_MASTER_KEY

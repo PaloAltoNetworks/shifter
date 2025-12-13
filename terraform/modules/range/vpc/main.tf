@@ -104,7 +104,7 @@ resource "aws_security_group" "kali" {
   description = "Security group for Kali attack EC2 instances"
   vpc_id      = aws_vpc.this.id
 
-  # SSH from within VPC (for MCP/LibreChat access)
+  # SSH from within VPC (for MCP/Chat UI access)
   ingress {
     description = "SSH from VPC"
     from_port   = 22

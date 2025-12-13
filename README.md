@@ -56,14 +56,14 @@ The same AI that sets up scenarios can also execute them. Two chat contexts: one
 ```mermaid
 flowchart LR
     Browser --> Portal[Portal]
-    Browser --> Chat[LibreChat<br/>AI + MCPs]
+    Browser --> Chat[Chat UI<br/>AI + MCPs]
     Chat -->|MCP| Kali[Kali Box]
     Chat -->|MCP| Victim[Victim VM]
     Victim -->|Telemetry| XDR[Your XDR/XSIAM]
 ```
 
 - **Portal**: Authentication, range management, agent uploads
-- **LibreChat**: Browser-based AI chat with MCP tool access
+- **Chat UI**: Browser-based AI chat with MCP tool access
 - **Kali**: Pre-configured attack box with pentesting tools
 - **Victim**: Target VM running your XDR agent
 
@@ -71,7 +71,7 @@ flowchart LR
 
 - **AI Tools**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) gives the agent real capabilities—SSH, command execution, file operations
 - **Infrastructure**: AWS (VPCs, EC2, Step Functions), Terraform-managed
-- **Chat**: LibreChat with agent loops and multi-turn conversations
+- **Chat**: Agent loops and multi-turn conversations
 - **Auth**: Cognito with MFA, SSO across portal and chat
 
 Full technical docs: [docs/](docs/)

@@ -6,7 +6,7 @@ Three components, decoupled via RDS:
 
 - **Portal**: Django app for auth, agent upload, range status UI. Triggers Step Functions on launch.
 - **Provisioning Service**: Step Functions + Lambda, provisions range infra (subnet, Kali, Victim)
-- **LibreChat**: Shared multi-tenant chat UI in Portal VPC
+- **Chat UI**: Shared multi-tenant chat UI (being evaluated - see issue #209)
 - **Range**: Per-user subnet in Range VPC with Kali + Victim EC2
 
 ```mermaid
@@ -16,7 +16,7 @@ graph TB
         RDS[(PostgreSQL)]
         StepFn[[Step Functions]]
         Lambda[Lambda Functions]
-        LibreChat[LibreChat + MCPs]
+        ChatUI[Chat UI + MCPs]
         Portal --> RDS
         Portal -->|start execution| StepFn
         StepFn --> Lambda
@@ -32,8 +32,8 @@ graph TB
     end
 
     User((User)) -->|HTTPS| Portal
-    User -->|HTTPS| LibreChat
-    LibreChat -->|SSH/MCP| Kali
+    User -->|HTTPS| ChatUI
+    ChatUI -->|SSH/MCP| Kali
     Lambda -->|AWS API| Kali
     Lambda -->|AWS API| Victim
     Victim -->|Telemetry| XDR[XDR/XSIAM]
@@ -129,7 +129,7 @@ Per-user ephemeral subnets in Range VPC, provisioned by Step Functions + Lambda.
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| LibreChat | Portal VPC | Shared chat UI, agent loop, MCP tool use |
+| Chat UI | Portal VPC | Shared chat UI, agent loop, MCP tool use |
 | Kali EC2 | Range VPC | Attack tools, MCP-controlled |
 | Victim EC2 | Range VPC | Target with XDR agent |
 
@@ -181,7 +181,7 @@ Creates namespaced secrets: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_POR
 
 ## Two-Context Pattern
 
-MCP enables AI-driven scenario setup via separate LibreChat conversations:
+MCP enables AI-driven scenario setup via separate chat conversations:
 
 1. **Setup chat**: "Set up a PHP command injection on /cmd.php and a SUID privesc"
    - AI uses victim MCP to configure vulnerabilities
@@ -196,9 +196,9 @@ User demos detections to customer.
 
 ## MCP Configuration
 
-MCPs connect LibreChat to range instances via SSH. Currently using hexstrike-ai MCP for Kali access.
+MCPs connect Chat UI to range instances via SSH. Currently using hexstrike-ai MCP for Kali access.
 
-**Current State:** MCPs are configured manually in LibreChat. Users SSH into their Kali instance from LibreChat.
+**Current State:** MCPs are configured manually. Users SSH into their Kali instance from the Chat UI.
 
 **Future State:** Per-range MCP config will be auto-generated:
 

@@ -30,6 +30,20 @@ aws ssm send-command --profile $AWS_PROFILE --region us-east-2 \
 aws ssm get-command-invocation --profile $AWS_PROFILE --region us-east-2 \
   --command-id "COMMAND_ID" --instance-id "$INSTANCE" \
   --query "Status" --output text
+
+# LiteLLM health
+aws ssm send-command --profile $AWS_PROFILE --region us-east-2 \
+  --instance-ids "$INSTANCE" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["curl -sf http://localhost:4000/health && echo OK"]' \
+  --query "Command.CommandId" --output text
+
+# Container status
+aws ssm send-command --profile $AWS_PROFILE --region us-east-2 \
+  --instance-ids "$INSTANCE" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["docker compose -f /opt/librechat/docker-compose.yml ps"]' \
+  --query "Command.CommandId" --output text
 ```
 
 ## Browser Checks (You)

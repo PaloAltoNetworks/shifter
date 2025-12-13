@@ -10,9 +10,8 @@
 set -euo pipefail
 
 # Defaults
-ENV="prod"
-AWS_REGION="${AWS_REGION:-us-east-2}"
-AWS_PROFILE="${AWS_PROFILE:-dev-workstation-user}"
+ENV="dev"
+AWS_REGION="us-east-2"
 LOCAL_PORT="${LOCAL_PORT:-9090}"
 REMOTE_PORT="${REMOTE_PORT:-3080}"
 
@@ -31,8 +30,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate environment
-if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
+# Validate environment and set profile
+if [[ "$ENV" == "dev" ]]; then
+    AWS_PROFILE="panw-shifter-dev-workstation"
+elif [[ "$ENV" == "prod" ]]; then
+    AWS_PROFILE="dev-workstation-user"
+else
     echo "Error: Environment must be 'dev' or 'prod'"
     exit 1
 fi

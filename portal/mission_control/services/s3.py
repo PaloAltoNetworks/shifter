@@ -115,7 +115,7 @@ def delete_agent(s3_key: str) -> None:
         client = get_s3_client()
         client.delete_object(Bucket=settings.AWS_S3_BUCKET_NAME, Key=s3_key)
     except ClientError as e:
-        raise S3Error(f"Failed to delete from S3: {e}") from e  # nosec B608 - not SQL
+        raise S3Error(f"Failed to delete from S3: {e}") from e  # nosec B608
 
 
 def generate_presigned_upload_url(

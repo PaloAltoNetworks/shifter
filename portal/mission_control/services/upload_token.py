@@ -75,8 +75,8 @@ def verify_upload_token(token: str, user_id: int) -> dict:
     """
     try:
         payload_b64, signature = token.rsplit(".", 1)
-    except ValueError:
-        raise ValueError("Invalid token format")
+    except ValueError as err:
+        raise ValueError("Invalid token format") from err
 
     expected_sig = hmac.new(
         settings.SECRET_KEY.encode(),
@@ -90,8 +90,8 @@ def verify_upload_token(token: str, user_id: int) -> dict:
     try:
         payload_json = base64.urlsafe_b64decode(payload_b64).decode()
         payload = json.loads(payload_json)
-    except (ValueError, json.JSONDecodeError):
-        raise ValueError("Invalid token payload")
+    except (ValueError, json.JSONDecodeError) as err:
+        raise ValueError("Invalid token payload") from err
 
     if payload.get("user_id") != user_id:
         raise ValueError("Token user mismatch")

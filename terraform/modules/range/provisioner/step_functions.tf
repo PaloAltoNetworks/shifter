@@ -44,6 +44,7 @@ resource "aws_iam_role_policy" "step_functions_lambda" {
           aws_lambda_function.create_subnet.arn,
           aws_lambda_function.create_victim.arn,
           aws_lambda_function.create_kali.arn,
+          aws_lambda_function.mark_ready.arn,
           aws_lambda_function.cleanup.arn,
           aws_lambda_function.find_stale_ranges.arn,
         ]
@@ -186,6 +187,38 @@ resource "aws_sfn_state_machine" "provision_range" {
         ResultSelector = {
           "kali_instance_id.$" = "$.Payload.kali_instance_id"
           "kali_ip.$"          = "$.Payload.kali_ip"
+        }
+        Next = "MarkReady"
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            ResultPath  = "$.error"
+            Next        = "Cleanup"
+          }
+        ]
+        Retry = [
+          {
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
+            IntervalSeconds = 2
+            MaxAttempts     = 3
+            BackoffRate     = 2
+          }
+        ]
+      }
+
+      MarkReady = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.mark_ready.arn
+          Payload = {
+            "range_id.$" = "$.range_id"
+          }
+        }
+        ResultPath = "$.mark_ready_result"
+        ResultSelector = {
+          "status.$"   = "$.Payload.status"
+          "chat_url.$" = "$.Payload.chat_url"
         }
         Next = "Success"
         Catch = [

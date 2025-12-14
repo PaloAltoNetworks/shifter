@@ -95,6 +95,22 @@ jobs:
         working-directory: mcp/mcp-red
         run: npm run lint
 
+      - name: Setup Python for Checkov
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Cache Checkov and Terraform modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            terraform/.external_modules
+          key: ${{ runner.os }}-checkov-${{ hashFiles('terraform/**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-checkov-
+
       - name: Checkov IaC Security
         uses: bridgecrewio/checkov-action@v12
         with:

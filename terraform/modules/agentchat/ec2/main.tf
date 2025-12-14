@@ -62,7 +62,8 @@ resource "aws_iam_role_policy" "bedrock_invoke" {
           "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
           "arn:aws:bedrock:*::foundation-model/deepseek.*",
           "arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-*",
-          "arn:aws:bedrock:*:*:inference-profile/global.anthropic.claude-*"
+          "arn:aws:bedrock:*:*:inference-profile/global.anthropic.claude-*",
+          "arn:aws:bedrock:*:*:inference-profile/us.deepseek.*"
         ]
       },
       {

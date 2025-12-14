@@ -50,6 +50,7 @@ Connection is pre-configured via environment variables during deployment. After 
 
 1. Create admin account (first user becomes admin)
 2. Apply manual settings per [manual-config.md](manual-config.md)
+3. Set model visibility: Admin → Settings → Models → click each model card → set "Visibility" to include your user groups (models default to admin-only)
 
 **Connection details (pre-configured):**
 - URL: `http://bedrock-gateway:8080/api/v1`

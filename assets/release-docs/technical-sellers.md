@@ -28,7 +28,7 @@ A **self-service cyber range platform** that lets you run live AI-driven attack 
 4. Portal shows "Range Ready" + link to control interface
 
 ### Step 3: Run Demo (30 minutes)
-1. Click "Open Range" → LibreChat interface opens
+1. Click "Open Range" → chat interface opens
 2. **Chat 1**: "Set up a vulnerable web application with command injection"
 3. AI autonomously configures victim VM
 4. **Chat 2**: "Exploit the vulnerability and gain root access"
@@ -52,7 +52,7 @@ A **self-service cyber range platform** that lets you run live AI-driven attack 
 
 ### What Runs Automatically
 - **Infrastructure**: AWS spins up isolated VPC, victim VM
-- **AI Agent**: Autonomous attack execution via LibreChat
+- **AI Agent**: Autonomous attack execution via chat
 - **XDR Agent**: Installed on victim, sends telemetry to tenant
 - **Cleanup**: Destroy range = everything deleted
 
@@ -60,7 +60,7 @@ A **self-service cyber range platform** that lets you run live AI-driven attack 
 ```
 You → Portal → Range Provisioning
               ↓
-         LibreChat (AI + Tools)
+         Chat (AI + Tools)
               ↓
          Victim VM (with XDR agent)
               ↓
@@ -138,7 +138,7 @@ You → Portal → Range Provisioning
 | Component | What It Does |
 |-----------|--------------|
 | Victim VM | Ubuntu 22.04 EC2 with XDR agent |
-| LibreChat | Browser-based AI interface |
+| Chat | Browser-based AI interface |
 | MCP Tools | SSH, file ops, command execution for AI |
 | Isolation | No internet egress, isolated VPC |
 
@@ -210,7 +210,7 @@ Use customer-specific scenarios:
 - **Escalate**: Contact Shifter support if persistent
 
 ### AI Not Responding
-- **Refresh**: Reload LibreChat interface
+- **Refresh**: Reload Chat interface
 - **Check agent**: Ensure AI has MCP tools loaded
 - **Rephrase**: Try different phrasing for instruction
 - **Manual fallback**: Use recorded demo if needed
@@ -230,16 +230,16 @@ Use customer-specific scenarios:
 
 ## Objection Handling
 
-**"This isn't a real attack"**  
+**"This isn't a real attack"**
 → "These are real techniques attackers use. The AI uses actual exploitation tools. Your XDR detections are production-grade."
 
-**"Our environment is different"**  
+**"Our environment is different"**
 → "The attack principles are universal. We can customize scenarios to match your environment."
 
-**"What about false positives?"**  
+**"What about false positives?"**
 → "These are confirmed malicious activities. XDR tunes out noise and shows real threats."
 
-**"Can we break out of the sandbox?"**  
+**"Can we break out of the sandbox?"**
 → "No internet egress, isolated VPC. It's designed to be secure."
 
 ---
@@ -319,8 +319,8 @@ Track these in CRM to show your impact.
 
 ---
 
-**Platform Access**: https://[portal-url]  
-**Support**: [Support email/Slack]  
+**Platform Access**: https://[portal-url]
+**Support**: [Support email/Slack]
 **Launch Date**: December 18, 2025
 
 **Let's show customers what XDR can really do. 🚀**

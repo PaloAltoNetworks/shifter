@@ -33,12 +33,15 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "health_check",
     "health_check.db",
     "health_check.cache",
     "health_check.storage",
     "mozilla_django_oidc",
+    "rest_framework",
     "mission_control.apps.MissionControlConfig",
+    "risk_register.apps.RiskRegisterConfig",
 ]
 
 MIDDLEWARE = [
@@ -150,10 +153,10 @@ _oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "")
 _oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
 
 # Always define OIDC_OP_* variables to avoid runtime errors
-OIDC_OP_AUTHORIZATION_ENDPOINT = ""
-OIDC_OP_TOKEN_ENDPOINT = ""
-OIDC_OP_USER_ENDPOINT = ""
-OIDC_OP_JWKS_ENDPOINT = ""
+OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105 - not a password, placeholder URL
+OIDC_OP_TOKEN_ENDPOINT = ""  # nosec B105
+OIDC_OP_USER_ENDPOINT = ""  # nosec B105
+OIDC_OP_JWKS_ENDPOINT = ""  # nosec B105
 
 if _oidc_auth_domain and _oidc_issuer:
     # OAuth endpoints use the auth domain
@@ -164,7 +167,12 @@ if _oidc_auth_domain and _oidc_issuer:
     OIDC_OP_JWKS_ENDPOINT = f"{_oidc_issuer}/.well-known/jwks.json"
 else:
     import warnings
-    warnings.warn("OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.", RuntimeWarning)
+
+    warnings.warn(
+        "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
 # Token verification
 OIDC_RP_SIGN_ALGO = "RS256"
 
@@ -176,10 +184,7 @@ LOGIN_REDIRECT_URL = "/mission-control/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Login URL - dev bypass in DEBUG, OIDC in production
-if DEBUG:
-    LOGIN_URL = "/dev-login/"
-else:
-    LOGIN_URL = "oidc_authentication_init"
+LOGIN_URL = "/dev-login/" if DEBUG else "oidc_authentication_init"
 
 # Cognito logout endpoint - clears Cognito session in addition to Django session
 OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url"
@@ -189,6 +194,12 @@ OIDC_CREATE_USER = True
 
 # Use email as username (default is sha1 hash of email)
 OIDC_USERNAME_ALGO = "config.oidc.generate_username"
+
+# URLs exempt from OIDC authentication (public pages)
+OIDC_EXEMPT_URLS = [
+    r"^/$",  # Landing page
+    r"^/oidc/",  # OIDC callback URLs
+]
 
 # ------------------------------------------------------------------------------
 # Shifter Configuration
@@ -212,3 +223,19 @@ TEARDOWN_STATE_MACHINE_ARN = os.environ.get("TEARDOWN_STATE_MACHINE_ARN", "")
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
 AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+
+# ------------------------------------------------------------------------------
+# Django REST Framework Configuration
+# ------------------------------------------------------------------------------
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "risk_register.api.authentication.APIKeyAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
+}

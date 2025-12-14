@@ -75,7 +75,7 @@ export interface LabConfig {
  */
 async function loadDockerLabConfig(configPath: string): Promise<LabConfig> {
   console.error(`[MCP] Looking for Docker config at: ${configPath}`);
-  
+
   if (!existsSync(configPath)) {
     throw new Error(`Docker lab configuration not found at: ${configPath}`);
   }
@@ -83,22 +83,22 @@ async function loadDockerLabConfig(configPath: string): Promise<LabConfig> {
   const fs = await import('fs/promises');
   const configContent = await fs.readFile(configPath, 'utf8');
   const config = JSON.parse(configContent) as LabConfig;
-  
+
   // Validate required configuration sections exist
   if (!config.server) {
     throw new Error('Server configuration is required in docker-lab-config.json');
   }
-  
+
   // Validate that at least one capability is configured
   if (!config.containers && !config.api) {
     throw new Error('Either containers (SSH) or api (HTTP) configuration is required');
   }
-  
+
   // If SSH is configured, validate container exists
   if (config.containers && config.server.configKey && !config.containers[config.server.configKey]) {
     throw new Error(`Container '${config.server.configKey}' not found in configuration`);
   }
-  
+
   console.error(`[MCP] Loaded Docker lab config for: ${config.lab.name}`);
   return config;
 }
@@ -108,7 +108,7 @@ async function loadDockerLabConfig(configPath: string): Promise<LabConfig> {
  */
 export async function loadLabConfig(configPath: string): Promise<LabConfig> {
   const config = await loadDockerLabConfig(configPath);
-  
+
   // Expand tilde paths for SSH keys if containers are configured
   if (config.containers && config.server.configKey) {
     const configKey = config.server.configKey;
@@ -117,7 +117,7 @@ export async function loadLabConfig(configPath: string): Promise<LabConfig> {
       container.ssh_key = expandTilde(container.ssh_key);
     }
   }
-  
+
   return config;
 }
 
@@ -130,22 +130,22 @@ export function getTargetCredentials(config: LabConfig): { sshKey: string; usern
   if (!config.containers) {
     throw new Error('SSH containers not configured - use API tools instead');
   }
-  
+
   const configKey = config.server.configKey;
   const container = config.containers[configKey];
-  
+
   if (!container) {
     throw new Error(`Container '${configKey}' not found in configuration`);
   }
-  
+
   if (!container.enabled) {
     throw new Error(`${config.server.targetName} instance is not enabled`);
   }
-  
+
   return {
     sshKey: container.ssh_key,
     username: container.ssh_user,
     port: container.ssh_port,
     target: container.container_ip
   };
-} 
+}

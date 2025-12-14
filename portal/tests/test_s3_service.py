@@ -6,7 +6,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from mission_control.services.s3 import S3Error, delete_agent, get_s3_client, upload_agent
+from mission_control.services.s3 import (
+    S3Error,
+    delete_agent,
+    get_s3_client,
+    upload_agent,
+)
 
 
 class TestGetS3Client:
@@ -82,9 +87,7 @@ class TestDeleteAgent:
 
         delete_agent("agents/123/abc_test.msi")
 
-        mock_client.delete_object.assert_called_once_with(
-            Bucket="test-bucket", Key="agents/123/abc_test.msi"
-        )
+        mock_client.delete_object.assert_called_once_with(Bucket="test-bucket", Key="agents/123/abc_test.msi")
 
     def test_raises_if_bucket_not_configured(self, settings):
         settings.AWS_S3_BUCKET_NAME = ""

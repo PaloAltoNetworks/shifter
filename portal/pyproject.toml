@@ -7,6 +7,7 @@ dependencies = [
     "boto3>=1.42.4",
     "django>=6.0",
     "django-health-check>=3.20.0",
+    "djangorestframework>=3.15.0",
     "gunicorn>=23.0.0",
     "mozilla-django-oidc>=4.0.1",
     "psycopg>=3.3.2",
@@ -19,10 +20,65 @@ dev = [
     "pytest-cov>=7.0.0",
     "pytest>=9.0.2",
     "pytest-django>=4.11.1",
+    "ruff>=0.14.9",
+    "bandit>=1.9.2",
+    "pre-commit>=4.5.0",
 ]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
-addopts = "--cov=config --cov=mission_control --cov-report=term-missing"
+addopts = "--cov=config --cov=mission_control --cov-report=term-missing --cov-report=xml:coverage.xml"
+
+# Ruff - linting and formatting
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+    ".venv",
+    "migrations",
+    "__pycache__",
+    "staticfiles",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "DJ",     # flake8-django
+    "S",      # flake8-bandit (security)
+    "T20",    # flake8-print
+    "SIM",    # flake8-simplify
+    "RUF",    # ruff-specific
+]
+ignore = [
+    "S101",   # assert - OK in tests
+    "S105",   # hardcoded password - false positives on empty strings
+    "RUF012", # Django Meta class attributes don't need ClassVar
+    "S608",   # false positive on f-strings in error messages
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",   # assert is fine in tests
+    "S105",   # hardcoded passwords in test fixtures OK
+    "S106",   # same
+]
+"config/settings.py" = [
+    "S105",   # empty password string for default
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# Bandit - security scanning
+[tool.bandit]
+exclude_dirs = [".venv", "tests"]
+skips = ["B101"]  # assert OK in production code for this project

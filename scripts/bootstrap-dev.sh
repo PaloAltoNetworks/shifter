@@ -646,4 +646,3 @@ provider "aws" {
   }
 }
 EOF
-

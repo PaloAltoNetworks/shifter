@@ -15,15 +15,6 @@ on:
       - 'terraform/environments/*/*.tf'
       - '.github/workflows/core.yml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy'
-        required: true
-        type: choice
-        options:
-          - dev
-          - prod
-        default: dev
 
 permissions:
   id-token: write
@@ -43,11 +34,8 @@ jobs:
         id: set
         run: |
           # For PRs, use base_ref (target branch)
-          # For push, use ref
-          # For workflow_dispatch, use input
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+          # For push/workflow_dispatch, use ref
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
             if [ "${{ github.base_ref }}" == "dev" ]; then
               ENV="dev"
             else
@@ -59,7 +47,7 @@ jobs:
             ENV="prod"
           fi
           echo "environment=$ENV" >> $GITHUB_OUTPUT
-          
+
           if [ "$ENV" == "dev" ]; then
             echo "is_dev=true" >> $GITHUB_OUTPUT
           else

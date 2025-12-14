@@ -66,17 +66,17 @@ Shifter is a self-service cyber range platform that enables your technical teams
 
 ## PANW Conversations Enabled
 
-✅ **XDR/XSIAM**: Live detection demonstrations  
-✅ **Cortex XSOAR**: Automated response to demonstrated attacks  
-✅ **Cortex XDR Pro**: Advanced attack scenarios  
-✅ **Security Validation**: Continuous testing and improvement  
+✅ **XDR/XSIAM**: Live detection demonstrations
+✅ **Cortex XSOAR**: Automated response to demonstrated attacks
+✅ **Cortex XDR Pro**: Advanced attack scenarios
+✅ **Security Validation**: Continuous testing and improvement
 ✅ **AI Threat Readiness**: Executive-level risk discussions
 
 ---
 
 ## Investment & ROI
 
-**Cost**: Cloud infrastructure for demo ranges (~$X per user/month)  
+**Cost**: Cloud infrastructure for demo ranges (~$X per user/month)
 **ROI**: Accelerated Prisma revenue, competitive differentiation, SE efficiency
 
 **Break-even**: Expected within first quarter based on deal velocity improvement

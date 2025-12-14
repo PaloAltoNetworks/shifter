@@ -126,16 +126,16 @@ A **self-service cyber range platform** that lets you demonstrate AI-driven atta
 
 ## Objection Handling
 
-**"Is this realistic?"**  
+**"Is this realistic?"**
 → "These are real attack techniques. The AI uses the same tools adversaries use. Your XDR detections are production-grade."
 
-**"Can we test our own scenarios?"**  
+**"Can we test our own scenarios?"**
 → "Absolutely. The AI can configure custom vulnerabilities based on your environment."
 
-**"What about our compliance requirements?"**  
+**"What about our compliance requirements?"**
 → "Fully isolated environment, no internet egress, your data never leaves your tenant."
 
-**"How much does this cost?"**  
+**"How much does this cost?"**
 → "Shifter is a PANW tool for demonstrating our products. The value is in validating your XDR investment."
 
 ---

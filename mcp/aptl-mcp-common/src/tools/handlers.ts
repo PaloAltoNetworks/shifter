@@ -16,7 +16,7 @@ function getShellType(labConfig: LabConfig): ShellType {
   if (!labConfig.containers || !labConfig.server.configKey) {
     return 'bash'; // Default to bash
   }
-  
+
   const container = labConfig.containers[labConfig.server.configKey];
   return (container?.shell as ShellType) || 'bash';
 }
@@ -37,10 +37,10 @@ const baseHandlers = {
         ],
       };
     }
-    
+
     const configKey = labConfig.server.configKey;
     const container = labConfig.containers[configKey];
-    
+
     if (!container) {
       return {
         content: [
@@ -51,7 +51,7 @@ const baseHandlers = {
         ],
       };
     }
-    
+
     if (!container.enabled) {
       return {
         content: [
@@ -128,7 +128,7 @@ const baseHandlers = {
   },
 
   interactive_session: async (args: any, { sshManager, labConfig }: ToolContext) => {
-    const { 
+    const {
       session_id,
       timeout_ms = 600000
     } = args as {
@@ -186,7 +186,7 @@ const baseHandlers = {
   },
 
   background_session: async (args: any, { sshManager, labConfig }: ToolContext) => {
-    const { 
+    const {
       session_id,
       raw = false,
       timeout_ms = 600000
@@ -424,7 +424,7 @@ const baseHandlers = {
     try {
       const sessions = sshManager.listSessions();
       const sessionCount = sessions.length;
-      
+
       await sshManager.disconnectAll();
 
       return {
@@ -460,7 +460,7 @@ const baseHandlers = {
  */
 export function generateToolHandlers(serverConfig: LabConfig['server']): Record<string, ToolHandler> {
   const handlers: Record<string, ToolHandler> = {};
-  
+
   // Map server-specific tool names to base handlers
   handlers[`${serverConfig.toolPrefix}_info`] = baseHandlers.target_info;
   handlers[`${serverConfig.toolPrefix}_run_command`] = baseHandlers.run_command;
@@ -471,7 +471,7 @@ export function generateToolHandlers(serverConfig: LabConfig['server']): Record<
   handlers[`${serverConfig.toolPrefix}_close_session`] = baseHandlers.close_session;
   handlers[`${serverConfig.toolPrefix}_get_session_output`] = baseHandlers.get_session_output;
   handlers[`${serverConfig.toolPrefix}_close_all_sessions`] = baseHandlers.close_all_sessions;
-  
+
   return handlers;
 }
 

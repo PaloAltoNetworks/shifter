@@ -130,6 +130,12 @@ resource "aws_iam_policy" "core_infrastructure" {
 }
 
 # VPC Networking
+# checkov:skip=CKV_AWS_355:CI/CD requires broad VPC permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires broad VPC permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires broad VPC permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires broad VPC permissions for infrastructure management. Risk accepted, see #44
+# NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
+# and size of inline policies outweigh need for pure least privilege. Risk accepted.
 resource "aws_iam_policy" "vpc_networking" {
   name = "shifter-${var.environment}-vpc-networking"
 
@@ -160,6 +166,12 @@ resource "aws_iam_policy" "vpc_networking" {
 }
 
 # EC2 Instances
+# checkov:skip=CKV_AWS_355:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
+# NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
+# and size of inline policies outweigh need for pure least privilege. Risk accepted.
 resource "aws_iam_policy" "ec2_instances" {
   name = "shifter-${var.environment}-ec2-instances"
 
@@ -191,7 +203,9 @@ resource "aws_iam_policy" "ec2_instances" {
           "ec2:DescribeInstanceCreditSpecifications",
           "ec2:DescribeKeyPairs",
           "ec2:CreateKeyPair",
-          "ec2:DeleteKeyPair"
+          "ec2:DeleteKeyPair",
+          "ec2:MonitorInstances",
+          "ec2:UnmonitorInstances"
         ]
         Resource = "*"
       }
@@ -200,6 +214,12 @@ resource "aws_iam_policy" "ec2_instances" {
 }
 
 # ELB and ACM
+# checkov:skip=CKV_AWS_355:CI/CD requires broad ELB/ACM permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires broad ELB/ACM permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires broad ELB/ACM permissions for infrastructure management. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires broad ELB/ACM permissions for infrastructure management. Risk accepted, see #44
+# NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
+# and size of inline policies outweigh need for pure least privilege. Risk accepted.
 resource "aws_iam_policy" "elb_acm" {
   name = "shifter-${var.environment}-elb-acm"
 
@@ -414,6 +434,12 @@ resource "aws_iam_policy" "lambda_sfn" {
 }
 
 # RDS
+# checkov:skip=CKV_AWS_355:CI/CD requires broad RDS permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires broad RDS permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires broad RDS permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires broad RDS permissions. Risk accepted, see #44
+# NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
+# and size of inline policies outweigh need for pure least privilege. Risk accepted.
 resource "aws_iam_policy" "rds" {
   name = "shifter-${var.environment}-rds"
 
@@ -453,6 +479,12 @@ resource "aws_iam_policy" "rds" {
 }
 
 # Secrets Manager and KMS
+# checkov:skip=CKV_AWS_355:CI/CD requires broad Secrets/KMS permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires broad Secrets/KMS permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires broad Secrets/KMS permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires broad Secrets/KMS permissions. Risk accepted, see #44
+# NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
+# and size of inline policies outweigh need for pure least privilege. Risk accepted.
 resource "aws_iam_policy" "secrets_kms" {
   name = "shifter-${var.environment}-secrets-kms"
 
@@ -506,6 +538,12 @@ resource "aws_iam_policy" "secrets_kms" {
 }
 
 # SSM and Cognito
+# checkov:skip=CKV_AWS_355:CI/CD requires broad SSM/Cognito permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires broad SSM/Cognito permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires broad SSM/Cognito permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires broad SSM/Cognito permissions. Risk accepted, see #44
+# NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
+# and size of inline policies outweigh need for pure least privilege. Risk accepted.
 resource "aws_iam_policy" "ssm_cognito" {
   name = "shifter-${var.environment}-ssm-cognito"
 

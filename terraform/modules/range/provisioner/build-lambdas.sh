@@ -13,7 +13,6 @@ LAMBDAS=(
     "create_subnet"
     "create_victim"
     "create_kali"
-    "configure_librechat"
     "cleanup"
     "find_stale_ranges"
 )

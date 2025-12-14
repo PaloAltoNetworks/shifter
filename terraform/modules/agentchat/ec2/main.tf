@@ -52,15 +52,17 @@ resource "aws_iam_role_policy" "bedrock_invoke" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "BedrockInvokeSonnet45"
+        Sid    = "BedrockInvokeClaudeModels"
         Effect = "Allow"
         Action = [
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream"
         ]
         Resource = [
-          "arn:aws:bedrock:us-east-1:*:inference-profile/us.anthropic.claude-sonnet-4-5-*",
-          "arn:aws:bedrock:us-east-2:*:inference-profile/us.anthropic.claude-sonnet-4-5-*"
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
+          "arn:aws:bedrock:*::foundation-model/deepseek.*",
+          "arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-*",
+          "arn:aws:bedrock:*:*:inference-profile/global.anthropic.claude-*"
         ]
       },
       {

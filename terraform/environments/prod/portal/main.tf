@@ -252,4 +252,3 @@ module "provisioner" {
   enable_alarms = var.enable_provisioner_alarms
   alarm_email   = var.provisioner_alarm_email
 }
-

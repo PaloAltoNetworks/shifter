@@ -59,9 +59,7 @@ def start_provisioning(range_id: int) -> str | None:
         return execution_arn
 
     except ClientError as e:
-        logger.error(
-            f"Failed to start provisioning for range_id={range_id}: {e}"
-        )
+        logger.error(f"Failed to start provisioning for range_id={range_id}: {e}")
         raise
 
 
@@ -104,9 +102,7 @@ def start_teardown(range_id: int) -> str | None:
         return execution_arn
 
     except ClientError as e:
-        logger.error(
-            f"Failed to start teardown for range_id={range_id}: {e}"
-        )
+        logger.error(f"Failed to start teardown for range_id={range_id}: {e}")
         raise
 
 

@@ -65,7 +65,7 @@ jobs:
             ENV="prod"
           fi
           echo "environment=$ENV" >> $GITHUB_OUTPUT
-          
+
           if [ "$ENV" == "dev" ]; then
             echo "is_dev=true" >> $GITHUB_OUTPUT
           else

@@ -24,4 +24,3 @@ output "secrets_arn" {
   description = "ARN of the Secrets Manager secret containing LibreChat secrets"
   value       = module.librechat.secrets_arn
 }
-

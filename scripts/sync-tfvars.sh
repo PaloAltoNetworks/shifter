@@ -21,7 +21,7 @@ echo "Discovering tfvars files..."
 found=0
 while IFS= read -r -d '' tfvars_file; do
   # Extract path relative to environments dir
-  rel_path="${tfvars_file#$ENVS_DIR/}"
+  rel_path="${tfvars_file#"$ENVS_DIR"/}"
 
   # Parse environment and component from path
   # prod/terraform.tfvars → env=prod, component=foundation

@@ -57,4 +57,3 @@ variable "allow_registration" {
   type        = bool
   default     = true
 }
-

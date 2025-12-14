@@ -286,4 +286,3 @@ resource "aws_volume_attachment" "data" {
   volume_id   = aws_ebs_volume.data.id
   instance_id = aws_instance.this.id
 }
-

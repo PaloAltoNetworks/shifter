@@ -63,8 +63,12 @@ class AgentConfig(models.Model):
     os = models.ForeignKey(
         OperatingSystem, on_delete=models.PROTECT, related_name="agents"
     )
-    name = models.CharField(max_length=100, help_text="User-friendly name for this agent")
-    s3_key = models.CharField(max_length=500, help_text="S3 object key for the installer")
+    name = models.CharField(
+        max_length=100, help_text="User-friendly name for this agent"
+    )
+    s3_key = models.CharField(
+        max_length=500, help_text="S3 object key for the installer"
+    )
     original_filename = models.CharField(max_length=255)
     file_size_bytes = models.PositiveBigIntegerField()
     sha256_hash = models.CharField(max_length=64)
@@ -125,21 +129,33 @@ class Range(models.Model):
     )
     # AWS resource IDs (populated by provisioner Lambda)
     subnet_id = models.CharField(
-        max_length=50, null=True, blank=True, help_text="AWS subnet ID (e.g., subnet-abc123)"
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="AWS subnet ID (e.g., subnet-abc123)",
     )
     subnet_cidr = models.CharField(
-        max_length=18, null=True, blank=True, help_text="Subnet CIDR (e.g., 10.1.5.0/24)"
+        max_length=18,
+        null=True,
+        blank=True,
+        help_text="Subnet CIDR (e.g., 10.1.5.0/24)",
     )
     subnet_index = models.PositiveIntegerField(
         null=True, blank=True, help_text="Unique index for CIDR allocation"
     )
     victim_ip = models.GenericIPAddressField(null=True, blank=True)
     victim_instance_id = models.CharField(
-        max_length=50, null=True, blank=True, help_text="EC2 instance ID (e.g., i-abc123)"
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="EC2 instance ID (e.g., i-abc123)",
     )
     kali_ip = models.GenericIPAddressField(null=True, blank=True)
     kali_instance_id = models.CharField(
-        max_length=50, null=True, blank=True, help_text="Kali EC2 instance ID (e.g., i-abc123)"
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Kali EC2 instance ID (e.g., i-abc123)",
     )
     chat_url = models.URLField(max_length=500, null=True, blank=True)
 

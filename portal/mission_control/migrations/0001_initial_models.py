@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
@@ -15,77 +14,179 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='OperatingSystem',
+            name="OperatingSystem",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('slug', models.SlugField(unique=True)),
-                ('name', models.CharField(max_length=100)),
-                ('extensions', models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("slug", models.SlugField(unique=True)),
+                ("name", models.CharField(max_length=100)),
+                (
+                    "extensions",
+                    models.JSONField(
+                        default=list,
+                        help_text="File extensions that map to this OS (e.g., ['.msi'])",
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Operating System',
-                'verbose_name_plural': 'Operating Systems',
-                'ordering': ['name'],
+                "verbose_name": "Operating System",
+                "verbose_name_plural": "Operating Systems",
+                "ordering": ["name"],
             },
         ),
         migrations.CreateModel(
-            name='ActivityLog',
+            name="ActivityLog",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('action', models.CharField(db_index=True, max_length=100)),
-                ('timestamp', models.DateTimeField(auto_now_add=True, db_index=True)),
-                ('metadata', models.JSONField(blank=True, default=dict)),
-                ('user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='activities', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("action", models.CharField(db_index=True, max_length=100)),
+                ("timestamp", models.DateTimeField(auto_now_add=True, db_index=True)),
+                ("metadata", models.JSONField(blank=True, default=dict)),
+                (
+                    "user",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="activities",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Activity Log',
-                'verbose_name_plural': 'Activity Logs',
-                'ordering': ['-timestamp'],
+                "verbose_name": "Activity Log",
+                "verbose_name_plural": "Activity Logs",
+                "ordering": ["-timestamp"],
             },
         ),
         migrations.CreateModel(
-            name='AgentConfig',
+            name="AgentConfig",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(help_text='User-friendly name for this agent', max_length=100)),
-                ('s3_key', models.CharField(help_text='S3 object key for the installer', max_length=500)),
-                ('original_filename', models.CharField(max_length=255)),
-                ('file_size_bytes', models.PositiveBigIntegerField()),
-                ('sha256_hash', models.CharField(max_length=64)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('deleted_at', models.DateTimeField(blank=True, null=True)),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='agents', to=settings.AUTH_USER_MODEL)),
-                ('os', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='agents', to='mission_control.operatingsystem')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "name",
+                    models.CharField(
+                        help_text="User-friendly name for this agent", max_length=100
+                    ),
+                ),
+                (
+                    "s3_key",
+                    models.CharField(
+                        help_text="S3 object key for the installer", max_length=500
+                    ),
+                ),
+                ("original_filename", models.CharField(max_length=255)),
+                ("file_size_bytes", models.PositiveBigIntegerField()),
+                ("sha256_hash", models.CharField(max_length=64)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("deleted_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="agents",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+                (
+                    "os",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="agents",
+                        to="mission_control.operatingsystem",
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Agent Config',
-                'verbose_name_plural': 'Agent Configs',
-                'ordering': ['-created_at'],
+                "verbose_name": "Agent Config",
+                "verbose_name_plural": "Agent Configs",
+                "ordering": ["-created_at"],
             },
         ),
         migrations.CreateModel(
-            name='Range',
+            name="Range",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('agent', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='ranges', to='mission_control.agentconfig')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='ranges', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "agent",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="ranges",
+                        to="mission_control.agentconfig",
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="ranges",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-created_at'],
+                "ordering": ["-created_at"],
             },
         ),
         migrations.CreateModel(
-            name='UserProfile',
+            name="UserProfile",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('deleted_at', models.DateTimeField(blank=True, null=True)),
-                ('anonymized_at', models.DateTimeField(blank=True, null=True)),
-                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='profile', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("deleted_at", models.DateTimeField(blank=True, null=True)),
+                ("anonymized_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "user",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="profile",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'User Profile',
-                'verbose_name_plural': 'User Profiles',
+                "verbose_name": "User Profile",
+                "verbose_name_plural": "User Profiles",
             },
         ),
     ]

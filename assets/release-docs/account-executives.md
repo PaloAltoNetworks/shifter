@@ -140,18 +140,18 @@ A **self-service cyber range platform** that lets technical sellers demonstrate 
 ## PANW Product Positioning
 
 ### Primary Play: XDR/XSIAM
-**When**: Any active XDR opportunity  
-**Message**: "See XDR defend against modern AI-driven attacks"  
+**When**: Any active XDR opportunity
+**Message**: "See XDR defend against modern AI-driven attacks"
 **Outcome**: Faster POC, higher confidence, better close rate
 
 ### Expansion Play: Cortex Product Family
-**When**: Existing XDR customer, looking to expand  
-**Message**: "Test additional Cortex capabilities with Shifter"  
+**When**: Existing XDR customer, looking to expand
+**Message**: "Test additional Cortex capabilities with Shifter"
 **Products**: XSOAR (automated response), XDR Pro (advanced detection)
 
 ### Strategic Play: Executive Risk Discussion
-**When**: CISO/board concerned about AI threats  
-**Message**: "See the emerging threat landscape and how PANW protects you"  
+**When**: CISO/board concerned about AI threats
+**Message**: "See the emerging threat landscape and how PANW protects you"
 **Outcome**: Executive sponsorship, larger deal size
 
 ### Future Plays
@@ -215,9 +215,9 @@ A **self-service cyber range platform** that lets technical sellers demonstrate 
 ## Success Stories (How to Use Them)
 
 ### Story 1: Fast-Track POC
-**Customer**: Mid-market financial services  
-**Situation**: Evaluating 3 XDR vendors, couldn't decide  
-**Shifter Impact**: Live demo showed PANW detection advantage  
+**Customer**: Mid-market financial services
+**Situation**: Evaluating 3 XDR vendors, couldn't decide
+**Shifter Impact**: Live demo showed PANW detection advantage
 **Outcome**: Chose PANW, closed 40% faster than typical cycle
 
 **When to Use**: Customer in evaluation mode, comparing vendors
@@ -225,9 +225,9 @@ A **self-service cyber range platform** that lets technical sellers demonstrate 
 ---
 
 ### Story 2: Competitive Win
-**Customer**: Large healthcare provider  
-**Situation**: Had competitor XDR, renewal coming up  
-**Shifter Impact**: Showed gaps in competitor detection  
+**Customer**: Large healthcare provider
+**Situation**: Had competitor XDR, renewal coming up
+**Shifter Impact**: Showed gaps in competitor detection
 **Outcome**: Displaced competitor, $XXX ARR
 
 **When to Use**: Competitive displacement opportunity
@@ -235,9 +235,9 @@ A **self-service cyber range platform** that lets technical sellers demonstrate 
 ---
 
 ### Story 3: Executive Education
-**Customer**: Tech company CISO  
-**Situation**: Board pressure about AI threats  
-**Shifter Impact**: Live AI attack demo for executive team  
+**Customer**: Tech company CISO
+**Situation**: Board pressure about AI threats
+**Shifter Impact**: Live AI attack demo for executive team
 **Outcome**: Expanded XDR deployment, added XSOAR
 
 **When to Use**: Executive-level concerns, strategic deals
@@ -324,24 +324,24 @@ A **self-service cyber range platform** that lets technical sellers demonstrate 
 
 ## FAQs
 
-**Q: Do I need to run the demo myself?**  
+**Q: Do I need to run the demo myself?**
 A: No—your SE runs the technical demo. You manage the meeting and business conversation.
 
-**Q: How long does it take to set up?**  
+**Q: How long does it take to set up?**
 A: SE needs 5 minutes to launch the range before the meeting. No prep needed from you.
 
-**Q: Can we customize the demo for specific customers?**  
+**Q: Can we customize the demo for specific customers?**
 A: Yes—work with your SE to tailor scenarios to customer's environment and concerns.
 
-**Q: What if the customer doesn't have XDR yet?**  
+**Q: What if the customer doesn't have XDR yet?**
 A: Use a demo tenant. Still shows the capability, just not in their specific environment.
 
-**Q: How do I measure ROI?**  
+**Q: How do I measure ROI?**
 A: Track time-to-close, win rate, and deal size for Shifter-supported opportunities vs. others.
 
 ---
 
-**Platform Access**: Coordinate with your SE team  
+**Platform Access**: Coordinate with your SE team
 **Launch Date**: December 18, 2025
 
 **Go close more deals. Shifter's got your back. 💼🚀**

@@ -57,25 +57,33 @@ class TestOperatingSystem:
 class TestUserProfile:
     def test_auto_created_on_user_creation(self):
         """UserProfile is automatically created when User is created."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
+        user = User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
         assert hasattr(user, "profile")
         assert isinstance(user.profile, UserProfile)
 
     def test_str_returns_user_email(self):
         """__str__ returns profile description with email."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
+        user = User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
         assert "test@example.com" in str(user.profile)
 
     def test_is_deleted_false_by_default(self):
         """is_deleted returns False when deleted_at is None."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
+        user = User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
         assert user.profile.is_deleted is False
 
     def test_is_deleted_true_when_deleted_at_set(self):
         """is_deleted returns True when deleted_at is set."""
         from django.utils import timezone
 
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
+        user = User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
         user.profile.deleted_at = timezone.now()
         assert user.profile.is_deleted is True
 
@@ -87,7 +95,9 @@ class TestUserProfile:
 class TestAgentConfig:
     @pytest.fixture
     def user(self):
-        return User.objects.create_user(username="test@example.com", email="test@example.com")
+        return User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
 
     @pytest.fixture
     def windows_os(self):
@@ -169,7 +179,9 @@ class TestAgentConfig:
 
     def test_active_for_user_only_returns_user_agents(self, user, windows_os):
         """active_for_user only returns agents for the specified user."""
-        other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
+        other_user = User.objects.create_user(
+            username="other@example.com", email="other@example.com"
+        )
 
         AgentConfig.objects.create(
             user=user,
@@ -203,7 +215,9 @@ class TestAgentConfig:
 class TestRange:
     def test_str_with_agent(self):
         """__str__ includes agent name when agent exists."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
+        user = User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
         windows_os = OperatingSystem.objects.get(slug="windows")
         agent = AgentConfig.objects.create(
             user=user,
@@ -219,7 +233,9 @@ class TestRange:
 
     def test_str_without_agent(self):
         """__str__ shows 'Unknown Agent' when agent is None."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
+        user = User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
         range_obj = Range.objects.create(user=user, agent=None)
         assert "Unknown Agent" in str(range_obj)
 
@@ -231,7 +247,9 @@ class TestRange:
 class TestActivityLog:
     def test_log_creates_entry(self):
         """ActivityLog.log() creates a new entry."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
+        user = User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
         log = ActivityLog.log("test_action", user=user)
 
         assert log.action == "test_action"
@@ -253,7 +271,9 @@ class TestActivityLog:
 
     def test_str_with_user(self):
         """__str__ includes user email when user exists."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
+        user = User.objects.create_user(
+            username="test@example.com", email="test@example.com"
+        )
         log = ActivityLog.log("test_action", user=user)
 
         assert "test@example.com" in str(log)

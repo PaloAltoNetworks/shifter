@@ -38,4 +38,3 @@ ps:
 # Health check
 health:
 	@curl -sf http://localhost:3080/api/health && echo "Healthy" || echo "Not healthy"
-

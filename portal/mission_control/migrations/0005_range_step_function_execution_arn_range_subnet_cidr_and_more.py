@@ -4,35 +4,56 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mission_control', '0004_range_status_fields'),
+        ("mission_control", "0004_range_status_fields"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='range',
-            name='step_function_execution_arn',
-            field=models.CharField(blank=True, help_text='Step Functions execution ARN', max_length=500, null=True),
+            model_name="range",
+            name="step_function_execution_arn",
+            field=models.CharField(
+                blank=True,
+                help_text="Step Functions execution ARN",
+                max_length=500,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='range',
-            name='subnet_cidr',
-            field=models.CharField(blank=True, help_text='Subnet CIDR (e.g., 10.1.5.0/24)', max_length=18, null=True),
+            model_name="range",
+            name="subnet_cidr",
+            field=models.CharField(
+                blank=True,
+                help_text="Subnet CIDR (e.g., 10.1.5.0/24)",
+                max_length=18,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='range',
-            name='subnet_id',
-            field=models.CharField(blank=True, help_text='AWS subnet ID (e.g., subnet-abc123)', max_length=50, null=True),
+            model_name="range",
+            name="subnet_id",
+            field=models.CharField(
+                blank=True,
+                help_text="AWS subnet ID (e.g., subnet-abc123)",
+                max_length=50,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='range',
-            name='subnet_index',
-            field=models.PositiveIntegerField(blank=True, help_text='Unique index for CIDR allocation', null=True),
+            model_name="range",
+            name="subnet_index",
+            field=models.PositiveIntegerField(
+                blank=True, help_text="Unique index for CIDR allocation", null=True
+            ),
         ),
         migrations.AddField(
-            model_name='range',
-            name='victim_instance_id',
-            field=models.CharField(blank=True, help_text='EC2 instance ID (e.g., i-abc123)', max_length=50, null=True),
+            model_name="range",
+            name="victim_instance_id",
+            field=models.CharField(
+                blank=True,
+                help_text="EC2 instance ID (e.g., i-abc123)",
+                max_length=50,
+                null=True,
+            ),
         ),
     ]

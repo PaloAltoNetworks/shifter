@@ -26,7 +26,9 @@ def get_authenticated_client(user):
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(username="test@example.com", email="test@example.com")
+    return User.objects.create_user(
+        username="test@example.com", email="test@example.com"
+    )
 
 
 @pytest.fixture
@@ -102,7 +104,9 @@ class TestUploadAgent:
 
     def test_requires_file(self, user):
         client = get_authenticated_client(user)
-        response = client.post(reverse("mission_control:upload_agent"), {"name": "Test"})
+        response = client.post(
+            reverse("mission_control:upload_agent"), {"name": "Test"}
+        )
         assert response.status_code == 302
         # Should redirect with error message
 

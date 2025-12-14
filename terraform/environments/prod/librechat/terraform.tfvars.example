@@ -23,4 +23,3 @@ tags = {
   Component   = "librechat"
   ManagedBy   = "terraform"
 }
-

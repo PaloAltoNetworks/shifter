@@ -25,8 +25,7 @@ def dev_login(request):
     if request.method == "POST":
         email = request.POST.get("email", "dev@example.com")
         user, created = User.objects.get_or_create(
-            username=email,
-            defaults={"email": email, "is_active": True}
+            username=email, defaults={"email": email, "is_active": True}
         )
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
         return HttpResponseRedirect(reverse("mission_control:dashboard"))
@@ -43,5 +42,6 @@ def dev_logout(request):
         return HttpResponseForbidden("Development auth disabled in production")
 
     from django.contrib.auth import logout
+
     logout(request)
     return HttpResponseRedirect("/")

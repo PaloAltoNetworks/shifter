@@ -3,7 +3,7 @@ console.error(`[MCP-TOPLEVEL] Current working directory: ${process.cwd()}`);
 
 /**
  * APTL Kali Red Team MCP Server
- * 
+ *
  * Wrapper around the generic APTL MCP server using local configuration.
  */
 

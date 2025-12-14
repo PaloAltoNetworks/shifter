@@ -38,3 +38,14 @@ variable "openwebui_db_secret_arn" {
   type        = string
   default     = ""
 }
+
+variable "db_resource_id" {
+  description = "Resource ID of the RDS instance (for IAM DB authentication)"
+  type        = string
+  default     = ""
+}
+
+variable "environment" {
+  description = "Environment name (dev, prod) - used for SSH key secret pattern"
+  type        = string
+}

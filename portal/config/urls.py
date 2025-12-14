@@ -7,6 +7,8 @@ from config.views import home
 urlpatterns = [
     path("", home, name="home"),
     path("mission-control/", include("mission_control.urls")),
+    path("risk-register/", include("risk_register.urls")),
+    path("api/v1/", include("risk_register.api.urls")),
     path("admin/", admin.site.urls),
     path("health/", include("health_check.urls")),
     path("oidc/", include("mozilla_django_oidc.urls")),

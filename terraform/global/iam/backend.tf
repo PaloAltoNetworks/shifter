@@ -10,6 +10,7 @@ terraform {
 
   # Backend configured via -backend-config during init
   # This allows separate state per environment
+  # checkov:skip=CKV_TF_3: State locking is configured via DynamoDB in external backend config files (dev.s3.tfbackend, prod.s3.tfbackend). The dynamodb_table parameter is provided via -backend-config during terraform init.
   backend "s3" {}
 }
 
@@ -24,4 +25,3 @@ provider "aws" {
     }
   }
 }
-

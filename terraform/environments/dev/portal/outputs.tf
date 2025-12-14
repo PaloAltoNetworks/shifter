@@ -143,3 +143,11 @@ output "provisioner_alerts_sns_topic_arn" {
   value       = module.provisioner.alerts_sns_topic_arn
 }
 
+# ------------------------------------------------------------------------------
+# OpenWebUI
+# ------------------------------------------------------------------------------
+
+output "openwebui_db_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing OpenWebUI DB credentials"
+  value       = aws_secretsmanager_secret.openwebui_db.arn
+}

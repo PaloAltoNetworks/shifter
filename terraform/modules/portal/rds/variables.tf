@@ -74,3 +74,9 @@ variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
 }
+
+variable "prevent_destroy" {
+  description = "Prevent accidental destruction of RDS instance (use in prod)"
+  type        = bool
+  default     = false
+}

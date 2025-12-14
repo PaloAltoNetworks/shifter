@@ -1,6 +1,6 @@
 """Tests for provisioner service (Step Functions integration)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -10,12 +10,8 @@ from botocore.exceptions import ClientError
 def mock_settings(settings):
     """Configure Step Functions ARNs for testing."""
     settings.AWS_REGION = "us-east-2"
-    settings.PROVISION_STATE_MACHINE_ARN = (
-        "arn:aws:states:us-east-2:123456789012:stateMachine:test-provision"
-    )
-    settings.TEARDOWN_STATE_MACHINE_ARN = (
-        "arn:aws:states:us-east-2:123456789012:stateMachine:test-teardown"
-    )
+    settings.PROVISION_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123456789012:stateMachine:test-provision"
+    settings.TEARDOWN_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123456789012:stateMachine:test-teardown"
     return settings
 
 

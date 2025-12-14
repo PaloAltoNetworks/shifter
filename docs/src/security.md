@@ -26,7 +26,7 @@ Separate VPC (`10.1.0.0/16`) for attack lab environments.
 
 - **Bidirectional Kali ↔ Victim traffic**: Required for reverse shells, C2 callbacks, and realistic attack scenarios
 - **Unrestricted egress**: Kali needs apt for tools; Victim needs internet for XDR agent callbacks
-- **SSH from VPC CIDR**: Allows MCP/LibreChat to manage both instances
+- **SSH from VPC CIDR**: Allows MCP/Chat UI to manage both instances
 - **Security group references**: Traffic rules use SG IDs, not CIDR blocks—prevents cross-user subnet attacks
 
 **Isolation:**

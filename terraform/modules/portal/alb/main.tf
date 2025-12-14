@@ -91,6 +91,9 @@ resource "aws_acm_certificate_validation" "this" {
 # Application Load Balancer
 # ------------------------------------------------------------------------------
 
+# checkov:skip=CKV_AWS_150:Deletion protection deferred - see #214
+# checkov:skip=CKV_AWS_91:Access logs deferred - see #57, #58
+# checkov:skip=CKV2_AWS_28:WAF deferred - see #52
 resource "aws_lb" "this" {
   name                       = "${var.name_prefix}-alb"
   internal                   = false

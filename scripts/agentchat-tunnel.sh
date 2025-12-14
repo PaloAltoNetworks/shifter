@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 #
-# Opens an SSM port forwarding tunnel to the LibreChat EC2 instance.
-# Access LibreChat at http://localhost:9090 after running.
+# Opens an SSM port forwarding tunnel to the AgentChat EC2 for testing.
+# Access OpenWebUI at http://localhost:3000 after running.
 #
 # Usage:
-#   ./scripts/librechat-tunnel.sh           # Connect to prod
-#   ./scripts/librechat-tunnel.sh -e dev    # Connect to dev
+#   ./scripts/agentchat-tunnel.sh           # Connect to dev (default)
+#   ./scripts/agentchat-tunnel.sh -e prod   # Connect to prod
 #
 set -euo pipefail
 
 # Defaults
-ENV="prod"
+ENV="dev"
 AWS_REGION="${AWS_REGION:-us-east-2}"
-AWS_PROFILE="${AWS_PROFILE:-dev-workstation-user}"
-LOCAL_PORT="${LOCAL_PORT:-9090}"
-REMOTE_PORT="${REMOTE_PORT:-3080}"
+LOCAL_PORT="${LOCAL_PORT:-3000}"
+REMOTE_PORT="${REMOTE_PORT:-3000}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -37,9 +36,16 @@ if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
     exit 1
 fi
 
-INSTANCE_TAG="${ENV}-librechat-ec2"
+# Set profile based on environment
+if [[ "$ENV" == "dev" ]]; then
+    AWS_PROFILE="$PANW_SHIFTER_DEV_PROFILE"
+else
+    AWS_PROFILE="$PANW_SHIFTER_PROD_PROFILE"
+fi
 
-# Get the LibreChat EC2 instance ID
+INSTANCE_TAG="${ENV}-agentchat-ec2"
+
+# Get the AgentChat EC2 instance ID
 INSTANCE_ID=$(aws ec2 describe-instances \
   --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
   --query 'Reservations[0].Instances[0].InstanceId' \
@@ -48,25 +54,17 @@ INSTANCE_ID=$(aws ec2 describe-instances \
   --profile "$AWS_PROFILE")
 
 if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-  echo "Error: Could not find running LibreChat EC2 instance for $ENV"
-  echo ""
-  echo "Possible causes:"
-  echo "  - Instance not yet created (run terraform apply)"
-  echo "  - Instance stopped or terminated"
-  echo ""
-  echo "To deploy LibreChat infrastructure:"
-  echo "  cd terraform/environments/$ENV/librechat"
-  echo "  terraform init && terraform apply"
+  echo "Error: Could not find running AgentChat EC2 instance for $ENV"
   exit 1
 fi
 
-echo "Starting SSM tunnel to LibreChat EC2..."
+echo "Starting SSM tunnel to AgentChat EC2..."
 echo "  Environment: $ENV"
 echo "  Instance:    $INSTANCE_ID"
 echo "  Local:       http://localhost:$LOCAL_PORT"
 echo "  Remote:      $REMOTE_PORT"
 echo ""
-echo "Access LibreChat at: http://localhost:$LOCAL_PORT"
+echo "Access OpenWebUI at: http://localhost:$LOCAL_PORT"
 echo "Press Ctrl+C to close the tunnel."
 echo ""
 

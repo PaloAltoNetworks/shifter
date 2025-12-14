@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - OpenWebUI + Bedrock Access Gateway (BAG) for AgentChat
+- Sonnet 4.5 and DeepSeek R1 models for AgentChat
 - AgentChat infrastructure
 - Checkov IaC security scanning in CI and pre-commit
 - Dockerfile HEALTHCHECK for portal container

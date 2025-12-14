@@ -15,6 +15,7 @@ import type { MCPSession, SessionStats, RangeRecord } from './types.js';
 import { getConfig } from './config.js';
 import { logger } from './logger.js';
 import { buildLabConfig } from './lab-config-builder.js';
+import { onSessionCreated, onSessionDestroyed } from './connection-cleanup.js';
 
 /**
  * Session storage - keyed by sessionId
@@ -117,6 +118,9 @@ export async function createSession(
   }
   sessionsByUser.get(userEmail)!.add(sessionId);
 
+  // Notify cleanup manager that a session was created
+  onSessionCreated();
+
   logger.info(`Session created: ${sessionId}`, {
     userEmail,
     rangeId: range.id,
@@ -175,6 +179,9 @@ export async function destroySession(sessionId: string): Promise<void> {
       sessionsByUser.delete(session.userEmail);
     }
   }
+
+  // Notify cleanup manager that a session was destroyed
+  onSessionDestroyed();
 
   logger.info(`Session destroyed: ${sessionId}`, {
     userEmail: session.userEmail,

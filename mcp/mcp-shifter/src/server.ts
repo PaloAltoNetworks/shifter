@@ -33,6 +33,11 @@ import {
   destroyAllSessions,
   getSessionCount,
 } from './session-manager.js';
+import {
+  initializeCleanupManager,
+  stopCleanupManager,
+  getIdleStatus,
+} from './connection-cleanup.js';
 import type { UserContext, NoRangeError, SessionLimitError } from './types.js';
 
 // Shared SSH connection manager - pools connections by user@host:port
@@ -97,6 +102,7 @@ export function createApp(): express.Application {
     res.json({
       status: 'healthy',
       sessions: getSessionCount(),
+      idle: getIdleStatus(),
     });
   });
 
@@ -265,12 +271,16 @@ export async function startServer(configPath: string): Promise<void> {
   initialize(configPath);
   const config = getConfig();
 
+  // Initialize connection cleanup manager
+  initializeCleanupManager(sshManager);
+
   const app = createApp();
 
   // Start listening
   const server = app.listen(config.server.port, () => {
     logger.info(`mcp-shifter server started`, {
       port: config.server.port,
+      idleTimeoutMs: config.connections.idleTimeoutMs,
     });
   });
 
@@ -280,6 +290,9 @@ export async function startServer(configPath: string): Promise<void> {
 
     // Stop accepting new connections
     server.close();
+
+    // Stop cleanup manager timers
+    stopCleanupManager();
 
     // Destroy all MCP sessions
     await destroyAllSessions();

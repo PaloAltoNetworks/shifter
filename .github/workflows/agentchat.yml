@@ -13,6 +13,7 @@ on:
       - 'terraform/modules/agentchat/**'
       - 'terraform/environments/*/agentchat/**'
       - 'agentchat/**'
+      - 'mcp/mcp-shifter/**'
       - '.github/workflows/agentchat.yml'
   push:
     branches: [main, dev]
@@ -20,6 +21,7 @@ on:
       - 'terraform/modules/agentchat/**'
       - 'terraform/environments/*/agentchat/**'
       - 'agentchat/**'
+      - 'mcp/mcp-shifter/**'
       - '.github/workflows/agentchat.yml'
   workflow_run:
     workflows: ["Portal"]
@@ -253,6 +255,46 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           echo "database_url=$DATABASE_URL" >> $GITHUB_OUTPUT
 
+      - name: Get MCP server config from Secrets Manager
+        id: mcp_secrets
+        run: |
+          # Get Cognito credentials for MCP server
+          COGNITO_SECRET_NAME="shifter-${ENV}-portal-cognito-agentchat"
+          COGNITO_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id "$COGNITO_SECRET_NAME" \
+            --query 'SecretString' \
+            --output text)
+
+          COGNITO_USER_POOL_ID=$(echo "$COGNITO_JSON" | jq -r '.user_pool_id')
+          COGNITO_CLIENT_ID=$(echo "$COGNITO_JSON" | jq -r '.client_id')
+          COGNITO_ISSUER=$(echo "$COGNITO_JSON" | jq -r '.issuer_url')
+
+          # Get RDS credentials for MCP server
+          RDS_SECRET_NAME="shifter-${ENV}-portal-db-credentials"
+          RDS_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id "$RDS_SECRET_NAME" \
+            --query 'SecretString' \
+            --output text)
+
+          RDS_HOSTNAME=$(echo "$RDS_JSON" | jq -r '.host')
+          RDS_PORT=$(echo "$RDS_JSON" | jq -r '.port')
+          RDS_DATABASE=$(echo "$RDS_JSON" | jq -r '.dbname')
+          RDS_USERNAME="mcp_user"
+
+          # Mask secrets in logs
+          echo "::add-mask::$COGNITO_USER_POOL_ID"
+          echo "::add-mask::$COGNITO_CLIENT_ID"
+          echo "::add-mask::$COGNITO_ISSUER"
+          echo "::add-mask::$RDS_HOSTNAME"
+
+          echo "cognito_user_pool_id=$COGNITO_USER_POOL_ID" >> $GITHUB_OUTPUT
+          echo "cognito_client_id=$COGNITO_CLIENT_ID" >> $GITHUB_OUTPUT
+          echo "cognito_issuer=$COGNITO_ISSUER" >> $GITHUB_OUTPUT
+          echo "rds_hostname=$RDS_HOSTNAME" >> $GITHUB_OUTPUT
+          echo "rds_port=$RDS_PORT" >> $GITHUB_OUTPUT
+          echo "rds_database=$RDS_DATABASE" >> $GITHUB_OUTPUT
+          echo "rds_username=$RDS_USERNAME" >> $GITHUB_OUTPUT
+
       - name: Get Instance ID
         id: instance
         run: |
@@ -306,6 +348,13 @@ jobs:
           BEDROCK_REGION: ${{ steps.config.outputs.bedrock_region }}
           BAG_API_KEY: ${{ steps.secrets.outputs.bag_api_key }}
           DATABASE_URL: ${{ steps.db_secrets.outputs.database_url }}
+          COGNITO_USER_POOL_ID: ${{ steps.mcp_secrets.outputs.cognito_user_pool_id }}
+          COGNITO_CLIENT_ID: ${{ steps.mcp_secrets.outputs.cognito_client_id }}
+          COGNITO_ISSUER: ${{ steps.mcp_secrets.outputs.cognito_issuer }}
+          RDS_HOSTNAME: ${{ steps.mcp_secrets.outputs.rds_hostname }}
+          RDS_PORT: ${{ steps.mcp_secrets.outputs.rds_port }}
+          RDS_DATABASE: ${{ steps.mcp_secrets.outputs.rds_database }}
+          RDS_USERNAME: ${{ steps.mcp_secrets.outputs.rds_username }}
         run: |
           # Build SSM parameters JSON with env vars expanded
           SSM_PARAMS=$(cat <<EOF
@@ -318,19 +367,45 @@ jobs:
               "# Build BAG image from src directory",
               "cd src",
               "docker build -f Dockerfile_ecs -t bedrock-gateway .",
+              "cd /opt",
+              "# Clone or update shifter repo for mcp-shifter",
+              "if [ -d shifter ]; then cd shifter && git pull; else git clone https://github.com/Brad-Edwards/shifter.git && cd shifter; fi",
+              "# Build mcp-shifter image",
+              "cd mcp/mcp-shifter",
+              "docker build -t mcp-shifter .",
               "# Stop existing containers",
-              "docker stop open-webui bedrock-gateway 2>/dev/null || true",
-              "docker rm open-webui bedrock-gateway 2>/dev/null || true",
+              "docker stop open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
+              "docker rm open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
               "# Create network if not exists",
               "docker network create agentchat 2>/dev/null || true",
+              "# Create mcp-shifter config file",
+              "mkdir -p /opt/mcp-shifter-config",
+              "cat > /opt/mcp-shifter-config/config.json << 'MCPEOF'",
+              "{",
+              "  \"sessions\": {",
+              "    \"maxPerUser\": 10,",
+              "    \"maxGlobal\": 100,",
+              "    \"logInfoThreshold\": 50,",
+              "    \"logWarnThreshold\": 80",
+              "  },",
+              "  \"connections\": {",
+              "    \"idleTimeoutMs\": 300000",
+              "  }",
+              "}",
+              "MCPEOF",
               "# Start BAG with secret API key",
               "docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=${BEDROCK_REGION} -e API_KEY=${BAG_API_KEY} bedrock-gateway",
+              "# Start mcp-shifter",
+              "docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=${BEDROCK_REGION} -e COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID} -e COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID} -e COGNITO_ISSUER=${COGNITO_ISSUER} -e RDS_HOSTNAME=${RDS_HOSTNAME} -e RDS_PORT=${RDS_PORT} -e RDS_DATABASE=${RDS_DATABASE} -e RDS_USERNAME=${RDS_USERNAME} mcp-shifter",
               "# Pull and start OpenWebUI (pinned version) with PostgreSQL",
               "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
-              "docker run -d --name open-webui --restart unless-stopped --network agentchat -p 3000:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=${BAG_API_KEY} -e BYPASS_ADMIN_ACCESS_CONTROL=false -e DATABASE_URL=${DATABASE_URL} ghcr.io/open-webui/open-webui:v0.6.41",
+              "docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=${BAG_API_KEY} -e BYPASS_ADMIN_ACCESS_CONTROL=false -e DATABASE_URL=${DATABASE_URL} ghcr.io/open-webui/open-webui:v0.6.41",
               "# Wait for OpenWebUI to be healthy",
               "echo 'Waiting for OpenWebUI health check...'",
-              "for i in \$(seq 1 30); do if curl -sf http://localhost:3000/health > /dev/null 2>&1; then echo \"OpenWebUI healthy after \${i}0 seconds\"; break; fi; if [ \$i -eq 30 ]; then echo 'Health check failed after 300 seconds'; docker logs open-webui; exit 1; fi; sleep 10; done",
+              "for i in \$(seq 1 30); do if curl -sf http://localhost:8080/health > /dev/null 2>&1; then echo \"OpenWebUI healthy after \${i}0 seconds\"; break; fi; if [ \$i -eq 30 ]; then echo 'Health check failed after 300 seconds'; docker logs open-webui; exit 1; fi; sleep 10; done",
+              "# Wait for mcp-shifter to be healthy",
+              "echo 'Waiting for mcp-shifter health check...'",
+              "for i in \$(seq 1 30); do if curl -sf http://localhost:3001/health > /dev/null 2>&1; then echo \"mcp-shifter healthy after \${i}0 seconds\"; break; fi; if [ \$i -eq 30 ]; then echo 'Health check failed after 300 seconds'; docker logs mcp-shifter; exit 1; fi; sleep 10; done",
               "echo 'Deployment complete'"
             ]
           }

@@ -64,9 +64,7 @@ class RiskViewSet(viewsets.ModelViewSet):
         queryset = Risk.objects.all()
 
         # Filter by deleted status
-        include_deleted = (
-            self.request.query_params.get("include_deleted", "").lower() == "true"
-        )
+        include_deleted = self.request.query_params.get("include_deleted", "").lower() == "true"
         if not include_deleted:
             queryset = queryset.filter(deleted_at__isnull=True)
 
@@ -205,9 +203,7 @@ class CommentViewSet(viewsets.ViewSet):
         """List comments for a risk."""
         risk = get_object_or_404(Risk, pk=risk_pk)
 
-        include_deleted = (
-            request.query_params.get("include_deleted", "").lower() == "true"
-        )
+        include_deleted = request.query_params.get("include_deleted", "").lower() == "true"
         comments = risk.comments.all().order_by("created_at")
 
         if not include_deleted:

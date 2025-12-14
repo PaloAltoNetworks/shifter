@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mission_control', '0006_create_provisioner_lambda_user'),
+        ("mission_control", "0006_create_provisioner_lambda_user"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='range',
-            name='updated_at',
+            model_name="range",
+            name="updated_at",
             field=models.DateTimeField(auto_now=True),
         ),
     ]

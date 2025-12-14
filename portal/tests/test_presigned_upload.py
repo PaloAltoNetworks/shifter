@@ -10,7 +10,10 @@ from django.test import Client
 from django.urls import reverse
 
 from mission_control.models import ActivityLog, AgentConfig, OperatingSystem
-from mission_control.services.upload_token import generate_upload_token, verify_upload_token
+from mission_control.services.upload_token import (
+    generate_upload_token,
+    verify_upload_token,
+)
 
 User = get_user_model()
 
@@ -155,7 +158,10 @@ class TestInitiateUpload:
     def test_successful_initiate(self, mock_presign, user, settings):
         settings.AGENT_MAX_FILE_SIZE_MB = 2048
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120
-        mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/abc_test.msi")
+        mock_presign.return_value = (
+            "https://s3.example.com/presigned",
+            "agents/1/abc_test.msi",
+        )
 
         client = get_authenticated_client(user)
         response = client.post(
@@ -267,7 +273,10 @@ class TestInitiateUpload:
         """Only one upload at a time per user."""
         settings.AGENT_MAX_FILE_SIZE_MB = 2048
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120
-        mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/abc_test.msi")
+        mock_presign.return_value = (
+            "https://s3.example.com/presigned",
+            "agents/1/abc_test.msi",
+        )
 
         client = get_authenticated_client(user)
 
@@ -296,7 +305,10 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
 
         with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
-            mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/test.msi")
+            mock_presign.return_value = (
+                "https://s3.example.com/presigned",
+                "agents/1/test.msi",
+            )
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
@@ -517,7 +529,10 @@ class TestCancelUpload:
 
         # First set up an upload in progress
         with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
-            mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/test.msi")
+            mock_presign.return_value = (
+                "https://s3.example.com/presigned",
+                "agents/1/test.msi",
+            )
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
@@ -546,7 +561,10 @@ class TestCancelUpload:
 
         # Now another upload should work
         with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
-            mock_presign.return_value = ("https://s3.example.com/presigned2", "agents/1/new.msi")
+            mock_presign.return_value = (
+                "https://s3.example.com/presigned2",
+                "agents/1/new.msi",
+            )
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
@@ -622,7 +640,10 @@ class TestUploadIntegration:
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120
         settings.AGENT_UPLOAD_URL_EXPIRES = 3600
 
-        mock_presign.return_value = ("https://s3.example.com/presigned", f"agents/{user.id}/flow_test.msi")
+        mock_presign.return_value = (
+            "https://s3.example.com/presigned",
+            f"agents/{user.id}/flow_test.msi",
+        )
         mock_verify.return_value = (1024 * 1024, "etag_flow")
 
         client = get_authenticated_client(user)
@@ -669,7 +690,10 @@ class TestUploadIntegration:
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120
         settings.AGENT_UPLOAD_URL_EXPIRES = 3600
 
-        mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/cancel_test.msi")
+        mock_presign.return_value = (
+            "https://s3.example.com/presigned",
+            "agents/1/cancel_test.msi",
+        )
 
         client = get_authenticated_client(user)
 

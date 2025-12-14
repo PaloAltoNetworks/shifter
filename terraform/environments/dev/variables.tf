@@ -9,4 +9,3 @@ variable "portal_repository_name" {
   type        = string
   default     = "shifter-dev-portal"
 }
-

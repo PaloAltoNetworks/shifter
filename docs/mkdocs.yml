@@ -44,7 +44,6 @@ nav:
     - Portal: qa/portal-smoke.md
     - Range: qa/range-smoke.md
     - Provisioner: qa/provisioner-smoke.md
-    - LibreChat: qa/librechat-smoke.md
     - Dev Deploy: qa/dev-deploy-smoke.md
   - API Reference: api.md
 

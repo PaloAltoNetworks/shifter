@@ -29,7 +29,7 @@ Range VPC (10.1.0.0/16)
 ├── Kali EC2 instances (pre-baked AMI)
 └── Victim EC2 instances (XDR agent installed)
 
-LibreChat runs in Portal VPC (shared, multi-tenant)
+Chat UI runs in Portal VPC (shared, multi-tenant)
 ```
 
 ## Key Principles

@@ -125,6 +125,9 @@ class Range(models.Model):
     kali_instance_id = models.CharField(
         max_length=50, blank=True, default="", help_text="Kali EC2 instance ID (e.g., i-abc123)"
     )
+    kali_ssh_key_secret_arn = models.CharField(
+        max_length=500, blank=True, default="", help_text="Secrets Manager ARN for Kali SSH private key"
+    )
     chat_url = models.URLField(max_length=500, blank=True, default="")
 
     # Step Functions tracking

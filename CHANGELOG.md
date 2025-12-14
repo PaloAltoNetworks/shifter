@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - SonarCloud coverage extended to all modules
 - GitHub Actions workflows: explicit permissions, removed workflow_dispatch inputs where not needed
+- Use SonarQube Cloud automatic analysis instead of CI/CD workflows
 
 ### Security
 - Full review of lint (ruff, bandit, eslint) and IaC (checkov) findings

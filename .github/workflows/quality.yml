@@ -10,7 +10,6 @@ on:
       - 'portal/**'
       - 'terraform/**'
       - '.github/workflows/quality.yml'
-      - 'sonar-project.properties'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -18,7 +17,6 @@ on:
       - 'portal/**'
       - 'terraform/**'
       - '.github/workflows/quality.yml'
-      - 'sonar-project.properties'
 
 permissions:
   contents: read
@@ -106,9 +104,4 @@ jobs:
           quiet: true
           compact: true
           soft_fail: true
-
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      # SonarCloud uses automatic analysis (configured in SonarCloud settings)

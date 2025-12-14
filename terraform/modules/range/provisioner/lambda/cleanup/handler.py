@@ -5,15 +5,17 @@ Input: { "range_id": "uuid", "mark_failed": true/false }
 Output: { "range_id": "uuid", "cleaned_up": [...] }
 
 Called on:
-- Provisioning failure (mark_failed=true)
-- User-initiated destroy (mark_failed=false, status set to 'destroyed')
-- Stale range cleanup (mark_failed=true)
+- Provisioning failure (mark_failed=true) - sets status to 'failed'
+- User-initiated destroy (mark_failed=false) - status already 'destroyed' by Portal
+- Stale range cleanup (mark_failed=true) - sets status to 'failed'
+
+User-initiated destroy is async: Portal sets status to 'destroyed' immediately,
+then triggers this Lambda to clean up resources in the background.
 """
 
 import logging
 import os
 import sys
-from datetime import datetime, timezone
 
 import boto3
 from botocore.exceptions import ClientError
@@ -64,35 +66,72 @@ def handler(event: dict, context) -> dict:
             return {"range_id": range_id, "cleaned_up": []}
 
         # Validate range is in a state that allows cleanup
-        # Valid states: destroying (user-initiated), provisioning (failure), failed (stale cleanup)
-        valid_cleanup_states = {"destroying", "provisioning", "failed"}
+        # Valid states for mark_failed=true: provisioning, failed (error cleanup)
+        # Valid states for mark_failed=false: destroyed (Portal already set status)
+        if mark_failed:
+            valid_cleanup_states = {"provisioning", "failed"}
+        else:
+            valid_cleanup_states = {"destroyed"}
+
         if range_data["status"] not in valid_cleanup_states:
             raise ValueError(
                 f"Range {range_id} cannot be cleaned up in state: {range_data['status']}. "
-                f"Valid states: {valid_cleanup_states}"
+                f"Valid states for mark_failed={mark_failed}: {valid_cleanup_states}"
             )
+
+        # Update DB status FIRST so user sees failure immediately
+        # Resource cleanup continues in background
+        if mark_failed:
+            update_range(
+                conn,
+                range_id,
+                status="failed",
+                error_message=error_message,
+            )
+            logger.info(f"Marked range {range_id} as failed - starting resource cleanup")
 
         # 1. Terminate victim EC2 instance
         victim_instance_id = range_data.get("victim_instance_id")
         if victim_instance_id:
             try:
                 ec2.terminate_instances(InstanceIds=[victim_instance_id])
-                logger.info(f"Terminated instance {victim_instance_id}")
-                cleaned_up.append(f"instance:{victim_instance_id}")
-
-                # Wait for termination to complete before deleting subnet
-                waiter = ec2.get_waiter("instance_terminated")
-                waiter.wait(
-                    InstanceIds=[victim_instance_id],
-                    WaiterConfig={"Delay": 5, "MaxAttempts": 60},
-                )
+                logger.info(f"Terminated victim instance {victim_instance_id}")
+                cleaned_up.append(f"victim:{victim_instance_id}")
             except ClientError as e:
                 if e.response["Error"]["Code"] == "InvalidInstanceID.NotFound":
-                    logger.info(f"Instance {victim_instance_id} already terminated")
+                    logger.info(f"Victim instance {victim_instance_id} already terminated")
                 else:
                     raise
 
-        # 2. Delete subnet
+        # 2. Terminate Kali EC2 instance
+        kali_instance_id = range_data.get("kali_instance_id")
+        if kali_instance_id:
+            try:
+                ec2.terminate_instances(InstanceIds=[kali_instance_id])
+                logger.info(f"Terminated Kali instance {kali_instance_id}")
+                cleaned_up.append(f"kali:{kali_instance_id}")
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "InvalidInstanceID.NotFound":
+                    logger.info(f"Kali instance {kali_instance_id} already terminated")
+                else:
+                    raise
+
+        # 3. Wait for all instances to terminate before deleting subnet
+        instances_to_wait = []
+        if victim_instance_id:
+            instances_to_wait.append(victim_instance_id)
+        if kali_instance_id:
+            instances_to_wait.append(kali_instance_id)
+
+        if instances_to_wait:
+            waiter = ec2.get_waiter("instance_terminated")
+            waiter.wait(
+                InstanceIds=instances_to_wait,
+                WaiterConfig={"Delay": 5, "MaxAttempts": 60},
+            )
+            logger.info(f"All instances terminated: {instances_to_wait}")
+
+        # 4. Delete subnet
         subnet_id = range_data.get("subnet_id")
         if subnet_id:
             try:
@@ -121,24 +160,22 @@ def handler(event: dict, context) -> dict:
                 else:
                     raise
 
-        # 3. Update database
-        update_fields = {
-            "victim_instance_id": None,
-            "victim_ip": None,
-            "subnet_id": None,
-            "subnet_cidr": None,
-            "chat_url": None,
-        }
-
-        if mark_failed:
-            update_fields["status"] = "failed"
-            update_fields["error_message"] = error_message
-        else:
-            update_fields["status"] = "destroyed"
-            update_fields["destroyed_at"] = datetime.now(timezone.utc)
-
-        update_range(conn, range_id, **update_fields)
-        logger.info(f"Updated range {range_id} status")
+        # 5. Update database - clear resource fields
+        # Status was already set:
+        # - mark_failed=true: set to 'failed' at start of this function
+        # - mark_failed=false: set to 'destroyed' by Portal before calling us
+        update_range(
+            conn,
+            range_id,
+            victim_instance_id=None,
+            victim_ip=None,
+            kali_instance_id=None,
+            kali_ip=None,
+            subnet_id=None,
+            subnet_cidr=None,
+            chat_url=None,
+        )
+        logger.info(f"Cleared resource fields for range {range_id}")
 
         return {
             "range_id": range_id,

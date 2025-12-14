@@ -5,9 +5,53 @@
 # - EC2 permissions scoped to Range VPC only
 # - CloudWatch Logs permissions
 # - S3 read access for agent installers
+#
+# Also creates an instance profile for range EC2s (victim/kali) with:
+# - SSM managed instance core policy for Systems Manager access
 
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM Role (for Victim and Kali EC2s)
+# ------------------------------------------------------------------------------
+
+resource "aws_iam_role" "range_instance" {
+  name = "${var.name_prefix}-range-instance"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-range-instance"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "range_instance_ssm" {
+  role       = aws_iam_role.range_instance.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "range_instance" {
+  name = "${var.name_prefix}-range-instance"
+  role = aws_iam_role.range_instance.name
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-range-instance"
+    Module = "provisioner"
+  })
+}
 
 # ------------------------------------------------------------------------------
 # Lambda Execution Role
@@ -136,12 +180,10 @@ resource "aws_iam_role_policy" "lambda_ec2" {
           "ec2:DeleteSubnet",
           "ec2:ModifySubnetAttribute"
         ]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "ec2:Vpc" = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:vpc/${var.range_vpc_id}"
-          }
-        }
+        Resource = [
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:subnet/*",
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:vpc/${var.range_vpc_id}"
+        ]
       },
       # Route table association
       {
@@ -195,6 +237,26 @@ resource "aws_iam_role_policy" "lambda_ec2" {
             "ec2:CreateAction" = ["CreateSubnet", "RunInstances"]
           }
         }
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# IAM PassRole - Allow Lambda to attach instance profile to EC2s
+# ------------------------------------------------------------------------------
+
+resource "aws_iam_role_policy" "lambda_iam" {
+  name = "iam-passrole"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
+        Resource = aws_iam_role.range_instance.arn
       }
     ]
   })

@@ -115,6 +115,7 @@ def handler(event: dict, context) -> dict:
     victim_security_group_id = get_env("VICTIM_SECURITY_GROUP_ID")
     s3_bucket = get_env("AGENT_S3_BUCKET")
     environment = get_env("ENVIRONMENT", "prod")
+    instance_profile_name = get_env("RANGE_INSTANCE_PROFILE_NAME", "")
 
     # Connect to database
     conn = get_db_connection()
@@ -135,7 +136,7 @@ def handler(event: dict, context) -> dict:
             raise ValueError(f"Range {range_id} has no subnet_id - run create_subnet first")
 
         user_id = range_data["user_id"]
-        agent_config_id = range_data["agent_config_id"]
+        agent_id = range_data["agent_id"]
 
         # Check if victim already exists (idempotent)
         if range_data["victim_instance_id"]:
@@ -147,9 +148,9 @@ def handler(event: dict, context) -> dict:
             }
 
         # Get agent config for S3 key
-        agent_config = get_agent_config(conn, agent_config_id)
+        agent_config = get_agent_config(conn, agent_id)
         if not agent_config:
-            raise ValueError(f"AgentConfig {agent_config_id} not found")
+            raise ValueError(f"AgentConfig {agent_id} not found")
 
         agent_s3_key = agent_config["s3_key"]
         logger.info(f"Using agent installer: s3://{s3_bucket}/{agent_s3_key}")
@@ -160,28 +161,34 @@ def handler(event: dict, context) -> dict:
         # Create instance
         ec2 = boto3.client("ec2")
         tags = get_resource_tags(range_id, user_id, environment)
-        tags.append({"Key": "Name", "Value": f"shifter-victim-{range_id[:8]}"})
+        tags.append({"Key": "Name", "Value": f"shifter-victim-{range_id}"})
 
-        response = ec2.run_instances(
-            ImageId=victim_ami_id,
-            InstanceType=victim_instance_type,
-            MinCount=1,
-            MaxCount=1,
-            SubnetId=subnet_id,
-            SecurityGroupIds=[victim_security_group_id],
-            UserData=user_data,
-            TagSpecifications=[
+        # Build run_instances parameters
+        run_params = {
+            "ImageId": victim_ami_id,
+            "InstanceType": victim_instance_type,
+            "MinCount": 1,
+            "MaxCount": 1,
+            "SubnetId": subnet_id,
+            "SecurityGroupIds": [victim_security_group_id],
+            "UserData": user_data,
+            "TagSpecifications": [
                 {
                     "ResourceType": "instance",
                     "Tags": tags,
                 }
             ],
-            # No IAM role - victim should not have AWS API access
-            MetadataOptions={
+            "MetadataOptions": {
                 "HttpTokens": "required",  # IMDSv2 only
                 "HttpPutResponseHopLimit": 1,
             },
-        )
+        }
+
+        # Add IAM instance profile if configured (enables SSM access)
+        if instance_profile_name:
+            run_params["IamInstanceProfile"] = {"Name": instance_profile_name}
+
+        response = ec2.run_instances(**run_params)
 
         instance = response["Instances"][0]
         instance_id = instance["InstanceId"]

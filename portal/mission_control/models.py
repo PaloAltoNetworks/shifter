@@ -9,9 +9,7 @@ class OperatingSystem(models.Model):
 
     slug = models.SlugField(max_length=50, unique=True)
     name = models.CharField(max_length=100)
-    extensions = models.JSONField(
-        default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])"
-    )
+    extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
 
     class Meta:
         ordering = ["name"]
@@ -24,7 +22,7 @@ class OperatingSystem(models.Model):
     @classmethod
     def get_for_extension(cls, extension: str):
         """Find the OS that matches a given file extension."""
-        ext = extension.lower() if not extension.startswith(".") else extension.lower()
+        ext = extension.lower()
         if not ext.startswith("."):
             ext = f".{ext}"
         for os in cls.objects.all():
@@ -36,9 +34,7 @@ class OperatingSystem(models.Model):
 class UserProfile(models.Model):
     """Extended user data for soft delete and anonymization."""
 
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile"
-    )
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
     deleted_at = models.DateTimeField(null=True, blank=True)
     anonymized_at = models.DateTimeField(null=True, blank=True)
 
@@ -57,12 +53,8 @@ class UserProfile(models.Model):
 class AgentConfig(models.Model):
     """XDR/XSIAM agent installer uploaded by a user."""
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agents"
-    )
-    os = models.ForeignKey(
-        OperatingSystem, on_delete=models.PROTECT, related_name="agents"
-    )
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agents")
+    os = models.ForeignKey(OperatingSystem, on_delete=models.PROTECT, related_name="agents")
     name = models.CharField(max_length=100, help_text="User-friendly name for this agent")
     s3_key = models.CharField(max_length=500, help_text="S3 object key for the installer")
     original_filename = models.CharField(max_length=255)
@@ -107,9 +99,7 @@ class Range(models.Model):
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges"
-    )
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
     agent = models.ForeignKey(
         AgentConfig,
         on_delete=models.SET_NULL,
@@ -124,28 +114,26 @@ class Range(models.Model):
         db_index=True,
     )
     # AWS resource IDs (populated by provisioner Lambda)
-    subnet_id = models.CharField(
-        max_length=50, null=True, blank=True, help_text="AWS subnet ID (e.g., subnet-abc123)"
-    )
-    subnet_cidr = models.CharField(
-        max_length=18, null=True, blank=True, help_text="Subnet CIDR (e.g., 10.1.5.0/24)"
-    )
-    subnet_index = models.PositiveIntegerField(
-        null=True, blank=True, help_text="Unique index for CIDR allocation"
-    )
+    subnet_id = models.CharField(max_length=50, blank=True, default="", help_text="AWS subnet ID (e.g., subnet-abc123)")
+    subnet_cidr = models.CharField(max_length=18, blank=True, default="", help_text="Subnet CIDR (e.g., 10.1.5.0/24)")
+    subnet_index = models.PositiveIntegerField(null=True, blank=True, help_text="Unique index for CIDR allocation")
     victim_ip = models.GenericIPAddressField(null=True, blank=True)
     victim_instance_id = models.CharField(
-        max_length=50, null=True, blank=True, help_text="EC2 instance ID (e.g., i-abc123)"
+        max_length=50, blank=True, default="", help_text="EC2 instance ID (e.g., i-abc123)"
     )
-    chat_url = models.URLField(max_length=500, null=True, blank=True)
+    kali_ip = models.GenericIPAddressField(null=True, blank=True)
+    kali_instance_id = models.CharField(
+        max_length=50, blank=True, default="", help_text="Kali EC2 instance ID (e.g., i-abc123)"
+    )
+    chat_url = models.URLField(max_length=500, blank=True, default="")
 
     # Step Functions tracking
     step_function_execution_arn = models.CharField(
-        max_length=500, null=True, blank=True, help_text="Step Functions execution ARN"
+        max_length=500, blank=True, default="", help_text="Step Functions execution ARN"
     )
 
     # Status and timestamps
-    error_message = models.TextField(null=True, blank=True)
+    error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     ready_at = models.DateTimeField(null=True, blank=True)

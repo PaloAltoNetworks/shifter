@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+AWS access:
+DEV profile env var: PANW_SHIFTER_DEV_PROFILE
+PROD profile env var: PANW_SHIFTER_PROD_PROFILE
+
 ## Project Overview
 
-**Shifter** is a self-service cyber range platform. Users access a browser-based chat interface (LibreChat + MCPs) to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.
+**Shifter** is a self-service cyber range platform. Users access a browser-based chat interface with MCPs to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.
 
 ### Target Users
 
@@ -23,62 +27,61 @@ PANW SecOps Domain Consultants who need to:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         RDS (PostgreSQL)                                │
-│            Range table: user_id, status, victim_ip, chat_url            │
+│            Range table: user_id, status, kali_ip, victim_ip             │
 └─────────────────────────────────────────────────────────────────────────┘
          │                                    │
          │ writes                             │ reads/writes
          ▼                                    ▼
 ┌─────────────────────┐            ┌─────────────────────────────┐
 │       Portal        │            │    Provisioning Service     │
-│     (Django)        │            │   (Step Functions / ECS)    │
+│     (Django)        │            │   (Step Functions + Lambda) │
 │                     │            │                             │
-│ • Auth (Cognito)    │───SQS────▶│ • Consumes from queue       │
-│ • Agent upload      │            │ • Terraform apply (VPC/EC2) │
-│ • Launch range UI   │            │ • Deploy LibreChat instance │
-│ • Show range status │            │ • Generate MCP config       │
+│ • Auth (Cognito)    │──start───▶│ • create_subnet Lambda      │
+│ • Agent upload      │ execution  │ • create_kali Lambda        │
+│ • Launch range UI   │            │ • create_victim Lambda      │
+│ • Show range status │            │ • Updates RDS directly      │
+└─────────────────────┘            └─────────────────────────────┘
+         │                                    │
+         │                                    │ AWS APIs
+         ▼                                    ▼
+┌─────────────────────┐            ┌─────────────────────────────┐
+│  Chat UI            │            │  Range VPC (10.1.0.0/16)    │
+│  (shared instance)  │            │                             │
+│                     │            │  Per-user subnet:           │
+│ • Browser-based     │───SSH────▶│  • Kali EC2 (attack tools)  │
+│ • MCP (hexstrike)   │   /MCP     │  • Victim EC2 (XDR agent)   │
+│ • Agent loops       │            │                             │
 └─────────────────────┘            └─────────────────────────────┘
                                               │
                                               ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Per-User Range                                                         │
-│                                                                          │
-│  ┌─────────────────┐     ┌─────────────────┐                           │
-│  │   LibreChat     │────▶│   Victim VM     │                           │
-│  │   + MCPs        │     │   (EC2)         │                           │
-│  │                 │     │                 │                           │
-│  │ • Agent loop    │     │ • XDR agent     │──▶ User's XSIAM Tenant   │
-│  │ • Chat history  │     │ • AI-configured │                           │
-│  │ • Tool use      │     │   vulns         │                           │
-│  └─────────────────┘     └─────────────────┘                           │
-└─────────────────────────────────────────────────────────────────────────┘
+                                   User's XSIAM Tenant (telemetry)
 ```
 
 ### How It Works
 
 1. **User logs into Portal** (Cognito, paloaltonetworks.com email)
 2. **Uploads XDR/XSIAM agent installer** (stored in S3)
-3. **Clicks "Launch Range"** → Portal writes `Range(status='pending')` to DB, pushes to SQS
-4. **Provisioning service consumes from SQS:**
-   - Terraform: VPC + victim EC2 + agent install
-   - Generates MCP config JSON with victim IP
-   - Deploys LibreChat with MCP servers
-   - Writes `status='ready'` + `chat_url` back to DB
-5. **Portal shows "Open Range"** → user clicks, lands in LibreChat
-6. **Two-context workflow:**
-   - Chat 1: "Set up a command injection vuln" → MCP configures victim
-   - Chat 2: "Hack the target" → MCP runs attack autonomously
-   - XDR/XSIAM detects, user demos to customer
+3. **Clicks "Launch Range"** → Portal writes `Range(status='provisioning')` to DB, starts Step Functions
+4. **Step Functions orchestrates Lambda functions:**
+   - `create_subnet`: Creates /24 subnet in Range VPC
+   - `create_kali`: Launches Kali EC2 from pre-baked AMI
+   - `create_victim`: Launches Victim EC2, installs XDR agent from S3
+   - Each Lambda updates RDS directly with resource IDs
+5. **Portal shows "Ready"** → user clicks "Open Range", goes to Chat UI
+6. **User interacts with AI in Chat:**
+   - Uses hexstrike-ai MCP to control Kali instance
+   - Runs attacks against Victim, XDR/XSIAM detects
 
 ### Why This Architecture
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Chat UI | LibreChat | MCP support, agent loops, Cognito OIDC, open source |
-| Decoupling | SQS + RDS | SQS triggers provisioning, RDS stores state |
-| Infra Provisioning | Terraform via service | Users don't touch IaC |
-| Auth | Cognito SSO | Same identity across Portal and LibreChat |
+| Chat UI | TBD | MCP support, agent loops, open source |
+| Orchestration | Step Functions + Lambda | Reliable, retry logic, error handling |
+| State | RDS only | Single source of truth, no message queues |
+| Auth | Cognito | Same identity across Portal and Chat |
+| Attack Tools | Kali EC2 | Full Linux with hexstrike-ai pre-installed |
 | Victim VMs | Real EC2 | XDR agent requires real OS |
-| Tool Execution | MCP (stdio) | Config-driven, no Lambda wrapper needed |
 
 ---
 
@@ -92,60 +95,46 @@ PANW SecOps Domain Consultants who need to:
 - Cognito OIDC authentication
 - Agent config CRUD (upload installer to S3)
 - Write `Range(status='pending')` to DB on launch
-- Display range status, link to LibreChat when ready
+- Display range status, link to agentic chat
 
 Portal does NOT provision infrastructure. It writes requests to DB.
 
 ### 2. Provisioning Service
 
-**Purpose**: Provision range infra, deploy LibreChat
+**Purpose**: Provision range infra (subnet, Kali, Victim EC2)
 
-**Trigger**: SQS FIFO queue (Portal pushes `{ range_id }` after DB write)
+**Trigger**: Portal starts Step Functions execution with `{ range_id }`
 
-**Actions**:
-1. Terraform apply: VPC, EC2 victim, security groups
-2. Install user's XDR agent on victim (from S3)
-3. Generate MCP config JSON with victim IP
-4. Deploy LibreChat instance with MCP servers
-5. Update Range row: `status='ready'`, `chat_url`, `victim_ip`
+**Lambda Functions**:
+- `create_subnet`: Creates /24 subnet in Range VPC
+- `create_kali`: Launches Kali EC2 from pre-baked AMI
+- `create_victim`: Launches Victim EC2, installs XDR agent
+- `mark_ready`: Updates Range status to 'ready'
+- `cleanup`: Destroys resources on error
 
-**Implementation options**: Step Functions, ECS task, or Lambda.
+**Key Design**: Lambda functions run in Portal VPC, access RDS directly via IAM Database Auth, create Range resources via AWS APIs (no VPC peering needed).
 
-### 3. LibreChat
+### 3. Chat UI
 
 **Purpose**: Browser-based chat UI with agent loop and MCP tool use
 
-**Features used**:
-- Cognito OIDC (same as Portal, SSO)
-- MCP server integration (stdio transport)
-- Multi-turn conversations
+**Features needed**:
+- MCP server integration (hexstrike-ai for Kali control)
+- Multi-turn conversations with agent loops
 - Chat history
+- AWS Bedrock for Claude models
 
-**Deployment**: Per-range instance or shared instance with per-user MCP config.
+**Status**: Chat UI component is being evaluated. See GitHub issue #209.
 
 ### 4. MCP Servers
 
-**Purpose**: Give AI tools to configure victims and run attacks
+**Purpose**: Give AI tools to control Kali and run attacks
 
-**Config-driven** via JSON (see `mcp/mcp-red/docker-lab-config.json`):
-```json
-{
-  "containers": {
-    "victim": {
-      "container_ip": "${victim_ip}",
-      "ssh_key": "/secrets/range-key.pem",
-      "ssh_user": "ubuntu",
-      "ssh_port": 22
-    }
-  }
-}
-```
-
-Provisioning service generates this per-range. Same MCP binary, different config.
+**Current**: Uses `hexstrike-ai` MCP for AI-driven pentesting, pre-installed on Kali AMI.
 
 **Two-Context Pattern**:
-- Chat 1: "Set up a vulnerable web server" → MCP configures victim
-- Chat 2: "Hack the target" → MCP attacks (no memory of setup)
+- Chat 1: "Set up a vulnerable web server" → AI configures victim via Kali
+- Chat 2: "Hack the target" → AI attacks (no memory of setup)
 
 ---
 
@@ -153,9 +142,9 @@ Provisioning service generates this per-range. Same MCP binary, different config
 
 The authenticated area of the Django portal. See full documentation:
 
-- [docs/mission-control.md](docs/mission-control.md) - Pages, layout, user flows
-- [docs/design-system.md](docs/design-system.md) - Colors, typography, effects
-- [docs/user-stories.md](docs/user-stories.md) - User stories US-1 through US-10
+- [docs/src/portal/index.md](docs/src/portal/index.md) - Pages, layout, user flows
+- [docs/src/portal/design-system.md](docs/src/portal/design-system.md) - Colors, typography, effects
+- [docs/src/portal/user-stories.md](docs/src/portal/user-stories.md) - User stories US-1 through US-10
 
 **Key Routes:**
 
@@ -166,7 +155,7 @@ The authenticated area of the Django portal. See full documentation:
 | `/mission-control/history/` | Range history |
 | `/mission-control/settings/` | Account settings |
 
-**Architecture Note:** Portal handles auth and status display. LibreChat handles the actual AI chat interaction. User clicks "Open Range" → redirects to LibreChat URL.
+**Architecture Note:** Portal handles auth and status display. Chat UI handles the actual AI chat interaction. User clicks "Open Range" → redirects to Chat URL.
 
 ---
 
@@ -231,8 +220,8 @@ npx @modelcontextprotocol/inspector build/index.js
 ### Phase 1: Core Platform (Target: Dec 18)
 - [x] Django portal (auth, agent upload, Mission Control UI)
 - [x] Portal infrastructure (VPC, RDS, ALB, Cognito)
-- [ ] Provisioning service (watch DB, Terraform, deploy LibreChat)
-- [ ] LibreChat deployment with MCP integration
+- [ ] Provisioning service (watch DB, Terraform)
+- [ ] Chat UI deployment with MCP integration
 - [ ] Range VPC + victim EC2 provisioning
 
 ### Phase 2: Polish
@@ -262,18 +251,29 @@ Route: ALB → NGFW → EC2
 
 ### Branch Strategy
 
-- `main` - Stable releases
-- `dev` - Integration (not currently in use)
-- `feature/*` - New features (not currently in use)
+- `main` - Production releases, deploys to prod AWS environment
+- `dev` - Integration branch, deploys to dev AWS environment
+- `feature/*` - Feature branches for development work
+
+**Branch Flow:** `feature/* → dev → main`
+
+All changes flow through pull requests. GitHub Actions workflows handle deployment:
+- PR to `dev` → deploys to dev environment on merge
+- PR to `main` → deploys to prod environment on merge
+
+### AWS Profiles
+
+When working locally with AWS CLI or Terraform:
+- `PANW_SHIFTER_DEV_PROFILE` - AWS profile for dev environment
+- `PANW_SHIFTER_PROD_PROFILE` - AWS profile for prod environment
 
 ### Commit Protocol
 
-**NEVER make commits without explicit user permission:**
-1. ALWAYS ask before creating commits
-2. Show user what will be committed first
-3. Let user review changes before committing
-4. Only commit when user explicitly requests it
-5. NEVER include Claude attribution or co-authored-by tags
+**Git operations are user-only:**
+1. NEVER make commits - the user will do it and sign them
+2. NEVER create PRs - the user handles all PR creation
+3. NEVER merge branches - the user controls all merges
+4. NEVER deploy directly to prod - always go through `feature → dev → main` flow
 
 ---
 
@@ -286,3 +286,10 @@ Per project rules:
 - Do NOT add "helpful" extras beyond the request
 - Keep responses focused and concise
 - Write for technical audience (no marketing language)
+
+## Active Technologies
+- Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc (001-risk-register)
+- PostgreSQL (existing RDS instance) (001-risk-register)
+
+## Recent Changes
+- 001-risk-register: Added Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc

@@ -10,7 +10,10 @@ from django.test import Client
 from django.urls import reverse
 
 from mission_control.models import ActivityLog, AgentConfig, OperatingSystem
-from mission_control.services.upload_token import generate_upload_token, verify_upload_token
+from mission_control.services.upload_token import (
+    generate_upload_token,
+    verify_upload_token,
+)
 
 User = get_user_model()
 
@@ -155,7 +158,10 @@ class TestInitiateUpload:
     def test_successful_initiate(self, mock_presign, user, settings):
         settings.AGENT_MAX_FILE_SIZE_MB = 2048
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120
-        mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/abc_test.msi")
+        mock_presign.return_value = (
+            "https://s3.example.com/presigned",
+            "agents/1/abc_test.msi",
+        )
 
         client = get_authenticated_client(user)
         response = client.post(
@@ -209,11 +215,13 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Big Agent",
-                "filename": "big.msi",
-                "file_size": 200 * 1024 * 1024,  # 200 MB
-            }),
+            data=json.dumps(
+                {
+                    "name": "Big Agent",
+                    "filename": "big.msi",
+                    "file_size": 200 * 1024 * 1024,  # 200 MB
+                }
+            ),
             content_type="application/json",
         )
 
@@ -226,11 +234,13 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Bad Agent",
-                "filename": "agent.exe",
-                "file_size": 1024 * 1024,
-            }),
+            data=json.dumps(
+                {
+                    "name": "Bad Agent",
+                    "filename": "agent.exe",
+                    "file_size": 1024 * 1024,
+                }
+            ),
             content_type="application/json",
         )
 
@@ -245,11 +255,13 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Over Quota",
-                "filename": "over.msi",
-                "file_size": 100 * 1024 * 1024,  # 100 MB - would exceed quota
-            }),
+            data=json.dumps(
+                {
+                    "name": "Over Quota",
+                    "filename": "over.msi",
+                    "file_size": 100 * 1024 * 1024,  # 100 MB - would exceed quota
+                }
+            ),
             content_type="application/json",
         )
 
@@ -261,7 +273,10 @@ class TestInitiateUpload:
         """Only one upload at a time per user."""
         settings.AGENT_MAX_FILE_SIZE_MB = 2048
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120
-        mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/abc_test.msi")
+        mock_presign.return_value = (
+            "https://s3.example.com/presigned",
+            "agents/1/abc_test.msi",
+        )
 
         client = get_authenticated_client(user)
 
@@ -290,15 +305,20 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
 
         with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
-            mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/test.msi")
+            mock_presign.return_value = (
+                "https://s3.example.com/presigned",
+                "agents/1/test.msi",
+            )
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
-                data=json.dumps({
-                    "name": "Traversal Test",
-                    "filename": "../../../etc/passwd.msi",
-                    "file_size": 1024,
-                }),
+                data=json.dumps(
+                    {
+                        "name": "Traversal Test",
+                        "filename": "../../../etc/passwd.msi",
+                        "file_size": 1024,
+                    }
+                ),
                 content_type="application/json",
             )
 
@@ -432,9 +452,7 @@ class TestCompleteUpload:
     def test_token_user_mismatch(self, user, settings):
         """Token from different user is rejected."""
         settings.AGENT_UPLOAD_URL_EXPIRES = 3600
-        other_user = User.objects.create_user(
-            username="other@example.com", email="other@example.com"
-        )
+        other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
 
         # Generate token for other user
         token = generate_upload_token(
@@ -511,7 +529,10 @@ class TestCancelUpload:
 
         # First set up an upload in progress
         with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
-            mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/test.msi")
+            mock_presign.return_value = (
+                "https://s3.example.com/presigned",
+                "agents/1/test.msi",
+            )
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
@@ -540,7 +561,10 @@ class TestCancelUpload:
 
         # Now another upload should work
         with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
-            mock_presign.return_value = ("https://s3.example.com/presigned2", "agents/1/new.msi")
+            mock_presign.return_value = (
+                "https://s3.example.com/presigned2",
+                "agents/1/new.msi",
+            )
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
@@ -616,7 +640,10 @@ class TestUploadIntegration:
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120
         settings.AGENT_UPLOAD_URL_EXPIRES = 3600
 
-        mock_presign.return_value = ("https://s3.example.com/presigned", f"agents/{user.id}/flow_test.msi")
+        mock_presign.return_value = (
+            "https://s3.example.com/presigned",
+            f"agents/{user.id}/flow_test.msi",
+        )
         mock_verify.return_value = (1024 * 1024, "etag_flow")
 
         client = get_authenticated_client(user)
@@ -624,11 +651,13 @@ class TestUploadIntegration:
         # Step 1: Initiate
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Flow Test Agent",
-                "filename": "flow_test.msi",
-                "file_size": 1024 * 1024,
-            }),
+            data=json.dumps(
+                {
+                    "name": "Flow Test Agent",
+                    "filename": "flow_test.msi",
+                    "file_size": 1024 * 1024,
+                }
+            ),
             content_type="application/json",
         )
 
@@ -661,18 +690,23 @@ class TestUploadIntegration:
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120
         settings.AGENT_UPLOAD_URL_EXPIRES = 3600
 
-        mock_presign.return_value = ("https://s3.example.com/presigned", "agents/1/cancel_test.msi")
+        mock_presign.return_value = (
+            "https://s3.example.com/presigned",
+            "agents/1/cancel_test.msi",
+        )
 
         client = get_authenticated_client(user)
 
         # Step 1: Initiate
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Cancel Test",
-                "filename": "cancel_test.msi",
-                "file_size": 1024,
-            }),
+            data=json.dumps(
+                {
+                    "name": "Cancel Test",
+                    "filename": "cancel_test.msi",
+                    "file_size": 1024,
+                }
+            ),
             content_type="application/json",
         )
 

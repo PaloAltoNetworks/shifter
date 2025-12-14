@@ -35,19 +35,24 @@ jobs:
             core:
               - 'terraform/modules/ecr/**'
               - 'terraform/environments/*/*.tf'
+              - '.github/workflows/_core.yml'
+              - '.github/workflows/deploy.yml'
             range:
               - 'terraform/modules/range/**'
               - 'terraform/environments/*/range/**'
+              - '.github/workflows/_range.yml'
             portal:
               - 'terraform/modules/portal/**'
               - 'terraform/modules/range/provisioner/**'
               - 'terraform/environments/*/portal/**'
               - 'portal/**'
+              - '.github/workflows/_portal.yml'
             agentchat:
               - 'terraform/modules/agentchat/**'
               - 'terraform/environments/*/agentchat/**'
               - 'agentchat/**'
               - 'mcp/mcp-shifter/**'
+              - '.github/workflows/_agentchat.yml'
 
       - name: Set environment
         id: env

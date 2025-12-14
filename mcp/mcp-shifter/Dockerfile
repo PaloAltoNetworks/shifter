@@ -6,18 +6,18 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files for dependency installation
-COPY package*.json ./
-COPY tsconfig.json ./
+# Copy package files for dependency installation (context is ./mcp)
+COPY mcp-shifter/package*.json ./
+COPY mcp-shifter/tsconfig.json ./
 
 # Copy aptl-mcp-common for local dependency
-COPY ../aptl-mcp-common /aptl-mcp-common
+COPY aptl-mcp-common /aptl-mcp-common
 
 # Install dependencies
 RUN npm ci
 
 # Copy source code
-COPY src ./src
+COPY mcp-shifter/src ./src
 
 # Build TypeScript
 RUN npm run build
@@ -36,7 +36,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 
 # Copy config example for reference
-COPY config.example.json ./
+COPY mcp-shifter/config.example.json ./
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \

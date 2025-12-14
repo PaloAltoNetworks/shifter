@@ -2,66 +2,81 @@
   <img src="assets/logo-wide-short.png" alt="Shifter">
 </p>
 
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Bugs](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=bugs)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Quality](https://github.com/Brad-Edwards/shifter/actions/workflows/quality.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/quality.yml)
+[![Portal](https://github.com/Brad-Edwards/shifter/actions/workflows/portal.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/portal.yml)
+[![Range](https://github.com/Brad-Edwards/shifter/actions/workflows/range.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/range.yml)
+[![AgentChat](https://github.com/Brad-Edwards/shifter/actions/workflows/agentchat.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/agentchat.yml)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
+[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
 
 # Shifter
 
-**Watch an AI hack. In your browser. Under your control.**
+**Your AI demo partner. Instant environments. Zero prep.**
 
-A SaaS cyber range for autonomous AI hacking agents.
+Shifter spins up demo environments on demand and uses AI to configure and run scenarios for you. Describe what you need in plain English—the agent handles the rest.
 
 **Beta coming soon:** Cortex Catalyst - December 18, 2025
 
 ## What is Shifter?
 
-Shifter gives you a turnkey environment to experiment with AI-driven attacks. No setup, no infrastructure headaches—just log in and go.
+Shifter is an agentic demo platform. Tell it what scenario you need, and it builds and executes it autonomously. No scripts, no manual setup, no infrastructure wrestling.
 
-- **Demo** AI cyber capabilities for customers, executives, or colleagues
-- **Experiment** with AI-driven attacks against victim infrastructure
-- **Educate** yourself on what autonomous offensive AI looks like in practice
-- **Research** AI cyber agent capabilities in an isolated environment
+**The hook:** Watch an AI hack a target in real-time. Agentic offensive AI is a compelling demo—customers pay attention when they see autonomous exploitation.
 
-Everything runs in the cloud. Open your browser, launch a range, and start.
+**The real value:** A polymorphic demo environment that adapts to whatever scenario you need. The AI handles setup *and* execution, so you focus on the conversation, not the keyboard.
+
+## Use Cases
+
+- **Security demos** — Show XDR/XSIAM detecting AI-driven attacks in your customer's tenant
+- **Product walkthroughs** — Let AI configure vulnerable targets to highlight specific detections
+- **POC environments** — Spin up isolated test scenarios without touching production
+- **Training** — Hands-on labs without the lab maintenance
 
 ## Why Shifter?
 
-- **No infra to manage** — spin up a range in minutes, not days
-- **No tools to install** — everything's in the browser
-- **No scripts to write** — tell the AI what you want in plain English
-- **Your endpoint agent** — victim VMs run your XDR/XSIAM agent, detections in your tenant
-- **No cleanup** — tear down when you're done
+| Traditional demo prep | With Shifter |
+|-----------------------|--------------|
+| Hours configuring VMs | "Set up a web server with SQLi" |
+| Scripts that break | Natural language instructions |
+| "Let me share my screen" | "Open this link" |
+| "I'll send you the recording" | Live, interactive, in their browser |
+| Cleanup and reset for next demo | Tear down with one click |
+
+**Zero infrastructure. Zero scripting. Zero cleanup.**
 
 ## How It Works
 
-1. Log into the portal and launch a range
-2. Open the chat interface
-3. Tell the agent what to do: *"Set up a vulnerable web server"* or *"Attack the target and get root"*
-4. Watch the AI autonomously configure, exploit, and pivot
-5. See detections in your security tooling
+1. **Launch a range** — Log into the portal, click a button
+2. **Describe your scenario** — "Set up a vulnerable PHP app" or "Configure a Windows DC with weak credentials"
+3. **AI builds it** — The agent configures the environment to your spec
+4. **Run the demo** — "Now attack it and get root" or walk through manually
+5. **Tear down** — One click when you're done
 
-You direct. The agent executes.
+The same AI that sets up scenarios can also execute them. Two chat contexts: one for setup, one for attack. Fresh perspective, no cheating.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     Browser --> Portal[Portal]
-    Browser --> Chat[LibreChat<br/>Agent + MCPs]
+    Browser --> Chat[Chat UI<br/>AI + MCPs]
+    Chat -->|MCP| Kali[Kali Box]
     Chat -->|MCP| Victim[Victim VM]
+    Victim -->|Telemetry| XDR[Your XDR/XSIAM]
 ```
 
-- **Portal**: Authentication and range management
-- **LibreChat**: Browser-based chat with AI agent and MCP tools
-- **Victim**: Target infrastructure with your XDR agent
+- **Portal**: Authentication, range management, agent uploads
+- **Chat UI**: Browser-based AI chat with MCP tool access
+- **Kali**: Pre-configured attack box with pentesting tools
+- **Victim**: Target VM running your XDR agent
 
 ## Under the Hood
 
-- **AI Integration**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) gives the agent real tools—SSH, command execution, file ops
-- **Infrastructure**: Terraform-managed AWS (VPCs, EC2, ALB, Cognito auth)
-- **Chat UI**: LibreChat with agent loops and MCP tool use
-- **Zero local install**: Everything browser-based
+- **AI Tools**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) gives the agent real capabilities—SSH, command execution, file operations
+- **Infrastructure**: AWS (VPCs, EC2, Step Functions), Terraform-managed
+- **Chat**: Agent loops and multi-turn conversations
+- **Auth**: Cognito with MFA, SSO across portal and chat
 
 Full technical docs: [docs/](docs/)
 
@@ -69,18 +84,16 @@ Full technical docs: [docs/](docs/)
 
 See [GitHub Issues](https://github.com/Brad-Edwards/shifter/issues).
 
-**Note:** Initial release limits ranges to a single victim VM per user.
-
 ## Ethics
 
-AI-driven attack capabilities are already in adversary hands. Defenders need to catch up. [Read more](docs/ethics.md).
+AI-driven attack capabilities already exist in the wild. Defenders need realistic exposure to understand what they're facing. [Read more](docs/src/ethics.md).
 
 ## Safety
 
-- Ranges are isolated—no internet egress from victim VMs
+- Ranges are network-isolated—no lateral movement between users
 - Human oversight required—you direct every scenario
-- AI actions are logged and auditable
-- Users authenticate via Cognito with MFA required
+- All AI actions logged and auditable
+- MFA-enforced authentication
 - Access restricted to authorized personnel
 
 ## Disclaimer
@@ -95,4 +108,4 @@ MIT
 
 ---
 
-10-23 AI hacker shenanigans 🚓
+*Polymorphic demos for a polymorphic threat landscape*

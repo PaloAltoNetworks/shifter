@@ -67,7 +67,7 @@ class TestAllowedUpdateFields:
         assert ALLOWED_UPDATE_FIELDS == expected
 
     def test_does_not_contain_dangerous_fields(self):
-        dangerous = {"id", "user_id", "agent_config_id", "created_at", "subnet_index"}
+        dangerous = {"id", "user_id", "agent_id", "created_at", "subnet_index"}
         for field in dangerous:
             assert field not in ALLOWED_UPDATE_FIELDS
 

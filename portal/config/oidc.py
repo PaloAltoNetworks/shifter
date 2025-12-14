@@ -43,8 +43,7 @@ def generate_username(email: str) -> str:
             email,
         )
         raise ValueError(
-            "Email contains characters not allowed in Django usernames. "
-            "Fix the Cognito pre-signup Lambda allow-list."
+            "Email contains characters not allowed in Django usernames. Fix the Cognito pre-signup Lambda allow-list."
         )
 
     return email
@@ -73,9 +72,11 @@ def provider_logout_url(request):
     host = request.get_host()
     logout_uri = f"{scheme}://{host}/"
 
-    params = urlencode({
-        "client_id": client_id,
-        "logout_uri": logout_uri,
-    })
+    params = urlencode(
+        {
+            "client_id": client_id,
+            "logout_uri": logout_uri,
+        }
+    )
 
     return f"{auth_domain}/logout?{params}"

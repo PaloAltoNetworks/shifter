@@ -24,6 +24,8 @@ locals {
 # VPC
 # ------------------------------------------------------------------------------
 
+# checkov:skip=CKV2_AWS_11:VPC flow logs deferred - see #220
+# checkov:skip=CKV2_AWS_12:Default SG restriction deferred - see #221
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -89,6 +91,7 @@ resource "aws_route_table_association" "public" {
 # NAT Gateway (single for cost optimization, can be per-AZ for HA)
 # ------------------------------------------------------------------------------
 
+# checkov:skip=CKV2_AWS_19:EIP attached to NAT Gateway, not EC2 - see #222
 resource "aws_eip" "nat" {
   count  = var.enable_nat_gateway ? 1 : 0
   domain = "vpc"

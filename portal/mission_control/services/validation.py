@@ -127,8 +127,7 @@ def validate_file_size(file_obj) -> None:
 
     if size > max_bytes:
         raise ValidationError(
-            f"File size ({size / 1024 / 1024:.1f} MB) exceeds "
-            f"maximum allowed ({settings.AGENT_MAX_FILE_SIZE_MB} MB)"
+            f"File size ({size / 1024 / 1024:.1f} MB) exceeds maximum allowed ({settings.AGENT_MAX_FILE_SIZE_MB} MB)"
         )
 
 

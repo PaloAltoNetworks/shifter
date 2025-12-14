@@ -1,3 +1,4 @@
+# checkov:skip=CKV_GHA_7:workflow_dispatch inputs required for manual destroy action
 name: Range
 
 on:
@@ -65,7 +66,7 @@ jobs:
             ENV="prod"
           fi
           echo "environment=$ENV" >> $GITHUB_OUTPUT
-          
+
           if [ "$ENV" == "dev" ]; then
             echo "is_dev=true" >> $GITHUB_OUTPUT
           else

@@ -49,11 +49,11 @@ fi
 SECRET_ID="shifter-${ENV}-portal-db-credentials"
 EC2_TAG_NAME="${ENV}-portal-ec2"
 
-# Profile depends on environment
+# Set profile based on environment
 if [[ "$ENV" == "dev" ]]; then
-    PROFILE="panw-shifter-dev-workstation"
+    PROFILE="$PANW_SHIFTER_DEV_PROFILE"
 else
-    PROFILE="dev-workstation-user"
+    PROFILE="$PANW_SHIFTER_PROD_PROFILE"
 fi
 
 # Get EC2 instance ID

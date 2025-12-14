@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+AWS access:
+DEV profile env var: PANW_SHIFTER_DEV_PROFILE
+PROD profile env var: PANW_SHIFTER_PROD_PROFILE
+
 ## Project Overview
 
-**Shifter** is a self-service cyber range platform. Users access a browser-based chat interface (LibreChat + MCPs) to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.
+**Shifter** is a self-service cyber range platform. Users access a browser-based chat interface with MCPs to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.
 
 ### Target Users
 
@@ -41,10 +45,10 @@ PANW SecOps Domain Consultants who need to:
          │                                    │ AWS APIs
          ▼                                    ▼
 ┌─────────────────────┐            ┌─────────────────────────────┐
-│  LibreChat          │            │  Range VPC (10.1.0.0/16)    │
+│  Chat UI            │            │  Range VPC (10.1.0.0/16)    │
 │  (shared instance)  │            │                             │
 │                     │            │  Per-user subnet:           │
-│ • Chat UI           │───SSH────▶│  • Kali EC2 (attack tools)  │
+│ • Browser-based     │───SSH────▶│  • Kali EC2 (attack tools)  │
 │ • MCP (hexstrike)   │   /MCP     │  • Victim EC2 (XDR agent)   │
 │ • Agent loops       │            │                             │
 └─────────────────────┘            └─────────────────────────────┘
@@ -63,8 +67,8 @@ PANW SecOps Domain Consultants who need to:
    - `create_kali`: Launches Kali EC2 from pre-baked AMI
    - `create_victim`: Launches Victim EC2, installs XDR agent from S3
    - Each Lambda updates RDS directly with resource IDs
-5. **Portal shows "Ready"** → user clicks "Open Range", goes to LibreChat
-6. **User interacts with AI in LibreChat:**
+5. **Portal shows "Ready"** → user clicks "Open Range", goes to Chat UI
+6. **User interacts with AI in Chat:**
    - Uses hexstrike-ai MCP to control Kali instance
    - Runs attacks against Victim, XDR/XSIAM detects
 
@@ -72,10 +76,10 @@ PANW SecOps Domain Consultants who need to:
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Chat UI | LibreChat | MCP support, agent loops, open source |
+| Chat UI | TBD | MCP support, agent loops, open source |
 | Orchestration | Step Functions + Lambda | Reliable, retry logic, error handling |
 | State | RDS only | Single source of truth, no message queues |
-| Auth | Cognito | Same identity across Portal and LibreChat |
+| Auth | Cognito | Same identity across Portal and Chat |
 | Attack Tools | Kali EC2 | Full Linux with hexstrike-ai pre-installed |
 | Victim VMs | Real EC2 | XDR agent requires real OS |
 
@@ -91,7 +95,7 @@ PANW SecOps Domain Consultants who need to:
 - Cognito OIDC authentication
 - Agent config CRUD (upload installer to S3)
 - Write `Range(status='pending')` to DB on launch
-- Display range status, link to LibreChat when ready
+- Display range status, link to agentic chat
 
 Portal does NOT provision infrastructure. It writes requests to DB.
 
@@ -110,17 +114,17 @@ Portal does NOT provision infrastructure. It writes requests to DB.
 
 **Key Design**: Lambda functions run in Portal VPC, access RDS directly via IAM Database Auth, create Range resources via AWS APIs (no VPC peering needed).
 
-### 3. LibreChat
+### 3. Chat UI
 
 **Purpose**: Browser-based chat UI with agent loop and MCP tool use
 
-**Features used**:
+**Features needed**:
 - MCP server integration (hexstrike-ai for Kali control)
 - Multi-turn conversations with agent loops
 - Chat history
 - AWS Bedrock for Claude models
 
-**Deployment**: Shared multi-tenant instance in Portal VPC (EC2 + Docker Compose).
+**Status**: Chat UI component is being evaluated. See GitHub issue #209.
 
 ### 4. MCP Servers
 
@@ -151,7 +155,7 @@ The authenticated area of the Django portal. See full documentation:
 | `/mission-control/history/` | Range history |
 | `/mission-control/settings/` | Account settings |
 
-**Architecture Note:** Portal handles auth and status display. LibreChat handles the actual AI chat interaction. User clicks "Open Range" → redirects to LibreChat URL.
+**Architecture Note:** Portal handles auth and status display. Chat UI handles the actual AI chat interaction. User clicks "Open Range" → redirects to Chat URL.
 
 ---
 
@@ -216,8 +220,8 @@ npx @modelcontextprotocol/inspector build/index.js
 ### Phase 1: Core Platform (Target: Dec 18)
 - [x] Django portal (auth, agent upload, Mission Control UI)
 - [x] Portal infrastructure (VPC, RDS, ALB, Cognito)
-- [ ] Provisioning service (watch DB, Terraform, deploy LibreChat)
-- [ ] LibreChat deployment with MCP integration
+- [ ] Provisioning service (watch DB, Terraform)
+- [ ] Chat UI deployment with MCP integration
 - [ ] Range VPC + victim EC2 provisioning
 
 ### Phase 2: Polish
@@ -247,14 +251,29 @@ Route: ALB → NGFW → EC2
 
 ### Branch Strategy
 
-- `main` - Stable releases
-- `dev` - Integration (not currently in use)
-- `feature/*` - New features (not currently in use)
+- `main` - Production releases, deploys to prod AWS environment
+- `dev` - Integration branch, deploys to dev AWS environment
+- `feature/*` - Feature branches for development work
+
+**Branch Flow:** `feature/* → dev → main`
+
+All changes flow through pull requests. GitHub Actions workflows handle deployment:
+- PR to `dev` → deploys to dev environment on merge
+- PR to `main` → deploys to prod environment on merge
+
+### AWS Profiles
+
+When working locally with AWS CLI or Terraform:
+- `PANW_SHIFTER_DEV_PROFILE` - AWS profile for dev environment
+- `PANW_SHIFTER_PROD_PROFILE` - AWS profile for prod environment
 
 ### Commit Protocol
 
-**NEVER make commits without explicit user permission:**
-1. NEVER make commits, the user will do it and sign them
+**Git operations are user-only:**
+1. NEVER make commits - the user will do it and sign them
+2. NEVER create PRs - the user handles all PR creation
+3. NEVER merge branches - the user controls all merges
+4. NEVER deploy directly to prod - always go through `feature → dev → main` flow
 
 ---
 
@@ -267,3 +286,10 @@ Per project rules:
 - Do NOT add "helpful" extras beyond the request
 - Keep responses focused and concise
 - Write for technical audience (no marketing language)
+
+## Active Technologies
+- Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc (001-risk-register)
+- PostgreSQL (existing RDS instance) (001-risk-register)
+
+## Recent Changes
+- 001-risk-register: Added Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc

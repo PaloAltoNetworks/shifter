@@ -9,7 +9,11 @@ def seed_operating_systems(apps, schema_editor):
 
     operating_systems = [
         {"slug": "windows", "name": "Windows", "extensions": [".msi"]},
-        {"slug": "linux-debian", "name": "Linux (Debian/Ubuntu)", "extensions": [".deb"]},
+        {
+            "slug": "linux-debian",
+            "name": "Linux (Debian/Ubuntu)",
+            "extensions": [".deb"],
+        },
         {"slug": "linux-rhel", "name": "Linux (RHEL/CentOS)", "extensions": [".rpm"]},
         {"slug": "linux-generic", "name": "Linux (Generic)", "extensions": [".sh"]},
     ]

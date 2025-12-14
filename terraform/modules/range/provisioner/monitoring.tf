@@ -184,7 +184,6 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
     aws_lambda_function.create_subnet.function_name,
     aws_lambda_function.create_victim.function_name,
     aws_lambda_function.create_kali.function_name,
-    aws_lambda_function.configure_librechat.function_name,
     aws_lambda_function.cleanup.function_name,
     aws_lambda_function.find_stale_ranges.function_name,
   ]) : toset([])
@@ -222,7 +221,6 @@ resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
     aws_lambda_function.create_subnet.function_name,
     aws_lambda_function.create_victim.function_name,
     aws_lambda_function.create_kali.function_name,
-    aws_lambda_function.configure_librechat.function_name,
     aws_lambda_function.cleanup.function_name,
     aws_lambda_function.find_stale_ranges.function_name,
   ]) : toset([])

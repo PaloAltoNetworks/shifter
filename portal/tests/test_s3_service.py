@@ -87,9 +87,7 @@ class TestDeleteAgent:
 
         delete_agent("agents/123/abc_test.msi")
 
-        mock_client.delete_object.assert_called_once_with(
-            Bucket="test-bucket", Key="agents/123/abc_test.msi"
-        )
+        mock_client.delete_object.assert_called_once_with(Bucket="test-bucket", Key="agents/123/abc_test.msi")
 
     def test_raises_if_bucket_not_configured(self, settings):
         settings.AWS_S3_BUCKET_NAME = ""

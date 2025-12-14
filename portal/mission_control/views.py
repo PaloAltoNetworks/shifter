@@ -18,11 +18,15 @@ from django.views.decorators.http import require_GET, require_POST
 from .models import ActivityLog, AgentConfig, OperatingSystem, Range
 from .services.s3 import (
     S3Error,
-    delete_agent as s3_delete,
     generate_presigned_upload_url,
     tag_s3_object,
-    upload_agent as s3_upload,
     verify_s3_object_exists,
+)
+from .services.s3 import (
+    delete_agent as s3_delete,
+)
+from .services.s3 import (
+    upload_agent as s3_upload,
 )
 from .services.upload_token import generate_upload_token, verify_upload_token
 from .services.validation import (
@@ -87,15 +91,11 @@ def upload_agent(request):
         # Look up OS
         os_obj = OperatingSystem.objects.filter(slug=file_format.os_slug).first()
         if not os_obj:
-            messages.error(
-                request, f"Operating system '{file_format.os_slug}' not found."
-            )
+            messages.error(request, f"Operating system '{file_format.os_slug}' not found.")
             return redirect("mission_control:agents")
 
         # Upload to S3
-        s3_key, sha256_hash, file_size = s3_upload(
-            uploaded_file, request.user.id, original_filename
-        )
+        s3_key, sha256_hash, file_size = s3_upload(uploaded_file, request.user.id, original_filename)
 
         # Create database record
         agent = AgentConfig.objects.create(
@@ -149,9 +149,7 @@ def upload_agent(request):
 @require_POST
 def delete_agent(request, agent_id):
     """Handle agent deletion (soft delete)."""
-    agent = get_object_or_404(
-        AgentConfig, id=agent_id, user=request.user, deleted_at__isnull=True
-    )
+    agent = get_object_or_404(AgentConfig, id=agent_id, user=request.user, deleted_at__isnull=True)
 
     try:
         # Delete from S3 first
@@ -277,9 +275,7 @@ def initiate_upload(request):
     # Check for concurrent upload
     if _check_upload_in_progress(request):
         return JsonResponse(
-            {
-                "error": "An upload is already in progress. Please wait for it to complete."
-            },
+            {"error": "An upload is already in progress. Please wait for it to complete."},
             status=409,
         )
 
@@ -426,17 +422,13 @@ def complete_upload(request):
     except S3Error:
         _set_upload_in_progress(request, False)
         logger.warning(f"Upload completion failed - file not found: {s3_key}")
-        return JsonResponse(
-            {"error": "File not found in storage. Upload may have failed."}, status=400
-        )
+        return JsonResponse({"error": "File not found in storage. Upload may have failed."}, status=400)
 
     # Look up OS
     os_obj = OperatingSystem.objects.filter(slug=os_slug).first()
     if not os_obj:
         _set_upload_in_progress(request, False)
-        return JsonResponse(
-            {"error": f"Operating system '{os_slug}' not found"}, status=400
-        )
+        return JsonResponse({"error": f"Operating system '{os_slug}' not found"}, status=400)
 
     # Tag object as completed (for lifecycle rule)
     try:
@@ -547,9 +539,7 @@ def _range_to_json(range_obj):
         "agent_name": range_obj.agent.name if range_obj.agent else None,
         "chat_url": range_obj.chat_url,
         "error_message": range_obj.error_message,
-        "created_at": range_obj.created_at.isoformat()
-        if range_obj.created_at
-        else None,
+        "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
         "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
         "paused_at": range_obj.paused_at.isoformat() if range_obj.paused_at else None,
     }
@@ -619,9 +609,7 @@ def launch_range(request):
     except ValueError as e:
         logger.error("Failed to allocate subnet index: %s", e)
         return JsonResponse(
-            {
-                "error": "No capacity available. Please try again later or destroy existing ranges."
-            },
+            {"error": "No capacity available. Please try again later or destroy existing ranges."},
             status=503,
         )
 

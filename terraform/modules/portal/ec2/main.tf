@@ -209,6 +209,8 @@ resource "aws_instance" "this" {
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.this.id]
   iam_instance_profile   = aws_iam_instance_profile.this.name
+  monitoring             = true
+  ebs_optimized          = true
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region         = var.aws_region

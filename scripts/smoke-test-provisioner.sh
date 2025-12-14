@@ -2,21 +2,20 @@
 # Smoke Test for Shifter Provisioner Infrastructure
 #
 # Usage:
-#   ./scripts/smoke-test-provisioner.sh           # Test prod
-#   ./scripts/smoke-test-provisioner.sh -e dev    # Test dev
+#   ./scripts/smoke-test-provisioner.sh           # Test dev (default)
+#   ./scripts/smoke-test-provisioner.sh -e prod   # Test prod
 #
 # Prerequisites:
-# - AWS CLI configured with dev-workstation-user profile
+# - AWS CLI configured with appropriate profile
 # - jq installed
 # - Provisioner infrastructure deployed
 
 set -e
 
 # Defaults
-ENV="prod"
+ENV="dev"
 REGION="us-east-2"
 NAME_PREFIX="shifter"
-PROFILE="${AWS_PROFILE:-dev-workstation-user}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -37,6 +36,13 @@ done
 if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
     echo "Error: Environment must be 'dev' or 'prod'"
     exit 1
+fi
+
+# Set profile based on environment
+if [[ "$ENV" == "dev" ]]; then
+    PROFILE="$PANW_SHIFTER_DEV_PROFILE"
+else
+    PROFILE="$PANW_SHIFTER_PROD_PROFILE"
 fi
 
 # Colors for output
@@ -60,7 +66,6 @@ LAMBDA_FUNCTIONS=(
     "${NAME_PREFIX}-create-subnet"
     "${NAME_PREFIX}-create-victim"
     "${NAME_PREFIX}-create-kali"
-    "${NAME_PREFIX}-configure-librechat"
     "${NAME_PREFIX}-cleanup"
     "${NAME_PREFIX}-find-stale-ranges"
 )
@@ -188,7 +193,6 @@ LOG_GROUPS=(
     "/aws/lambda/${NAME_PREFIX}-create-subnet"
     "/aws/lambda/${NAME_PREFIX}-create-victim"
     "/aws/lambda/${NAME_PREFIX}-create-kali"
-    "/aws/lambda/${NAME_PREFIX}-configure-librechat"
     "/aws/lambda/${NAME_PREFIX}-cleanup"
     "/aws/lambda/${NAME_PREFIX}-find-stale-ranges"
     "/aws/stepfunctions/${NAME_PREFIX}-provisioner"
@@ -367,7 +371,7 @@ section "Summary"
 echo -e "\n${GREEN}━━━ SMOKE TEST COMPLETE (${ENV}) ━━━${NC}"
 echo ""
 echo "Infrastructure components verified:"
-echo "  - 6 Lambda functions"
+echo "  - 5 Lambda functions"
 echo "  - 3 Step Functions state machines"
 echo "  - 3 IAM roles"
 echo "  - 1 Security group"

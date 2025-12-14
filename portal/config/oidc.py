@@ -43,8 +43,7 @@ def generate_username(email: str) -> str:
             email,
         )
         raise ValueError(
-            "Email contains characters not allowed in Django usernames. "
-            "Fix the Cognito pre-signup Lambda allow-list."
+            "Email contains characters not allowed in Django usernames. Fix the Cognito pre-signup Lambda allow-list."
         )
 
     return email

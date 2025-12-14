@@ -2,9 +2,13 @@
   <img src="assets/logo-wide-short.png" alt="Shifter">
 </p>
 
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Bugs](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=bugs)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter) [![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Quality](https://github.com/Brad-Edwards/shifter/actions/workflows/quality.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/quality.yml)
+[![Portal](https://github.com/Brad-Edwards/shifter/actions/workflows/portal.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/portal.yml)
+[![Range](https://github.com/Brad-Edwards/shifter/actions/workflows/range.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/range.yml)
+[![AgentChat](https://github.com/Brad-Edwards/shifter/actions/workflows/agentchat.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/agentchat.yml)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
+[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
 
 # Shifter
 
@@ -56,14 +60,14 @@ The same AI that sets up scenarios can also execute them. Two chat contexts: one
 ```mermaid
 flowchart LR
     Browser --> Portal[Portal]
-    Browser --> Chat[LibreChat<br/>AI + MCPs]
+    Browser --> Chat[Chat UI<br/>AI + MCPs]
     Chat -->|MCP| Kali[Kali Box]
     Chat -->|MCP| Victim[Victim VM]
     Victim -->|Telemetry| XDR[Your XDR/XSIAM]
 ```
 
 - **Portal**: Authentication, range management, agent uploads
-- **LibreChat**: Browser-based AI chat with MCP tool access
+- **Chat UI**: Browser-based AI chat with MCP tool access
 - **Kali**: Pre-configured attack box with pentesting tools
 - **Victim**: Target VM running your XDR agent
 
@@ -71,7 +75,7 @@ flowchart LR
 
 - **AI Tools**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) gives the agent real capabilities—SSH, command execution, file operations
 - **Infrastructure**: AWS (VPCs, EC2, Step Functions), Terraform-managed
-- **Chat**: LibreChat with agent loops and multi-turn conversations
+- **Chat**: Agent loops and multi-turn conversations
 - **Auth**: Cognito with MFA, SSO across portal and chat
 
 Full technical docs: [docs/](docs/)

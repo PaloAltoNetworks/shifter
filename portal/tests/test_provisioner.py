@@ -10,12 +10,8 @@ from botocore.exceptions import ClientError
 def mock_settings(settings):
     """Configure Step Functions ARNs for testing."""
     settings.AWS_REGION = "us-east-2"
-    settings.PROVISION_STATE_MACHINE_ARN = (
-        "arn:aws:states:us-east-2:123456789012:stateMachine:test-provision"
-    )
-    settings.TEARDOWN_STATE_MACHINE_ARN = (
-        "arn:aws:states:us-east-2:123456789012:stateMachine:test-teardown"
-    )
+    settings.PROVISION_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123456789012:stateMachine:test-provision"
+    settings.TEARDOWN_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123456789012:stateMachine:test-teardown"
     return settings
 
 
@@ -49,10 +45,7 @@ class TestStartProvisioning:
         assert result == "arn:aws:states:us-east-2:123456789012:execution:test:abc123"
         mock_sfn_client.start_execution.assert_called_once()
         call_args = mock_sfn_client.start_execution.call_args
-        assert (
-            call_args.kwargs["stateMachineArn"]
-            == mock_settings.PROVISION_STATE_MACHINE_ARN
-        )
+        assert call_args.kwargs["stateMachineArn"] == mock_settings.PROVISION_STATE_MACHINE_ARN
         assert '"range_id": 42' in call_args.kwargs["input"]
 
     def test_raises_on_client_error(self, mock_settings, mock_sfn_client):
@@ -88,15 +81,10 @@ class TestStartTeardown:
 
         result = start_teardown(range_id=99)
 
-        assert (
-            result == "arn:aws:states:us-east-2:123456789012:execution:teardown:xyz789"
-        )
+        assert result == "arn:aws:states:us-east-2:123456789012:execution:teardown:xyz789"
         mock_sfn_client.start_execution.assert_called_once()
         call_args = mock_sfn_client.start_execution.call_args
-        assert (
-            call_args.kwargs["stateMachineArn"]
-            == mock_settings.TEARDOWN_STATE_MACHINE_ARN
-        )
+        assert call_args.kwargs["stateMachineArn"] == mock_settings.TEARDOWN_STATE_MACHINE_ARN
         assert '"range_id": 99' in call_args.kwargs["input"]
 
     def test_raises_on_client_error(self, mock_settings, mock_sfn_client):

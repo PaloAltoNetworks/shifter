@@ -45,12 +45,8 @@ class Risk(models.Model):
 
     title = models.CharField(max_length=200)
     description = models.TextField()
-    severity = models.CharField(
-        max_length=10, choices=Severity.choices, default=Severity.MEDIUM
-    )
-    status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.OPEN
-    )
+    severity = models.CharField(max_length=10, choices=Severity.choices, default=Severity.MEDIUM)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
 
     # Threat modeling fields
     stride_categories = ArrayField(
@@ -58,12 +54,8 @@ class Risk(models.Model):
         default=list,
         blank=True,
     )
-    likelihood_score = models.PositiveSmallIntegerField(
-        null=True, blank=True, help_text="1-5 scale"
-    )
-    impact_score = models.PositiveSmallIntegerField(
-        null=True, blank=True, help_text="1-5 scale"
-    )
+    likelihood_score = models.PositiveSmallIntegerField(null=True, blank=True, help_text="1-5 scale")
+    impact_score = models.PositiveSmallIntegerField(null=True, blank=True, help_text="1-5 scale")
     attack_vector = models.TextField(blank=True)
     affected_assets = models.TextField(blank=True)
     mitigation_status = models.TextField(blank=True)
@@ -201,12 +193,8 @@ class Comment(models.Model):
 class APIKey(models.Model):
     """API key for programmatic access."""
 
-    name = models.CharField(
-        max_length=100, help_text="Human-friendly name for this key"
-    )
-    prefix = models.CharField(
-        max_length=8, unique=True, help_text="Key prefix for identification"
-    )
+    name = models.CharField(max_length=100, help_text="Human-friendly name for this key")
+    prefix = models.CharField(max_length=8, unique=True, help_text="Key prefix for identification")
     key_hash = models.CharField(max_length=64, help_text="SHA-256 hash of full key")
 
     created_by = models.ForeignKey(
@@ -238,9 +226,7 @@ class APIKey(models.Model):
         """Return True if key is not revoked and not expired."""
         if self.revoked_at is not None:
             return False
-        if self.expires_at is not None and self.expires_at < timezone.now():
-            return False
-        return True
+        return not (self.expires_at is not None and self.expires_at < timezone.now())
 
     @property
     def display_key(self) -> str:

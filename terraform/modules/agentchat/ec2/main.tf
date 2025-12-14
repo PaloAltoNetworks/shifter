@@ -132,6 +132,38 @@ resource "aws_iam_role_policy" "secrets_read" {
           aws_secretsmanager_secret.bag_api_key.arn,
           var.openwebui_db_secret_arn
         ])
+      },
+      {
+        Sid    = "ReadSshKeySecrets"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        # MCP server needs to read SSH keys for any range belonging to any user
+        # Pattern: shifter-{env}-range-{range_id}-kali-ssh
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter-${var.environment}-range-*-kali-ssh-*"
+      }
+    ]
+  })
+}
+
+# RDS IAM Database Authentication for MCP server
+resource "aws_iam_role_policy" "rds_connect" {
+  count = var.db_resource_id != "" ? 1 : 0
+  name  = "rds-iam-connect"
+  role  = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "RdsIamConnect"
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        # Allow connection as 'mcp_user' IAM user to the database
+        Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${var.db_resource_id}/mcp_user"
       }
     ]
   })

@@ -123,12 +123,15 @@ resource "aws_iam_role_policy" "secrets_read" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ReadBagApiKey"
+        Sid    = "ReadSecrets"
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = aws_secretsmanager_secret.bag_api_key.arn
+        Resource = compact([
+          aws_secretsmanager_secret.bag_api_key.arn,
+          var.openwebui_db_secret_arn
+        ])
       }
     ]
   })

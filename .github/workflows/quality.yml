@@ -99,15 +99,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
 
-      - name: Cache Checkov and Terraform modules
+      - name: Cache Checkov
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/pip
-            terraform/.external_modules
-          key: ${{ runner.os }}-checkov-${{ hashFiles('terraform/**/*.tf') }}
+          path: ~/.local
+          key: ${{ runner.os }}-checkov-${{ hashFiles('.github/workflows/quality.yml') }}
           restore-keys: |
             ${{ runner.os }}-checkov-
 

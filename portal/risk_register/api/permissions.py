@@ -16,10 +16,7 @@ class IsAuthenticatedOrAPIKey(permissions.BasePermission):
             return True
 
         # Check for API key authentication
-        if isinstance(request.auth, APIKey):
-            return True
-
-        return False
+        return bool(isinstance(request.auth, APIKey))
 
 
 class IsAdminUser(permissions.BasePermission):
@@ -35,9 +32,7 @@ class IsAdminUser(permissions.BasePermission):
 
         # Must be authenticated user with staff/superuser status
         return bool(
-            request.user
-            and request.user.is_authenticated
-            and (request.user.is_staff or request.user.is_superuser)
+            request.user and request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
         )
 
 
@@ -49,15 +44,12 @@ class IsOwnerOrAdmin(permissions.BasePermission):
 
     def has_object_permission(self, request, view, obj):
         # Admins can access anything
-        if request.user and request.user.is_authenticated:
-            if request.user.is_staff or request.user.is_superuser:
-                return True
+        if request.user and request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser):
+            return True
 
         # Check ownership for API keys
-        if isinstance(request.auth, APIKey):
-            # For comments, check if API key is the author
-            if hasattr(obj, "author_apikey") and obj.author_apikey == request.auth:
-                return True
+        if isinstance(request.auth, APIKey) and hasattr(obj, "author_apikey") and obj.author_apikey == request.auth:
+            return True
 
         # Check ownership for users
         if request.user and request.user.is_authenticated:

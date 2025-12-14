@@ -283,7 +283,7 @@ class TestRangeToJson:
         assert result["agent_id"] == agent.id
         assert result["agent_name"] == "Test Agent"
         assert result["chat_url"] == "http://chat.example.com/123"
-        assert result["error_message"] is None
+        assert result["error_message"] == ""  # Empty string, not None (model default)
         assert "victim_ip" not in result  # Security: internal detail not exposed
 
     def test_handles_null_agent(self, user):

@@ -33,19 +33,19 @@ Self-service cyber range for demonstrating AI-driven attacks against XDR/XSIAM-p
 
 ## When to Use Shifter
 
-✅ XDR/XSIAM active evaluation  
-✅ Stalled POC (inject momentum)  
-✅ Competitive displacement  
-✅ Executive AI threat concerns  
+✅ XDR/XSIAM active evaluation
+✅ Stalled POC (inject momentum)
+✅ Competitive displacement
+✅ Executive AI threat concerns
 ✅ Technical buyer skepticism
 
 ---
 
 ## Value Messages (Pick Your Audience)
 
-**Technical**: "Live attacks generating real XDR detections in your tenant"  
-**Executive**: "See how XDR defends against AI-driven threats"  
-**Competitive**: "No competitor can show you this"  
+**Technical**: "Live attacks generating real XDR detections in your tenant"
+**Executive**: "See how XDR defends against AI-driven threats"
+**Competitive**: "No competitor can show you this"
 **Business**: "Validate XDR value before purchase"
 
 ---
@@ -63,37 +63,37 @@ Self-service cyber range for demonstrating AI-driven attacks against XDR/XSIAM-p
 
 ## PANW Products Supported
 
-✅ **XDR/XSIAM**: Primary use case  
-✅ **Cortex XSOAR**: Automated response  
-✅ **XDR Pro**: Advanced scenarios  
-🔜 **Prisma Cloud**: Coming soon  
+✅ **XDR/XSIAM**: Primary use case
+✅ **Cortex XSOAR**: Automated response
+✅ **XDR Pro**: Advanced scenarios
+🔜 **Prisma Cloud**: Coming soon
 🔜 **SASE**: Roadmap
 
 ---
 
 ## Success Formula
 
-**Before**: Qualify opportunity + Coordinate with SE + Upload agent  
-**During**: 5 min intro + 30 min demo + 10 min business discussion  
+**Before**: Qualify opportunity + Coordinate with SE + Upload agent
+**During**: 5 min intro + 30 min demo + 10 min business discussion
 **After**: Follow up + Track metrics + Share wins
 
 ---
 
 ## Common Questions
 
-**Q: Do I need technical skills?**  
+**Q: Do I need technical skills?**
 A: Account execs position value; SEs run demos
 
-**Q: How long does setup take?**  
+**Q: How long does setup take?**
 A: 5 minutes one-time, then instant for future demos
 
-**Q: What if customer doesn't have XDR?**  
+**Q: What if customer doesn't have XDR?**
 A: Use demo tenant (still shows capability)
 
-**Q: Is it safe?**  
+**Q: Is it safe?**
 A: Yes—isolated, no internet egress, full audit logs
 
-**Q: What's the ROI?**  
+**Q: What's the ROI?**
 A: 15-20% faster deal cycles, higher win rates
 
 ---
@@ -109,17 +109,17 @@ A: 15-20% faster deal cycles, higher win rates
 
 ## Support & Resources
 
-**Platform**: [Portal URL]  
-**Support**: #shifter-support (Slack) | [Email]  
-**Training**: [Video links]  
+**Platform**: [Portal URL]
+**Support**: #shifter-support (Slack) | [Email]
+**Training**: [Video links]
 **Documentation**: See role-specific handouts
 
 ---
 
 ## Important Notes
 
-⚠️ **Initially**: Only technical sellers with XDR agents run demos  
-⚠️ **Cleanup**: Always destroy ranges after demo (cost management)  
+⚠️ **Initially**: Only technical sellers with XDR agents run demos
+⚠️ **Cleanup**: Always destroy ranges after demo (cost management)
 ⚠️ **Preparation**: Test platform before customer-facing demos
 
 ---

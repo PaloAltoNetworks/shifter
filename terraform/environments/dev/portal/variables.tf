@@ -181,12 +181,6 @@ variable "kali_instance_type" {
   default     = "t3.small"
 }
 
-variable "librechat_base_url" {
-  description = "Base URL for LibreChat"
-  type        = string
-  default     = ""
-}
-
 variable "enable_provisioner_alarms" {
   description = "Enable CloudWatch alarms for provisioner Step Functions and Lambda"
   type        = bool
@@ -198,4 +192,3 @@ variable "provisioner_alarm_email" {
   type        = string
   default     = ""
 }
-

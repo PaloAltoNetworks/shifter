@@ -15,7 +15,10 @@ class Migration(migrations.Migration):
     """Create provisioner_lambda PostgreSQL user with IAM auth and minimal permissions."""
 
     dependencies = [
-        ("mission_control", "0005_range_step_function_execution_arn_range_subnet_cidr_and_more"),
+        (
+            "mission_control",
+            "0005_range_step_function_execution_arn_range_subnet_cidr_and_more",
+        ),
     ]
 
     operations = [

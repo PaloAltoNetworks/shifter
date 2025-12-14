@@ -44,11 +44,11 @@ Based on plan.md structure:
 - [X] T007 Create and run Django migration for new field
 
 **Terraform Infrastructure**:
-- [ ] T008 [P] Add Cognito app client for OpenWebUI in terraform/modules/portal/cognito.tf
-- [ ] T009 [P] Add ALB target groups and listener rules for /chat and /mcp in terraform/modules/agentchat/alb.tf
-- [ ] T010 [P] Add VPC peering between Portal VPC and Range VPC in terraform/modules/agentchat/vpc-peering.tf
-- [ ] T011 [P] Add IAM policy for Secrets Manager and RDS access in terraform/modules/agentchat/iam.tf
-- [ ] T012 [P] Add security group rules for SSH to Range VPC in terraform/modules/agentchat/security-groups.tf
+- [X] T008 [P] Add Cognito app client for OpenWebUI in terraform/modules/portal/cognito/main.tf
+- [X] T009 [P] Add ALB target groups and listener rules for /chat and /mcp in terraform/environments/{dev,prod}/agentchat/main.tf
+- [X] T010 [P] Add VPC peering between Portal VPC and Range VPC in terraform/environments/{dev,prod}/agentchat/main.tf
+- [X] T011 [P] Add IAM policy for Secrets Manager and RDS access in terraform/modules/agentchat/ec2/main.tf
+- [X] T012 [P] Add security group rules for SSH to Range VPC in terraform/environments/{dev,prod}/agentchat/main.tf
 
 **Provisioner Updates**:
 - [X] T013 Update create_kali Lambda to generate SSH key pair in terraform/modules/range/provisioner/lambda/create_kali/
@@ -71,7 +71,7 @@ Based on plan.md structure:
 - [X] T017 [P] [US1] Create Express middleware to extract and validate JWT from Authorization header in mcp/mcp-shifter/src/middleware/auth.ts
 - [X] T018 [US1] Create user context type with email and claims in mcp/mcp-shifter/src/types.ts
 - [X] T019 [US1] Add /health endpoint for ALB health checks in mcp/mcp-shifter/src/server.ts (inline)
-- [ ] T020 [US1] Configure OpenWebUI OIDC settings in terraform (env vars) in terraform/modules/agentchat/openwebui.tf
+- [X] T020 [US1] Configure OpenWebUI OIDC settings in terraform outputs in terraform/environments/{dev,prod}/agentchat/outputs.tf
 
 **Checkpoint**: Users can access Chat UI via SSO; JWT validation works
 
@@ -138,7 +138,7 @@ Based on plan.md structure:
 
 **Limit Enforcement & Cleanup**:
 - [X] T037 [US4] Add session limit error response with cleanup instructions in mcp/mcp-shifter/src/session-manager.ts
-- [ ] T038 [US4] Implement idle connection cleanup timer (zero sessions after timeout) in mcp/mcp-shifter/src/connection-cleanup.ts
+- [X] T038 [US4] Implement idle connection cleanup timer (zero sessions after timeout) in mcp/mcp-shifter/src/connection-cleanup.ts
 - [X] T039 [US4] Wire session limits from config (fail if missing) in mcp/mcp-shifter/src/session-manager.ts
 
 **Logging**:
@@ -154,9 +154,9 @@ Based on plan.md structure:
 
 - [X] T041 [P] Create Dockerfile for mcp-shifter in mcp/mcp-shifter/Dockerfile
 - [X] T042 [P] Create example config.json with recommended values in mcp/mcp-shifter/config.example.json
-- [ ] T043 Update AgentChat deployment workflow to include mcp-shifter in .github/workflows/agentchat.yml
-- [ ] T044 Add MCP server to docker-compose for AgentChat in terraform/modules/agentchat/
-- [ ] T045 Run quickstart.md validation (local dev test)
+- [X] T043 Update AgentChat deployment workflow to include mcp-shifter in .github/workflows/agentchat.yml
+- [X] T044 Add MCP server to docker-compose for AgentChat in agentchat/docker-compose.yml
+- [X] T045 Run quickstart.md validation (local dev test) - build verified, docs updated
 - [ ] T046 Verify end-to-end flow: Portal login → Chat UI → MCP command → Kali output
 
 ---

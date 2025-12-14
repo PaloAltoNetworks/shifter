@@ -68,7 +68,7 @@ npm run build
 npm start
 ```
 
-Server runs on `http://localhost:3001/mcp`
+Server runs on `http://localhost:3001` (MCP endpoints at `/mcp/*`)
 
 ### 4. Test with curl
 
@@ -76,11 +76,22 @@ Server runs on `http://localhost:3001/mcp`
 # Get JWT token (via Cognito hosted UI or CLI)
 TOKEN="eyJ..."
 
-# List available tools
-curl -X POST http://localhost:3001/mcp \
+# Create MCP session (returns sessionId)
+curl -X POST http://localhost:3001/mcp/session \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN"
+# Response: {"sessionId":"abc-123","rangeId":42,"kaliIp":"10.1.1.4"}
+
+# Use session to list tools
+SESSION_ID="abc-123"
+curl -X POST http://localhost:3001/mcp/$SESSION_ID \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# Cleanup session when done
+curl -X DELETE http://localhost:3001/mcp/$SESSION_ID \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ## OpenWebUI Configuration
@@ -96,41 +107,50 @@ curl -X POST http://localhost:3001/mcp \
 ```
 mcp/mcp-shifter/
 ├── src/
-│   ├── index.ts         # Express server entrypoint
-│   ├── transport.ts     # StreamableHTTPServerTransport setup
-│   ├── auth.ts          # Cognito JWT validation
-│   ├── range-lookup.ts  # RDS query + Secrets Manager
-│   └── config.ts        # Dynamic LabConfig builder
-├── tests/
-│   ├── auth.test.ts
-│   ├── range-lookup.test.ts
-│   └── integration/
+│   ├── index.ts              # Application entrypoint
+│   ├── server.ts             # Express app, routes, transport setup
+│   ├── auth.ts               # Cognito JWT verification
+│   ├── config.ts             # Config loader
+│   ├── config-schema.ts      # Zod schema for config validation
+│   ├── db.ts                 # RDS connection with IAM auth + range lookup
+│   ├── secrets.ts            # Secrets Manager client for SSH keys
+│   ├── lab-config-builder.ts # Build LabConfig from range data
+│   ├── session-manager.ts    # Per-session LabConfig caching
+│   ├── connection-cleanup.ts # Idle connection timer
+│   ├── logger.ts             # Structured JSON logging
+│   ├── types.ts              # TypeScript interfaces
+│   └── middleware/
+│       └── auth.ts           # JWT extraction middleware
+├── config.example.json
+├── Dockerfile
 ├── package.json
 └── tsconfig.json
 ```
 
-## Key Files to Implement
+## Key Files
 
 | File | Purpose |
 |------|---------|
 | `auth.ts` | JWT validation using `aws-jwt-verify` |
-| `range-lookup.ts` | Query RDS for user's range, fetch SSH key from Secrets Manager |
-| `config.ts` | Build `LabConfig` from range data |
-| `transport.ts` | Session management with `StreamableHTTPServerTransport` |
-| `index.ts` | Express routes: POST/GET/DELETE `/mcp` |
+| `db.ts` | Query RDS for user's range with IAM auth |
+| `secrets.ts` | Fetch SSH private key from Secrets Manager |
+| `lab-config-builder.ts` | Build `LabConfig` from range + SSH key |
+| `session-manager.ts` | Session lifecycle with limits enforcement |
+| `server.ts` | Express routes: POST/GET/DELETE `/mcp` |
 
 ## Testing
 
+Unit tests are not yet implemented. The test framework is configured:
+
 ```bash
-# Unit tests
+# Run tests (when implemented)
 npm test
 
 # With coverage
 npm test -- --coverage
-
-# Watch mode
-npm run test:watch
 ```
+
+For manual testing, use the curl examples above with a valid Cognito JWT.
 
 ## Common Issues
 

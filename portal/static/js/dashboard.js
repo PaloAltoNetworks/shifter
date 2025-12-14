@@ -21,6 +21,8 @@ class DashboardManager {
         this.currentRange = null;
         this.pollInterval = null;
         this.pollIntervalMs = 2000; // Poll every 2 seconds
+        this.pollErrorCount = 0;
+        this.maxPollErrors = 5; // Force refresh after 5 consecutive errors
 
         // UI Elements
         this.noRangeState = document.getElementById('no-range-state');
@@ -55,7 +57,8 @@ class DashboardManager {
                 this._stopPolling();
             } else if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
                 // Resume polling when tab becomes visible again if in transitional state
-                this._startPolling();
+                // Do an immediate status check since state may have changed while hidden
+                this.loadStatus();
             }
         });
     }
@@ -170,6 +173,7 @@ class DashboardManager {
 
         if (!this.currentRange) {
             this.noRangeState.style.display = 'block';
+            this._resetLaunchButton();
             return;
         }
 
@@ -192,12 +196,12 @@ class DashboardManager {
 
             case 'resuming':
                 this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Resuming range...');
+                this._updateProvisioningState('Resuming Range', 'Starting instances...');
                 break;
 
             case 'destroying':
                 this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Destroying range...');
+                this._updateProvisioningState('Destroying Range', 'Cleaning up resources...');
                 break;
 
             case 'failed':
@@ -217,7 +221,11 @@ class DashboardManager {
         }
     }
 
-    _updateProvisioningState(message = 'Setting up infrastructure...') {
+    _updateProvisioningState(title = 'Provisioning Range', message = 'Setting up infrastructure...') {
+        const cardTitle = this.provisioningState.querySelector('.card-title');
+        if (cardTitle) {
+            cardTitle.textContent = title;
+        }
         const statusText = this.provisioningState.querySelector('.status span:last-child');
         if (statusText) {
             statusText.textContent = message;
@@ -278,6 +286,13 @@ class DashboardManager {
     _formatDate(isoString) {
         const date = new Date(isoString);
         return date.toLocaleString();
+    }
+
+    _resetLaunchButton() {
+        if (this.launchBtn) {
+            this.launchBtn.textContent = 'Launch Range';
+            this.launchBtn.disabled = !this.agentSelect?.value;
+        }
     }
 
     async launchRange() {
@@ -363,9 +378,10 @@ class DashboardManager {
                 throw new Error(data.error || 'Failed to destroy range');
             }
 
-            this.currentRange = data.range;
+            // Range is destroyed immediately - show no-range state
+            this._stopPolling();
+            this.currentRange = null;
             this._updateUI();
-            this._startPolling();
 
         } catch (error) {
             alert(error.message);
@@ -387,12 +403,29 @@ class DashboardManager {
                     headers: { 'Accept': 'application/json' },
                 });
 
-                if (!response.ok) return;
+                if (!response.ok) {
+                    console.warn('Polling: response not ok', response.status);
+                    this.pollErrorCount++;
+                    if (this.pollErrorCount >= this.maxPollErrors) {
+                        console.error('Too many polling errors, reloading page');
+                        window.location.reload();
+                    }
+                    return;
+                }
+
+                // Reset error count on success
+                this.pollErrorCount = 0;
 
                 const data = await response.json();
                 const oldStatus = this.currentRange?.status;
+                const newStatus = data.range?.status;
                 this.currentRange = data.range;
                 this._updateUI();
+
+                // Log state transitions for debugging
+                if (oldStatus !== newStatus) {
+                    console.log(`Range status: ${oldStatus} → ${newStatus ?? 'null (no range)'}`);
+                }
 
                 // Stop polling if we've reached a stable state
                 if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {

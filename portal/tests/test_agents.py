@@ -294,9 +294,7 @@ class TestDeleteAgent:
         assert log is not None
 
     def test_cannot_delete_other_users_agent(self, user, agent):
-        other_user = User.objects.create_user(
-            username="other@example.com", email="other@example.com"
-        )
+        other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
         client = get_authenticated_client(other_user)
 
         response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))

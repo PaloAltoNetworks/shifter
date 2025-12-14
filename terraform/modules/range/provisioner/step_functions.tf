@@ -44,7 +44,6 @@ resource "aws_iam_role_policy" "step_functions_lambda" {
           aws_lambda_function.create_subnet.arn,
           aws_lambda_function.create_victim.arn,
           aws_lambda_function.create_kali.arn,
-          aws_lambda_function.configure_librechat.arn,
           aws_lambda_function.cleanup.arn,
           aws_lambda_function.find_stale_ranges.arn,
         ]
@@ -105,7 +104,7 @@ resource "aws_sfn_state_machine" "provision_range" {
   role_arn = aws_iam_role.step_functions.arn
 
   definition = jsonencode({
-    Comment = "Provision a new range with subnet, victim, kali, and librechat"
+    Comment = "Provision a new range with subnet, victim, and kali"
     StartAt = "CreateSubnet"
     # Timeout after 30 minutes to prevent runaway executions
     TimeoutSeconds = 1800
@@ -185,38 +184,8 @@ resource "aws_sfn_state_machine" "provision_range" {
         }
         ResultPath = "$.create_kali_result"
         ResultSelector = {
-          "kali_info.$" = "$.Payload.kali_info"
-        }
-        Next = "ConfigureLibreChat"
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            ResultPath  = "$.error"
-            Next        = "Cleanup"
-          }
-        ]
-        Retry = [
-          {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
-            IntervalSeconds = 2
-            MaxAttempts     = 3
-            BackoffRate     = 2
-          }
-        ]
-      }
-
-      ConfigureLibreChat = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = aws_lambda_function.configure_librechat.arn
-          Payload = {
-            "range_id.$" = "$.range_id"
-          }
-        }
-        ResultPath = "$.configure_librechat_result"
-        ResultSelector = {
-          "chat_url.$" = "$.Payload.chat_url"
+          "kali_instance_id.$" = "$.Payload.kali_instance_id"
+          "kali_ip.$"          = "$.Payload.kali_ip"
         }
         Next = "Success"
         Catch = [

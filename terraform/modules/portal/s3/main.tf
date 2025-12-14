@@ -12,12 +12,24 @@ locals {
   })
 }
 
+# checkov:skip=CKV_AWS_21:Versioning intentionally disabled - ephemeral data, see #109
+# checkov:skip=CKV_AWS_145:KMS encryption deferred - see #218
+# checkov:skip=CKV_AWS_18:Access logging deferred - see #218
+# checkov:skip=CKV2_AWS_62:Event notifications deferred - see #218
+# checkov:skip=CKV_AWS_144:Cross-region replication deferred - see #219
 resource "aws_s3_bucket" "this" {
   bucket = var.bucket_name
 
   tags = merge(local.common_tags, {
     Name = var.bucket_name
   })
+}
+
+resource "aws_s3_bucket_versioning" "this" {
+  bucket = aws_s3_bucket.this.id
+  versioning_configuration {
+    status = "Disabled"
+  }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
@@ -60,9 +72,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
     id     = "abort-incomplete-multipart"
     status = "Enabled"
 
+    filter {}
+
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
     }
   }
 }
-

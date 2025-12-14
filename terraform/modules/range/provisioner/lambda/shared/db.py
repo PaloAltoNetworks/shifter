@@ -90,9 +90,10 @@ def get_range(conn, range_id) -> dict | None:
         cur.execute(
             """
             SELECT
-                id, user_id, agent_config_id, status,
+                id, user_id, agent_id, status,
                 subnet_id, subnet_cidr, subnet_index,
                 victim_ip, victim_instance_id,
+                kali_ip, kali_instance_id,
                 chat_url, error_message,
                 created_at, ready_at, destroyed_at,
                 step_function_execution_arn
@@ -108,19 +109,21 @@ def get_range(conn, range_id) -> dict | None:
         return {
             "id": row[0],
             "user_id": row[1],
-            "agent_config_id": row[2],
+            "agent_id": row[2],
             "status": row[3],
             "subnet_id": row[4],
             "subnet_cidr": row[5],
             "subnet_index": row[6],
             "victim_ip": row[7],
             "victim_instance_id": row[8],
-            "chat_url": row[9],
-            "error_message": row[10],
-            "created_at": row[11],
-            "ready_at": row[12],
-            "destroyed_at": row[13],
-            "step_function_execution_arn": row[14],
+            "kali_ip": row[9],
+            "kali_instance_id": row[10],
+            "chat_url": row[11],
+            "error_message": row[12],
+            "created_at": row[13],
+            "ready_at": row[14],
+            "destroyed_at": row[15],
+            "step_function_execution_arn": row[16],
         }
 
 
@@ -138,7 +141,7 @@ def get_agent_config(conn, agent_config_id: int) -> dict | None:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id, name, s3_key, os_type_id
+            SELECT id, name, s3_key, os_id
             FROM mission_control_agentconfig
             WHERE id = %s
             """,
@@ -152,7 +155,7 @@ def get_agent_config(conn, agent_config_id: int) -> dict | None:
             "id": row[0],
             "name": row[1],
             "s3_key": row[2],
-            "os_type_id": row[3],
+            "os_id": row[3],
         }
 
 
@@ -163,6 +166,8 @@ ALLOWED_UPDATE_FIELDS = frozenset({
     "subnet_cidr",
     "victim_ip",
     "victim_instance_id",
+    "kali_ip",
+    "kali_instance_id",
     "chat_url",
     "error_message",
     "ready_at",

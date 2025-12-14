@@ -293,7 +293,7 @@ jobs:
               "docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=${BEDROCK_REGION} -e API_KEY=${BAG_API_KEY} bedrock-gateway",
               "# Pull and start OpenWebUI (pinned version)",
               "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
-              "docker run -d --name open-webui --restart unless-stopped --network agentchat -p 3000:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=${BAG_API_KEY} -v open-webui-data:/app/backend/data ghcr.io/open-webui/open-webui:v0.6.41",
+              "docker run -d --name open-webui --restart unless-stopped --network agentchat -p 3000:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=${BAG_API_KEY} -e BYPASS_ADMIN_ACCESS_CONTROL=false -v open-webui-data:/app/backend/data ghcr.io/open-webui/open-webui:v0.6.41",
               "# Wait for OpenWebUI to be healthy",
               "echo 'Waiting for OpenWebUI health check...'",
               "for i in \$(seq 1 30); do if curl -sf http://localhost:3000/health > /dev/null 2>&1; then echo \"OpenWebUI healthy after \${i}0 seconds\"; break; fi; if [ \$i -eq 30 ]; then echo 'Health check failed after 300 seconds'; docker logs open-webui; exit 1; fi; sleep 10; done",

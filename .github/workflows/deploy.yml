@@ -1,0 +1,122 @@
+name: Deploy
+
+# Single entry point - prevents race conditions by enforcing dependency order
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================================
+  # CHANGE DETECTION
+  # ============================================================================
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      range: ${{ steps.filter.outputs.range }}
+      portal: ${{ steps.filter.outputs.portal }}
+      agentchat: ${{ steps.filter.outputs.agentchat }}
+      environment: ${{ steps.env.outputs.environment }}
+      is_dev: ${{ steps.env.outputs.is_dev }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            core:
+              - 'terraform/modules/ecr/**'
+              - 'terraform/environments/*/*.tf'
+              - '.github/workflows/_core.yml'
+              - '.github/workflows/deploy.yml'
+            range:
+              - 'terraform/modules/range/**'
+              - 'terraform/environments/*/range/**'
+              - '.github/workflows/_range.yml'
+            portal:
+              - 'terraform/modules/portal/**'
+              - 'terraform/modules/range/provisioner/**'
+              - 'terraform/environments/*/portal/**'
+              - 'portal/**'
+              - '.github/workflows/_portal.yml'
+            agentchat:
+              - 'terraform/modules/agentchat/**'
+              - 'terraform/environments/*/agentchat/**'
+              - 'agentchat/**'
+              - 'mcp/mcp-shifter/**'
+              - '.github/workflows/_agentchat.yml'
+
+      - name: Set environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            ENV="${{ github.base_ref == 'dev' && 'dev' || 'prod' }}"
+          elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+            ENV="dev"
+          else
+            ENV="prod"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> $GITHUB_OUTPUT
+
+  # ============================================================================
+  # DEPENDENCY CHAIN: Core -> Range -> Portal -> AgentChat
+  # Each component waits for its upstream dependency before running
+  # ============================================================================
+
+  core:
+    name: Core
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/_core.yml
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+      is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
+    secrets: inherit
+
+  range:
+    name: Range
+    needs: [changes, core]
+    if: |
+      always() &&
+      (needs.changes.outputs.range == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.core.result == 'success' || needs.core.result == 'skipped')
+    uses: ./.github/workflows/_range.yml
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+      is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
+    secrets: inherit
+
+  portal:
+    name: Portal
+    needs: [changes, range]
+    if: |
+      always() &&
+      (needs.changes.outputs.portal == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.range.result == 'success' || needs.range.result == 'skipped')
+    uses: ./.github/workflows/_portal.yml
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+      is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
+    secrets: inherit
+
+  agentchat:
+    name: AgentChat
+    needs: [changes, portal]
+    if: |
+      always() &&
+      (needs.changes.outputs.agentchat == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.portal.result == 'success' || needs.portal.result == 'skipped')
+    uses: ./.github/workflows/_agentchat.yml
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+      is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
+    secrets: inherit

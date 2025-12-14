@@ -290,7 +290,7 @@ jobs:
               "# Create network if not exists",
               "docker network create agentchat 2>/dev/null || true",
               "# Start BAG with secret API key",
-              "docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:80 -e AWS_REGION=${BEDROCK_REGION} -e DEFAULT_API_KEYS=${BAG_API_KEY} bedrock-gateway",
+              "docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:80 -e AWS_REGION=${BEDROCK_REGION} -e API_KEY=${BAG_API_KEY} bedrock-gateway",
               "# Pull and start OpenWebUI (pinned version)",
               "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
               "docker run -d --name open-webui --restart unless-stopped --network agentchat -p 3000:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -v open-webui-data:/app/backend/data ghcr.io/open-webui/open-webui:v0.6.41",

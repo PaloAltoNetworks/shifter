@@ -43,6 +43,19 @@ data "terraform_remote_state" "range" {
 }
 
 # ------------------------------------------------------------------------------
+# Remote State - Foundation (ECR repos)
+# ------------------------------------------------------------------------------
+
+data "terraform_remote_state" "foundation" {
+  backend = "s3"
+  config = {
+    bucket = "shifter-dev-infra-e3462f0c-c5b5-4b47-836b-efe3f657858c"
+    key    = "dev/terraform.tfstate"
+    region = "us-east-2"
+  }
+}
+
+# ------------------------------------------------------------------------------
 # VPC Peering - Portal VPC to Range VPC
 # ------------------------------------------------------------------------------
 
@@ -98,6 +111,9 @@ module "ec2" {
   # MCP server IAM permissions for RDS and Secrets Manager
   db_resource_id = data.terraform_remote_state.portal.outputs.db_resource_id
   environment    = var.environment
+
+  # ECR pull permissions for mcp-shifter
+  mcp_shifter_ecr_arn = data.terraform_remote_state.foundation.outputs.mcp_shifter_ecr_arn
 
   tags = var.tags
 }

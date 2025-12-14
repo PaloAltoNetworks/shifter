@@ -1,0 +1,96 @@
+{% extends "risk_register/base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">API Keys</h1>
+        <p class="page-subtitle">Manage API keys for programmatic access</p>
+    </div>
+</div>
+
+{% if show_key %}
+<div class="card" style="background: rgba(57, 255, 20, 0.1); border-color: var(--neon-green);">
+    <h3 class="card-title" style="color: var(--neon-green);">⚠️ Save This Key Now</h3>
+    <p style="margin-bottom: 1rem;">This is your new API key. Copy it now - you won't be able to see it again!</p>
+    <div style="background: var(--black); padding: 1rem; border-radius: 4px; font-family: monospace; word-break: break-all;">
+        {{ raw_key }}
+    </div>
+    <p style="margin-top: 1rem; font-size: 0.875rem;">
+        <strong>Key Name:</strong> {{ api_key.name }}<br>
+        <strong>Prefix:</strong> {{ api_key.prefix }}...
+    </p>
+    <a href="{% url 'risk_register:apikey_list' %}" class="btn btn-primary" style="margin-top: 1rem;">Done - Show All Keys</a>
+</div>
+{% else %}
+
+<div class="card">
+    <h3 class="card-title">Create New API Key</h3>
+    <form method="post" action="{% url 'risk_register:apikey_create' %}" style="display: flex; gap: 1rem; align-items: flex-end;">
+        {% csrf_token %}
+        <div class="form-group" style="flex: 1; margin-bottom: 0;">
+            <label class="form-label">Key Name</label>
+            <input type="text" name="name" class="form-input" required placeholder="e.g., AI Agent Production">
+        </div>
+        <button type="submit" class="btn btn-primary">Create Key</button>
+    </form>
+</div>
+
+{% if keys %}
+<div class="card" style="padding: 0;">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Prefix</th>
+                <th>Created</th>
+                <th>Last Used</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for key in keys %}
+            <tr>
+                <td>{{ key.name }}</td>
+                <td style="font-family: monospace;">{{ key.display_key }}</td>
+                <td style="color: rgba(255,255,255,0.5);">{{ key.created_at|date:"M d, Y" }}</td>
+                <td style="color: rgba(255,255,255,0.5);">
+                    {% if key.last_used_at %}{{ key.last_used_at|date:"M d, Y H:i" }}{% else %}Never{% endif %}
+                </td>
+                <td>
+                    {% if key.is_active %}
+                    <span style="color: var(--neon-green);">Active</span>
+                    {% else %}
+                    <span style="color: var(--gray);">Revoked</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if key.is_active %}
+                    <form method="post" action="{% url 'risk_register:apikey_revoke' pk=key.pk %}" style="display: inline;" onsubmit="return confirm('Revoke this API key?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-danger btn-sm">Revoke</button>
+                    </form>
+                    {% else %}
+                    <span style="color: var(--gray);">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card empty-state">
+    <p>No API keys created yet.</p>
+</div>
+{% endif %}
+
+{% endif %}
+
+<div class="card" style="margin-top: 1.5rem;">
+    <h3 class="card-title">API Usage</h3>
+    <p style="margin-bottom: 1rem;">Use your API key in the <code>X-API-Key</code> header:</p>
+    <pre style="background: var(--black); padding: 1rem; border-radius: 4px; overflow-x: auto;"><code>curl -H "X-API-Key: rr_live_your_key_here" \
+     {{ request.scheme }}://{{ request.get_host }}/api/v1/risks/</code></pre>
+</div>
+{% endblock %}

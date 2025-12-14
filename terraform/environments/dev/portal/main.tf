@@ -207,6 +207,45 @@ resource "aws_secretsmanager_secret_version" "app" {
 }
 
 # ------------------------------------------------------------------------------
+# OpenWebUI Database Credentials
+# ------------------------------------------------------------------------------
+# OpenWebUI uses a separate database in the same RDS instance.
+# After terraform apply, manually create the database and user:
+#   CREATE DATABASE openwebui;
+#   CREATE USER openwebui WITH PASSWORD '<from-secrets-manager>';
+#   GRANT ALL PRIVILEGES ON DATABASE openwebui TO openwebui;
+#   \c openwebui
+#   GRANT ALL ON SCHEMA public TO openwebui;
+
+resource "random_password" "openwebui_db_password" {
+  length  = 32
+  special = false
+}
+
+# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal MVP. See #213
+resource "aws_secretsmanager_secret" "openwebui_db" {
+  name                    = "shifter-${local.name_prefix}-openwebui-db"
+  description             = "OpenWebUI PostgreSQL database credentials"
+  recovery_window_in_days = 0
+
+  tags = merge(var.tags, {
+    Name = "shifter-${local.name_prefix}-openwebui-db"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "openwebui_db" {
+  secret_id = aws_secretsmanager_secret.openwebui_db.id
+  secret_string = jsonencode({
+    username     = "openwebui"
+    password     = random_password.openwebui_db_password.result
+    host         = module.rds.db_instance_address
+    port         = 5432
+    dbname       = "openwebui"
+    database_url = "postgresql://openwebui:${random_password.openwebui_db_password.result}@${module.rds.db_instance_address}:5432/openwebui"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Provisioner (Step Functions + Lambda for range provisioning)
 # ------------------------------------------------------------------------------
 

@@ -43,5 +43,8 @@ module "ec2" {
   instance_type    = var.ec2_instance_type
   root_volume_size = var.ec2_root_volume_size
 
+  # OpenWebUI PostgreSQL credentials (from Portal RDS)
+  openwebui_db_secret_arn = data.terraform_remote_state.portal.outputs.openwebui_db_secret_arn
+
   tags = var.tags
 }

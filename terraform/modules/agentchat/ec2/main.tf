@@ -169,6 +169,37 @@ resource "aws_iam_role_policy" "rds_connect" {
   })
 }
 
+# ECR pull permissions for mcp-shifter
+resource "aws_iam_role_policy" "ecr_pull" {
+  count = var.mcp_shifter_ecr_arn != "" ? 1 : 0
+  name  = "ecr-pull"
+  role  = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EcrGetToken"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "EcrPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+        ]
+        Resource = var.mcp_shifter_ecr_arn
+      }
+    ]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # Security Group
 # ------------------------------------------------------------------------------

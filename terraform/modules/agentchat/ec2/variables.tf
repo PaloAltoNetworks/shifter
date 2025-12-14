@@ -49,3 +49,9 @@ variable "environment" {
   description = "Environment name (dev, prod) - used for SSH key secret pattern"
   type        = string
 }
+
+variable "mcp_shifter_ecr_arn" {
+  description = "ARN of the mcp-shifter ECR repository"
+  type        = string
+  default     = ""
+}

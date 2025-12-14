@@ -295,6 +295,23 @@ jobs:
           echo "rds_database=$RDS_DATABASE" >> $GITHUB_OUTPUT
           echo "rds_username=$RDS_USERNAME" >> $GITHUB_OUTPUT
 
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push mcp-shifter to ECR
+        id: build-push
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPO_NAME: shifter-${{ needs.set-env.outputs.environment == 'dev' && 'dev-' || '' }}mcp-shifter
+        run: |
+          IMAGE_TAG="${ECR_REGISTRY}/${ECR_REPO_NAME}:latest"
+          echo "Building mcp-shifter image..."
+          docker build -t "$IMAGE_TAG" ./mcp/mcp-shifter
+          echo "Pushing to ECR..."
+          docker push "$IMAGE_TAG"
+          echo "image_uri=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
       - name: Get Instance ID
         id: instance
         run: |
@@ -355,6 +372,8 @@ jobs:
           RDS_PORT: ${{ steps.mcp_secrets.outputs.rds_port }}
           RDS_DATABASE: ${{ steps.mcp_secrets.outputs.rds_database }}
           RDS_USERNAME: ${{ steps.mcp_secrets.outputs.rds_username }}
+          MCP_SHIFTER_IMAGE: ${{ steps.build-push.outputs.image_uri }}
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
         run: |
           # Build SSM parameters JSON with env vars expanded
           SSM_PARAMS=$(cat <<EOF
@@ -368,11 +387,9 @@ jobs:
               "cd src",
               "docker build -f Dockerfile_ecs -t bedrock-gateway .",
               "cd /opt",
-              "# Clone or update shifter repo for mcp-shifter",
-              "if [ -d shifter ]; then cd shifter && git pull; else git clone https://github.com/Brad-Edwards/shifter.git && cd shifter; fi",
-              "# Build mcp-shifter image",
-              "cd mcp/mcp-shifter",
-              "docker build -t mcp-shifter .",
+              "# Login to ECR and pull mcp-shifter image",
+              "aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin ${ECR_REGISTRY}",
+              "docker pull ${MCP_SHIFTER_IMAGE}",
               "# Stop existing containers",
               "docker stop open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
               "docker rm open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
@@ -395,8 +412,8 @@ jobs:
               "MCPEOF",
               "# Start BAG with secret API key",
               "docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=${BEDROCK_REGION} -e API_KEY=${BAG_API_KEY} bedrock-gateway",
-              "# Start mcp-shifter",
-              "docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=${BEDROCK_REGION} -e COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID} -e COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID} -e COGNITO_ISSUER=${COGNITO_ISSUER} -e RDS_HOSTNAME=${RDS_HOSTNAME} -e RDS_PORT=${RDS_PORT} -e RDS_DATABASE=${RDS_DATABASE} -e RDS_USERNAME=${RDS_USERNAME} mcp-shifter",
+              "# Start mcp-shifter from ECR image",
+              "docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=${BEDROCK_REGION} -e COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID} -e COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID} -e COGNITO_ISSUER=${COGNITO_ISSUER} -e RDS_HOSTNAME=${RDS_HOSTNAME} -e RDS_PORT=${RDS_PORT} -e RDS_DATABASE=${RDS_DATABASE} -e RDS_USERNAME=${RDS_USERNAME} ${MCP_SHIFTER_IMAGE}",
               "# Pull and start OpenWebUI (pinned version) with PostgreSQL",
               "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
               "docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=${BAG_API_KEY} -e BYPASS_ADMIN_ACCESS_CONTROL=false -e DATABASE_URL=${DATABASE_URL} ghcr.io/open-webui/open-webui:v0.6.41",

@@ -33,12 +33,15 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "health_check",
     "health_check.db",
     "health_check.cache",
     "health_check.storage",
     "mozilla_django_oidc",
+    "rest_framework",
     "mission_control.apps.MissionControlConfig",
+    "risk_register.apps.RiskRegisterConfig",
 ]
 
 MIDDLEWARE = [
@@ -98,7 +101,9 @@ DATABASES = {
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
@@ -116,7 +121,9 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    },
 }
 
 # Default primary key field type
@@ -150,10 +157,10 @@ _oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "")
 _oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
 
 # Always define OIDC_OP_* variables to avoid runtime errors
-OIDC_OP_AUTHORIZATION_ENDPOINT = ""
-OIDC_OP_TOKEN_ENDPOINT = ""
-OIDC_OP_USER_ENDPOINT = ""
-OIDC_OP_JWKS_ENDPOINT = ""
+OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105 - not a password, placeholder URL
+OIDC_OP_TOKEN_ENDPOINT = ""  # nosec B105
+OIDC_OP_USER_ENDPOINT = ""  # nosec B105
+OIDC_OP_JWKS_ENDPOINT = ""  # nosec B105
 
 if _oidc_auth_domain and _oidc_issuer:
     # OAuth endpoints use the auth domain
@@ -164,7 +171,11 @@ if _oidc_auth_domain and _oidc_issuer:
     OIDC_OP_JWKS_ENDPOINT = f"{_oidc_issuer}/.well-known/jwks.json"
 else:
     import warnings
-    warnings.warn("OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.", RuntimeWarning)
+
+    warnings.warn(
+        "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
+        RuntimeWarning,
+    )
 # Token verification
 OIDC_RP_SIGN_ALGO = "RS256"
 
@@ -194,14 +205,18 @@ OIDC_USERNAME_ALGO = "config.oidc.generate_username"
 # Shifter Configuration
 # ------------------------------------------------------------------------------
 
-SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "bedwards@paloaltonetworks.com")
+SHIFTER_SUPPORT_EMAIL = os.environ.get(
+    "SHIFTER_SUPPORT_EMAIL", "bedwards@paloaltonetworks.com"
+)
 
 # ------------------------------------------------------------------------------
 # AWS S3 Configuration
 # ------------------------------------------------------------------------------
 
 AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
-AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
+AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get(
+    "AWS_S3_REGION", "us-east-2"
+)
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
 
 # Step Functions State Machine ARNs (for range provisioning)
@@ -212,3 +227,19 @@ TEARDOWN_STATE_MACHINE_ARN = os.environ.get("TEARDOWN_STATE_MACHINE_ARN", "")
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
 AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+
+# ------------------------------------------------------------------------------
+# Django REST Framework Configuration
+# ------------------------------------------------------------------------------
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "risk_register.api.authentication.APIKeyAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
+}

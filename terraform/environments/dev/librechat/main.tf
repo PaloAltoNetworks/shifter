@@ -55,4 +55,3 @@ module "librechat" {
 
   tags = var.tags
 }
-

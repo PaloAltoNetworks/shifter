@@ -9,4 +9,3 @@ module "portal_ecr" {
     Component = "portal"
   }
 }
-

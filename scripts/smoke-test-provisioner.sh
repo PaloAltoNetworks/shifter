@@ -296,15 +296,13 @@ section "9. Database Connectivity (via Lambda)"
 info "Testing find_stale_ranges Lambda (reads from DB)"
 echo "Invoking Lambda to verify DB connectivity..."
 
-INVOKE_RESULT=$(aws lambda invoke \
+if INVOKE_RESULT=$(aws lambda invoke \
     --function-name "${NAME_PREFIX}-find-stale-ranges" \
     --region "$REGION" \
     --profile "$PROFILE" \
     --payload '{}' \
     --cli-binary-format raw-in-base64-out \
-    /tmp/lambda-response.json 2>&1)
-
-if [ $? -eq 0 ]; then
+    /tmp/lambda-response.json 2>&1); then
     RESPONSE=$(cat /tmp/lambda-response.json)
 
     # Check if response contains expected fields

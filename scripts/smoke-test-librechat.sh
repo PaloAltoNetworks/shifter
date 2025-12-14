@@ -12,7 +12,7 @@ make init
 
 # Wait for health (max 90s)
 echo "Waiting for LibreChat to be healthy..."
-for i in {1..18}; do
+for _ in {1..18}; do
   if curl -sf http://localhost:3080/api/health >/dev/null 2>&1; then
     echo "LibreChat is healthy"
     make down
@@ -25,4 +25,3 @@ echo "Health check failed after 90s"
 docker compose logs
 make down
 exit 1
-

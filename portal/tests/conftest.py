@@ -21,8 +21,7 @@ def authenticated_client(db):
     def _make_client(user=None, email="test@example.com"):
         if user is None:
             user, _ = User.objects.get_or_create(
-                username=email,
-                defaults={"email": email}
+                username=email, defaults={"email": email}
             )
 
         client = Client()

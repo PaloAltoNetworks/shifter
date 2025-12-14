@@ -152,7 +152,9 @@ def validate_file_extension(filename: str) -> FileFormat:
     fmt = get_format_for_extension(extension)
     if not fmt:
         allowed = ", ".join(get_allowed_extensions())
-        raise ValidationError(f"Extension '{extension}' not allowed. Allowed: {allowed}")
+        raise ValidationError(
+            f"Extension '{extension}' not allowed. Allowed: {allowed}"
+        )
 
     return fmt
 

@@ -46,14 +46,14 @@ Variables: `TF_VARS_{ENV}_AGENTCHAT` GitHub secret.
 
 ## Configuration
 
-After first login to OpenWebUI:
+Connection is pre-configured via environment variables during deployment. After first login:
 
-1. Go to Admin Panel → Settings → Connections
-2. Add new OpenAI connection:
-   - URL: `http://bedrock-gateway:80/api/v1`
-   - API Key: (retrieve from AWS Secrets Manager: `shifter-{env}-agentchat-bag-api-key`)
-3. Verify connection
-4. Bedrock models will appear in model selector
+1. Create admin account (first user becomes admin)
+2. Apply manual settings per [manual-config.md](manual-config.md)
+
+**Connection details (pre-configured):**
+- URL: `http://bedrock-gateway:8080/api/v1`
+- API Key: Retrieved from Secrets Manager (`shifter-{env}-agentchat-bag-api-key`)
 
 ## Terraform
 
@@ -74,6 +74,6 @@ Environments: `environments/{dev,prod}/agentchat/`
 |---------|----------------|
 | Network | No ingress ports - access only via SSM tunnel |
 | API Key | Stored in AWS Secrets Manager (not hardcoded) |
-| Bedrock | IAM policy restricts to Claude Sonnet 4.5 models only |
+| Bedrock | IAM policy restricts to Claude and DeepSeek models |
 | Logs | Docker log rotation enabled to prevent disk fill |
 | Supply Chain | BAG cloned from forked repo (Brad-Edwards/bedrock-access-gateway) |

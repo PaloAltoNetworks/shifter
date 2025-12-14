@@ -31,11 +31,6 @@ output "create_kali_lambda_arn" {
   value       = aws_lambda_function.create_kali.arn
 }
 
-output "configure_librechat_lambda_arn" {
-  description = "ARN of the configure_librechat Lambda function"
-  value       = aws_lambda_function.configure_librechat.arn
-}
-
 output "cleanup_lambda_arn" {
   description = "ARN of the cleanup Lambda function"
   value       = aws_lambda_function.cleanup.arn
@@ -50,12 +45,11 @@ output "find_stale_ranges_lambda_arn" {
 output "lambda_function_names" {
   description = "Names of all Lambda functions"
   value = {
-    create_subnet       = aws_lambda_function.create_subnet.function_name
-    create_victim       = aws_lambda_function.create_victim.function_name
-    create_kali         = aws_lambda_function.create_kali.function_name
-    configure_librechat = aws_lambda_function.configure_librechat.function_name
-    cleanup             = aws_lambda_function.cleanup.function_name
-    find_stale_ranges   = aws_lambda_function.find_stale_ranges.function_name
+    create_subnet     = aws_lambda_function.create_subnet.function_name
+    create_victim     = aws_lambda_function.create_victim.function_name
+    create_kali       = aws_lambda_function.create_kali.function_name
+    cleanup           = aws_lambda_function.cleanup.function_name
+    find_stale_ranges = aws_lambda_function.find_stale_ranges.function_name
   }
 }
 

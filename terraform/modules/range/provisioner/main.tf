@@ -4,7 +4,6 @@
 # - create_subnet: Creates subnet in Range VPC
 # - create_victim: Launches victim EC2 with XDR agent
 # - create_kali: Sets up Kali attack environment (stub)
-# - configure_librechat: Configures chat interface (stub)
 # - cleanup: Deletes all range resources
 
 locals {
@@ -154,44 +153,6 @@ resource "aws_lambda_function" "create_kali" {
 
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-create-kali"
-    Module = "provisioner"
-  })
-}
-
-# ------------------------------------------------------------------------------
-# Configure LibreChat Lambda (stub)
-# ------------------------------------------------------------------------------
-
-data "archive_file" "configure_librechat" {
-  type        = "zip"
-  source_dir  = "${local.build_dir}/configure_librechat_pkg"
-  output_path = "${local.build_dir}/configure_librechat.zip"
-}
-
-resource "aws_lambda_function" "configure_librechat" {
-  function_name = "${var.name_prefix}-configure-librechat"
-  role          = aws_iam_role.lambda.arn
-  handler       = "handler.handler"
-  runtime       = local.lambda_runtime
-  timeout       = var.lambda_timeout
-  memory_size   = var.lambda_memory
-
-  filename         = data.archive_file.configure_librechat.output_path
-  source_code_hash = data.archive_file.configure_librechat.output_base64sha256
-
-  vpc_config {
-    subnet_ids         = var.portal_subnet_ids
-    security_group_ids = [aws_security_group.lambda.id]
-  }
-
-  environment {
-    variables = merge(local.common_env_vars, {
-      LIBRECHAT_BASE_URL = var.librechat_base_url
-    })
-  }
-
-  tags = merge(var.tags, {
-    Name   = "${var.name_prefix}-configure-librechat"
     Module = "provisioner"
   })
 }

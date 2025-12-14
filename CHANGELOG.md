@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.3] - 2025-12-13
 ### Added
 - Risk Register Django app
+-
+## [0.4.2] - 2025-12-13
+
+### Added
+- OpenWebUI + Bedrock Access Gateway (BAG) for AgentChat
+- Sonnet 4.5 and DeepSeek R1 models for AgentChat
+- AgentChat infrastructure
+- Checkov IaC security scanning in CI and pre-commit
+- Dockerfile HEALTHCHECK for portal container
+
+### Changed
+- SonarCloud coverage extended to all modules
+- GitHub Actions workflows: explicit permissions, removed workflow_dispatch inputs where not needed
+- Use SonarQube Cloud automatic analysis instead of CI/CD workflows
+
+### Security
+- Full review of lint (ruff, bandit, eslint) and IaC (checkov) findings
+- Fixed critical issues: workflow permissions, Dockerfile healthcheck
+- Created issues (#214-222) for deferred security hardening (WAF, flow logs, KMS, etc.)
+- All checkov findings now have explicit skip comments with issue references
+
+## [0.4.1] - 2025-12-12
+
+### Removed
+- LibreChat
+- LiteLLM
 
 ## [0.4.0] - 2025-12-12
 

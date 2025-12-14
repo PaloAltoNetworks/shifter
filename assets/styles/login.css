@@ -1,0 +1,245 @@
+/* ================== FONT STACKS ================== */
+/* ========== FONT WEIGHTS ========== */
+/* =========== FONT SIZES =========== */
+/* ====== NEW COLOR PALETTE ====== */
+/* === GRAY === */
+/* === STONE === */
+/* === BLUE === */
+/* === STEEL BLUE === */
+/* === RED === */
+/* === ORANGE === */
+/* === BRAND(green) === */
+/* === GREEN === */
+/* === YELLOW === */
+/* ================== COLOR USAGE ================== */
+/* ================ for light theme =============== */
+/* ================ for dark theme =============== */
+/* =========== DIFFERENT COMPONENTS SETTINGS =========== */
+.xdr-dark-theme {
+  /* ======== PRIMARY COLOR VARIATIONS ======== */
+  --xdr-primary: #128df3;
+  --xdr-on-primary: #fff;
+  /* ======== /PRIMARY COLOR VARIATIONS ======== */
+  /* ======== MAIN BACKGROUND/TEXT VARIATIONS ======== */
+  --xdr-background: #1f1f1f;
+  --xdr-background-rgb: 31;
+  --xdr-on-background: #eaebeb;
+  --xdr-on-background-secondary: #b8b8b8;
+  --xdr-disabled-text: #707070;
+  /* ======== /MAIN BACKGROUND/TEXT VARIATIONS ======== */
+  /* ======== SURFACE BACKGROUND/TEXT/SHADOW VARIATIONS ======== */
+  --xdr-surface: #151515;
+  --xdr-surface-rgb: 26, 26, 26;
+  --xdr-surface-secondary: #000;
+  --xdr-surface-box-shadow: #000;
+  --xdr-surface-box-shadow-dark: #000;
+  --xdr-surface-box-shadow-floating-object: rgba(0, 0, 0, 0.7);
+  --xdr-surface-box-shadow-secondary: #000;
+  /* ======== /SURFACE BACKGROUND/TEXT/SHADOW VARIATIONS ======== */
+  /* ======== BUTTONS, TABS +MORE ======== */
+  /* === PRIMARY === */
+  --xdr-on-primary-new: #000;
+  --xdr-primary-new: #fff;
+  --xdr-primary-bg--hover: #f4f5f5;
+  --xdr-primary-bg--selected: #eaebeb;
+  --xdr-primary-bg--disabled: #707070;
+  --xdr-tertiary-bg: #1f1f1f;
+  --xdr-hover: #333;
+  --xdr-selected: #484848;
+  --xdr-locked-bg: #484848;
+  /* === SECONDARY === */
+  /* === CLEAR BUTTON === */
+  /* ======== /BUTTONS, TABS +MORE ======== */
+  /* ======== BORDERS ======== */
+  --xdr-border: #484848;
+  --xdr-border-extra-soft: #333;
+  --xdr-border-medium: #575757;
+  --xdr-border-strong: #707070;
+  --xdr-border-fade: linear-gradient(90deg, #484848 46.3%, rgba(var(--xdr-background-rgb), var(--xdr-background-rgb), var(--xdr-background-rgb), 0) 100%);
+  --xdr-selected-bg-fade: linear-gradient(90deg, #000 34.62%, rgba(0, 0, 0, 0) 88.57%);
+  /* ======== /BORDERS ======== */
+  /* ======== LINK COLOR VARIATIONS ======== */
+  --xdr-link: #128df3;
+  /* ======== /LINK COLOR VARIATIONS ======== */
+  /* ======== OTHERS ======== */
+  --xdr-pseudo: #484848;
+  --xdr-placeholder: #929191;
+  /* ======== /OTHERS ======== */
+  /* ======== DEPRECATED(WILL BE REMOVED) ======== */
+  --xdr-primary100: #f4f5f5;
+  --xdr-primary200: #eaebeb;
+  --xdr-primary300: #006fcc;
+  --xdr-primary-100: #128df3;
+  --xdr-background-old: #1f1f1f;
+  --xdr-background-old-rgb: 0;
+  --xdr-background-old-rgb-inverted: 255;
+  --xdr-background-primary: #1a1a1a;
+  --xdr-background-primary-100: #19222e;
+  --xdr-background-highlight: #19222e;
+  --xdr-background-gradient-100: #006fcc;
+  --xdr-background-gradient-200: #19222e;
+  --xdr-background-gradient-300: #484848;
+  --xdr-background-gradient100: #575757;
+  --xdr-background-gradient200: #484848;
+  --xdr-background-gradient300: #354252;
+  --xdr-background-gradient400: #929191;
+  --xdr-surface-primary: #333;
+  --xdr-surface-primary100: rgba(18, 141, 243, 0.5);
+  --xdr-on-surface-100: #b8b8b8;
+  --xdr-border-100: #929191;
+  --xdr-border-info: #dfe5eb;
+  --xdr-surface-border: 0;
+  --xdr-surface-link: #eaebeb;
+  --xdr-surface-link-hover: #333;
+  --xdr-list-hover-overlay-opacity: 0.08;
+  --xdr-transparent: rgba(0, 0, 0, 0);
+}
+
+@keyframes slide-in {
+  100% {
+    transform: translateX(0%);
+  }
+}
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  min-width: 1024px;
+  background: var(--xdr-background);
+  color: var(--xdr-primary-text);
+  font-size: calc(10px + 0.2vw);
+  font-weight: 400;
+  font-family: Lato, "Assistant", sans-serif;
+}
+
+.app-wrap {
+  display: flex;
+  height: 100%;
+  position: relative;
+}
+.app-wrap .background,
+.app-wrap .circle,
+.app-wrap svg {
+  width: 100%;
+  height: 100%;
+}
+.app-wrap .circle svg {
+  transform: scale(1.4);
+}
+.app-wrap button {
+  display: flex;
+  height: 28px;
+  padding: 0 18px 0 10px;
+  color: var(--xdr-on-primary-new);
+  background: var(--xdr-primary-new);
+  border-radius: 20px;
+  cursor: pointer;
+  border: 0;
+  font-size: 12px;
+  font-weight: 600;
+  align-items: center;
+  font-family: Lato, "Assistant", sans-serif;
+}
+.app-wrap button:active, .app-wrap button:hover {
+  background-color: var(--xdr-primary-bg--hover);
+}
+.app-wrap button .lock-icon {
+  height: 31px;
+  width: 31px;
+}
+.app-wrap .right-side {
+  display: flex;
+  height: 100%;
+  right: 0;
+  position: absolute;
+  box-shadow: 0 0 12px var(--xdr-surface-box-shadow-floating-object);
+  transform: translateX(100%);
+  opacity: 0.98;
+  overflow: hidden;
+  background-color: var(--xdr-background);
+  will-change: transform;
+  width: 40vw;
+  justify-content: center;
+}
+.app-wrap .right-side.slide-in {
+  animation: slide-in 0.5s forwards;
+}
+.app-wrap .right-side .signin-wrap {
+  align-items: center;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+}
+.signin-wrap .email-input {
+  border: 0;
+  border-bottom: 1px solid var(--xdr-border-medium);
+  background-color: var(--xdr-background);
+  color: var(--xdr-on-background);
+  margin-bottom: 10px;
+}
+.signin-wrap .email-input:focus {
+  outline: none;
+  border-color: var(--xdr-on-background);
+}
+.app-wrap .background {
+  align-items: flex-start;
+  margin: 0 20vw 0 15vw;
+  position: relative;
+}
+.app-wrap .background .logo {
+  position: absolute;
+  top: calc(50vh + 2vw);
+  left: -20px;
+}
+.app-wrap .background .logo img {
+  width: calc(200px + 9vw);
+  max-width: 420px;
+}
+@media (min-width: 2000px) {
+  .app-wrap .background {
+    margin: 0 20vw;
+  }
+  .app-wrap .background .logo {
+    top: 55vh;
+    left: 0;
+  }
+}
+
+.border {
+  display: flex;
+  margin: 25px 0;
+  color: var(--xdr-on-primary);
+  font-weight: bold;
+  align-items: center;
+}
+.border .fade-border {
+  display: block;
+  width: 130px;
+  height: 1px;
+  margin: 0 20px;
+}
+.border .fade-border.left {
+  background: linear-gradient(270deg, #0C6 2.89%, rgba(255, 255, 255, 0) 96.58%);
+}
+.border .fade-border.right {
+  background: linear-gradient(90deg, #0C6 2.89%, rgba(255, 255, 255, 0) 96.58%);
+}
+
+a {
+  text-align: unset;
+  color: var(--xdr-link);
+  font-family: Lato, "Assistant", sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: 0;
+  text-decoration: none;
+  cursor: pointer;
+}
+a:hover {
+  text-decoration: underline;
+}

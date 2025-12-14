@@ -26,9 +26,7 @@ def get_authenticated_client(user):
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(
-        username="test@example.com", email="test@example.com"
-    )
+    return User.objects.create_user(username="test@example.com", email="test@example.com")
 
 
 @pytest.fixture
@@ -104,9 +102,7 @@ class TestUploadAgent:
 
     def test_requires_file(self, user):
         client = get_authenticated_client(user)
-        response = client.post(
-            reverse("mission_control:upload_agent"), {"name": "Test"}
-        )
+        response = client.post(reverse("mission_control:upload_agent"), {"name": "Test"})
         assert response.status_code == 302
         # Should redirect with error message
 
@@ -298,9 +294,7 @@ class TestDeleteAgent:
         assert log is not None
 
     def test_cannot_delete_other_users_agent(self, user, agent):
-        other_user = User.objects.create_user(
-            username="other@example.com", email="other@example.com"
-        )
+        other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
         client = get_authenticated_client(other_user)
 
         response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))

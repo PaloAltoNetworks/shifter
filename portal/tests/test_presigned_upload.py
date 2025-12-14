@@ -30,9 +30,7 @@ def get_authenticated_client(user):
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(
-        username="test@example.com", email="test@example.com"
-    )
+    return User.objects.create_user(username="test@example.com", email="test@example.com")
 
 
 @pytest.fixture
@@ -146,9 +144,7 @@ class TestInitiateUpload:
     def test_requires_login(self, client):
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps(
-                {"name": "Test", "filename": "test.msi", "file_size": 1024}
-            ),
+            data=json.dumps({"name": "Test", "filename": "test.msi", "file_size": 1024}),
             content_type="application/json",
         )
         assert response.status_code == 302
@@ -170,9 +166,7 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps(
-                {"name": "Test Agent", "filename": "test.msi", "file_size": 1024 * 1024}
-            ),
+            data=json.dumps({"name": "Test Agent", "filename": "test.msi", "file_size": 1024 * 1024}),
             content_type="application/json",
         )
 
@@ -256,9 +250,7 @@ class TestInitiateUpload:
     def test_rejects_over_quota(self, user, agent, settings):
         """User exceeding storage quota is rejected."""
         settings.AGENT_MAX_FILE_SIZE_MB = 2048
-        settings.AGENT_USER_STORAGE_QUOTA_MB = (
-            1024  # 1 GB quota, existing agent uses 1 GB
-        )
+        settings.AGENT_USER_STORAGE_QUOTA_MB = 1024  # 1 GB quota, existing agent uses 1 GB
 
         client = get_authenticated_client(user)
         response = client.post(
@@ -291,9 +283,7 @@ class TestInitiateUpload:
         # First upload
         response1 = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps(
-                {"name": "First", "filename": "first.msi", "file_size": 1024}
-            ),
+            data=json.dumps({"name": "First", "filename": "first.msi", "file_size": 1024}),
             content_type="application/json",
         )
         assert response1.status_code == 200
@@ -301,9 +291,7 @@ class TestInitiateUpload:
         # Second upload should be blocked
         response2 = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps(
-                {"name": "Second", "filename": "second.msi", "file_size": 1024}
-            ),
+            data=json.dumps({"name": "Second", "filename": "second.msi", "file_size": 1024}),
             content_type="application/json",
         )
         assert response2.status_code == 409
@@ -316,9 +304,7 @@ class TestInitiateUpload:
 
         client = get_authenticated_client(user)
 
-        with patch(
-            "mission_control.views.generate_presigned_upload_url"
-        ) as mock_presign:
+        with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
             mock_presign.return_value = (
                 "https://s3.example.com/presigned",
                 "agents/1/test.msi",
@@ -466,9 +452,7 @@ class TestCompleteUpload:
     def test_token_user_mismatch(self, user, settings):
         """Token from different user is rejected."""
         settings.AGENT_UPLOAD_URL_EXPIRES = 3600
-        other_user = User.objects.create_user(
-            username="other@example.com", email="other@example.com"
-        )
+        other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
 
         # Generate token for other user
         token = generate_upload_token(
@@ -544,9 +528,7 @@ class TestCancelUpload:
         client = get_authenticated_client(user)
 
         # First set up an upload in progress
-        with patch(
-            "mission_control.views.generate_presigned_upload_url"
-        ) as mock_presign:
+        with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
             mock_presign.return_value = (
                 "https://s3.example.com/presigned",
                 "agents/1/test.msi",
@@ -554,9 +536,7 @@ class TestCancelUpload:
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
-                data=json.dumps(
-                    {"name": "Test", "filename": "test.msi", "file_size": 1024}
-                ),
+                data=json.dumps({"name": "Test", "filename": "test.msi", "file_size": 1024}),
                 content_type="application/json",
             )
             assert response.status_code == 200
@@ -565,9 +545,7 @@ class TestCancelUpload:
         # Verify concurrent upload is blocked
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps(
-                {"name": "Second", "filename": "second.msi", "file_size": 1024}
-            ),
+            data=json.dumps({"name": "Second", "filename": "second.msi", "file_size": 1024}),
             content_type="application/json",
         )
         assert response.status_code == 409
@@ -582,9 +560,7 @@ class TestCancelUpload:
             assert response.status_code == 200
 
         # Now another upload should work
-        with patch(
-            "mission_control.views.generate_presigned_upload_url"
-        ) as mock_presign:
+        with patch("mission_control.views.generate_presigned_upload_url") as mock_presign:
             mock_presign.return_value = (
                 "https://s3.example.com/presigned2",
                 "agents/1/new.msi",
@@ -592,9 +568,7 @@ class TestCancelUpload:
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
-                data=json.dumps(
-                    {"name": "New Upload", "filename": "new.msi", "file_size": 1024}
-                ),
+                data=json.dumps({"name": "New Upload", "filename": "new.msi", "file_size": 1024}),
                 content_type="application/json",
             )
             assert response.status_code == 200
@@ -660,9 +634,7 @@ class TestUploadIntegration:
     @patch("mission_control.views.generate_presigned_upload_url")
     @patch("mission_control.views.verify_s3_object_exists")
     @patch("mission_control.views.tag_s3_object")
-    def test_full_upload_flow(
-        self, mock_tag, mock_verify, mock_presign, user, settings
-    ):
+    def test_full_upload_flow(self, mock_tag, mock_verify, mock_presign, user, settings):
         """Test complete upload flow: initiate -> complete."""
         settings.AGENT_MAX_FILE_SIZE_MB = 2048
         settings.AGENT_USER_STORAGE_QUOTA_MB = 5120

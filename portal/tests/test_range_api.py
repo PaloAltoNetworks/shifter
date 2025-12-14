@@ -34,9 +34,7 @@ def test_agent(db, django_user_model, windows_os):
 def mock_provisioner():
     """Mock the provisioner service to avoid AWS calls."""
     with (
-        patch(
-            "mission_control.services.provisioner.start_provisioning"
-        ) as mock_provision,
+        patch("mission_control.services.provisioner.start_provisioning") as mock_provision,
         patch("mission_control.services.provisioner.start_teardown") as mock_teardown,
     ):
         mock_provision.return_value = None  # No ARN in test mode
@@ -125,9 +123,7 @@ class TestLaunchRange:
 
     def test_successful_launch_with_step_functions(self, client, test_agent):
         """Test launch with mocked Step Functions."""
-        with patch(
-            "mission_control.services.provisioner._get_sfn_client"
-        ) as mock_client:
+        with patch("mission_control.services.provisioner._get_sfn_client") as mock_client:
             mock_client.return_value.start_execution.return_value = {
                 "executionArn": "arn:aws:states:us-east-2:123:execution:test:abc"
             }
@@ -138,9 +134,7 @@ class TestLaunchRange:
                 from django.conf import settings
 
                 original_arn = getattr(settings, "PROVISION_STATE_MACHINE_ARN", "")
-                settings.PROVISION_STATE_MACHINE_ARN = (
-                    "arn:aws:states:us-east-2:123:stateMachine:test"
-                )
+                settings.PROVISION_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123:stateMachine:test"
 
                 try:
                     response = client.post(
@@ -156,10 +150,7 @@ class TestLaunchRange:
 
                     # Verify execution ARN was stored
                     range_obj = Range.objects.get(id=data["range"]["id"])
-                    assert (
-                        range_obj.step_function_execution_arn
-                        == "arn:aws:states:us-east-2:123:execution:test:abc"
-                    )
+                    assert range_obj.step_function_execution_arn == "arn:aws:states:us-east-2:123:execution:test:abc"
                 finally:
                     settings.PROVISION_STATE_MACHINE_ARN = original_arn
 
@@ -244,7 +235,7 @@ class TestDestroyRange:
         client.force_login(test_agent.user)
 
         # Create a ready range
-        Range.objects.create(
+        range_obj = Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.READY,
@@ -254,7 +245,10 @@ class TestDestroyRange:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["range"]["status"] == "destroying"
+
+        # Verify range was marked as destroyed in DB
+        range_obj.refresh_from_db()
+        assert range_obj.status == Range.Status.DESTROYED
 
     def test_can_destroy_failed_range(self, client, test_agent, settings):
         """Failed ranges can be destroyed to clean up."""
@@ -262,7 +256,7 @@ class TestDestroyRange:
         client.force_login(test_agent.user)
 
         # Create a failed range
-        Range.objects.create(
+        range_obj = Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.FAILED,
@@ -273,7 +267,10 @@ class TestDestroyRange:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["range"]["status"] == "destroying"
+
+        # Verify range was marked as destroyed in DB
+        range_obj.refresh_from_db()
+        assert range_obj.status == Range.Status.DESTROYED
 
 
 @pytest.mark.django_db
@@ -430,9 +427,7 @@ class TestSubnetIndexAllocation:
         with pytest.raises(ValueError, match="No subnet indices available"):
             Range.allocate_subnet_index()
 
-    def test_capacity_error_returns_503(
-        self, client, test_agent, settings, django_user_model
-    ):
+    def test_capacity_error_returns_503(self, client, test_agent, settings, django_user_model):
         """API should return 503 when no capacity available."""
         settings.PROVISION_STATE_MACHINE_ARN = ""
         client.force_login(test_agent.user)

@@ -130,6 +130,12 @@ variable "lambda_memory" {
   default     = 256
 }
 
+# Chat Configuration
+variable "chat_base_url" {
+  description = "Base URL for the chat/MCP interface (e.g., https://chat.example.com)"
+  type        = string
+}
+
 # Monitoring Configuration
 variable "enable_alarms" {
   description = "Enable CloudWatch alarms for Step Functions and Lambda"

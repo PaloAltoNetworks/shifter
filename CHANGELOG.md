@@ -7,7 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2025-12-10
+## [0.4.3] - 2025-12-13
+### Added
+- Risk Register Django app
+-
+## [0.4.2] - 2025-12-13
+
+### Added
+- OpenWebUI + Bedrock Access Gateway (BAG) for AgentChat
+- Sonnet 4.5 and DeepSeek R1 models for AgentChat
+- AgentChat infrastructure
+- Checkov IaC security scanning in CI and pre-commit
+- Dockerfile HEALTHCHECK for portal container
+
+### Changed
+- SonarCloud coverage extended to all modules
+- GitHub Actions workflows: explicit permissions, removed workflow_dispatch inputs where not needed
+- Use SonarQube Cloud automatic analysis instead of CI/CD workflows
+
+### Security
+- Full review of lint (ruff, bandit, eslint) and IaC (checkov) findings
+- Fixed critical issues: workflow permissions, Dockerfile healthcheck
+- Created issues (#214-222) for deferred security hardening (WAF, flow logs, KMS, etc.)
+- All checkov findings now have explicit skip comments with issue references
+
+## [0.4.1] - 2025-12-12
+
+### Removed
+- LibreChat
+- LiteLLM
+
+## [0.4.0] - 2025-12-12
+
+### Added
+- Dev environment (`terraform/environments/dev/`)
+- Branch-based deployments: `dev` branch → dev, `main` branch → prod
+- Bootstrap script for new AWS accounts (`scripts/bootstrap-dev.sh`)
+
+### Changed
+- All workflows support environment selection via branch or manual dispatch
+- Streamline GitHub Actions workflows for consistency
+- Utility scripts work with dev and prod environments
+- User updated immediately when range deploy fails
+
+## [0.3.6] - 2025-12-11
+
+### Fixed
+- Remove default value from s3_bucket_arn variable (module variables should have no defaults)
+
+## [0.3.5] - 2025-12-11
+
+### Changed
+- Make no versioning on user data s3 bucket explicit
+
+## [0.3.4] - 2025-12-11
+
+### Added
+- AWS Bedrock as LibreChat LLM provider
+
+### Changed
+- LibreChat EC2 instance rebuilds on user_data changes
+
+## [0.3.3] - 2025-12-11
+
+### Changed
+- RDS deletion protection enabled for prod database
+- Final snapshot enabled before RDS deletion
+
+## [0.3.2] - 2025-12-11
+
+### Added
+- Kali EC2 provisioning Lambda (create_kali) with official AWS Marketplace AMI
+- Kali security group in Range VPC with bidirectional victim traffic
+- kali_instance_id and kali_ip fields on Range model
+- Kali cleanup in teardown Lambda
+- Range VPC security documentation (security groups, traffic matrix, isolation)
+
+### Changed
+- Victim security group now allows all inbound from Kali SG (for attacks)
+- Kali security group allows all inbound from Victim SG (reverse shells, C2)
+
+## [0.3.1] - 2025-12-11
+
+### Added
+- LibreChat infrastructure (EC2, dedicated subnet, Secrets Manager, Docker Compose)
+- LibreChat CI/CD workflows (infra and deploy)
+- SSM tunnel script for LibreChat admin access
+
+### Fixed
+- Portal/LibreChat infra workflows now trigger on direct push to main, not just upstream cascade
+
+## [0.3.0] - 2025-12-11
 
 ### Added
 - Provisioner fields on Range model (subnet_id, subnet_cidr, subnet_index, victim_instance_id, step_function_execution_arn)
@@ -20,7 +110,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Portal integration with Step Functions (replaces callback-based stub)
 - EC2 IAM permissions for Step Functions execution
 - Range failure alarms
-- Stale range cleanup  
+- Stale range cleanup
+- docs/maintenance.md: RDS maintenance window reference
+
+### Fixed
+- Lambda DB queries: `agent_config_id` → `agent_id`, `os_type_id` → `os_id` (Django FK naming)
+- Lambda handlers: `range_id[:8]` slice on integer (range_id is int, not UUID)
+- db-connect.sh: Added autocommit for INSERT/UPDATE queries
+- IAM policy: Fix `ec2:CreateSubnet` permission (unsupported `ec2:Vpc` condition key)
+- Cleanup Lambda: Allow teardown from `ready` state (mark_failed=false)
 
 ### Removed
 - Callback endpoint for provisioner (Lambda writes directly to DB)
@@ -186,7 +284,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docker-compose.yml for local dev with Postgres
 - Makefile with dev commands (up, down, build, logs, shell, migrate, init)
 - GitHub Actions workflow for portal build, ECR push, SSM deploy
-- Portal dev documentation 
+- Portal dev documentation
 - Secrets management: IAM user for prod, Secrets Manager for DB + app secrets
 
 ### Changed
@@ -282,4 +380,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Container definitions (kali, victim, gaming-api, minetest, minecraft, reverse)
 - CTF scenarios (will be AI-generated dynamically)
 - Local deployment scripts
-

@@ -56,7 +56,6 @@ variable "root_volume_size" {
 variable "s3_bucket_arn" {
   description = "ARN of the S3 bucket for user storage"
   type        = string
-  default     = ""
 }
 
 variable "tags" {

@@ -14,4 +14,3 @@ variable "cors_allowed_origins" {
   type        = list(string)
   default     = []
 }
-

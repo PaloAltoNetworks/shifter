@@ -11,13 +11,13 @@ export type APIToolHandler = (args: any, context: APIToolContext) => Promise<any
 // Base API handler functions
 const baseAPIHandlers = {
   api_call: async (args: any, { httpClient }: APIToolContext) => {
-    const { 
-      endpoint, 
-      method = 'GET', 
-      params, 
-      body, 
-      headers, 
-      response_type = 'json' 
+    const {
+      endpoint,
+      method = 'GET',
+      params,
+      body,
+      headers,
+      response_type = 'json'
     } = args as {
       endpoint: string;
       method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -154,18 +154,18 @@ const baseAPIHandlers = {
  * Generate API tool handlers with server-specific names
  */
 export function generateAPIToolHandlers(
-  serverConfig: LabConfig['server'], 
+  serverConfig: LabConfig['server'],
   queries?: LabConfig['queries'],
   includeGenericTools: boolean = true
 ): Record<string, APIToolHandler> {
   const handlers: Record<string, APIToolHandler> = {};
-  
+
   // Map server-specific tool names to base handlers
   if (includeGenericTools) {
     handlers[`${serverConfig.toolPrefix}_api_call`] = baseAPIHandlers.api_call;
     handlers[`${serverConfig.toolPrefix}_api_info`] = baseAPIHandlers.api_info;
   }
-  
+
   // Add predefined query handlers
   if (queries) {
     Object.entries(queries).forEach(([queryName, queryConfig]) => {
@@ -174,6 +174,6 @@ export function generateAPIToolHandlers(
       };
     });
   }
-  
+
   return handlers;
 }

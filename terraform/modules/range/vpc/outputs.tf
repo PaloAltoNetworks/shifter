@@ -24,3 +24,8 @@ output "victim_security_group_id" {
   description = "ID of the security group for victim EC2 instances"
   value       = aws_security_group.victim.id
 }
+
+output "kali_security_group_id" {
+  description = "ID of the security group for Kali attack instances"
+  value       = aws_security_group.kali.id
+}

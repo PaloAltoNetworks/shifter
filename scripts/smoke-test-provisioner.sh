@@ -1,17 +1,49 @@
 #!/bin/bash
 # Smoke Test for Shifter Provisioner Infrastructure
-# Run with: AWS_PROFILE=dev-workstation-user ./scripts/smoke-test-provisioner.sh
+#
+# Usage:
+#   ./scripts/smoke-test-provisioner.sh           # Test dev (default)
+#   ./scripts/smoke-test-provisioner.sh -e prod   # Test prod
 #
 # Prerequisites:
-# - AWS CLI configured with dev-workstation-user profile
+# - AWS CLI configured with appropriate profile
 # - jq installed
 # - Provisioner infrastructure deployed
 
 set -e
 
+# Defaults
+ENV="dev"
 REGION="us-east-2"
 NAME_PREFIX="shifter"
-PROFILE="${AWS_PROFILE:-dev-workstation-user}"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -e|--env)
+            ENV="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [-e|--env <dev|prod>]"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate environment
+if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
+    echo "Error: Environment must be 'dev' or 'prod'"
+    exit 1
+fi
+
+# Set profile based on environment
+if [[ "$ENV" == "dev" ]]; then
+    PROFILE="$PANW_SHIFTER_DEV_PROFILE"
+else
+    PROFILE="$PANW_SHIFTER_PROD_PROFILE"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -24,6 +56,8 @@ fail() { echo -e "${RED}✗ FAIL${NC}: $1"; exit 1; }
 info() { echo -e "${YELLOW}→${NC} $1"; }
 section() { echo -e "\n${YELLOW}━━━ $1 ━━━${NC}"; }
 
+echo -e "${YELLOW}Environment: ${ENV}${NC}"
+
 # ------------------------------------------------------------------------------
 section "1. Lambda Functions"
 # ------------------------------------------------------------------------------
@@ -32,7 +66,6 @@ LAMBDA_FUNCTIONS=(
     "${NAME_PREFIX}-create-subnet"
     "${NAME_PREFIX}-create-victim"
     "${NAME_PREFIX}-create-kali"
-    "${NAME_PREFIX}-configure-librechat"
     "${NAME_PREFIX}-cleanup"
     "${NAME_PREFIX}-find-stale-ranges"
 )
@@ -160,7 +193,6 @@ LOG_GROUPS=(
     "/aws/lambda/${NAME_PREFIX}-create-subnet"
     "/aws/lambda/${NAME_PREFIX}-create-victim"
     "/aws/lambda/${NAME_PREFIX}-create-kali"
-    "/aws/lambda/${NAME_PREFIX}-configure-librechat"
     "/aws/lambda/${NAME_PREFIX}-cleanup"
     "/aws/lambda/${NAME_PREFIX}-find-stale-ranges"
     "/aws/stepfunctions/${NAME_PREFIX}-provisioner"
@@ -268,15 +300,13 @@ section "9. Database Connectivity (via Lambda)"
 info "Testing find_stale_ranges Lambda (reads from DB)"
 echo "Invoking Lambda to verify DB connectivity..."
 
-INVOKE_RESULT=$(aws lambda invoke \
+if INVOKE_RESULT=$(aws lambda invoke \
     --function-name "${NAME_PREFIX}-find-stale-ranges" \
     --region "$REGION" \
     --profile "$PROFILE" \
     --payload '{}' \
     --cli-binary-format raw-in-base64-out \
-    /tmp/lambda-response.json 2>&1)
-
-if [ $? -eq 0 ]; then
+    /tmp/lambda-response.json 2>&1); then
     RESPONSE=$(cat /tmp/lambda-response.json)
 
     # Check if response contains expected fields
@@ -338,10 +368,10 @@ fi
 section "Summary"
 # ------------------------------------------------------------------------------
 
-echo -e "\n${GREEN}━━━ SMOKE TEST COMPLETE ━━━${NC}"
+echo -e "\n${GREEN}━━━ SMOKE TEST COMPLETE (${ENV}) ━━━${NC}"
 echo ""
 echo "Infrastructure components verified:"
-echo "  - 6 Lambda functions"
+echo "  - 5 Lambda functions"
 echo "  - 3 Step Functions state machines"
 echo "  - 3 IAM roles"
 echo "  - 1 Security group"

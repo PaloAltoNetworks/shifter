@@ -33,12 +33,15 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "health_check",
     "health_check.db",
     "health_check.cache",
     "health_check.storage",
     "mozilla_django_oidc",
+    "rest_framework",
     "mission_control.apps.MissionControlConfig",
+    "risk_register.apps.RiskRegisterConfig",
 ]
 
 MIDDLEWARE = [
@@ -150,11 +153,10 @@ _oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "")
 _oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
 
 # Always define OIDC_OP_* variables to avoid runtime errors
-# Empty defaults are overwritten by env vars below
-OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105
+OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105 - not a password, placeholder URL
 OIDC_OP_TOKEN_ENDPOINT = ""  # nosec B105
-OIDC_OP_USER_ENDPOINT = ""
-OIDC_OP_JWKS_ENDPOINT = ""
+OIDC_OP_USER_ENDPOINT = ""  # nosec B105
+OIDC_OP_JWKS_ENDPOINT = ""  # nosec B105
 
 if _oidc_auth_domain and _oidc_issuer:
     # OAuth endpoints use the auth domain
@@ -221,3 +223,19 @@ TEARDOWN_STATE_MACHINE_ARN = os.environ.get("TEARDOWN_STATE_MACHINE_ARN", "")
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
 AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+
+# ------------------------------------------------------------------------------
+# Django REST Framework Configuration
+# ------------------------------------------------------------------------------
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "risk_register.api.authentication.APIKeyAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
+}

@@ -50,7 +50,7 @@ data "terraform_remote_state" "foundation" {
   backend = "s3"
   config = {
     bucket = "shifter-dev-infra-e3462f0c-c5b5-4b47-836b-efe3f657858c"
-    key    = "dev/terraform.tfstate"
+    key    = "shifter/dev/terraform.tfstate"
     region = "us-east-2"
   }
 }

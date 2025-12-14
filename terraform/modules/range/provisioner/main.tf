@@ -158,6 +158,44 @@ resource "aws_lambda_function" "create_kali" {
 }
 
 # ------------------------------------------------------------------------------
+# Mark Ready Lambda
+# ------------------------------------------------------------------------------
+
+data "archive_file" "mark_ready" {
+  type        = "zip"
+  source_dir  = "${local.build_dir}/mark_ready_pkg"
+  output_path = "${local.build_dir}/mark_ready.zip"
+}
+
+resource "aws_lambda_function" "mark_ready" {
+  function_name = "${var.name_prefix}-mark-ready"
+  role          = aws_iam_role.lambda.arn
+  handler       = "handler.handler"
+  runtime       = local.lambda_runtime
+  timeout       = 60 # Short timeout - just DB updates
+  memory_size   = 128
+
+  filename         = data.archive_file.mark_ready.output_path
+  source_code_hash = data.archive_file.mark_ready.output_base64sha256
+
+  vpc_config {
+    subnet_ids         = var.portal_subnet_ids
+    security_group_ids = [aws_security_group.lambda.id]
+  }
+
+  environment {
+    variables = merge(local.common_env_vars, {
+      CHAT_BASE_URL = var.chat_base_url
+    })
+  }
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-mark-ready"
+    Module = "provisioner"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Cleanup Lambda
 # ------------------------------------------------------------------------------
 

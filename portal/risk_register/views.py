@@ -334,10 +334,7 @@ def comment_delete(request: HttpRequest, risk_pk: int, pk: int) -> HttpResponse:
 def apikey_list(request: HttpRequest) -> HttpResponse:
     """List API keys for the current user."""
     # Show all keys for staff, own keys for regular users
-    if request.user.is_staff:
-        keys = APIKey.objects.all()
-    else:
-        keys = APIKey.objects.filter(created_by=request.user)
+    keys = APIKey.objects.all() if request.user.is_staff else APIKey.objects.filter(created_by=request.user)
 
     context = {
         "keys": keys,

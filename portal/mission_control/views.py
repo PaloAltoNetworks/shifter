@@ -1,12 +1,9 @@
 """Mission Control views."""
 
-import ipaddress
 import json
 import logging
 import os
-import re
 import time
-from urllib.parse import urlparse
 
 from django.conf import settings as django_settings
 from django.contrib import messages
@@ -21,11 +18,15 @@ from django.views.decorators.http import require_GET, require_POST
 from .models import ActivityLog, AgentConfig, OperatingSystem, Range
 from .services.s3 import (
     S3Error,
-    delete_agent as s3_delete,
     generate_presigned_upload_url,
     tag_s3_object,
-    upload_agent as s3_upload,
     verify_s3_object_exists,
+)
+from .services.s3 import (
+    delete_agent as s3_delete,
+)
+from .services.s3 import (
+    upload_agent as s3_upload,
 )
 from .services.upload_token import generate_upload_token, verify_upload_token
 from .services.validation import (
@@ -94,9 +95,7 @@ def upload_agent(request):
             return redirect("mission_control:agents")
 
         # Upload to S3
-        s3_key, sha256_hash, file_size = s3_upload(
-            uploaded_file, request.user.id, original_filename
-        )
+        s3_key, sha256_hash, file_size = s3_upload(uploaded_file, request.user.id, original_filename)
 
         # Create database record
         agent = AgentConfig.objects.create(
@@ -420,7 +419,7 @@ def complete_upload(request):
     # Verify file exists in S3
     try:
         file_size, etag = verify_s3_object_exists(s3_key)
-    except S3Error as e:
+    except S3Error:
         _set_upload_in_progress(request, False)
         logger.warning(f"Upload completion failed - file not found: {s3_key}")
         return JsonResponse({"error": "File not found in storage. Upload may have failed."}, status=400)
@@ -561,10 +560,12 @@ def get_range_status(request):
     if not active_range:
         return JsonResponse({"has_range": False, "range": None})
 
-    return JsonResponse({
-        "has_range": True,
-        "range": _range_to_json(active_range),
-    })
+    return JsonResponse(
+        {
+            "has_range": True,
+            "range": _range_to_json(active_range),
+        }
+    )
 
 
 @login_required
@@ -638,6 +639,7 @@ def launch_range(request):
 
     # Trigger provisioning via Step Functions
     from .services.provisioner import start_provisioning
+
     execution_arn = start_provisioning(range_obj.id)
 
     # Store execution ARN if returned (None in local dev without Step Functions)
@@ -645,10 +647,12 @@ def launch_range(request):
         range_obj.step_function_execution_arn = execution_arn
         range_obj.save(update_fields=["step_function_execution_arn"])
 
-    return JsonResponse({
-        "success": True,
-        "range": _range_to_json(range_obj),
-    })
+    return JsonResponse(
+        {
+            "success": True,
+            "range": _range_to_json(range_obj),
+        }
+    )
 
 
 @login_required
@@ -723,6 +727,7 @@ def destroy_range(request):
     # Trigger async resource cleanup via Step Functions
     # This runs in background - user doesn't wait for it
     from .services.provisioner import start_teardown
+
     execution_arn = start_teardown(range_to_destroy.id)
 
     # Store execution ARN if returned (None in local dev without Step Functions)

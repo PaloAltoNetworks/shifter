@@ -4,15 +4,14 @@
 # Access Django admin at http://localhost:9000/admin/ after running.
 #
 # Usage:
-#   ./scripts/portal-admin-tunnel.sh           # Connect to prod
-#   ./scripts/portal-admin-tunnel.sh -e dev    # Connect to dev
+#   ./scripts/portal-admin-tunnel.sh           # Connect to dev (default)
+#   ./scripts/portal-admin-tunnel.sh -e prod   # Connect to prod
 #
 set -euo pipefail
 
 # Defaults
-ENV="prod"
+ENV="dev"
 AWS_REGION="${AWS_REGION:-us-east-2}"
-AWS_PROFILE="${AWS_PROFILE:-dev-workstation-user}"
 LOCAL_PORT="${LOCAL_PORT:-9000}"
 REMOTE_PORT="${REMOTE_PORT:-8000}"
 
@@ -35,6 +34,13 @@ done
 if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
     echo "Error: Environment must be 'dev' or 'prod'"
     exit 1
+fi
+
+# Set profile based on environment
+if [[ "$ENV" == "dev" ]]; then
+    AWS_PROFILE="$PANW_SHIFTER_DEV_PROFILE"
+else
+    AWS_PROFILE="$PANW_SHIFTER_PROD_PROFILE"
 fi
 
 INSTANCE_TAG="${ENV}-portal-ec2"

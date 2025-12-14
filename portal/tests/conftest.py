@@ -13,17 +13,15 @@ def authenticated_client(db):
     in the session. Without it, force_login users get redirected to OIDC.
     This fixture sets up the session properly.
     """
-    from django.contrib.auth import get_user_model
     import time
+
+    from django.contrib.auth import get_user_model
 
     User = get_user_model()
 
     def _make_client(user=None, email="test@example.com"):
         if user is None:
-            user, _ = User.objects.get_or_create(
-                username=email,
-                defaults={"email": email}
-            )
+            user, _ = User.objects.get_or_create(username=email, defaults={"email": email})
 
         client = Client()
         client.force_login(user)

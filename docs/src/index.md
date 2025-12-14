@@ -4,7 +4,7 @@ Self-service cyber range platform for PANW SecOps Domain Consultants.
 
 ## What It Does
 
-- Browser-based chat UI (LibreChat) with AI-driven pentesting
+- Browser-based chat UI with AI-driven pentesting
 - Per-user Kali + Victim instances in isolated subnets
 - AI-driven vulnerability deployment and attack simulation
 - XDR/XSIAM detection testing

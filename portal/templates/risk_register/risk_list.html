@@ -1,0 +1,80 @@
+{% extends "risk_register/base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Risk Register</h1>
+        <p class="page-subtitle">Security risks and threat tracking</p>
+    </div>
+    <a href="{% url 'risk_register:risk_create' %}" class="btn btn-primary">+ New Risk</a>
+</div>
+
+<div class="filters">
+    <form method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+        <select name="severity" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Severities</option>
+            {% for value, label in severity_choices %}
+            <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="status" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Statuses</option>
+            {% for value, label in status_choices %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <label class="checkbox-label">
+            <input type="checkbox" name="include_deleted" value="true" {% if include_deleted %}checked{% endif %} onchange="this.form.submit()">
+            <span>Show Deleted</span>
+        </label>
+    </form>
+</div>
+
+{% if risks %}
+<div class="card" style="padding: 0;">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Severity</th>
+                <th>Status</th>
+                <th>Risk Score</th>
+                <th>Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for risk in risks %}
+            <tr {% if risk.is_deleted %}class="deleted"{% endif %}>
+                <td>
+                    <a href="{% url 'risk_register:risk_detail' pk=risk.pk %}" style="color: var(--white); text-decoration: none;">
+                        {{ risk.title }}
+                    </a>
+                </td>
+                <td>
+                    <span class="badge badge-{{ risk.severity }}">{{ risk.severity }}</span>
+                </td>
+                <td>
+                    <span class="status-{{ risk.status }}">{{ risk.get_status_display }}</span>
+                </td>
+                <td>
+                    {% if risk.risk_score %}
+                    {{ risk.risk_score }}
+                    {% else %}
+                    <span style="color: var(--gray);">—</span>
+                    {% endif %}
+                </td>
+                <td style="color: rgba(255,255,255,0.5);">
+                    {{ risk.updated_at|date:"M d, Y H:i" }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card empty-state">
+    <p>No risks found matching your filters.</p>
+    <a href="{% url 'risk_register:risk_create' %}" class="btn btn-primary" style="margin-top: 1rem;">Create First Risk</a>
+</div>
+{% endif %}
+{% endblock %}

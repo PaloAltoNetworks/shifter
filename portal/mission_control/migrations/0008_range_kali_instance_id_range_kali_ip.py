@@ -4,20 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('mission_control', '0007_add_range_updated_at'),
+        ("mission_control", "0007_add_range_updated_at"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='range',
-            name='kali_instance_id',
-            field=models.CharField(blank=True, help_text='Kali EC2 instance ID (e.g., i-abc123)', max_length=50, null=True),
+            model_name="range",
+            name="kali_instance_id",
+            field=models.CharField(
+                blank=True,
+                help_text="Kali EC2 instance ID (e.g., i-abc123)",
+                max_length=50,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='range',
-            name='kali_ip',
+            model_name="range",
+            name="kali_ip",
             field=models.GenericIPAddressField(blank=True, null=True),
         ),
     ]

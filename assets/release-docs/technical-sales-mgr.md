@@ -94,8 +94,8 @@ A **self-service cyber range platform** that enables your technical team to demo
 ## Demo Scenarios & Use Cases
 
 ### Scenario 1: XDR Detection Validation
-**Time**: 30 minutes  
-**Customer**: XDR evaluator or existing customer  
+**Time**: 30 minutes
+**Customer**: XDR evaluator or existing customer
 **Value**: Prove detection capabilities
 
 1. Launch range with customer's XDR agent
@@ -107,8 +107,8 @@ A **self-service cyber range platform** that enables your technical team to demo
 **Best for**: Technical buyers, security architects
 
 ### Scenario 2: AI Threat Awareness
-**Time**: 40 minutes  
-**Customer**: CISO, security leadership  
+**Time**: 40 minutes
+**Customer**: CISO, security leadership
 **Value**: Executive education on emerging threats
 
 1. Explain AI-driven attack landscape
@@ -119,8 +119,8 @@ A **self-service cyber range platform** that enables your technical team to demo
 **Best for**: Executive stakeholders, board presentations
 
 ### Scenario 3: Competitive Displacement
-**Time**: 35 minutes  
-**Customer**: Considering competitor's XDR  
+**Time**: 35 minutes
+**Customer**: Considering competitor's XDR
 **Value**: Differentiation through innovation
 
 1. Position PANW as innovation leader
@@ -161,9 +161,9 @@ A **self-service cyber range platform** that enables your technical team to demo
 ## Coaching Your Team
 
 ### New SE Onboarding
-**Week 1**: Shadow experienced SE demo  
-**Week 2**: Run practice demo with peer feedback  
-**Week 3**: First customer demo with manager observing  
+**Week 1**: Shadow experienced SE demo
+**Week 2**: Run practice demo with peer feedback
+**Week 3**: First customer demo with manager observing
 **Week 4**: Independent customer demos
 
 ### Skill Development

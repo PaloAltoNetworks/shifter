@@ -1,5 +1,3 @@
-# LibreChat Module Outputs
-
 output "instance_id" {
   description = "EC2 instance ID"
   value       = aws_instance.this.id
@@ -15,18 +13,12 @@ output "security_group_id" {
   value       = aws_security_group.this.id
 }
 
-output "subnet_id" {
-  description = "LibreChat subnet ID"
-  value       = aws_subnet.this.id
-}
-
 output "iam_role_arn" {
   description = "IAM role ARN"
   value       = aws_iam_role.this.arn
 }
 
-output "secrets_arn" {
-  description = "ARN of the Secrets Manager secret containing LibreChat secrets"
-  value       = aws_secretsmanager_secret.librechat.arn
+output "bag_api_key_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing the BAG API key"
+  value       = aws_secretsmanager_secret.bag_api_key.arn
 }
-

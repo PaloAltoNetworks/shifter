@@ -1,0 +1,107 @@
+name: Quality
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'mcp/**'
+      - 'portal/**'
+      - 'terraform/**'
+      - '.github/workflows/quality.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'mcp/**'
+      - 'portal/**'
+      - 'terraform/**'
+      - '.github/workflows/quality.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and Analyze
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: shifter
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            mcp/aptl-mcp-common/package-lock.json
+            mcp/mcp-red/package-lock.json
+
+      - name: Build and test aptl-mcp-common
+        working-directory: mcp/aptl-mcp-common
+        run: |
+          npm ci
+          npm run build
+          npm run test -- --coverage
+
+      - name: Build mcp-red
+        working-directory: mcp/mcp-red
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Lint Python
+        working-directory: portal
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Test portal
+        working-directory: portal
+        env:
+          TF_VARS: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          DJANGO_DEBUG: "true"
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: shifter
+          DB_USER: test
+          DB_PASSWORD: test
+        run: |
+          export DJANGO_SECRET_KEY=$(echo "$TF_VARS" | grep '^django_secret_key_ci' | sed 's/.*= *"\([^"]*\)".*/\1/')
+          uv run python manage.py collectstatic --noinput
+          uv run pytest
+
+      - name: Lint TypeScript
+        working-directory: mcp/mcp-red
+        run: npm run lint
+
+      - name: Checkov IaC Security
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform/
+          framework: terraform
+          download_external_modules: true
+          quiet: true
+          compact: true
+          soft_fail: true
+      # SonarCloud uses automatic analysis (configured in SonarCloud settings)

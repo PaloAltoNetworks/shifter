@@ -209,11 +209,13 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Big Agent",
-                "filename": "big.msi",
-                "file_size": 200 * 1024 * 1024,  # 200 MB
-            }),
+            data=json.dumps(
+                {
+                    "name": "Big Agent",
+                    "filename": "big.msi",
+                    "file_size": 200 * 1024 * 1024,  # 200 MB
+                }
+            ),
             content_type="application/json",
         )
 
@@ -226,11 +228,13 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Bad Agent",
-                "filename": "agent.exe",
-                "file_size": 1024 * 1024,
-            }),
+            data=json.dumps(
+                {
+                    "name": "Bad Agent",
+                    "filename": "agent.exe",
+                    "file_size": 1024 * 1024,
+                }
+            ),
             content_type="application/json",
         )
 
@@ -245,11 +249,13 @@ class TestInitiateUpload:
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Over Quota",
-                "filename": "over.msi",
-                "file_size": 100 * 1024 * 1024,  # 100 MB - would exceed quota
-            }),
+            data=json.dumps(
+                {
+                    "name": "Over Quota",
+                    "filename": "over.msi",
+                    "file_size": 100 * 1024 * 1024,  # 100 MB - would exceed quota
+                }
+            ),
             content_type="application/json",
         )
 
@@ -294,11 +300,13 @@ class TestInitiateUpload:
 
             response = client.post(
                 reverse("mission_control:initiate_upload"),
-                data=json.dumps({
-                    "name": "Traversal Test",
-                    "filename": "../../../etc/passwd.msi",
-                    "file_size": 1024,
-                }),
+                data=json.dumps(
+                    {
+                        "name": "Traversal Test",
+                        "filename": "../../../etc/passwd.msi",
+                        "file_size": 1024,
+                    }
+                ),
                 content_type="application/json",
             )
 
@@ -432,9 +440,7 @@ class TestCompleteUpload:
     def test_token_user_mismatch(self, user, settings):
         """Token from different user is rejected."""
         settings.AGENT_UPLOAD_URL_EXPIRES = 3600
-        other_user = User.objects.create_user(
-            username="other@example.com", email="other@example.com"
-        )
+        other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
 
         # Generate token for other user
         token = generate_upload_token(
@@ -624,11 +630,13 @@ class TestUploadIntegration:
         # Step 1: Initiate
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Flow Test Agent",
-                "filename": "flow_test.msi",
-                "file_size": 1024 * 1024,
-            }),
+            data=json.dumps(
+                {
+                    "name": "Flow Test Agent",
+                    "filename": "flow_test.msi",
+                    "file_size": 1024 * 1024,
+                }
+            ),
             content_type="application/json",
         )
 
@@ -668,11 +676,13 @@ class TestUploadIntegration:
         # Step 1: Initiate
         response = client.post(
             reverse("mission_control:initiate_upload"),
-            data=json.dumps({
-                "name": "Cancel Test",
-                "filename": "cancel_test.msi",
-                "file_size": 1024,
-            }),
+            data=json.dumps(
+                {
+                    "name": "Cancel Test",
+                    "filename": "cancel_test.msi",
+                    "file_size": 1024,
+                }
+            ),
             content_type="application/json",
         )
 

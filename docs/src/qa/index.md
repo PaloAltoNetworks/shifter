@@ -42,4 +42,3 @@ Document failures in the issue tracker with:
 2. Which check failed
 3. Error output
 4. Timestamp
-

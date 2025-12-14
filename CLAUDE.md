@@ -267,3 +267,10 @@ Per project rules:
 - Do NOT add "helpful" extras beyond the request
 - Keep responses focused and concise
 - Write for technical audience (no marketing language)
+
+## Active Technologies
+- Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc (001-risk-register)
+- PostgreSQL (existing RDS instance) (001-risk-register)
+
+## Recent Changes
+- 001-risk-register: Added Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc

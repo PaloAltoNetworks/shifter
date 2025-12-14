@@ -1,0 +1,126 @@
+{% extends "risk_register/base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{% if editing %}Edit Risk{% else %}New Risk{% endif %}</h1>
+        <p class="page-subtitle">{% if editing %}Update risk details{% else %}Create a new security risk entry{% endif %}</p>
+    </div>
+</div>
+
+<form method="post">
+    {% csrf_token %}
+
+    <div class="card">
+        <h3 class="card-title">Basic Information</h3>
+
+        <div class="form-group">
+            <label class="form-label">Title *</label>
+            <input type="text" name="title" class="form-input" required maxlength="200"
+                   value="{% if risk %}{{ risk.title }}{% endif %}"
+                   placeholder="Brief title for this risk">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Description *</label>
+            <textarea name="description" class="form-textarea" required
+                      placeholder="Detailed description of the risk...">{% if risk %}{{ risk.description }}{% endif %}</textarea>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Severity *</label>
+                <select name="severity" class="form-select" required>
+                    {% for value, label in severity_choices %}
+                    <option value="{{ value }}" {% if risk and risk.severity == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                    {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if risk and risk.status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title">Threat Modeling</h3>
+
+        <div class="form-group">
+            <label class="form-label">STRIDE Categories</label>
+            <div class="checkbox-group">
+                {% for code, name in stride_choices %}
+                <label class="checkbox-label">
+                    <input type="checkbox" name="stride_categories" value="{{ code }}"
+                           {% if risk and code in risk.stride_categories %}checked{% endif %}>
+                    <span>{{ name }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <p class="form-hint">Select all that apply</p>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Likelihood Score</label>
+                <select name="likelihood_score" class="form-select">
+                    <option value="">Not specified</option>
+                    {% for i in "12345" %}
+                    <option value="{{ i }}" {% if risk and risk.likelihood_score|stringformat:"s" == i %}selected{% endif %}>{{ i }} - {% if i == "1" %}Very Low{% elif i == "2" %}Low{% elif i == "3" %}Medium{% elif i == "4" %}High{% else %}Very High{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Impact Score</label>
+                <select name="impact_score" class="form-select">
+                    <option value="">Not specified</option>
+                    {% for i in "12345" %}
+                    <option value="{{ i }}" {% if risk and risk.impact_score|stringformat:"s" == i %}selected{% endif %}>{{ i }} - {% if i == "1" %}Negligible{% elif i == "2" %}Minor{% elif i == "3" %}Moderate{% elif i == "4" %}Major{% else %}Severe{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Attack Vector</label>
+            <textarea name="attack_vector" class="form-textarea" rows="2"
+                      placeholder="How could this risk be exploited?">{% if risk %}{{ risk.attack_vector }}{% endif %}</textarea>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Affected Assets</label>
+            <textarea name="affected_assets" class="form-textarea" rows="2"
+                      placeholder="What systems, data, or components are affected?">{% if risk %}{{ risk.affected_assets }}{% endif %}</textarea>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title">Mitigation</h3>
+
+        <div class="form-group">
+            <label class="form-label">Mitigation Status</label>
+            <textarea name="mitigation_status" class="form-textarea" rows="2"
+                      placeholder="Current mitigation efforts or plans...">{% if risk %}{{ risk.mitigation_status }}{% endif %}</textarea>
+        </div>
+
+        {% if editing %}
+        <div class="form-group">
+            <label class="form-label">Resolution Reason</label>
+            <textarea name="resolution_reason" class="form-textarea" rows="2"
+                      placeholder="Reason for closing this risk (if applicable)...">{% if risk %}{{ risk.resolution_reason }}{% endif %}</textarea>
+        </div>
+        {% endif %}
+    </div>
+
+    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+        <button type="submit" class="btn btn-primary">{% if editing %}Save Changes{% else %}Create Risk{% endif %}</button>
+        <a href="{% if editing %}{% url 'risk_register:risk_detail' pk=risk.pk %}{% else %}{% url 'risk_register:risk_list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

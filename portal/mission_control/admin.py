@@ -22,7 +22,14 @@ class UserProfileAdmin(admin.ModelAdmin):
 
 @admin.register(AgentConfig)
 class AgentConfigAdmin(admin.ModelAdmin):
-    list_display = ("name", "user", "os", "original_filename", "created_at", "deleted_at")
+    list_display = (
+        "name",
+        "user",
+        "os",
+        "original_filename",
+        "created_at",
+        "deleted_at",
+    )
     list_filter = ("os", "deleted_at", "created_at")
     search_fields = ("name", "user__email", "original_filename")
     raw_id_fields = ("user",)

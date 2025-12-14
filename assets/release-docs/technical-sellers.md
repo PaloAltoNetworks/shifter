@@ -230,16 +230,16 @@ Use customer-specific scenarios:
 
 ## Objection Handling
 
-**"This isn't a real attack"**  
+**"This isn't a real attack"**
 → "These are real techniques attackers use. The AI uses actual exploitation tools. Your XDR detections are production-grade."
 
-**"Our environment is different"**  
+**"Our environment is different"**
 → "The attack principles are universal. We can customize scenarios to match your environment."
 
-**"What about false positives?"**  
+**"What about false positives?"**
 → "These are confirmed malicious activities. XDR tunes out noise and shows real threats."
 
-**"Can we break out of the sandbox?"**  
+**"Can we break out of the sandbox?"**
 → "No internet egress, isolated VPC. It's designed to be secure."
 
 ---
@@ -319,8 +319,8 @@ Track these in CRM to show your impact.
 
 ---
 
-**Platform Access**: https://[portal-url]  
-**Support**: [Support email/Slack]  
+**Platform Access**: https://[portal-url]
+**Support**: [Support email/Slack]
 **Launch Date**: December 18, 2025
 
 **Let's show customers what XDR can really do. 🚀**

@@ -33,8 +33,12 @@ def test_agent(db, django_user_model, windows_os):
 @pytest.fixture
 def mock_provisioner():
     """Mock the provisioner service to avoid AWS calls."""
-    with patch("mission_control.services.provisioner.start_provisioning") as mock_provision, \
-         patch("mission_control.services.provisioner.start_teardown") as mock_teardown:
+    with (
+        patch(
+            "mission_control.services.provisioner.start_provisioning"
+        ) as mock_provision,
+        patch("mission_control.services.provisioner.start_teardown") as mock_teardown,
+    ):
         mock_provision.return_value = None  # No ARN in test mode
         mock_teardown.return_value = None
         yield {"provision": mock_provision, "teardown": mock_teardown}
@@ -121,19 +125,22 @@ class TestLaunchRange:
 
     def test_successful_launch_with_step_functions(self, client, test_agent):
         """Test launch with mocked Step Functions."""
-        with patch("mission_control.services.provisioner._get_sfn_client") as mock_client:
+        with patch(
+            "mission_control.services.provisioner._get_sfn_client"
+        ) as mock_client:
             mock_client.return_value.start_execution.return_value = {
                 "executionArn": "arn:aws:states:us-east-2:123:execution:test:abc"
             }
 
             client.force_login(test_agent.user)
-            with patch.object(
-                client.session, "get", return_value=None
-            ):
+            with patch.object(client.session, "get", return_value=None):
                 # Need to patch settings for this test
                 from django.conf import settings
+
                 original_arn = getattr(settings, "PROVISION_STATE_MACHINE_ARN", "")
-                settings.PROVISION_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123:stateMachine:test"
+                settings.PROVISION_STATE_MACHINE_ARN = (
+                    "arn:aws:states:us-east-2:123:stateMachine:test"
+                )
 
                 try:
                     response = client.post(
@@ -149,7 +156,10 @@ class TestLaunchRange:
 
                     # Verify execution ARN was stored
                     range_obj = Range.objects.get(id=data["range"]["id"])
-                    assert range_obj.step_function_execution_arn == "arn:aws:states:us-east-2:123:execution:test:abc"
+                    assert (
+                        range_obj.step_function_execution_arn
+                        == "arn:aws:states:us-east-2:123:execution:test:abc"
+                    )
                 finally:
                     settings.PROVISION_STATE_MACHINE_ARN = original_arn
 
@@ -385,13 +395,16 @@ class TestSubnetIndexAllocation:
     def test_skips_active_indices(self, test_agent):
         """Should not reuse indices from non-destroyed ranges."""
         # Create ranges in various active states
-        for i, status in enumerate([
-            Range.Status.PROVISIONING,
-            Range.Status.READY,
-            Range.Status.PAUSED,
-            Range.Status.DESTROYING,
-            Range.Status.FAILED,
-        ], start=1):
+        for i, status in enumerate(
+            [
+                Range.Status.PROVISIONING,
+                Range.Status.READY,
+                Range.Status.PAUSED,
+                Range.Status.DESTROYING,
+                Range.Status.FAILED,
+            ],
+            start=1,
+        ):
             Range.objects.create(
                 user=test_agent.user,
                 agent=test_agent,
@@ -417,14 +430,18 @@ class TestSubnetIndexAllocation:
         with pytest.raises(ValueError, match="No subnet indices available"):
             Range.allocate_subnet_index()
 
-    def test_capacity_error_returns_503(self, client, test_agent, settings, django_user_model):
+    def test_capacity_error_returns_503(
+        self, client, test_agent, settings, django_user_model
+    ):
         """API should return 503 when no capacity available."""
         settings.PROVISION_STATE_MACHINE_ARN = ""
         client.force_login(test_agent.user)
 
         # Create a different user to hold the 254 ranges (so test_agent.user has no active range)
         other_user = django_user_model.objects.create_user(
-            username="capacitytest", email="capacitytest@example.com", password="testpass"
+            username="capacitytest",
+            email="capacitytest@example.com",
+            password="testpass",
         )
 
         # Create ranges for all 254 indices (owned by other_user, all DESTROYED so they don't block)

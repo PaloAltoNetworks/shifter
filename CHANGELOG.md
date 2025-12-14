@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2025-12-14
+
+### Changed
+
+- Upgraded patch @modelcontextprotocol/sdk
+
 ## [0.4.3] - 2025-12-13
+
 ### Added
 - Risk Register Django app
 -

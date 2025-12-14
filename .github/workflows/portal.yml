@@ -40,16 +40,25 @@ jobs:
       is_dev: ${{ steps.set.outputs.is_dev }}
       ecr_repo: ${{ steps.set.outputs.ecr_repo }}
       instance_tag: ${{ steps.set.outputs.instance_tag }}
+      skip: ${{ steps.set.outputs.skip }}
     steps:
       - name: Determine environment
         id: set
         env:
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
           PR_BASE_REF: ${{ github.base_ref }}
           GIT_REF: ${{ github.ref }}
         run: |
           if [ "$EVENT_NAME" == "workflow_run" ]; then
+            # Only proceed if the triggering workflow was a push (not a PR)
+            # PRs are handled by the pull_request trigger directly
+            if [ "$WORKFLOW_RUN_EVENT" == "pull_request" ]; then
+              echo "Skipping: workflow_run triggered by a pull_request (handled separately)"
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
             if [ "$WORKFLOW_RUN_BRANCH" == "dev" ]; then
               ENV="dev"
             else
@@ -83,7 +92,7 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     needs: set-env
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.set-env.outputs.skip != 'true'
     defaults:
       run:
         working-directory: terraform/environments/${{ needs.set-env.outputs.environment }}/portal
@@ -139,6 +148,7 @@ jobs:
     needs: [set-env, terraform-plan]
     if: |
       always() &&
+      needs.set-env.outputs.skip != 'true' &&
       (needs.terraform-plan.result == 'success' || needs.terraform-plan.result == 'skipped') &&
       (
         (github.event_name == 'pull_request' && needs.set-env.outputs.is_dev == 'true') ||

@@ -38,9 +38,7 @@ class RiskSerializer(serializers.ModelSerializer):
     def validate_likelihood_score(self, value):
         """Validate likelihood score is between 1 and 5."""
         if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError(
-                "Likelihood score must be between 1 and 5"
-            )
+            raise serializers.ValidationError("Likelihood score must be between 1 and 5")
         return value
 
     def validate_impact_score(self, value):
@@ -54,9 +52,7 @@ class RiskSerializer(serializers.ModelSerializer):
         valid_codes = [choice[0] for choice in StrideCategory.choices]
         for category in value:
             if category not in valid_codes:
-                raise serializers.ValidationError(
-                    f"Invalid STRIDE category: {category}. Must be one of: {valid_codes}"
-                )
+                raise serializers.ValidationError(f"Invalid STRIDE category: {category}. Must be one of: {valid_codes}")
         return value
 
 
@@ -80,9 +76,7 @@ class RiskCreateSerializer(serializers.ModelSerializer):
 
     def validate_likelihood_score(self, value):
         if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError(
-                "Likelihood score must be between 1 and 5"
-            )
+            raise serializers.ValidationError("Likelihood score must be between 1 and 5")
         return value
 
     def validate_impact_score(self, value):
@@ -112,9 +106,7 @@ class RiskUpdateSerializer(serializers.ModelSerializer):
 
     def validate_likelihood_score(self, value):
         if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError(
-                "Likelihood score must be between 1 and 5"
-            )
+            raise serializers.ValidationError("Likelihood score must be between 1 and 5")
         return value
 
     def validate_impact_score(self, value):
@@ -136,9 +128,7 @@ class CommentSerializer(serializers.ModelSerializer):
 
     author = serializers.SerializerMethodField()
     risk_id = serializers.IntegerField(source="risk.id", read_only=True)
-    parent_comment_id = serializers.IntegerField(
-        source="parent_comment.id", read_only=True, allow_null=True
-    )
+    parent_comment_id = serializers.IntegerField(source="parent_comment.id", read_only=True, allow_null=True)
 
     class Meta:
         model = Comment

@@ -32,3 +32,9 @@ variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
 }
+
+variable "openwebui_db_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing OpenWebUI DB credentials"
+  type        = string
+  default     = ""
+}

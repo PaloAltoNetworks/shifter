@@ -144,7 +144,7 @@ jobs:
           ECR_REPO_NAME: shifter-${{ inputs.is_dev && 'dev-' || '' }}mcp-shifter
         run: |
           IMAGE_TAG="${ECR_REGISTRY}/${ECR_REPO_NAME}:latest"
-          docker build -t "$IMAGE_TAG" ./mcp/mcp-shifter
+          docker build -t "$IMAGE_TAG" -f ./mcp/mcp-shifter/Dockerfile ./mcp
           docker push "$IMAGE_TAG"
           echo "image_uri=$IMAGE_TAG" >> $GITHUB_OUTPUT
 

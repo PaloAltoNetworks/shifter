@@ -6,7 +6,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from mission_control.services.s3 import S3Error, delete_agent, get_s3_client, upload_agent
+from mission_control.services.s3 import (
+    S3Error,
+    delete_agent,
+    get_s3_client,
+    upload_agent,
+)
 
 
 class TestGetS3Client:

@@ -434,7 +434,9 @@ class TestSubnetIndexAllocation:
 
         # Create a different user to hold the 254 ranges (so test_agent.user has no active range)
         other_user = django_user_model.objects.create_user(
-            username="capacitytest", email="capacitytest@example.com", password="testpass"
+            username="capacitytest",
+            email="capacitytest@example.com",
+            password="testpass",
         )
 
         # Create ranges for all 254 indices (owned by other_user, all DESTROYED so they don't block)

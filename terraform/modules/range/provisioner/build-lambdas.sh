@@ -13,6 +13,7 @@ LAMBDAS=(
     "create_subnet"
     "create_victim"
     "create_kali"
+    "mark_ready"
     "cleanup"
     "find_stale_ranges"
 )
@@ -33,7 +34,8 @@ pip install --target "${DEPS_DIR}" --quiet \
     --implementation cp \
     --python-version 3.12 \
     --only-binary=:all: \
-    psycopg[binary]
+    psycopg[binary] \
+    cryptography
 
 for lambda in "${LAMBDAS[@]}"; do
     echo "  Packaging ${lambda}..."

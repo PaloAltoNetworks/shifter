@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+AWS access:
+DEV profile env var: PANW_SHIFTER_DEV_PROFILE
+PROD profile env var: PANW_SHIFTER_PROD_PROFILE
+
 ## Project Overview
 
 **Shifter** is a self-service cyber range platform. Users access a browser-based chat interface with MCPs to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.

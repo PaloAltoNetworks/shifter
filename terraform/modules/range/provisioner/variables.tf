@@ -117,13 +117,6 @@ variable "kali_security_group_id" {
   type        = string
 }
 
-# LibreChat Configuration
-variable "librechat_base_url" {
-  description = "Base URL for LibreChat"
-  type        = string
-  default     = "https://chat.example.com"
-}
-
 # Lambda Configuration
 variable "lambda_timeout" {
   description = "Lambda function timeout in seconds"

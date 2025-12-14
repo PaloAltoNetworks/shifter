@@ -188,6 +188,7 @@ resource "random_password" "django_secret_key" {
   special = true
 }
 
+# checkov:skip=CKV_AWS_149:Deferred for MVP. AWS-managed keys sufficient for low-usage internal MVP. See #213
 resource "aws_secretsmanager_secret" "app" {
   name                    = "shifter-${local.name_prefix}-app"
   description             = "Django application secrets"
@@ -202,6 +203,45 @@ resource "aws_secretsmanager_secret_version" "app" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
     django_secret_key = random_password.django_secret_key.result
+  })
+}
+
+# ------------------------------------------------------------------------------
+# OpenWebUI Database Credentials
+# ------------------------------------------------------------------------------
+# OpenWebUI uses a separate database in the same RDS instance.
+# After terraform apply, manually create the database and user:
+#   CREATE DATABASE openwebui;
+#   CREATE USER openwebui WITH PASSWORD '<from-secrets-manager>';
+#   GRANT ALL PRIVILEGES ON DATABASE openwebui TO openwebui;
+#   \c openwebui
+#   GRANT ALL ON SCHEMA public TO openwebui;
+
+resource "random_password" "openwebui_db_password" {
+  length  = 32
+  special = false
+}
+
+# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal MVP. See #213
+resource "aws_secretsmanager_secret" "openwebui_db" {
+  name                    = "shifter-${local.name_prefix}-openwebui-db"
+  description             = "OpenWebUI PostgreSQL database credentials"
+  recovery_window_in_days = 0
+
+  tags = merge(var.tags, {
+    Name = "shifter-${local.name_prefix}-openwebui-db"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "openwebui_db" {
+  secret_id = aws_secretsmanager_secret.openwebui_db.id
+  secret_string = jsonencode({
+    username     = "openwebui"
+    password     = random_password.openwebui_db_password.result
+    host         = module.rds.db_instance_address
+    port         = 5432
+    dbname       = "openwebui"
+    database_url = "postgresql://openwebui:${random_password.openwebui_db_password.result}@${module.rds.db_instance_address}:5432/openwebui"
   })
 }
 
@@ -244,9 +284,6 @@ module "provisioner" {
   kali_ami_id            = var.kali_ami_id
   kali_instance_type     = var.kali_instance_type
   kali_security_group_id = data.terraform_remote_state.range.outputs.kali_security_group_id
-
-  # LibreChat Configuration
-  librechat_base_url = var.librechat_base_url
 
   # Monitoring Configuration
   enable_alarms = var.enable_provisioner_alarms

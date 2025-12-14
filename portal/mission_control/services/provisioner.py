@@ -37,8 +37,7 @@ def start_provisioning(range_id: int) -> str | None:
 
     if not provision_arn:
         logger.warning(
-            "PROVISION_STATE_MACHINE_ARN not configured, skipping Step Functions. "
-            "Set this in settings for production."
+            "PROVISION_STATE_MACHINE_ARN not configured, skipping Step Functions. Set this in settings for production."
         )
         return None
 
@@ -52,10 +51,7 @@ def start_provisioning(range_id: int) -> str | None:
             input=json.dumps({"range_id": range_id}),
         )
         execution_arn = response["executionArn"]
-        logger.info(
-            f"Started provisioning execution: range_id={range_id} "
-            f"execution_arn={execution_arn}"
-        )
+        logger.info(f"Started provisioning execution: range_id={range_id} execution_arn={execution_arn}")
         return execution_arn
 
     except ClientError as e:
@@ -80,8 +76,7 @@ def start_teardown(range_id: int) -> str | None:
 
     if not teardown_arn:
         logger.warning(
-            "TEARDOWN_STATE_MACHINE_ARN not configured, skipping Step Functions. "
-            "Set this in settings for production."
+            "TEARDOWN_STATE_MACHINE_ARN not configured, skipping Step Functions. Set this in settings for production."
         )
         return None
 
@@ -95,10 +90,7 @@ def start_teardown(range_id: int) -> str | None:
             input=json.dumps({"range_id": range_id}),
         )
         execution_arn = response["executionArn"]
-        logger.info(
-            f"Started teardown execution: range_id={range_id} "
-            f"execution_arn={execution_arn}"
-        )
+        logger.info(f"Started teardown execution: range_id={range_id} execution_arn={execution_arn}")
         return execution_arn
 
     except ClientError as e:

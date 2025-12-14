@@ -101,9 +101,7 @@ DATABASES = {
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
-    },
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
@@ -121,9 +119,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
-    },
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
 # Default primary key field type
@@ -175,6 +171,7 @@ else:
     warnings.warn(
         "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
         RuntimeWarning,
+        stacklevel=2,
     )
 # Token verification
 OIDC_RP_SIGN_ALGO = "RS256"
@@ -187,10 +184,7 @@ LOGIN_REDIRECT_URL = "/mission-control/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Login URL - dev bypass in DEBUG, OIDC in production
-if DEBUG:
-    LOGIN_URL = "/dev-login/"
-else:
-    LOGIN_URL = "oidc_authentication_init"
+LOGIN_URL = "/dev-login/" if DEBUG else "oidc_authentication_init"
 
 # Cognito logout endpoint - clears Cognito session in addition to Django session
 OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url"
@@ -201,22 +195,24 @@ OIDC_CREATE_USER = True
 # Use email as username (default is sha1 hash of email)
 OIDC_USERNAME_ALGO = "config.oidc.generate_username"
 
+# URLs exempt from OIDC authentication (public pages)
+OIDC_EXEMPT_URLS = [
+    r"^/$",  # Landing page
+    r"^/oidc/",  # OIDC callback URLs
+]
+
 # ------------------------------------------------------------------------------
 # Shifter Configuration
 # ------------------------------------------------------------------------------
 
-SHIFTER_SUPPORT_EMAIL = os.environ.get(
-    "SHIFTER_SUPPORT_EMAIL", "bedwards@paloaltonetworks.com"
-)
+SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "bedwards@paloaltonetworks.com")
 
 # ------------------------------------------------------------------------------
 # AWS S3 Configuration
 # ------------------------------------------------------------------------------
 
 AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
-AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get(
-    "AWS_S3_REGION", "us-east-2"
-)
+AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
 
 # Step Functions State Machine ARNs (for range provisioning)

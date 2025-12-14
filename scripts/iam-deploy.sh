@@ -29,33 +29,45 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: $0 [-e|--env <dev|prod>] [--apply] [--destroy]"
+            echo "Usage: $0 [-e|--env <dev|prod|all>] [--apply] [--destroy]"
             echo ""
             echo "Options:"
-            echo "  -e, --env     Environment: dev (default) or prod"
+            echo "  -e, --env     Environment: dev (default), prod, or all"
             echo "  --apply       Run terraform apply (default is plan only)"
             echo "  --destroy     Run terraform destroy"
             exit 0
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [-e|--env <dev|prod>] [--apply] [--destroy]"
+            echo "Usage: $0 [-e|--env <dev|prod|all>] [--apply] [--destroy]"
             exit 1
             ;;
     esac
 done
 
 # Validate environment
-if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
-    echo "Error: Environment must be 'dev' or 'prod'"
+if [[ "$ENV" != "dev" && "$ENV" != "prod" && "$ENV" != "all" ]]; then
+    echo "Error: Environment must be 'dev', 'prod', or 'all'"
     exit 1
+fi
+
+# Handle 'all' by recursively calling for dev and prod
+if [[ "$ENV" == "all" ]]; then
+    echo "Deploying to all environments..."
+    echo ""
+    "$0" -e dev --$ACTION
+    echo ""
+    echo "=========================================="
+    echo ""
+    "$0" -e prod --$ACTION
+    exit 0
 fi
 
 # Set AWS profile based on environment
 if [[ "$ENV" == "dev" ]]; then
-    AWS_PROFILE="panw-shifter-dev-workstation"
+    AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:-panw-shifter-dev-workstation}"
 else
-    AWS_PROFILE="dev-workstation-user"
+    AWS_PROFILE="${PANW_SHIFTER_PROD_PROFILE:-dev-workstation-user}"
 fi
 
 echo "=========================================="

@@ -127,8 +127,7 @@ def validate_file_size(file_obj) -> None:
 
     if size > max_bytes:
         raise ValidationError(
-            f"File size ({size / 1024 / 1024:.1f} MB) exceeds "
-            f"maximum allowed ({settings.AGENT_MAX_FILE_SIZE_MB} MB)"
+            f"File size ({size / 1024 / 1024:.1f} MB) exceeds maximum allowed ({settings.AGENT_MAX_FILE_SIZE_MB} MB)"
         )
 
 
@@ -152,9 +151,7 @@ def validate_file_extension(filename: str) -> FileFormat:
     fmt = get_format_for_extension(extension)
     if not fmt:
         allowed = ", ".join(get_allowed_extensions())
-        raise ValidationError(
-            f"Extension '{extension}' not allowed. Allowed: {allowed}"
-        )
+        raise ValidationError(f"Extension '{extension}' not allowed. Allowed: {allowed}")
 
     return fmt
 

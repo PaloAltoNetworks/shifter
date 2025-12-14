@@ -235,7 +235,7 @@ class TestDestroyRange:
         client.force_login(test_agent.user)
 
         # Create a ready range
-        Range.objects.create(
+        range_obj = Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.READY,
@@ -245,7 +245,10 @@ class TestDestroyRange:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["range"]["status"] == "destroying"
+
+        # Verify range was marked as destroyed in DB
+        range_obj.refresh_from_db()
+        assert range_obj.status == Range.Status.DESTROYED
 
     def test_can_destroy_failed_range(self, client, test_agent, settings):
         """Failed ranges can be destroyed to clean up."""
@@ -253,7 +256,7 @@ class TestDestroyRange:
         client.force_login(test_agent.user)
 
         # Create a failed range
-        Range.objects.create(
+        range_obj = Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.FAILED,
@@ -264,7 +267,10 @@ class TestDestroyRange:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["range"]["status"] == "destroying"
+
+        # Verify range was marked as destroyed in DB
+        range_obj.refresh_from_db()
+        assert range_obj.status == Range.Status.DESTROYED
 
 
 @pytest.mark.django_db

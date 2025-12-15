@@ -201,15 +201,16 @@
    ============================================================ */
 .xdr-dark-theme .card {
     background: var(--xdr-surface);
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--xdr-border-extra-soft);
     border-radius: 4px;
     padding: 1.5rem;
     margin-bottom: 1rem;
     transition: border-color 0.2s;
+    box-shadow: 0 1px 3px rgb(0, 0, 0, 0.3);
 }
 
 .xdr-dark-theme .card:hover {
-    border-color: var(--xdr-border-medium);
+    border-color: var(--xdr-border);
 }
 
 .xdr-dark-theme .card-danger {
@@ -396,53 +397,17 @@
 /* ============================================================
    T009: Header Styles
    ============================================================ */
+/* Header removed - content flows directly under sidebar */
 .xdr-dark-theme .header {
-    background: var(--xdr-surface);
-    border-bottom: 1px solid var(--xdr-border-extra-soft);
-    padding: 0 1.5rem;
-    height: 60px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
+    display: none;
 }
 
-.xdr-dark-theme .header-left {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.xdr-dark-theme .header-logo {
-    height: 32px;
-    width: auto;
-}
-
-.xdr-dark-theme .header-title {
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--xdr-on-background-secondary);
-    letter-spacing: 0.1em;
-}
-
-.xdr-dark-theme .header-title span {
-    color: var(--xdr-primary);
-    font-weight: 600;
-}
-
-.xdr-dark-theme .header-right {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
+.xdr-dark-theme .header-left,
+.xdr-dark-theme .header-right,
+.xdr-dark-theme .header-logo,
+.xdr-dark-theme .header-title,
 .xdr-dark-theme .user-info {
-    font-size: 14px;
-    color: var(--xdr-on-background-secondary);
+    display: none;
 }
 
 /* ============================================================
@@ -545,7 +510,7 @@
 /* Layout */
 .xdr-dark-theme .layout {
     display: flex;
-    padding-top: 60px;
+    padding-top: 0;
     min-height: 100vh;
 }
 
@@ -558,21 +523,24 @@
 
 /* Page header */
 .xdr-dark-theme .page-header {
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
+    padding: 1.5rem 0 1rem;
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    border-bottom: 1px solid var(--xdr-border-extra-soft);
 }
 
 .xdr-dark-theme .page-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--xdr-on-background);
-    margin-bottom: 0.5rem;
+    font-size: 22px;
+    font-weight: 400;
+    color: #fff;
+    margin-bottom: 0.25rem;
+    font-family: Lato, sans-serif;
 }
 
 .xdr-dark-theme .page-subtitle {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--xdr-on-background-secondary);
 }
 

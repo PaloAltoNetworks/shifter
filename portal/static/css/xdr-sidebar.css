@@ -114,6 +114,20 @@ body.nav-lock .left-nav .left-nav-body,
   text-decoration: none;
 }
 
+.header-link:hover,
+.nav-menu-item:hover,
+.nav-profile:hover {
+  text-decoration: none;
+}
+
+.left-nav a {
+  text-decoration: none;
+}
+
+.left-nav a:hover {
+  text-decoration: none;
+}
+
 .header-link:focus-visible {
   outline: 1px solid var(--xdr-border, #484848) !important;
 }
@@ -327,11 +341,32 @@ body.nav-mouse-leave .lock-button {
 }
 
 .header-link .logo-text {
-  margin-left: 8px;
+  margin-left: 10px;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.header-link .logo-text-main {
   font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+
+.header-link .logo-text-sub {
   font-weight: 600;
   color: #a4a4a4;
-  white-space: nowrap;
+}
+
+.header-link .logo-text-tagline {
+  font-size: 9px;
+  font-weight: 400;
+  color: #a4a4a4;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
 }
 
 /* Tooltip styles */

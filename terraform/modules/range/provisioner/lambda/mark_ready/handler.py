@@ -77,8 +77,8 @@ def handler(event: dict, context) -> dict:
             raise ValueError(f"Range {range_id} missing kali_ssh_key_secret_arn")
 
         # Construct chat URL
-        # The chat URL points to the MCP server - user authenticates with their JWT
-        chat_url = f"{chat_base_url.rstrip('/')}/chat?range={range_id}"
+        # The chat URL points to OpenWebUI on the chat subdomain
+        chat_url = f"{chat_base_url.rstrip('/')}?range={range_id}"
 
         # Update range to ready state
         now = datetime.now(timezone.utc)

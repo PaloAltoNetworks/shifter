@@ -6,19 +6,19 @@
  * - Per-user and global session limits
  * - LabConfig caching per session
  * - Transport management
+ *
+ * Sessions are keyed by MCP session ID (from StreamableHTTPServerTransport).
  */
 
-import { randomUUID } from 'crypto';
 import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { LabConfig } from 'aptl-mcp-common';
 import type { MCPSession, SessionStats, RangeRecord } from './types.js';
 import { getConfig } from './config.js';
 import { logger } from './logger.js';
-import { buildLabConfig } from './lab-config-builder.js';
 import { onSessionCreated, onSessionDestroyed } from './connection-cleanup.js';
 
 /**
- * Session storage - keyed by sessionId
+ * Session storage - keyed by MCP session ID (from transport)
  */
 const sessions = new Map<string, MCPSession>();
 
@@ -73,34 +73,26 @@ export function canCreateSession(userEmail: string): string | null {
 }
 
 /**
- * Create a new MCP session for a user.
+ * Store a new MCP session.
  *
- * Builds LabConfig from range data (DB + Secrets Manager hit happens here).
- * Subsequent requests for this session use cached config.
+ * Called from server.ts onsessioninitialized callback after the transport
+ * generates its session ID. LabConfig is built before transport creation.
  *
+ * @param mcpSessionId - The MCP session ID from transport
  * @param userEmail - The user's email
  * @param range - The user's active range
+ * @param labConfig - Pre-built LabConfig for this session
  * @param transport - The MCP transport for this session
- * @returns The created session
  */
-export async function createSession(
+export function storeSession(
+  mcpSessionId: string,
   userEmail: string,
   range: RangeRecord,
+  labConfig: LabConfig,
   transport: StreamableHTTPServerTransport
-): Promise<MCPSession> {
-  // Check limits (should be called by caller, but double-check)
-  const limitError = canCreateSession(userEmail);
-  if (limitError) {
-    throw new Error(limitError);
-  }
-
-  const sessionId = randomUUID();
-
-  // Build LabConfig - this is the DB/Secrets Manager hit
-  const labConfig = await buildLabConfig(range);
-
+): void {
   const session: MCPSession = {
-    sessionId,
+    sessionId: mcpSessionId,
     userEmail,
     rangeId: range.id,
     kaliIp: range.kaliIp,
@@ -109,32 +101,30 @@ export async function createSession(
     createdAt: new Date(),
   };
 
-  // Store session
-  sessions.set(sessionId, session);
+  // Store session keyed by MCP session ID
+  sessions.set(mcpSessionId, session);
 
   // Update user index
   if (!sessionsByUser.has(userEmail)) {
     sessionsByUser.set(userEmail, new Set());
   }
-  sessionsByUser.get(userEmail)!.add(sessionId);
+  sessionsByUser.get(userEmail)!.add(mcpSessionId);
 
   // Notify cleanup manager that a session was created
   onSessionCreated();
 
-  logger.info(`Session created: ${sessionId}`, {
+  logger.info(`Session stored: ${mcpSessionId}`, {
     userEmail,
     rangeId: range.id,
     globalSessions: sessions.size,
   });
-
-  return session;
 }
 
 /**
- * Get a session by ID.
+ * Get a session by MCP session ID.
  */
-export function getSession(sessionId: string): MCPSession | undefined {
-  return sessions.get(sessionId);
+export function getSessionByMcpId(mcpSessionId: string): MCPSession | undefined {
+  return sessions.get(mcpSessionId);
 }
 
 /**
@@ -151,10 +141,10 @@ export function getSessionsForUser(userEmail: string): MCPSession[] {
 }
 
 /**
- * Destroy a session and clean up resources.
+ * Destroy a session by MCP session ID and clean up resources.
  */
-export async function destroySession(sessionId: string): Promise<void> {
-  const session = sessions.get(sessionId);
+export async function destroySessionByMcpId(mcpSessionId: string): Promise<void> {
+  const session = sessions.get(mcpSessionId);
   if (!session) {
     return;
   }
@@ -163,18 +153,18 @@ export async function destroySession(sessionId: string): Promise<void> {
   try {
     await session.transport.close();
   } catch (error) {
-    logger.warn(`Error closing transport for session ${sessionId}`, {
+    logger.warn(`Error closing transport for session ${mcpSessionId}`, {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 
   // Remove from storage
-  sessions.delete(sessionId);
+  sessions.delete(mcpSessionId);
 
   // Update user index
   const userSessions = sessionsByUser.get(session.userEmail);
   if (userSessions) {
-    userSessions.delete(sessionId);
+    userSessions.delete(mcpSessionId);
     if (userSessions.size === 0) {
       sessionsByUser.delete(session.userEmail);
     }
@@ -183,7 +173,7 @@ export async function destroySession(sessionId: string): Promise<void> {
   // Notify cleanup manager that a session was destroyed
   onSessionDestroyed();
 
-  logger.info(`Session destroyed: ${sessionId}`, {
+  logger.info(`Session destroyed: ${mcpSessionId}`, {
     userEmail: session.userEmail,
     globalSessions: sessions.size,
   });
@@ -217,7 +207,7 @@ export async function destroySessionsForUser(userEmail: string): Promise<number>
 
   const sessionIds = Array.from(userSessionIds);
   for (const sessionId of sessionIds) {
-    await destroySession(sessionId);
+    await destroySessionByMcpId(sessionId);
   }
 
   return sessionIds.length;
@@ -231,7 +221,7 @@ export async function destroyAllSessions(): Promise<void> {
   const sessionIds = Array.from(sessions.keys());
 
   for (const sessionId of sessionIds) {
-    await destroySession(sessionId);
+    await destroySessionByMcpId(sessionId);
   }
 
   logger.info('All sessions destroyed');

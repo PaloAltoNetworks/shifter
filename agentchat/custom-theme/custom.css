@@ -100,37 +100,54 @@ html.dark {
   min-height: 32px !important;
 }
 
-/* Wordmark styling - "Cortex Shifter" with "by palo alto networks" tagline */
-.dark #sidebar-webui-name {
-  font-size: 0 !important;  /* Hide original text */
-  color: transparent !important;
-  display: flex !important;
+/* Wordmark link - no hover highlight */
+.dark a:has(#sidebar-webui-name) {
   flex-direction: column !important;
-  line-height: 1.1 !important;
-  white-space: nowrap !important;
-  position: relative !important;
+  align-items: flex-start !important;
 }
 
-/* Main wordmark: "CORTEX SHIFTER" */
-.dark #sidebar-webui-name::before {
-  content: "CORTEX SHIFTER" !important;
-  font-size: 14px !important;
-  font-weight: 700 !important;
-  color: #fff !important;
-  letter-spacing: 0.5px !important;
-  display: block !important;
+.dark a:has(#sidebar-webui-name):hover {
+  background-color: transparent !important;
 }
 
-/* Tagline: "by palo alto networks" */
-.dark #sidebar-webui-name::after {
+/* Tagline on parent link: "by palo alto networks" */
+.dark a:has(#sidebar-webui-name)::after {
   content: "by palo alto networks" !important;
   font-size: 9px !important;
   font-weight: 400 !important;
   color: #a4a4a4 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.3px !important;
-  margin-top: 2px !important;
+  margin-top: 1px !important;
+  margin-left: 10px !important;  /* Align with wordmark text */
   display: block !important;
+}
+
+/* Wordmark container - hide original text */
+.dark #sidebar-webui-name {
+  font-size: 0 !important;
+  color: transparent !important;
+  display: inline !important;
+  line-height: 1.1 !important;
+  white-space: nowrap !important;
+}
+
+/* "CORTEX " in white */
+.dark #sidebar-webui-name::before {
+  content: "CORTEX " !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: #fff !important;
+  letter-spacing: 0.5px !important;
+}
+
+/* "SHIFTER" in grey (matching XDR styling) */
+.dark #sidebar-webui-name::after {
+  content: "SHIFTER" !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #a4a4a4 !important;
+  letter-spacing: 0.5px !important;
 }
 
 /* Sidebar container - pure black like Cortex XDR */

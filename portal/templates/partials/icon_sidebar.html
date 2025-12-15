@@ -1,4 +1,4 @@
-{% load static %}
+{% load static user_extras %}
 <!-- Icon Sidebar Navigation -->
 <nav class="icon-sidebar">
     <div class="icon-sidebar-nav">
@@ -74,7 +74,7 @@
     <!-- User Avatar -->
     <div class="icon-sidebar-footer">
         <div class="user-avatar" id="user-avatar">
-            {% if request.user.email %}{{ request.user.email|slice:":2"|upper }}{% else %}??{% endif %}
+            {{ request.user.email|initials }}
         </div>
         <div class="user-dropdown" id="user-dropdown">
             <div class="user-dropdown-header">{{ request.user.email }}</div>

@@ -1,4 +1,4 @@
-{% load static %}
+{% load static user_extras %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -86,10 +86,10 @@
             </div>
         </div>
 
-        <!-- User Avatar (placeholder for US5) -->
+        <!-- User Avatar -->
         <div class="icon-sidebar-footer">
             <div class="user-avatar" id="user-avatar">
-                {{ request.user.email|make_list|first|upper }}{{ request.user.email|make_list|first|upper }}
+                {{ request.user.email|initials }}
             </div>
             <div class="user-dropdown" id="user-dropdown">
                 <div class="user-dropdown-header">{{ request.user.email }}</div>

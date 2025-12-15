@@ -90,6 +90,12 @@ jobs:
           uv run python manage.py collectstatic --noinput
           uv run pytest
 
+      - name: Test openwebui-mcp-wrapper
+        working-directory: mcp/openwebui-mcp-wrapper
+        run: |
+          uv sync --group dev
+          uv run python -m pytest --cov=. --cov-report=xml:coverage.xml
+
       - name: Lint TypeScript
         working-directory: mcp/mcp-red
         run: npm run lint

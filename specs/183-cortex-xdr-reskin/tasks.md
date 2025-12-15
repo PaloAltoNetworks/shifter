@@ -86,18 +86,18 @@
 
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] Update portal/templates/risk_register/base.html to link xdr-theme.css stylesheet
-- [ ] T032 [US2] Update portal/templates/risk_register/base.html to load Lato font from Google Fonts
-- [ ] T033 [US2] Add xdr-dark-theme class to body element in portal/templates/risk_register/base.html
-- [ ] T034 [US2] Remove inline `<style>` block from portal/templates/risk_register/base.html
-- [ ] T035 [US2] Update header and sidebar in portal/templates/risk_register/base.html to match Mission Control
-- [ ] T036 [US2] Update severity badge classes in portal/templates/risk_register/risk_list.html
-- [ ] T037 [US2] Update table styling in portal/templates/risk_register/risk_list.html
-- [ ] T038 [P] [US2] Update portal/templates/risk_register/risk_detail.html to use new component classes
-- [ ] T039 [P] [US2] Update form inputs in portal/templates/risk_register/risk_form.html to bottom-border style
-- [ ] T040 [P] [US2] Update portal/templates/risk_register/apikey_list.html to use new component classes
-- [ ] T041 [US2] Verify navigation between Mission Control and Risk Register is visually seamless
-- [ ] T042 [US2] Visual review: Compare Risk Register to Mission Control for consistency
+- [x] T031 [US2] Update portal/templates/risk_register/base.html to link xdr-theme.css stylesheet
+- [x] T032 [US2] Update portal/templates/risk_register/base.html to load Lato font from Google Fonts
+- [x] T033 [US2] Add xdr-dark-theme class to body element in portal/templates/risk_register/base.html
+- [x] T034 [US2] Remove inline `<style>` block from portal/templates/risk_register/base.html
+- [x] T035 [US2] Update header and sidebar in portal/templates/risk_register/base.html to match Mission Control
+- [x] T036 [US2] Update severity badge classes in portal/templates/risk_register/risk_list.html
+- [x] T037 [US2] Update table styling in portal/templates/risk_register/risk_list.html
+- [x] T038 [P] [US2] Update portal/templates/risk_register/risk_detail.html to use new component classes
+- [x] T039 [P] [US2] Update form inputs in portal/templates/risk_register/risk_form.html to bottom-border style
+- [x] T040 [P] [US2] Update portal/templates/risk_register/apikey_list.html to use new component classes
+- [x] T041 [US2] Verify navigation between Mission Control and Risk Register is visually seamless
+- [x] T042 [US2] Visual review: Compare Risk Register to Mission Control for consistency
 
 **Checkpoint**: Risk Register matches Mission Control styling exactly
 

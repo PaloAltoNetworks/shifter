@@ -1,6 +1,7 @@
 {% extends "risk_register/base.html" %}
 
 {% block content %}
+<!-- T040: API key list with XDR component classes -->
 <div class="page-header">
     <div>
         <h1 class="page-title">API Keys</h1>
@@ -9,23 +10,23 @@
 </div>
 
 {% if show_key %}
-<div class="card" style="background: rgba(57, 255, 20, 0.1); border-color: var(--neon-green);">
-    <h3 class="card-title" style="color: var(--neon-green);">⚠️ Save This Key Now</h3>
-    <p style="margin-bottom: 1rem;">This is your new API key. Copy it now - you won't be able to see it again!</p>
-    <div style="background: var(--black); padding: 1rem; border-radius: 4px; font-family: monospace; word-break: break-all;">
+<div class="card message-success">
+    <h3 class="card-title text-success">⚠️ Save This Key Now</h3>
+    <p class="mb-md">This is your new API key. Copy it now - you won't be able to see it again!</p>
+    <div style="background: var(--xdr-surface-secondary); padding: 1rem; border-radius: 4px; font-family: monospace; word-break: break-all;">
         {{ raw_key }}
     </div>
-    <p style="margin-top: 1rem; font-size: 0.875rem;">
+    <p class="mt-md text-small">
         <strong>Key Name:</strong> {{ api_key.name }}<br>
         <strong>Prefix:</strong> {{ api_key.prefix }}...
     </p>
-    <a href="{% url 'risk_register:apikey_list' %}" class="btn btn-primary" style="margin-top: 1rem;">Done - Show All Keys</a>
+    <a href="{% url 'risk_register:apikey_list' %}" class="btn btn-primary mt-md">Done - Show All Keys</a>
 </div>
 {% else %}
 
 <div class="card">
     <h3 class="card-title">Create New API Key</h3>
-    <form method="post" action="{% url 'risk_register:apikey_create' %}" style="display: flex; gap: 1rem; align-items: flex-end;">
+    <form method="post" action="{% url 'risk_register:apikey_create' %}" class="flex-row gap-md" style="align-items: flex-end;">
         {% csrf_token %}
         <div class="form-group" style="flex: 1; margin-bottom: 0;">
             <label class="form-label">Key Name</label>
@@ -53,15 +54,15 @@
             <tr>
                 <td>{{ key.name }}</td>
                 <td style="font-family: monospace;">{{ key.display_key }}</td>
-                <td style="color: rgba(255,255,255,0.5);">{{ key.created_at|date:"M d, Y" }}</td>
-                <td style="color: rgba(255,255,255,0.5);">
+                <td class="text-muted">{{ key.created_at|date:"M d, Y" }}</td>
+                <td class="text-muted">
                     {% if key.last_used_at %}{{ key.last_used_at|date:"M d, Y H:i" }}{% else %}Never{% endif %}
                 </td>
                 <td>
                     {% if key.is_active %}
-                    <span style="color: var(--neon-green);">Active</span>
+                    <span class="text-success">Active</span>
                     {% else %}
-                    <span style="color: var(--gray);">Revoked</span>
+                    <span class="text-muted">Revoked</span>
                     {% endif %}
                 </td>
                 <td>
@@ -71,7 +72,7 @@
                         <button type="submit" class="btn btn-danger btn-sm">Revoke</button>
                     </form>
                     {% else %}
-                    <span style="color: var(--gray);">—</span>
+                    <span class="text-muted">—</span>
                     {% endif %}
                 </td>
             </tr>
@@ -87,10 +88,10 @@
 
 {% endif %}
 
-<div class="card" style="margin-top: 1.5rem;">
+<div class="card mt-lg">
     <h3 class="card-title">API Usage</h3>
-    <p style="margin-bottom: 1rem;">Use your API key in the <code>X-API-Key</code> header:</p>
-    <pre style="background: var(--black); padding: 1rem; border-radius: 4px; overflow-x: auto;"><code>curl -H "X-API-Key: rr_live_your_key_here" \
+    <p class="mb-md">Use your API key in the <code style="background: var(--xdr-hover); padding: 0.125rem 0.375rem; border-radius: 4px;">X-API-Key</code> header:</p>
+    <pre style="background: var(--xdr-surface-secondary); padding: 1rem; border-radius: 4px; overflow-x: auto; color: var(--xdr-on-background);"><code>curl -H "X-API-Key: rr_live_your_key_here" \
      {{ request.scheme }}://{{ request.get_host }}/api/v1/risks/</code></pre>
 </div>
 {% endblock %}

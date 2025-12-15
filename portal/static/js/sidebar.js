@@ -2,6 +2,7 @@
  * Cortex XDR Sidebar JavaScript
  *
  * Handles:
+ * - Sidebar expand/collapse with lock
  * - Secondary panel expand/collapse
  * - User avatar dropdown
  * - Outside click detection
@@ -9,6 +10,26 @@
 
 (function() {
     'use strict';
+
+    // Sidebar Lock Toggle
+    function initSidebarLock() {
+        const sidebar = document.querySelector('.icon-sidebar');
+        const lockBtn = document.querySelector('.sidebar-lock-btn');
+
+        if (!sidebar || !lockBtn) return;
+
+        // Check localStorage for lock state
+        const isLocked = localStorage.getItem('sidebarLocked') === 'true';
+        if (isLocked) {
+            sidebar.classList.add('locked');
+        }
+
+        lockBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const nowLocked = sidebar.classList.toggle('locked');
+            localStorage.setItem('sidebarLocked', nowLocked);
+        });
+    }
 
     // Secondary Panel Toggle
     function initSecondaryPanel() {
@@ -87,6 +108,7 @@
     }
 
     function init() {
+        initSidebarLock();
         initSecondaryPanel();
         initUserDropdown();
     }

@@ -14,7 +14,8 @@
     left: 0;
     bottom: 0;
     width: 56px;
-    background: var(--xdr-surface);
+    /* Layered background with subtle gradient */
+    background: linear-gradient(180deg, #1a1a1a 0%, #151515 100%);
     border-right: 1px solid var(--xdr-border-extra-soft);
     display: flex;
     flex-direction: column;
@@ -44,17 +45,19 @@
     flex-shrink: 0;
 }
 
-.icon-sidebar-logo img {
+.icon-sidebar-logo img,
+.icon-sidebar-logo .cortex-logo {
     width: 32px;
     height: 32px;
     flex-shrink: 0;
 }
 
 .icon-sidebar-logo-text {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 700;
+    letter-spacing: 0.05em;
     color: var(--xdr-on-background);
-    margin-left: 12px;
+    margin-left: 10px;
     white-space: nowrap;
     opacity: 0;
     transition: opacity 0.15s ease;
@@ -104,7 +107,7 @@
 }
 
 .icon-sidebar.locked .sidebar-lock-btn {
-    color: var(--xdr-primary);
+    color: var(--xdr-brand, #00d26a); /* Green when locked */
 }
 
 .icon-sidebar-nav {
@@ -160,6 +163,12 @@
     white-space: nowrap;
     opacity: 0;
     transition: opacity 0.15s ease;
+    color: #b8b8b8; /* Gray text, not blue */
+}
+
+.icon-sidebar-item:hover .icon-sidebar-item-text,
+.icon-sidebar-item.active .icon-sidebar-item-text {
+    color: #eaebeb; /* White on hover/active */
 }
 
 .icon-sidebar:hover .icon-sidebar-item-text,
@@ -195,7 +204,7 @@
     transform: translateY(-50%);
     width: 3px;
     height: 24px;
-    background: var(--xdr-primary);
+    background: var(--xdr-brand, #00d26a); /* Green accent */
     border-radius: 0 2px 2px 0;
 }
 

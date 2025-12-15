@@ -139,9 +139,9 @@ body.nav-lock .left-nav .left-nav-body,
   z-index: 1;
   top: 10px;
   color: var(--nav-lock-button-color);
-  opacity: 1;
+  opacity: 0;
   background-color: transparent;
-  transition: opacity 0.3s 0.3s, color 0.3s, background-color 0.3s;
+  transition: opacity 0.3s, color 0.3s, background-color 0.3s;
   border: 0;
   cursor: pointer;
   display: flex;
@@ -153,6 +153,16 @@ body.nav-lock .left-nav .left-nav-body,
   padding: 0;
 }
 
+/* Show lock button when sidebar is expanded */
+.left-nav:not(.minimized) .lock-button {
+  opacity: 1;
+}
+
+/* When locked, always show and use white color */
+body.nav-lock .lock-button {
+  opacity: 1;
+}
+
 .lock-button:hover {
   background-color: var(--nav-lock-button-bg-color-hover);
   color: var(--nav-lock-button-color-hover);
@@ -162,14 +172,10 @@ body.nav-lock .left-nav .left-nav-body,
   color: var(--nav-lock-button-color-active);
 }
 
-/* Hide lock button when mouse leaves nav */
-body.nav-mouse-leave .lock-button {
+/* Hide lock button when mouse leaves nav (with delay) */
+body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
   opacity: 0;
-}
-
-/* When minimized, hide lock button */
-.left-nav.minimized .lock-button {
-  opacity: 0;
+  transition-delay: 0.3s;
 }
 
 /* Reset button base styles */

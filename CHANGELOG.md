@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Session limits (per-user and global) with structured logging
   - Idle connection cleanup timer
   - StreamableHTTPServerTransport for MCP over HTTP
+- OpenWebUI MCP wrapper tool (`mcp/openwebui-mcp-wrapper/`)
+- `cognito_sub` column on Range model for MCP user lookups
+- Custom OIDC backend passing Cognito `sub` claim to Range model
+- Security context in MCP server description (authorized pentest boundaries)
 - VPC peering between Portal VPC and Range VPC for SSH connectivity
 - ALB listener rules for `/chat` and `/mcp` path routing
 - IAM policies for MCP server (RDS connect, Secrets Manager read)
@@ -29,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - AgentChat deployment workflow includes mcp-shifter container
 - mark_ready Lambda sets chat_url when range becomes ready
+- - AgentChat routing changed from subpath (`/chat/`) to subdomain (`chat.{domain}`)
+- ACM certificate includes SAN for `chat.{domain}` subdomain
+- Cognito OAuth callbacks updated for subdomain URLs
+- ALB listener rules use `host_header` matching instead of `path_pattern`
+- Docker layer caching added to portal and agentchat CI/CD workflows (faster builds)
+
+## [0.4.5] - 2025-12-15
+### Changed
+- Reskin Portal and Risk Registerto Cortex XDR look and feel
 
 ## [0.4.4] - 2025-12-14
 

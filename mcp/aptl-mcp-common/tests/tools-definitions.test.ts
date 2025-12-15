@@ -3,8 +3,12 @@ import { generateToolDefinitions } from '../src/tools/definitions.js';
 
 describe('generateToolDefinitions', () => {
   const mockServerConfig = {
+    name: 'test-server',
+    version: '1.0.0',
+    description: 'Test server',
     toolPrefix: 'test',
-    targetName: 'Test Container'
+    targetName: 'Test Container',
+    configKey: 'test',
   };
 
   it('generates tools with correct names using toolPrefix', () => {
@@ -35,8 +39,12 @@ describe('generateToolDefinitions', () => {
 
   it('works with different server configs', () => {
     const kaliConfig = {
+      name: 'kali-server',
+      version: '1.0.0',
+      description: 'Kali server',
       toolPrefix: 'kali',
-      targetName: 'Kali Linux'
+      targetName: 'Kali Linux',
+      configKey: 'kali',
     };
 
     const tools = generateToolDefinitions(kaliConfig);
@@ -48,8 +56,12 @@ describe('generateToolDefinitions', () => {
 
   it('handles empty toolPrefix', () => {
     const emptyConfig = {
+      name: 'test-server',
+      version: '1.0.0',
+      description: 'Test server',
       toolPrefix: '',
-      targetName: 'Test Container'
+      targetName: 'Test Container',
+      configKey: 'test',
     };
 
     const tools = generateToolDefinitions(emptyConfig);
@@ -59,12 +71,16 @@ describe('generateToolDefinitions', () => {
 
   it('handles empty targetName', () => {
     const emptyConfig = {
+      name: 'test-server',
+      version: '1.0.0',
+      description: 'Test server',
       toolPrefix: 'test',
-      targetName: ''
+      targetName: '',
+      configKey: 'test',
     };
 
     const tools = generateToolDefinitions(emptyConfig);
-    expect(tools[0].description).toContain(' instance in the lab');
+    expect(tools[0].description).toContain(' instance including allowed target networks');
     expect(tools[1].description).toContain(' instance (creates temporary session)');
   });
 

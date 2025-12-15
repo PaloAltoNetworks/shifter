@@ -2,7 +2,8 @@
  * mcp-shifter HTTP Server
  *
  * Express server that provides MCP over HTTP for OpenWebUI integration.
- * Routes requests to per-user MCP sessions based on JWT authentication.
+ * Uses standard MCP protocol with single /mcp endpoint.
+ * Sessions are created on MCP initialize request, keyed by mcp-session-id header.
  */
 
 import express, { type Request, type Response, type NextFunction } from 'express';
@@ -12,6 +13,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  isInitializeRequest,
   type CallToolRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
@@ -27,9 +29,9 @@ import { authMiddleware } from './middleware/auth.js';
 import { getActiveRangeForUser, closePool } from './db.js';
 import {
   canCreateSession,
-  createSession,
-  getSession,
-  destroySession,
+  storeSession,
+  getSessionByMcpId,
+  destroySessionByMcpId,
   destroyAllSessions,
   getSessionCount,
 } from './session-manager.js';
@@ -38,6 +40,7 @@ import {
   stopCleanupManager,
   getIdleStatus,
 } from './connection-cleanup.js';
+import { buildLabConfig } from './lab-config-builder.js';
 import type { UserContext, NoRangeError, SessionLimitError } from './types.js';
 
 // Shared SSH connection manager - pools connections by user@host:port
@@ -106,12 +109,52 @@ export function createApp(): express.Application {
     });
   });
 
-  // MCP session initialization endpoint
-  app.post('/mcp/session', authMiddleware, async (req: Request, res: Response) => {
+  /**
+   * MCP POST endpoint - handles all MCP messages
+   *
+   * On initialize request: JWT auth -> range lookup -> build LabConfig -> create transport/server
+   * On other requests: lookup session by mcp-session-id header -> forward to transport
+   */
+  app.post('/mcp', authMiddleware, async (req: Request, res: Response) => {
     const userContext = req.userContext as UserContext;
+    const mcpSessionId = req.headers['mcp-session-id'] as string | undefined;
 
     try {
-      // Check if user has an active range
+      // Check if we have an existing session
+      if (mcpSessionId) {
+        const session = getSessionByMcpId(mcpSessionId);
+
+        if (session) {
+          // Verify session belongs to authenticated user
+          if (session.userEmail !== userContext.email) {
+            logger.warn('Unauthorized session access attempt', {
+              mcpSessionId,
+              sessionOwner: session.userEmail,
+              requestUser: userContext.email,
+            });
+            res.status(403).json({
+              error: 'forbidden',
+              message: 'Session belongs to another user',
+            });
+            return;
+          }
+
+          // Forward request to session transport
+          await session.transport.handleRequest(req, res, req.body);
+          return;
+        }
+      }
+
+      // No existing session - must be initialize request
+      if (!isInitializeRequest(req.body)) {
+        res.status(400).json({
+          error: 'session_required',
+          message: 'mcp-session-id header required for non-initialize requests',
+        });
+        return;
+      }
+
+      // New session: validate user has active range
       const range = await getActiveRangeForUser(userContext.email);
 
       if (!range) {
@@ -137,48 +180,71 @@ export function createApp(): express.Application {
         return;
       }
 
-      // Create transport for this session
+      // Build LabConfig from range
+      const labConfig = await buildLabConfig(range);
+
+      // Create transport - it will generate session ID on initialize
+      // enableJsonResponse forces synchronous JSON responses instead of SSE streams
+      // Required for compatibility with OpenWebUI wrapper which expects JSON
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
+        enableJsonResponse: true,
+        onsessioninitialized: (sessionId: string) => {
+          // Store session keyed by MCP session ID
+          storeSession(sessionId, userContext.email, range, labConfig, transport);
+          logger.info(`MCP session initialized for ${userContext.email}`, {
+            mcpSessionId: sessionId,
+            rangeId: range.id,
+          });
+        },
       });
 
-      // Create session (builds LabConfig from range + Secrets Manager)
-      const session = await createSession(userContext.email, range, transport);
+      // Cleanup handler when transport closes
+      transport.onclose = () => {
+        const sid = transport.sessionId;
+        if (sid) {
+          destroySessionByMcpId(sid);
+        }
+      };
 
-      // Create MCP server with session's LabConfig
-      const mcpServer = createMCPServerForSession(session.labConfig);
+      // Create MCP server with LabConfig
+      const mcpServer = createMCPServerForSession(labConfig);
 
       // Connect server to transport
       await mcpServer.connect(transport);
 
-      logger.info(`MCP session initialized for ${userContext.email}`, {
-        sessionId: session.sessionId,
-        rangeId: range.id,
-      });
-
-      res.json({
-        sessionId: session.sessionId,
-        rangeId: range.id,
-        kaliIp: range.kaliIp,
-      });
+      // Let transport handle the initialize request
+      // This will trigger onsessioninitialized callback and set mcp-session-id header
+      await transport.handleRequest(req, res, req.body);
     } catch (error) {
-      logger.error('Failed to initialize MCP session', {
+      logger.error('MCP request failed', {
         userEmail: userContext.email,
+        mcpSessionId,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       res.status(500).json({
-        error: 'session_creation_failed',
-        message: 'Failed to create MCP session',
+        error: 'request_failed',
+        message: 'MCP request processing failed',
       });
     }
   });
 
-  // MCP message endpoint
-  app.post('/mcp/:sessionId', authMiddleware, async (req: Request, res: Response) => {
-    const { sessionId } = req.params;
+  /**
+   * MCP GET endpoint - SSE stream for server-sent events
+   */
+  app.get('/mcp', authMiddleware, async (req: Request, res: Response) => {
     const userContext = req.userContext as UserContext;
+    const mcpSessionId = req.headers['mcp-session-id'] as string | undefined;
 
-    const session = getSession(sessionId);
+    if (!mcpSessionId) {
+      res.status(400).json({
+        error: 'session_required',
+        message: 'mcp-session-id header required for SSE stream',
+      });
+      return;
+    }
+
+    const session = getSessionByMcpId(mcpSessionId);
 
     if (!session) {
       res.status(404).json({
@@ -190,11 +256,6 @@ export function createApp(): express.Application {
 
     // Verify session belongs to authenticated user
     if (session.userEmail !== userContext.email) {
-      logger.warn(`Unauthorized session access attempt`, {
-        sessionId,
-        sessionOwner: session.userEmail,
-        requestUser: userContext.email,
-      });
       res.status(403).json({
         error: 'forbidden',
         message: 'Session belongs to another user',
@@ -203,26 +264,36 @@ export function createApp(): express.Application {
     }
 
     try {
-      // Forward request to session transport
-      await session.transport.handleRequest(req, res, req.body);
+      // Forward to transport for SSE handling
+      await session.transport.handleRequest(req, res);
     } catch (error) {
-      logger.error('MCP request failed', {
-        sessionId,
+      logger.error('SSE stream failed', {
+        mcpSessionId,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       res.status(500).json({
-        error: 'request_failed',
-        message: 'MCP request processing failed',
+        error: 'stream_failed',
+        message: 'SSE stream setup failed',
       });
     }
   });
 
-  // Session deletion endpoint
-  app.delete('/mcp/:sessionId', authMiddleware, async (req: Request, res: Response) => {
-    const { sessionId } = req.params;
+  /**
+   * MCP DELETE endpoint - terminate session
+   */
+  app.delete('/mcp', authMiddleware, async (req: Request, res: Response) => {
     const userContext = req.userContext as UserContext;
+    const mcpSessionId = req.headers['mcp-session-id'] as string | undefined;
 
-    const session = getSession(sessionId);
+    if (!mcpSessionId) {
+      res.status(400).json({
+        error: 'session_required',
+        message: 'mcp-session-id header required to terminate session',
+      });
+      return;
+    }
+
+    const session = getSessionByMcpId(mcpSessionId);
 
     if (!session) {
       res.status(404).json({
@@ -241,10 +312,10 @@ export function createApp(): express.Application {
       return;
     }
 
-    await destroySession(sessionId);
+    await destroySessionByMcpId(mcpSessionId);
 
-    logger.info(`Session destroyed by user`, {
-      sessionId,
+    logger.info('Session destroyed by user', {
+      mcpSessionId,
       userEmail: userContext.email,
     });
 
@@ -278,7 +349,7 @@ export async function startServer(configPath: string): Promise<void> {
 
   // Start listening
   const server = app.listen(config.server.port, () => {
-    logger.info(`mcp-shifter server started`, {
+    logger.info('mcp-shifter server started', {
       port: config.server.port,
       idleTimeoutMs: config.connections.idleTimeoutMs,
     });

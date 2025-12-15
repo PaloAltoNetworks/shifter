@@ -200,6 +200,47 @@ jobs:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           OPENWEBUI_URL: ${{ env.WEBUI_URL }}
         run: |
+          # nginx config for path rewriting (OpenWebUI doesn't support subpaths natively)
+          # Use single quotes for sub_filter patterns to match literal quotes in HTML
+          read -r -d '' NGINX_CONF << 'NGINXEOF'
+          worker_processes auto;
+          events { worker_connections 1024; }
+          http {
+            include /etc/nginx/mime.types;
+            server {
+              listen 8080;
+              location /chat/ {
+                proxy_pass http://open-webui:8080/;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_buffering off;
+                sub_filter_once off;
+                sub_filter_types text/html text/css application/javascript application/json;
+                sub_filter '/_app/' '_app/';
+                sub_filter '/static/' 'static/';
+                sub_filter '/api/' 'api/';
+                sub_filter '/assets/' 'assets/';
+                sub_filter '/manifest.json' 'manifest.json';
+                sub_filter '/favicon' 'favicon';
+              }
+              location /chat { return 301 /chat/; }
+              location /mcp/ {
+                proxy_pass http://mcp-shifter:3001/;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_set_header Host $host;
+              }
+              location /health { return 200 "healthy"; }
+            }
+          }
+          NGINXEOF
+
           # Build SSM commands JSON using jq to avoid escaping issues
           SSM_PARAMS=$(jq -n \
             --arg ecr_registry "$ECR_REGISTRY" \
@@ -216,6 +257,7 @@ jobs:
             --arg rds_db "$RDS_DATABASE" \
             --arg db_url "$DATABASE_URL" \
             --arg webui_url "$OPENWEBUI_URL" \
+            --arg nginx_conf "$NGINX_CONF" \
             '{
               "commands": [
                 "set -e",
@@ -224,19 +266,22 @@ jobs:
                 "cd src && docker build -f Dockerfile_ecs -t bedrock-gateway . && cd /opt",
                 ("aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin " + $ecr_registry),
                 ("docker pull " + $mcp_image),
-                "docker stop open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
-                "docker rm open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
+                "docker stop nginx-proxy open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
+                "docker rm nginx-proxy open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
                 "docker network create agentchat 2>/dev/null || true",
-                "mkdir -p /opt/mcp-shifter-config",
+                "mkdir -p /opt/mcp-shifter-config /opt/nginx-config",
                 "echo '\''{\"sessions\":{\"maxPerUser\":10,\"maxGlobal\":100,\"logInfoThreshold\":50,\"logWarnThreshold\":80},\"connections\":{\"idleTimeoutMs\":300000}}'\'' > /opt/mcp-shifter-config/config.json",
+                ("echo " + ($nginx_conf | @sh) + " > /opt/nginx-config/nginx.conf"),
                 ("docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=" + $bedrock_region + " -e API_KEY=" + $bag_api_key + " bedrock-gateway"),
-                ("docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=" + $bedrock_region + " -e COGNITO_USER_POOL_ID=" + $cognito_pool + " -e COGNITO_CLIENT_ID=" + $cognito_client + " -e COGNITO_ISSUER=" + $cognito_issuer + " -e RDS_HOSTNAME=" + $rds_host + " -e RDS_PORT=" + $rds_port + " -e RDS_DATABASE=" + $rds_db + " -e RDS_USERNAME=mcp_user " + $mcp_image),
+                ("docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=" + $bedrock_region + " -e COGNITO_USER_POOL_ID=" + $cognito_pool + " -e COGNITO_CLIENT_ID=" + $cognito_client + " -e COGNITO_ISSUER=" + $cognito_issuer + " -e RDS_HOSTNAME=" + $rds_host + " -e RDS_PORT=" + $rds_port + " -e RDS_DATABASE=" + $rds_db + " -e RDS_USERNAME=mcp_user -v /opt/mcp-shifter-config:/app/config:ro " + $mcp_image),
                 "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
-                ("docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=" + $bag_api_key + " -e DATABASE_URL=" + $db_url + " -e WEBUI_URL=" + $webui_url + " -e ENABLE_OAUTH_SIGNUP=true -e ENABLE_LOGIN_FORM=false -e OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true -e OAUTH_PROVIDER_NAME=cognito -e OAUTH_CLIENT_ID=" + $cognito_client + " -e OAUTH_CLIENT_SECRET=" + $cognito_secret + " -e OPENID_PROVIDER_URL=" + $cognito_issuer + "/.well-known/openid-configuration ghcr.io/open-webui/open-webui:v0.6.41"),
+                ("docker run -d --name open-webui --restart unless-stopped --network agentchat -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=" + $bag_api_key + " -e DATABASE_URL=" + $db_url + " -e WEBUI_URL=" + $webui_url + " -e ENABLE_OAUTH_SIGNUP=true -e ENABLE_LOGIN_FORM=false -e OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true -e OAUTH_PROVIDER_NAME=cognito -e OAUTH_CLIENT_ID=" + $cognito_client + " -e OAUTH_CLIENT_SECRET=" + $cognito_secret + " -e OPENID_PROVIDER_URL=" + $cognito_issuer + "/.well-known/openid-configuration ghcr.io/open-webui/open-webui:v0.6.41"),
+                "docker run -d --name nginx-proxy --restart unless-stopped --network agentchat -p 8080:8080 -v /opt/nginx-config/nginx.conf:/etc/nginx/nginx.conf:ro nginx:alpine",
                 "echo Waiting for health checks...",
                 "sleep 30",
-                "curl -sf http://localhost:8080/health || (docker logs open-webui && exit 1)",
-                "curl -sf http://localhost:3001/health || (docker logs mcp-shifter && exit 1)",
+                "curl -sf http://localhost:8080/health || (docker logs nginx-proxy && exit 1)",
+                "curl -sf http://localhost:8080/chat/health || (docker logs open-webui && exit 1)",
+                "docker logs mcp-shifter --tail 5",
                 "echo AgentChat deployment complete"
               ]
             }')

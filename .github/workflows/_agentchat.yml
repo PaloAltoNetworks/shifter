@@ -142,16 +142,23 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push mcp-shifter
         id: build-push
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          ECR_REPO_NAME: shifter-${{ inputs.is_dev && 'dev-' || '' }}mcp-shifter
-        run: |
-          IMAGE_TAG="${ECR_REGISTRY}/${ECR_REPO_NAME}:latest"
-          docker build -t "$IMAGE_TAG" -f ./mcp/mcp-shifter/Dockerfile ./mcp
-          docker push "$IMAGE_TAG"
-          echo "image_uri=$IMAGE_TAG" >> $GITHUB_OUTPUT
+        uses: docker/build-push-action@v5
+        with:
+          context: ./mcp
+          file: ./mcp/mcp-shifter/Dockerfile
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/shifter-${{ inputs.is_dev && 'dev-' || '' }}mcp-shifter:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set image output
+        id: image-output
+        run: echo "image_uri=${{ steps.ecr-login.outputs.registry }}/shifter-${{ inputs.is_dev && 'dev-' || '' }}mcp-shifter:latest" >> $GITHUB_OUTPUT
 
       - name: Get Instance ID
         id: instance
@@ -196,7 +203,7 @@ jobs:
           RDS_HOSTNAME: ${{ steps.secrets.outputs.rds_hostname }}
           RDS_PORT: ${{ steps.secrets.outputs.rds_port }}
           RDS_DATABASE: ${{ steps.secrets.outputs.rds_database }}
-          MCP_SHIFTER_IMAGE: ${{ steps.build-push.outputs.image_uri }}
+          MCP_SHIFTER_IMAGE: ${{ steps.image-output.outputs.image_uri }}
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           OPENWEBUI_URL: ${{ env.WEBUI_URL }}
         run: |

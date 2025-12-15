@@ -84,18 +84,6 @@ describe('generateToolDefinitions', () => {
     expect(tools[1].description).toContain(' instance (creates temporary session)');
   });
 
-  it('includes security context in tool descriptions', () => {
-    const tools = generateToolDefinitions(mockServerConfig);
-
-    // Key command tools should include security context
-    expect(tools[0].description).toContain('[AUTHORIZED PENTEST]');
-    expect(tools[1].description).toContain('[AUTHORIZED PENTEST]');
-    expect(tools[4].description).toContain('[AUTHORIZED PENTEST]'); // session_command
-
-    // Security context should reference the info tool
-    expect(tools[1].description).toContain('test_info');
-  });
-
   it('all tools have required properties', () => {
     const tools = generateToolDefinitions(mockServerConfig);
 

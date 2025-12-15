@@ -110,13 +110,13 @@
 
 ### Implementation for User Story 4
 
-- [ ] T042 [US4] Add .empty-state-graphic CSS (circular shape) in portal/static/css/xdr-theme.css
-- [ ] T043 [US4] Add .empty-state-graphic inner arc/segment styles in portal/static/css/xdr-theme.css
-- [ ] T044 [US4] Update empty state in portal/templates/mission_control/dashboard.html with graphic
-- [ ] T045 [US4] Update empty state in portal/templates/mission_control/agents.html with graphic
-- [ ] T046 [US4] Update empty state in portal/templates/mission_control/history.html with graphic
-- [ ] T047 [US4] Update empty state in portal/templates/risk_register/risk_list.html with graphic
-- [ ] T048 [US4] Update empty state in portal/templates/risk_register/apikey_list.html with graphic
+- [x] T042 [US4] Add .empty-state-graphic CSS (circular shape) in portal/static/css/xdr-theme.css
+- [x] T043 [US4] Add .empty-state-graphic inner arc/segment styles in portal/static/css/xdr-theme.css
+- [x] T044 [US4] Update empty state in portal/templates/mission_control/dashboard.html with graphic (N/A - uses functional state card)
+- [x] T045 [US4] Update empty state in portal/templates/mission_control/agents.html with graphic
+- [x] T046 [US4] Update empty state in portal/templates/mission_control/history.html with graphic
+- [x] T047 [US4] Update empty state in portal/templates/risk_register/risk_list.html with graphic
+- [x] T048 [US4] Update empty state in portal/templates/risk_register/apikey_list.html with graphic
 
 **Checkpoint**: All empty states display graphical elements
 

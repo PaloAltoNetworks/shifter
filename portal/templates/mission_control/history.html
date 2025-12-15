@@ -7,13 +7,19 @@
 </div>
 
 <div class="card">
-    <!-- Empty state -->
+    <!-- Empty state with graphical element -->
     <div class="empty-state" id="history-empty">
-        <div class="empty-state-icon">[ ]</div>
-        <p>No range history yet</p>
-        <p class="text-small mt-sm">
-            Your past ranges will appear here
-        </p>
+        <div class="empty-state-graphic">
+            <div class="empty-state-graphic-arc"></div>
+            <div class="empty-state-graphic-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                </svg>
+            </div>
+        </div>
+        <h3>No range history yet</h3>
+        <p>Your past ranges will appear here</p>
     </div>
 
     <!-- History list (hidden when empty) -->

@@ -67,28 +67,31 @@ body.xdr-dark-theme {
     margin: 0 0 12px;
 }
 
-/* Buttons */
+/* Buttons - Cortex XDR white pill style */
 .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 8px 16px;
-    border-radius: 4px;
-    font-size: 13px;
+    height: 28px;
+    min-width: 90px;
+    padding: 0 30px;
+    border-radius: 20px;
+    font-size: 12px;
     font-weight: 600;
     font-family: Lato, sans-serif;
     cursor: pointer;
     border: none;
-    transition: background-color 0.15s ease;
+    transition: opacity 0.2s ease;
 }
 
 .btn-primary {
-    background: #00d26a;
+    background: #fff;
     color: #000;
 }
 
-.btn-primary:hover {
-    background: #00e676;
+.btn-primary:disabled {
+    opacity: 0.36;
+    cursor: not-allowed;
 }
 
 .btn-secondary {
@@ -97,8 +100,9 @@ body.xdr-dark-theme {
     border: 1px solid var(--xdr-border);
 }
 
-.btn-secondary:hover {
-    background: var(--xdr-hover);
+.btn-secondary:disabled {
+    opacity: 0.36;
+    cursor: not-allowed;
 }
 
 /* Tables */

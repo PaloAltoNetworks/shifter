@@ -147,12 +147,12 @@
 
 **Purpose**: Final testing, validation, and cleanup
 
-- [ ] T057 Test all navigation flows in browser at 1366×768 resolution
-- [ ] T058 Visual comparison with Cortex XDR reference screenshots
-- [ ] T059 Test in Chrome, Firefox, Safari, Edge (latest versions)
-- [ ] T060 Verify sidebar behavior on window resize
-- [ ] T061 Remove any unused CSS from Phase 1 sidebar in portal/static/css/xdr-theme.css
-- [ ] T062 Run quickstart-restructure.md validation checklist
+- [x] T057 Test all navigation flows in browser at 1366×768 resolution
+- [x] T058 Visual comparison with Cortex XDR reference screenshots
+- [ ] T059 Test in Chrome, Firefox, Safari, Edge (latest versions) (deferred - requires manual testing)
+- [x] T060 Verify sidebar behavior on window resize
+- [x] T061 Remove any unused CSS from Phase 1 sidebar in portal/static/css/xdr-theme.css (reviewed - all CSS in use)
+- [x] T062 Run quickstart-restructure.md validation checklist
 
 ---
 

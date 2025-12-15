@@ -196,9 +196,11 @@ OIDC_CREATE_USER = True
 OIDC_USERNAME_ALGO = "config.oidc.generate_username"
 
 # URLs exempt from OIDC authentication (public pages)
+# Must be URL paths starting with "/" or view names (not regex patterns)
 OIDC_EXEMPT_URLS = [
-    r"^/$",  # Landing page
-    r"^/oidc/",  # OIDC callback URLs
+    "/",  # Landing page
+    "/health",  # Health check
+    "/health/",  # Health check with trailing slash
 ]
 
 # ------------------------------------------------------------------------------

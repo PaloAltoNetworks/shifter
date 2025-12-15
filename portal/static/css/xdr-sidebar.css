@@ -37,15 +37,15 @@
 .icon-sidebar-logo {
     display: flex;
     align-items: center;
-    height: 60px;
-    padding: 0 12px;
+    height: 52px;
+    padding: 0 8px;
     flex-shrink: 0;
 }
 
 .icon-sidebar-logo img,
 .icon-sidebar-logo svg {
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
     flex-shrink: 0;
 }
 

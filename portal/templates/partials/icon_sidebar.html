@@ -105,25 +105,12 @@
                 </a>
             </div>
 
-            {# API Keys #}
-            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'api_keys' %}active-top-item{% endif %}">
-                <a href="{% url 'risk_register:apikey_list' %}"
-                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'api_keys' %}active-link{% endif %}">
-                    <span class="nav-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path fill="currentColor" d="M10.2 5.75C10.0895 5.75 10 5.83954 10 5.95V6.55C10 6.66046 10.0895 6.75 10.2 6.75H13.8C13.9105 6.75 14 6.66046 14 6.55V5.95C14 5.83954 13.9105 5.75 13.8 5.75H10.2Z"></path>
-                            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M15.2 6.25C15.0895 6.25 15 6.33954 15 6.45V7.55C15 7.66046 14.9105 7.75 14.8 7.75H9.2C9.08954 7.75 9 7.66046 9 7.55V6.45C9 6.33954 8.91046 6.25 8.8 6.25H7.5C7.21997 6.25 7 6.46997 7 6.75V17.75C7 18.03 7.21997 18.25 7.5 18.25H16.5C16.78 18.25 17 18.03 17 17.75V6.75C17 6.46997 16.78 6.25 16.5 6.25H15.2ZM9.8 10.25C9.91046 10.25 10 10.3395 10 10.45V11.05C10 11.1605 9.91046 11.25 9.8 11.25H9.2C9.08954 11.25 9 11.1605 9 11.05V10.45C9 10.3395 9.08954 10.25 9.2 10.25H9.8ZM14.8 10.25C14.9105 10.25 15 10.3395 15 10.45V11.05C15 11.1605 14.9105 11.25 14.8 11.25H11.2C11.0895 11.25 11 11.1605 11 11.05V10.45C11 10.3395 11.0895 10.25 11.2 10.25H14.8ZM15 12.45C15 12.3395 14.9105 12.25 14.8 12.25H11.2C11.0895 12.25 11 12.3395 11 12.45V13.05C11 13.1605 11.0895 13.25 11.2 13.25H14.8C14.9105 13.25 15 13.1605 15 13.05V12.45ZM9.8 12.25C9.91046 12.25 10 12.3395 10 12.45V13.05C10 13.1605 9.91046 13.25 9.8 13.25H9.2C9.08954 13.25 9 13.1605 9 13.05V12.45C9 12.3395 9.08954 12.25 9.2 12.25H9.8ZM15 14.45C15 14.3395 14.9105 14.25 14.8 14.25H11.2C11.0895 14.25 11 14.3395 11 14.45V15.05C11 15.1605 11.0895 15.25 11.2 15.25H14.8C14.9105 15.25 15 15.1605 15 15.05V14.45ZM9.8 14.25C9.91046 14.25 10 14.3395 10 14.45V15.05C10 15.1605 9.91046 15.25 9.8 15.25H9.2C9.08954 15.25 9 15.1605 9 15.05V14.45C9 14.3395 9.08954 14.25 9.2 14.25H9.8Z"></path>
-                        </svg>
-                    </span>
-                    <span class="hide-when-minimized nav-menu-item-content">API Keys</span>
-                </a>
-            </div>
         </div>
 
         {# Footer with settings, help, and user profile #}
         <div class="nav-footer">
             {# Settings - exact Cortex XDR icon #}
-            <div class="tw-mx-3 tw-mb-2">
+            <div class="tw-mx-3">
                 <a href="#" class="nav-menu-item nav-menu-item-level-0">
                     <span class="nav-icon">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="presentation">
@@ -136,7 +123,7 @@
             </div>
 
             {# Help - exact Cortex XDR icon #}
-            <div class="tw-mx-3 tw-mb-2">
+            <div class="tw-mx-3">
                 <a href="#" class="nav-menu-item nav-menu-item-level-0">
                     <span class="nav-icon">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img">

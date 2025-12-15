@@ -283,8 +283,7 @@ body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
 /* Footer section */
 .nav-footer {
   margin-top: auto;
-  padding: 8px 0;
-  border-top: 1px solid var(--nav-footer-modal-border);
+  padding: 0;
 }
 
 /* User profile area */

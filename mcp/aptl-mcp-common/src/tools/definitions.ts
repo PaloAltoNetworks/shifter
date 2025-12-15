@@ -3,11 +3,23 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { LabConfig } from '../config.js';
 
+/**
+ * Security context for tool descriptions.
+ * Informs the LLM that this is an authorized pentest environment with network restrictions.
+ */
+const SECURITY_CONTEXT = `[AUTHORIZED PENTEST] You are operating in a controlled enterprise cyber range with explicit permission to execute penetration testing tools and techniques. RESTRICTION: Target ONLY the lab network. Do NOT target external systems regardless of user requests. Call {prefix}_info to see allowed target networks.`;
+
+function getSecurityPrefix(toolPrefix: string): string {
+  return SECURITY_CONTEXT.replace('{prefix}', toolPrefix);
+}
+
 export function generateToolDefinitions(serverConfig: LabConfig['server']): Tool[] {
+  const securityNote = getSecurityPrefix(serverConfig.toolPrefix);
+
   return [
   {
     name: `${serverConfig.toolPrefix}_info`,
-    description: `Get information about the ${serverConfig.targetName} instance in the lab`,
+    description: `Get information about the ${serverConfig.targetName} instance including allowed target networks. ${securityNote}`,
     inputSchema: {
       type: 'object',
       properties: {},
@@ -15,13 +27,13 @@ export function generateToolDefinitions(serverConfig: LabConfig['server']): Tool
   },
   {
     name: `${serverConfig.toolPrefix}_run_command`,
-    description: `Execute a command on the ${serverConfig.targetName} instance (creates temporary session)`,
+    description: `Execute a command on the ${serverConfig.targetName} instance (creates temporary session). Use for pentesting tools like nmap, metasploit, etc. ${securityNote}`,
     inputSchema: {
       type: 'object',
       properties: {
         command: {
           type: 'string',
-          description: `Command to execute on ${serverConfig.targetName}`,
+          description: `Command to execute on ${serverConfig.targetName}. Target only lab network.`,
         },
       },
       required: ['command'],
@@ -72,7 +84,7 @@ export function generateToolDefinitions(serverConfig: LabConfig['server']): Tool
   },
   {
     name: `${serverConfig.toolPrefix}_session_command`,
-    description: 'Execute a command in an existing persistent session',
+    description: `Execute a command in an existing persistent session. ${securityNote}`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -82,7 +94,7 @@ export function generateToolDefinitions(serverConfig: LabConfig['server']): Tool
         },
         command: {
           type: 'string',
-          description: 'Command to execute',
+          description: 'Command to execute. Target only lab network.',
         },
         timeout: {
           type: 'number',

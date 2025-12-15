@@ -153,17 +153,27 @@ html.dark {
 /* Sidebar container - pure black like Cortex XDR */
 .dark [class*="sidebar"],
 .dark [data-state] [class*="sidebar"],
-.dark aside {
+.dark aside,
+.dark aside > div,
+.dark [class*="sidebar"] > div,
+.dark [class*="bg-gray-950"],
+.dark [class*="dark:bg-gray-950"] {
   background-color: #000000 !important;
 }
 
-/* Sidebar nav items hover - Cortex dark green */
+/* Sidebar nav items hover - Cortex dark green (only sidebar, not main nav) */
 .dark [class*="sidebar"] button:hover,
 .dark [class*="sidebar"] a:hover,
-.dark nav button:hover,
-.dark nav a:hover,
-.dark [role="button"]:hover {
+.dark aside button:hover,
+.dark aside a:hover {
   background-color: #05180f !important;
+}
+
+/* Main content nav - no green hover (keep default or transparent) */
+.dark main nav button:hover,
+.dark main nav a:hover,
+.dark [class*="content"] nav button:hover {
+  background-color: transparent !important;
 }
 
 /* Active sidebar items - slightly brighter dark green */

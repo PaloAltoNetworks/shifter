@@ -25,7 +25,7 @@
     --xdr-surface: #151515;
     --xdr-surface-secondary: #000;
     --xdr-surface-primary: #333;
-    --xdr-surface-box-shadow-floating-object: rgba(0, 0, 0, 0.7);
+    --xdr-surface-box-shadow-floating-object: rgb(0, 0, 0, 0.7);
 
     /* Interactive States */
     --xdr-hover: #333;
@@ -50,7 +50,7 @@
     --xdr-placeholder: #929191;
 
     /* Semantic Colors */
-    --xdr-success: #00CC66;
+    --xdr-success: #0C6;
     --xdr-warning: #FFB300;
     --xdr-error: #FF5252;
     --xdr-orange: #FA582D;
@@ -58,8 +58,8 @@
     /* Severity Badge Colors (Risk Register) */
     --xdr-severity-critical: #FF5252;
     --xdr-severity-high: #FFB300;
-    --xdr-severity-medium: rgba(255, 179, 0, 0.6);
-    --xdr-severity-low: #00CC66;
+    --xdr-severity-medium: rgb(255, 179, 0, 0.6);
+    --xdr-severity-low: #0C6;
 }
 
 /* ============================================================
@@ -83,7 +83,7 @@
     font-family: Lato, "Assistant", sans-serif;
     font-weight: 700;
     color: var(--xdr-on-background);
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 0.5rem;
 }
 
 .xdr-dark-theme h1 { font-size: 24px; }
@@ -92,7 +92,7 @@
 .xdr-dark-theme h4 { font-size: 16px; }
 
 .xdr-dark-theme p {
-    margin: 0 0 1rem 0;
+    margin: 0 0 1rem;
 }
 
 .xdr-dark-theme a {
@@ -163,11 +163,11 @@
 .xdr-dark-theme .btn-danger {
     background: transparent;
     color: var(--xdr-error);
-    border: 1px solid rgba(255, 82, 82, 0.5);
+    border: 1px solid rgb(255, 82, 82, 0.5);
 }
 
 .xdr-dark-theme .btn-danger:hover {
-    background: rgba(255, 82, 82, 0.15);
+    background: rgb(255, 82, 82, 0.15);
 }
 
 .xdr-dark-theme .btn-sm,
@@ -213,7 +213,7 @@
 }
 
 .xdr-dark-theme .card-danger {
-    border-color: rgba(255, 82, 82, 0.3);
+    border-color: rgb(255, 82, 82, 0.3);
 }
 
 .xdr-dark-theme .card-title {
@@ -371,7 +371,7 @@
 .xdr-dark-theme .nav-item.active {
     color: var(--xdr-primary);
     border-left-color: var(--xdr-primary);
-    background: rgba(18, 141, 243, 0.1);
+    background: rgb(18, 141, 243, 0.1);
 }
 
 .xdr-dark-theme .nav-section {
@@ -509,25 +509,25 @@
 
 /* Severity badges for Risk Register */
 .xdr-dark-theme .badge-critical {
-    background: rgba(255, 82, 82, 0.2);
+    background: rgb(255, 82, 82, 0.2);
     color: var(--xdr-severity-critical);
     border: 1px solid var(--xdr-severity-critical);
 }
 
 .xdr-dark-theme .badge-high {
-    background: rgba(255, 179, 0, 0.2);
+    background: rgb(255, 179, 0, 0.2);
     color: var(--xdr-severity-high);
     border: 1px solid var(--xdr-severity-high);
 }
 
 .xdr-dark-theme .badge-medium {
-    background: rgba(255, 179, 0, 0.1);
+    background: rgb(255, 179, 0, 0.1);
     color: var(--xdr-severity-high);
     border: 1px solid var(--xdr-severity-medium);
 }
 
 .xdr-dark-theme .badge-low {
-    background: rgba(0, 204, 102, 0.2);
+    background: rgb(0, 204, 102, 0.2);
     color: var(--xdr-severity-low);
     border: 1px solid var(--xdr-severity-low);
 }
@@ -685,19 +685,19 @@
 }
 
 .xdr-dark-theme .message-success {
-    background: rgba(0, 204, 102, 0.1);
+    background: rgb(0, 204, 102, 0.1);
     border: 1px solid var(--xdr-success);
     color: var(--xdr-success);
 }
 
 .xdr-dark-theme .message-error {
-    background: rgba(255, 82, 82, 0.1);
+    background: rgb(255, 82, 82, 0.1);
     border: 1px solid var(--xdr-error);
     color: var(--xdr-error);
 }
 
 .xdr-dark-theme .message-warning {
-    background: rgba(255, 179, 0, 0.1);
+    background: rgb(255, 179, 0, 0.1);
     border: 1px solid var(--xdr-warning);
     color: var(--xdr-warning);
 }
@@ -802,7 +802,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgb(0, 0, 0, 0.8);
     z-index: 1000;
     display: flex;
     align-items: center;

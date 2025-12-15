@@ -2,6 +2,7 @@
 Unit tests for mcp_wrapper.py
 
 Uses mocks to test the Tools class without requiring mcp-shifter or OAuth.
+Tests the standard MCP protocol flow: initialize -> notifications/initialized -> tools/*
 """
 
 import json
@@ -35,43 +36,55 @@ def mock_event_emitter():
     return AsyncMock()
 
 
-class TestGetAuthHeaders:
-    """Tests for _get_auth_headers method."""
+class TestGetMcpHeaders:
+    """Tests for _get_mcp_headers method."""
 
-    @pytest.mark.asyncio
-    async def test_valid_token_returns_headers(self, tools, valid_oauth_token):
-        headers = await tools._get_auth_headers(valid_oauth_token)
+    def test_valid_token_returns_headers(self, tools, valid_oauth_token):
+        headers = tools._get_mcp_headers(valid_oauth_token)
 
         assert headers["Authorization"] == "Bearer test-access-token-12345"
         assert headers["Content-Type"] == "application/json"
+        assert headers["Accept"] == "application/json, text/event-stream"
 
-    @pytest.mark.asyncio
-    async def test_none_token_raises_error(self, tools):
+    def test_includes_session_id_when_set(self, tools, valid_oauth_token):
+        tools._mcp_session_id = "session-abc-123"
+        headers = tools._get_mcp_headers(valid_oauth_token)
+
+        assert headers["mcp-session-id"] == "session-abc-123"
+
+    def test_no_session_id_header_when_not_set(self, tools, valid_oauth_token):
+        headers = tools._get_mcp_headers(valid_oauth_token)
+
+        assert "mcp-session-id" not in headers
+
+    def test_none_token_raises_error(self, tools):
         with pytest.raises(ValueError, match="Not authenticated"):
-            await tools._get_auth_headers(None)
+            tools._get_mcp_headers(None)
 
-    @pytest.mark.asyncio
-    async def test_empty_token_raises_error(self, tools):
+    def test_empty_token_raises_error(self, tools):
         with pytest.raises(ValueError, match="Not authenticated"):
-            await tools._get_auth_headers({})
+            tools._get_mcp_headers({})
 
-    @pytest.mark.asyncio
-    async def test_token_without_access_token_raises_error(self, tools):
+    def test_token_without_access_token_raises_error(self, tools):
         with pytest.raises(ValueError, match="Not authenticated"):
-            await tools._get_auth_headers({"id_token": "some-id"})
+            tools._get_mcp_headers({"id_token": "some-id"})
 
 
-class TestEnsureSession:
-    """Tests for _ensure_session method."""
+class TestEnsureInitialized:
+    """Tests for _ensure_initialized method."""
 
     @pytest.mark.asyncio
-    async def test_creates_new_session(self, tools, valid_oauth_token, mock_event_emitter):
+    async def test_sends_initialize_request(self, tools, valid_oauth_token, mock_event_emitter):
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.headers = {"mcp-session-id": "session-123"}
         mock_response.json.return_value = {
-            "sessionId": "session-123",
-            "rangeId": 42,
-            "kaliIp": "10.1.1.5"
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {"name": "mcp-shifter", "version": "0.1.0"}
+            }
         }
 
         with patch("httpx.AsyncClient") as mock_client_class:
@@ -79,44 +92,58 @@ class TestEnsureSession:
             mock_client.post.return_value = mock_response
             mock_client_class.return_value.__aenter__.return_value = mock_client
 
-            session_id = await tools._ensure_session(valid_oauth_token, mock_event_emitter)
+            await tools._ensure_initialized(valid_oauth_token, mock_event_emitter)
 
-        assert session_id == "session-123"
-        assert tools._session_id == "session-123"
+        assert tools._mcp_session_id == "session-123"
         assert tools._session_token == "test-access-token-12345"
+
+        # Verify initialize request was sent
+        first_call = mock_client.post.call_args_list[0]
+        assert first_call[0][0].endswith("/mcp")
+        payload = first_call[1]["json"]
+        assert payload["method"] == "initialize"
+        assert payload["params"]["protocolVersion"] == "2024-11-05"
+
+        # Verify initialized notification was sent
+        second_call = mock_client.post.call_args_list[1]
+        assert second_call[1]["json"]["method"] == "notifications/initialized"
 
     @pytest.mark.asyncio
     async def test_reuses_existing_session(self, tools, valid_oauth_token):
         # Pre-set session
-        tools._session_id = "existing-session"
+        tools._mcp_session_id = "existing-session"
         tools._session_token = "test-access-token-12345"
 
         with patch("httpx.AsyncClient") as mock_client_class:
-            session_id = await tools._ensure_session(valid_oauth_token)
+            await tools._ensure_initialized(valid_oauth_token)
 
         # Should not have made any HTTP calls
         mock_client_class.assert_not_called()
-        assert session_id == "existing-session"
+        assert tools._mcp_session_id == "existing-session"
 
     @pytest.mark.asyncio
     async def test_creates_new_session_if_token_changed(self, tools, valid_oauth_token):
         # Pre-set session with different token
-        tools._session_id = "old-session"
+        tools._mcp_session_id = "old-session"
         tools._session_token = "different-token"
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"sessionId": "new-session", "kaliIp": "10.1.1.5"}
+        mock_response.headers = {"mcp-session-id": "new-session"}
+        mock_response.json.return_value = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"protocolVersion": "2024-11-05"}
+        }
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client_class.return_value.__aenter__.return_value = mock_client
 
-            session_id = await tools._ensure_session(valid_oauth_token)
+            await tools._ensure_initialized(valid_oauth_token)
 
-        assert session_id == "new-session"
-        mock_client.post.assert_called_once()
+        assert tools._mcp_session_id == "new-session"
 
     @pytest.mark.asyncio
     async def test_handles_401_unauthorized(self, tools, valid_oauth_token):
@@ -129,7 +156,7 @@ class TestEnsureSession:
             mock_client_class.return_value.__aenter__.return_value = mock_client
 
             with pytest.raises(PermissionError, match="Authentication failed"):
-                await tools._ensure_session(valid_oauth_token)
+                await tools._ensure_initialized(valid_oauth_token)
 
     @pytest.mark.asyncio
     async def test_handles_404_no_range(self, tools, valid_oauth_token):
@@ -146,7 +173,7 @@ class TestEnsureSession:
             mock_client_class.return_value.__aenter__.return_value = mock_client
 
             with pytest.raises(ValueError, match="No active range found"):
-                await tools._ensure_session(valid_oauth_token)
+                await tools._ensure_initialized(valid_oauth_token)
 
     @pytest.mark.asyncio
     async def test_handles_429_session_limit(self, tools, valid_oauth_token):
@@ -164,7 +191,7 @@ class TestEnsureSession:
             mock_client_class.return_value.__aenter__.return_value = mock_client
 
             with pytest.raises(RuntimeError, match="Session limit reached"):
-                await tools._ensure_session(valid_oauth_token)
+                await tools._ensure_initialized(valid_oauth_token)
 
     @pytest.mark.asyncio
     async def test_handles_connection_error(self, tools, valid_oauth_token):
@@ -174,7 +201,7 @@ class TestEnsureSession:
             mock_client_class.return_value.__aenter__.return_value = mock_client
 
             with pytest.raises(ConnectionError, match="Cannot connect to MCP server"):
-                await tools._ensure_session(valid_oauth_token)
+                await tools._ensure_initialized(valid_oauth_token)
 
     @pytest.mark.asyncio
     async def test_handles_timeout(self, tools, valid_oauth_token):
@@ -184,20 +211,36 @@ class TestEnsureSession:
             mock_client_class.return_value.__aenter__.return_value = mock_client
 
             with pytest.raises(TimeoutError, match="timed out"):
-                await tools._ensure_session(valid_oauth_token)
+                await tools._ensure_initialized(valid_oauth_token)
 
     @pytest.mark.asyncio
-    async def test_emits_status_events(self, tools, valid_oauth_token, mock_event_emitter):
+    async def test_handles_missing_session_id_header(self, tools, valid_oauth_token):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"sessionId": "session-123", "kaliIp": "10.1.1.5"}
+        mock_response.headers = {}  # No mcp-session-id header
+        mock_response.json.return_value = {"jsonrpc": "2.0", "id": 1, "result": {}}
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client_class.return_value.__aenter__.return_value = mock_client
 
-            await tools._ensure_session(valid_oauth_token, mock_event_emitter)
+            with pytest.raises(RuntimeError, match="did not return session ID"):
+                await tools._ensure_initialized(valid_oauth_token)
+
+    @pytest.mark.asyncio
+    async def test_emits_status_events(self, tools, valid_oauth_token, mock_event_emitter):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"mcp-session-id": "session-123"}
+        mock_response.json.return_value = {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            await tools._ensure_initialized(valid_oauth_token, mock_event_emitter)
 
         # Should have emitted connecting and connected status
         assert mock_event_emitter.call_count == 2
@@ -217,7 +260,7 @@ class TestCallMcp:
     @pytest.mark.asyncio
     async def test_makes_jsonrpc_call(self, tools, valid_oauth_token):
         # Pre-set session
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -237,15 +280,16 @@ class TestCallMcp:
 
         assert result["result"]["tools"] == []
 
-        # Verify the call was made correctly
+        # Verify the call was made correctly - now uses /mcp with session ID header
         call_args = mock_client.post.call_args
-        assert "session-123" in call_args[0][0]
+        assert call_args[0][0].endswith("/mcp")
+        assert call_args[1]["headers"]["mcp-session-id"] == "session-123"
         assert call_args[1]["json"]["method"] == "tools/list"
         assert call_args[1]["json"]["jsonrpc"] == "2.0"
 
     @pytest.mark.asyncio
     async def test_includes_params_when_provided(self, tools, valid_oauth_token):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -268,28 +312,39 @@ class TestCallMcp:
 
     @pytest.mark.asyncio
     async def test_retries_on_session_expired(self, tools, valid_oauth_token):
-        tools._session_id = "old-session"
+        tools._mcp_session_id = "old-session"
         tools._session_token = "test-access-token-12345"
 
-        # First call returns 404 (session expired), second succeeds
+        # First call returns 404 (session expired)
         mock_404_response = MagicMock()
         mock_404_response.status_code = 404
+        mock_404_response.json.return_value = {
+            "error": "session_not_found",
+            "message": "Session not found"
+        }
 
+        # Initialize response for new session
+        mock_init_response = MagicMock()
+        mock_init_response.status_code = 200
+        mock_init_response.headers = {"mcp-session-id": "new-session"}
+        mock_init_response.json.return_value = {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+        # Notification response (no body needed)
+        mock_notify_response = MagicMock()
+        mock_notify_response.status_code = 202
+
+        # Success response after re-init
         mock_success_response = MagicMock()
         mock_success_response.status_code = 200
         mock_success_response.json.return_value = {"jsonrpc": "2.0", "id": 1, "result": {}}
 
-        # Session creation response
-        mock_session_response = MagicMock()
-        mock_session_response.status_code = 200
-        mock_session_response.json.return_value = {"sessionId": "new-session", "kaliIp": "10.1.1.5"}
-
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
-            # First MCP call fails, then session create, then MCP call succeeds
+            # First call 404, then init, notify, then retry succeeds
             mock_client.post.side_effect = [
                 mock_404_response,
-                mock_session_response,
+                mock_init_response,
+                mock_notify_response,
                 mock_success_response
             ]
             mock_client_class.return_value.__aenter__.return_value = mock_client
@@ -297,11 +352,11 @@ class TestCallMcp:
             result = await tools._call_mcp("tools/list", None, valid_oauth_token)
 
         assert result["result"] == {}
-        assert tools._session_id == "new-session"
+        assert tools._mcp_session_id == "new-session"
 
     @pytest.mark.asyncio
     async def test_handles_403_forbidden(self, tools, valid_oauth_token):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -321,7 +376,7 @@ class TestListMcpTools:
 
     @pytest.mark.asyncio
     async def test_returns_formatted_tool_list(self, tools, valid_oauth_token):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -351,7 +406,7 @@ class TestListMcpTools:
 
     @pytest.mark.asyncio
     async def test_handles_empty_tool_list(self, tools, valid_oauth_token):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -389,7 +444,7 @@ class TestRunMcpTool:
 
     @pytest.mark.asyncio
     async def test_executes_tool_with_arguments(self, tools, valid_oauth_token, mock_event_emitter):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -436,7 +491,7 @@ class TestRunMcpTool:
 
     @pytest.mark.asyncio
     async def test_handles_empty_arguments(self, tools, valid_oauth_token):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -462,7 +517,7 @@ class TestRunMcpTool:
 
     @pytest.mark.asyncio
     async def test_handles_tool_error_response(self, tools, valid_oauth_token):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -492,7 +547,7 @@ class TestRunMcpTool:
 
     @pytest.mark.asyncio
     async def test_handles_multiple_content_blocks(self, tools, valid_oauth_token):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -526,7 +581,7 @@ class TestRunMcpTool:
 
     @pytest.mark.asyncio
     async def test_emits_status_events(self, tools, valid_oauth_token, mock_event_emitter):
-        tools._session_id = "session-123"
+        tools._mcp_session_id = "session-123"
         tools._session_token = "test-access-token-12345"
 
         mock_response = MagicMock()
@@ -573,3 +628,14 @@ class TestValves:
 
         assert tools.valves.mcp_server_url == "http://custom-server:8080"
         assert tools.valves.request_timeout == 60
+
+
+class TestProtocolConstants:
+    """Tests for MCP protocol constants."""
+
+    def test_protocol_version(self, tools):
+        assert tools.MCP_PROTOCOL_VERSION == "2024-11-05"
+
+    def test_client_info(self, tools):
+        assert tools.CLIENT_NAME == "shifter-openwebui-wrapper"
+        assert tools.CLIENT_VERSION == "0.5.0"

@@ -27,48 +27,56 @@
 
     <div class="icon-sidebar-nav">
         <div class="icon-sidebar-section">
-            <a href="{% url 'mission_control:dashboard' %}"
-               class="icon-sidebar-item {% if active_nav == 'dashboard' %}active{% endif %}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <rect x="3" y="3" width="7" height="9" rx="1"/>
-                    <rect x="14" y="3" width="7" height="5" rx="1"/>
-                    <rect x="14" y="12" width="7" height="9" rx="1"/>
-                    <rect x="3" y="16" width="7" height="5" rx="1"/>
-                </svg>
-                <span class="icon-sidebar-item-text">Dashboard</span>
-            </a>
-            <a href="{% url 'mission_control:agents' %}"
-               class="icon-sidebar-item {% if active_nav == 'agents' %}active{% endif %}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <rect x="2" y="2" width="20" height="8" rx="2"/>
-                    <rect x="2" y="14" width="20" height="8" rx="2"/>
-                    <circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/>
-                    <circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/>
-                </svg>
-                <span class="icon-sidebar-item-text">Agents</span>
-            </a>
-            <a href="{% url 'mission_control:history' %}"
-               class="icon-sidebar-item {% if active_nav == 'history' %}active{% endif %}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12 6 12 12 16 14"/>
-                </svg>
-                <span class="icon-sidebar-item-text">History</span>
-            </a>
+            <div class="nav-item-wrapper">
+                <a href="{% url 'mission_control:dashboard' %}"
+                   class="icon-sidebar-item {% if active_nav == 'dashboard' %}active{% endif %}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="7" height="9" rx="1"/>
+                        <rect x="14" y="3" width="7" height="5" rx="1"/>
+                        <rect x="14" y="12" width="7" height="9" rx="1"/>
+                        <rect x="3" y="16" width="7" height="5" rx="1"/>
+                    </svg>
+                    <span class="icon-sidebar-item-text">Dashboard</span>
+                </a>
+            </div>
+            <div class="nav-item-wrapper">
+                <a href="{% url 'mission_control:agents' %}"
+                   class="icon-sidebar-item {% if active_nav == 'agents' %}active{% endif %}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="2" y="2" width="20" height="8" rx="2"/>
+                        <rect x="2" y="14" width="20" height="8" rx="2"/>
+                        <circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/>
+                        <circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/>
+                    </svg>
+                    <span class="icon-sidebar-item-text">Agents</span>
+                </a>
+            </div>
+            <div class="nav-item-wrapper">
+                <a href="{% url 'mission_control:history' %}"
+                   class="icon-sidebar-item {% if active_nav == 'history' %}active{% endif %}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <span class="icon-sidebar-item-text">History</span>
+                </a>
+            </div>
         </div>
 
         <div class="icon-sidebar-divider"></div>
 
         <div class="icon-sidebar-section">
-            <a href="{% url 'risk_register:risk_list' %}"
-               class="icon-sidebar-item {% if active_nav == 'risks' or active_nav == 'create' or active_nav == 'apikeys' %}active{% endif %}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                    <path d="M12 8v4"/>
-                    <circle cx="12" cy="16" r="1" fill="currentColor" stroke="none"/>
-                </svg>
-                <span class="icon-sidebar-item-text">Risk Register</span>
-            </a>
+            <div class="nav-item-wrapper">
+                <a href="{% url 'risk_register:risk_list' %}"
+                   class="icon-sidebar-item {% if active_nav == 'risks' or active_nav == 'create' or active_nav == 'apikeys' %}active{% endif %}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        <path d="M12 8v4"/>
+                        <circle cx="12" cy="16" r="1" fill="currentColor" stroke="none"/>
+                    </svg>
+                    <span class="icon-sidebar-item-text">Risk Register</span>
+                </a>
+            </div>
         </div>
     </div>
 
@@ -77,23 +85,27 @@
         <div class="icon-sidebar-divider"></div>
 
         <div class="icon-sidebar-section">
-            <a href="{% url 'mission_control:settings' %}"
-               class="icon-sidebar-item {% if active_nav == 'settings' %}active{% endif %}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                </svg>
-                <span class="icon-sidebar-item-text">Settings</span>
-            </a>
-            <a href="{% url 'mission_control:help' %}"
-               class="icon-sidebar-item {% if active_nav == 'help' %}active{% endif %}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                    <circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>
-                </svg>
-                <span class="icon-sidebar-item-text">Help</span>
-            </a>
+            <div class="nav-item-wrapper">
+                <a href="{% url 'mission_control:settings' %}"
+                   class="icon-sidebar-item {% if active_nav == 'settings' %}active{% endif %}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    <span class="icon-sidebar-item-text">Settings</span>
+                </a>
+            </div>
+            <div class="nav-item-wrapper">
+                <a href="{% url 'mission_control:help' %}"
+                   class="icon-sidebar-item {% if active_nav == 'help' %}active{% endif %}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>
+                    </svg>
+                    <span class="icon-sidebar-item-text">Help</span>
+                </a>
+            </div>
         </div>
 
         <!-- User Avatar -->

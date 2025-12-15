@@ -42,7 +42,8 @@
     flex-shrink: 0;
 }
 
-.icon-sidebar-logo img {
+.icon-sidebar-logo img,
+.icon-sidebar-logo svg {
     width: 32px;
     height: 32px;
     flex-shrink: 0;
@@ -126,45 +127,57 @@
 }
 
 /* ============================================================
-   Icon Sidebar Items
+   Icon Sidebar Items - Cortex XDR Pattern
    ============================================================ */
+
+/* Wrapper div controls margins - item stays 100% of wrapper */
+.nav-item-wrapper {
+    margin: 0 12px 8px;
+}
+
 .icon-sidebar-item {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
     width: 100%;
-    height: 44px;
-    padding: 0 16px;
-    color: #b8b8b8; /* Gray, never blue */
+    height: 32px;
+    padding: 0;
+    color: #fefefe;
     text-decoration: none;
     position: relative;
     transition: background-color 0.15s ease;
     cursor: pointer;
-    gap: 12px;
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: 14px;
+    white-space: nowrap;
 }
 
 .icon-sidebar-item svg {
-    width: 20px;
-    height: 20px;
-    stroke: #b8b8b8; /* Gray, never blue */
+    width: 24px;
+    height: 24px;
+    stroke: #b8b8b8;
     stroke-width: 1.5;
     fill: none;
     flex-shrink: 0;
+    margin: 0 4px;
 }
 
-/* Text label - hidden when collapsed */
+/* Text label - clipped when collapsed via overflow:hidden on item */
 .icon-sidebar-item-text {
-    font-size: 13px;
-    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: 8px;
+    font-size: 14px;
+    font-weight: 400;
     white-space: nowrap;
-    opacity: 0;
-    transition: opacity 0.15s ease;
+    text-decoration: none;
+    color: #fefefe;
 }
 
-.icon-sidebar:hover .icon-sidebar-item-text,
-.icon-sidebar.expanded .icon-sidebar-item-text,
-.icon-sidebar.locked .icon-sidebar-item-text {
-    opacity: 1;
+/* Active state - bold text */
+.icon-sidebar-item.active .icon-sidebar-item-text {
+    font-weight: 700;
 }
 
 .icon-sidebar-item:hover {
@@ -176,14 +189,18 @@
     stroke: #eaebeb;
 }
 
-/* Active state - dark green background, no left bar */
+/* Active state - dark green background */
 .icon-sidebar-item.active {
-    color: #eaebeb;
+    color: #fefefe;
     background: #062314;
 }
 
 .icon-sidebar-item.active svg {
-    stroke: #eaebeb;
+    stroke: #fefefe;
+}
+
+.icon-sidebar-item:hover svg {
+    stroke: #fefefe;
 }
 
 /* ============================================================

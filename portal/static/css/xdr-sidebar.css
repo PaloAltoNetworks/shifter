@@ -282,8 +282,8 @@ body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
 
 /* Footer section */
 .nav-footer {
+  margin: 16px 12px;
   margin-top: auto;
-  padding: 0;
 }
 
 /* User profile area */
@@ -293,7 +293,6 @@ body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
   padding: 0;
   cursor: pointer;
   border-radius: 4px;
-  margin: 0 12px;
   height: 32px;
 }
 

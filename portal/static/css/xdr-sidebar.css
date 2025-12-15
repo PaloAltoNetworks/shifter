@@ -6,7 +6,7 @@
  */
 
 /* ============================================================
-   Icon Sidebar (56px fixed left)
+   Icon Sidebar (56px collapsed, 200px expanded)
    ============================================================ */
 .icon-sidebar {
     position: fixed;
@@ -19,7 +19,92 @@
     display: flex;
     flex-direction: column;
     z-index: 200;
-    padding-top: 60px; /* Below header */
+    padding-top: 0;
+    transition: width 0.2s ease-out;
+    overflow: hidden;
+}
+
+/* Expanded state (hover or locked) */
+.icon-sidebar:hover,
+.icon-sidebar.expanded {
+    width: 200px;
+}
+
+.icon-sidebar.locked {
+    width: 200px;
+}
+
+/* Logo section at top */
+.icon-sidebar-logo {
+    display: flex;
+    align-items: center;
+    height: 60px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--xdr-border-extra-soft);
+    flex-shrink: 0;
+}
+
+.icon-sidebar-logo img {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+}
+
+.icon-sidebar-logo-text {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--xdr-on-background);
+    margin-left: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.icon-sidebar:hover .icon-sidebar-logo-text,
+.icon-sidebar.expanded .icon-sidebar-logo-text,
+.icon-sidebar.locked .icon-sidebar-logo-text {
+    opacity: 1;
+}
+
+/* Lock/pin button */
+.sidebar-lock-btn {
+    position: absolute;
+    top: 18px;
+    right: 12px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--xdr-on-background-secondary);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    padding: 0;
+}
+
+.icon-sidebar:hover .sidebar-lock-btn,
+.icon-sidebar.expanded .sidebar-lock-btn,
+.icon-sidebar.locked .sidebar-lock-btn {
+    opacity: 1;
+}
+
+.sidebar-lock-btn:hover {
+    color: var(--xdr-on-background);
+}
+
+.sidebar-lock-btn svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentcolor;
+    stroke-width: 2;
+    fill: none;
+}
+
+.icon-sidebar.locked .sidebar-lock-btn {
+    color: var(--xdr-primary);
 }
 
 .icon-sidebar-nav {
@@ -47,32 +132,50 @@
 .icon-sidebar-item {
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 56px;
-    height: 48px;
+    justify-content: flex-start;
+    width: 100%;
+    height: 44px;
+    padding: 0 16px;
     color: var(--xdr-on-background-secondary);
     text-decoration: none;
     position: relative;
-    transition: background-color 0.15s ease, color 0.15s ease;
+    transition: background-color 0.15s ease;
     cursor: pointer;
+    gap: 12px;
 }
 
 .icon-sidebar-item svg {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     stroke: currentcolor;
     stroke-width: 1.5;
     fill: none;
+    flex-shrink: 0;
+}
+
+/* Text label - hidden when collapsed */
+.icon-sidebar-item-text {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.icon-sidebar:hover .icon-sidebar-item-text,
+.icon-sidebar.expanded .icon-sidebar-item-text,
+.icon-sidebar.locked .icon-sidebar-item-text {
+    opacity: 1;
 }
 
 .icon-sidebar-item:hover {
     background: var(--xdr-hover);
-    color: var(--xdr-on-background);
 }
 
+/* T077: Active state - icon stays white/gray, only left bar is blue */
 .icon-sidebar-item.active {
-    color: var(--xdr-primary);
-    background: rgb(18, 141, 243, 0.1);
+    color: var(--xdr-on-background);
+    background: rgb(255, 255, 255, 0.05);
 }
 
 .icon-sidebar-item.active::before {
@@ -171,29 +274,47 @@
    User Avatar (bottom of sidebar)
    ============================================================ */
 .icon-sidebar-footer {
-    padding: 0.75rem 0;
-    border-top: 1px solid var(--xdr-border-extra-soft);
+    margin-top: auto;
+    padding: 0.5rem 0;
+}
+
+.icon-sidebar-footer .icon-sidebar-divider {
+    margin: 0 12px 0.5rem;
+}
+
+.icon-sidebar-user {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 12px;
+    position: relative;
 }
 
 .user-avatar {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
-    margin: 0 auto;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
     background: var(--xdr-primary);
     color: var(--xdr-on-primary);
     border-radius: 50%;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    position: relative;
     transition: background-color 0.15s ease;
 }
 
 .user-avatar:hover {
     background: var(--xdr-link);
+}
+
+.icon-sidebar-user .user-name {
+    margin-left: 12px;
+    font-size: 12px;
+    color: var(--xdr-on-background-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .user-dropdown {

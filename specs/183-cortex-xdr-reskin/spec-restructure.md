@@ -147,4 +147,86 @@ The bottom of the icon sidebar shows a user avatar/initials circle (like Cortex 
 - Mobile responsive hamburger menu (current min-width 1024px remains)
 - Animated page transitions between sections
 - Customizable sidebar icon order
-- Collapsible/hideable sidebar toggle
+
+---
+
+# Phase 2 Refinements (Cortex XDR Parity)
+
+**Added**: 2025-12-15
+**Status**: Draft
+**Reference**: Side-by-side comparison with live Cortex XDR instance
+
+Based on visual comparison with Cortex XDR, the following refinements are needed to achieve full parity.
+
+## Refinement 1 - Expandable Sidebar with Lock (Priority: P1)
+
+The icon sidebar should expand on hover to show text labels (like "Dashboards & Reports"), and users can click a lock/pin icon to keep it expanded.
+
+**Current**: Static 56px icon-only sidebar
+**Target**: Expands to ~200px on hover, lockable in expanded state
+
+**Acceptance Scenarios**:
+
+1. **Given** the icon sidebar, **When** user hovers over it, **Then** sidebar expands smoothly to ~200px showing icon + text labels
+2. **Given** the expanded sidebar, **When** user moves mouse away, **Then** sidebar collapses back to icon-only (unless locked)
+3. **Given** the expanded sidebar, **When** user clicks a lock/pin icon, **Then** sidebar remains expanded permanently
+4. **Given** a locked sidebar, **When** user clicks unlock, **Then** sidebar returns to hover-to-expand behavior
+
+---
+
+## Refinement 2 - Logo in Sidebar Top (Priority: P1)
+
+The Shifter logo should be positioned at the top of the icon sidebar (like "CORTEX XDR" in the reference), not in the header bar.
+
+**Current**: Logo in header bar, left of "// MISSION CONTROL"
+**Target**: Logo at top of icon sidebar, header shows only "// MISSION CONTROL" text
+
+**Acceptance Scenarios**:
+
+1. **Given** the icon sidebar, **When** page loads, **Then** Shifter logo appears at the very top of the sidebar
+2. **Given** the collapsed sidebar, **When** viewing logo, **Then** only the icon/symbol is visible
+3. **Given** the expanded sidebar, **When** viewing logo, **Then** full "SHIFTER" text is visible next to icon
+4. **Given** the header, **When** viewing it, **Then** only "// MISSION CONTROL" text appears (no logo)
+
+---
+
+## Refinement 3 - Icon Color Correction (Priority: P1)
+
+Navigation icons should be white/gray, not blue. Only the active indicator (left edge bar) should be blue.
+
+**Current**: Active icon turns blue
+**Target**: Icons stay white/gray, only left-edge accent bar is blue
+
+**Acceptance Scenarios**:
+
+1. **Given** any navigation icon, **When** in default state, **Then** icon color is white/gray (#eaebeb or similar)
+2. **Given** the active navigation icon, **When** viewing it, **Then** icon color remains white, but a blue accent bar appears on left edge
+3. **Given** a navigation icon, **When** hovering, **Then** background highlights but icon color stays consistent
+
+---
+
+## Refinement 4 - Bottom Utility Section (Priority: P2)
+
+The bottom of the sidebar should have additional utility icons above the user avatar (matching Cortex XDR's Cortex Assistant, Settings, Notifications pattern).
+
+**Current**: Only user avatar at bottom
+**Target**: Divider + utility icons (Help, Settings) + user avatar with name on expand
+
+**Acceptance Scenarios**:
+
+1. **Given** the icon sidebar, **When** viewing the bottom section, **Then** Help and Settings icons appear above user avatar
+2. **Given** the collapsed sidebar, **When** viewing user avatar, **Then** only initials circle is visible
+3. **Given** the expanded sidebar, **When** viewing user section, **Then** full name/email and status indicators are visible
+
+---
+
+## Refinement Requirements
+
+- **RFN-001**: Sidebar MUST expand from 56px to ~200px on hover
+- **RFN-002**: Sidebar MUST support a lock/pin toggle to stay expanded
+- **RFN-003**: Logo MUST be positioned at top of sidebar, not header
+- **RFN-004**: Navigation icons MUST be white/gray (#eaebeb) in all states
+- **RFN-005**: Active state MUST use blue left-edge bar only, not blue icon color
+- **RFN-006**: Bottom section MUST include utility icons above user avatar
+- **RFN-007**: Expanded sidebar MUST show text labels for all navigation items
+- **RFN-008**: Sidebar expansion MUST animate smoothly (200-300ms transition)

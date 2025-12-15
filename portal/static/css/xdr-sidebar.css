@@ -285,10 +285,10 @@ body.nav-mouse-leave .lock-button {
 .nav-profile {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
+  padding: 8px 0;
   cursor: pointer;
   border-radius: 4px;
-  margin: 0 8px;
+  margin: 0 12px;
 }
 
 .nav-profile:hover {

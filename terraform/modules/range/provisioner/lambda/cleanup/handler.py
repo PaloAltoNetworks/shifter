@@ -116,7 +116,24 @@ def handler(event: dict, context) -> dict:
                 else:
                     raise
 
-        # 3. Wait for all instances to terminate before deleting subnet
+        # 3. Delete Kali SSH key secret from Secrets Manager
+        kali_ssh_key_secret_arn = range_data.get("kali_ssh_key_secret_arn")
+        if kali_ssh_key_secret_arn:
+            try:
+                secrets_client = boto3.client("secretsmanager")
+                secrets_client.delete_secret(
+                    SecretId=kali_ssh_key_secret_arn,
+                    ForceDeleteWithoutRecovery=True,
+                )
+                logger.info(f"Deleted SSH key secret {kali_ssh_key_secret_arn}")
+                cleaned_up.append(f"secret:{kali_ssh_key_secret_arn}")
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                    logger.info(f"SSH key secret {kali_ssh_key_secret_arn} already deleted")
+                else:
+                    raise
+
+        # 5. Wait for all instances to terminate before deleting subnet
         instances_to_wait = []
         if victim_instance_id:
             instances_to_wait.append(victim_instance_id)
@@ -131,7 +148,7 @@ def handler(event: dict, context) -> dict:
             )
             logger.info(f"All instances terminated: {instances_to_wait}")
 
-        # 4. Delete subnet
+        # 6. Delete subnet
         subnet_id = range_data.get("subnet_id")
         if subnet_id:
             try:
@@ -160,7 +177,7 @@ def handler(event: dict, context) -> dict:
                 else:
                     raise
 
-        # 5. Update database - clear resource fields
+        # 7. Update database - clear resource fields
         # Status was already set:
         # - mark_failed=true: set to 'failed' at start of this function
         # - mark_failed=false: set to 'destroyed' by Portal before calling us
@@ -171,6 +188,7 @@ def handler(event: dict, context) -> dict:
             victim_ip=None,
             kali_instance_id=None,
             kali_ip=None,
+            kali_ssh_key_secret_arn=None,
             subnet_id=None,
             subnet_cidr=None,
             chat_url=None,

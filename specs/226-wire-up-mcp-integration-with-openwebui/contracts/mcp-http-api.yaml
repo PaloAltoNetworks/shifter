@@ -1,0 +1,196 @@
+openapi: 3.1.0
+info:
+  title: Shifter MCP HTTP API
+  version: 1.0.0
+  description: |
+    Streamable HTTP transport for MCP (Model Context Protocol) server.
+    Used by OpenWebUI to invoke MCP tools on user-specific Kali instances.
+
+servers:
+  - url: https://{domain}/mcp
+    description: MCP endpoint on AgentChat host
+    variables:
+      domain:
+        default: shifter.example.com
+        description: Shifter domain
+
+security:
+  - bearerAuth: []
+
+paths:
+  /mcp:
+    post:
+      summary: Send MCP request
+      description: |
+        Handles JSON-RPC messages from OpenWebUI.
+        On first request (no session), initializes new session.
+        Subsequent requests include mcp-session-id header.
+      operationId: handleMcpRequest
+      parameters:
+        - name: mcp-session-id
+          in: header
+          required: false
+          description: Session ID from previous response (omit for new session)
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JsonRpcRequest'
+      responses:
+        '200':
+          description: MCP response
+          headers:
+            mcp-session-id:
+              description: Session ID for subsequent requests
+              schema:
+                type: string
+                format: uuid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcResponse'
+        '401':
+          description: Invalid or missing JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No active range for user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Database or Secrets Manager unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: SSE stream for server notifications
+      description: |
+        Returns Server-Sent Events stream for asynchronous notifications.
+        Keep connection open for session duration.
+      operationId: mcpNotifications
+      parameters:
+        - name: mcp-session-id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: Invalid or missing JWT
+        '404':
+          description: Session not found
+
+    delete:
+      summary: Terminate MCP session
+      description: Closes session and cleans up resources
+      operationId: terminateSession
+      parameters:
+        - name: mcp-session-id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Session terminated
+        '401':
+          description: Invalid or missing JWT
+        '404':
+          description: Session not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito JWT token
+
+  schemas:
+    JsonRpcRequest:
+      type: object
+      required:
+        - jsonrpc
+        - method
+      properties:
+        jsonrpc:
+          type: string
+          const: '2.0'
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+        method:
+          type: string
+          description: MCP method name
+          examples:
+            - tools/list
+            - tools/call
+        params:
+          type: object
+          description: Method parameters
+
+    JsonRpcResponse:
+      type: object
+      required:
+        - jsonrpc
+      properties:
+        jsonrpc:
+          type: string
+          const: '2.0'
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+        result:
+          type: object
+          description: Successful result
+        error:
+          $ref: '#/components/schemas/JsonRpcError'
+
+    JsonRpcError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+          description: Error code
+        message:
+          type: string
+          description: Error message
+        data:
+          type: object
+          description: Additional error data
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+        message:
+          type: string
+          description: Human-readable error message

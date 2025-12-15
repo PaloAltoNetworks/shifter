@@ -707,12 +707,88 @@
     text-align: center;
     padding: 3rem;
     color: var(--xdr-on-background-secondary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
 }
 
 .xdr-dark-theme .empty-state-icon {
     font-size: 3rem;
     margin-bottom: 1rem;
     opacity: 0.3;
+}
+
+/* T042-T043: Graphical empty state circular element */
+.xdr-dark-theme .empty-state-graphic {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    margin: 0 auto 1.5rem;
+}
+
+.xdr-dark-theme .empty-state-graphic::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 3px solid var(--xdr-border);
+    opacity: 0.5;
+}
+
+.xdr-dark-theme .empty-state-graphic::after {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    border: 2px dashed var(--xdr-border-extra-soft);
+    opacity: 0.4;
+}
+
+.xdr-dark-theme .empty-state-graphic-arc {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    border-top-color: var(--xdr-primary);
+    opacity: 0.6;
+}
+
+.xdr-dark-theme .empty-state-graphic-icon {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    color: var(--xdr-on-background-secondary);
+    opacity: 0.5;
+}
+
+.xdr-dark-theme .empty-state-graphic-icon svg {
+    width: 100%;
+    height: 100%;
+    stroke: currentcolor;
+    stroke-width: 1.5;
+    fill: none;
+}
+
+.xdr-dark-theme .empty-state h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--xdr-on-background);
+    margin-bottom: 0.5rem;
+}
+
+.xdr-dark-theme .empty-state p {
+    color: var(--xdr-on-background-secondary);
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+}
+
+.xdr-dark-theme .empty-state .btn {
+    margin-top: 1rem;
 }
 
 /* Detail sections */

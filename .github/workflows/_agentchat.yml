@@ -108,9 +108,15 @@ jobs:
         run: |
           BEDROCK_REGION=$(echo "$TF_VARS" | grep '^bedrock_region' | sed 's/.*= *"\([^"]*\)".*/\1/')
           if [[ ! "$BEDROCK_REGION" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]]; then
-            echo "Error: Invalid region format: $BEDROCK_REGION"; exit 1
+            echo "Error: Invalid bedrock_region format: $BEDROCK_REGION"; exit 1
           fi
           echo "bedrock_region=${BEDROCK_REGION}" >> $GITHUB_OUTPUT
+
+          RDS_REGION=$(echo "$TF_VARS" | grep '^rds_region' | sed 's/.*= *"\([^"]*\)".*/\1/')
+          if [[ ! "$RDS_REGION" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]]; then
+            echo "Error: Invalid rds_region format: $RDS_REGION"; exit 1
+          fi
+          echo "rds_region=${RDS_REGION}" >> $GITHUB_OUTPUT
 
       - name: Get secrets
         id: secrets
@@ -193,6 +199,7 @@ jobs:
         env:
           INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
           BEDROCK_REGION: ${{ steps.config.outputs.bedrock_region }}
+          RDS_REGION: ${{ steps.config.outputs.rds_region }}
           BAG_API_KEY: ${{ steps.secrets.outputs.bag_api_key }}
           DATABASE_URL: ${{ steps.secrets.outputs.database_url }}
           COGNITO_USER_POOL_ID: ${{ steps.secrets.outputs.cognito_user_pool_id }}
@@ -212,6 +219,7 @@ jobs:
             --arg ecr_registry "$ECR_REGISTRY" \
             --arg mcp_image "$MCP_SHIFTER_IMAGE" \
             --arg bedrock_region "$BEDROCK_REGION" \
+            --arg rds_region "$RDS_REGION" \
             --arg bag_api_key "$BAG_API_KEY" \
             --arg cognito_pool "$COGNITO_USER_POOL_ID" \
             --arg cognito_client "$COGNITO_CLIENT_ID" \
@@ -237,7 +245,7 @@ jobs:
                 "mkdir -p /opt/mcp-shifter-config",
                 "echo '\''{\"sessions\":{\"maxPerUser\":10,\"maxGlobal\":100,\"logInfoThreshold\":50,\"logWarnThreshold\":80},\"connections\":{\"idleTimeoutMs\":300000}}'\'' > /opt/mcp-shifter-config/config.json",
                 ("docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=" + $bedrock_region + " -e API_KEY=" + $bag_api_key + " bedrock-gateway"),
-                ("docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=" + $bedrock_region + " -e COGNITO_USER_POOL_ID=" + $cognito_pool + " -e COGNITO_CLIENT_ID=" + $cognito_client + " -e COGNITO_ISSUER=" + $cognito_issuer + " -e RDS_HOSTNAME=" + $rds_host + " -e RDS_PORT=" + $rds_port + " -e RDS_DATABASE=" + $rds_db + " -e RDS_USERNAME=mcp_user " + $mcp_image),
+                ("docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=" + $rds_region + " -e COGNITO_USER_POOL_ID=" + $cognito_pool + " -e COGNITO_CLIENT_ID=" + $cognito_client + " -e COGNITO_ISSUER=" + $cognito_issuer + " -e RDS_HOSTNAME=" + $rds_host + " -e RDS_PORT=" + $rds_port + " -e RDS_DATABASE=" + $rds_db + " -e RDS_USERNAME=mcp_user " + $mcp_image),
                 "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
                 ("docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=" + $bag_api_key + " -e DATABASE_URL=" + $db_url + " -e WEBUI_URL=" + $webui_url + " -e ENABLE_OAUTH_SIGNUP=true -e ENABLE_LOGIN_FORM=false -e OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true -e OAUTH_PROVIDER_NAME=cognito -e OAUTH_CLIENT_ID=" + $cognito_client + " -e OAUTH_CLIENT_SECRET=" + $cognito_secret + " -e OPENID_PROVIDER_URL=" + $cognito_issuer + "/.well-known/openid-configuration ghcr.io/open-webui/open-webui:v0.6.41"),
                 "echo Waiting for health checks...",

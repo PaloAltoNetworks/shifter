@@ -1,0 +1,336 @@
+/*
+ * Cortex XDR Theme for OpenWeb UI
+ * Version: 1.1.0
+ *
+ * This CSS uses unlayered rules (higher priority than @layer rules)
+ * to override Tailwind's utility classes.
+ */
+
+/* ==========================================================================
+   FONTS (must load before other rules)
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@100;300;400;700;900&display=swap');
+
+/* ==========================================================================
+   UNLAYERED OVERRIDES
+
+   These rules are "unlayered" which means they have higher priority than
+   any rules inside @layer blocks (which Tailwind v4 uses).
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   BACKGROUND COLORS
+   -------------------------------------------------------------------------- */
+
+/* Main app wrapper - this element has dark:bg-gray-900 */
+html.dark .dark\:bg-gray-900 {
+  background-color: #1f1f1f !important;
+}
+
+/* Darkest surfaces */
+html.dark .dark\:bg-gray-950,
+html.dark .dark\:bg-gray-950\/30 {
+  background-color: #151515 !important;
+}
+
+/* Mid-dark surfaces */
+html.dark .dark\:bg-gray-850 {
+  background-color: #262626 !important;
+}
+
+/* Card/panel surfaces */
+html.dark .dark\:bg-gray-800 {
+  background-color: #333333 !important;
+}
+
+/* Body specific override */
+html.dark body,
+body.dark {
+  background-color: #1f1f1f !important;
+}
+
+/* Additional bg classes used */
+html.dark .bg-gray-900 {
+  background-color: #1f1f1f !important;
+}
+
+html.dark .bg-gray-950 {
+  background-color: #151515 !important;
+}
+
+html.dark .bg-gray-850 {
+  background-color: #262626 !important;
+}
+
+html.dark .bg-gray-800 {
+  background-color: #333333 !important;
+}
+
+/* Semi-transparent backgrounds */
+html.dark .dark\:bg-gray-500\/5,
+html.dark .bg-white\/5 {
+  background-color: rgba(51, 51, 51, 0.3) !important;
+}
+
+/* --------------------------------------------------------------------------
+   HOVER STATES
+   -------------------------------------------------------------------------- */
+
+html.dark .dark\:hover\:bg-gray-950\/30:hover,
+html.dark .hover\:bg-gray-950\/30:hover {
+  background-color: rgba(21, 21, 21, 0.5) !important;
+}
+
+html.dark .dark\:hover\:bg-gray-850:hover,
+html.dark .hover\:bg-gray-850:hover {
+  background-color: #333333 !important;
+}
+
+html.dark .dark\:hover\:bg-gray-800:hover,
+html.dark .hover\:bg-gray-800:hover {
+  background-color: #484848 !important;
+}
+
+html.dark .hover\:bg-gray-100:hover {
+  background-color: #333333 !important;
+}
+
+html.dark .hover\:bg-gray-50:hover,
+html.dark .hover\:bg-gray-50\/30:hover {
+  background-color: #262626 !important;
+}
+
+/* --------------------------------------------------------------------------
+   TEXT COLORS
+   -------------------------------------------------------------------------- */
+
+html.dark .dark\:text-gray-100,
+html.dark .text-gray-100 {
+  color: #eaebeb !important;
+}
+
+html.dark .dark\:text-gray-400,
+html.dark .text-gray-400 {
+  color: #b8b8b8 !important;
+}
+
+html.dark .dark\:text-gray-500,
+html.dark .dark\:text-gray-600,
+html.dark .text-gray-500,
+html.dark .text-gray-600 {
+  color: #929191 !important;
+}
+
+html.dark .text-gray-700 {
+  color: #eaebeb !important;
+}
+
+html.dark .text-white {
+  color: #eaebeb !important;
+}
+
+html.dark .dark\:text-white {
+  color: #eaebeb !important;
+}
+
+/* --------------------------------------------------------------------------
+   BORDER COLORS
+   -------------------------------------------------------------------------- */
+
+html.dark .dark\:border-gray-900,
+html.dark .border-gray-900 {
+  border-color: #333333 !important;
+}
+
+html.dark .dark\:border-gray-850,
+html.dark .dark\:border-gray-850\/30,
+html.dark .border-gray-850 {
+  border-color: #333333 !important;
+}
+
+html.dark .dark\:border-gray-800,
+html.dark .border-gray-800 {
+  border-color: #484848 !important;
+}
+
+html.dark .border-gray-50,
+html.dark .dark\:border-gray-50 {
+  border-color: #333333 !important;
+}
+
+/* --------------------------------------------------------------------------
+   ACCENT COLOR (Cortex Blue #128df3)
+   -------------------------------------------------------------------------- */
+
+html.dark .dark\:bg-indigo-500,
+html.dark .dark\:bg-indigo-400,
+html.dark .bg-indigo-500,
+html.dark .bg-indigo-400 {
+  background-color: #128df3 !important;
+}
+
+html.dark .dark\:bg-indigo-300\/10,
+html.dark .dark\:bg-indigo-500\/10,
+html.dark .bg-indigo-300\/10 {
+  background-color: rgba(18, 141, 243, 0.1) !important;
+}
+
+html.dark .bg-indigo-400\/20 {
+  background-color: rgba(18, 141, 243, 0.2) !important;
+}
+
+html.dark .dark\:text-indigo-500,
+html.dark .dark\:text-indigo-400,
+html.dark .text-indigo-500,
+html.dark .text-indigo-400 {
+  color: #128df3 !important;
+}
+
+html.dark .dark\:border-indigo-500,
+html.dark .border-indigo-500 {
+  border-color: #128df3 !important;
+}
+
+/* --------------------------------------------------------------------------
+   GRADIENTS
+   -------------------------------------------------------------------------- */
+
+html.dark .dark\:from-gray-900\/90 {
+  --tw-gradient-from: rgba(31, 31, 31, 0.9) var(--tw-gradient-from-position) !important;
+}
+
+html.dark .dark\:via-gray-900\/50 {
+  --tw-gradient-via: rgba(31, 31, 31, 0.5) var(--tw-gradient-via-position) !important;
+}
+
+html.dark .dark\:from-gray-900\/50 {
+  --tw-gradient-from: rgba(31, 31, 31, 0.5) var(--tw-gradient-from-position) !important;
+}
+
+/* --------------------------------------------------------------------------
+   TYPOGRAPHY
+   -------------------------------------------------------------------------- */
+
+html.dark,
+html.dark body,
+html.dark * {
+  font-family: 'Lato', -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, sans-serif !important;
+}
+
+html.dark .placeholder-gray-400::placeholder {
+  color: #929191 !important;
+}
+
+/* --------------------------------------------------------------------------
+   BRAND CONCEALMENT
+   -------------------------------------------------------------------------- */
+
+/* Hide OpenWebUI branding links */
+a[href*="github.com/open-webui"],
+a[href*="openwebui.com"],
+a[href*="docs.openwebui.com"],
+a[href*="discord.gg/5rJgQTnV4s"],
+a[href*="open-webui/open-webui/blob/main/docs/CONTRIBUTING"] {
+  display: none !important;
+}
+
+/* Hide version release links */
+a[href*="github.com/open-webui/open-webui/releases"] {
+  visibility: hidden !important;
+  font-size: 0 !important;
+}
+
+/* --------------------------------------------------------------------------
+   SCROLLBARS
+   -------------------------------------------------------------------------- */
+
+html.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: #151515;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #484848;
+  border-radius: 4px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #707070;
+}
+
+html.dark * {
+  scrollbar-width: thin;
+  scrollbar-color: #484848 #151515;
+}
+
+/* --------------------------------------------------------------------------
+   DIALOGS AND MODALS
+   -------------------------------------------------------------------------- */
+
+html.dark dialog,
+html.dark [role="dialog"] {
+  background-color: #151515 !important;
+  border-color: #484848 !important;
+}
+
+/* --------------------------------------------------------------------------
+   DROPDOWN MENUS
+   -------------------------------------------------------------------------- */
+
+html.dark [role="menu"],
+html.dark [role="listbox"] {
+  background-color: #151515 !important;
+  border-color: #484848 !important;
+}
+
+html.dark [role="menuitem"]:hover,
+html.dark [role="option"]:hover {
+  background-color: #333333 !important;
+}
+
+/* --------------------------------------------------------------------------
+   SWITCHES AND TOGGLES
+   -------------------------------------------------------------------------- */
+
+html.dark [role="switch"][aria-checked="true"] {
+  background-color: #128df3 !important;
+}
+
+/* --------------------------------------------------------------------------
+   CODE BLOCKS
+   -------------------------------------------------------------------------- */
+
+html.dark pre,
+html.dark code {
+  background-color: #000000 !important;
+  border-radius: 4px !important;
+}
+
+/* --------------------------------------------------------------------------
+   SEMANTIC COLORS
+   -------------------------------------------------------------------------- */
+
+html.dark .bg-green-400,
+html.dark .bg-green-500 {
+  background-color: #00CC66 !important;
+}
+
+html.dark .text-green-500,
+html.dark .text-green-600 {
+  color: #00CC66 !important;
+}
+
+html.dark .text-yellow-500,
+html.dark .text-amber-500 {
+  color: #FFB300 !important;
+}
+
+html.dark .text-red-500,
+html.dark .text-red-600 {
+  color: #FF5252 !important;
+}

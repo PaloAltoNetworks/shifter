@@ -9,8 +9,9 @@
     <a href="{% url 'risk_register:risk_create' %}" class="btn btn-primary">+ New Risk</a>
 </div>
 
+<!-- T037: Filters using XDR styles -->
 <div class="filters">
-    <form method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+    <form method="get" class="flex-row gap-md" style="flex-wrap: wrap; align-items: center;">
         <select name="severity" class="filter-select" onchange="this.form.submit()">
             <option value="">All Severities</option>
             {% for value, label in severity_choices %}
@@ -31,7 +32,8 @@
 </div>
 
 {% if risks %}
-<div class="card" style="padding: 0;">
+<!-- T036/T037: Table with XDR styles and severity badges -->
+<div class="card card-flush">
     <table class="table">
         <thead>
             <tr>
@@ -46,7 +48,7 @@
             {% for risk in risks %}
             <tr {% if risk.is_deleted %}class="deleted"{% endif %}>
                 <td>
-                    <a href="{% url 'risk_register:risk_detail' pk=risk.pk %}" style="color: var(--white); text-decoration: none;">
+                    <a href="{% url 'risk_register:risk_detail' pk=risk.pk %}" class="link" style="color: var(--xdr-on-background);">
                         {{ risk.title }}
                     </a>
                 </td>
@@ -60,10 +62,10 @@
                     {% if risk.risk_score %}
                     {{ risk.risk_score }}
                     {% else %}
-                    <span style="color: var(--gray);">—</span>
+                    <span class="text-muted">—</span>
                     {% endif %}
                 </td>
-                <td style="color: rgba(255,255,255,0.5);">
+                <td class="text-muted">
                     {{ risk.updated_at|date:"M d, Y H:i" }}
                 </td>
             </tr>
@@ -73,8 +75,19 @@
 </div>
 {% else %}
 <div class="card empty-state">
-    <p>No risks found matching your filters.</p>
-    <a href="{% url 'risk_register:risk_create' %}" class="btn btn-primary" style="margin-top: 1rem;">Create First Risk</a>
+    <div class="empty-state-graphic">
+        <div class="empty-state-graphic-arc"></div>
+        <div class="empty-state-graphic-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="M12 8v4"/>
+                <circle cx="12" cy="16" r="1" fill="currentColor" stroke="none"/>
+            </svg>
+        </div>
+    </div>
+    <h3>No risks found</h3>
+    <p>No risks match your current filters</p>
+    <a href="{% url 'risk_register:risk_create' %}" class="btn btn-primary">Create First Risk</a>
 </div>
 {% endif %}
 {% endblock %}

@@ -29,14 +29,20 @@ services:
     volumes:
       # Persist data locally (SQLite DB, uploads, etc.)
       - owui-theming-data:/app/backend/data
-      # Mount custom Cortex theme CSS (correct path for OpenWebUI)
+      # Mount custom Cortex theme CSS (read-only to prevent overwrite)
       - ./custom-theme/custom.css:/app/backend/open_webui/static/custom.css:ro
-      # Mount custom logo and favicon
+      # Mount custom logo and favicon (all paths OpenWebUI checks)
       - ./custom-theme/logo.png:/app/backend/open_webui/static/logo.png:ro
-      - ./custom-theme/logo.png:/app/backend/open_webui/static/favicon.png:ro
+      - ./custom-theme/logo.png:/app/build/static/logo.png:ro
+      - ./custom-theme/favicon.png:/app/backend/open_webui/static/favicon.png:ro
+      - ./custom-theme/favicon.png:/app/build/static/favicon.png:ro
+      - ./custom-theme/favicon.png:/app/build/favicon.png:ro
+      # Additional favicon paths for browser tab
+      - ./custom-theme/favicon.png:/app/backend/open_webui/static/favicon.ico:ro
+      - ./custom-theme/favicon.png:/app/build/favicon.ico:ro
     environment:
       # Branding - this changes the page title and UI references
-      - WEBUI_NAME=Cortex AI
+      - WEBUI_NAME=Cortex Shifter
 
       # Disable Ollama (we're not using local models for theming)
       - OLLAMA_BASE_URL=

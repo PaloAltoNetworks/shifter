@@ -74,7 +74,7 @@ class Tools:
     async def _send_initialized_notification(
         self,
         oauth_token: Optional[dict],
-        client: httpx.AsyncClient
+        client
     ) -> None:
         """
         Send notifications/initialized after successful initialize.

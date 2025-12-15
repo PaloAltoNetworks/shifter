@@ -137,7 +137,7 @@ if not DEBUG:
 # ------------------------------------------------------------------------------
 
 AUTHENTICATION_BACKENDS = [
-    "mozilla_django_oidc.auth.OIDCAuthenticationBackend",
+    "config.oidc.ShifterOIDCBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
 

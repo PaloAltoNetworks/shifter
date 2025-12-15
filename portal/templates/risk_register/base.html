@@ -9,15 +9,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
-    <!-- T031: Link xdr-theme.css stylesheet -->
     <link rel="stylesheet" href="{% static 'css/xdr-theme.css' %}">
+    <!-- T017: Link xdr-sidebar.css -->
+    <link rel="stylesheet" href="{% static 'css/xdr-sidebar.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/logo-transparent.png' %}">
-    <!-- T034: Inline styles removed - now using xdr-theme.css -->
     {% block extra_css %}{% endblock %}
 </head>
-<!-- T033: Add xdr-dark-theme class to body element -->
 <body class="xdr-dark-theme">
-    <!-- T035: Header matches Mission Control styling -->
+    <!-- T015: Icon Sidebar - injected via include or inline -->
+    {% include "partials/icon_sidebar.html" %}
+
     <header class="header">
         <div class="header-left">
             <img src="{% static 'images/logo-transparent.png' %}" alt="Shifter" class="header-logo">
@@ -25,32 +26,18 @@
         </div>
         <div class="header-right">
             <span class="user-info">{{ request.user.email }}</span>
-            {% if debug %}
-            <a href="{% url 'dev_logout' %}" class="btn-logout">Logout</a>
-            {% else %}
-            <form action="{% url 'oidc_logout' %}" method="post" style="display: inline;">
-                {% csrf_token %}
-                <button type="submit" class="btn-logout">Logout</button>
-            </form>
-            {% endif %}
         </div>
     </header>
 
+    <!-- Secondary Panel for Risk Register sub-navigation -->
+    <div class="secondary-panel" id="secondary-panel">
+        <div class="secondary-panel-header">Risk Register</div>
+        <a href="{% url 'risk_register:risk_list' %}" class="secondary-panel-item {% if active_nav == 'risks' %}active{% endif %}">All Risks</a>
+        <a href="{% url 'risk_register:risk_create' %}" class="secondary-panel-item {% if active_nav == 'create' %}active{% endif %}">New Risk</a>
+        <a href="{% url 'risk_register:apikey_list' %}" class="secondary-panel-item {% if active_nav == 'apikeys' %}active{% endif %}">API Keys</a>
+    </div>
+
     <div class="layout">
-        <!-- T035: Sidebar matches Mission Control styling -->
-        <nav class="sidebar">
-            <div class="nav-section">Risk Register</div>
-            <a href="{% url 'risk_register:risk_list' %}" class="nav-item {% if active_nav == 'risks' %}active{% endif %}">All Risks</a>
-            <a href="{% url 'risk_register:risk_create' %}" class="nav-item {% if active_nav == 'create' %}active{% endif %}">New Risk</a>
-            <a href="{% url 'risk_register:apikey_list' %}" class="nav-item {% if active_nav == 'apikeys' %}active{% endif %}">API Keys</a>
-
-            <div class="nav-section">Other</div>
-            <a href="{% url 'mission_control:dashboard' %}" class="nav-item">Mission Control</a>
-            <a href="{% url 'admin:index' %}" class="nav-item">Admin</a>
-
-            <div class="sidebar-footer">&copy; 2025 Brad Edwards</div>
-        </nav>
-
         <main class="main">
             {% if messages %}
             <div class="messages">
@@ -63,6 +50,8 @@
         </main>
     </div>
 
+    <!-- T019: Link sidebar.js -->
+    <script src="{% static 'js/sidebar.js' %}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

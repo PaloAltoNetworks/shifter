@@ -5,7 +5,7 @@ author_url: https://github.com/paloaltonetworks/shifter
 description: Execute MCP tools on your Shifter Kali range. Enables AI-driven pentesting through the Shifter cyber range platform.
 required_open_webui_version: 0.6.31
 requirements: httpx>=0.25.0
-version: 0.5.0
+version: 0.6.0
 licence: MIT
 """
 
@@ -32,7 +32,7 @@ class Tools:
     # MCP protocol version
     MCP_PROTOCOL_VERSION = "2024-11-05"
     CLIENT_NAME = "shifter-openwebui-wrapper"
-    CLIENT_VERSION = "0.5.0"
+    CLIENT_VERSION = "0.6.0"
 
     def __init__(self):
         self.valves = self.Valves()
@@ -377,26 +377,52 @@ class Tools:
 
             if "error" in result:
                 error = result["error"]
-                return f"Tool execution failed: {error.get('message', 'Unknown error')}"
+                error_msg = f"Tool execution failed: {error.get('message', 'Unknown error')}"
+                if __event_emitter__:
+                    await __event_emitter__({
+                        "type": "message",
+                        "data": {
+                            "content": f"**`{tool_name}` ERROR**\n```\n{error_msg}\n```"
+                        }
+                    })
+                return error_msg
 
             # Extract and format result
             tool_result = result.get("result", {})
             content = tool_result.get("content", [])
 
             if not content:
-                return "Tool executed successfully (no output)"
+                output = "Tool executed successfully (no output)"
+            else:
+                # Combine all content blocks
+                output_parts = []
+                for block in content:
+                    if block.get("type") == "text":
+                        output_parts.append(block.get("text", ""))
+                    elif block.get("type") == "resource":
+                        output_parts.append(f"[Resource: {block.get('uri', 'unknown')}]")
+                    else:
+                        output_parts.append(str(block))
+                output = "\n".join(output_parts)
 
-            # Combine all content blocks
-            output_parts = []
-            for block in content:
-                if block.get("type") == "text":
-                    output_parts.append(block.get("text", ""))
-                elif block.get("type") == "resource":
-                    output_parts.append(f"[Resource: {block.get('uri', 'unknown')}]")
-                else:
-                    output_parts.append(str(block))
+            # Emit tool output as a message so users can see exactly what happened
+            if __event_emitter__:
+                await __event_emitter__({
+                    "type": "message",
+                    "data": {
+                        "content": f"**`{tool_name}`**\n```\n{output}\n```"
+                    }
+                })
 
-            return "\n".join(output_parts)
+            return output
 
         except (ValueError, PermissionError, ConnectionError, TimeoutError, RuntimeError) as e:
-            return f"Error: {str(e)}"
+            error_msg = f"Error: {str(e)}"
+            if __event_emitter__:
+                await __event_emitter__({
+                    "type": "message",
+                    "data": {
+                        "content": f"**`{tool_name}` ERROR**\n```\n{error_msg}\n```"
+                    }
+                })
+            return error_msg

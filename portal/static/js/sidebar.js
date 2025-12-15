@@ -1,115 +1,61 @@
 /**
- * Cortex XDR Sidebar JavaScript
- *
- * Handles:
- * - Sidebar expand/collapse with lock
- * - Secondary panel expand/collapse
- * - User avatar dropdown
- * - Outside click detection
+ * Cortex XDR Left Navigation - Direct port behavior
  */
 
-(function() {
-    'use strict';
+document.addEventListener('DOMContentLoaded', function() {
+    const leftNav = document.getElementById('leftNav');
+    const lockBtn = document.getElementById('lockBtn');
 
-    // Sidebar Lock Toggle
-    function initSidebarLock() {
-        const sidebar = document.querySelector('.icon-sidebar');
-        const lockBtn = document.querySelector('.sidebar-lock-btn');
+    if (!leftNav || !lockBtn) return;
 
-        if (!sidebar || !lockBtn) return;
+    // Check localStorage for lock state
+    const isLocked = localStorage.getItem('nav-lock') === 'true';
 
-        // Check localStorage for lock state
-        const isLocked = localStorage.getItem('sidebarLocked') === 'true';
-        if (isLocked) {
-            sidebar.classList.add('locked');
+    if (isLocked) {
+        document.body.classList.add('nav-lock');
+        leftNav.classList.remove('minimized');
+        lockBtn.classList.add('active');
+        lockBtn.setAttribute('aria-expanded', 'true');
+    }
+
+    // Expand on hover (if not locked)
+    leftNav.addEventListener('mouseenter', function() {
+        document.body.classList.remove('nav-mouse-leave');
+        if (!document.body.classList.contains('nav-lock')) {
+            leftNav.classList.remove('minimized');
         }
+    });
 
-        lockBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const nowLocked = sidebar.classList.toggle('locked');
-            localStorage.setItem('sidebarLocked', nowLocked);
-        });
-    }
-
-    // Secondary Panel Toggle
-    function initSecondaryPanel() {
-        const panelTriggers = document.querySelectorAll('[data-panel-trigger]');
-        const secondaryPanel = document.getElementById('secondary-panel');
-        const layout = document.querySelector('.layout');
-
-        if (!secondaryPanel) return;
-
-        panelTriggers.forEach(trigger => {
-            trigger.addEventListener('click', function(e) {
-                e.preventDefault();
-                const panelId = this.getAttribute('data-panel-trigger');
-
-                // Toggle panel
-                if (secondaryPanel.classList.contains('open')) {
-                    closeSecondaryPanel();
-                } else {
-                    openSecondaryPanel();
-                }
-            });
-        });
-
-        // Close on outside click
-        document.addEventListener('click', function(e) {
-            if (!secondaryPanel.contains(e.target) &&
-                !e.target.closest('[data-panel-trigger]') &&
-                secondaryPanel.classList.contains('open')) {
-                closeSecondaryPanel();
-            }
-        });
-
-        function openSecondaryPanel() {
-            secondaryPanel.classList.add('open');
-            if (layout) layout.classList.add('panel-open');
+    // Collapse on mouse leave (if not locked)
+    leftNav.addEventListener('mouseleave', function() {
+        document.body.classList.add('nav-mouse-leave');
+        if (!document.body.classList.contains('nav-lock')) {
+            leftNav.classList.add('minimized');
         }
+    });
 
-        function closeSecondaryPanel() {
-            secondaryPanel.classList.remove('open');
-            if (layout) layout.classList.remove('panel-open');
+    // Lock button click
+    lockBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const willBeLocked = !document.body.classList.contains('nav-lock');
+
+        if (willBeLocked) {
+            document.body.classList.add('nav-lock');
+            leftNav.classList.remove('minimized');
+            lockBtn.classList.add('active');
+            lockBtn.setAttribute('aria-expanded', 'true');
+            localStorage.setItem('nav-lock', 'true');
+        } else {
+            document.body.classList.remove('nav-lock');
+            leftNav.classList.add('minimized');
+            lockBtn.classList.remove('active');
+            lockBtn.setAttribute('aria-expanded', 'false');
+            localStorage.setItem('nav-lock', 'false');
         }
-    }
+    });
 
-    // User Avatar Dropdown
-    function initUserDropdown() {
-        const avatar = document.querySelector('.user-avatar');
-        const dropdown = document.querySelector('.user-dropdown');
-
-        if (!avatar || !dropdown) return;
-
-        avatar.addEventListener('click', function(e) {
-            e.stopPropagation();
-            dropdown.classList.toggle('open');
-        });
-
-        // Close on outside click
-        document.addEventListener('click', function(e) {
-            if (!dropdown.contains(e.target) && !avatar.contains(e.target)) {
-                dropdown.classList.remove('open');
-            }
-        });
-
-        // Close on Escape key
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') {
-                dropdown.classList.remove('open');
-            }
-        });
-    }
-
-    // Initialize on DOM ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-
-    function init() {
-        initSidebarLock();
-        initSecondaryPanel();
-        initUserDropdown();
-    }
-})();
+    // Initial state - start with mouse leave
+    document.body.classList.add('nav-mouse-leave');
+});

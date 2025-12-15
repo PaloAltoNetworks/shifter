@@ -30,10 +30,13 @@ body.xdr-dark-theme {
 
 .layout {
     min-height: 100vh;
+    margin-left: var(--xdr-left-nav-width, 56px);
+    transition: margin-left 0.3s ease-in-out;
 }
 
 .main {
     padding: 24px;
+    background: var(--xdr-background);
 }
 
 /* Page Header */

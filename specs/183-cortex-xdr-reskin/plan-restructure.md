@@ -158,4 +158,62 @@ portal/
 | Phase 4: Empty States | 5 | Low |
 | Phase 5: User Avatar | 5 | Medium |
 | Phase 6: Polish | 4 | Low |
-| **Total** | **28 tasks** | |
+| **Total (Initial)** | **28 tasks** | |
+
+---
+
+# Phase 2 Refinements
+
+**Added**: 2025-12-15
+**Reference**: Side-by-side comparison with Cortex XDR
+
+## Phase 7: Expandable Sidebar
+
+**Goal**: Make sidebar expand on hover with lock capability
+
+1. Update sidebar CSS for expandable width (56px → 200px)
+2. Add CSS transition for smooth expansion
+3. Add text labels to navigation items (hidden when collapsed)
+4. Add lock/pin toggle button
+5. Implement expand/collapse JavaScript logic
+6. Persist lock state in localStorage
+
+## Phase 8: Logo Relocation
+
+**Goal**: Move logo from header to sidebar top
+
+1. Remove logo from header HTML
+2. Add logo to sidebar top section
+3. Style logo for collapsed state (icon only)
+4. Style logo for expanded state (icon + text)
+5. Adjust header layout (remove logo space)
+
+## Phase 9: Icon Color Correction
+
+**Goal**: Fix icon colors to match Cortex XDR
+
+1. Update icon color to white/gray (#eaebeb)
+2. Remove blue color from active icon
+3. Keep blue accent bar on left edge only
+4. Update hover states to use background only
+
+## Phase 10: Bottom Utility Section
+
+**Goal**: Add utility icons above user avatar
+
+1. Add divider above utility section
+2. Add Help icon to bottom section
+3. Add Settings icon to bottom section
+4. Update user avatar for expanded state (show name)
+5. Style utility section layout
+
+## Updated Effort Estimate
+
+| Phase | Tasks | Complexity |
+|-------|-------|------------|
+| Phases 1-6 (Complete) | 62 | ✅ Done |
+| Phase 7: Expandable Sidebar | 6 | Medium |
+| Phase 8: Logo Relocation | 5 | Low |
+| Phase 9: Icon Color Correction | 4 | Low |
+| Phase 10: Bottom Utility Section | 5 | Low |
+| **Refinements Total** | **20 tasks** | |

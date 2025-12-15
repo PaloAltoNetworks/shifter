@@ -1,57 +1,48 @@
 {% load static user_extras %}
-<!-- Icon Sidebar Navigation -->
+<!-- Icon Sidebar Navigation - Expandable -->
 <nav class="icon-sidebar">
+    <!-- Logo at top -->
+    <div class="icon-sidebar-logo">
+        <img src="{% static 'images/logo-transparent.png' %}" alt="Shifter">
+        <span class="icon-sidebar-logo-text">SHIFTER</span>
+        <!-- Lock/pin button -->
+        <button class="sidebar-lock-btn" title="Lock sidebar open">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+        </button>
+    </div>
+
     <div class="icon-sidebar-nav">
         <div class="icon-sidebar-section">
             <a href="{% url 'mission_control:dashboard' %}"
-               class="icon-sidebar-item {% if active_nav == 'dashboard' %}active{% endif %}"
-               data-tooltip="Dashboard">
+               class="icon-sidebar-item {% if active_nav == 'dashboard' %}active{% endif %}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <rect x="3" y="3" width="7" height="9" rx="1"/>
                     <rect x="14" y="3" width="7" height="5" rx="1"/>
                     <rect x="14" y="12" width="7" height="9" rx="1"/>
                     <rect x="3" y="16" width="7" height="5" rx="1"/>
                 </svg>
+                <span class="icon-sidebar-item-text">Dashboard</span>
             </a>
             <a href="{% url 'mission_control:agents' %}"
-               class="icon-sidebar-item {% if active_nav == 'agents' %}active{% endif %}"
-               data-tooltip="Agents">
+               class="icon-sidebar-item {% if active_nav == 'agents' %}active{% endif %}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <rect x="2" y="2" width="20" height="8" rx="2"/>
                     <rect x="2" y="14" width="20" height="8" rx="2"/>
-                    <circle cx="6" cy="6" r="0.5" fill="currentColor"/>
-                    <circle cx="6" cy="18" r="0.5" fill="currentColor"/>
+                    <circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/>
                 </svg>
+                <span class="icon-sidebar-item-text">Agents</span>
             </a>
             <a href="{% url 'mission_control:history' %}"
-               class="icon-sidebar-item {% if active_nav == 'history' %}active{% endif %}"
-               data-tooltip="History">
+               class="icon-sidebar-item {% if active_nav == 'history' %}active{% endif %}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <circle cx="12" cy="12" r="10"/>
                     <polyline points="12 6 12 12 16 14"/>
                 </svg>
-            </a>
-        </div>
-
-        <div class="icon-sidebar-divider"></div>
-
-        <div class="icon-sidebar-section">
-            <a href="{% url 'mission_control:settings' %}"
-               class="icon-sidebar-item {% if active_nav == 'settings' %}active{% endif %}"
-               data-tooltip="Settings">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="m19.4 15 .6 1.9-2.8 2.8-1.9-.6a9 9 0 0 1-1.3.8l-.5 2H9.5l-.5-2a9 9 0 0 1-1.3-.8l-1.9.6-2.8-2.8.6-1.9a9 9 0 0 1-.8-1.3l-2-.5V9.5l2-.5a9 9 0 0 1 .8-1.3l-.6-1.9L5.8 3l1.9.6a9 9 0 0 1 1.3-.8l.5-2h3.9l.5 2a9 9 0 0 1 1.3.8l1.9-.6 2.8 2.8-.6 1.9a9 9 0 0 1 .8 1.3l2 .5v3.9l-2 .5a9 9 0 0 1-.8 1.3z"/>
-                </svg>
-            </a>
-            <a href="{% url 'mission_control:help' %}"
-               class="icon-sidebar-item {% if active_nav == 'help' %}active{% endif %}"
-               data-tooltip="Help">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                    <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
-                </svg>
+                <span class="icon-sidebar-item-text">History</span>
             </a>
         </div>
 
@@ -59,34 +50,59 @@
 
         <div class="icon-sidebar-section">
             <a href="{% url 'risk_register:risk_list' %}"
-               class="icon-sidebar-item {% if active_nav == 'risks' or active_nav == 'create' or active_nav == 'apikeys' %}active{% endif %}"
-               data-tooltip="Risk Register"
-               {% if has_secondary_panel %}data-panel-trigger="risk-panel"{% endif %}>
+               class="icon-sidebar-item {% if active_nav == 'risks' or active_nav == 'create' or active_nav == 'apikeys' %}active{% endif %}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     <path d="M12 8v4"/>
-                    <circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+                    <circle cx="12" cy="16" r="1" fill="currentColor" stroke="none"/>
                 </svg>
+                <span class="icon-sidebar-item-text">Risk Register</span>
             </a>
         </div>
     </div>
 
-    <!-- User Avatar -->
+    <!-- Bottom utility section -->
     <div class="icon-sidebar-footer">
-        <div class="user-avatar" id="user-avatar">
-            {{ request.user.email|initials }}
+        <div class="icon-sidebar-divider"></div>
+
+        <div class="icon-sidebar-section">
+            <a href="{% url 'mission_control:settings' %}"
+               class="icon-sidebar-item {% if active_nav == 'settings' %}active{% endif %}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                <span class="icon-sidebar-item-text">Settings</span>
+            </a>
+            <a href="{% url 'mission_control:help' %}"
+               class="icon-sidebar-item {% if active_nav == 'help' %}active{% endif %}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>
+                </svg>
+                <span class="icon-sidebar-item-text">Help</span>
+            </a>
         </div>
-        <div class="user-dropdown" id="user-dropdown">
-            <div class="user-dropdown-header">{{ request.user.email }}</div>
-            <a href="{% url 'mission_control:settings' %}" class="user-dropdown-item">Settings</a>
-            {% if debug %}
-            <a href="{% url 'dev_logout' %}" class="user-dropdown-item danger">Logout</a>
-            {% else %}
-            <form action="{% url 'oidc_logout' %}" method="post">
-                {% csrf_token %}
-                <button type="submit" class="user-dropdown-item danger">Logout</button>
-            </form>
-            {% endif %}
+
+        <!-- User Avatar -->
+        <div class="icon-sidebar-user">
+            <div class="user-avatar" id="user-avatar">
+                {{ request.user.email|initials }}
+            </div>
+            <span class="icon-sidebar-item-text user-name">{{ request.user.email }}</span>
+            <div class="user-dropdown" id="user-dropdown">
+                <div class="user-dropdown-header">{{ request.user.email }}</div>
+                <a href="{% url 'mission_control:settings' %}" class="user-dropdown-item">Settings</a>
+                {% if debug %}
+                <a href="{% url 'dev_logout' %}" class="user-dropdown-item danger">Logout</a>
+                {% else %}
+                <form action="{% url 'oidc_logout' %}" method="post">
+                    {% csrf_token %}
+                    <button type="submit" class="user-dropdown-item danger">Logout</button>
+                </form>
+                {% endif %}
+            </div>
         </div>
     </div>
 </nav>

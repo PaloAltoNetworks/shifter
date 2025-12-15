@@ -1,6 +1,39 @@
-# OpenWebUI Tools for Shifter
+# OpenWebUI MCP Wrapper for Shifter
 
 Custom OpenWebUI tools that enable AI-driven pentesting through the Shifter cyber range platform.
+
+## Overview
+
+This wrapper enables OpenWebUI to communicate with mcp-shifter using the standard MCP (Model Context Protocol) over Streamable HTTP transport. It handles:
+
+1. User authentication via OAuth token forwarding
+2. MCP session lifecycle (initialize → tools/list → tools/call)
+3. Session management via `mcp-session-id` header
+4. Error handling and session recovery
+
+## Protocol Flow
+
+```
+OpenWebUI Tool                          mcp-shifter
+     |                                       |
+     |-- POST /mcp (initialize) ------------>|
+     |   Authorization: Bearer <jwt>         |
+     |   Accept: application/json, text/...  |
+     |                                       |
+     |<-- 200 + mcp-session-id header -------|
+     |                                       |
+     |-- POST /mcp (notifications/init) ---->|
+     |   mcp-session-id: <id>                |
+     |<-- 202 Accepted ---------------------|
+     |                                       |
+     |-- POST /mcp (tools/list) ------------>|
+     |   mcp-session-id: <id>                |
+     |<-- 200 {tools: [...]} ---------------|
+     |                                       |
+     |-- POST /mcp (tools/call) ------------>|
+     |   mcp-session-id: <id>                |
+     |<-- 200 {result: ...} ----------------|
+```
 
 ## Installation
 
@@ -45,6 +78,19 @@ Executes an MCP tool on your Kali range.
 - Active Shifter range in "ready" status
 - mcp-shifter service running and accessible
 
+## Development
+
+```bash
+# Install dependencies
+uv sync --group dev
+
+# Run tests
+uv run python -m pytest -v
+
+# Run tests with coverage
+uv run python -m pytest --cov=. --cov-report=xml:coverage.xml
+```
+
 ## Troubleshooting
 
 ### "Not authenticated. Please log in via SSO."
@@ -65,3 +111,7 @@ The mcp-shifter service may be down or unreachable. Check:
 ### "Session limit reached."
 
 Too many active sessions. Close unused browser tabs or wait for sessions to expire (5 minute idle timeout).
+
+### "MCP server did not return session ID"
+
+The mcp-shifter server responded but didn't include the `mcp-session-id` header. This indicates a server-side issue.

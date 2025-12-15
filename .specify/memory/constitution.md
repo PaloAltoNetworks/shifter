@@ -18,9 +18,9 @@ Sync Impact Report:
 
 # Portal Cortex XDR Reskin Constitution
 
-This constitution governs the UI/UX reskinning of the Shifter Django portal (landing page
-and Mission Control) to match the Palo Alto Networks Cortex XDR look and feel. The goal
-is to deliver demo-ready polish that gives stakeholders confidence during customer demos.
+This constitution governs the UI/UX reskinning of the Shifter Django portal (landing page,
+Mission Control, and Risk Register) to match the Palo Alto Networks Cortex XDR look and feel.
+The goal is to deliver demo-ready polish that gives stakeholders confidence during customer demos.
 
 ## Core Principles
 
@@ -146,7 +146,7 @@ cyberpunk palette:
 Load via Google Fonts:
 ```html
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
 ```
 
 | Element | Font | Weight | Size |
@@ -214,6 +214,11 @@ Load via Google Fonts:
 - `portal/templates/mission_control/history.html`
 - `portal/templates/mission_control/settings.html`
 - `portal/templates/mission_control/help.html`
+- `portal/templates/risk_register/base.html` - Risk Register layout
+- `portal/templates/risk_register/risk_list.html`
+- `portal/templates/risk_register/risk_detail.html`
+- `portal/templates/risk_register/risk_form.html`
+- `portal/templates/risk_register/apikey_list.html`
 
 **Static Files:**
 - `portal/static/css/` - All CSS files (new or modified)

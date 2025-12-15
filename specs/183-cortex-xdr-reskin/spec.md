@@ -67,7 +67,7 @@ A prospective user or returning user visits the Shifter landing page. Instead of
 ### Functional Requirements
 
 - **FR-001**: Portal MUST use the Cortex XDR dark theme color palette as defined in `assets/styles/login.css`
-- **FR-002**: Portal MUST use Lato font family (weights 100, 400, 700) as the primary typeface
+- **FR-002**: Portal MUST use Lato font family (weights 100, 400, 600, 700) as the primary typeface
 - **FR-003**: All interactive elements (buttons, links, inputs) MUST have proper hover, focus, and active states per Cortex patterns
 - **FR-004**: Sidebar navigation MUST use Cortex styling: dark background, left-border accent for active items, hover states
 - **FR-005**: Cards MUST use `#151515` background with `#484848` borders

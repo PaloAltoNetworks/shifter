@@ -106,6 +106,15 @@
     text-decoration: underline;
 }
 
+.xdr-dark-theme .link {
+    color: var(--xdr-primary);
+    text-decoration: none;
+}
+
+.xdr-dark-theme .link:hover {
+    text-decoration: underline;
+}
+
 /* ============================================================
    T004: Button Component Styles
    ============================================================ */
@@ -161,7 +170,8 @@
     background: rgba(255, 82, 82, 0.15);
 }
 
-.xdr-dark-theme .btn-sm {
+.xdr-dark-theme .btn-sm,
+.xdr-dark-theme .btn-small {
     height: 24px;
     padding: 0 12px;
     font-size: 11px;
@@ -200,6 +210,10 @@
 
 .xdr-dark-theme .card:hover {
     border-color: var(--xdr-border-medium);
+}
+
+.xdr-dark-theme .card-danger {
+    border-color: rgba(255, 82, 82, 0.3);
 }
 
 .xdr-dark-theme .card-title {
@@ -489,8 +503,8 @@
     border-radius: 4px;
     font-size: 11px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    background: var(--xdr-hover);
+    color: var(--xdr-on-background);
 }
 
 /* Severity badges for Risk Register */
@@ -563,14 +577,25 @@
 }
 
 /* Text utilities */
-.xdr-dark-theme .text-muted { color: var(--xdr-disabled-text); }
+.xdr-dark-theme .text-muted { color: var(--xdr-on-background-secondary); }
 .xdr-dark-theme .text-primary { color: var(--xdr-primary); }
+.xdr-dark-theme .text-accent { color: var(--xdr-primary); }
 .xdr-dark-theme .text-success { color: var(--xdr-success); }
 .xdr-dark-theme .text-warning { color: var(--xdr-warning); }
 .xdr-dark-theme .text-error { color: var(--xdr-error); }
 .xdr-dark-theme .text-small { font-size: 12px; }
+.xdr-dark-theme .text-bold { font-weight: 600; }
+.xdr-dark-theme .text-right { text-align: right; }
 
-/* Spacing */
+/* Semantic spacing (sm/md/lg variants) */
+.xdr-dark-theme .mt-sm { margin-top: 0.5rem; }
+.xdr-dark-theme .mt-md { margin-top: 1rem; }
+.xdr-dark-theme .mt-lg { margin-top: 1.5rem; }
+.xdr-dark-theme .mb-sm { margin-bottom: 0.5rem; }
+.xdr-dark-theme .mb-md { margin-bottom: 1rem; }
+.xdr-dark-theme .mb-lg { margin-bottom: 1.5rem; }
+
+/* Numeric spacing */
 .xdr-dark-theme .mb-0 { margin-bottom: 0; }
 .xdr-dark-theme .mb-1 { margin-bottom: 0.5rem; }
 .xdr-dark-theme .mb-2 { margin-bottom: 1rem; }
@@ -585,9 +610,14 @@
 
 /* Flexbox utilities */
 .xdr-dark-theme .flex { display: flex; }
-.xdr-dark-theme .flex-col { flex-direction: column; }
+.xdr-dark-theme .flex-row { display: flex; flex-direction: row; }
+.xdr-dark-theme .flex-col { display: flex; flex-direction: column; }
+.xdr-dark-theme .flex-between { display: flex; justify-content: space-between; align-items: flex-start; }
 .xdr-dark-theme .items-center { align-items: center; }
 .xdr-dark-theme .justify-between { justify-content: space-between; }
+.xdr-dark-theme .gap-sm { gap: 0.5rem; }
+.xdr-dark-theme .gap-md { gap: 1rem; }
+.xdr-dark-theme .gap-lg { gap: 1.5rem; }
 .xdr-dark-theme .gap-1 { gap: 0.5rem; }
 .xdr-dark-theme .gap-2 { gap: 1rem; }
 
@@ -712,6 +742,25 @@
 .xdr-dark-theme .deleted {
     opacity: 0.5;
     text-decoration: line-through;
+}
+
+/* Modal */
+.xdr-dark-theme .modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.xdr-dark-theme .modal-content {
+    max-width: 400px;
+    margin: 2rem;
 }
 
 /* ============================================================

@@ -11,21 +11,21 @@
     <div class="empty-state" id="history-empty">
         <div class="empty-state-icon">[ ]</div>
         <p>No range history yet</p>
-        <p style="font-size: 0.75rem; margin-top: 0.5rem;">
+        <p class="text-small mt-sm">
             Your past ranges will appear here
         </p>
     </div>
 
     <!-- History list (hidden when empty) -->
     <div id="history-list" style="display: none;">
-        <table style="width: 100%; border-collapse: collapse;">
+        <table class="table">
             <thead>
-                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
-                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">DATE</th>
-                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">AGENT</th>
-                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">STATUS</th>
-                    <th style="text-align: left; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">DURATION</th>
-                    <th style="text-align: right; padding: 0.75rem 0; font-weight: 500; font-size: 0.75rem; color: rgba(255,255,255,0.5);">ACTIONS</th>
+                <tr>
+                    <th>DATE</th>
+                    <th>AGENT</th>
+                    <th>STATUS</th>
+                    <th>DURATION</th>
+                    <th class="text-right">ACTIONS</th>
                 </tr>
             </thead>
             <tbody id="history-tbody">

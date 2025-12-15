@@ -1,937 +1,212 @@
-/**
- * Cortex XDR Theme for Shifter Portal
- *
- * This stylesheet implements the Cortex XDR dark theme design system.
- * Source reference: assets/styles/login.css (Cortex XSIAM platform)
- *
- * Usage: Add class "xdr-dark-theme" to <body> element
- */
+/* Cortex XDR Theme - Exact Match */
 
-/* ============================================================
-   T002: CSS Custom Properties (Color Variables)
-   ============================================================ */
-.xdr-dark-theme {
-    /* Brand Colors - Shifter Green (like Cortex green) */
-    --xdr-brand: #00d26a;
-    --xdr-brand-dark: #00a854;
-
-    /* Primary Colors - keeping blue for links/actions */
-    --xdr-primary: #128df3;
-    --xdr-on-primary: #fff;
-
-    /* Background Colors - Layered dark theme */
-    --xdr-background: #000;
-    --xdr-background-elevated: #0a0a0a;
-    --xdr-on-background: #eaebeb;
-    --xdr-on-background-secondary: #b8b8b8;
-    --xdr-disabled-text: #707070;
-
-    /* Surface Colors - Multiple layers for depth */
+:root {
+    --xdr-background: #1f1f1f;
     --xdr-surface: #151515;
-    --xdr-surface-secondary: #0d0d0d;
-    --xdr-surface-primary: #1a1a1a;
-    --xdr-surface-elevated: #202020;
-    --xdr-surface-box-shadow-floating-object: rgb(0, 0, 0, 0.7);
-
-    /* Interactive States */
-    --xdr-hover: rgb(255, 255, 255, 0.05);
-    --xdr-selected: rgb(255, 255, 255, 0.08);
-
-    /* Button Colors */
-    --xdr-primary-new: #fff;
-    --xdr-on-primary-new: #000;
-    --xdr-primary-bg--hover: #f4f5f5;
-    --xdr-primary-bg--disabled: #707070;
-
-    /* Border Colors - Subtle gradients */
-    --xdr-border: #383838;
-    --xdr-border-extra-soft: #2a2a2a;
-    --xdr-border-medium: #484848;
-    --xdr-border-strong: #707070;
-
-    /* Link Colors */
-    --xdr-link: #128df3;
-
-    /* Other */
-    --xdr-placeholder: #929191;
-
-    /* Semantic Colors */
-    --xdr-success: #0C6;
-    --xdr-warning: #FFB300;
-    --xdr-error: #FF5252;
-    --xdr-orange: #FA582D;
-
-    /* Severity Badge Colors (Risk Register) */
-    --xdr-severity-critical: #FF5252;
-    --xdr-severity-high: #FFB300;
-    --xdr-severity-medium: rgb(255, 179, 0, 0.6);
-    --xdr-severity-low: #0C6;
-}
-
-/* ============================================================
-   T003: Typography Styles
-   ============================================================ */
-.xdr-dark-theme {
-    font-family: Lato, "Assistant", sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 1.5;
-    color: var(--xdr-on-background);
-    background: var(--xdr-background);
-}
-
-.xdr-dark-theme h1,
-.xdr-dark-theme h2,
-.xdr-dark-theme h3,
-.xdr-dark-theme h4,
-.xdr-dark-theme h5,
-.xdr-dark-theme h6 {
-    font-family: Lato, "Assistant", sans-serif;
-    font-weight: 700;
-    color: var(--xdr-on-background);
-    margin: 0 0 0.5rem;
-}
-
-.xdr-dark-theme h1 { font-size: 24px; }
-.xdr-dark-theme h2 { font-size: 20px; }
-.xdr-dark-theme h3 { font-size: 18px; }
-.xdr-dark-theme h4 { font-size: 16px; }
-
-.xdr-dark-theme p {
-    margin: 0 0 1rem;
-}
-
-.xdr-dark-theme a {
-    color: var(--xdr-link);
-    text-decoration: none;
-    font-size: 12px;
-    font-weight: 400;
-}
-
-.xdr-dark-theme a:hover {
-    text-decoration: underline;
-}
-
-.xdr-dark-theme .link {
-    color: var(--xdr-primary);
-    text-decoration: none;
-}
-
-.xdr-dark-theme .link:hover {
-    text-decoration: underline;
-}
-
-/* ============================================================
-   T004: Button Component Styles
-   ============================================================ */
-.xdr-dark-theme .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 28px;
-    padding: 0 18px;
-    border-radius: 20px;
-    font-family: Lato, "Assistant", sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: background-color 0.2s ease, border-color 0.2s ease;
-    text-decoration: none;
-    gap: 0.5rem;
-}
-
-.xdr-dark-theme .btn-primary {
-    background: var(--xdr-primary-new);
-    color: var(--xdr-on-primary-new);
-}
-
-.xdr-dark-theme .btn-primary:hover {
-    background: var(--xdr-primary-bg--hover);
-}
-
-.xdr-dark-theme .btn-primary:disabled {
-    background: var(--xdr-primary-bg--disabled);
-    cursor: not-allowed;
-}
-
-.xdr-dark-theme .btn-secondary {
-    background: transparent;
-    color: var(--xdr-on-background);
-    border: 1px solid var(--xdr-border);
-}
-
-.xdr-dark-theme .btn-secondary:hover {
-    border-color: var(--xdr-primary);
-    color: var(--xdr-primary);
-}
-
-.xdr-dark-theme .btn-danger {
-    background: transparent;
-    color: var(--xdr-error);
-    border: 1px solid rgb(255, 82, 82, 0.5);
-}
-
-.xdr-dark-theme .btn-danger:hover {
-    background: rgb(255, 82, 82, 0.15);
-}
-
-.xdr-dark-theme .btn-sm,
-.xdr-dark-theme .btn-small {
-    height: 24px;
-    padding: 0 12px;
-    font-size: 11px;
-}
-
-/* Logout button specific */
-.xdr-dark-theme .btn-logout {
-    background: transparent;
-    border: 1px solid var(--xdr-border);
-    color: var(--xdr-on-background);
-    padding: 0.5rem 1rem;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
-    text-decoration: none;
-}
-
-.xdr-dark-theme .btn-logout:hover {
-    border-color: var(--xdr-primary);
-    color: var(--xdr-primary);
-}
-
-/* ============================================================
-   T005: Card Component Styles
-   ============================================================ */
-.xdr-dark-theme .card {
-    background: linear-gradient(180deg, #1a1a1a 0%, #151515 100%);
-    border: 1px solid var(--xdr-border-extra-soft);
-    border-radius: 4px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    box-shadow: 0 2px 8px rgb(0, 0, 0, 0.4);
-}
-
-.xdr-dark-theme .card:hover {
-    border-color: var(--xdr-border);
-    box-shadow: 0 4px 12px rgb(0, 0, 0, 0.5);
-}
-
-.xdr-dark-theme .card-danger {
-    border-color: rgb(255, 82, 82, 0.3);
-}
-
-.xdr-dark-theme .card-title {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 1rem;
-    color: var(--xdr-on-background);
-}
-
-/* ============================================================
-   T006: Form Input Styles
-   ============================================================ */
-.xdr-dark-theme .form-group {
-    margin-bottom: 1.5rem;
-}
-
-.xdr-dark-theme .form-label {
-    display: block;
-    font-size: 12px;
-    font-weight: 400;
-    color: var(--xdr-on-background-secondary);
-    margin-bottom: 0.5rem;
-}
-
-.xdr-dark-theme .form-input,
-.xdr-dark-theme .form-select,
-.xdr-dark-theme .form-textarea {
-    width: 100%;
-    padding: 0.75rem 0;
-    background: var(--xdr-background);
-    border: none;
-    border-bottom: 1px solid var(--xdr-border-medium);
-    color: var(--xdr-on-background);
-    font-family: Lato, "Assistant", sans-serif;
-    font-size: 14px;
-    transition: border-color 0.2s;
-}
-
-.xdr-dark-theme .form-input:focus,
-.xdr-dark-theme .form-select:focus,
-.xdr-dark-theme .form-textarea:focus {
-    outline: none;
-    border-color: var(--xdr-on-background);
-}
-
-.xdr-dark-theme .form-input::placeholder,
-.xdr-dark-theme .form-textarea::placeholder {
-    color: var(--xdr-placeholder);
-}
-
-.xdr-dark-theme .form-textarea {
-    min-height: 120px;
-    resize: vertical;
-    padding: 0.75rem;
-    border: 1px solid var(--xdr-border-medium);
-    border-radius: 4px;
-}
-
-.xdr-dark-theme .form-hint {
-    font-size: 11px;
-    color: var(--xdr-disabled-text);
-    margin-top: 0.25rem;
-}
-
-.xdr-dark-theme .form-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-}
-
-/* Checkbox styling */
-.xdr-dark-theme .checkbox-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-}
-
-.xdr-dark-theme .checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    font-size: 14px;
-}
-
-.xdr-dark-theme .checkbox-label input {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--xdr-primary);
-}
-
-/* ============================================================
-   T007: Table Styles
-   ============================================================ */
-.xdr-dark-theme .table {
-    width: 100%;
-    border-collapse: collapse;
-    background: var(--xdr-surface);
-}
-
-.xdr-dark-theme .table th,
-.xdr-dark-theme .table td {
-    padding: 1rem;
-    text-align: left;
-    border-bottom: 1px solid var(--xdr-border-extra-soft);
-}
-
-.xdr-dark-theme .table th {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--xdr-on-background-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    background: var(--xdr-surface-secondary);
-}
-
-.xdr-dark-theme .table tr:hover {
-    background: var(--xdr-hover);
-}
-
-.xdr-dark-theme .table td {
-    font-size: 14px;
-    color: var(--xdr-on-background);
-}
-
-/* ============================================================
-   T008: Navigation Styles (Sidebar)
-   ============================================================ */
-.xdr-dark-theme .sidebar {
-    width: 200px;
-    background: var(--xdr-surface);
-    border-right: 1px solid var(--xdr-border-extra-soft);
-    position: fixed;
-    top: 60px;
-    left: 0;
-    bottom: 0;
-    padding: 1.5rem 0 1.5rem 0.5rem;
-}
-
-.xdr-dark-theme .nav-item {
-    display: block;
-    padding: 0.75rem 1.5rem;
-    color: var(--xdr-on-background-secondary);
-    text-decoration: none;
-    font-size: 14px;
-    border-left: 3px solid transparent;
-    transition: all 0.2s;
-}
-
-.xdr-dark-theme .nav-item:hover {
-    color: var(--xdr-on-background);
-    background: var(--xdr-hover);
-}
-
-.xdr-dark-theme .nav-item.active {
-    color: var(--xdr-primary);
-    border-left-color: var(--xdr-primary);
-    background: rgb(18, 141, 243, 0.1);
-}
-
-.xdr-dark-theme .nav-section {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--xdr-disabled-text);
-    padding: 1rem 1.5rem 0.5rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-}
-
-.xdr-dark-theme .sidebar-footer {
-    position: absolute;
-    bottom: 1.5rem;
-    left: 0;
-    right: 0;
-    padding: 0 1.5rem;
-    font-size: 11px;
-    color: var(--xdr-disabled-text);
-}
-
-/* ============================================================
-   T009: Header Styles
-   ============================================================ */
-/* Header removed - content flows directly under sidebar */
-.xdr-dark-theme .header {
-    display: none;
-}
-
-.xdr-dark-theme .header-left,
-.xdr-dark-theme .header-right,
-.xdr-dark-theme .header-logo,
-.xdr-dark-theme .header-title,
-.xdr-dark-theme .user-info {
-    display: none;
-}
-
-/* ============================================================
-   T010: Status Indicator Styles
-   ============================================================ */
-.xdr-dark-theme .status {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 14px;
-}
-
-.xdr-dark-theme .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-}
-
-.xdr-dark-theme .status-active .status-dot {
-    background: var(--xdr-success);
-    box-shadow: 0 0 8px var(--xdr-success);
-    animation: pulse 2s infinite;
-}
-
-.xdr-dark-theme .status-paused .status-dot {
-    background: var(--xdr-warning);
-}
-
-.xdr-dark-theme .status-provisioning .status-dot {
-    background: var(--xdr-primary);
-    animation: spin 1s linear infinite;
-}
-
-.xdr-dark-theme .status-error .status-dot {
-    background: var(--xdr-error);
-}
-
-.xdr-dark-theme .status-destroyed .status-dot {
-    background: var(--xdr-disabled-text);
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-}
-
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-/* ============================================================
-   T011: Badge Styles (including severity variants)
-   ============================================================ */
-.xdr-dark-theme .badge {
-    display: inline-block;
-    padding: 0.25rem 0.75rem;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    background: var(--xdr-hover);
-    color: var(--xdr-on-background);
-}
-
-/* Severity badges for Risk Register */
-.xdr-dark-theme .badge-critical {
-    background: rgb(255, 82, 82, 0.2);
-    color: var(--xdr-severity-critical);
-    border: 1px solid var(--xdr-severity-critical);
-}
-
-.xdr-dark-theme .badge-high {
-    background: rgb(255, 179, 0, 0.2);
-    color: var(--xdr-severity-high);
-    border: 1px solid var(--xdr-severity-high);
-}
-
-.xdr-dark-theme .badge-medium {
-    background: rgb(255, 179, 0, 0.1);
-    color: var(--xdr-severity-high);
-    border: 1px solid var(--xdr-severity-medium);
-}
-
-.xdr-dark-theme .badge-low {
-    background: rgb(0, 204, 102, 0.2);
-    color: var(--xdr-severity-low);
-    border: 1px solid var(--xdr-severity-low);
-}
-
-/* Status badges */
-.xdr-dark-theme .status-open { color: var(--xdr-success); }
-.xdr-dark-theme .status-acknowledged { color: var(--xdr-warning); }
-.xdr-dark-theme .status-mitigating { color: var(--xdr-orange); }
-.xdr-dark-theme .status-resolved { color: var(--xdr-primary); }
-.xdr-dark-theme .status-closed { color: var(--xdr-disabled-text); }
-
-/* ============================================================
-   T012: Utility Classes
-   ============================================================ */
-/* Layout */
-.xdr-dark-theme .layout {
-    display: flex;
-    padding-top: 0;
-    min-height: 100vh;
-}
-
-.xdr-dark-theme .main {
-    flex: 1;
-    margin-left: 0;
-    padding: 1.5rem 2rem;
-    min-height: 100vh;
-    /* Layered background - darker than sidebar */
-    background: linear-gradient(180deg, #0d0d0d 0%, #000 100%);
-}
-
-/* Page header */
-.xdr-dark-theme .page-header {
-    margin-bottom: 1.5rem;
-    padding: 1.5rem 0 1rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    border-bottom: 1px solid var(--xdr-border-extra-soft);
-}
-
-.xdr-dark-theme .page-title {
-    font-size: 22px;
-    font-weight: 400;
-    color: #fff;
-    margin-bottom: 0.25rem;
-    font-family: Lato, sans-serif;
-}
-
-.xdr-dark-theme .page-subtitle {
-    font-size: 13px;
-    color: var(--xdr-on-background-secondary);
-}
-
-/* Text utilities */
-.xdr-dark-theme .text-muted { color: var(--xdr-on-background-secondary); }
-.xdr-dark-theme .text-primary { color: var(--xdr-primary); }
-.xdr-dark-theme .text-accent { color: var(--xdr-primary); }
-.xdr-dark-theme .text-success { color: var(--xdr-success); }
-.xdr-dark-theme .text-warning { color: var(--xdr-warning); }
-.xdr-dark-theme .text-error { color: var(--xdr-error); }
-.xdr-dark-theme .text-small { font-size: 12px; }
-.xdr-dark-theme .text-bold { font-weight: 600; }
-.xdr-dark-theme .text-right { text-align: right; }
-
-/* Semantic spacing (sm/md/lg variants) */
-.xdr-dark-theme .mt-sm { margin-top: 0.5rem; }
-.xdr-dark-theme .mt-md { margin-top: 1rem; }
-.xdr-dark-theme .mt-lg { margin-top: 1.5rem; }
-.xdr-dark-theme .mb-sm { margin-bottom: 0.5rem; }
-.xdr-dark-theme .mb-md { margin-bottom: 1rem; }
-.xdr-dark-theme .mb-lg { margin-bottom: 1.5rem; }
-
-/* Numeric spacing */
-.xdr-dark-theme .mb-0 { margin-bottom: 0; }
-.xdr-dark-theme .mb-1 { margin-bottom: 0.5rem; }
-.xdr-dark-theme .mb-2 { margin-bottom: 1rem; }
-.xdr-dark-theme .mb-3 { margin-bottom: 1.5rem; }
-.xdr-dark-theme .mb-4 { margin-bottom: 2rem; }
-
-.xdr-dark-theme .mt-0 { margin-top: 0; }
-.xdr-dark-theme .mt-1 { margin-top: 0.5rem; }
-.xdr-dark-theme .mt-2 { margin-top: 1rem; }
-.xdr-dark-theme .mt-3 { margin-top: 1.5rem; }
-.xdr-dark-theme .mt-4 { margin-top: 2rem; }
-
-/* Flexbox utilities */
-.xdr-dark-theme .flex { display: flex; }
-.xdr-dark-theme .flex-row { display: flex; flex-direction: row; }
-.xdr-dark-theme .flex-col { display: flex; flex-direction: column; }
-.xdr-dark-theme .flex-between { display: flex; justify-content: space-between; align-items: flex-start; }
-.xdr-dark-theme .items-center { align-items: center; }
-.xdr-dark-theme .justify-between { justify-content: space-between; }
-.xdr-dark-theme .gap-sm { gap: 0.5rem; }
-.xdr-dark-theme .gap-md { gap: 1rem; }
-.xdr-dark-theme .gap-lg { gap: 1.5rem; }
-.xdr-dark-theme .gap-1 { gap: 0.5rem; }
-.xdr-dark-theme .gap-2 { gap: 1rem; }
-
-/* Additional spacing */
-.xdr-dark-theme .ml-sm { margin-left: 0.5rem; }
-.xdr-dark-theme .mr-xs { margin-right: 0.25rem; }
-.xdr-dark-theme .pl-lg { padding-left: 1.5rem; }
-
-/* List styling */
-.xdr-dark-theme .list-styled {
-    padding-left: 1.5rem;
-    line-height: 1.8;
-}
-
-/* Card variants */
-.xdr-dark-theme .card-flush {
-    padding: 0;
-}
-
-/* Typography helpers */
-.xdr-dark-theme .font-mono {
-    font-family: monospace;
-}
-
-.xdr-dark-theme .leading-relaxed {
-    line-height: 1.6;
-}
-
-/* Opacity helpers */
-.xdr-dark-theme .opacity-60 {
-    opacity: 0.6;
-}
-
-/* Code blocks */
-.xdr-dark-theme code {
-    background: var(--xdr-hover);
-    padding: 0.125rem 0.375rem;
-    border-radius: 4px;
-    font-family: monospace;
-}
-
-.xdr-dark-theme pre {
-    background: var(--xdr-surface-secondary);
-    padding: 1rem;
-    border-radius: 4px;
-    overflow-x: auto;
-    color: var(--xdr-on-background);
-}
-
-.xdr-dark-theme pre code {
-    background: transparent;
-    padding: 0;
-}
-
-/* Messages */
-.xdr-dark-theme .messages {
-    margin-bottom: 1.5rem;
-}
-
-.xdr-dark-theme .message {
-    padding: 1rem;
-    border-radius: 4px;
-    margin-bottom: 0.5rem;
-    font-size: 14px;
-}
-
-.xdr-dark-theme .message-success {
-    background: rgb(0, 204, 102, 0.1);
-    border: 1px solid var(--xdr-success);
-    color: var(--xdr-success);
-}
-
-.xdr-dark-theme .message-error {
-    background: rgb(255, 82, 82, 0.1);
-    border: 1px solid var(--xdr-error);
-    color: var(--xdr-error);
-}
-
-.xdr-dark-theme .message-warning {
-    background: rgb(255, 179, 0, 0.1);
-    border: 1px solid var(--xdr-warning);
-    color: var(--xdr-warning);
-}
-
-/* Empty state */
-.xdr-dark-theme .empty-state {
-    text-align: center;
-    padding: 3rem;
-    color: var(--xdr-on-background-secondary);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 300px;
-}
-
-.xdr-dark-theme .empty-state-icon {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-    opacity: 0.3;
-}
-
-/* T042-T043: Graphical empty state circular element */
-.xdr-dark-theme .empty-state-graphic {
-    position: relative;
-    width: 120px;
-    height: 120px;
-    margin: 0 auto 1.5rem;
-}
-
-.xdr-dark-theme .empty-state-graphic::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 3px solid var(--xdr-border);
-    opacity: 0.5;
-}
-
-.xdr-dark-theme .empty-state-graphic::after {
-    content: '';
-    position: absolute;
-    inset: 8px;
-    border-radius: 50%;
-    border: 2px dashed var(--xdr-border-extra-soft);
-    opacity: 0.4;
-}
-
-.xdr-dark-theme .empty-state-graphic-arc {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 3px solid transparent;
-    border-top-color: var(--xdr-primary);
-    opacity: 0.6;
-}
-
-.xdr-dark-theme .empty-state-graphic-icon {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 40px;
-    height: 40px;
-    color: var(--xdr-on-background-secondary);
-    opacity: 0.5;
-}
-
-.xdr-dark-theme .empty-state-graphic-icon svg {
-    width: 100%;
-    height: 100%;
-    stroke: currentcolor;
-    stroke-width: 1.5;
-    fill: none;
-}
-
-.xdr-dark-theme .empty-state h3 {
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--xdr-on-background);
-    margin-bottom: 0.5rem;
-}
-
-.xdr-dark-theme .empty-state p {
-    color: var(--xdr-on-background-secondary);
-    font-size: 0.875rem;
-    margin-bottom: 0.5rem;
-}
-
-.xdr-dark-theme .empty-state .btn {
-    margin-top: 1rem;
-}
-
-/* Detail sections */
-.xdr-dark-theme .detail-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1.5rem;
-}
-
-.xdr-dark-theme .detail-item {
-    margin-bottom: 1rem;
-}
-
-.xdr-dark-theme .detail-label {
-    font-size: 11px;
-    color: var(--xdr-disabled-text);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.25rem;
-}
-
-.xdr-dark-theme .detail-value {
-    font-size: 14px;
-    color: var(--xdr-on-background);
-}
-
-/* Comments */
-.xdr-dark-theme .comment {
-    background: var(--xdr-hover);
-    padding: 1rem;
-    border-radius: 4px;
-    margin-bottom: 0.75rem;
-}
-
-.xdr-dark-theme .comment-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 0.5rem;
-}
-
-.xdr-dark-theme .comment-author {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--xdr-on-background);
-}
-
-.xdr-dark-theme .comment-date {
-    font-size: 12px;
-    color: var(--xdr-disabled-text);
-}
-
-.xdr-dark-theme .comment-content {
-    font-size: 14px;
-    line-height: 1.5;
-    color: var(--xdr-on-background-secondary);
-}
-
-/* Filters */
-.xdr-dark-theme .filters {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-    align-items: center;
-}
-
-.xdr-dark-theme .filter-select {
-    padding: 0.5rem 1rem;
-    background: var(--xdr-surface);
-    border: 1px solid var(--xdr-border);
-    border-radius: 4px;
-    color: var(--xdr-on-background);
-    font-size: 14px;
-    font-family: Lato, "Assistant", sans-serif;
-}
-
-/* Deleted indicator */
-.xdr-dark-theme .deleted {
-    opacity: 0.5;
-    text-decoration: line-through;
-}
-
-/* Modal */
-.xdr-dark-theme .modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgb(0, 0, 0, 0.8);
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.xdr-dark-theme .modal-content {
-    max-width: 400px;
-    margin: 2rem;
-}
-
-/* ============================================================
-   T013: Responsive Breakpoints and Mobile Styles
-   ============================================================ */
-@media (max-width: 1024px) {
-    .xdr-dark-theme .sidebar {
-        width: 60px;
-        padding: 1rem 0;
-    }
-
-    .xdr-dark-theme .nav-item {
-        padding: 0.75rem;
-        text-align: center;
-        font-size: 0;
-    }
-
-    .xdr-dark-theme .nav-section {
-        display: none;
-    }
-
-    .xdr-dark-theme .sidebar-footer {
-        display: none;
-    }
-
-    .xdr-dark-theme .main {
-        margin-left: 60px;
-    }
-}
-
-@media (max-width: 768px) {
-    .xdr-dark-theme .sidebar {
-        display: none;
-    }
-
-    .xdr-dark-theme .main {
-        margin-left: 0;
-        padding: 1rem;
-    }
-
-    .xdr-dark-theme .header-title {
-        display: none;
-    }
-
-    .xdr-dark-theme .page-header {
-        flex-direction: column;
-        gap: 1rem;
-    }
-
-    .xdr-dark-theme .detail-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .xdr-dark-theme .filters {
-        flex-direction: column;
-        align-items: stretch;
-    }
+    --xdr-text: #eaebeb;
+    --xdr-text-secondary: #b8b8b8;
+    --xdr-border: #333;
+    --xdr-hover: rgb(255, 255, 255, 0.08);
 }
 
-/* ============================================================
-   T014: Minimum Width Rule
-   ============================================================ */
-.xdr-dark-theme {
+html, body {
     min-width: 1024px;
+    margin: 0;
+    padding: 0;
 }
 
 html.xdr-dark-theme,
 body.xdr-dark-theme {
-    min-width: 1024px;
+    background: var(--xdr-background);
+    color: var(--xdr-text);
+    font-family: Lato, Assistant, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+.layout {
+    min-height: 100vh;
+}
+
+.main {
+    padding: 24px;
+}
+
+/* Page Header */
+.page-header {
+    margin-bottom: 24px;
+}
+
+.page-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 0;
+}
+
+/* Cards */
+.card {
+    background: var(--xdr-surface);
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 0 0 12px;
+}
+
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: Lato, sans-serif;
+    cursor: pointer;
+    border: none;
+    transition: background-color 0.15s ease;
+}
+
+.btn-primary {
+    background: #00d26a;
+    color: #000;
+}
+
+.btn-primary:hover {
+    background: #00e676;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--xdr-text);
+    border: 1px solid var(--xdr-border);
+}
+
+.btn-secondary:hover {
+    background: var(--xdr-hover);
+}
+
+/* Tables */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th,
+.table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--xdr-border);
+}
+
+.table th {
+    font-weight: 600;
+    color: var(--xdr-text-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.table td {
+    color: var(--xdr-text);
+}
+
+.table tbody tr:hover {
+    background: var(--xdr-hover);
+}
+
+/* Forms */
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin-bottom: 4px;
+}
+
+.form-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    color: var(--xdr-text);
+    font-size: 14px;
+    font-family: Lato, sans-serif;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: #00d26a;
+}
+
+/* Status */
+.status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.status-online .status-dot { background: #00d26a; }
+.status-offline .status-dot { background: #707070; }
+.status-error .status-dot { background: #ff4d4f; }
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 48px;
+    color: var(--xdr-text-secondary);
+}
+
+.empty-state-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 16px 0 8px;
+}
+
+/* Links */
+a {
+    color: #128df3;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #484848;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #575757;
 }

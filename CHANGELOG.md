@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Session limits (per-user and global) with structured logging
   - Idle connection cleanup timer
   - StreamableHTTPServerTransport for MCP over HTTP
+- OpenWebUI MCP wrapper tool (`mcp/openwebui-mcp-wrapper/`)
+- `cognito_sub` column on Range model for MCP user lookups
+- Custom OIDC backend passing Cognito `sub` claim to Range model
+- Security context in MCP server description (authorized pentest boundaries)
 - VPC peering between Portal VPC and Range VPC for SSH connectivity
 - ALB listener rules for `/chat` and `/mcp` path routing
 - IAM policies for MCP server (RDS connect, Secrets Manager read)
@@ -25,7 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AgentChat docker-compose for local development (`agentchat/`)
 - SSH keypair generation in create_kali Lambda (stored in Secrets Manager)
 - `kali_ssh_key_secret_arn` field on Range model
-- mcp client for OpenWebUI integration (`mcp/mcp-client/`)
 
 ### Changed
 - AgentChat deployment workflow includes mcp-shifter container

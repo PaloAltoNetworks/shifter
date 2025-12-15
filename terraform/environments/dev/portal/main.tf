@@ -293,6 +293,6 @@ module "provisioner" {
   enable_alarms = var.enable_provisioner_alarms
   alarm_email   = var.provisioner_alarm_email
 
-  # Chat URL for MCP integration
-  chat_base_url = "https://${var.domain_name}/chat"
+  # Chat URL for MCP integration (base URL only - Lambda adds /chat path)
+  chat_base_url = "https://${var.domain_name}"
 }

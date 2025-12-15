@@ -1,0 +1,65 @@
+# Lightweight OpenWebUI for theming/CSS development
+#
+# Runs OpenWebUI standalone with SQLite - no AWS, no Bedrock, no Cognito.
+# Use this for rapid CSS iteration on the Cortex XDR reskin.
+#
+# Usage:
+#   cd agentchat
+#   docker-compose -f docker-compose.theming.yml up -d
+#   open http://localhost:3000
+#
+# First run:
+#   1. Create an account (first user becomes admin)
+#   2. Go to Admin → Settings → Interface → Custom CSS
+#   3. Paste your theme CSS, save, refresh
+#
+# Stop:
+#   docker-compose -f docker-compose.theming.yml down
+#
+# Reset (wipe all data):
+#   docker-compose -f docker-compose.theming.yml down -v
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.6.41
+    container_name: owui-theming
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    volumes:
+      # Persist data locally (SQLite DB, uploads, etc.)
+      - owui-theming-data:/app/backend/data
+      # Mount custom Cortex theme CSS (correct path for OpenWebUI)
+      - ./custom-theme/custom.css:/app/backend/open_webui/static/custom.css:ro
+      # Mount custom logo and favicon
+      - ./custom-theme/logo.png:/app/backend/open_webui/static/logo.png:ro
+      - ./custom-theme/logo.png:/app/backend/open_webui/static/favicon.png:ro
+    environment:
+      # Branding - this changes the page title and UI references
+      - WEBUI_NAME=Cortex AI
+
+      # Disable Ollama (we're not using local models for theming)
+      - OLLAMA_BASE_URL=
+      - ENABLE_OLLAMA_API=false
+
+      # No external OpenAI/Bedrock needed for CSS work
+      # (Add back when you want to test with actual models)
+      # - OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1
+      # - OPENAI_API_KEY=your-key
+
+      # Default auth settings (first user becomes admin)
+      - ENABLE_SIGNUP=true
+      - ENABLE_LOGIN_FORM=true
+
+      # Auth disabled for faster theming iteration
+      - WEBUI_AUTH=false
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  owui-theming-data:
+    name: owui-theming-data

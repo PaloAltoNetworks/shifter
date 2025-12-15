@@ -16,15 +16,6 @@
 <body class="xdr-dark-theme">
     {% include "partials/icon_sidebar.html" %}
 
-    <header class="header">
-        <div class="header-left">
-            <span class="header-title">// <span>MISSION CONTROL</span></span>
-        </div>
-        <div class="header-right">
-            <span class="user-info">{{ request.user.email }}</span>
-        </div>
-    </header>
-
     <div class="layout">
         <main class="main">
             {% block content %}{% endblock %}

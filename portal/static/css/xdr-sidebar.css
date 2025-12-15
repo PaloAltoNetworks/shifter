@@ -136,7 +136,7 @@
     width: 100%;
     height: 44px;
     padding: 0 16px;
-    color: var(--xdr-on-background-secondary);
+    color: #b8b8b8; /* Gray, never blue */
     text-decoration: none;
     position: relative;
     transition: background-color 0.15s ease;
@@ -147,7 +147,7 @@
 .icon-sidebar-item svg {
     width: 20px;
     height: 20px;
-    stroke: currentcolor;
+    stroke: #b8b8b8; /* Gray, never blue */
     stroke-width: 1.5;
     fill: none;
     flex-shrink: 0;
@@ -170,12 +170,21 @@
 
 .icon-sidebar-item:hover {
     background: var(--xdr-hover);
+    color: #eaebeb;
+}
+
+.icon-sidebar-item:hover svg {
+    stroke: #eaebeb;
 }
 
 /* T077: Active state - icon stays white/gray, only left bar is blue */
 .icon-sidebar-item.active {
-    color: var(--xdr-on-background);
+    color: #eaebeb;
     background: rgb(255, 255, 255, 0.05);
+}
+
+.icon-sidebar-item.active svg {
+    stroke: #eaebeb; /* White, never blue */
 }
 
 .icon-sidebar-item.active::before {

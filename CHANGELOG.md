@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- AgentChat routing changed from subpath (`/chat/`) to subdomain (`chat.{domain}`)
-- ACM certificate includes SAN for `chat.{domain}` subdomain
-- Cognito OAuth callbacks updated for subdomain URLs
-- ALB listener rules use `host_header` matching instead of `path_pattern`
-- Docker layer caching added to portal and agentchat CI/CD workflows (faster builds)
-
 ## [0.5.0] - 2025-12-14
 
 ### Added
@@ -32,10 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AgentChat docker-compose for local development (`agentchat/`)
 - SSH keypair generation in create_kali Lambda (stored in Secrets Manager)
 - `kali_ssh_key_secret_arn` field on Range model
+- mcp client for OpenWebUI integration (`mcp/mcp-client/`)
 
 ### Changed
 - AgentChat deployment workflow includes mcp-shifter container
 - mark_ready Lambda sets chat_url when range becomes ready
+- - AgentChat routing changed from subpath (`/chat/`) to subdomain (`chat.{domain}`)
+- ACM certificate includes SAN for `chat.{domain}` subdomain
+- Cognito OAuth callbacks updated for subdomain URLs
+- ALB listener rules use `host_header` matching instead of `path_pattern`
+- Docker layer caching added to portal and agentchat CI/CD workflows (faster builds)
+
 
 ## [0.4.4] - 2025-12-14
 

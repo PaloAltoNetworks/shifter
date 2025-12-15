@@ -291,10 +291,11 @@ body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
 .nav-profile {
   display: flex;
   align-items: center;
-  padding: 8px 0;
+  padding: 0;
   cursor: pointer;
   border-radius: 4px;
   margin: 0 12px;
+  height: 32px;
 }
 
 .nav-profile:hover {
@@ -313,11 +314,17 @@ body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
   font-weight: 600;
   color: var(--nav-profile-text-color);
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .nav-profile-info {
   margin-left: 8px;
   overflow: hidden;
+  height: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .nav-profile-name {

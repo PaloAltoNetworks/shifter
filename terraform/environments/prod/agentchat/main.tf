@@ -196,8 +196,8 @@ resource "aws_lb_listener_rule" "chat" {
   }
 
   condition {
-    path_pattern {
-      values = ["/chat", "/chat/*"]
+    host_header {
+      values = ["chat.${var.domain_name}"]
     }
   }
 
@@ -211,6 +211,12 @@ resource "aws_lb_listener_rule" "mcp" {
   action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.mcp.arn
+  }
+
+  condition {
+    host_header {
+      values = ["chat.${var.domain_name}"]
+    }
   }
 
   condition {

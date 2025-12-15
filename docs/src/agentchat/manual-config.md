@@ -35,6 +35,7 @@ The MCP wrapper enables AI-driven pentesting by forwarding user OAuth tokens to 
 1. Copy the contents of `mcp/openwebui-mcp-wrapper/mcp_wrapper.py`
 2. Paste into the tool editor
 3. Click **Save**
+4. Set visibility to "Public" to make available to all users
 
 ### Valve Configuration
 

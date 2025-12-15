@@ -5,6 +5,8 @@ import os
 import re
 from urllib.parse import urlencode
 
+from mozilla_django_oidc.auth import OIDCAuthenticationBackend
+
 logger = logging.getLogger(__name__)
 
 # Django's UnicodeUsernameValidator pattern
@@ -80,3 +82,43 @@ def provider_logout_url(request):
     )
 
     return f"{auth_domain}/logout?{params}"
+
+
+class ShifterOIDCBackend(OIDCAuthenticationBackend):
+    """Custom OIDC backend that stores Cognito sub in UserProfile.
+
+    The Cognito `sub` is the stable identifier for a user across tokens.
+    We store it in UserProfile to enable MCP server lookups by sub
+    (access tokens only contain sub, not email).
+    """
+
+    def create_user(self, claims):
+        """Create user and populate cognito_sub from claims."""
+        user = super().create_user(claims)
+        self._update_cognito_sub(user, claims)
+        return user
+
+    def update_user(self, user, claims):
+        """Update user and ensure cognito_sub is set."""
+        user = super().update_user(user, claims)
+        self._update_cognito_sub(user, claims)
+        return user
+
+    def _update_cognito_sub(self, user, claims):
+        """Store Cognito sub in user's profile."""
+        from mission_control.models import UserProfile
+
+        cognito_sub = claims.get("sub")
+        if not cognito_sub:
+            logger.warning("OIDC claims missing 'sub' for user %s", user.email)
+            return
+
+        profile, _created = UserProfile.objects.get_or_create(user=user)
+        if profile.cognito_sub != cognito_sub:
+            profile.cognito_sub = cognito_sub
+            profile.save(update_fields=["cognito_sub"])
+            logger.info(
+                "Updated cognito_sub for user %s: %s",
+                user.email,
+                cognito_sub,
+            )

@@ -13,7 +13,7 @@ A PANW domain consultant authenticated to the Portal clicks "Open Range" and is 
 
 **Why this priority**: Authentication is the foundation. Without unified identity, we cannot route MCP commands to user-specific Kali instances.
 
-**Independent Test**: Can be tested by verifying a Portal-authenticated user can access `/chat` without login prompts, and the system can identify their email from the session.
+**Independent Test**: Can be tested by verifying a Portal-authenticated user can access the chat subdomain (`chat.{domain}`) without login prompts, and the system can identify their email from the session.
 
 **Acceptance Scenarios**:
 
@@ -107,7 +107,7 @@ A consultant chats naturally ("run msfconsole and set up a handler"). The AI age
 
 #### Infrastructure Routing
 
-- **FR-012**: Load balancer MUST route `/chat` and `/chat/*` paths to the AgentChat host
+- **FR-012**: Load balancer MUST route requests for `chat.{domain}` subdomain to the AgentChat host
 - **FR-013**: AgentChat host MUST have network path to Kali instances in the Range VPC (via VPC peering or similar)
 - **FR-014**: AgentChat host MUST have access to the RDS database for range lookups
 - **FR-015**: AgentChat host MUST have IAM permissions to read from Secrets Manager

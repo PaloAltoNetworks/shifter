@@ -1,6 +1,6 @@
 /*
  * Cortex XDR Theme for OpenWeb UI
- * Version: 1.1.0
+ * Version: 1.2.0
  *
  * This CSS uses unlayered rules (higher priority than @layer rules)
  * to override Tailwind's utility classes.
@@ -19,318 +19,347 @@
    any rules inside @layer blocks (which Tailwind v4 uses).
    ========================================================================== */
 
-/* --------------------------------------------------------------------------
-   BACKGROUND COLORS
-   -------------------------------------------------------------------------- */
-
-/* Main app wrapper - this element has dark:bg-gray-900 */
-html.dark .dark\:bg-gray-900 {
+/* HTML and Body Background */
+html.dark, body.dark {
+  --background: #1f1f1f !important;
   background-color: #1f1f1f !important;
 }
 
-/* Darkest surfaces */
-html.dark .dark\:bg-gray-950,
-html.dark .dark\:bg-gray-950\/30 {
-  background-color: #151515 !important;
+/* Tailwind Gray Color Overrides */
+html.dark {
+  --color-gray-950: #1f1f1f !important; /* Darkest background */
+  --color-gray-900: #1f1f1f !important; /* Main background */
+  --color-gray-850: #151515 !important; /* Surface/Card background */
+  --color-gray-800: #333333 !important; /* Secondary surface */
+  --color-gray-700: #4e4e4e !important; /* Borders/Dividers */
+  --color-gray-600: #676767 !important; /* Disabled text */
+  --color-gray-500: #9b9b9b !important; /* Secondary text */
+  --color-gray-400: #b8b8b8 !important; /* Placeholder text */
+  --color-gray-300: #cdcdcd !important; /* Light text */
+  --color-gray-200: #eaebeb !important; /* Primary text */
+  --color-gray-100: #ffffff !important; /* White elements */
+  --color-gray-50: #ffffff !important; /* White elements */
 }
 
-/* Mid-dark surfaces */
-html.dark .dark\:bg-gray-850 {
-  background-color: #262626 !important;
+/* Primary Accent Color (Cortex Blue) */
+html.dark {
+  --primary: #128df3 !important;
+  --primary-foreground: #ffffff !important;
+  --accent: #128df3 !important;
+  --accent-foreground: #ffffff !important;
 }
 
-/* Card/panel surfaces */
-html.dark .dark\:bg-gray-800 {
-  background-color: #333333 !important;
+/* Font Family */
+body {
+  font-family: 'Lato', sans-serif !important;
 }
 
-/* Body specific override */
-html.dark body,
-body.dark {
-  background-color: #1f1f1f !important;
+/* ==========================================================================
+   CORTEX XDR SIDEBAR STYLING
+   Colors extracted from Cortex XDR Portal (xdr-sidebar.css)
+   ========================================================================== */
+
+/* Cortex XDR Brand Colors */
+html.dark {
+  --xdr-brand: #00cc66;                    /* Cortex green */
+  --xdr-brand-dark: #05180f;               /* Dark green hover bg */
+  --xdr-brand-active: #062314;             /* Active item bg */
+  --nav-item-hover-bg-color: #05180f;      /* Hover background */
+  --nav-item-active-bg-color: #062314;     /* Active background */
+  --nav-item-active-icon-color: #00cc66;   /* Active icon green */
 }
 
-/* Additional bg classes used */
-html.dark .bg-gray-900 {
-  background-color: #1f1f1f !important;
+/* Sidebar icons - white by default (like Cortex XDR) */
+.dark svg,
+.dark [class*="sidebar"] svg,
+.dark nav svg,
+.dark button svg,
+.dark a svg {
+  color: #fefefe !important;
 }
 
-html.dark .bg-gray-950 {
-  background-color: #151515 !important;
-}
+/* ==========================================================================
+   CORTEX LOGO REPLACEMENT
+   Target actual OpenWebUI DOM structure for logo replacement
+   ========================================================================== */
 
-html.dark .bg-gray-850 {
-  background-color: #262626 !important;
-}
-
-html.dark .bg-gray-800 {
-  background-color: #333333 !important;
-}
-
-/* Semi-transparent backgrounds */
-html.dark .dark\:bg-gray-500\/5,
-html.dark .bg-white\/5 {
-  background-color: rgba(51, 51, 51, 0.3) !important;
-}
-
-/* --------------------------------------------------------------------------
-   HOVER STATES
-   -------------------------------------------------------------------------- */
-
-html.dark .dark\:hover\:bg-gray-950\/30:hover,
-html.dark .hover\:bg-gray-950\/30:hover {
-  background-color: rgba(21, 21, 21, 0.5) !important;
-}
-
-html.dark .dark\:hover\:bg-gray-850:hover,
-html.dark .hover\:bg-gray-850:hover {
-  background-color: #333333 !important;
-}
-
-html.dark .dark\:hover\:bg-gray-800:hover,
-html.dark .hover\:bg-gray-800:hover {
-  background-color: #484848 !important;
-}
-
-html.dark .hover\:bg-gray-100:hover {
-  background-color: #333333 !important;
-}
-
-html.dark .hover\:bg-gray-50:hover,
-html.dark .hover\:bg-gray-50\/30:hover {
-  background-color: #262626 !important;
-}
-
-/* --------------------------------------------------------------------------
-   TEXT COLORS
-   -------------------------------------------------------------------------- */
-
-html.dark .dark\:text-gray-100,
-html.dark .text-gray-100 {
-  color: #eaebeb !important;
-}
-
-html.dark .dark\:text-gray-400,
-html.dark .text-gray-400 {
-  color: #b8b8b8 !important;
-}
-
-html.dark .dark\:text-gray-500,
-html.dark .dark\:text-gray-600,
-html.dark .text-gray-500,
-html.dark .text-gray-600 {
-  color: #929191 !important;
-}
-
-html.dark .text-gray-700 {
-  color: #eaebeb !important;
-}
-
-html.dark .text-white {
-  color: #eaebeb !important;
-}
-
-html.dark .dark\:text-white {
-  color: #eaebeb !important;
-}
-
-/* --------------------------------------------------------------------------
-   BORDER COLORS
-   -------------------------------------------------------------------------- */
-
-html.dark .dark\:border-gray-900,
-html.dark .border-gray-900 {
-  border-color: #333333 !important;
-}
-
-html.dark .dark\:border-gray-850,
-html.dark .dark\:border-gray-850\/30,
-html.dark .border-gray-850 {
-  border-color: #333333 !important;
-}
-
-html.dark .dark\:border-gray-800,
-html.dark .border-gray-800 {
-  border-color: #484848 !important;
-}
-
-html.dark .border-gray-50,
-html.dark .dark\:border-gray-50 {
-  border-color: #333333 !important;
-}
-
-/* --------------------------------------------------------------------------
-   ACCENT COLOR (Cortex Blue #128df3)
-   -------------------------------------------------------------------------- */
-
-html.dark .dark\:bg-indigo-500,
-html.dark .dark\:bg-indigo-400,
-html.dark .bg-indigo-500,
-html.dark .bg-indigo-400 {
-  background-color: #128df3 !important;
-}
-
-html.dark .dark\:bg-indigo-300\/10,
-html.dark .dark\:bg-indigo-500\/10,
-html.dark .bg-indigo-300\/10 {
-  background-color: rgba(18, 141, 243, 0.1) !important;
-}
-
-html.dark .bg-indigo-400\/20 {
-  background-color: rgba(18, 141, 243, 0.2) !important;
-}
-
-html.dark .dark\:text-indigo-500,
-html.dark .dark\:text-indigo-400,
-html.dark .text-indigo-500,
-html.dark .text-indigo-400 {
-  color: #128df3 !important;
-}
-
-html.dark .dark\:border-indigo-500,
-html.dark .border-indigo-500 {
-  border-color: #128df3 !important;
-}
-
-/* --------------------------------------------------------------------------
-   GRADIENTS
-   -------------------------------------------------------------------------- */
-
-html.dark .dark\:from-gray-900\/90 {
-  --tw-gradient-from: rgba(31, 31, 31, 0.9) var(--tw-gradient-from-position) !important;
-}
-
-html.dark .dark\:via-gray-900\/50 {
-  --tw-gradient-via: rgba(31, 31, 31, 0.5) var(--tw-gradient-via-position) !important;
-}
-
-html.dark .dark\:from-gray-900\/50 {
-  --tw-gradient-from: rgba(31, 31, 31, 0.5) var(--tw-gradient-from-position) !important;
-}
-
-/* --------------------------------------------------------------------------
-   TYPOGRAPHY
-   -------------------------------------------------------------------------- */
-
-html.dark,
-html.dark body,
-html.dark * {
-  font-family: 'Lato', -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, sans-serif !important;
-}
-
-html.dark .placeholder-gray-400::placeholder {
-  color: #929191 !important;
-}
-
-/* --------------------------------------------------------------------------
-   BRAND CONCEALMENT
-   -------------------------------------------------------------------------- */
-
-/* Hide OpenWebUI branding links */
-a[href*="github.com/open-webui"],
-a[href*="openwebui.com"],
-a[href*="docs.openwebui.com"],
-a[href*="discord.gg/5rJgQTnV4s"],
-a[href*="open-webui/open-webui/blob/main/docs/CONTRIBUTING"] {
-  display: none !important;
-}
-
-/* Hide version release links */
-a[href*="github.com/open-webui/open-webui/releases"] {
+/* Sidebar header logo - hide favicon, show Cortex logo via parent link */
+.dark .sidebar-new-chat-icon {
   visibility: hidden !important;
-  font-size: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
-/* --------------------------------------------------------------------------
-   SCROLLBARS
-   -------------------------------------------------------------------------- */
+/* Parent link gets the Cortex logo */
+.dark a:has(.sidebar-new-chat-icon) {
+  background-image: url('/static/logo.png') !important;
+  background-size: 32px 32px !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+}
 
-html.dark ::-webkit-scrollbar {
+/* Wordmark styling - "Cortex Shifter" with "by palo alto networks" tagline */
+.dark #sidebar-webui-name {
+  font-size: 0 !important;  /* Hide original text */
+  color: transparent !important;
+  display: flex !important;
+  flex-direction: column !important;
+  line-height: 1.1 !important;
+  white-space: nowrap !important;
+  position: relative !important;
+}
+
+/* Main wordmark: "CORTEX SHIFTER" */
+.dark #sidebar-webui-name::before {
+  content: "CORTEX SHIFTER" !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: #fff !important;
+  letter-spacing: 0.5px !important;
+  display: block !important;
+}
+
+/* Tagline: "by palo alto networks" */
+.dark #sidebar-webui-name::after {
+  content: "by palo alto networks" !important;
+  font-size: 9px !important;
+  font-weight: 400 !important;
+  color: #a4a4a4 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.3px !important;
+  margin-top: 2px !important;
+  display: block !important;
+}
+
+/* Sidebar container - pure black like Cortex XDR */
+.dark [class*="sidebar"],
+.dark [data-state] [class*="sidebar"],
+.dark aside {
+  background-color: #000000 !important;
+}
+
+/* Sidebar nav items hover - Cortex dark green */
+.dark [class*="sidebar"] button:hover,
+.dark [class*="sidebar"] a:hover,
+.dark nav button:hover,
+.dark nav a:hover,
+.dark [role="button"]:hover {
+  background-color: #05180f !important;
+}
+
+/* Active sidebar items - slightly brighter dark green */
+.dark [class*="sidebar"] button[class*="active"],
+.dark [class*="sidebar"] a[class*="active"],
+.dark [class*="sidebar"] [aria-current="page"],
+.dark nav [class*="active"] {
+  background-color: #062314 !important;
+}
+
+/* Active icons should be Cortex green */
+.dark [class*="sidebar"] button[class*="active"] svg,
+.dark [class*="sidebar"] a[class*="active"] svg,
+.dark [class*="sidebar"] [aria-current="page"] svg,
+.dark nav [class*="active"] svg {
+  color: #00cc66 !important;
+}
+
+/* Suggested prompt tiles hover - Cortex green tint */
+.dark [class*="listitem"]:hover,
+.dark li[class*="cursor-pointer"]:hover,
+.dark [role="listitem"]:hover {
+  background-color: #062314 !important;
+}
+
+/* ==========================================================================
+   CUSTOM SCROLLBAR (Cortex XDR style - gray, not blue)
+   ========================================================================== */
+
+::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-html.dark ::-webkit-scrollbar-track {
-  background: #151515;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-html.dark ::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   background: #484848;
   border-radius: 4px;
 }
 
-html.dark ::-webkit-scrollbar-thumb:hover {
-  background: #707070;
+::-webkit-scrollbar-thumb:hover {
+  background: #575757;
 }
 
-html.dark * {
+/* Firefox scrollbar */
+* {
   scrollbar-width: thin;
-  scrollbar-color: #484848 #151515;
+  scrollbar-color: #484848 transparent;
 }
 
-/* --------------------------------------------------------------------------
-   DIALOGS AND MODALS
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   BUTTON AND INTERACTIVE ELEMENT STYLING
+   ========================================================================== */
 
-html.dark dialog,
-html.dark [role="dialog"] {
-  background-color: #151515 !important;
-  border-color: #484848 !important;
+/* Primary buttons */
+button[class*="primary"],
+.btn-primary,
+button.bg-blue-500,
+button.bg-blue-600 {
+  background-color: #128df3 !important;
+  border-color: #128df3 !important;
 }
 
-/* --------------------------------------------------------------------------
-   DROPDOWN MENUS
-   -------------------------------------------------------------------------- */
-
-html.dark [role="menu"],
-html.dark [role="listbox"] {
-  background-color: #151515 !important;
-  border-color: #484848 !important;
+button[class*="primary"]:hover,
+.btn-primary:hover,
+button.bg-blue-500:hover,
+button.bg-blue-600:hover {
+  background-color: #0e6fc2 !important;
+  border-color: #0e6fc2 !important;
 }
 
-html.dark [role="menuitem"]:hover,
-html.dark [role="option"]:hover {
+/* Focus rings */
+*:focus {
+  outline-color: #128df3 !important;
+}
+
+*:focus-visible {
+  outline: 2px solid #128df3 !important;
+  outline-offset: 2px !important;
+}
+
+/* ==========================================================================
+   LINK STYLING (Cortex XDR style)
+   ========================================================================== */
+
+/* Sidebar links are WHITE - must come before generic link rules */
+.dark aside a,
+.dark [class*="sidebar"] a,
+.dark [data-state] a,
+.dark nav a,
+.dark header a {
+  color: #fefefe !important;
+}
+
+.dark aside a:hover,
+.dark [class*="sidebar"] a:hover,
+.dark nav a:hover {
+  color: #ffffff !important;
+}
+
+/* Content area links are blue */
+.dark main a,
+.dark article a,
+.dark [class*="message"] a,
+.dark [class*="content"] a {
+  color: #128df3 !important;
+}
+
+.dark main a:hover,
+.dark article a:hover {
+  color: #5bb8ff !important;
+}
+
+/* ==========================================================================
+   CHAT MESSAGE STYLING
+   ========================================================================== */
+
+/* User message bubbles */
+.dark [class*="user-message"],
+.dark [class*="message"][class*="user"] {
   background-color: #333333 !important;
 }
 
-/* --------------------------------------------------------------------------
-   SWITCHES AND TOGGLES
-   -------------------------------------------------------------------------- */
-
-html.dark [role="switch"][aria-checked="true"] {
-  background-color: #128df3 !important;
+/* Assistant message bubbles */
+.dark [class*="assistant-message"],
+.dark [class*="message"][class*="assistant"] {
+  background-color: #1f1f1f !important;
 }
 
-/* --------------------------------------------------------------------------
-   CODE BLOCKS
-   -------------------------------------------------------------------------- */
-
-html.dark pre,
-html.dark code {
-  background-color: #000000 !important;
-  border-radius: 4px !important;
+/* Code blocks in messages */
+.dark pre,
+.dark code {
+  background-color: #151515 !important;
+  border-color: #4e4e4e !important;
 }
 
-/* --------------------------------------------------------------------------
-   SEMANTIC COLORS
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   INPUT FIELDS
+   ========================================================================== */
 
-html.dark .bg-green-400,
-html.dark .bg-green-500 {
-  background-color: #00CC66 !important;
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: #333333 !important;
+  border-color: #4e4e4e !important;
+  color: #eaebeb !important;
 }
 
-html.dark .text-green-500,
-html.dark .text-green-600 {
-  color: #00CC66 !important;
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: #128df3 !important;
+  box-shadow: 0 0 0 2px rgba(18, 141, 243, 0.2) !important;
 }
 
-html.dark .text-yellow-500,
-html.dark .text-amber-500 {
-  color: #FFB300 !important;
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #676767 !important;
 }
 
-html.dark .text-red-500,
-html.dark .text-red-600 {
-  color: #FF5252 !important;
+/* ==========================================================================
+   CARDS AND PANELS
+   ========================================================================== */
+
+.dark [class*="card"],
+.dark [class*="panel"],
+.dark [class*="modal"] {
+  background-color: #1f1f1f !important;
+  border-color: #4e4e4e !important;
+}
+
+/* ==========================================================================
+   TOOLTIPS AND POPOVERS
+   ========================================================================== */
+
+.dark [class*="tooltip"],
+.dark [class*="popover"],
+.dark [role="tooltip"] {
+  background-color: #333333 !important;
+  border-color: #4e4e4e !important;
+  color: #eaebeb !important;
+}
+
+/* ==========================================================================
+   DROPDOWN MENUS
+   ========================================================================== */
+
+.dark [class*="dropdown"],
+.dark [class*="menu"],
+.dark [role="menu"] {
+  background-color: #1f1f1f !important;
+  border-color: #4e4e4e !important;
+}
+
+.dark [class*="dropdown"] [class*="item"]:hover,
+.dark [class*="menu"] [class*="item"]:hover,
+.dark [role="menuitem"]:hover {
+  background-color: #333333 !important;
+}
+
+/* ==========================================================================
+   SELECTION HIGHLIGHT
+   ========================================================================== */
+
+::selection {
+  background-color: rgba(18, 141, 243, 0.3) !important;
+  color: #ffffff !important;
+}
+
+::-moz-selection {
+  background-color: rgba(18, 141, 243, 0.3) !important;
+  color: #ffffff !important;
 }

@@ -15,16 +15,16 @@
     --xdr-primary: #128df3;
     --xdr-on-primary: #fff;
 
-    /* Background Colors */
-    --xdr-background: #1f1f1f;
+    /* Background Colors - T011: Darker to match Cortex XDR */
+    --xdr-background: #000;
     --xdr-on-background: #eaebeb;
     --xdr-on-background-secondary: #b8b8b8;
     --xdr-disabled-text: #707070;
 
-    /* Surface Colors */
+    /* Surface Colors - T012: Adjusted for proper contrast on #000 background */
     --xdr-surface: #151515;
-    --xdr-surface-secondary: #000;
-    --xdr-surface-primary: #333;
+    --xdr-surface-secondary: #0a0a0a;
+    --xdr-surface-primary: #252525;
     --xdr-surface-box-shadow-floating-object: rgb(0, 0, 0, 0.7);
 
     /* Interactive States */

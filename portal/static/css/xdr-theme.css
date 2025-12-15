@@ -11,25 +11,31 @@
    T002: CSS Custom Properties (Color Variables)
    ============================================================ */
 .xdr-dark-theme {
-    /* Primary Colors */
+    /* Brand Colors - Shifter Green (like Cortex green) */
+    --xdr-brand: #00d26a;
+    --xdr-brand-dark: #00a854;
+
+    /* Primary Colors - keeping blue for links/actions */
     --xdr-primary: #128df3;
     --xdr-on-primary: #fff;
 
-    /* Background Colors - T011: Darker to match Cortex XDR */
+    /* Background Colors - Layered dark theme */
     --xdr-background: #000;
+    --xdr-background-elevated: #0a0a0a;
     --xdr-on-background: #eaebeb;
     --xdr-on-background-secondary: #b8b8b8;
     --xdr-disabled-text: #707070;
 
-    /* Surface Colors - T012: Adjusted for proper contrast on #000 background */
+    /* Surface Colors - Multiple layers for depth */
     --xdr-surface: #151515;
-    --xdr-surface-secondary: #0a0a0a;
-    --xdr-surface-primary: #252525;
+    --xdr-surface-secondary: #0d0d0d;
+    --xdr-surface-primary: #1a1a1a;
+    --xdr-surface-elevated: #202020;
     --xdr-surface-box-shadow-floating-object: rgb(0, 0, 0, 0.7);
 
     /* Interactive States */
-    --xdr-hover: #333;
-    --xdr-selected: #484848;
+    --xdr-hover: rgb(255, 255, 255, 0.05);
+    --xdr-selected: rgb(255, 255, 255, 0.08);
 
     /* Button Colors */
     --xdr-primary-new: #fff;
@@ -37,10 +43,10 @@
     --xdr-primary-bg--hover: #f4f5f5;
     --xdr-primary-bg--disabled: #707070;
 
-    /* Border Colors */
-    --xdr-border: #484848;
-    --xdr-border-extra-soft: #333;
-    --xdr-border-medium: #575757;
+    /* Border Colors - Subtle gradients */
+    --xdr-border: #383838;
+    --xdr-border-extra-soft: #2a2a2a;
+    --xdr-border-medium: #484848;
     --xdr-border-strong: #707070;
 
     /* Link Colors */
@@ -200,17 +206,18 @@
    T005: Card Component Styles
    ============================================================ */
 .xdr-dark-theme .card {
-    background: var(--xdr-surface);
+    background: linear-gradient(180deg, #1a1a1a 0%, #151515 100%);
     border: 1px solid var(--xdr-border-extra-soft);
     border-radius: 4px;
     padding: 1.5rem;
     margin-bottom: 1rem;
-    transition: border-color 0.2s;
-    box-shadow: 0 1px 3px rgb(0, 0, 0, 0.3);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-shadow: 0 2px 8px rgb(0, 0, 0, 0.4);
 }
 
 .xdr-dark-theme .card:hover {
     border-color: var(--xdr-border);
+    box-shadow: 0 4px 12px rgb(0, 0, 0, 0.5);
 }
 
 .xdr-dark-theme .card-danger {
@@ -516,9 +523,11 @@
 
 .xdr-dark-theme .main {
     flex: 1;
-    margin-left: 200px;
-    padding: 2rem;
-    min-height: calc(100vh - 60px);
+    margin-left: 0;
+    padding: 1.5rem 2rem;
+    min-height: 100vh;
+    /* Layered background - darker than sidebar */
+    background: linear-gradient(180deg, #0d0d0d 0%, #000 100%);
 }
 
 /* Page header */

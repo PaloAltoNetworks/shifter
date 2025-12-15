@@ -44,10 +44,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T015 Update portal/templates/mission_control/base.html to link xdr-theme.css stylesheet
-- [ ] T016 Update portal/templates/mission_control/base.html to load Lato font from Google Fonts
-- [ ] T017 Add xdr-dark-theme class to body element in portal/templates/mission_control/base.html
-- [ ] T018 Remove inline `<style>` block from portal/templates/mission_control/base.html (styles now in xdr-theme.css)
+- [x] T015 Update portal/templates/mission_control/base.html to link xdr-theme.css stylesheet
+- [x] T016 Update portal/templates/mission_control/base.html to load Lato font from Google Fonts
+- [x] T017 Add xdr-dark-theme class to body element in portal/templates/mission_control/base.html
+- [x] T018 Remove inline `<style>` block from portal/templates/mission_control/base.html (styles now in xdr-theme.css)
 
 **Checkpoint**: Foundation ready - Mission Control base template uses new theme
 

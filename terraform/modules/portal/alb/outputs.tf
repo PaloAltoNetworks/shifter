@@ -38,3 +38,8 @@ output "acm_validation_records" {
     }
   }
 }
+
+output "https_listener_arn" {
+  description = "ARN of the HTTPS listener (for adding path-based rules)"
+  value       = aws_lb_listener.https.arn
+}

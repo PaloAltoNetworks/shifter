@@ -123,6 +123,10 @@ module "cognito" {
   allowed_emails        = var.allowed_emails
   deletion_protection   = false
 
+  # AgentChat (OpenWebUI) OAuth callback - served at /chat path
+  agentchat_callback_urls = ["https://${var.domain_name}/chat/oauth/oidc/callback"]
+  agentchat_logout_urls   = ["https://${var.domain_name}/chat/"]
+
   tags = var.tags
 }
 
@@ -288,4 +292,7 @@ module "provisioner" {
   # Monitoring Configuration
   enable_alarms = var.enable_provisioner_alarms
   alarm_email   = var.provisioner_alarm_email
+
+  # Chat URL for MCP integration
+  chat_base_url = "https://${var.domain_name}/chat"
 }

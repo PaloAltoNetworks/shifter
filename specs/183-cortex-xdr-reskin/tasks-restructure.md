@@ -130,14 +130,14 @@
 
 ### Implementation for User Story 5
 
-- [ ] T049 [US5] Create initials template filter in portal/templatetags/user_extras.py
-- [ ] T050 [US5] Add .user-avatar styles (32-40px circle) in portal/static/css/xdr-sidebar.css
-- [ ] T051 [US5] Add .user-dropdown styles in portal/static/css/xdr-sidebar.css
-- [ ] T052 [US5] Add avatar HTML to icon sidebar in portal/templates/mission_control/base.html
-- [ ] T053 [US5] Add avatar HTML to icon sidebar in portal/templates/risk_register/base.html
-- [ ] T054 [US5] Implement avatar dropdown toggle in portal/static/js/sidebar.js
-- [ ] T055 [US5] Add dropdown items (Settings, Logout) in portal/templates/mission_control/base.html
-- [ ] T056 [US5] Add dropdown items (Settings, Logout) in portal/templates/risk_register/base.html
+- [x] T049 [US5] Create initials template filter in portal/templatetags/user_extras.py
+- [x] T050 [US5] Add .user-avatar styles (32-40px circle) in portal/static/css/xdr-sidebar.css
+- [x] T051 [US5] Add .user-dropdown styles in portal/static/css/xdr-sidebar.css
+- [x] T052 [US5] Add avatar HTML to icon sidebar in portal/templates/mission_control/base.html
+- [x] T053 [US5] Add avatar HTML to icon sidebar in portal/templates/risk_register/base.html
+- [x] T054 [US5] Implement avatar dropdown toggle in portal/static/js/sidebar.js
+- [x] T055 [US5] Add dropdown items (Settings, Logout) in portal/templates/mission_control/base.html
+- [x] T056 [US5] Add dropdown items (Settings, Logout) in portal/templates/risk_register/base.html
 
 **Checkpoint**: User avatar with dropdown fully functional
 

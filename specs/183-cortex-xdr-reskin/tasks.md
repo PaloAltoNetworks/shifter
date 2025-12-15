@@ -111,14 +111,14 @@
 
 ### Implementation for User Story 3
 
-- [ ] T043 [US3] Update portal/templates/coming_soon.html to link xdr-theme.css stylesheet
-- [ ] T044 [US3] Update portal/templates/coming_soon.html to load Lato font from Google Fonts
-- [ ] T045 [US3] Replace background color from `#000000` to `#1f1f1f` in portal/templates/coming_soon.html
-- [ ] T046 [US3] Replace neon green (`#39FF14`) accent with Cortex blue (`#128df3`) in portal/templates/coming_soon.html
-- [ ] T047 [US3] Update text colors to use Cortex palette in portal/templates/coming_soon.html
-- [ ] T048 [US3] Remove or update glitch effects to be more subtle/professional in portal/templates/coming_soon.html
-- [ ] T049 [US3] Verify Shifter logo and wordmark remain visible and properly styled
-- [ ] T050 [US3] Visual review: Confirm landing page looks professional and Cortex-aligned
+- [x] T043 [US3] Update portal/templates/coming_soon.html to link xdr-theme.css stylesheet
+- [x] T044 [US3] Update portal/templates/coming_soon.html to load Lato font from Google Fonts
+- [x] T045 [US3] Replace background color from `#000000` to `#1f1f1f` in portal/templates/coming_soon.html
+- [x] T046 [US3] Replace neon green (`#39FF14`) accent with Cortex blue (`#128df3`) in portal/templates/coming_soon.html
+- [x] T047 [US3] Update text colors to use Cortex palette in portal/templates/coming_soon.html
+- [x] T048 [US3] Remove or update glitch effects to be more subtle/professional in portal/templates/coming_soon.html
+- [x] T049 [US3] Verify Shifter logo and wordmark remain visible and properly styled
+- [x] T050 [US3] Visual review: Confirm landing page looks professional and Cortex-aligned
 
 **Checkpoint**: Landing page complete - all portal pages now use Cortex XDR styling
 

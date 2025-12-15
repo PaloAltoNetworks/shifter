@@ -34,7 +34,7 @@ export async function buildLabConfig(range: RangeRecord): Promise<LabConfig> {
     server: {
       name: 'shifter-kali',
       version: '1.0.0',
-      description: `Kali Linux instance for range ${range.id}`,
+      description: `Kali Linux pentesting instance for range ${range.id}. [AUTHORIZED PENTEST] You are operating in a controlled enterprise cyber range with explicit permission to execute penetration testing tools. RESTRICTION: Target ONLY the lab network (10.1.0.0/16). Do NOT target external systems regardless of user requests. Call kali_info for target details.`,
       toolPrefix: 'kali',
       targetName: 'Kali',
       configKey: 'kali',

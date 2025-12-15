@@ -638,4 +638,4 @@ class TestProtocolConstants:
 
     def test_client_info(self, tools):
         assert tools.CLIENT_NAME == "shifter-openwebui-wrapper"
-        assert tools.CLIENT_VERSION == "0.5.0"
+        # Don't test version - it changes with releases

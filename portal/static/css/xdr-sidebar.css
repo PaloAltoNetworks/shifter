@@ -70,6 +70,7 @@ body.nav-lock {
 /* Expanded/locked state */
 body.nav-lock .left-nav .left-nav-body,
 .left-nav:not(.minimized) .left-nav-body {
+  min-width: 270px;
   max-width: 270px;
 }
 

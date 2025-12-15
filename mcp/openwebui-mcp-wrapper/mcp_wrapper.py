@@ -339,7 +339,7 @@ class Tools:
         Runs the specified tool with the given arguments on your Shifter
         Kali instance. Use list_mcp_tools first to see available tools.
 
-        :param tool_name: Name of the MCP tool to execute (e.g., "run_command", "nmap_scan")
+        :param tool_name: Name of the MCP tool to execute (e.g., "kali_run_command", "kali_info")
         :param arguments: JSON string of arguments to pass to the tool
         :return: Tool execution result
         """

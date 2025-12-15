@@ -87,16 +87,16 @@
 
 ### Implementation for User Story 2
 
-- [ ] T032 [US2] Add .secondary-panel container styles (180px, slide animation) in portal/static/css/xdr-sidebar.css
-- [ ] T033 [US2] Add .secondary-panel.open transform styles in portal/static/css/xdr-sidebar.css
-- [ ] T034 [US2] Add .secondary-panel-item styles (text links) in portal/static/css/xdr-sidebar.css
-- [ ] T035 [US2] Add .secondary-panel-item.active styles in portal/static/css/xdr-sidebar.css
-- [ ] T036 [US2] Add .secondary-panel-header styles (section title) in portal/static/css/xdr-sidebar.css
-- [ ] T037 [US2] Implement panel toggle function in portal/static/js/sidebar.js
-- [ ] T038 [US2] Implement outside click handler to close panel in portal/static/js/sidebar.js
-- [ ] T039 [US2] Add secondary panel HTML for Risk Register in portal/templates/risk_register/base.html
-- [ ] T040 [US2] Wire up icon click to expand secondary panel in portal/static/js/sidebar.js
-- [ ] T041 [US2] Update .main margin-left when panel open (56px + 180px) in portal/static/css/xdr-sidebar.css
+- [x] T032 [US2] Add .secondary-panel container styles (180px, slide animation) in portal/static/css/xdr-sidebar.css
+- [x] T033 [US2] Add .secondary-panel.open transform styles in portal/static/css/xdr-sidebar.css
+- [x] T034 [US2] Add .secondary-panel-item styles (text links) in portal/static/css/xdr-sidebar.css
+- [x] T035 [US2] Add .secondary-panel-item.active styles in portal/static/css/xdr-sidebar.css
+- [x] T036 [US2] Add .secondary-panel-header styles (section title) in portal/static/css/xdr-sidebar.css
+- [x] T037 [US2] Implement panel toggle function in portal/static/js/sidebar.js
+- [x] T038 [US2] Implement outside click handler to close panel in portal/static/js/sidebar.js
+- [x] T039 [US2] Add secondary panel HTML for Risk Register in portal/templates/risk_register/base.html
+- [x] T040 [US2] Wire up icon click to expand secondary panel in portal/static/js/sidebar.js
+- [x] T041 [US2] Update .main margin-left when panel open (56px + 180px) in portal/static/css/xdr-sidebar.css
 
 **Checkpoint**: Secondary panel slides out and closes correctly
 

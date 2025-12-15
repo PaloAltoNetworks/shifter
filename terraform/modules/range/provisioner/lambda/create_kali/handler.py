@@ -2,7 +2,7 @@
 Create Kali Lambda - Launches a Kali Linux EC2 instance for attack operations.
 
 Input: { "range_id": "uuid" }
-Output: { "range_id": "uuid", "kali_instance_id": "i-xxx", "kali_ip": "10.1.X.Y" }
+Output: { "range_id": "uuid", "kali_instance_id": "i-xxx", "kali_ip": "10.1.X.Y", "kali_ssh_key_secret_arn": "arn:..." }
 """
 
 import base64
@@ -11,6 +11,8 @@ import os
 import sys
 
 import boto3
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -19,6 +21,7 @@ from shared import (
     get_env,
     get_range,
     get_resource_tags,
+    get_resource_tags_dict,
     update_range,
     validate_env_vars,
 )
@@ -35,19 +38,92 @@ REQUIRED_ENV_VARS = [
 ]
 
 
-def get_user_data_script() -> str:
+def generate_ssh_keypair() -> tuple[str, str]:
     """
-    Generate user data script to install kali-linux-headless tools on boot.
+    Generate an Ed25519 SSH key pair.
+
+    Returns:
+        tuple: (private_key_pem, public_key_openssh)
+    """
+    private_key = ed25519.Ed25519PrivateKey.generate()
+
+    # Private key in PEM format (OpenSSH format)
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.OpenSSH,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+
+    # Public key in OpenSSH format
+    public_key_openssh = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.OpenSSH,
+        format=serialization.PublicFormat.OpenSSH,
+    ).decode("utf-8")
+
+    return private_key_pem, public_key_openssh
+
+
+def store_ssh_key_in_secrets_manager(
+    private_key: str, range_id: int, user_id: int, environment: str
+) -> str:
+    """
+    Store SSH private key in AWS Secrets Manager.
+
+    Args:
+        private_key: The SSH private key in PEM format
+        range_id: The range ID
+        user_id: The user ID
+        environment: Environment name (dev/prod)
+
+    Returns:
+        The ARN of the created secret
+    """
+    secrets_client = boto3.client("secretsmanager")
+
+    secret_name = f"shifter/{environment}/range/{range_id}/kali-ssh-key"
+
+    # Create the secret with tags for lifecycle management
+    response = secrets_client.create_secret(
+        Name=secret_name,
+        Description=f"SSH private key for Kali instance in range {range_id}",
+        SecretString=private_key,
+        Tags=[
+            {"Key": "shifter:range_id", "Value": str(range_id)},
+            {"Key": "shifter:user_id", "Value": str(user_id)},
+            {"Key": "shifter:environment", "Value": environment},
+            {"Key": "shifter:resource_type", "Value": "kali-ssh-key"},
+        ],
+    )
+
+    return response["ARN"]
+
+
+def get_user_data_script(public_key: str) -> str:
+    """
+    Generate user data script to install kali-linux-headless tools on boot
+    and configure SSH access with the provided public key.
+
+    Args:
+        public_key: SSH public key in OpenSSH format
 
     Returns:
         Base64-encoded user data script
     """
-    script = """#!/bin/bash
+    script = f"""#!/bin/bash
 set -euo pipefail
 
 # Log output
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting Kali headless setup..."
+
+# Configure SSH access for MCP server
+echo "Configuring SSH access..."
+mkdir -p /home/kali/.ssh
+chmod 700 /home/kali/.ssh
+echo "{public_key}" >> /home/kali/.ssh/authorized_keys
+chmod 600 /home/kali/.ssh/authorized_keys
+chown -R kali:kali /home/kali/.ssh
+echo "SSH access configured"
 
 # Update package lists
 export DEBIAN_FRONTEND=noninteractive
@@ -111,10 +187,22 @@ def handler(event: dict, context) -> dict:
                 "range_id": range_id,
                 "kali_instance_id": range_data["kali_instance_id"],
                 "kali_ip": range_data["kali_ip"],
+                "kali_ssh_key_secret_arn": range_data["kali_ssh_key_secret_arn"],
             }
 
-        # Generate user data script
-        user_data = get_user_data_script()
+        # Generate SSH key pair for MCP server access
+        logger.info("Generating SSH key pair for MCP access")
+        private_key, public_key = generate_ssh_keypair()
+
+        # Store private key in Secrets Manager
+        logger.info("Storing SSH private key in Secrets Manager")
+        ssh_key_secret_arn = store_ssh_key_in_secrets_manager(
+            private_key, range_id, user_id, environment
+        )
+        logger.info(f"SSH key stored: {ssh_key_secret_arn}")
+
+        # Generate user data script with public key
+        user_data = get_user_data_script(public_key)
 
         # Create instance
         ec2 = boto3.client("ec2")
@@ -177,6 +265,7 @@ def handler(event: dict, context) -> dict:
             range_id,
             kali_instance_id=instance_id,
             kali_ip=private_ip,
+            kali_ssh_key_secret_arn=ssh_key_secret_arn,
         )
         logger.info(f"Updated range {range_id} with Kali info")
 
@@ -184,6 +273,7 @@ def handler(event: dict, context) -> dict:
             "range_id": range_id,
             "kali_instance_id": instance_id,
             "kali_ip": private_ip,
+            "kali_ssh_key_secret_arn": ssh_key_secret_arn,
         }
 
     finally:

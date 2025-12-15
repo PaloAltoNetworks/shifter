@@ -44,3 +44,19 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# ------------------------------------------------------------------------------
+# AgentChat (OpenWebUI) Client Settings
+# ------------------------------------------------------------------------------
+
+variable "agentchat_callback_urls" {
+  description = "OAuth callback URLs for AgentChat (OpenWebUI)"
+  type        = list(string)
+  default     = []
+}
+
+variable "agentchat_logout_urls" {
+  description = "OAuth logout URLs for AgentChat (OpenWebUI)"
+  type        = list(string)
+  default     = []
+}

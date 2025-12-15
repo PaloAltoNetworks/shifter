@@ -19,7 +19,6 @@ jobs:
   plan:
     name: Plan (${{ inputs.environment }})
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: terraform/environments/${{ inputs.environment }}/portal

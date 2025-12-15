@@ -192,32 +192,43 @@ jobs:
           MCP_SHIFTER_IMAGE: ${{ steps.build-push.outputs.image_uri }}
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
         run: |
-          SSM_PARAMS=$(cat <<EOF
-          {
-            "commands": [
-              "set -e",
-              "cd /opt",
-              "if [ -d bedrock-access-gateway ]; then cd bedrock-access-gateway && git pull; else git clone https://github.com/Brad-Edwards/bedrock-access-gateway.git && cd bedrock-access-gateway; fi",
-              "cd src && docker build -f Dockerfile_ecs -t bedrock-gateway . && cd /opt",
-              "aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin ${ECR_REGISTRY}",
-              "docker pull ${MCP_SHIFTER_IMAGE}",
-              "docker stop open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
-              "docker rm open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
-              "docker network create agentchat 2>/dev/null || true",
-              "mkdir -p /opt/mcp-shifter-config",
-              "echo '{\"sessions\":{\"maxPerUser\":10,\"maxGlobal\":100,\"logInfoThreshold\":50,\"logWarnThreshold\":80},\"connections\":{\"idleTimeoutMs\":300000}}' > /opt/mcp-shifter-config/config.json",
-              "docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=${BEDROCK_REGION} -e API_KEY=${BAG_API_KEY} bedrock-gateway",
-              "docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=${BEDROCK_REGION} -e COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID} -e COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID} -e COGNITO_ISSUER=${COGNITO_ISSUER} -e RDS_HOSTNAME=${RDS_HOSTNAME} -e RDS_PORT=${RDS_PORT} -e RDS_DATABASE=${RDS_DATABASE} -e RDS_USERNAME=mcp_user ${MCP_SHIFTER_IMAGE}",
-              "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
-              "docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=${BAG_API_KEY} -e BYPASS_ADMIN_ACCESS_CONTROL=false -e DATABASE_URL=${DATABASE_URL} ghcr.io/open-webui/open-webui:v0.6.41",
-              "echo 'Waiting for health checks...'",
-              "for i in \\$(seq 1 30); do if curl -sf http://localhost:8080/health > /dev/null 2>&1; then echo 'OpenWebUI healthy'; break; fi; if [ \\$i -eq 30 ]; then docker logs open-webui; exit 1; fi; sleep 10; done",
-              "for i in \\$(seq 1 30); do if curl -sf http://localhost:3001/health > /dev/null 2>&1; then echo 'mcp-shifter healthy'; break; fi; if [ \\$i -eq 30 ]; then docker logs mcp-shifter; exit 1; fi; sleep 10; done",
-              "echo 'AgentChat deployment complete'"
-            ]
-          }
-          EOF
-          )
+          # Build SSM commands JSON using jq to avoid escaping issues
+          SSM_PARAMS=$(jq -n \
+            --arg ecr_registry "$ECR_REGISTRY" \
+            --arg mcp_image "$MCP_SHIFTER_IMAGE" \
+            --arg bedrock_region "$BEDROCK_REGION" \
+            --arg bag_api_key "$BAG_API_KEY" \
+            --arg cognito_pool "$COGNITO_USER_POOL_ID" \
+            --arg cognito_client "$COGNITO_CLIENT_ID" \
+            --arg cognito_issuer "$COGNITO_ISSUER" \
+            --arg rds_host "$RDS_HOSTNAME" \
+            --arg rds_port "$RDS_PORT" \
+            --arg rds_db "$RDS_DATABASE" \
+            --arg db_url "$DATABASE_URL" \
+            '{
+              "commands": [
+                "set -e",
+                "cd /opt",
+                "if [ -d bedrock-access-gateway ]; then cd bedrock-access-gateway && git pull; else git clone https://github.com/Brad-Edwards/bedrock-access-gateway.git && cd bedrock-access-gateway; fi",
+                "cd src && docker build -f Dockerfile_ecs -t bedrock-gateway . && cd /opt",
+                ("aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin " + $ecr_registry),
+                ("docker pull " + $mcp_image),
+                "docker stop open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
+                "docker rm open-webui bedrock-gateway mcp-shifter 2>/dev/null || true",
+                "docker network create agentchat 2>/dev/null || true",
+                "mkdir -p /opt/mcp-shifter-config",
+                "echo '\''{\"sessions\":{\"maxPerUser\":10,\"maxGlobal\":100,\"logInfoThreshold\":50,\"logWarnThreshold\":80},\"connections\":{\"idleTimeoutMs\":300000}}'\'' > /opt/mcp-shifter-config/config.json",
+                ("docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=" + $bedrock_region + " -e API_KEY=" + $bag_api_key + " bedrock-gateway"),
+                ("docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=" + $bedrock_region + " -e COGNITO_USER_POOL_ID=" + $cognito_pool + " -e COGNITO_CLIENT_ID=" + $cognito_client + " -e COGNITO_ISSUER=" + $cognito_issuer + " -e RDS_HOSTNAME=" + $rds_host + " -e RDS_PORT=" + $rds_port + " -e RDS_DATABASE=" + $rds_db + " -e RDS_USERNAME=mcp_user " + $mcp_image),
+                "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
+                ("docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=" + $bag_api_key + " -e BYPASS_ADMIN_ACCESS_CONTROL=false -e DATABASE_URL=" + $db_url + " ghcr.io/open-webui/open-webui:v0.6.41"),
+                "echo Waiting for health checks...",
+                "sleep 30",
+                "curl -sf http://localhost:8080/health || (docker logs open-webui && exit 1)",
+                "curl -sf http://localhost:3001/health || (docker logs mcp-shifter && exit 1)",
+                "echo AgentChat deployment complete"
+              ]
+            }')
 
           COMMAND_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" --instance-ids "$INSTANCE_ID" \
             --parameters "$SSM_PARAMS" --timeout-seconds 600 --query "Command.CommandId" --output text)

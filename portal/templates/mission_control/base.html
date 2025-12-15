@@ -9,106 +9,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/xdr-theme.css' %}">
-    <!-- T016: Link xdr-sidebar.css -->
     <link rel="stylesheet" href="{% static 'css/xdr-sidebar.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/logo-transparent.png' %}">
     {% block extra_css %}{% endblock %}
 </head>
 <body class="xdr-dark-theme">
-    <!-- T014: Icon Sidebar -->
-    <nav class="icon-sidebar">
-        <div class="icon-sidebar-nav">
-            <div class="icon-sidebar-section">
-                <a href="{% url 'mission_control:dashboard' %}"
-                   class="icon-sidebar-item {% if active_nav == 'dashboard' %}active{% endif %}"
-                   data-tooltip="Dashboard">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="3" y="3" width="7" height="9" rx="1"/>
-                        <rect x="14" y="3" width="7" height="5" rx="1"/>
-                        <rect x="14" y="12" width="7" height="9" rx="1"/>
-                        <rect x="3" y="16" width="7" height="5" rx="1"/>
-                    </svg>
-                </a>
-                <a href="{% url 'mission_control:agents' %}"
-                   class="icon-sidebar-item {% if active_nav == 'agents' %}active{% endif %}"
-                   data-tooltip="Agents">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
-                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
-                        <line x1="6" y1="6" x2="6.01" y2="6"/>
-                        <line x1="6" y1="18" x2="6.01" y2="18"/>
-                    </svg>
-                </a>
-                <a href="{% url 'mission_control:history' %}"
-                   class="icon-sidebar-item {% if active_nav == 'history' %}active{% endif %}"
-                   data-tooltip="History">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <polyline points="12 6 12 12 16 14"/>
-                    </svg>
-                </a>
-            </div>
-
-            <div class="icon-sidebar-divider"></div>
-
-            <div class="icon-sidebar-section">
-                <a href="{% url 'mission_control:settings' %}"
-                   class="icon-sidebar-item {% if active_nav == 'settings' %}active{% endif %}"
-                   data-tooltip="Settings">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                    </svg>
-                </a>
-                <a href="{% url 'mission_control:help' %}"
-                   class="icon-sidebar-item {% if active_nav == 'help' %}active{% endif %}"
-                   data-tooltip="Help">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                        <line x1="12" y1="17" x2="12.01" y2="17"/>
-                    </svg>
-                </a>
-            </div>
-
-            <div class="icon-sidebar-divider"></div>
-
-            <div class="icon-sidebar-section">
-                <a href="{% url 'risk_register:risk_list' %}"
-                   class="icon-sidebar-item"
-                   data-tooltip="Risk Register">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                        <path d="M12 8v4"/>
-                        <path d="M12 16h.01"/>
-                    </svg>
-                </a>
-            </div>
-        </div>
-
-        <!-- User Avatar -->
-        <div class="icon-sidebar-footer">
-            <div class="user-avatar" id="user-avatar">
-                {{ request.user.email|initials }}
-            </div>
-            <div class="user-dropdown" id="user-dropdown">
-                <div class="user-dropdown-header">{{ request.user.email }}</div>
-                <a href="{% url 'mission_control:settings' %}" class="user-dropdown-item">Settings</a>
-                {% if debug %}
-                <a href="{% url 'dev_logout' %}" class="user-dropdown-item danger">Logout</a>
-                {% else %}
-                <form action="{% url 'oidc_logout' %}" method="post">
-                    {% csrf_token %}
-                    <button type="submit" class="user-dropdown-item danger" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer;">Logout</button>
-                </form>
-                {% endif %}
-            </div>
-        </div>
-    </nav>
+    {% include "partials/icon_sidebar.html" %}
 
     <header class="header">
         <div class="header-left">
-            <img src="{% static 'images/logo-transparent.png' %}" alt="Shifter" class="header-logo">
             <span class="header-title">// <span>MISSION CONTROL</span></span>
         </div>
         <div class="header-right">
@@ -122,7 +31,6 @@
         </main>
     </div>
 
-    <!-- T018: Link sidebar.js -->
     <script src="{% static 'js/sidebar.js' %}"></script>
     {% block extra_js %}{% endblock %}
 </body>

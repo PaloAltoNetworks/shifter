@@ -251,3 +251,90 @@ Parallel: T044, T045, T046, T047, T048 (different template files)
 - Commit after each task or logical group
 - Stop at any checkpoint to validate independently
 - US3 (Darker Background) is included in Foundational phase as it affects all pages
+
+---
+
+# Phase 2 Refinements (Cortex XDR Parity)
+
+**Added**: 2025-12-15
+**Reference**: Side-by-side comparison with Cortex XDR
+
+---
+
+## Phase 8: Expandable Sidebar (RFN-1)
+
+**Goal**: Sidebar expands on hover to show text labels, can be locked open
+
+- [x] T063 [RFN1] Update .icon-sidebar width transition (56px → 200px) in portal/static/css/xdr-sidebar.css
+- [x] T064 [RFN1] Add .icon-sidebar.expanded styles in portal/static/css/xdr-sidebar.css
+- [x] T065 [RFN1] Add text labels to nav items (hidden when collapsed) in portal/templates/partials/icon_sidebar.html
+- [x] T066 [RFN1] Add lock/pin toggle button HTML in portal/templates/partials/icon_sidebar.html
+- [x] T067 [RFN1] Add .sidebar-lock-btn styles in portal/static/css/xdr-sidebar.css
+- [x] T068 [RFN1] Implement hover expand logic in portal/static/js/sidebar.js
+- [x] T069 [RFN1] Implement lock toggle with localStorage persistence in portal/static/js/sidebar.js
+- [x] T070 [RFN1] Update Mission Control base.html with expandable sidebar in portal/templates/mission_control/base.html
+
+**Checkpoint**: Sidebar expands on hover and can be locked
+
+---
+
+## Phase 9: Logo Relocation (RFN-2)
+
+**Goal**: Move logo from header to sidebar top
+
+- [x] T071 [RFN2] Remove logo from header in portal/templates/mission_control/base.html
+- [x] T072 [RFN2] Remove logo from header in portal/templates/risk_register/base.html
+- [x] T073 [RFN2] Add logo to sidebar top in portal/templates/partials/icon_sidebar.html
+- [x] T074 [RFN2] Style logo collapsed state (icon only, 40px) in portal/static/css/xdr-sidebar.css
+- [x] T075 [RFN2] Style logo expanded state (icon + "SHIFTER" text) in portal/static/css/xdr-sidebar.css
+
+**Checkpoint**: Logo appears at sidebar top, header has text only
+
+---
+
+## Phase 10: Icon Color Correction (RFN-3)
+
+**Goal**: Icons white/gray, only left-edge bar is blue
+
+- [x] T076 [RFN3] Update .icon-sidebar-item color to #eaebeb in portal/static/css/xdr-sidebar.css
+- [x] T077 [RFN3] Update .icon-sidebar-item.active to keep icon white in portal/static/css/xdr-sidebar.css
+- [x] T078 [RFN3] Ensure .icon-sidebar-item.active::before (blue bar) remains in portal/static/css/xdr-sidebar.css
+- [x] T079 [RFN3] Update hover states to use background only in portal/static/css/xdr-sidebar.css
+
+**Checkpoint**: Icons are consistently white/gray, blue only on active bar
+
+---
+
+## Phase 11: Bottom Utility Section (RFN-4)
+
+**Goal**: Add utility icons above user avatar
+
+- [x] T080 [RFN4] Add divider above utility section in portal/templates/partials/icon_sidebar.html
+- [x] T081 [RFN4] Add Help icon to bottom section in portal/templates/partials/icon_sidebar.html
+- [x] T082 [RFN4] Add Settings icon to bottom section in portal/templates/partials/icon_sidebar.html
+- [x] T083 [RFN4] Style utility section layout in portal/static/css/xdr-sidebar.css
+- [x] T084 [RFN4] Update user avatar expanded state to show name in portal/templates/partials/icon_sidebar.html
+
+**Checkpoint**: Bottom section matches Cortex XDR pattern
+
+---
+
+## Phase 12: Refinement Polish
+
+- [x] T085 Test expandable sidebar in browser
+- [x] T086 Visual comparison with Cortex XDR reference
+- [ ] T087 Test lock persistence across page navigation
+- [x] T088 Verify all icon colors are correct
+
+---
+
+## Refinements Summary
+
+| Phase | Refinement | Tasks |
+|-------|------------|-------|
+| 8 | Expandable Sidebar | T063-T070 (8) |
+| 9 | Logo Relocation | T071-T075 (5) |
+| 10 | Icon Color Correction | T076-T079 (4) |
+| 11 | Bottom Utility Section | T080-T084 (5) |
+| 12 | Polish | T085-T088 (4) |
+| **Total** | | **26 tasks** |

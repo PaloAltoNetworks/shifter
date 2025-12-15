@@ -93,6 +93,7 @@ jobs:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}
       INSTANCE_TAG: ${{ inputs.is_dev && 'dev-agentchat-ec2' || 'prod-agentchat-ec2' }}
+      WEBUI_URL: ${{ inputs.is_dev && 'https://dev.shifter.keplerops.com/chat' || 'https://shifter.keplerops.com/chat' }}
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -126,7 +127,11 @@ jobs:
           COGNITO_JSON=$(aws secretsmanager get-secret-value --secret-id "shifter-${ENV}-portal-cognito-agentchat" --query 'SecretString' --output text)
           echo "cognito_user_pool_id=$(echo "$COGNITO_JSON" | jq -r '.user_pool_id')" >> $GITHUB_OUTPUT
           echo "cognito_client_id=$(echo "$COGNITO_JSON" | jq -r '.client_id')" >> $GITHUB_OUTPUT
+          COGNITO_SECRET=$(echo "$COGNITO_JSON" | jq -r '.client_secret')
+          echo "::add-mask::$COGNITO_SECRET"
+          echo "cognito_client_secret=$COGNITO_SECRET" >> $GITHUB_OUTPUT
           echo "cognito_issuer=$(echo "$COGNITO_JSON" | jq -r '.issuer_url')" >> $GITHUB_OUTPUT
+          echo "cognito_domain=$(echo "$COGNITO_JSON" | jq -r '.domain')" >> $GITHUB_OUTPUT
 
           RDS_JSON=$(aws secretsmanager get-secret-value --secret-id "shifter-${ENV}-portal-db-credentials" --query 'SecretString' --output text)
           echo "rds_hostname=$(echo "$RDS_JSON" | jq -r '.host')" >> $GITHUB_OUTPUT
@@ -185,12 +190,15 @@ jobs:
           DATABASE_URL: ${{ steps.secrets.outputs.database_url }}
           COGNITO_USER_POOL_ID: ${{ steps.secrets.outputs.cognito_user_pool_id }}
           COGNITO_CLIENT_ID: ${{ steps.secrets.outputs.cognito_client_id }}
+          COGNITO_CLIENT_SECRET: ${{ steps.secrets.outputs.cognito_client_secret }}
           COGNITO_ISSUER: ${{ steps.secrets.outputs.cognito_issuer }}
+          COGNITO_DOMAIN: ${{ steps.secrets.outputs.cognito_domain }}
           RDS_HOSTNAME: ${{ steps.secrets.outputs.rds_hostname }}
           RDS_PORT: ${{ steps.secrets.outputs.rds_port }}
           RDS_DATABASE: ${{ steps.secrets.outputs.rds_database }}
           MCP_SHIFTER_IMAGE: ${{ steps.build-push.outputs.image_uri }}
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          OPENWEBUI_URL: ${{ env.WEBUI_URL }}
         run: |
           # Build SSM commands JSON using jq to avoid escaping issues
           SSM_PARAMS=$(jq -n \
@@ -200,11 +208,14 @@ jobs:
             --arg bag_api_key "$BAG_API_KEY" \
             --arg cognito_pool "$COGNITO_USER_POOL_ID" \
             --arg cognito_client "$COGNITO_CLIENT_ID" \
+            --arg cognito_secret "$COGNITO_CLIENT_SECRET" \
             --arg cognito_issuer "$COGNITO_ISSUER" \
+            --arg cognito_domain "$COGNITO_DOMAIN" \
             --arg rds_host "$RDS_HOSTNAME" \
             --arg rds_port "$RDS_PORT" \
             --arg rds_db "$RDS_DATABASE" \
             --arg db_url "$DATABASE_URL" \
+            --arg webui_url "$OPENWEBUI_URL" \
             '{
               "commands": [
                 "set -e",
@@ -221,7 +232,7 @@ jobs:
                 ("docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=" + $bedrock_region + " -e API_KEY=" + $bag_api_key + " bedrock-gateway"),
                 ("docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=" + $bedrock_region + " -e COGNITO_USER_POOL_ID=" + $cognito_pool + " -e COGNITO_CLIENT_ID=" + $cognito_client + " -e COGNITO_ISSUER=" + $cognito_issuer + " -e RDS_HOSTNAME=" + $rds_host + " -e RDS_PORT=" + $rds_port + " -e RDS_DATABASE=" + $rds_db + " -e RDS_USERNAME=mcp_user " + $mcp_image),
                 "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
-                ("docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=" + $bag_api_key + " -e BYPASS_ADMIN_ACCESS_CONTROL=false -e DATABASE_URL=" + $db_url + " ghcr.io/open-webui/open-webui:v0.6.41"),
+                ("docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=" + $bag_api_key + " -e DATABASE_URL=" + $db_url + " -e WEBUI_URL=" + $webui_url + " -e ENABLE_OAUTH_SIGNUP=true -e ENABLE_LOGIN_FORM=false -e OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true -e OAUTH_PROVIDER_NAME=cognito -e OAUTH_CLIENT_ID=" + $cognito_client + " -e OAUTH_CLIENT_SECRET=" + $cognito_secret + " -e OPENID_PROVIDER_URL=" + $cognito_issuer + "/.well-known/openid-configuration ghcr.io/open-webui/open-webui:v0.6.41"),
                 "echo Waiting for health checks...",
                 "sleep 30",
                 "curl -sf http://localhost:8080/health || (docker logs open-webui && exit 1)",

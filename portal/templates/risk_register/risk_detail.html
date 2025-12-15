@@ -7,8 +7,8 @@
         <h1 class="page-title">{{ risk.title }}</h1>
         <p class="page-subtitle">
             <span class="badge badge-{{ risk.severity }}">{{ risk.severity }}</span>
-            <span class="status-{{ risk.status }}" style="margin-left: 0.5rem;">{{ risk.get_status_display }}</span>
-            {% if risk.is_deleted %}<span class="text-error" style="margin-left: 0.5rem;">[DELETED]</span>{% endif %}
+            <span class="status-{{ risk.status }} ml-sm">{{ risk.get_status_display }}</span>
+            {% if risk.is_deleted %}<span class="text-error ml-sm">[DELETED]</span>{% endif %}
         </p>
     </div>
     <div class="flex-row gap-sm">
@@ -40,7 +40,7 @@
 
 <div class="card">
     <h3 class="card-title">Description</h3>
-    <p style="line-height: 1.6;">{{ risk.description|linebreaks }}</p>
+    <p class="leading-relaxed">{{ risk.description|linebreaks }}</p>
 </div>
 
 <div class="detail-grid">
@@ -52,7 +52,7 @@
                 {% if risk.stride_categories %}
                     {% for cat in risk.stride_categories %}
                         {% for code, name in stride_choices %}
-                            {% if code == cat %}<span class="badge" style="margin-right: 0.25rem;">{{ name }}</span>{% endif %}
+                            {% if code == cat %}<span class="badge mr-xs">{{ name }}</span>{% endif %}
                         {% endfor %}
                     {% endfor %}
                 {% else %}

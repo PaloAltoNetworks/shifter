@@ -41,6 +41,7 @@ def risk_list(request: HttpRequest) -> HttpResponse:
         "severity_filter": severity_filter,
         "status_choices": Status.choices,
         "severity_choices": Severity.choices,
+        "active_nav": "risks",
     }
     return render(request, "risk_register/risk_list.html", context)
 
@@ -55,6 +56,7 @@ def risk_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "risk": risk,
         "comments": comments,
         "stride_choices": StrideCategory.choices,
+        "active_nav": "risks",
     }
     return render(request, "risk_register/risk_detail.html", context)
 
@@ -87,6 +89,7 @@ def risk_create(request: HttpRequest) -> HttpResponse:
                     "severity_choices": Severity.choices,
                     "status_choices": Status.choices,
                     "stride_choices": StrideCategory.choices,
+                    "active_nav": "risks",
                 },
             )
 
@@ -121,6 +124,7 @@ def risk_create(request: HttpRequest) -> HttpResponse:
         "severity_choices": Severity.choices,
         "status_choices": Status.choices,
         "stride_choices": StrideCategory.choices,
+        "active_nav": "risks",
     }
     return render(request, "risk_register/risk_form.html", context)
 
@@ -171,6 +175,7 @@ def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "status_choices": Status.choices,
         "stride_choices": StrideCategory.choices,
         "editing": True,
+        "active_nav": "risks",
     }
     return render(request, "risk_register/risk_form.html", context)
 
@@ -339,6 +344,7 @@ def apikey_list(request: HttpRequest) -> HttpResponse:
     context = {
         "keys": keys,
         "is_admin": request.user.is_staff,
+        "active_nav": "risks",
     }
     return render(request, "risk_register/apikey_list.html", context)
 
@@ -369,6 +375,7 @@ def apikey_create(request: HttpRequest) -> HttpResponse:
             "api_key": api_key,
             "raw_key": raw_key,
             "show_key": True,
+            "active_nav": "risks",
         }
         return render(request, "risk_register/apikey_list.html", context)
 

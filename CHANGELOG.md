@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ALB listener rules use `host_header` matching instead of `path_pattern`
 - Docker layer caching added to portal and agentchat CI/CD workflows (faster builds)
 
+## [0.4.5] - 2025-12-15
+### Changed
+- Reskin Portal and Risk Registerto Cortex XDR look and feel
 
 ## [0.4.4] - 2025-12-14
 

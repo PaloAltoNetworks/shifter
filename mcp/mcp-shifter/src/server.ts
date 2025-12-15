@@ -184,8 +184,11 @@ export function createApp(): express.Application {
       const labConfig = await buildLabConfig(range);
 
       // Create transport - it will generate session ID on initialize
+      // enableJsonResponse forces synchronous JSON responses instead of SSE streams
+      // Required for compatibility with OpenWebUI wrapper which expects JSON
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
+        enableJsonResponse: true,
         onsessioninitialized: (sessionId: string) => {
           // Store session keyed by MCP session ID
           storeSession(sessionId, userContext.email, range, labConfig, transport);

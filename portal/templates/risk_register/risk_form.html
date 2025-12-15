@@ -1,6 +1,7 @@
 {% extends "risk_register/base.html" %}
 
 {% block content %}
+<!-- T039: Risk form with XDR input styles -->
 <div class="page-header">
     <div>
         <h1 class="page-title">{% if editing %}Edit Risk{% else %}New Risk{% endif %}</h1>
@@ -118,7 +119,7 @@
         {% endif %}
     </div>
 
-    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+    <div class="flex-row gap-md mt-md">
         <button type="submit" class="btn btn-primary">{% if editing %}Save Changes{% else %}Create Risk{% endif %}</button>
         <a href="{% if editing %}{% url 'risk_register:risk_detail' pk=risk.pk %}{% else %}{% url 'risk_register:risk_list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
     </div>

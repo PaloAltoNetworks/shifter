@@ -43,13 +43,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (willBeLocked) {
             document.body.classList.add('nav-lock');
+            document.body.classList.remove('nav-mouse-leave');
             leftNav.classList.remove('minimized');
             lockBtn.classList.add('active');
             lockBtn.setAttribute('aria-expanded', 'true');
             localStorage.setItem('nav-lock', 'true');
         } else {
             document.body.classList.remove('nav-lock');
-            leftNav.classList.add('minimized');
+            // Don't minimize or hide immediately - let mouseleave handle it
             lockBtn.classList.remove('active');
             lockBtn.setAttribute('aria-expanded', 'false');
             localStorage.setItem('nav-lock', 'false');

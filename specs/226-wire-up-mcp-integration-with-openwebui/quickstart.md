@@ -96,10 +96,12 @@ curl -X DELETE http://localhost:3001/mcp/$SESSION_ID \
 
 ## OpenWebUI Configuration
 
+OpenWebUI runs at `chat.{domain}` subdomain (e.g., `chat.dev.shifter.keplerops.com`).
+
 1. Open OpenWebUI Settings > External Tools
 2. Click "Add Server"
 3. Select "MCP (Streamable HTTP)"
-4. Enter URL: `https://shifter-dev.example.com/mcp`
+4. Enter URL: `https://chat.dev.shifter.keplerops.com/mcp`
 5. Authentication: Bearer token (Cognito JWT)
 
 ## Project Structure

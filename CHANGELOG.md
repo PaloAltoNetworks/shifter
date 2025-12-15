@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- AgentChat routing changed from subpath (`/chat/`) to subdomain (`chat.{domain}`)
+- ACM certificate includes SAN for `chat.{domain}` subdomain
+- Cognito OAuth callbacks updated for subdomain URLs
+- ALB listener rules use `host_header` matching instead of `path_pattern`
+- Docker layer caching added to portal and agentchat CI/CD workflows (faster builds)
+
 ## [0.5.0] - 2025-12-14
 
 ### Added

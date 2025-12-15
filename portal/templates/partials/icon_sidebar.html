@@ -1,130 +1,152 @@
 {% load static user_extras %}
-<!-- Icon Sidebar Navigation - Expandable -->
-<nav class="icon-sidebar">
-    <!-- Logo at top -->
-    <div class="icon-sidebar-logo">
-        <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M30 19.8102C30 15.8425 26.9583 12.6155 23.1917 12.6155V27.0049C26.9583 27.0049 30 23.7905 30 19.8102Z" fill="url(#g1)"/>
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M15.5955 20.0239C15.5955 16.2433 18.9268 13.1685 23.0519 13.1685V7.99998C15.8428 7.99998 10 13.3719 10 20C10 26.6281 15.8428 32 23.0519 32V26.8554C18.9268 26.8794 15.5955 23.8165 15.5955 20.0239Z" fill="url(#g2)"/>
-            <defs>
-                <linearGradient id="g1" x1="23.1917" y1="27.0049" x2="23.1917" y2="12.6155" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#5BFFA5"/><stop offset="1" stop-color="#03833D"/>
-                </linearGradient>
-                <linearGradient id="g2" x1="16.526" y1="32" x2="16.526" y2="7.99998" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#03833D"/><stop offset="1" stop-color="#5BFFA5"/>
-                </linearGradient>
-            </defs>
-        </svg>
-        <span class="icon-sidebar-logo-text">CORTEX SHIFTER</span>
-        <!-- Lock/pin button -->
-        <button class="sidebar-lock-btn" title="Lock sidebar open">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-        </button>
-    </div>
+{# Cortex XDR Left Navigation - Direct port from Cortex XDR #}
 
-    <div class="icon-sidebar-nav">
-        <div class="icon-sidebar-section">
-            <div class="nav-item-wrapper">
+<nav class="left-nav minimized" id="leftNav">
+    <div class="left-nav-body">
+        {# Header with logo and lock button #}
+        <div style="position: relative;">
+            <button class="reset-button lock-button tw-flex tw-size-8 tw-items-center tw-justify-center tw-rounded"
+                    id="lockBtn"
+                    aria-expanded="false"
+                    data-testid="left-nav-lock-button">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img">
+                    <title>lock filled icon</title>
+                    <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 6.79999C10.6745 6.79999 9.6 7.8745 9.6 9.19999V9.99999H8.8C8.35817 9.99999 8 10.3582 8 10.8V16.4C8 16.8418 8.35817 17.2 8.8 17.2H15.2C15.6418 17.2 16 16.8418 16 16.4V10.8C16 10.3582 15.6418 9.99999 15.2 9.99999H14.4V9.19999C14.4 7.8745 13.3255 6.79999 12 6.79999ZM13.6 9.99999V9.19999C13.6 8.31633 12.8837 7.59999 12 7.59999C11.1163 7.59999 10.4 8.31633 10.4 9.19999V9.99999H13.6ZM12.6963 13.594C12.7622 13.4777 12.7999 13.3432 12.7999 13.2C12.7999 12.7582 12.4417 12.4 11.9999 12.4C11.558 12.4 11.1999 12.7582 11.1999 13.2C11.1999 13.3438 11.2378 13.4787 11.3042 13.5953L10.8807 14.16C10.683 14.4237 10.8711 14.8 11.2007 14.8H12.8007C13.1303 14.8 13.3185 14.4237 13.1207 14.16L12.6963 13.594Z"></path>
+                </svg>
+            </button>
+
+            <a href="{% url 'mission_control:dashboard' %}" class="header-link" aria-label="Home page">
+                {# Cortex logo SVG #}
+                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="paint0_linear" x1="23.0519" y1="8" x2="23.0519" y2="32" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#00CC66"/>
+                            <stop offset="1" stop-color="#00CC66" stop-opacity="0.6"/>
+                        </linearGradient>
+                        <linearGradient id="paint1_linear" x1="16.5259" y1="8" x2="16.5259" y2="32" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#00CC66"/>
+                            <stop offset="1" stop-color="#00CC66" stop-opacity="0.6"/>
+                        </linearGradient>
+                    </defs>
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M24.4045 20.0239C24.4045 23.8045 21.0732 26.8794 16.9481 26.8794V32C24.1572 32 30 26.6281 30 20C30 13.3719 24.1572 8 16.9481 8V13.1446C21.0732 13.1206 24.4045 16.1835 24.4045 20.0239Z" fill="url(#paint0_linear)"/>
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M15.5955 20.0239C15.5955 16.2433 18.9268 13.1685 23.0519 13.1685V7.99998C15.8428 7.99998 10 13.3719 10 20C10 26.6281 15.8428 32 23.0519 32V26.8554C18.9268 26.8794 15.5955 23.8165 15.5955 20.0239Z" fill="url(#paint1_linear)"/>
+                </svg>
+                <span class="logo-text hide-when-minimized">CORTEX SHIFTER</span>
+            </a>
+        </div>
+
+        {# Navigation menu sections #}
+        <div class="nav-menu-sections">
+            {# Dashboard #}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'dashboard' %}active-top-item{% endif %}">
                 <a href="{% url 'mission_control:dashboard' %}"
-                   class="icon-sidebar-item {% if active_nav == 'dashboard' %}active{% endif %}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="3" y="3" width="7" height="9" rx="1"/>
-                        <rect x="14" y="3" width="7" height="5" rx="1"/>
-                        <rect x="14" y="12" width="7" height="9" rx="1"/>
-                        <rect x="3" y="16" width="7" height="5" rx="1"/>
-                    </svg>
-                    <span class="icon-sidebar-item-text">Dashboard</span>
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'dashboard' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M9.8 7.55005C9.8 7.27391 10.0239 7.05005 10.3 7.05005H17C17.2761 7.05005 17.5 7.27391 17.5 7.55005V8.75005C17.5 9.02619 17.2761 9.25005 17 9.25005H10.3C10.0239 9.25005 9.8 9.02619 9.8 8.75005V7.55005Z"></path>
+                            <path fill="currentColor" d="M6.5 7.55005C6.5 7.27391 6.72386 7.05005 7 7.05005H8.2C8.47614 7.05005 8.7 7.27391 8.7 7.55005V16.45C8.7 16.7262 8.47614 16.95 8.2 16.95H7C6.72386 16.95 6.5 16.7262 6.5 16.45V7.55005Z"></path>
+                            <path fill="currentColor" d="M9.8 10.85C9.8 10.5739 10.0239 10.35 10.3 10.35H17C17.2761 10.35 17.5 10.5739 17.5 10.85V16.45C17.5 16.7262 17.2761 16.95 17 16.95H10.3C10.0239 16.95 9.8 16.7262 9.8 16.45V10.85Z"></path>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized nav-menu-item-content">Dashboard</span>
                 </a>
             </div>
-            <div class="nav-item-wrapper">
+
+            {# Agents #}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' %}active-top-item{% endif %}">
                 <a href="{% url 'mission_control:agents' %}"
-                   class="icon-sidebar-item {% if active_nav == 'agents' %}active{% endif %}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="2" y="2" width="20" height="8" rx="2"/>
-                        <rect x="2" y="14" width="20" height="8" rx="2"/>
-                        <circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/>
-                        <circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/>
-                    </svg>
-                    <span class="icon-sidebar-item-text">Agents</span>
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'agents' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M11.7156 11.5H5.28442C5.12686 11.5 5 11.6224 5 11.7744V17.2256C5 17.3776 5.12686 17.5 5.28442 17.5H11.7156C11.8731 17.5 12 17.3776 12 17.2256V11.7744C12 11.6224 11.8731 11.5 11.7156 11.5Z"></path>
+                            <path fill="currentColor" d="M11.7968 6.5H7.20316C7.09062 6.5 7 6.58161 7 6.68295V10.317C7 10.4184 7.09062 10.5 7.20316 10.5H11.7968C11.9094 10.5 12 10.4184 12 10.317V6.68295C12 6.58161 11.9094 6.5 11.7968 6.5Z"></path>
+                            <path fill="currentColor" d="M16.8375 14.5H13.1625C13.0725 14.5 13 14.5612 13 14.6372V17.3628C13 17.4388 13.0725 17.5 13.1625 17.5H16.8375C16.9275 17.5 17 17.4388 17 17.3628V14.6372C17 14.5612 16.9275 14.5 16.8375 14.5Z"></path>
+                            <path fill="currentColor" d="M18.7562 8.5H13.2438C13.1087 8.5 13 8.60201 13 8.72869V13.2713C13 13.398 13.1087 13.5 13.2438 13.5H18.7562C18.8913 13.5 19 13.398 19 13.2713V8.72869C19 8.60201 18.8913 8.5 18.7562 8.5Z"></path>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized nav-menu-item-content">Agents</span>
                 </a>
             </div>
-            <div class="nav-item-wrapper">
+
+            {# History #}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'history' %}active-top-item{% endif %}">
                 <a href="{% url 'mission_control:history' %}"
-                   class="icon-sidebar-item {% if active_nav == 'history' %}active{% endif %}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="12" cy="12" r="10"/>
-                        <polyline points="12 6 12 12 16 14"/>
-                    </svg>
-                    <span class="icon-sidebar-item-text">History</span>
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'history' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 5C12 5 13.4269 6.52073 16.6146 7.34527C17.1362 7.47993 17.5 7.94061 17.5 8.4672V13.509C17.5 14.3393 17.1075 15.1225 16.4363 15.6319L12 19L7.56374 15.6319C6.89252 15.1225 6.5 14.3393 6.5 13.509V8.4672C6.5 7.94004 6.86377 7.47993 7.38537 7.34527C10.5731 6.52073 12 5 12 5ZM12.7702 8.55002H11.1202V12.4H12.7702V8.55002ZM12.7704 14.05H11.1204V15.7H12.7704V14.05Z"></path>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized nav-menu-item-content">History</span>
                 </a>
             </div>
-        </div>
 
-        <div class="icon-sidebar-divider"></div>
-
-        <div class="icon-sidebar-section">
-            <div class="nav-item-wrapper">
+            {# Risk Register #}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'risks' %}active-top-item{% endif %}">
                 <a href="{% url 'risk_register:risk_list' %}"
-                   class="icon-sidebar-item {% if active_nav == 'risks' or active_nav == 'create' or active_nav == 'apikeys' %}active{% endif %}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                        <path d="M12 8v4"/>
-                        <circle cx="12" cy="16" r="1" fill="currentColor" stroke="none"/>
-                    </svg>
-                    <span class="icon-sidebar-item-text">Risk Register</span>
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'risks' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M12 5.25C8.28 5.25 5.25 8.28 5.25 12C5.25 15.72 8.28 18.75 12 18.75C15.72 18.75 18.75 15.72 18.75 12C18.75 8.28 15.72 5.25 12 5.25ZM12 17.25C9.1 17.25 6.75 14.9 6.75 12C6.75 9.1 9.1 6.75 12 6.75C14.9 6.75 17.25 9.1 17.25 12C17.25 14.9 14.9 17.25 12 17.25Z"></path>
+                            <path fill="currentColor" d="M12 13.5C12.8284 13.5 13.5 12.8284 13.5 12C13.5 11.1716 12.8284 10.5 12 10.5C11.1716 10.5 10.5 11.1716 10.5 12C10.5 12.8284 11.1716 13.5 12 13.5Z"></path>
+                            <path fill="currentColor" d="M12 8.19C9.9 8.19 8.19 9.9 8.19 12C8.19 14.1 9.9 15.81 12 15.81C14.1 15.81 15.81 14.1 15.81 12C15.81 9.9 14.1 8.19 12 8.19ZM12 14.81C10.45 14.81 9.19 13.55 9.19 12C9.19 10.45 10.45 9.19 12 9.19C13.55 9.19 14.81 10.45 14.81 12C14.81 13.55 13.55 14.81 12 14.81Z"></path>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized nav-menu-item-content">Risk Register</span>
                 </a>
             </div>
-        </div>
-    </div>
 
-    <!-- Bottom utility section -->
-    <div class="icon-sidebar-footer">
-        <div class="icon-sidebar-divider"></div>
-
-        <div class="icon-sidebar-section">
-            <div class="nav-item-wrapper">
-                <a href="{% url 'mission_control:settings' %}"
-                   class="icon-sidebar-item {% if active_nav == 'settings' %}active{% endif %}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                    </svg>
-                    <span class="icon-sidebar-item-text">Settings</span>
-                </a>
-            </div>
-            <div class="nav-item-wrapper">
-                <a href="{% url 'mission_control:help' %}"
-                   class="icon-sidebar-item {% if active_nav == 'help' %}active{% endif %}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                        <circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>
-                    </svg>
-                    <span class="icon-sidebar-item-text">Help</span>
+            {# API Keys #}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'api_keys' %}active-top-item{% endif %}">
+                <a href="{% url 'risk_register:apikey_list' %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'api_keys' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M10.2 5.75C10.0895 5.75 10 5.83954 10 5.95V6.55C10 6.66046 10.0895 6.75 10.2 6.75H13.8C13.9105 6.75 14 6.66046 14 6.55V5.95C14 5.83954 13.9105 5.75 13.8 5.75H10.2Z"></path>
+                            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M15.2 6.25C15.0895 6.25 15 6.33954 15 6.45V7.55C15 7.66046 14.9105 7.75 14.8 7.75H9.2C9.08954 7.75 9 7.66046 9 7.55V6.45C9 6.33954 8.91046 6.25 8.8 6.25H7.5C7.21997 6.25 7 6.46997 7 6.75V17.75C7 18.03 7.21997 18.25 7.5 18.25H16.5C16.78 18.25 17 18.03 17 17.75V6.75C17 6.46997 16.78 6.25 16.5 6.25H15.2ZM9.8 10.25C9.91046 10.25 10 10.3395 10 10.45V11.05C10 11.1605 9.91046 11.25 9.8 11.25H9.2C9.08954 11.25 9 11.1605 9 11.05V10.45C9 10.3395 9.08954 10.25 9.2 10.25H9.8ZM14.8 10.25C14.9105 10.25 15 10.3395 15 10.45V11.05C15 11.1605 14.9105 11.25 14.8 11.25H11.2C11.0895 11.25 11 11.1605 11 11.05V10.45C11 10.3395 11.0895 10.25 11.2 10.25H14.8ZM15 12.45C15 12.3395 14.9105 12.25 14.8 12.25H11.2C11.0895 12.25 11 12.3395 11 12.45V13.05C11 13.1605 11.0895 13.25 11.2 13.25H14.8C14.9105 13.25 15 13.1605 15 13.05V12.45ZM9.8 12.25C9.91046 12.25 10 12.3395 10 12.45V13.05C10 13.1605 9.91046 13.25 9.8 13.25H9.2C9.08954 13.25 9 13.1605 9 13.05V12.45C9 12.3395 9.08954 12.25 9.2 12.25H9.8ZM15 14.45C15 14.3395 14.9105 14.25 14.8 14.25H11.2C11.0895 14.25 11 14.3395 11 14.45V15.05C11 15.1605 11.0895 15.25 11.2 15.25H14.8C14.9105 15.25 15 15.1605 15 15.05V14.45ZM9.8 14.25C9.91046 14.25 10 14.3395 10 14.45V15.05C10 15.1605 9.91046 15.25 9.8 15.25H9.2C9.08954 15.25 9 15.1605 9 15.05V14.45C9 14.3395 9.08954 14.25 9.2 14.25H9.8Z"></path>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized nav-menu-item-content">API Keys</span>
                 </a>
             </div>
         </div>
 
-        <!-- User Avatar -->
-        <div class="icon-sidebar-user">
-            <div class="user-avatar" id="user-avatar">
-                {{ request.user.email|initials }}
+        {# Footer with settings, help, and user profile #}
+        <div class="nav-footer">
+            {# Settings #}
+            <div class="tw-mx-3 tw-mb-2">
+                <a href="#" class="nav-menu-item nav-menu-item-level-0">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 8.5C9.79086 8.5 8 10.2909 8 12.5C8 14.7091 9.79086 16.5 12 16.5C14.2091 16.5 16 14.7091 16 12.5C16 10.2909 14.2091 8.5 12 8.5ZM10 12.5C10 11.3954 10.8954 10.5 12 10.5C13.1046 10.5 14 11.3954 14 12.5C14 13.6046 13.1046 14.5 12 14.5C10.8954 14.5 10 13.6046 10 12.5Z"></path>
+                            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 3C11.175 3 10.5 3.675 10.5 4.5V4.8C10.5 5.13 10.305 5.43 10.005 5.565C9.93 5.595 9.855 5.64 9.78 5.685C9.495 5.85 9.135 5.865 8.85 5.685L8.595 5.535C7.89 5.115 6.975 5.34 6.555 6.045L5.555 7.74C5.135 8.445 5.36 9.36 6.065 9.78L6.32 9.93C6.605 10.095 6.755 10.425 6.71 10.755C6.695 10.845 6.695 10.92 6.695 11.01V11.985C6.695 12.075 6.695 12.165 6.71 12.24C6.755 12.57 6.605 12.9 6.32 13.065L6.065 13.215C5.36 13.635 5.135 14.55 5.555 15.255L6.555 16.95C6.975 17.655 7.89 17.88 8.595 17.46L8.85 17.31C9.135 17.145 9.495 17.145 9.78 17.31C9.855 17.355 9.93 17.4 10.005 17.43C10.305 17.565 10.5 17.865 10.5 18.195V18.495C10.5 19.32 11.175 19.995 12 19.995C12.825 19.995 13.5 19.32 13.5 18.495V18.195C13.5 17.865 13.695 17.565 13.995 17.43C14.07 17.4 14.145 17.355 14.22 17.31C14.505 17.145 14.865 17.13 15.15 17.31L15.405 17.46C16.11 17.88 17.025 17.655 17.445 16.95L18.445 15.255C18.865 14.55 18.64 13.635 17.935 13.215L17.68 13.065C17.395 12.9 17.245 12.57 17.29 12.24C17.305 12.15 17.305 12.075 17.305 11.985V11.01C17.305 10.92 17.305 10.83 17.29 10.755C17.245 10.425 17.395 10.095 17.68 9.93L17.935 9.78C18.64 9.36 18.865 8.445 18.445 7.74L17.445 6.045C17.025 5.34 16.11 5.115 15.405 5.535L15.15 5.685C14.865 5.85 14.505 5.865 14.22 5.685C14.145 5.64 14.07 5.595 13.995 5.565C13.695 5.43 13.5 5.13 13.5 4.8V4.5C13.5 3.675 12.825 3 12 3Z"></path>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized nav-menu-item-content">Settings</span>
+                </a>
             </div>
-            <span class="icon-sidebar-item-text user-name">{{ request.user.email }}</span>
-            <div class="user-dropdown" id="user-dropdown">
-                <div class="user-dropdown-header">{{ request.user.email }}</div>
-                <a href="{% url 'mission_control:settings' %}" class="user-dropdown-item">Settings</a>
-                {% if debug %}
-                <a href="{% url 'dev_logout' %}" class="user-dropdown-item danger">Logout</a>
-                {% else %}
-                <form action="{% url 'oidc_logout' %}" method="post">
-                    {% csrf_token %}
-                    <button type="submit" class="user-dropdown-item danger">Logout</button>
-                </form>
-                {% endif %}
+
+            {# Help #}
+            <div class="tw-mx-3 tw-mb-2">
+                <a href="#" class="nav-menu-item nav-menu-item-level-0">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4ZM11 17V15H13V17H11ZM12.95 12.55C13.6 11.95 14 11.45 14 10.5C14 9.12 12.88 8 11.5 8C10.12 8 9 9.12 9 10.5H11C11 10.22 11.22 10 11.5 10C11.78 10 12 10.22 12 10.5C12 10.78 11.78 11 11.5 11C10.95 11 10.5 11.45 10.5 12V14H12.5V12.55H12.95Z"></path>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized nav-menu-item-content">Help</span>
+                </a>
+            </div>
+
+            {# User profile #}
+            <div class="nav-profile">
+                <div class="nav-profile-avatar">
+                    {{ user.email|initials }}
+                </div>
+                <div class="nav-profile-info hide-when-minimized">
+                    <div class="nav-profile-name">{{ user.get_full_name|default:user.username }}</div>
+                    <div class="nav-profile-email">{{ user.email }}</div>
+                </div>
             </div>
         </div>
     </div>

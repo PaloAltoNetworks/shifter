@@ -166,9 +166,9 @@ fi
 echo "$TOOLS" | jq .
 echo ""
 
-# 4. Test run_command if available
-if echo "$TOOLS" | jq -e '.result.tools[] | select(.name=="run_command")' > /dev/null 2>&1; then
-  echo "4. Test run_command (uptime)..."
+# 4. Test kali_run_command if available
+if echo "$TOOLS" | jq -e '.result.tools[] | select(.name=="kali_run_command")' > /dev/null 2>&1; then
+  echo "4. Test kali_run_command (cat mcp-test.txt)..."
   RESULT=$(curl -sf "$HOST/mcp" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
@@ -177,11 +177,11 @@ if echo "$TOOLS" | jq -e '.result.tools[] | select(.name=="run_command")' > /dev
       "jsonrpc": "2.0",
       "id": 3,
       "method": "tools/call",
-      "params": {"name": "run_command", "arguments": {"command": "uptime"}}
+      "params": {"name": "kali_run_command", "arguments": {"command": "cat /home/kali/mcp-test.txt"}}
     }' 2>&1)
   echo "$RESULT" | jq .
 else
-  echo "4. Skipping tool test (run_command not found)"
+  echo "4. Skipping tool test (kali_run_command not found)"
 fi
 
 echo ""

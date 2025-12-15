@@ -1,406 +1,353 @@
-/**
- * Cortex XDR Sidebar Styles
- *
- * Icon sidebar (56px) + Secondary panel (180px) navigation pattern
- * Matches Cortex XDR two-panel navigation structure
- */
+/* =============================================================================
+   CORTEX XDR SIDEBAR - Direct port from Cortex XDR
+   ============================================================================= */
 
-/* ============================================================
-   Icon Sidebar (56px collapsed, 200px expanded)
-   ============================================================ */
-.icon-sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: 56px;
-    background: #000;
-    display: flex;
-    flex-direction: column;
-    z-index: 200;
-    padding-top: 0;
-    transition: width 0.2s ease-out;
-    overflow: hidden;
+/* CSS Variables - Dark theme (default) */
+:root {
+  --xdr-left-nav-width: 56px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-8: 32px;
+  --border-radius-xs: 4px;
 }
 
-/* Expanded state (hover or locked) */
-.icon-sidebar:hover,
-.icon-sidebar.expanded {
-    width: 200px;
+:root.open-left-nav,
+body.nav-lock {
+  --xdr-left-nav-width: 270px;
 }
 
-.icon-sidebar.locked {
-    width: 200px;
+/* Nav component host styles */
+.left-nav {
+  --nav-shadow-color: rgb(0 0 0 / 0.0784);
+  --nav-bg: #000;
+  --nav-lock-button-color: #333;
+  --nav-lock-button-color-hover: #929191;
+  --nav-lock-button-bg-color-hover: rgb(6 35 20 / 0.698);
+  --nav-lock-button-color-active: #fefefe;
+  --nav-footer-modal-border: #333;
+  --nav-item-hover-bg-color: #05180f;
+  --nav-item-active-bg-color: #062314;
+  --nav-item-active-icon-color: var(--xdr-brand, #0c6);
+  --nav-item-text-color: #fefefe;
+  --nav-sub-item-text-color: #b8b8b8;
+  --nav-sub-item-text-active-color: #eaebeb;
+  --nav-item-favorite-color: #b8b8b8;
+  --nav-item-favorite-active-color: #fefefe;
+  --nav-profile-text-color: #eaebeb;
+  --nav-profile-bg: #333;
+  --nav-profile-hover-bg: rgb(6 35 20 / 0.698);
+  --nav-profile-active-bg: #062314;
+  --nav-dialog-bg: #151515;
+  --nav-dialog-border: #333;
+  --nav-theme-bg: #151515;
+  --nav-theme-color: #b8b8b8;
+  --nav-theme-selected-color: var(--xdr-brand, #0c6);
+  --nav-theme-selected-bg: #333;
+
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  z-index: 999;
 }
 
-/* Logo section at top */
-.icon-sidebar-logo {
-    display: flex;
-    align-items: center;
-    height: 52px;
-    padding: 0 8px;
-    flex-shrink: 0;
+/* Left nav body - the expanding container */
+.left-nav-body {
+  transition: max-width 0.3s ease-in-out;
+  max-width: 270px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: var(--nav-bg);
 }
 
-.icon-sidebar-logo img,
-.icon-sidebar-logo svg {
-    width: 40px;
-    height: 40px;
-    flex-shrink: 0;
+/* Minimized state */
+.left-nav.minimized .left-nav-body {
+  max-width: 56px;
 }
 
-.icon-sidebar-logo-text {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    color: #a4a4a4;
-    margin-left: 10px;
-    white-space: nowrap;
-    opacity: 0;
-    transition: opacity 0.15s ease;
+/* Expanded/locked state */
+body.nav-lock .left-nav .left-nav-body,
+.left-nav:not(.minimized) .left-nav-body {
+  max-width: 270px;
 }
 
-.icon-sidebar:hover .icon-sidebar-logo-text,
-.icon-sidebar.expanded .icon-sidebar-logo-text,
-.icon-sidebar.locked .icon-sidebar-logo-text {
-    opacity: 1;
+/* Tailwind utility classes used by Cortex */
+.tw-mx-3 {
+  margin-left: var(--spacing-3);
+  margin-right: var(--spacing-3);
 }
 
-/* Lock/pin button */
-.sidebar-lock-btn {
-    position: absolute;
-    top: 18px;
-    right: 12px;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: none;
-    color: var(--xdr-on-background-secondary);
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s ease, color 0.15s ease;
-    padding: 0;
+.tw-mb-2 {
+  margin-bottom: var(--spacing-2);
 }
 
-.icon-sidebar:hover .sidebar-lock-btn,
-.icon-sidebar.expanded .sidebar-lock-btn,
-.icon-sidebar.locked .sidebar-lock-btn {
-    opacity: 1;
+.tw-flex {
+  display: flex;
 }
 
-.sidebar-lock-btn:hover {
-    color: var(--xdr-on-background);
+.tw-size-8 {
+  width: var(--spacing-8);
+  height: var(--spacing-8);
 }
 
-.sidebar-lock-btn svg {
-    width: 16px;
-    height: 16px;
-    stroke: currentcolor;
-    stroke-width: 2;
-    fill: none;
+.tw-items-center {
+  align-items: center;
 }
 
-.icon-sidebar.locked .sidebar-lock-btn {
-    color: #0c6;
+.tw-justify-center {
+  justify-content: center;
 }
 
-.icon-sidebar-nav {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 0.5rem 0;
+.tw-rounded {
+  border-radius: var(--border-radius-xs);
 }
 
-.icon-sidebar-section {
-    display: flex;
-    flex-direction: column;
-    margin-bottom: 0.5rem;
+/* Header link - logo area */
+.header-link {
+  margin: 0 8px;
+  align-items: center;
+  display: flex;
+  height: 52px;
+  text-decoration: none;
 }
 
-.icon-sidebar-divider {
-    height: 1px;
-    background: var(--xdr-border-extra-soft);
-    margin: 0.5rem 0.75rem;
+.header-link:focus-visible {
+  outline: 1px solid var(--xdr-border, #484848) !important;
 }
 
-/* ============================================================
-   Icon Sidebar Items - Cortex XDR Pattern
-   ============================================================ */
-
-/* Wrapper div controls margins - item stays 100% of wrapper */
-.nav-item-wrapper {
-    margin: 0 12px 8px;
+/* Lock button */
+.lock-button {
+  position: absolute;
+  right: 6px;
+  z-index: 1;
+  top: 10px;
+  color: var(--nav-lock-button-color);
+  opacity: 1;
+  background-color: transparent;
+  transition: opacity 0.3s 0.3s, color 0.3s, background-color 0.3s;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  width: var(--spacing-8);
+  height: var(--spacing-8);
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--border-radius-xs);
+  padding: 0;
 }
 
-.icon-sidebar-item {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    height: 32px;
-    padding: 0;
-    color: #fefefe;
-    text-decoration: none;
-    position: relative;
-    transition: background-color 0.15s ease;
-    cursor: pointer;
-    border-radius: 4px;
-    overflow: hidden;
-    font-size: 14px;
-    white-space: nowrap;
+.lock-button:hover {
+  background-color: var(--nav-lock-button-bg-color-hover);
+  color: var(--nav-lock-button-color-hover);
 }
 
-.icon-sidebar-item svg {
-    width: 24px;
-    height: 24px;
-    stroke: #b8b8b8;
-    stroke-width: 1.5;
-    fill: none;
-    flex-shrink: 0;
-    margin: 0 4px;
+.lock-button.active {
+  color: var(--nav-lock-button-color-active);
 }
 
-/* Text label - clipped when collapsed via overflow:hidden on item */
-.icon-sidebar-item-text {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-left: 8px;
-    font-size: 14px;
-    font-weight: 400;
-    white-space: nowrap;
-    text-decoration: none;
-    color: #fefefe;
+/* Hide lock button when mouse leaves nav */
+body.nav-mouse-leave .lock-button {
+  opacity: 0;
 }
 
-/* Active state - bold text */
-.icon-sidebar-item.active .icon-sidebar-item-text {
-    font-weight: 700;
+/* When minimized, hide lock button */
+.left-nav.minimized .lock-button {
+  opacity: 0;
 }
 
-.icon-sidebar-item:hover {
-    background: var(--xdr-hover);
-    color: #eaebeb;
+/* Reset button base styles */
+.reset-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
-.icon-sidebar-item:hover svg {
-    stroke: #eaebeb;
+/* Nav menu item - the main navigation buttons */
+.nav-menu-item {
+  align-items: center;
+  background-color: transparent;
+  border: 0;
+  border-radius: 4px;
+  display: flex;
+  color: var(--nav-item-text-color);
+  font-size: 14px;
+  overflow: hidden;
+  position: relative;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-/* Active state - dark green background */
-.icon-sidebar-item.active {
-    color: #fefefe;
-    background: #062314;
+/* Level 0 items (main nav) */
+.nav-menu-item.nav-menu-item-level-0 {
+  height: 32px;
+  max-width: 100%;
+  min-height: 32px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
-.icon-sidebar-item.active svg {
-    stroke: #fefefe;
+.nav-menu-item.nav-menu-item-level-0:hover,
+.nav-menu-item.nav-menu-item-level-0.is-open {
+  background-color: var(--nav-item-hover-bg-color);
 }
 
-.icon-sidebar-item:hover svg {
-    stroke: #fefefe;
+.nav-menu-item.nav-menu-item-level-0.active-link {
+  background-color: var(--nav-item-active-bg-color);
+  font-weight: 700;
 }
 
-/* ============================================================
-   Tooltips
-   ============================================================ */
-.icon-sidebar-item[data-tooltip]::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    left: 100%;
-    top: 50%;
-    transform: translateY(-50%);
-    margin-left: 8px;
-    padding: 6px 12px;
-    background: var(--xdr-surface-primary);
-    color: var(--xdr-on-background);
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-    border-radius: 4px;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.15s ease, visibility 0.15s ease;
-    z-index: 300;
-    box-shadow: 0 2px 8px rgb(0, 0, 0, 0.3);
+.nav-menu-item.nav-menu-item-level-0.active-link .nav-icon {
+  color: var(--nav-item-active-icon-color);
 }
 
-.icon-sidebar-item:hover[data-tooltip]::after {
-    opacity: 1;
-    visibility: visible;
+/* Icon wrapper */
+.nav-menu-item .nav-icon {
+  margin: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-/* ============================================================
-   Secondary Panel (180px slide-out)
-   ============================================================ */
-.secondary-panel {
-    position: fixed;
-    top: 60px;
-    left: 56px;
-    bottom: 0;
-    width: 180px;
-    background: var(--xdr-surface);
-    border-right: 1px solid var(--xdr-border-extra-soft);
-    transform: translateX(-100%);
-    transition: transform 0.2s ease-out;
-    z-index: 150;
-    display: flex;
-    flex-direction: column;
-    padding: 1rem 0;
+.nav-menu-item .nav-icon svg {
+  width: 24px;
+  height: 24px;
 }
 
-.secondary-panel.open {
-    transform: translateX(0);
+/* Nav menu item content (text) */
+.nav-menu-item-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 8px;
 }
 
-.secondary-panel-header {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--xdr-disabled-text);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    padding: 0.5rem 1rem 0.75rem;
+/* Hide when minimized */
+.hide-when-minimized {
+  overflow: hidden;
+  transition: opacity 0.3s ease-out;
+  white-space: nowrap;
 }
 
-.secondary-panel-item {
-    display: block;
-    padding: 0.625rem 1rem;
-    color: var(--xdr-on-background-secondary);
-    text-decoration: none;
-    font-size: 13px;
-    transition: background-color 0.15s ease, color 0.15s ease;
+.left-nav.minimized .hide-when-minimized {
+  opacity: 0;
+  pointer-events: none;
 }
 
-.secondary-panel-item:hover {
-    background: var(--xdr-hover);
-    color: var(--xdr-on-background);
+/* Active top item marker */
+.active-top-item {
+  /* Visual indicator for active section */
 }
 
-.secondary-panel-item.active {
-    color: var(--xdr-primary);
-    background: rgb(18, 141, 243, 0.1);
+/* Nav menu sections container */
+.nav-menu-sections {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
 }
 
-/* ============================================================
-   User Avatar (bottom of sidebar)
-   ============================================================ */
-.icon-sidebar-footer {
-    margin-top: auto;
-    padding: 0.5rem 0;
+.nav-menu-sections::-webkit-scrollbar {
+  display: none;
 }
 
-.icon-sidebar-footer .icon-sidebar-divider {
-    margin: 0 12px 0.5rem;
+/* Footer section */
+.nav-footer {
+  margin-top: auto;
+  padding: 8px 0;
+  border-top: 1px solid var(--nav-footer-modal-border);
 }
 
-.icon-sidebar-user {
-    display: flex;
-    align-items: center;
-    padding: 0.5rem 12px;
-    position: relative;
+/* User profile area */
+.nav-profile {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  margin: 0 8px;
 }
 
-.user-avatar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    flex-shrink: 0;
-    background: #333;
-    color: #fefefe;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.15s ease;
+.nav-profile:hover {
+  background-color: var(--nav-profile-hover-bg);
 }
 
-.user-avatar:hover {
-    background: #484848;
+.nav-profile-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background-color: var(--nav-profile-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nav-profile-text-color);
+  flex-shrink: 0;
 }
 
-.icon-sidebar-user .user-name {
-    margin-left: 12px;
-    font-size: 12px;
-    color: var(--xdr-on-background-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
+.nav-profile-info {
+  margin-left: 8px;
+  overflow: hidden;
 }
 
-.user-dropdown {
-    position: absolute;
-    left: 100%;
-    bottom: 0;
-    margin-left: 8px;
-    min-width: 160px;
-    background: var(--xdr-surface-primary);
-    border: 1px solid var(--xdr-border);
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgb(0, 0, 0, 0.4);
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(10px);
-    transition: opacity 0.15s ease, visibility 0.15s ease, transform 0.15s ease;
-    z-index: 400;
+.nav-profile-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nav-profile-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.user-dropdown.open {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
+.nav-profile-email {
+  font-size: 12px;
+  color: var(--nav-sub-item-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.user-dropdown-header {
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--xdr-border-extra-soft);
-    font-size: 12px;
-    color: var(--xdr-on-background-secondary);
+/* Logo SVG styling */
+.header-link svg {
+  width: 40px;
+  height: 40px;
 }
 
-.user-dropdown-item {
-    display: block;
-    padding: 0.625rem 1rem;
-    color: var(--xdr-on-background);
-    text-decoration: none;
-    font-size: 13px;
-    transition: background-color 0.15s ease;
+.header-link .logo-text {
+  margin-left: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #a4a4a4;
+  white-space: nowrap;
 }
 
-.user-dropdown-item:hover {
-    background: var(--xdr-hover);
+/* Tooltip styles */
+.tooltip.main-side-nav-menu-item-tooltip {
+  opacity: 1;
 }
 
-.user-dropdown-item.danger {
-    color: var(--xdr-error);
+.xdr-dark-theme .tooltip.main-side-nav-menu-item-tooltip {
+  --nav-tooltip-bg: #1f1f1f;
+  --nav-tooltip-color: #fefefe;
+  --nav-tooltip-shadow: 0 0 8px 2px rgb(0 0 0 / 0.5);
 }
 
-/* ============================================================
-   Layout Adjustments
-   ============================================================ */
-/* Main content area - shift right for icon sidebar */
-.xdr-dark-theme .layout {
-    padding-left: 56px;
+.tooltip.main-side-nav-menu-item-tooltip .arrow {
+  display: none;
 }
 
-/* When secondary panel is open */
-.xdr-dark-theme .layout.panel-open {
-    padding-left: 236px; /* 56 + 180 */
-}
-
-/* Header adjustment */
-.xdr-dark-theme .header {
-    left: 56px;
-}
-
-/* Hide old sidebar */
-.xdr-dark-theme .sidebar {
-    display: none;
-}
-
-/* Main content adjustment */
-.xdr-dark-theme .main {
-    margin-left: 0;
+.tooltip.main-side-nav-menu-item-tooltip .tooltip-inner {
+  padding: 6px 12px;
+  background-color: var(--nav-tooltip-bg);
+  color: var(--nav-tooltip-color);
+  box-shadow: var(--nav-tooltip-shadow);
 }

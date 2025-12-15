@@ -19,6 +19,11 @@ variable "tags" {
   type        = map(string)
 }
 
+variable "domain_name" {
+  description = "Base domain name (e.g., dev.shifter.keplerops.com)"
+  type        = string
+}
+
 # ------------------------------------------------------------------------------
 # EC2
 # ------------------------------------------------------------------------------

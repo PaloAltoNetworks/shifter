@@ -621,6 +621,57 @@
 .xdr-dark-theme .gap-1 { gap: 0.5rem; }
 .xdr-dark-theme .gap-2 { gap: 1rem; }
 
+/* Additional spacing */
+.xdr-dark-theme .ml-sm { margin-left: 0.5rem; }
+.xdr-dark-theme .mr-xs { margin-right: 0.25rem; }
+.xdr-dark-theme .pl-lg { padding-left: 1.5rem; }
+
+/* List styling */
+.xdr-dark-theme .list-styled {
+    padding-left: 1.5rem;
+    line-height: 1.8;
+}
+
+/* Card variants */
+.xdr-dark-theme .card-flush {
+    padding: 0;
+}
+
+/* Typography helpers */
+.xdr-dark-theme .font-mono {
+    font-family: monospace;
+}
+
+.xdr-dark-theme .leading-relaxed {
+    line-height: 1.6;
+}
+
+/* Opacity helpers */
+.xdr-dark-theme .opacity-60 {
+    opacity: 0.6;
+}
+
+/* Code blocks */
+.xdr-dark-theme code {
+    background: var(--xdr-hover);
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+.xdr-dark-theme pre {
+    background: var(--xdr-surface-secondary);
+    padding: 1rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    color: var(--xdr-on-background);
+}
+
+.xdr-dark-theme pre code {
+    background: transparent;
+    padding: 0;
+}
+
 /* Messages */
 .xdr-dark-theme .messages {
     margin-bottom: 1.5rem;

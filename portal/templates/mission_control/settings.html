@@ -11,7 +11,7 @@
     <div class="card-title">Account</div>
     <div class="form-group">
         <label class="form-label">Email</label>
-        <input type="email" class="form-input" value="{{ request.user.email }}" disabled style="opacity: 0.6;">
+        <input type="email" class="form-input opacity-60" value="{{ request.user.email }}" disabled>
         <p class="text-small text-muted mt-sm">
             Managed by your identity provider
         </p>
@@ -47,7 +47,7 @@
         <p class="text-muted mb-md">
             This will:
         </p>
-        <ul class="text-muted mb-lg" style="padding-left: 1.5rem;">
+        <ul class="text-muted mb-lg pl-lg">
             <li>Destroy any active ranges</li>
             <li>Delete all uploaded agents</li>
             <li>Remove your account permanently</li>

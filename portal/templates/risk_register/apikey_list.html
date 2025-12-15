@@ -13,9 +13,7 @@
 <div class="card message-success">
     <h3 class="card-title text-success">⚠️ Save This Key Now</h3>
     <p class="mb-md">This is your new API key. Copy it now - you won't be able to see it again!</p>
-    <div style="background: var(--xdr-surface-secondary); padding: 1rem; border-radius: 4px; font-family: monospace; word-break: break-all;">
-        {{ raw_key }}
-    </div>
+    <pre class="font-mono" style="word-break: break-all;">{{ raw_key }}</pre>
     <p class="mt-md text-small">
         <strong>Key Name:</strong> {{ api_key.name }}<br>
         <strong>Prefix:</strong> {{ api_key.prefix }}...
@@ -37,7 +35,7 @@
 </div>
 
 {% if keys %}
-<div class="card" style="padding: 0;">
+<div class="card card-flush">
     <table class="table">
         <thead>
             <tr>
@@ -53,7 +51,7 @@
             {% for key in keys %}
             <tr>
                 <td>{{ key.name }}</td>
-                <td style="font-family: monospace;">{{ key.display_key }}</td>
+                <td class="font-mono">{{ key.display_key }}</td>
                 <td class="text-muted">{{ key.created_at|date:"M d, Y" }}</td>
                 <td class="text-muted">
                     {% if key.last_used_at %}{{ key.last_used_at|date:"M d, Y H:i" }}{% else %}Never{% endif %}
@@ -90,8 +88,8 @@
 
 <div class="card mt-lg">
     <h3 class="card-title">API Usage</h3>
-    <p class="mb-md">Use your API key in the <code style="background: var(--xdr-hover); padding: 0.125rem 0.375rem; border-radius: 4px;">X-API-Key</code> header:</p>
-    <pre style="background: var(--xdr-surface-secondary); padding: 1rem; border-radius: 4px; overflow-x: auto; color: var(--xdr-on-background);"><code>curl -H "X-API-Key: rr_live_your_key_here" \
+    <p class="mb-md">Use your API key in the <code>X-API-Key</code> header:</p>
+    <pre><code>curl -H "X-API-Key: rr_live_your_key_here" \
      {{ request.scheme }}://{{ request.get_host }}/api/v1/risks/</code></pre>
 </div>
 {% endblock %}

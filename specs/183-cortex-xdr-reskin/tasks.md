@@ -128,13 +128,13 @@
 
 **Purpose**: Final validation and cleanup
 
-- [ ] T051 Run full visual review using quickstart.md checklist
-- [ ] T052 Test all pages at 1366×768 resolution (minimum demo resolution)
-- [ ] T053 Verify no console errors related to CSS or fonts in browser dev tools
-- [ ] T054 Check text contrast meets WCAG AA requirements (4.5:1 minimum)
-- [ ] T055 Test in Chrome, Firefox, Safari, Edge (latest versions)
-- [ ] T056 Remove any remaining inline styles that duplicate xdr-theme.css
-- [ ] T057 Final cleanup: Remove unused CSS classes from xdr-theme.css if any
+- [x] T051 Run full visual review using quickstart.md checklist
+- [x] T052 Test all pages at 1366×768 resolution (minimum demo resolution)
+- [x] T053 Verify no console errors related to CSS or fonts in browser dev tools
+- [x] T054 Check text contrast meets WCAG AA requirements (4.5:1 minimum)
+- [x] T055 Test in Chrome, Firefox, Safari, Edge (latest versions)
+- [x] T056 Remove any remaining inline styles that duplicate xdr-theme.css
+- [x] T057 Final cleanup: Remove unused CSS classes from xdr-theme.css if any
 
 ---
 

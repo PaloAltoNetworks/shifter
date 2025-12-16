@@ -154,11 +154,11 @@ echo "Starting victim instance setup..."
 
 # Configure SSH access for MCP server
 echo "Configuring SSH access..."
-mkdir -p /home/ec2-user/.ssh
-chmod 700 /home/ec2-user/.ssh
-echo "{public_key}" >> /home/ec2-user/.ssh/authorized_keys
-chmod 600 /home/ec2-user/.ssh/authorized_keys
-chown -R ec2-user:ec2-user /home/ec2-user/.ssh
+mkdir -p /home/ubuntu/.ssh
+chmod 700 /home/ubuntu/.ssh
+echo "{public_key}" >> /home/ubuntu/.ssh/authorized_keys
+chmod 600 /home/ubuntu/.ssh/authorized_keys
+chown -R ubuntu:ubuntu /home/ubuntu/.ssh
 echo "SSH access configured"
 
 # Download agent installer from S3

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.1] - 2025-12-15
 
+### Changed
+- Reskin OpenWeb UI UX to match Cortex XDR look and feel
+
+## [0.5.1] - 2025-12-15
+
 ### Added
 - AWS Network Firewall for Range VPC egress filtering (#251)
 - NAT Gateway for private subnet internet access

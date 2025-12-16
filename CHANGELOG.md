@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-12-15
+
+### Added
+- AWS Network Firewall for Range VPC egress filtering (#251)
+- NAT Gateway for private subnet internet access
+- Domain allowlists: Victim restricted to XDR endpoints, Kali has no external access
+
 ## [0.5.0] - 2025-12-14
 
 ### Added

@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.1] - 2025-12-15
+## [0.5.3] - 2025-12-15
+
+### Added
+- TARGET_MODE parameterization for MCP-Shifter (`kali` or `victim`)
+  - Same binary serves both target types via environment variable
+  - Dynamic column selection based on target mode
+  - Tool prefixes match target type (`kali_*` or `victim_*`)
+- Victim MCP database user (`victim_mcp_user`) for operational isolation
+- Renamed `mcp_user` to `kali_mcp_user` for consistency
+- SSM VPC Endpoints for Range VPC (ssm, ssmmessages, ec2messages)
+  - Enables Systems Manager access without internet
+  - Traffic stays within AWS network
+
+### Changed
+- Replaced mcp-red with mcp-shifter in CI quality workflow
+- Architecture docs updated with MCP dual-container diagram
+
+## [0.5.2] - 2025-12-15
 
 ### Changed
 - Reskin OpenWeb UI UX to match Cortex XDR look and feel

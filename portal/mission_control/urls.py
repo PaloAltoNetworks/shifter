@@ -12,6 +12,7 @@ urlpatterns = [
     path("agents/upload/", views.upload_agent, name="upload_agent"),
     path("agents/<int:agent_id>/delete/", views.delete_agent, name="delete_agent"),
     path("history/", views.history, name="history"),
+    path("terminal/", views.terminal, name="terminal"),
     path("settings/", views.settings, name="settings"),
     path("help/", views.help_page, name="help"),
     # Presigned URL upload API

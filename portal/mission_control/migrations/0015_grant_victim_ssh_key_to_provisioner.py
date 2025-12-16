@@ -11,6 +11,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("mission_control", "0012_range_victim_ssh_key_secret_arn"),
+        ("mission_control", "0012_add_cognito_sub_to_userprofile"),
     ]
 
     operations = [

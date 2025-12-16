@@ -200,15 +200,15 @@ def handler(event: dict, context) -> dict:
         update_range(
             conn,
             range_id,
-            victim_instance_id=None,
+            victim_instance_id="",
             victim_ip=None,
-            victim_ssh_key_secret_arn=None,
-            kali_instance_id=None,
+            victim_ssh_key_secret_arn="",
+            kali_instance_id="",
             kali_ip=None,
-            kali_ssh_key_secret_arn=None,
-            subnet_id=None,
-            subnet_cidr=None,
-            chat_url=None,
+            kali_ssh_key_secret_arn="",
+            subnet_id="",
+            subnet_cidr="",
+            chat_url="",
         )
         logger.info(f"Cleared resource fields for range {range_id}")
 

@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
     """Grant UPDATE permission on victim_ssh_key_secret_arn to provisioner_lambda."""
 
     dependencies = [
-        ("mission_control", "0014_rename_mcp_user_to_kali_mcp_user"),
+        ("mission_control", "0012_range_victim_ssh_key_secret_arn"),
     ]
 
     operations = [

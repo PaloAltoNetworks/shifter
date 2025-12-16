@@ -50,6 +50,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
+            package-lock.json
             mcp/aptl-mcp-common/package-lock.json
             mcp/mcp-shifter/package-lock.json
 
@@ -96,6 +97,9 @@ jobs:
         run: |
           uv sync --group dev
           uv run python -m pytest --cov=. --cov-report=xml:coverage.xml
+
+      - name: Install root eslint dependencies
+        run: npm ci
 
       - name: Lint TypeScript
         working-directory: mcp/mcp-shifter

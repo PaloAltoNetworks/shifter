@@ -1,0 +1,80 @@
+name: Core
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      is_dev:
+        required: true
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Plan (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.1"
+      - name: Write tfvars
+        env:
+          TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_FOUNDATION || secrets.TF_VARS_PROD_FOUNDATION }}
+        run: echo "$TF_VARS" > terraform.tfvars
+      - run: terraform fmt -check -recursive
+        working-directory: terraform
+      - run: terraform init
+      - run: terraform validate
+      - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/environments/${{ inputs.environment }}/plan.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `#### Terraform Plan - Core (${{ inputs.environment }})\n<details><summary>Show Plan</summary>\n\n\`\`\`terraform\n${plan.substring(0, 60000)}\n\`\`\`\n\n</details>`
+            });
+
+  apply:
+    name: Apply (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: plan
+    if: always() && (needs.plan.result == 'success' || needs.plan.result == 'skipped')
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.1"
+      - name: Write tfvars
+        env:
+          TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_FOUNDATION || secrets.TF_VARS_PROD_FOUNDATION }}
+        run: echo "$TF_VARS" > terraform.tfvars
+      - run: terraform init
+      - run: terraform apply -auto-approve
+      - run: terraform output -json

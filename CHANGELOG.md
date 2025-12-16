@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-12-14
+
+### Added
+- MCP-Shifter server for OpenWebUI integration (`mcp/mcp-shifter/`)
+  - Cognito JWT authentication with per-user session management
+  - RDS IAM authentication for range lookup
+  - Secrets Manager integration for SSH key retrieval
+  - Session limits (per-user and global) with structured logging
+  - Idle connection cleanup timer
+  - StreamableHTTPServerTransport for MCP over HTTP
+- OpenWebUI MCP wrapper tool (`mcp/openwebui-mcp-wrapper/`)
+- `cognito_sub` column on Range model for MCP user lookups
+- Custom OIDC backend passing Cognito `sub` claim to Range model
+- Security context in MCP server description (authorized pentest boundaries)
+- VPC peering between Portal VPC and Range VPC for SSH connectivity
+- ALB listener rules for `/chat` and `/mcp` path routing
+- IAM policies for MCP server (RDS connect, Secrets Manager read)
+- Security group rules for SSH from AgentChat to Kali instances
+- Cognito app client for OpenWebUI OIDC authentication
+- AgentChat docker-compose for local development (`agentchat/`)
+- SSH keypair generation in create_kali Lambda (stored in Secrets Manager)
+- `kali_ssh_key_secret_arn` field on Range model
+
+### Changed
+- AgentChat deployment workflow includes mcp-shifter container
+- mark_ready Lambda sets chat_url when range becomes ready
+- - AgentChat routing changed from subpath (`/chat/`) to subdomain (`chat.{domain}`)
+- ACM certificate includes SAN for `chat.{domain}` subdomain
+- Cognito OAuth callbacks updated for subdomain URLs
+- ALB listener rules use `host_header` matching instead of `path_pattern`
+- Docker layer caching added to portal and agentchat CI/CD workflows (faster builds)
+
+## [0.4.5] - 2025-12-15
+### Changed
+- Reskin Portal and Risk Registerto Cortex XDR look and feel
+
 ## [0.4.4] - 2025-12-14
 
 ### Changed

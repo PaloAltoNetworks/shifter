@@ -7,9 +7,30 @@
 
 import { Pool, type PoolClient } from 'pg';
 import { Signer } from '@aws-sdk/rds-signer';
-import { getConfig } from './config.js';
+import { getConfig, type TargetMode } from './config.js';
 import { logger } from './logger.js';
 import type { RangeRecord } from './types.js';
+
+/**
+ * Column mapping by target mode.
+ * Maps generic field names to actual database column names.
+ */
+const COLUMN_MAP: Record<TargetMode, {
+  ip: string;
+  instanceId: string;
+  sshKeySecretArn: string;
+}> = {
+  kali: {
+    ip: 'kali_ip',
+    instanceId: 'kali_instance_id',
+    sshKeySecretArn: 'kali_ssh_key_secret_arn',
+  },
+  victim: {
+    ip: 'victim_ip',
+    instanceId: 'victim_instance_id',
+    sshKeySecretArn: 'victim_ssh_key_secret_arn',
+  },
+};
 
 // AWS RDS uses certificates signed by their CA. For IAM auth over SSL,
 // we need to either provide the CA bundle or disable strict verification.
@@ -87,28 +108,38 @@ export async function getClient(): Promise<PoolClient> {
  * Look up active range for a user by Cognito sub.
  * Returns null if user has no active range.
  *
+ * Column selection is parameterized based on TARGET_MODE:
+ * - TARGET_MODE=kali: queries kali_ip, kali_instance_id, kali_ssh_key_secret_arn
+ * - TARGET_MODE=victim: queries victim_ip, victim_instance_id, victim_ssh_key_secret_arn
+ *
  * @param cognitoSub - The user's Cognito subject identifier (UUID)
  * @returns RangeRecord if found, null otherwise
  */
 export async function getActiveRangeForUser(cognitoSub: string): Promise<RangeRecord | null> {
   const client = await getClient();
+  const config = getConfig();
+  const cols = COLUMN_MAP[config.targetMode];
 
   try {
     // Query joins through userprofile to get user by cognito_sub
     // Active statuses include: ready, paused (usable states)
+    // Column selection is based on TARGET_MODE
     const result = await client.query<{
       id: number;
       user_id: number;
       status: string;
-      kali_ip: string;
-      kali_instance_id: string;
-      kali_ssh_key_secret_arn: string;
+      target_ip: string;
+      target_instance_id: string;
+      target_ssh_key_secret_arn: string;
       chat_url: string | null;
       created_at: Date;
       updated_at: Date;
     }>(
-      `SELECT r.id, r.user_id, r.status, r.kali_ip, r.kali_instance_id,
-              r.kali_ssh_key_secret_arn, r.chat_url, r.created_at, r.updated_at
+      `SELECT r.id, r.user_id, r.status,
+              r.${cols.ip} AS target_ip,
+              r.${cols.instanceId} AS target_instance_id,
+              r.${cols.sshKeySecretArn} AS target_ssh_key_secret_arn,
+              r.chat_url, r.created_at, r.updated_at
        FROM mission_control_range r
        JOIN auth_user u ON r.user_id = u.id
        JOIN mission_control_userprofile p ON p.user_id = u.id
@@ -128,9 +159,9 @@ export async function getActiveRangeForUser(cognitoSub: string): Promise<RangeRe
       id: row.id,
       userId: row.user_id,
       status: row.status,
-      kaliIp: row.kali_ip,
-      kaliInstanceId: row.kali_instance_id,
-      kaliSshKeySecretArn: row.kali_ssh_key_secret_arn,
+      targetIp: row.target_ip,
+      targetInstanceId: row.target_instance_id,
+      targetSshKeySecretArn: row.target_ssh_key_secret_arn,
       chatUrl: row.chat_url,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

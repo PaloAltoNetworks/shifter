@@ -19,14 +19,15 @@ export interface UserContext {
 
 /**
  * Range record from database
+ * Fields are target-agnostic - actual columns queried depend on TARGET_MODE
  */
 export interface RangeRecord {
   id: number;
   userId: number;
   status: string;
-  kaliIp: string;
-  kaliInstanceId: string;
-  kaliSshKeySecretArn: string;
+  targetIp: string;
+  targetInstanceId: string;
+  targetSshKeySecretArn: string;
   chatUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -39,7 +40,7 @@ export interface MCPSession {
   sessionId: string;
   userEmail: string;
   rangeId: number;
-  kaliIp: string;
+  targetIp: string;
   labConfig: LabConfig;
   transport: StreamableHTTPServerTransport;
   createdAt: Date;
@@ -75,6 +76,7 @@ export interface SessionLimitError {
  * Express request with user context attached by auth middleware
  */
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       userContext?: UserContext;

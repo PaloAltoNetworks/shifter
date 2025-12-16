@@ -112,8 +112,9 @@ module "ec2" {
   db_resource_id = data.terraform_remote_state.portal.outputs.db_resource_id
   environment    = var.environment
 
-  # ECR pull permissions for mcp-shifter
+  # ECR pull permissions for mcp-shifter and custom OpenWebUI
   mcp_shifter_ecr_arn = data.terraform_remote_state.foundation.outputs.mcp_shifter_ecr_arn
+  openwebui_ecr_arn   = data.terraform_remote_state.foundation.outputs.openwebui_ecr_arn
 
   tags = var.tags
 }

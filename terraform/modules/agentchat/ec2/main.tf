@@ -187,9 +187,9 @@ resource "aws_iam_role_policy" "rds_connect" {
   })
 }
 
-# ECR pull permissions for mcp-shifter
+# ECR pull permissions for mcp-shifter and custom OpenWebUI
 resource "aws_iam_role_policy" "ecr_pull" {
-  count = var.mcp_shifter_ecr_arn != "" ? 1 : 0
+  count = var.mcp_shifter_ecr_arn != "" || var.openwebui_ecr_arn != "" ? 1 : 0
   name  = "ecr-pull"
   role  = aws_iam_role.this.id
 
@@ -212,7 +212,7 @@ resource "aws_iam_role_policy" "ecr_pull" {
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage"
         ]
-        Resource = var.mcp_shifter_ecr_arn
+        Resource = compact([var.mcp_shifter_ecr_arn, var.openwebui_ecr_arn])
       }
     ]
   })

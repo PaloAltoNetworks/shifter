@@ -43,6 +43,25 @@ resource "aws_iam_role_policy_attachment" "range_instance_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# S3 read access for downloading agent installers during user data bootstrap
+resource "aws_iam_role_policy" "range_instance_s3" {
+  name = "s3-agent-read"
+  role = aws_iam_role.range_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject"
+        ]
+        Resource = "arn:aws:s3:::${var.agent_s3_bucket}/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "range_instance" {
   name = "${var.name_prefix}-range-instance"
   role = aws_iam_role.range_instance.name

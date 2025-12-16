@@ -35,6 +35,14 @@ class UserProfile(models.Model):
     """Extended user data for soft delete and anonymization."""
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    cognito_sub = models.CharField(
+        max_length=36,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Cognito user pool subject identifier (UUID)",
+    )
     deleted_at = models.DateTimeField(null=True, blank=True)
     anonymized_at = models.DateTimeField(null=True, blank=True)
 
@@ -124,6 +132,9 @@ class Range(models.Model):
     kali_ip = models.GenericIPAddressField(null=True, blank=True)
     kali_instance_id = models.CharField(
         max_length=50, blank=True, default="", help_text="Kali EC2 instance ID (e.g., i-abc123)"
+    )
+    kali_ssh_key_secret_arn = models.CharField(
+        max_length=500, blank=True, default="", help_text="Secrets Manager ARN for Kali SSH private key"
     )
     chat_url = models.URLField(max_length=500, blank=True, default="")
 

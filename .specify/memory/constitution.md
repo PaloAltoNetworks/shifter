@@ -1,195 +1,264 @@
 <!--
-===============================================================================
-SYNC IMPACT REPORT
-===============================================================================
-Version Change: 0.0.0 → 1.0.0 (MAJOR - initial ratification)
-
-Modified Principles: N/A (initial version)
-
-Added Sections:
-- Core Principles (5 principles)
-  - I. API-First Design
-  - II. Dual-Actor Accessibility
-  - III. Threat Modeling Integration
-  - IV. Audit Trail & Traceability
-  - V. Django Integration Patterns
-- Security & Authentication
-- Development Workflow
-
-Removed Sections: N/A (initial version)
-
-Templates Requiring Updates:
-- ✅ plan-template.md - Constitution Check section compatible
-- ✅ spec-template.md - User stories align with dual-actor model
-- ✅ tasks-template.md - Phase structure compatible
-
-Follow-up TODOs: None
-===============================================================================
+Sync Impact Report:
+- Version change: N/A → 1.0.0 (Initial constitution)
+- Modified principles: N/A (new document)
+- Added sections:
+  - Core Principles (5 principles)
+  - Design Reference (Cortex XDR specifications from assets/styles/)
+  - Implementation Constraints
+  - Governance
+- Removed sections: N/A
+- Templates requiring updates:
+  - ✅ `.specify/templates/plan-template.md` - No changes required (template is generic)
+  - ✅ `.specify/templates/spec-template.md` - No changes required (template is generic)
+  - ✅ `.specify/templates/tasks-template.md` - No changes required (template is generic)
+- Follow-up TODOs: None
+- Source: Colors extracted from assets/styles/login.css (Cortex XSIAM platform)
 -->
 
-# Shifter Risk Register Constitution
+# Portal Cortex XDR Reskin Constitution
+
+This constitution governs the UI/UX reskinning of the Shifter Django portal (landing page,
+Mission Control, and Risk Register) to match the Palo Alto Networks Cortex XDR look and feel.
+The goal is to deliver demo-ready polish that gives stakeholders confidence during customer demos.
 
 ## Core Principles
 
-### I. API-First Design
+### I. Visual Fidelity First
 
-Every feature MUST be exposed via a RESTful API before any UI implementation begins.
-The API serves as the single source of truth for all operations:
+The portal MUST visually match Cortex XDR as closely as possible. Design decisions default
+to "what does Cortex XDR do?" rather than inventing new patterns.
 
-- All CRUD operations on risks, comments, and state changes MUST have corresponding API endpoints
-- API endpoints MUST support JSON request/response payloads
-- API key authentication MUST be supported for programmatic access
-- UI components MUST consume the same API endpoints (no server-side rendering of data)
-- API versioning MUST be considered from the start (prefix: `/api/v1/`)
+**Non-negotiables:**
+- Color palette MUST use Cortex XDR's actual colors (see Design Reference below)
+- Layout structure MUST mirror Cortex XDR sidebar + content pattern
+- Typography MUST match Cortex XDR font stack and weights
+- Component styling (cards, buttons, inputs, tables) MUST follow XDR patterns
+- Spacing and visual rhythm MUST approximate XDR proportions
 
-**Rationale**: AI agents perform most of the work. They need first-class API access, not workarounds.
+**Rationale:** Demo credibility requires the portal to feel like a PANW product. Deviation
+breaks immersion and undermines the professional impression we need to create.
 
-### II. Dual-Actor Accessibility
+### II. Demo-Ready Polish
 
-The system serves two distinct actor types with equal priority:
+Every visible element MUST meet production-quality standards. No placeholder styling,
+broken layouts, or "good enough for now" implementations.
 
-1. **Human Administrators**: Web UI for visual risk management, browsing, and oversight
-2. **AI Agents**: API access for automated risk identification, updates, and resolution
+**Non-negotiables:**
+- All interactive elements MUST have proper hover/focus/active states
+- Loading states MUST be graceful (spinners, skeletons, transitions)
+- Empty states MUST be designed, not just "No data"
+- Error states MUST look intentional and professional
+- Responsive behavior MUST work on typical demo devices (laptop screens 1366×768+)
 
-Both actors MUST be able to perform all operations. Design decisions MUST NOT favor one actor
-over the other unless explicitly justified:
+**Rationale:** First impressions matter. A polished UI signals product maturity and
+engineering competence to demo audiences.
 
-- Human UI MUST provide intuitive navigation and filtering
-- API MUST provide complete programmatic control without requiring UI interaction
-- Error messages MUST be structured for both human readability and machine parsing
-- Rate limiting and quotas (if any) MUST be documented for AI agent consumption patterns
+### III. CSS-First Implementation
 
-**Rationale**: The system is explicitly designed for AI-assisted risk management workflows.
+Styling changes MUST be implemented through CSS/template changes. No Python/Django
+backend modifications unless strictly necessary for template rendering.
 
-### III. Threat Modeling Integration
+**Non-negotiables:**
+- Use CSS custom properties (variables) for all colors, spacing, and typography
+- Style changes MUST NOT require database migrations
+- Style changes MUST NOT alter existing view logic or URL patterns
+- Maintain clean separation between styling and business logic
+- Preserve existing HTML structure where possible; restyle rather than rebuild
 
-Every risk entry MUST support structured threat modeling data:
+**Rationale:** A pure reskin minimizes risk. Keeping backend unchanged ensures the
+demo portal remains stable and functional throughout the styling work.
 
-- STRIDE categories (Spoofing, Tampering, Repudiation, Info Disclosure, DoS, Elevation of Privilege)
-- Likelihood and impact scoring (standardized scale MUST be defined)
-- Attack vector descriptions
-- Affected assets/components linkage
-- Mitigation status tracking
+### IV. Component Consistency
 
-Risk data models MUST NOT be free-form text only. Structured fields enable automated analysis,
-filtering, reporting, and AI agent decision-making.
+All UI components MUST follow a single design language. No mixing of styling approaches
+or inconsistent visual treatments across pages.
 
-**Rationale**: A risk register without structured threat data is just a todo list.
+**Non-negotiables:**
+- Create and use a unified CSS component library (buttons, cards, forms, tables, badges)
+- Document each component's variants (primary, secondary, danger, disabled states)
+- Apply components consistently across all Mission Control pages
+- Eliminate one-off styles; extract repeated patterns into reusable classes
+- Navigation, headers, and footers MUST be identical across all authenticated pages
 
-### IV. Audit Trail & Traceability
+**Rationale:** Consistency is the hallmark of professional software. Inconsistent UI
+immediately signals "work in progress" rather than "production ready."
 
-All state changes MUST be recorded with:
+### V. No Feature Creep
 
-- Actor identification (user or API key)
-- Timestamp (UTC)
-- Previous and new state values
-- Optional context/reason
+This reskin is cosmetic only. No new features, no new pages, no behavioral changes.
 
-Comments MUST be immutable once created. Edits create new comment entries referencing the original.
-Deletions are soft-deletes (marked deleted, not removed from database).
+**Non-negotiables:**
+- No new Django views, models, or URL patterns
+- No new JavaScript functionality beyond styling enhancements (hover effects, transitions)
+- No changes to authentication, authorization, or data flows
+- No "while we're here" improvements to unrelated areas
+- If a styling change suggests a UX improvement, document it for future consideration
 
-Risk lifecycle states (open → acknowledged → mitigating → resolved → closed) MUST be tracked
-with transition timestamps and actor attribution.
+**Rationale:** Scope discipline ensures delivery on schedule. Feature additions multiply
+risk and delay the primary goal of demo readiness.
 
-**Rationale**: Security governance requires complete audit trails. AI agents need history context.
+## Design Reference
 
-### V. Django Integration Patterns
+**Source:** `assets/styles/login.css` - Extracted from Cortex XSIAM platform
 
-Implementation MUST follow existing portal conventions:
+### Cortex XDR Color System
 
-- New Django app: `risk_register/` (parallel to `mission_control/`)
-- Models in `models.py` following existing patterns (soft-delete, timestamps, related_name conventions)
-- URL routing under `/risk-register/` for UI, `/api/v1/risks/` for API
-- Use existing authentication (Cognito OIDC for UI, API key model for programmatic access)
-- Template inheritance from existing portal base templates
-- Static assets follow existing patterns (`static/` directory structure)
+The reskin MUST adopt these colors from the `.xdr-dark-theme` class, replacing the current
+cyberpunk palette:
 
-MUST NOT introduce new frameworks, ORMs, or architectural patterns without explicit justification.
-Prefer Django's built-in capabilities and existing project dependencies.
+| Token | Hex | Usage |
+|-------|-----|-------|
+| `--xdr-primary` | `#128df3` | Primary accent (Cortex blue) |
+| `--xdr-on-primary` | `#fff` | Text on primary accent |
+| `--xdr-background` | `#1f1f1f` | Main page background (dark gray) |
+| `--xdr-on-background` | `#eaebeb` | Primary text on background |
+| `--xdr-on-background-secondary` | `#b8b8b8` | Secondary text |
+| `--xdr-disabled-text` | `#707070` | Disabled/muted text |
+| `--xdr-surface` | `#151515` | Cards, elevated surfaces (darker) |
+| `--xdr-surface-secondary` | `#000` | Deepest surface level |
+| `--xdr-surface-primary` | `#333` | Highlighted surface |
+| `--xdr-hover` | `#333` | Hover state background |
+| `--xdr-selected` | `#484848` | Selected state background |
+| `--xdr-border` | `#484848` | Default borders |
+| `--xdr-border-extra-soft` | `#333` | Subtle borders |
+| `--xdr-border-medium` | `#575757` | Medium emphasis borders |
+| `--xdr-border-strong` | `#707070` | Strong borders |
+| `--xdr-link` | `#128df3` | Link color (same as primary) |
+| `--xdr-placeholder` | `#929191` | Placeholder text |
+| `--xdr-primary-new` | `#fff` | Button background (primary) |
+| `--xdr-on-primary-new` | `#000` | Button text (primary) |
+| `--xdr-primary-bg--hover` | `#f4f5f5` | Primary button hover |
 
-**Rationale**: Consistency with existing codebase reduces cognitive load and maintenance burden.
+**Additional semantic colors (extend as needed):**
 
-## Security & Authentication
+| Token | Hex | Usage |
+|-------|-----|-------|
+| `--xdr-success` | `#0C6` | Success indicators (from gradient) |
+| `--xdr-warning` | `#FFB300` | Warning indicators |
+| `--xdr-error` | `#FF5252` | Error indicators |
+| `--xdr-orange` | `#FA582D` | PANW brand orange (use sparingly) |
 
-Authentication MUST support two mechanisms:
+### Typography
 
-1. **Session-based (UI)**: Cognito OIDC integration via existing mozilla-django-oidc setup
-2. **API Key (Programmatic)**: Django model storing hashed API keys with:
-   - Key prefix for identification (e.g., `rr_live_abc123...`)
-   - Key hash (never store plaintext)
-   - Associated user/service identity
-   - Creation timestamp and optional expiry
-   - Revocation capability
+**Font Family:** `Lato, "Assistant", sans-serif`
 
-API key MUST be settable/rotatable through Django admin interface.
-
-Authorization MUST define clear permission boundaries:
-- All authenticated users can read risks
-- Risk creation/modification requires specific permissions
-- Admin operations (API key management, bulk operations) require elevated privileges
-
-All API endpoints MUST require authentication. No anonymous access.
-
-## Development Workflow
-
-### Testing
-
-Tests SHOULD be written for:
-- API endpoint contracts (request/response validation)
-- Model state transitions
-- Permission enforcement
-- Audit trail generation
-
-Django's TestCase and pytest-django MUST be used (per existing `pyproject.toml`).
-
-### Code Organization
-
-```
-portal/
-├── risk_register/           # New Django app
-│   ├── __init__.py
-│   ├── admin.py             # Admin interface for risk management
-│   ├── api/                  # API views and serializers
-│   │   ├── __init__.py
-│   │   ├── views.py
-│   │   └── serializers.py
-│   ├── apps.py
-│   ├── migrations/
-│   ├── models.py            # Risk, Comment, AuditLog, APIKey models
-│   ├── urls.py              # URL routing (UI + API)
-│   └── views.py             # Template views for UI
-├── templates/
-│   └── risk_register/       # Templates for UI
-└── tests/
-    └── risk_register/       # Tests for the app
+Load via Google Fonts:
+```html
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
 ```
 
-### Versioning
+| Element | Font | Weight | Size |
+|---------|------|--------|------|
+| Body | Lato | 400 | calc(10px + 0.2vw) or 14px base |
+| Headers | Lato | 700 | 18-24px |
+| Labels | Lato | 400 | 12px |
+| Buttons | Lato | 600 | 12px |
+| Links | Lato | 400 | 12px |
 
-Data model changes MUST use Django migrations with descriptive names.
-API changes MUST maintain backward compatibility within a major version.
-Breaking API changes require version increment (`/api/v2/`).
+### Component Patterns
+
+**Sidebar Navigation:**
+- Fixed left sidebar, dark background (`--xdr-surface` or `--xdr-background`)
+- Navigation items with icon + label
+- Active item: background `--xdr-selected` + accent indicator
+- Hover: background `--xdr-hover`
+
+**Cards:**
+- Background: `--xdr-surface` (`#151515`)
+- Border: 1px solid `--xdr-border` (`#484848`)
+- Border-radius: 4px
+- Padding: 16-24px
+- Box shadow: `--xdr-surface-box-shadow-floating-object` for elevated cards
+
+**Buttons (per Cortex pattern):**
+- Primary: Background `--xdr-primary-new` (#fff), text `--xdr-on-primary-new` (#000)
+- Primary hover: `--xdr-primary-bg--hover` (#f4f5f5)
+- Border-radius: 20px (pill-shaped per Cortex)
+- Font: 12px, weight 600
+- Height: 28px, padding 0 18px
+
+**Tables:**
+- Header: darker background, standard labels
+- Rows: consistent background `--xdr-surface`
+- Hover: `--xdr-hover` overlay
+- Borders: `--xdr-border` horizontal only
+
+**Form Inputs:**
+- Background: `--xdr-background` (`#1f1f1f`)
+- Border: none, bottom border only: 1px solid `--xdr-border-medium`
+- Focus: border-color `--xdr-on-background`
+- Text color: `--xdr-on-background`
+
+**Links:**
+- Color: `--xdr-link` (`#128df3`)
+- No underline by default
+- Hover: underline
+
+## Implementation Constraints
+
+### Reference Files
+
+**Cortex Style Reference (read-only, do not modify):**
+- `assets/styles/login.css` - Cortex XSIAM CSS variables and component styles
+- `assets/styles/README.md` - Color palette documentation
+
+### Files in Scope
+
+**Templates (Django):**
+- `portal/templates/coming_soon.html` - Landing page
+- `portal/templates/mission_control/base.html` - Main layout
+- `portal/templates/mission_control/dashboard.html`
+- `portal/templates/mission_control/agents.html`
+- `portal/templates/mission_control/history.html`
+- `portal/templates/mission_control/settings.html`
+- `portal/templates/mission_control/help.html`
+- `portal/templates/risk_register/base.html` - Risk Register layout
+- `portal/templates/risk_register/risk_list.html`
+- `portal/templates/risk_register/risk_detail.html`
+- `portal/templates/risk_register/risk_form.html`
+- `portal/templates/risk_register/apikey_list.html`
+
+**Static Files:**
+- `portal/static/css/` - All CSS files (new or modified)
+- `portal/static/images/` - Brand assets if replacement needed
+- `portal/static/js/` - Only if styling-related changes needed
+
+### Files Out of Scope
+
+- All Python files (`views.py`, `models.py`, `urls.py`, etc.)
+- Test files
+- Configuration files
+- Documentation
+- Any files outside `portal/` directory
+
+### Browser Support
+
+Target modern browsers only (Chrome, Firefox, Safari, Edge - latest versions).
+No IE11 support required. Use modern CSS freely (Grid, Flexbox, custom properties).
 
 ## Governance
 
-This constitution establishes non-negotiable principles for the Shifter Risk Register.
-
 ### Amendment Procedure
 
-1. Propose changes with rationale in a dedicated PR/discussion
-2. Changes to Core Principles require documentation of impact analysis
-3. Update `LAST_AMENDED_DATE` and increment version per semantic versioning
+1. Propose change with rationale
+2. Verify change does not violate core principles
+3. Update constitution version and `LAST_AMENDED_DATE`
+4. Document change in Sync Impact Report header
 
 ### Versioning Policy
 
-- **MAJOR**: Principle removal or fundamental redefinition
-- **MINOR**: New principle added or existing principle materially expanded
-- **PATCH**: Clarifications, typos, non-semantic refinements
+- **MAJOR**: Changes to core principles or design reference that require restyling
+- **MINOR**: New sections, additional constraints, expanded guidance
+- **PATCH**: Clarifications, typo fixes, formatting
 
 ### Compliance Review
 
-All PRs MUST verify alignment with these principles.
-Deviations MUST be explicitly justified in PR description.
-Complexity beyond these principles MUST be documented in code comments.
+Before any PR is approved:
+1. Verify styling matches Cortex XDR design reference
+2. Confirm no out-of-scope files modified
+3. Check all interactive states are implemented
+4. Test on 1366×768 minimum resolution
 
-**Version**: 1.0.0 | **Ratified**: 2025-12-13 | **Last Amended**: 2025-12-13
+**Version**: 1.0.0 | **Ratified**: 2025-12-14 | **Last Amended**: 2025-12-14

@@ -485,20 +485,31 @@ export class SSHConnectionManager {
 
   /**
    * Create a new SSH connection
+   *
+   * @param privateKeyOrPath - Either a file path to the private key, or the private key content directly
+   *                           (detected by checking if it starts with '-----BEGIN')
    */
   private async createConnection(
     host: string,
     username: string,
-    privateKeyPath: string,
+    privateKeyOrPath: string,
     port: number = 22
   ): Promise<Client> {
     let privateKey: Buffer;
-    try {
-      privateKey = await readFile(privateKeyPath);
-    } catch (error) {
-      throw new SSHError(
-        `Failed to read SSH private key from ${privateKeyPath}: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+
+    // Check if this is the actual key content (starts with PEM header) or a file path
+    if (privateKeyOrPath.trim().startsWith('-----BEGIN')) {
+      // Direct key content - use as-is
+      privateKey = Buffer.from(privateKeyOrPath);
+    } else {
+      // File path - read from disk
+      try {
+        privateKey = await readFile(privateKeyOrPath);
+      } catch (error) {
+        throw new SSHError(
+          `Failed to read SSH private key from ${privateKeyOrPath}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+      }
     }
 
     const client = new Client();

@@ -377,9 +377,32 @@ resource "aws_iam_policy" "lambda_sfn" {
           "logs:ListTagsLogGroup",
           "logs:ListTagsForResource",
           "logs:TagResource",
-          "logs:UntagResource"
+          "logs:UntagResource",
+          "logs:CreateLogDelivery",
+          "logs:DeleteLogDelivery",
+          "logs:GetLogDelivery",
+          "logs:ListLogDeliveries",
+          "logs:UpdateLogDelivery",
+          "logs:PutResourcePolicy",
+          "logs:DescribeResourcePolicies",
+          "logs:DescribeLogGroups"
         ]
         Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:*"
+      },
+      {
+        Sid    = "CloudWatchLogsGlobal"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogDelivery",
+          "logs:DeleteLogDelivery",
+          "logs:GetLogDelivery",
+          "logs:ListLogDeliveries",
+          "logs:UpdateLogDelivery",
+          "logs:PutResourcePolicy",
+          "logs:DescribeResourcePolicies",
+          "logs:DescribeLogGroups"
+        ]
+        Resource = "*"
       },
       {
         Sid    = "CloudWatchAlarms"
@@ -571,6 +594,55 @@ resource "aws_iam_policy" "ssm_cognito" {
   })
 }
 
+# Network Firewall
+# checkov:skip=CKV_AWS_355:CI/CD requires Network Firewall permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires Network Firewall permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires Network Firewall permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires Network Firewall permissions. Risk accepted, see #44
+resource "aws_iam_policy" "network_firewall" {
+  name = "shifter-${var.environment}-network-firewall"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "NetworkFirewall"
+        Effect = "Allow"
+        Action = [
+          "network-firewall:CreateFirewall",
+          "network-firewall:DeleteFirewall",
+          "network-firewall:DescribeFirewall",
+          "network-firewall:UpdateFirewallDeleteProtection",
+          "network-firewall:UpdateFirewallDescription",
+          "network-firewall:UpdateFirewallPolicy",
+          "network-firewall:UpdateFirewallPolicyChangeProtection",
+          "network-firewall:UpdateSubnetChangeProtection",
+          "network-firewall:AssociateFirewallPolicy",
+          "network-firewall:DisassociateSubnets",
+          "network-firewall:AssociateSubnets",
+          "network-firewall:CreateFirewallPolicy",
+          "network-firewall:DeleteFirewallPolicy",
+          "network-firewall:DescribeFirewallPolicy",
+          "network-firewall:UpdateFirewallPolicy",
+          "network-firewall:CreateRuleGroup",
+          "network-firewall:DeleteRuleGroup",
+          "network-firewall:DescribeRuleGroup",
+          "network-firewall:UpdateRuleGroup",
+          "network-firewall:ListFirewalls",
+          "network-firewall:ListFirewallPolicies",
+          "network-firewall:ListRuleGroups",
+          "network-firewall:TagResource",
+          "network-firewall:UntagResource",
+          "network-firewall:ListTagsForResource",
+          "network-firewall:DescribeLoggingConfiguration",
+          "network-firewall:UpdateLoggingConfiguration"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # Policy Attachments
 # ------------------------------------------------------------------------------
@@ -618,6 +690,11 @@ resource "aws_iam_role_policy_attachment" "secrets_kms" {
 resource "aws_iam_role_policy_attachment" "ssm_cognito" {
   role       = aws_iam_role.github_actions.name
   policy_arn = aws_iam_policy.ssm_cognito.arn
+}
+
+resource "aws_iam_role_policy_attachment" "network_firewall" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.network_firewall.arn
 }
 
 # ------------------------------------------------------------------------------

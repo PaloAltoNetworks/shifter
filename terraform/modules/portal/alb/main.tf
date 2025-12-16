@@ -63,8 +63,9 @@ resource "aws_security_group_rule" "egress_all" {
 # ------------------------------------------------------------------------------
 
 resource "aws_acm_certificate" "this" {
-  domain_name       = var.domain_name
-  validation_method = "DNS"
+  domain_name               = var.domain_name
+  subject_alternative_names = ["chat.${var.domain_name}"]
+  validation_method         = "DNS"
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-cert"

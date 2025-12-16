@@ -31,7 +31,9 @@ class DashboardManager {
         this.pausedRangeState = document.getElementById('paused-range-state');
         this.failedState = document.getElementById('failed-state');
 
-        this.agentSelect = document.getElementById('agent-select');
+        this.agentDropdown = document.getElementById('agent-dropdown');
+        this.agentSelect = document.getElementById('agent-select-value');
+        this.agentItems = document.getElementById('agent-items');
         this.launchBtn = document.getElementById('launch-btn');
         this.cancelBtn = document.getElementById('cancel-btn');
         this.openWorkspaceBtn = document.getElementById('open-workspace-btn');
@@ -64,10 +66,10 @@ class DashboardManager {
     }
 
     _bindEvents() {
-        // Agent select change
-        if (this.agentSelect) {
-            this.agentSelect.addEventListener('change', () => {
-                this.launchBtn.disabled = !this.agentSelect.value;
+        // Agent dropdown change
+        if (this.agentDropdown) {
+            this.agentDropdown.addEventListener('change', (e) => {
+                this.launchBtn.disabled = !e.detail.value;
             });
         }
 
@@ -116,17 +118,23 @@ class DashboardManager {
 
             const data = await response.json();
 
-            // Clear existing options (except placeholder)
-            while (this.agentSelect.options.length > 1) {
-                this.agentSelect.remove(1);
-            }
+            // Clear existing items
+            if (this.agentItems) {
+                this.agentItems.innerHTML = '';
 
-            // Add agent options
-            for (const agent of data.agents) {
-                const option = document.createElement('option');
-                option.value = agent.id;
-                option.textContent = `${agent.name} (${agent.os_name})`;
-                this.agentSelect.appendChild(option);
+                // Add agent items
+                for (const agent of data.agents) {
+                    const li = document.createElement('li');
+                    li.className = 'xdr-dropdown-item';
+                    li.dataset.value = agent.id;
+                    li.textContent = `${agent.name} (${agent.os_name})`;
+                    this.agentItems.appendChild(li);
+                }
+
+                // Reinitialize dropdown after adding items
+                if (this.agentDropdown && window.XdrDropdown) {
+                    new window.XdrDropdown(this.agentDropdown);
+                }
             }
         } catch (error) {
             console.error('Error loading agents:', error);
@@ -296,7 +304,7 @@ class DashboardManager {
     }
 
     async launchRange() {
-        const agentId = this.agentSelect.value;
+        const agentId = this.agentSelect?.value;
         if (!agentId) return;
 
         this.launchBtn.disabled = true;

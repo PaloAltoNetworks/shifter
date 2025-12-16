@@ -137,7 +137,7 @@ if not DEBUG:
 # ------------------------------------------------------------------------------
 
 AUTHENTICATION_BACKENDS = [
-    "mozilla_django_oidc.auth.OIDCAuthenticationBackend",
+    "config.oidc.ShifterOIDCBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
 
@@ -196,9 +196,11 @@ OIDC_CREATE_USER = True
 OIDC_USERNAME_ALGO = "config.oidc.generate_username"
 
 # URLs exempt from OIDC authentication (public pages)
+# Must be URL paths starting with "/" or view names (not regex patterns)
 OIDC_EXEMPT_URLS = [
-    r"^/$",  # Landing page
-    r"^/oidc/",  # OIDC callback URLs
+    "/",  # Landing page
+    "/health",  # Health check
+    "/health/",  # Health check with trailing slash
 ]
 
 # ------------------------------------------------------------------------------
@@ -238,4 +240,41 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+}
+
+# ------------------------------------------------------------------------------
+# Logging Configuration
+# ------------------------------------------------------------------------------
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
 }

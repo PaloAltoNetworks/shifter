@@ -19,10 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SSM VPC Endpoints for Range VPC (ssm, ssmmessages, ec2messages)
   - Enables Systems Manager access without internet
   - Traffic stays within AWS network
+- Custom OpenWebUI Docker image with Cortex theme baked in
+  - ECR repository for custom OpenWebUI image
+  - Dockerfile extends base image with custom CSS/assets
+  - CI/CD builds and deploys themed image automatically
+- Victim MCP wrapper for OpenWebUI (`mcp_wrapper_victim.py`)
 
 ### Changed
 - Replaced mcp-red with mcp-shifter in CI quality workflow
 - Architecture docs updated with MCP dual-container diagram
+- AgentChat uses custom OpenWebUI image instead of stock ghcr.io image
 
 ## [0.5.2] - 2025-12-15
 

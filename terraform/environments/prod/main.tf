@@ -21,3 +21,15 @@ module "mcp_shifter_ecr" {
     Component = "mcp-shifter"
   }
 }
+
+module "openwebui_ecr" {
+  source = "../../modules/ecr"
+
+  repository_name      = var.openwebui_repository_name
+  image_tag_mutability = "MUTABLE"
+  scan_on_push         = true
+
+  tags = {
+    Component = "openwebui"
+  }
+}

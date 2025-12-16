@@ -88,8 +88,9 @@ def handler(event: dict, context) -> dict:
             }
 
         # Calculate CIDR block
-        # Range VPC uses {prefix}.0.0/16, each range gets {prefix}.{index}.0/24
-        subnet_cidr = f"{range_cidr_prefix}.{subnet_index}.0/24"
+        # Range VPC uses {prefix}.0.0/16, each range gets {prefix}.{index+1}.0/24
+        # Index offset by 1 to reserve {prefix}.0.0/24 for infrastructure (firewall, NAT)
+        subnet_cidr = f"{range_cidr_prefix}.{subnet_index + 1}.0/24"
         logger.info(f"Creating subnet with CIDR {subnet_cidr}")
 
         # Create subnet
@@ -111,13 +112,10 @@ def handler(event: dict, context) -> dict:
         subnet_id = response["Subnet"]["SubnetId"]
         logger.info(f"Created subnet {subnet_id}")
 
-        # Enable auto-assign public IP (for XDR agent connectivity)
-        ec2.modify_subnet_attribute(
-            SubnetId=subnet_id,
-            MapPublicIpOnLaunch={"Value": True},
-        )
+        # Note: Public IP auto-assign is disabled - instances use private IPs
+        # and egress via NAT Gateway through Network Firewall for domain filtering
 
-        # Associate with route table
+        # Associate with route table (private route table that routes through firewall)
         ec2.associate_route_table(
             SubnetId=subnet_id,
             RouteTableId=range_route_table_id,

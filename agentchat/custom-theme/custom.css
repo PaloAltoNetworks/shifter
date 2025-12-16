@@ -1,0 +1,497 @@
+/*
+ * Cortex XDR Theme for OpenWeb UI
+ * Version: 1.2.0
+ *
+ * This CSS uses unlayered rules (higher priority than @layer rules)
+ * to override Tailwind's utility classes.
+ */
+
+/* ==========================================================================
+   FONTS (must load before other rules)
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@100;300;400;700;900&display=swap');
+
+/* ==========================================================================
+   UNLAYERED OVERRIDES
+
+   These rules are "unlayered" which means they have higher priority than
+   any rules inside @layer blocks (which Tailwind v4 uses).
+   ========================================================================== */
+
+/* HTML and Body Background */
+html.dark, body.dark {
+  --background: #1f1f1f !important;
+  background-color: #1f1f1f !important;
+}
+
+/* Tailwind Gray Color Overrides */
+html.dark {
+  --color-gray-950: #1f1f1f !important; /* Darkest background */
+  --color-gray-900: #1f1f1f !important; /* Main background */
+  --color-gray-850: #151515 !important; /* Surface/Card background */
+  --color-gray-800: #333333 !important; /* Secondary surface */
+  --color-gray-700: #4e4e4e !important; /* Borders/Dividers */
+  --color-gray-600: #676767 !important; /* Disabled text */
+  --color-gray-500: #9b9b9b !important; /* Secondary text */
+  --color-gray-400: #b8b8b8 !important; /* Placeholder text */
+  --color-gray-300: #cdcdcd !important; /* Light text */
+  --color-gray-200: #eaebeb !important; /* Primary text */
+  --color-gray-100: #ffffff !important; /* White elements */
+  --color-gray-50: #ffffff !important; /* White elements */
+}
+
+/* Primary Accent Color (Cortex Blue) */
+html.dark {
+  --primary: #128df3 !important;
+  --primary-foreground: #ffffff !important;
+  --accent: #128df3 !important;
+  --accent-foreground: #ffffff !important;
+}
+
+/* Font Family */
+body {
+  font-family: 'Lato', sans-serif !important;
+}
+
+/* ==========================================================================
+   CORTEX XDR SIDEBAR STYLING
+   Colors extracted from Cortex XDR Portal (xdr-sidebar.css)
+   ========================================================================== */
+
+/* Cortex XDR Brand Colors */
+html.dark {
+  --xdr-brand: #00cc66;                    /* Cortex green */
+  --xdr-brand-dark: #05180f;               /* Dark green hover bg */
+  --xdr-brand-active: #062314;             /* Active item bg */
+  --nav-item-hover-bg-color: #05180f;      /* Hover background */
+  --nav-item-active-bg-color: #062314;     /* Active background */
+  --nav-item-active-icon-color: #00cc66;   /* Active icon green */
+}
+
+/* Sidebar icons - white by default (like Cortex XDR) */
+.dark svg,
+.dark [class*="sidebar"] svg,
+.dark nav svg,
+.dark button svg,
+.dark a svg {
+  color: #fefefe !important;
+}
+
+/* ==========================================================================
+   CORTEX LOGO REPLACEMENT
+   Target actual OpenWebUI DOM structure for logo replacement
+   ========================================================================== */
+
+/* Sidebar header logo - hide favicon, show Cortex logo via parent link */
+.dark .sidebar-new-chat-icon {
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Parent link gets the Cortex logo */
+.dark a:has(.sidebar-new-chat-icon) {
+  background-image: url('/static/logo.png') !important;
+  background-size: 32px 32px !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+}
+
+/* Add top margin to sidebar header */
+.dark .sidebar {
+  padding-top: 12px !important;
+}
+
+/* ==========================================================================
+   COLLAPSED SIDEBAR - Show Cortex logo and expand icon
+   ========================================================================== */
+
+/* Collapsed sidebar container */
+.dark #sidebar:has([aria-label="Open Sidebar"]) {
+  position: relative !important;
+  background-color: #000000 !important;
+}
+
+/* Add Cortex logo to top of collapsed sidebar */
+.dark #sidebar:has([aria-label="Open Sidebar"])::before {
+  content: "" !important;
+  display: block !important;
+  width: 32px !important;
+  height: 32px !important;
+  background-image: url('/static/logo.png') !important;
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  margin: 8px auto 4px auto !important;
+}
+
+/* Show the sidebar panel toggle icon (SVG) in collapsed state - always visible */
+.dark [aria-label="Open Sidebar"] svg {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 0.7 !important;
+}
+
+/* Hover effect on expand icon */
+.dark [aria-label="Open Sidebar"]:hover svg {
+  opacity: 1 !important;
+}
+
+/* Hide the favicon in the Open Sidebar button (we show Cortex logo separately above) */
+.dark [aria-label="Open Sidebar"] .sidebar-new-chat-icon {
+  display: none !important;
+}
+
+/* Wordmark link - no hover highlight */
+.dark a:has(#sidebar-webui-name) {
+  flex-direction: column !important;
+  align-items: flex-start !important;
+}
+
+.dark a:has(#sidebar-webui-name):hover {
+  background-color: transparent !important;
+}
+
+/* Tagline on parent link: "by palo alto networks" */
+.dark a:has(#sidebar-webui-name)::after {
+  content: "by palo alto networks" !important;
+  font-size: 9px !important;
+  font-weight: 400 !important;
+  color: #a4a4a4 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.3px !important;
+  margin-top: 1px !important;
+  margin-left: 10px !important;  /* Align with wordmark text */
+  display: block !important;
+}
+
+/* Wordmark container - hide original text */
+.dark #sidebar-webui-name {
+  font-size: 0 !important;
+  color: transparent !important;
+  display: inline !important;
+  line-height: 1.1 !important;
+  white-space: nowrap !important;
+}
+
+/* "CORTEX " in white */
+.dark #sidebar-webui-name::before {
+  content: "CORTEX " !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: #fff !important;
+  letter-spacing: 0.5px !important;
+}
+
+/* "SHIFTER" in grey (matching XDR styling) */
+.dark #sidebar-webui-name::after {
+  content: "SHIFTER" !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #a4a4a4 !important;
+  letter-spacing: 0.5px !important;
+}
+
+/* Sidebar container - pure black like Cortex XDR */
+.dark #sidebar,
+.dark #sidebar > div,
+.dark [class*="sidebar"],
+.dark [data-state] [class*="sidebar"],
+.dark aside,
+.dark aside > div,
+.dark [class*="sidebar"] > div,
+.dark [class*="bg-gray-950"],
+.dark [class*="dark:bg-gray-950"] {
+  background-color: #000000 !important;
+}
+
+/* Hide sidebar gradient overlays */
+.dark .sidebar-bg-gradient-to-b,
+.dark .sidebar-bg-gradient-to-t,
+.dark [class*="sidebar-bg-gradient"],
+.dark .bg-linear-to-b,
+.dark .bg-linear-to-t {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* Sidebar nav items hover - Cortex dark green (only sidebar, not main nav) */
+.dark [class*="sidebar"] button:hover,
+.dark [class*="sidebar"] a:hover,
+.dark aside button:hover,
+.dark aside a:hover {
+  background-color: #05180f !important;
+}
+
+/* Main content nav - no green hover (keep default or transparent) */
+.dark main nav button:hover,
+.dark main nav a:hover,
+.dark [class*="content"] nav button:hover {
+  background-color: transparent !important;
+}
+
+/* Active sidebar items - slightly brighter dark green */
+.dark [class*="sidebar"] button[class*="active"],
+.dark [class*="sidebar"] a[class*="active"],
+.dark [class*="sidebar"] [aria-current="page"],
+.dark nav [class*="active"] {
+  background-color: #062314 !important;
+}
+
+/* Active icons should be Cortex green */
+.dark [class*="sidebar"] button[class*="active"] svg,
+.dark [class*="sidebar"] a[class*="active"] svg,
+.dark [class*="sidebar"] [aria-current="page"] svg,
+.dark nav [class*="active"] svg {
+  color: #00cc66 !important;
+}
+
+/* Suggested prompt tiles hover - Cortex green tint */
+.dark [class*="listitem"]:hover,
+.dark li[class*="cursor-pointer"]:hover,
+.dark [role="listitem"]:hover {
+  background-color: #062314 !important;
+}
+
+/* ==========================================================================
+   HIDE "HELLO, USER" LOGO
+   The model profile image next to "Hello, User" is low-res - hide it
+   ========================================================================== */
+
+.dark img[src*="/api/v1/models/model/profile/image"],
+.dark img.rounded-full[aria-hidden="true"] {
+  display: none !important;
+}
+
+/* ==========================================================================
+   CUSTOM SCROLLBAR (Cortex XDR style - gray, not blue)
+   ========================================================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #484848;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #575757;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #484848 transparent;
+}
+
+/* ==========================================================================
+   BUTTON AND INTERACTIVE ELEMENT STYLING
+   ========================================================================== */
+
+/* Primary buttons */
+button[class*="primary"],
+.btn-primary,
+button.bg-blue-500,
+button.bg-blue-600 {
+  background-color: #128df3 !important;
+  border-color: #128df3 !important;
+}
+
+button[class*="primary"]:hover,
+.btn-primary:hover,
+button.bg-blue-500:hover,
+button.bg-blue-600:hover {
+  background-color: #0e6fc2 !important;
+  border-color: #0e6fc2 !important;
+}
+
+/* Focus rings */
+*:focus {
+  outline-color: #128df3 !important;
+}
+
+*:focus-visible {
+  outline: 2px solid #128df3 !important;
+  outline-offset: 2px !important;
+}
+
+/* ==========================================================================
+   LINK STYLING (Cortex XDR style)
+   ========================================================================== */
+
+/* Sidebar links are WHITE - must come before generic link rules */
+.dark aside a,
+.dark [class*="sidebar"] a,
+.dark [data-state] a,
+.dark nav a,
+.dark header a {
+  color: #fefefe !important;
+}
+
+.dark aside a:hover,
+.dark [class*="sidebar"] a:hover,
+.dark nav a:hover {
+  color: #ffffff !important;
+}
+
+/* Content area links are blue */
+.dark main a,
+.dark article a,
+.dark [class*="message"] a,
+.dark [class*="content"] a {
+  color: #128df3 !important;
+}
+
+.dark main a:hover,
+.dark article a:hover {
+  color: #5bb8ff !important;
+}
+
+/* ==========================================================================
+   HIDE LOW-RES "HELLO USER" LOGO
+   ========================================================================== */
+
+/* Hide the model profile image next to "Hello, User" */
+.dark img[src*="/api/v1/models/model/profile/image"],
+.dark img[src*="id=undefined"] {
+  display: none !important;
+}
+
+/* Hide the version/branding footer text */
+.dark .svelte-6tnq1o {
+  display: none !important;
+}
+
+/* ==========================================================================
+   CHAT MESSAGE STYLING
+   ========================================================================== */
+
+/* User message bubbles */
+.dark [class*="user-message"],
+.dark [class*="message"][class*="user"] {
+  background-color: #333333 !important;
+}
+
+/* Assistant message bubbles */
+.dark [class*="assistant-message"],
+.dark [class*="message"][class*="assistant"] {
+  background-color: #1f1f1f !important;
+}
+
+/* Code blocks in messages */
+.dark pre,
+.dark code {
+  background-color: #151515 !important;
+  border-color: #4e4e4e !important;
+}
+
+/* ==========================================================================
+   INPUT FIELDS
+   ========================================================================== */
+
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: #333333 !important;
+  border-color: #4e4e4e !important;
+  color: #eaebeb !important;
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: #ffffff !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Chat input container - white border on focus (specific targeting) */
+.dark form > div.rounded-3xl:has(.ProseMirror):focus-within,
+.dark .shadow-lg.rounded-3xl:has(.ProseMirror):focus-within {
+  border-color: #ffffff !important;
+}
+
+/* Remove outline from ProseMirror itself */
+.dark .ProseMirror:focus {
+  outline: none !important;
+}
+
+/* Voice mode button - fix white icon on white background */
+.dark button[aria-label="Voice mode"],
+.dark button[aria-label="Voice mode"] svg {
+  background-color: #333333 !important;
+  color: #ffffff !important;
+}
+
+.dark button[aria-label="Voice mode"] svg path {
+  fill: #ffffff !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #676767 !important;
+}
+
+/* ==========================================================================
+   CARDS AND PANELS
+   ========================================================================== */
+
+.dark [class*="card"],
+.dark [class*="panel"],
+.dark [class*="modal"] {
+  background-color: #1f1f1f !important;
+  border-color: #4e4e4e !important;
+}
+
+/* ==========================================================================
+   TOOLTIPS AND POPOVERS
+   ========================================================================== */
+
+.dark [class*="tooltip"],
+.dark [class*="popover"],
+.dark [role="tooltip"] {
+  background-color: #333333 !important;
+  border-color: #4e4e4e !important;
+  color: #eaebeb !important;
+}
+
+/* ==========================================================================
+   DROPDOWN MENUS
+   ========================================================================== */
+
+.dark [class*="dropdown"],
+.dark [class*="menu"],
+.dark [role="menu"] {
+  background-color: #1f1f1f !important;
+  border-color: #4e4e4e !important;
+}
+
+.dark [class*="dropdown"] [class*="item"]:hover,
+.dark [class*="menu"] [class*="item"]:hover,
+.dark [role="menuitem"]:hover {
+  background-color: #333333 !important;
+}
+
+/* ==========================================================================
+   SELECTION HIGHLIGHT
+   ========================================================================== */
+
+::selection {
+  background-color: rgba(18, 141, 243, 0.3) !important;
+  color: #ffffff !important;
+}
+
+::-moz-selection {
+  background-color: rgba(18, 141, 243, 0.3) !important;
+  color: #ffffff !important;
+}

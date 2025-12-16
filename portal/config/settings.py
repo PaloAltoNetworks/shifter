@@ -27,6 +27,7 @@ SITE_URL = os.environ.get("SITE_URL")
 
 # Application definition
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -34,6 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.postgres",
+    "channels",
     "health_check",
     "health_check.db",
     "health_check.cache",
@@ -76,12 +78,30 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "mission_control.context_processors.active_range",
             ],
         },
     },
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+# ------------------------------------------------------------------------------
+# Django Channels Configuration
+# ------------------------------------------------------------------------------
+
+# Channel layers - use in-memory for development, Redis for production
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer" if DEBUG else "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {}
+        if DEBUG
+        else {
+            "hosts": [(os.environ.get("REDIS_HOST", "localhost"), 6379)],
+        },
+    },
+}
 
 # Database
 DATABASES = {

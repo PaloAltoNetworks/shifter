@@ -1,0 +1,90 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/terminal.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="terminal-page">
+    <div class="terminal-header">
+        <div class="terminal-header-left">
+            <h1 class="terminal-title">Terminal</h1>
+            <span class="terminal-range-info">Range #{{ range.id }} - {{ range.agent.name }}</span>
+        </div>
+        <div class="terminal-header-right">
+            <div class="terminal-status">
+                <span class="status-dot status-active"></span>
+                <span>Connected</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="terminal-container" id="terminal-container">
+        <!-- Kali Terminal Pane -->
+        <div class="terminal-pane" id="kali-pane">
+            <div class="pane-header">
+                <span class="pane-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path fill="currentColor" d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path fill="currentColor" d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </span>
+                <span class="pane-title">Kali Linux</span>
+                <span class="pane-subtitle">{{ range.kali_ip }}</span>
+                <div class="pane-status" id="kali-status">
+                    <span class="status-indicator connecting"></span>
+                    <span>Connecting...</span>
+                </div>
+            </div>
+            <div class="terminal-wrapper" id="kali-terminal"></div>
+        </div>
+
+        <!-- Resizable Divider -->
+        <div class="terminal-divider" id="terminal-divider">
+            <div class="divider-handle"></div>
+        </div>
+
+        <!-- Victim Terminal Pane -->
+        <div class="terminal-pane" id="victim-pane">
+            <div class="pane-header">
+                <span class="pane-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path fill="currentColor" d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path fill="currentColor" d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </span>
+                <span class="pane-title">Victim</span>
+                <span class="pane-subtitle">{{ range.victim_ip }}</span>
+                <div class="pane-status" id="victim-status">
+                    <span class="status-indicator connecting"></span>
+                    <span>Connecting...</span>
+                </div>
+            </div>
+            <div class="terminal-wrapper" id="victim-terminal"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- xterm.js from CDN -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+
+<script src="{% static 'js/terminal.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const terminalManager = new TerminalManager({
+        rangeId: {{ range_id }},
+        kaliContainerId: 'kali-terminal',
+        victimContainerId: 'victim-terminal',
+        wsProtocol: window.location.protocol === 'https:' ? 'wss:' : 'ws:',
+        wsHost: window.location.host,
+    });
+    terminalManager.init();
+});
+</script>
+{% endblock %}

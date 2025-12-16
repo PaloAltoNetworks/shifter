@@ -90,6 +90,24 @@
                 </a>
             </div>
 
+            {# Terminal - only enabled when user has an active range #}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'terminal' %}active-top-item{% endif %}">
+                <a href="{% if has_active_range %}{% url 'mission_control:terminal' %}{% else %}#{% endif %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'terminal' %}active-link{% endif %}{% if not has_active_range %} nav-disabled{% endif %}"
+                   {% if not has_active_range %}aria-disabled="true" tabindex="-1"{% endif %}>
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path fill="currentColor" d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized nav-menu-item-content">Terminal</span>
+                    {% if has_active_range %}
+                    <span class="nav-indicator-dot hide-when-minimized"></span>
+                    {% endif %}
+                </a>
+            </div>
+
             {# Risk Register #}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'risks' %}active-top-item{% endif %}">
                 <a href="{% url 'risk_register:risk_list' %}"

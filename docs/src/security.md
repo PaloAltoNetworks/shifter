@@ -38,7 +38,6 @@ Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Inte
 - **Bidirectional Kali ↔ Victim traffic**: Required for reverse shells, C2 callbacks, and realistic attack scenarios
 - **Kali locked down**: No external access—tools are pre-installed on AMI
 - **Victim XDR-only egress**: Only domains required for XDR/XSIAM telemetry
-- **SSH from VPC CIDR**: Allows MCP/Chat UI to manage both instances
 - **Security group references**: Traffic rules use SG IDs, not CIDR blocks—prevents cross-user subnet attacks
 
 **Isolation:**
@@ -47,7 +46,7 @@ Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Inte
 - 10.1.0.0/24 reserved for infrastructure (firewall, NAT subnets)
 - Kali/Victim can only talk to each other within the same subnet
 - No cross-subnet traffic possible (SG rules reference specific SGs, not VPC CIDR)
-- VPC peering to Portal VPC for MCP SSH access
+- VPC peering to Portal VPC for SSH access
 
 ## Encryption
 

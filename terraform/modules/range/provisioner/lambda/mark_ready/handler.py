@@ -32,7 +32,6 @@ logger.setLevel(logging.INFO)
 REQUIRED_ENV_VARS = [
     "DB_HOST",
     "DB_NAME",
-    "CHAT_BASE_URL",
 ]
 
 
@@ -51,8 +50,8 @@ def handler(event: dict, context) -> dict:
     range_id = event["range_id"]
     logger.info(f"Marking range {range_id} as ready")
 
-    # Get chat base URL from environment
-    chat_base_url = get_env("CHAT_BASE_URL")
+    # Get chat base URL from environment (optional - may be empty during transition)
+    chat_base_url = os.environ.get("CHAT_BASE_URL", "")
 
     # Connect to database
     conn = get_db_connection()
@@ -80,9 +79,8 @@ def handler(event: dict, context) -> dict:
         if not range_data["victim_ssh_key_secret_arn"]:
             raise ValueError(f"Range {range_id} missing victim_ssh_key_secret_arn")
 
-        # Construct chat URL
-        # The chat URL points to OpenWebUI on the chat subdomain
-        chat_url = f"{chat_base_url.rstrip('/')}?range={range_id}"
+        # Construct chat URL (will be replaced by Django terminal URL later)
+        chat_url = f"{chat_base_url.rstrip('/')}?range={range_id}" if chat_base_url else ""
 
         # Update range to ready state
         now = datetime.now(timezone.utc)

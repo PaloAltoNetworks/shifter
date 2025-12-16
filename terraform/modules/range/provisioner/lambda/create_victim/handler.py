@@ -120,6 +120,14 @@ def get_user_data_script(s3_bucket: str, agent_s3_key: str, public_key: str) -> 
     """
     Generate user data script to install XDR agent on boot and configure SSH access.
 
+    Supports multiple installer formats:
+    - .sh: Shell scripts (executed directly)
+    - .deb: Debian packages (installed via dpkg)
+    - .rpm: RPM packages (installed via rpm)
+    - .tar.gz/.tgz: Tarballs (extracted and install.sh executed)
+    - .zip: Archives (extracted and install.sh executed)
+    - Binary executables (executed with --install flag)
+
     Args:
         s3_bucket: S3 bucket containing agent installers
         agent_s3_key: S3 key for the agent installer
@@ -154,12 +162,137 @@ chown -R ec2-user:ec2-user /home/ec2-user/.ssh
 echo "SSH access configured"
 
 # Download agent installer from S3
-echo "Installing XDR agent..."
-aws s3 cp 's3://{s3_bucket}/{agent_s3_key}' /tmp/agent-installer
+echo "Downloading XDR agent installer..."
+INSTALLER_KEY="{agent_s3_key}"
+INSTALLER_FILE="/tmp/agent-installer"
+aws s3 cp "s3://{s3_bucket}/$INSTALLER_KEY" "$INSTALLER_FILE"
 
-# Make executable and run
-chmod +x /tmp/agent-installer
-/tmp/agent-installer --install
+# Detect file type and install accordingly
+echo "Detecting installer type..."
+install_agent() {{
+    local file="$1"
+    local filename=$(basename "$INSTALLER_KEY")
+
+    # First, try to detect by file extension
+    case "$filename" in
+        *.sh)
+            echo "Installing via shell script..."
+            chmod +x "$file"
+            "$file"
+            return
+            ;;
+        *.deb)
+            echo "Installing via dpkg..."
+            dpkg -i "$file" || apt-get install -f -y
+            return
+            ;;
+        *.rpm)
+            echo "Installing via rpm..."
+            rpm -i "$file" || yum install -y "$file"
+            return
+            ;;
+        *.tar.gz|*.tgz)
+            echo "Extracting tarball..."
+            mkdir -p /tmp/agent-extract
+            tar xzf "$file" -C /tmp/agent-extract
+            # Look for install script
+            if [ -f /tmp/agent-extract/install.sh ]; then
+                chmod +x /tmp/agent-extract/install.sh
+                /tmp/agent-extract/install.sh
+            elif [ -f /tmp/agent-extract/*/install.sh ]; then
+                chmod +x /tmp/agent-extract/*/install.sh
+                /tmp/agent-extract/*/install.sh
+            else
+                echo "ERROR: No install.sh found in tarball"
+                ls -la /tmp/agent-extract/
+                exit 1
+            fi
+            return
+            ;;
+        *.zip)
+            echo "Extracting zip archive..."
+            mkdir -p /tmp/agent-extract
+            unzip -o "$file" -d /tmp/agent-extract
+            # Look for install script
+            if [ -f /tmp/agent-extract/install.sh ]; then
+                chmod +x /tmp/agent-extract/install.sh
+                /tmp/agent-extract/install.sh
+            elif [ -f /tmp/agent-extract/*/install.sh ]; then
+                chmod +x /tmp/agent-extract/*/install.sh
+                /tmp/agent-extract/*/install.sh
+            else
+                echo "ERROR: No install.sh found in archive"
+                ls -la /tmp/agent-extract/
+                exit 1
+            fi
+            return
+            ;;
+    esac
+
+    # Fall back to MIME type detection
+    local mime_type=$(file -b --mime-type "$file")
+    echo "Detected MIME type: $mime_type"
+
+    case "$mime_type" in
+        application/x-debian-package|application/vnd.debian.binary-package)
+            echo "Installing via dpkg..."
+            dpkg -i "$file" || apt-get install -f -y
+            ;;
+        application/x-rpm)
+            echo "Installing via rpm..."
+            rpm -i "$file" || yum install -y "$file"
+            ;;
+        text/x-shellscript|application/x-shellscript|application/x-sh)
+            echo "Installing via shell script..."
+            chmod +x "$file"
+            "$file"
+            ;;
+        application/gzip|application/x-gzip)
+            echo "Extracting gzip archive..."
+            mkdir -p /tmp/agent-extract
+            tar xzf "$file" -C /tmp/agent-extract
+            if [ -f /tmp/agent-extract/install.sh ]; then
+                chmod +x /tmp/agent-extract/install.sh
+                /tmp/agent-extract/install.sh
+            elif [ -f /tmp/agent-extract/*/install.sh ]; then
+                chmod +x /tmp/agent-extract/*/install.sh
+                /tmp/agent-extract/*/install.sh
+            else
+                echo "ERROR: No install.sh found"
+                exit 1
+            fi
+            ;;
+        application/zip)
+            echo "Extracting zip archive..."
+            mkdir -p /tmp/agent-extract
+            unzip -o "$file" -d /tmp/agent-extract
+            if [ -f /tmp/agent-extract/install.sh ]; then
+                chmod +x /tmp/agent-extract/install.sh
+                /tmp/agent-extract/install.sh
+            elif [ -f /tmp/agent-extract/*/install.sh ]; then
+                chmod +x /tmp/agent-extract/*/install.sh
+                /tmp/agent-extract/*/install.sh
+            else
+                echo "ERROR: No install.sh found"
+                exit 1
+            fi
+            ;;
+        application/x-executable|application/octet-stream)
+            echo "Installing via executable..."
+            chmod +x "$file"
+            "$file" --install || "$file"
+            ;;
+        *)
+            echo "Unknown installer type: $mime_type"
+            echo "Attempting to run as executable..."
+            chmod +x "$file"
+            "$file" --install || "$file"
+            ;;
+    esac
+}}
+
+echo "Installing XDR agent..."
+install_agent "$INSTALLER_FILE"
 
 echo "Victim instance setup complete"
 """

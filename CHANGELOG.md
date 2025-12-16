@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Architecture docs updated with MCP dual-container diagram
 - AgentChat uses custom OpenWebUI image instead of stock ghcr.io image
 
+## Fixed
+- Missing s3 permissions to fetch XDR installer
+- Fix range user_data fails to account for different installer types
+
 ## [0.5.2] - 2025-12-15
 
 ### Changed

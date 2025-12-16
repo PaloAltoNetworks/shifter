@@ -1,6 +1,6 @@
 [project]
 name = "shifter-openwebui-tools"
-version = "0.5.0"
+version = "0.5.2"
 description = "OpenWebUI tools for Shifter MCP integration"
 requires-python = ">=3.11"
 dependencies = [

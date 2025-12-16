@@ -51,7 +51,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             mcp/aptl-mcp-common/package-lock.json
-            mcp/mcp-red/package-lock.json
+            mcp/mcp-shifter/package-lock.json
 
       - name: Build and test aptl-mcp-common
         working-directory: mcp/aptl-mcp-common
@@ -60,11 +60,12 @@ jobs:
           npm run build
           npm run test -- --coverage
 
-      - name: Build mcp-red
-        working-directory: mcp/mcp-red
+      - name: Build and test mcp-shifter
+        working-directory: mcp/mcp-shifter
         run: |
           npm ci
           npm run build
+          npm run test -- --coverage
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
@@ -97,7 +98,7 @@ jobs:
           uv run python -m pytest --cov=. --cov-report=xml:coverage.xml
 
       - name: Lint TypeScript
-        working-directory: mcp/mcp-red
+        working-directory: mcp/mcp-shifter
         run: npm run lint
 
       - name: Setup Python for Checkov

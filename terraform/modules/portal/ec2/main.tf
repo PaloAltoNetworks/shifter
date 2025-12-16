@@ -79,6 +79,27 @@ resource "aws_iam_role_policy" "secrets_read" {
   })
 }
 
+# IAM policy for reading range SSH keys from Secrets Manager
+# SSH keys are stored at: shifter/{env}/range/{range_id}/*-ssh-key
+# Required for Terminal UI feature to connect to Kali/Victim instances
+resource "aws_iam_role_policy" "range_ssh_keys" {
+  name = "range-ssh-keys-read"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter/*/range/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "s3_access" {
   count = var.s3_bucket_arn != "" ? 1 : 0
   name  = "s3-access"

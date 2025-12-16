@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-12-16
+
+### Added
+- Browser-based Terminal UI for SSH access to range instances (#267)
+  - Side-by-side Kali and Victim terminal panes with xterm.js
+  - WebSocket-based SSH via Django Channels
+  - Terminal sidebar menu item with active range indicator
+- VPC peering between Portal and Range VPCs for SSH connectivity
+- Security group rules allowing SSH from Portal to range instances
+
+### Changed
+- Switched from Gunicorn (WSGI) to Daphne (ASGI) for WebSocket support
+
+### Fixed
+- Buttons should not have underline
+
 ## [0.5.4] - 2025-12-15
 
 ### Removed

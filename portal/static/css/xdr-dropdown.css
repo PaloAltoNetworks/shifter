@@ -1,0 +1,189 @@
+/* XDR Custom Dropdown Component
+ * Matches Cortex XDR dropdown styling
+ */
+
+/* Dropdown container */
+.xdr-dropdown {
+    position: relative;
+    display: inline-block;
+    font-family: Lato, Assistant, sans-serif;
+    font-size: 14px;
+    color: var(--xdr-text, #eaebeb);
+}
+
+.xdr-dropdown.full-width {
+    display: block;
+    width: 100%;
+}
+
+/* Trigger button */
+.xdr-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 2px 0 4px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--xdr-border-medium, #484848);
+    color: var(--xdr-text, #eaebeb);
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s ease;
+}
+
+.xdr-dropdown-trigger:hover {
+    border-bottom-color: var(--xdr-text-secondary, #b8b8b8);
+}
+
+.xdr-dropdown-trigger:focus {
+    outline: none;
+    border-bottom-color: var(--xdr-primary, #00d26a);
+}
+
+.xdr-dropdown.open .xdr-dropdown-trigger {
+    border-bottom-color: var(--xdr-primary, #00d26a);
+}
+
+/* Selected value display */
+.xdr-dropdown-value {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.xdr-dropdown-value.placeholder {
+    color: var(--xdr-text-secondary, #b8b8b8);
+}
+
+/* Chevron icon */
+.xdr-dropdown-chevron {
+    width: 0;
+    height: 0;
+    margin-left: 8px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 4px solid currentcolor;
+    transition: transform 0.2s ease;
+}
+
+.xdr-dropdown.open .xdr-dropdown-chevron {
+    transform: rotate(180deg);
+}
+
+/* Dropdown panel */
+.xdr-dropdown-panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    display: none;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--xdr-surface, #151515);
+    border: 1px solid var(--xdr-border-medium, #484848);
+    margin-top: 2px;
+}
+
+.xdr-dropdown.open .xdr-dropdown-panel {
+    display: block;
+}
+
+/* Filter input */
+.xdr-dropdown-filter {
+    position: sticky;
+    top: 0;
+    padding: 8px 14px;
+    background: var(--xdr-surface, #151515);
+    border-bottom: 1px solid var(--xdr-border, #333);
+}
+
+.xdr-dropdown-filter input {
+    width: 100%;
+    padding: 4px 0;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--xdr-border-medium, #484848);
+    color: var(--xdr-text, #eaebeb);
+    font-family: inherit;
+    font-size: 14px;
+}
+
+.xdr-dropdown-filter input::placeholder {
+    color: var(--xdr-text-secondary, #707070);
+}
+
+.xdr-dropdown-filter input:focus {
+    outline: none;
+    border-bottom-color: var(--xdr-primary, #00d26a);
+}
+
+/* Dropdown items */
+.xdr-dropdown-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.xdr-dropdown-item {
+    padding: 0 14px;
+    line-height: 32px;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background-color 0.15s ease;
+}
+
+.xdr-dropdown-item:hover {
+    background: var(--xdr-hover, #333);
+}
+
+.xdr-dropdown-item.selected {
+    background: var(--xdr-selected, rgb(0, 210, 106, 0.15));
+    color: var(--xdr-primary, #00d26a);
+}
+
+.xdr-dropdown-item.highlighted {
+    background: var(--xdr-hover, #333);
+}
+
+/* No results message */
+.xdr-dropdown-empty {
+    padding: 14px;
+    text-align: center;
+    color: var(--xdr-text-secondary, #707070);
+    font-style: italic;
+}
+
+/* Scrollbar styling */
+.xdr-dropdown-panel::-webkit-scrollbar {
+    width: 6px;
+}
+
+.xdr-dropdown-panel::-webkit-scrollbar-track {
+    background: var(--xdr-surface, #151515);
+}
+
+.xdr-dropdown-panel::-webkit-scrollbar-thumb {
+    background: var(--xdr-border-medium, #484848);
+    border-radius: 3px;
+}
+
+.xdr-dropdown-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--xdr-text-secondary, #707070);
+}
+
+/* Disabled state */
+.xdr-dropdown.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+.xdr-dropdown.disabled .xdr-dropdown-trigger {
+    cursor: not-allowed;
+}

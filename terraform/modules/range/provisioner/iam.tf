@@ -287,3 +287,27 @@ resource "aws_iam_role_policy" "lambda_s3" {
     ]
   })
 }
+
+# ------------------------------------------------------------------------------
+# Secrets Manager - Kali SSH Keys
+# ------------------------------------------------------------------------------
+
+resource "aws_iam_role_policy" "lambda_secrets" {
+  name = "secrets-manager-kali-ssh"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:CreateSecret",
+          "secretsmanager:DeleteSecret",
+          "secretsmanager:TagResource"
+        ]
+        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:shifter/${var.environment}/range/*/kali-ssh-key-*"
+      }
+    ]
+  })
+}

@@ -33,6 +33,16 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
+  # CSS - Stylelint
+  - repo: local
+    hooks:
+      - id: stylelint
+        name: stylelint
+        entry: npx stylelint --fix
+        language: system
+        files: ^portal/static/css/.*\.css$
+        types: [css]
+
   # TypeScript/JavaScript - ESLint
   - repo: local
     hooks:

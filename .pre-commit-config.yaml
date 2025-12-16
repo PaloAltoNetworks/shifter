@@ -5,9 +5,9 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-        files: ^(portal|mcp/openwebui-mcp-wrapper)/
+        files: ^portal/
       - id: ruff-format
-        files: ^(portal|mcp/openwebui-mcp-wrapper)/
+        files: ^portal/
 
   # Python - Security
   - repo: https://github.com/PyCQA/bandit
@@ -16,8 +16,8 @@ repos:
       - id: bandit
         args: [-c, portal/pyproject.toml, -r]
         additional_dependencies: ["bandit[toml]"]
-        files: ^(portal|mcp/openwebui-mcp-wrapper)/
-        exclude: ^(portal/(tests|\.venv)/|mcp/openwebui-mcp-wrapper/__pycache__/)
+        files: ^portal/
+        exclude: ^portal/(tests|\.venv)/
 
   # General
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -42,22 +42,6 @@ repos:
         language: system
         files: ^portal/static/css/.*\.css$
         types: [css]
-
-  # TypeScript/JavaScript - ESLint
-  - repo: local
-    hooks:
-      - id: eslint-mcp-shifter
-        name: eslint (mcp-shifter)
-        entry: bash -c 'cd mcp/mcp-shifter && npm ci --silent && npm run lint'
-        language: system
-        files: ^mcp/mcp-shifter/.*\.(ts|js)$
-        pass_filenames: false
-      - id: eslint-aptl-mcp-common
-        name: eslint (aptl-mcp-common)
-        entry: bash -c 'cd mcp/aptl-mcp-common && npm ci --silent && npm run lint'
-        language: system
-        files: ^mcp/aptl-mcp-common/.*\.(ts|js)$
-        pass_filenames: false
 
   # Terraform
   - repo: https://github.com/antonbabenko/pre-commit-terraform

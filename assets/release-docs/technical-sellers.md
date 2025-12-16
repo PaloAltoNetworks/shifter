@@ -139,7 +139,6 @@ You → Portal → Range Provisioning
 |-----------|--------------|
 | Victim VM | Ubuntu 22.04 EC2 with XDR agent |
 | Chat | Browser-based AI interface |
-| MCP Tools | SSH, file ops, command execution for AI |
 | Isolation | No internet egress, isolated VPC |
 
 ### Security & Compliance
@@ -211,7 +210,6 @@ Use customer-specific scenarios:
 
 ### AI Not Responding
 - **Refresh**: Reload Chat interface
-- **Check agent**: Ensure AI has MCP tools loaded
 - **Rephrase**: Try different phrasing for instruction
 - **Manual fallback**: Use recorded demo if needed
 

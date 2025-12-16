@@ -92,7 +92,7 @@ output "acm_validation_records" {
 }
 
 output "alb_https_listener_arn" {
-  description = "ARN of the ALB HTTPS listener (for agentchat path-based routing)"
+  description = "ARN of the ALB HTTPS listener"
   value       = module.alb.https_listener_arn
 }
 
@@ -156,27 +156,4 @@ output "provisioner_lambda_role_arn" {
 output "provisioner_alerts_sns_topic_arn" {
   description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"
   value       = module.provisioner.alerts_sns_topic_arn
-}
-
-# ------------------------------------------------------------------------------
-# OpenWebUI
-# ------------------------------------------------------------------------------
-
-output "openwebui_db_secret_arn" {
-  description = "ARN of the Secrets Manager secret containing OpenWebUI DB credentials"
-  value       = aws_secretsmanager_secret.openwebui_db.arn
-}
-
-# ------------------------------------------------------------------------------
-# AgentChat (OpenWebUI) Cognito
-# ------------------------------------------------------------------------------
-
-output "agentchat_cognito_client_id" {
-  description = "Cognito user pool client ID for AgentChat (OpenWebUI)"
-  value       = module.cognito.agentchat_client_id
-}
-
-output "agentchat_cognito_secret_arn" {
-  description = "ARN of Secrets Manager secret containing AgentChat Cognito credentials"
-  value       = module.cognito.agentchat_secret_arn
 }

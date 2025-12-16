@@ -87,7 +87,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
             else:  # victim
                 host = range_obj.victim_ip
                 secret_arn = range_obj.victim_ssh_key_secret_arn
-                username = "ec2-user"  # Victim uses Amazon Linux
+                username = "ubuntu"  # Victim uses Ubuntu
 
             if not host or not secret_arn:
                 logger.error(

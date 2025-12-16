@@ -8,6 +8,7 @@
 
 environment = ""
 aws_region  = ""
+domain_name = ""
 
 tags = {
   Project     = ""

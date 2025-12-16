@@ -5,7 +5,6 @@
 [![Quality](https://github.com/Brad-Edwards/shifter/actions/workflows/quality.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/quality.yml)
 [![Portal](https://github.com/Brad-Edwards/shifter/actions/workflows/portal.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/portal.yml)
 [![Range](https://github.com/Brad-Edwards/shifter/actions/workflows/range.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/range.yml)
-[![AgentChat](https://github.com/Brad-Edwards/shifter/actions/workflows/agentchat.yml/badge.svg)](https://github.com/Brad-Edwards/shifter/actions/workflows/agentchat.yml)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
 [![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
 [![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)

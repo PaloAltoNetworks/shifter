@@ -58,6 +58,11 @@ output "db_security_group_id" {
   value       = module.rds.db_security_group_id
 }
 
+output "db_resource_id" {
+  description = "Resource ID of the RDS instance (for IAM DB authentication)"
+  value       = module.rds.db_resource_id
+}
+
 # ------------------------------------------------------------------------------
 # EC2
 # ------------------------------------------------------------------------------
@@ -84,6 +89,16 @@ output "alb_dns_name" {
 output "acm_validation_records" {
   description = "DNS records to create for ACM certificate validation"
   value       = module.alb.acm_validation_records
+}
+
+output "alb_https_listener_arn" {
+  description = "ARN of the ALB HTTPS listener (for agentchat path-based routing)"
+  value       = module.alb.https_listener_arn
+}
+
+output "alb_security_group_id" {
+  description = "Security group ID of the ALB"
+  value       = module.alb.security_group_id
 }
 
 # ------------------------------------------------------------------------------
@@ -150,4 +165,18 @@ output "provisioner_alerts_sns_topic_arn" {
 output "openwebui_db_secret_arn" {
   description = "ARN of the Secrets Manager secret containing OpenWebUI DB credentials"
   value       = aws_secretsmanager_secret.openwebui_db.arn
+}
+
+# ------------------------------------------------------------------------------
+# AgentChat (OpenWebUI) Cognito
+# ------------------------------------------------------------------------------
+
+output "agentchat_cognito_client_id" {
+  description = "Cognito user pool client ID for AgentChat (OpenWebUI)"
+  value       = module.cognito.agentchat_client_id
+}
+
+output "agentchat_cognito_secret_arn" {
+  description = "ARN of Secrets Manager secret containing AgentChat Cognito credentials"
+  value       = module.cognito.agentchat_secret_arn
 }

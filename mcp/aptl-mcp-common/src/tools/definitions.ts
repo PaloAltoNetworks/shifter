@@ -7,7 +7,7 @@ export function generateToolDefinitions(serverConfig: LabConfig['server']): Tool
   return [
   {
     name: `${serverConfig.toolPrefix}_info`,
-    description: `Get information about the ${serverConfig.targetName} instance in the lab`,
+    description: `Get information about the ${serverConfig.targetName} instance including allowed target networks.`,
     inputSchema: {
       type: 'object',
       properties: {},
@@ -15,13 +15,13 @@ export function generateToolDefinitions(serverConfig: LabConfig['server']): Tool
   },
   {
     name: `${serverConfig.toolPrefix}_run_command`,
-    description: `Execute a command on the ${serverConfig.targetName} instance (creates temporary session)`,
+    description: `Execute a command on the ${serverConfig.targetName} instance (creates temporary session).`,
     inputSchema: {
       type: 'object',
       properties: {
         command: {
           type: 'string',
-          description: `Command to execute on ${serverConfig.targetName}`,
+          description: `Command to execute on ${serverConfig.targetName}.`,
         },
       },
       required: ['command'],
@@ -72,7 +72,7 @@ export function generateToolDefinitions(serverConfig: LabConfig['server']): Tool
   },
   {
     name: `${serverConfig.toolPrefix}_session_command`,
-    description: 'Execute a command in an existing persistent session',
+    description: `Execute a command in an existing persistent session.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -82,7 +82,7 @@ export function generateToolDefinitions(serverConfig: LabConfig['server']): Tool
         },
         command: {
           type: 'string',
-          description: 'Command to execute',
+          description: 'Command to execute.',
         },
         timeout: {
           type: 'number',

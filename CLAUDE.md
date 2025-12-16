@@ -290,6 +290,8 @@ Per project rules:
 ## Active Technologies
 - Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc (001-risk-register)
 - PostgreSQL (existing RDS instance) (001-risk-register)
+- TypeScript 5.3+ (MCP layer), Python 3.12 (Django portal) (226-wire-up-mcp-integration-with-openwebui)
+- PostgreSQL via RDS (existing Range model) (226-wire-up-mcp-integration-with-openwebui)
 
 ## Recent Changes
 - 001-risk-register: Added Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc

@@ -49,12 +49,10 @@ Each user gets one subnet with three instances:
 
 ## Security Groups
 
-Current implementation (Phase 1 - no Control Box yet):
-
 | SG | Ingress | Egress |
 |----|---------|--------|
-| Kali | SSH from VPC CIDR, ALL from Victim SG | ALL (0.0.0.0/0) |
-| Victim | SSH from VPC CIDR, ALL from Kali SG | ALL (0.0.0.0/0) |
+| Kali | SSH from VPC CIDR, ALL from Victim SG | VPC CIDR (all), DNS |
+| Victim | SSH from VPC CIDR, ALL from Kali SG | HTTPS, DNS |
 
 **Traffic Matrix:**
 
@@ -64,20 +62,16 @@ Current implementation (Phase 1 - no Control Box yet):
 | Victim → Kali | ✅ All ports/protocols | Reverse shells, callbacks, C2 |
 | VPC → Kali | ✅ SSH (22) | MCP/Chat UI access |
 | VPC → Victim | ✅ SSH (22) | MCP configuration |
-| Kali → Internet | ✅ All | apt updates, tool downloads |
-| Victim → Internet | ✅ All | XDR agent callbacks, updates |
+| Kali → Internet | ❌ Blocked | Tools pre-installed on AMI |
+| Victim → Internet | ✅ XDR domains only | `.paloaltonetworks.com`, `.storage.googleapis.com` |
 
-Both instances have unrestricted egress for operational flexibility. Victim-Kali traffic is fully bidirectional to support all attack scenarios including reverse shells.
+**Network Firewall:**
 
-**Future (Phase 2 - with Control Box):**
+AWS Network Firewall filters all egress with domain allowlists:
+- Kali: No external access (empty allowlist)
+- Victim: XDR/XSIAM endpoints only
 
-| SG | Ingress | Egress |
-|----|---------|--------|
-| Control | HTTPS from internet | SSH to Kali SG, Victim SG |
-| Kali | SSH from Control SG, ALL from Victim SG | ALL to Victim SG only |
-| Victim | ALL from Kali SG, SSH from Control SG | HTTPS (agent callbacks) |
-
-In Phase 2, Kali egress will be restricted to Victim only (no internet access from Kali).
+Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW`
 
 ## CIDR
 
@@ -86,7 +80,13 @@ In Phase 2, Kali egress will be restricted to Victim only (no internet access fr
 | Portal | `10.0.0.0/16` |
 | Range | `10.1.0.0/16` |
 
-255 usable `/24` subnets. AWS default 200 subnets/VPC (adjustable to 500).
+| Subnet | CIDR | Purpose |
+|--------|------|---------|
+| Firewall | `10.1.0.0/28` | Network Firewall endpoints |
+| NAT | `10.1.0.16/28` | NAT Gateway |
+| User ranges | `10.1.1.0/24`+ | Per-user subnets (start at index 1) |
+
+254 usable `/24` subnets for users. AWS default 200 subnets/VPC (adjustable to 500).
 
 ## Components
 
@@ -96,15 +96,21 @@ In Phase 2, Kali egress will be restricted to Victim only (no internet access fr
 |----------|---------|
 | VPC | Network boundary |
 | Internet Gateway | Internet access |
-| Route Table | 0.0.0.0/0 → IGW |
+| NAT Gateway | Outbound for private subnets |
+| Network Firewall | Domain-based egress filtering |
+| Firewall Subnet | Firewall endpoint placement |
+| NAT Subnet | NAT Gateway placement |
+| Private Route Table | User subnets → Firewall |
+| Firewall Route Table | Firewall → NAT |
+| NAT Route Table | NAT → IGW |
 
 ### Ephemeral (per-user)
 
 | Resource | Purpose |
 |----------|---------|
 | Subnet | `/24` per user |
-| Control/Kali/Victim EC2 | User instances |
-| 3x Security Groups | Traffic isolation |
+| Kali/Victim EC2 | User instances |
+| SSH keypair | Stored in Secrets Manager |
 
 ## AMI Prerequisites
 

@@ -50,7 +50,7 @@ data "terraform_remote_state" "foundation" {
   backend = "s3"
   config = {
     bucket = "shifter-dev-infra-e3462f0c-c5b5-4b47-836b-efe3f657858c"
-    key    = "dev/terraform.tfstate"
+    key    = "shifter/dev/terraform.tfstate"
     region = "us-east-2"
   }
 }
@@ -196,8 +196,8 @@ resource "aws_lb_listener_rule" "chat" {
   }
 
   condition {
-    path_pattern {
-      values = ["/chat", "/chat/*"]
+    host_header {
+      values = ["chat.${var.domain_name}"]
     }
   }
 
@@ -211,6 +211,12 @@ resource "aws_lb_listener_rule" "mcp" {
   action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.mcp.arn
+  }
+
+  condition {
+    host_header {
+      values = ["chat.${var.domain_name}"]
+    }
   }
 
   condition {

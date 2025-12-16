@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-12-15
+
+### Changed
+- Reskin OpenWeb UI UX to match Cortex XDR look and feel
+
 ## [0.5.0] - 2025-12-14
 
 ### Added

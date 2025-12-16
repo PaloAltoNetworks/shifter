@@ -62,6 +62,30 @@ resource "aws_iam_role_policy" "range_instance_s3" {
   })
 }
 
+# Bedrock access for Claude Code on range instances (Kali and Victim)
+resource "aws_iam_role_policy" "range_instance_bedrock" {
+  name = "bedrock-claude-code"
+  role = aws_iam_role.range_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+          "bedrock:ListInferenceProfiles"
+        ]
+        Resource = [
+          "arn:aws:bedrock:*:*:inference-profile/*",
+          "arn:aws:bedrock:*:*:foundation-model/*"
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "range_instance" {
   name = "${var.name_prefix}-range-instance"
   role = aws_iam_role.range_instance.name

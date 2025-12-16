@@ -253,6 +253,16 @@ html.dark {
 }
 
 /* ==========================================================================
+   HIDE "HELLO, USER" LOGO
+   The model profile image next to "Hello, User" is low-res - hide it
+   ========================================================================== */
+
+.dark img[src*="/api/v1/models/model/profile/image"],
+.dark img.rounded-full[aria-hidden="true"] {
+  display: none !important;
+}
+
+/* ==========================================================================
    CUSTOM SCROLLBAR (Cortex XDR style - gray, not blue)
    ========================================================================== */
 
@@ -341,6 +351,16 @@ button.bg-blue-600:hover {
 .dark main a:hover,
 .dark article a:hover {
   color: #5bb8ff !important;
+}
+
+/* ==========================================================================
+   HIDE LOW-RES "HELLO USER" LOGO
+   ========================================================================== */
+
+/* Hide the model profile image next to "Hello, User" */
+.dark img[src*="/api/v1/models/model/profile/image"],
+.dark img[src*="id=undefined"] {
+  display: none !important;
 }
 
 /* ==========================================================================

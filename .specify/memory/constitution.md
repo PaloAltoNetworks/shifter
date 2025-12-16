@@ -1,4 +1,4 @@
-<!--
+take <!--
 Sync Impact Report:
 - Version change: 1.0.0 → 2.0.0 (Major scope change: Django portal → OpenWeb UI)
 - Modified principles:

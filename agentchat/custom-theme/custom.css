@@ -191,6 +191,8 @@ html.dark {
 }
 
 /* Sidebar container - pure black like Cortex XDR */
+.dark #sidebar,
+.dark #sidebar > div,
 .dark [class*="sidebar"],
 .dark [data-state] [class*="sidebar"],
 .dark aside,
@@ -199,6 +201,17 @@ html.dark {
 .dark [class*="bg-gray-950"],
 .dark [class*="dark:bg-gray-950"] {
   background-color: #000000 !important;
+}
+
+/* Hide sidebar gradient overlays */
+.dark .sidebar-bg-gradient-to-b,
+.dark .sidebar-bg-gradient-to-t,
+.dark [class*="sidebar-bg-gradient"],
+.dark .bg-linear-to-b,
+.dark .bg-linear-to-t {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
 }
 
 /* Sidebar nav items hover - Cortex dark green (only sidebar, not main nav) */

@@ -28,6 +28,21 @@ class TerminalManager {
         this.isDragging = false;
         this.startX = 0;
         this.startLeftWidth = 0;
+
+        // Retry configuration
+        this.retryConfig = {
+            maxRetries: 5,
+            baseDelayMs: 1000,
+            maxDelayMs: 10000,
+            // Close codes that should NOT trigger retry (user/auth issues)
+            noRetryCodes: [4001, 4003],
+        };
+
+        // Retry state per connection
+        this.kaliRetries = 0;
+        this.victimRetries = 0;
+        this.kaliRetryTimeout = null;
+        this.victimRetryTimeout = null;
     }
 
     /**
@@ -139,8 +154,11 @@ class TerminalManager {
         };
 
         this.kaliSocket.onclose = (event) => {
-            this.updateStatus('kali', 'disconnected');
-            this.kaliTerminal.write('\r\n\x1b[31mConnection closed.\x1b[0m\r\n');
+            // Try to reconnect if it's a retriable error
+            if (!this._scheduleRetry('kali', event.code)) {
+                this.updateStatus('kali', 'disconnected');
+                this.kaliTerminal.write('\r\n\x1b[31mConnection closed.\x1b[0m\r\n');
+            }
         };
 
         this.kaliSocket.onerror = (error) => {
@@ -171,8 +189,11 @@ class TerminalManager {
         };
 
         this.victimSocket.onclose = (event) => {
-            this.updateStatus('victim', 'disconnected');
-            this.victimTerminal.write('\r\n\x1b[31mConnection closed.\x1b[0m\r\n');
+            // Try to reconnect if it's a retriable error
+            if (!this._scheduleRetry('victim', event.code)) {
+                this.updateStatus('victim', 'disconnected');
+                this.victimTerminal.write('\r\n\x1b[31mConnection closed.\x1b[0m\r\n');
+            }
         };
 
         this.victimSocket.onerror = (error) => {
@@ -204,7 +225,7 @@ class TerminalManager {
     /**
      * Update connection status indicator
      */
-    updateStatus(instance, status) {
+    updateStatus(instance, status, retryCount = null) {
         const statusEl = document.getElementById(`${instance}-status`);
         if (!statusEl) return;
 
@@ -219,9 +240,21 @@ class TerminalManager {
                 break;
             case 'connected':
                 text.textContent = 'Connected';
+                // Reset retry counter on successful connection
+                if (instance === 'kali') {
+                    this.kaliRetries = 0;
+                } else {
+                    this.victimRetries = 0;
+                }
                 break;
             case 'disconnected':
                 text.textContent = 'Disconnected';
+                break;
+            case 'retrying':
+                text.textContent = `Retrying (${retryCount}/${this.retryConfig.maxRetries})...`;
+                break;
+            case 'failed':
+                text.textContent = 'Failed';
                 break;
         }
     }
@@ -292,9 +325,83 @@ class TerminalManager {
     }
 
     /**
-     * Cleanup - close connections
+     * Calculate retry delay with exponential backoff
+     */
+    _getRetryDelay(retryCount) {
+        const delay = Math.min(
+            this.retryConfig.baseDelayMs * Math.pow(2, retryCount),
+            this.retryConfig.maxDelayMs
+        );
+        return delay;
+    }
+
+    /**
+     * Check if we should retry based on close code
+     */
+    _shouldRetry(closeCode, retryCount) {
+        // Don't retry if we've exceeded max retries
+        if (retryCount >= this.retryConfig.maxRetries) {
+            return false;
+        }
+        // Don't retry for auth/access issues
+        if (this.retryConfig.noRetryCodes.includes(closeCode)) {
+            return false;
+        }
+        // Don't retry for normal closure
+        if (closeCode === 1000) {
+            return false;
+        }
+        // Retry for all other cases (timing issues, SSH failures, etc.)
+        return true;
+    }
+
+    /**
+     * Schedule a retry for the given instance
+     */
+    _scheduleRetry(instance, closeCode) {
+        const retries = instance === 'kali' ? this.kaliRetries : this.victimRetries;
+
+        if (!this._shouldRetry(closeCode, retries)) {
+            this.updateStatus(instance, 'failed');
+            const terminal = instance === 'kali' ? this.kaliTerminal : this.victimTerminal;
+            if (retries >= this.retryConfig.maxRetries) {
+                terminal.write('\r\n\x1b[31mConnection failed after 5 attempts. Refresh page to retry.\x1b[0m\r\n');
+            }
+            return false;
+        }
+
+        const delay = this._getRetryDelay(retries);
+        this.updateStatus(instance, 'retrying', retries + 1);
+
+        const terminal = instance === 'kali' ? this.kaliTerminal : this.victimTerminal;
+        terminal.write(`\r\n\x1b[33mRetrying in ${delay/1000}s... (attempt ${retries + 1}/${this.retryConfig.maxRetries})\x1b[0m\r\n`);
+
+        const timeoutRef = instance === 'kali' ? 'kaliRetryTimeout' : 'victimRetryTimeout';
+        this[timeoutRef] = setTimeout(() => {
+            if (instance === 'kali') {
+                this.kaliRetries++;
+                this.connectKali();
+            } else {
+                this.victimRetries++;
+                this.connectVictim();
+            }
+        }, delay);
+
+        return true;
+    }
+
+    /**
+     * Cleanup - close connections and clear retry timeouts
      */
     destroy() {
+        // Clear retry timeouts
+        if (this.kaliRetryTimeout) {
+            clearTimeout(this.kaliRetryTimeout);
+        }
+        if (this.victimRetryTimeout) {
+            clearTimeout(this.victimRetryTimeout);
+        }
+
         if (this.kaliSocket) {
             this.kaliSocket.close();
         }

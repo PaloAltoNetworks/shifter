@@ -73,15 +73,6 @@ resource "aws_route" "nat_to_igw" {
   gateway_id             = aws_internet_gateway.this.id
 }
 
-# Return traffic from internet goes through firewall for inspection
-resource "aws_route" "nat_to_firewall" {
-  count = var.enable_network_firewall ? 1 : 0
-
-  route_table_id         = aws_route_table.nat.id
-  destination_cidr_block = var.vpc_cidr
-  vpc_endpoint_id        = one(one(aws_networkfirewall_firewall.this[0].firewall_status).sync_states).attachment[0].endpoint_id
-}
-
 resource "aws_route_table_association" "nat" {
   subnet_id      = aws_subnet.nat.id
   route_table_id = aws_route_table.nat.id

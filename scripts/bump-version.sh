@@ -44,4 +44,14 @@ else
   exit 1
 fi
 
+# Update openwebui-tools pyproject.toml
+OPENWEBUI_TOOLS="mcp/openwebui-mcp-wrapper/pyproject.toml"
+if [ -f "$OPENWEBUI_TOOLS" ]; then
+  sed -i "s/^version = \".*\"/version = \"$VERSION\"/" "$OPENWEBUI_TOOLS"
+  echo "Updated $OPENWEBUI_TOOLS"
+else
+  echo "Error: $OPENWEBUI_TOOLS not found"
+  exit 1
+fi
+
 echo "Version bumped to $VERSION successfully!"

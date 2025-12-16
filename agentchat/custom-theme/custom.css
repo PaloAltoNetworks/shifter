@@ -100,6 +100,11 @@ html.dark {
   min-height: 32px !important;
 }
 
+/* Add top margin to sidebar header */
+.dark .sidebar {
+  padding-top: 12px !important;
+}
+
 /* ==========================================================================
    COLLAPSED SIDEBAR - Show Cortex logo and expand icon
    ========================================================================== */
@@ -360,6 +365,11 @@ button.bg-blue-600:hover {
 /* Hide the model profile image next to "Hello, User" */
 .dark img[src*="/api/v1/models/model/profile/image"],
 .dark img[src*="id=undefined"] {
+  display: none !important;
+}
+
+/* Hide the version/branding footer text */
+.dark .svelte-6tnq1o {
   display: none !important;
 }
 

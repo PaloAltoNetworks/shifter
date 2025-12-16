@@ -2,7 +2,7 @@
 Create Victim Lambda - Launches a victim EC2 instance with XDR agent.
 
 Input: { "range_id": "uuid", "subnet_id": "subnet-xxx" }
-Output: { "range_id": "uuid", "victim_instance_id": "i-xxx", "victim_ip": "10.1.X.Y" }
+Output: { "range_id": "uuid", "victim_instance_id": "i-xxx", "victim_ip": "10.1.X.Y", "victim_ssh_key_secret_arn": "arn:..." }
 """
 
 import base64
@@ -11,6 +11,8 @@ import os
 import sys
 
 import boto3
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -54,13 +56,74 @@ def validate_s3_path(value: str) -> bool:
     return bool(safe_pattern.match(value))
 
 
-def get_user_data_script(s3_bucket: str, agent_s3_key: str) -> str:
+def generate_ssh_keypair() -> tuple[str, str]:
     """
-    Generate user data script to install XDR agent on boot.
+    Generate an Ed25519 SSH key pair for MCP server access.
+
+    Returns:
+        tuple: (private_key_pem, public_key_openssh)
+    """
+    private_key = ed25519.Ed25519PrivateKey.generate()
+
+    # Private key in PEM format (OpenSSH format)
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.OpenSSH,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+
+    # Public key in OpenSSH format
+    public_key_openssh = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.OpenSSH,
+        format=serialization.PublicFormat.OpenSSH,
+    ).decode("utf-8")
+
+    return private_key_pem, public_key_openssh
+
+
+def store_ssh_key_in_secrets_manager(
+    private_key: str, range_id: int, user_id: int, environment: str
+) -> str:
+    """
+    Store SSH private key in AWS Secrets Manager.
+
+    Args:
+        private_key: The SSH private key in PEM format
+        range_id: The range ID
+        user_id: The user ID
+        environment: Environment name (dev/prod)
+
+    Returns:
+        The ARN of the created secret
+    """
+    secrets_client = boto3.client("secretsmanager")
+
+    secret_name = f"shifter/{environment}/range/{range_id}/victim-ssh-key"
+
+    # Create the secret with tags for lifecycle management
+    response = secrets_client.create_secret(
+        Name=secret_name,
+        Description=f"SSH private key for Victim instance in range {range_id}",
+        SecretString=private_key,
+        Tags=[
+            {"Key": "shifter:range_id", "Value": str(range_id)},
+            {"Key": "shifter:user_id", "Value": str(user_id)},
+            {"Key": "shifter:environment", "Value": environment},
+            {"Key": "shifter:resource_type", "Value": "victim-ssh-key"},
+        ],
+    )
+
+    return response["ARN"]
+
+
+def get_user_data_script(s3_bucket: str, agent_s3_key: str, public_key: str) -> str:
+    """
+    Generate user data script to install XDR agent on boot and configure SSH access.
 
     Args:
         s3_bucket: S3 bucket containing agent installers
         agent_s3_key: S3 key for the agent installer
+        public_key: SSH public key in OpenSSH format for MCP access
 
     Returns:
         Base64-encoded user data script
@@ -79,16 +142,26 @@ set -euo pipefail
 
 # Log output
 exec > >(tee /var/log/user-data.log) 2>&1
-echo "Starting XDR agent installation..."
+echo "Starting victim instance setup..."
+
+# Configure SSH access for MCP server
+echo "Configuring SSH access..."
+mkdir -p /home/ec2-user/.ssh
+chmod 700 /home/ec2-user/.ssh
+echo "{public_key}" >> /home/ec2-user/.ssh/authorized_keys
+chmod 600 /home/ec2-user/.ssh/authorized_keys
+chown -R ec2-user:ec2-user /home/ec2-user/.ssh
+echo "SSH access configured"
 
 # Download agent installer from S3
+echo "Installing XDR agent..."
 aws s3 cp 's3://{s3_bucket}/{agent_s3_key}' /tmp/agent-installer
 
 # Make executable and run
 chmod +x /tmp/agent-installer
 /tmp/agent-installer --install
 
-echo "XDR agent installation complete"
+echo "Victim instance setup complete"
 """
     return base64.b64encode(script.encode()).decode()
 
@@ -145,6 +218,7 @@ def handler(event: dict, context) -> dict:
                 "range_id": range_id,
                 "victim_instance_id": range_data["victim_instance_id"],
                 "victim_ip": range_data["victim_ip"],
+                "victim_ssh_key_secret_arn": range_data["victim_ssh_key_secret_arn"],
             }
 
         # Get agent config for S3 key
@@ -155,8 +229,19 @@ def handler(event: dict, context) -> dict:
         agent_s3_key = agent_config["s3_key"]
         logger.info(f"Using agent installer: s3://{s3_bucket}/{agent_s3_key}")
 
-        # Generate user data script
-        user_data = get_user_data_script(s3_bucket, agent_s3_key)
+        # Generate SSH key pair for MCP server access
+        logger.info("Generating SSH key pair for MCP access")
+        private_key, public_key = generate_ssh_keypair()
+
+        # Store private key in Secrets Manager
+        logger.info("Storing SSH private key in Secrets Manager")
+        ssh_key_secret_arn = store_ssh_key_in_secrets_manager(
+            private_key, range_id, user_id, environment
+        )
+        logger.info(f"SSH key stored: {ssh_key_secret_arn}")
+
+        # Generate user data script with public key
+        user_data = get_user_data_script(s3_bucket, agent_s3_key, public_key)
 
         # Create instance
         ec2 = boto3.client("ec2")
@@ -219,6 +304,7 @@ def handler(event: dict, context) -> dict:
             range_id,
             victim_instance_id=instance_id,
             victim_ip=private_ip,
+            victim_ssh_key_secret_arn=ssh_key_secret_arn,
         )
         logger.info(f"Updated range {range_id} with victim info")
 
@@ -226,6 +312,7 @@ def handler(event: dict, context) -> dict:
             "range_id": range_id,
             "victim_instance_id": instance_id,
             "victim_ip": private_ip,
+            "victim_ssh_key_secret_arn": ssh_key_secret_arn,
         }
 
     finally:

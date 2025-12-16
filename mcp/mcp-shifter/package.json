@@ -11,7 +11,7 @@
     "dev": "tsx watch src/index.ts",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
-    "lint": "eslint src/",
+    "lint": "eslint src/ --config ../../eslint.config.js",
     "typecheck": "tsc --noEmit",
     "docker:build": "docker build -t mcp-shifter .",
     "docker:run": "docker run -p 3001:3001 --env-file .env mcp-shifter"
@@ -27,13 +27,18 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/eslint__js": "^8.42.3",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^2.1.9",
+    "eslint": "^9.39.2",
     "supertest": "^7.1.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.50.0",
     "vitest": "^2.1.8"
   },
   "engines": {

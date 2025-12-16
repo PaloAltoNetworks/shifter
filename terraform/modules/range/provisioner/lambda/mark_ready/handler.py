@@ -75,6 +75,10 @@ def handler(event: dict, context) -> dict:
             raise ValueError(f"Range {range_id} missing kali_instance_id")
         if not range_data["kali_ssh_key_secret_arn"]:
             raise ValueError(f"Range {range_id} missing kali_ssh_key_secret_arn")
+        if not range_data["victim_instance_id"]:
+            raise ValueError(f"Range {range_id} missing victim_instance_id")
+        if not range_data["victim_ssh_key_secret_arn"]:
+            raise ValueError(f"Range {range_id} missing victim_ssh_key_secret_arn")
 
         # Construct chat URL
         # The chat URL points to OpenWebUI on the chat subdomain

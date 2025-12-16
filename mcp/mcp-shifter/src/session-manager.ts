@@ -95,7 +95,7 @@ export function storeSession(
     sessionId: mcpSessionId,
     userEmail,
     rangeId: range.id,
-    kaliIp: range.kaliIp,
+    targetIp: range.targetIp,
     labConfig,
     transport,
     createdAt: new Date(),

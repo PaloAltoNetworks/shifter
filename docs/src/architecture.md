@@ -16,11 +16,17 @@ graph TB
         RDS[(PostgreSQL)]
         StepFn[[Step Functions]]
         Lambda[Lambda Functions]
-        ChatUI[Chat UI + MCPs]
+        subgraph "AgentChat EC2"
+            ChatUI[OpenWebUI]
+            MCP_K[MCP Kali :3001]
+            MCP_V[MCP Victim :3002]
+        end
         Portal --> RDS
         Portal -->|start execution| StepFn
         StepFn --> Lambda
         Lambda --> RDS
+        MCP_K -->|IAM Auth| RDS
+        MCP_V -->|IAM Auth| RDS
     end
 
     subgraph "Range VPC (10.1.0.0/16)"
@@ -33,7 +39,8 @@ graph TB
 
     User((User)) -->|HTTPS| Portal
     User -->|HTTPS| ChatUI
-    ChatUI -->|SSH/MCP| Kali
+    MCP_K -->|SSH| Kali
+    MCP_V -->|SSH| Victim
     Lambda -->|AWS API| Kali
     Lambda -->|AWS API| Victim
     Victim -->|Telemetry| XDR[XDR/XSIAM]
@@ -194,33 +201,103 @@ MCP enables AI-driven scenario setup via separate chat conversations:
 
 User demos detections to customer.
 
-## MCP Configuration
+## MCP Architecture
 
-MCPs connect Chat UI to range instances via SSH. Currently using hexstrike-ai MCP for Kali access.
+Two MCP server instances run on the AgentChat EC2, each controlling a different target type:
 
-**Current State:** MCPs are configured manually. Users SSH into their Kali instance from the Chat UI.
+```mermaid
+graph TB
+    subgraph "AgentChat EC2"
+        OpenWebUI[OpenWebUI]
+        MCP_Kali[MCP-Shifter<br/>:3001<br/>TARGET_MODE=kali]
+        MCP_Victim[MCP-Shifter<br/>:3002<br/>TARGET_MODE=victim]
+    end
 
-**Future State:** Per-range MCP config will be auto-generated:
+    subgraph "Range VPC"
+        Kali[Kali Instance]
+        Victim[Victim Instance]
+    end
 
-```json
+    subgraph "Portal VPC"
+        RDS[(PostgreSQL)]
+    end
+
+    OpenWebUI --> MCP_Kali
+    OpenWebUI --> MCP_Victim
+    MCP_Kali -->|SSH| Kali
+    MCP_Victim -->|SSH| Victim
+    MCP_Kali -->|IAM Auth| RDS
+    MCP_Victim -->|IAM Auth| RDS
+```
+
+### TARGET_MODE Parameterization
+
+Same MCP binary (`mcp-shifter`) serves both Kali and Victim targets. The `TARGET_MODE` environment variable controls:
+
+| TARGET_MODE | Database Columns | Tool Prefix | SSH User |
+|-------------|------------------|-------------|----------|
+| `kali` | `kali_ip`, `kali_instance_id`, `kali_ssh_key_secret_arn` | `kali_*` | `kali` |
+| `victim` | `victim_ip`, `victim_instance_id`, `victim_ssh_key_secret_arn` | `victim_*` | `ubuntu` |
+
+### Database Users
+
+Each MCP container uses a dedicated PostgreSQL user for operational isolation:
+
+| Container | RDS User | Purpose |
+|-----------|----------|---------|
+| mcp-shifter (Kali) | `kali_mcp_user` | Queries kali_* columns from Range table |
+| mcp-shifter-victim | `victim_mcp_user` | Queries victim_* columns from Range table |
+
+Both users have identical permissions (SELECT on `mission_control_range`, `auth_user`, `mission_control_userprofile`). Separate users enable:
+- Independent logging in RDS audit logs
+- Ability to revoke one without affecting the other
+- Clear operational separation
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant OpenWebUI
+    participant MCP
+    participant Cognito
+    participant RDS
+    participant SecretsManager
+    participant Target
+
+    User->>OpenWebUI: Chat message
+    OpenWebUI->>MCP: Tool call + Cognito JWT
+    MCP->>Cognito: Validate JWT (JWKS)
+    MCP->>RDS: Get range by cognito_sub (IAM auth)
+    RDS-->>MCP: Range record (target IP, SSH key ARN)
+    MCP->>SecretsManager: Get SSH private key
+    SecretsManager-->>MCP: SSH key
+    MCP->>Target: SSH command
+    Target-->>MCP: Output
+    MCP-->>OpenWebUI: Tool result
+    OpenWebUI-->>User: Response
+```
+
+### LabConfig Generation
+
+MCP dynamically builds LabConfig at session creation based on `TARGET_MODE`:
+
+```typescript
+// TARGET_MODE=kali
 {
-  "server": {
-    "name": "shifter-range-${range_id}",
-    "toolPrefix": "kali"
-  },
-  "targets": {
-    "kali": {
-      "host": "${kali_private_ip}",
-      "ssh_user": "kali",
-      "ssh_port": 22
-    },
-    "victim": {
-      "host": "${victim_private_ip}",
-      "ssh_user": "ubuntu",
-      "ssh_port": 22
-    }
+  server: { name: 'shifter-kali', toolPrefix: 'kali' },
+  containers: {
+    kali: { ssh_user: 'kali', container_ip: range.targetIp }
+  }
+}
+
+// TARGET_MODE=victim
+{
+  server: { name: 'shifter-victim', toolPrefix: 'victim' },
+  containers: {
+    victim: { ssh_user: 'ubuntu', container_ip: range.targetIp }
   }
 }
 ```
 
-Same MCP binary, different config per range. No code changes needed.
+Tools are named `{toolPrefix}_info`, `{toolPrefix}_run_command`, etc.

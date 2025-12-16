@@ -40,6 +40,9 @@ export const EnvSchema = z.object({
   // Server
   PORT: z.string().regex(/^\d+$/).transform(Number).default('3001'),
   CONFIG_PATH: z.string().min(1),
+
+  // Target mode - determines which range columns to query and tool naming
+  TARGET_MODE: z.enum(['kali', 'victim']).default('kali'),
 });
 
 export type EnvConfig = z.infer<typeof EnvSchema>;

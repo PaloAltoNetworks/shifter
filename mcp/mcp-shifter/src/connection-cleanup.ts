@@ -69,7 +69,7 @@ function startIdleTimer(): void {
     sessionCount: getSessionCount(),
   });
 
-  idleTimer = setTimeout(async () => {
+  idleTimer = setTimeout(() => {
     // Double-check we still have zero sessions
     if (getSessionCount() > 0) {
       logger.debug('Idle cleanup skipped - sessions exist');
@@ -78,7 +78,7 @@ function startIdleTimer(): void {
       return;
     }
 
-    await performCleanup();
+    void performCleanup();
   }, timeoutMs);
 }
 

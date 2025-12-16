@@ -35,6 +35,14 @@ class UserProfile(models.Model):
     """Extended user data for soft delete and anonymization."""
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    cognito_sub = models.CharField(
+        max_length=36,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Cognito user pool subject identifier (UUID)",
+    )
     deleted_at = models.DateTimeField(null=True, blank=True)
     anonymized_at = models.DateTimeField(null=True, blank=True)
 

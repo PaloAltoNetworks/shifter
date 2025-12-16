@@ -40,17 +40,19 @@ export async function validateToken(token: string): Promise<UserContext> {
   // Verify the token - throws if invalid
   const payload = await jwtVerifier.verify(token);
 
-  // Extract user email from claims
-  // Cognito access tokens have username claim, ID tokens have email claim
-  // For access tokens, username is typically the email if configured
-  const email = payload.username as string;
-  if (!email) {
-    throw new Error('Token missing username claim');
+  // Cognito access tokens have 'sub' claim (the stable user identifier)
+  // We use 'sub' for user lookups as it's the canonical identifier
+  // Note: access tokens don't include the email claim
+  const sub = payload.sub;
+  if (!sub) {
+    throw new Error('Token missing sub claim');
   }
 
   return {
-    email,
-    sub: payload.sub,
+    // Note: 'email' field contains the Cognito sub (UUID), not the actual email
+    // This is used for DB lookups via cognito_sub column in UserProfile
+    email: sub,
+    sub,
     tokenUse: payload.token_use,
     clientId: payload.client_id as string,
     iat: payload.iat,

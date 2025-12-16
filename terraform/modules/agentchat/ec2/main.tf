@@ -140,8 +140,8 @@ resource "aws_iam_role_policy" "secrets_read" {
           "secretsmanager:GetSecretValue"
         ]
         # MCP server needs to read SSH keys for any range belonging to any user
-        # Pattern: shifter-{env}-range-{range_id}-kali-ssh
-        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter-${var.environment}-range-*-kali-ssh-*"
+        # Pattern: shifter/{env}/range/{range_id}/kali-ssh-key
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter/${var.environment}/range/*/kali-ssh-key-*"
       }
     ]
   })

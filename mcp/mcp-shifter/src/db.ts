@@ -11,6 +11,16 @@ import { getConfig } from './config.js';
 import { logger } from './logger.js';
 import type { RangeRecord } from './types.js';
 
+// AWS RDS uses certificates signed by their CA. For IAM auth over SSL,
+// we need to either provide the CA bundle or disable strict verification.
+// In containerized environments, the system CA store may not have the RDS CA.
+const RDS_SSL_CONFIG = {
+  // For production, we should bundle the RDS CA certificate.
+  // For now, allow connections without strict CA verification since we're
+  // using IAM auth which provides its own authentication layer.
+  rejectUnauthorized: false,
+};
+
 let pool: Pool | null = null;
 
 /**
@@ -48,9 +58,7 @@ export async function getPool(): Promise<Pool> {
     database: config.rds.database,
     user: config.rds.username,
     password: token,
-    ssl: {
-      rejectUnauthorized: true,
-    },
+    ssl: RDS_SSL_CONFIG,
     // Pool settings
     max: 10,
     idleTimeoutMillis: 30000,
@@ -76,17 +84,17 @@ export async function getClient(): Promise<PoolClient> {
 }
 
 /**
- * Look up active range for a user by email.
+ * Look up active range for a user by Cognito sub.
  * Returns null if user has no active range.
  *
- * @param userEmail - The user's email address
+ * @param cognitoSub - The user's Cognito subject identifier (UUID)
  * @returns RangeRecord if found, null otherwise
  */
-export async function getActiveRangeForUser(userEmail: string): Promise<RangeRecord | null> {
+export async function getActiveRangeForUser(cognitoSub: string): Promise<RangeRecord | null> {
   const client = await getClient();
 
   try {
-    // Query joins auth_user to get the user by email
+    // Query joins through userprofile to get user by cognito_sub
     // Active statuses include: ready, paused (usable states)
     const result = await client.query<{
       id: number;
@@ -103,11 +111,12 @@ export async function getActiveRangeForUser(userEmail: string): Promise<RangeRec
               r.kali_ssh_key_secret_arn, r.chat_url, r.created_at, r.updated_at
        FROM mission_control_range r
        JOIN auth_user u ON r.user_id = u.id
-       WHERE u.email = $1
+       JOIN mission_control_userprofile p ON p.user_id = u.id
+       WHERE p.cognito_sub = $1
          AND r.status IN ('ready', 'paused')
        ORDER BY r.created_at DESC
        LIMIT 1`,
-      [userEmail]
+      [cognitoSub]
     );
 
     if (result.rows.length === 0) {

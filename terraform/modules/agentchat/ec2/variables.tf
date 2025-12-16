@@ -55,3 +55,9 @@ variable "mcp_shifter_ecr_arn" {
   type        = string
   default     = ""
 }
+
+variable "openwebui_ecr_arn" {
+  description = "ARN of the custom OpenWebUI ECR repository"
+  type        = string
+  default     = ""
+}

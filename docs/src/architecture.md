@@ -6,7 +6,7 @@ Three components, decoupled via RDS:
 
 - **Portal**: Django app for auth, agent upload, range status UI. Triggers Step Functions on launch.
 - **Provisioning Service**: Step Functions + Lambda, provisions range infra (subnet, Kali, Victim)
-- **Chat UI**: Shared multi-tenant chat UI (being evaluated - see issue #209)
+- **Terminal UI**: Browser-based terminal for SSH access to range instances (planned)
 - **Range**: Per-user subnet in Range VPC with Kali + Victim EC2
 
 ```mermaid
@@ -16,17 +16,10 @@ graph TB
         RDS[(PostgreSQL)]
         StepFn[[Step Functions]]
         Lambda[Lambda Functions]
-        subgraph "AgentChat EC2"
-            ChatUI[OpenWebUI]
-            MCP_K[MCP Kali :3001]
-            MCP_V[MCP Victim :3002]
-        end
         Portal --> RDS
         Portal -->|start execution| StepFn
         StepFn --> Lambda
         Lambda --> RDS
-        MCP_K -->|IAM Auth| RDS
-        MCP_V -->|IAM Auth| RDS
     end
 
     subgraph "Range VPC (10.1.0.0/16)"
@@ -38,9 +31,7 @@ graph TB
     end
 
     User((User)) -->|HTTPS| Portal
-    User -->|HTTPS| ChatUI
-    MCP_K -->|SSH| Kali
-    MCP_V -->|SSH| Victim
+    Portal -->|SSH via Terminal| Kali
     Lambda -->|AWS API| Kali
     Lambda -->|AWS API| Victim
     Victim -->|Telemetry| XDR[XDR/XSIAM]
@@ -136,8 +127,7 @@ Per-user ephemeral subnets in Range VPC, provisioned by Step Functions + Lambda.
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Chat UI | Portal VPC | Shared chat UI, agent loop, MCP tool use |
-| Kali EC2 | Range VPC | Attack tools, MCP-controlled |
+| Kali EC2 | Range VPC | Attack tools, SSH accessible |
 | Victim EC2 | Range VPC | Target with XDR agent |
 
 ### Isolation
@@ -186,118 +176,11 @@ Terraform variables stored locally in `.tfvars` files (gitignored). Synced to Gi
 
 Creates namespaced secrets: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_PORTAL`).
 
-## Two-Context Pattern
+## Range Access
 
-MCP enables AI-driven scenario setup via separate chat conversations:
+Users access their range instances via browser-based terminal integrated into the Portal. The terminal provides SSH access to:
 
-1. **Setup chat**: "Set up a PHP command injection on /cmd.php and a SUID privesc"
-   - AI uses victim MCP to configure vulnerabilities
-   - User can specify flags, locations, difficulty
+- **Kali instance**: Run attack tools, execute pentesting workflows
+- **Victim instance**: Configure vulnerabilities, check detections
 
-2. **Attack chat**: "Hack the target at 10.0.1.50, get root, find the flag"
-   - Fresh context (no memory of setup)
-   - AI uses attack methodology: recon → exploit → privesc
-   - XDR/XSIAM detects the attack chain
-
-User demos detections to customer.
-
-## MCP Architecture
-
-Two MCP server instances run on the AgentChat EC2, each controlling a different target type:
-
-```mermaid
-graph TB
-    subgraph "AgentChat EC2"
-        OpenWebUI[OpenWebUI]
-        MCP_Kali[MCP-Shifter<br/>:3001<br/>TARGET_MODE=kali]
-        MCP_Victim[MCP-Shifter<br/>:3002<br/>TARGET_MODE=victim]
-    end
-
-    subgraph "Range VPC"
-        Kali[Kali Instance]
-        Victim[Victim Instance]
-    end
-
-    subgraph "Portal VPC"
-        RDS[(PostgreSQL)]
-    end
-
-    OpenWebUI --> MCP_Kali
-    OpenWebUI --> MCP_Victim
-    MCP_Kali -->|SSH| Kali
-    MCP_Victim -->|SSH| Victim
-    MCP_Kali -->|IAM Auth| RDS
-    MCP_Victim -->|IAM Auth| RDS
-```
-
-### TARGET_MODE Parameterization
-
-Same MCP binary (`mcp-shifter`) serves both Kali and Victim targets. The `TARGET_MODE` environment variable controls:
-
-| TARGET_MODE | Database Columns | Tool Prefix | SSH User |
-|-------------|------------------|-------------|----------|
-| `kali` | `kali_ip`, `kali_instance_id`, `kali_ssh_key_secret_arn` | `kali_*` | `kali` |
-| `victim` | `victim_ip`, `victim_instance_id`, `victim_ssh_key_secret_arn` | `victim_*` | `ubuntu` |
-
-### Database Users
-
-Each MCP container uses a dedicated PostgreSQL user for operational isolation:
-
-| Container | RDS User | Purpose |
-|-----------|----------|---------|
-| mcp-shifter (Kali) | `kali_mcp_user` | Queries kali_* columns from Range table |
-| mcp-shifter-victim | `victim_mcp_user` | Queries victim_* columns from Range table |
-
-Both users have identical permissions (SELECT on `mission_control_range`, `auth_user`, `mission_control_userprofile`). Separate users enable:
-- Independent logging in RDS audit logs
-- Ability to revoke one without affecting the other
-- Clear operational separation
-
-### Authentication Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant OpenWebUI
-    participant MCP
-    participant Cognito
-    participant RDS
-    participant SecretsManager
-    participant Target
-
-    User->>OpenWebUI: Chat message
-    OpenWebUI->>MCP: Tool call + Cognito JWT
-    MCP->>Cognito: Validate JWT (JWKS)
-    MCP->>RDS: Get range by cognito_sub (IAM auth)
-    RDS-->>MCP: Range record (target IP, SSH key ARN)
-    MCP->>SecretsManager: Get SSH private key
-    SecretsManager-->>MCP: SSH key
-    MCP->>Target: SSH command
-    Target-->>MCP: Output
-    MCP-->>OpenWebUI: Tool result
-    OpenWebUI-->>User: Response
-```
-
-### LabConfig Generation
-
-MCP dynamically builds LabConfig at session creation based on `TARGET_MODE`:
-
-```typescript
-// TARGET_MODE=kali
-{
-  server: { name: 'shifter-kali', toolPrefix: 'kali' },
-  containers: {
-    kali: { ssh_user: 'kali', container_ip: range.targetIp }
-  }
-}
-
-// TARGET_MODE=victim
-{
-  server: { name: 'shifter-victim', toolPrefix: 'victim' },
-  containers: {
-    victim: { ssh_user: 'ubuntu', container_ip: range.targetIp }
-  }
-}
-```
-
-Tools are named `{toolPrefix}_info`, `{toolPrefix}_run_command`, etc.
+The terminal uses Django Channels with WebSocket connections for real-time SSH interaction.

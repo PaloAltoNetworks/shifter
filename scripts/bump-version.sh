@@ -24,16 +24,6 @@ fi
 
 echo "Bumping version to $VERSION..."
 
-# Update aptl-mcp-common package.json
-PACKAGE_JSON="mcp/aptl-mcp-common/package.json"
-if [ -f "$PACKAGE_JSON" ]; then
-  sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$PACKAGE_JSON"
-  echo "Updated $PACKAGE_JSON"
-else
-  echo "Error: $PACKAGE_JSON not found"
-  exit 1
-fi
-
 # Update sonar-project.properties
 SONAR_PROPS="sonar-project.properties"
 if [ -f "$SONAR_PROPS" ]; then
@@ -41,16 +31,6 @@ if [ -f "$SONAR_PROPS" ]; then
   echo "Updated $SONAR_PROPS"
 else
   echo "Error: $SONAR_PROPS not found"
-  exit 1
-fi
-
-# Update openwebui-tools pyproject.toml
-OPENWEBUI_TOOLS="mcp/openwebui-mcp-wrapper/pyproject.toml"
-if [ -f "$OPENWEBUI_TOOLS" ]; then
-  sed -i "s/^version = \".*\"/version = \"$VERSION\"/" "$OPENWEBUI_TOOLS"
-  echo "Updated $OPENWEBUI_TOOLS"
-else
-  echo "Error: $OPENWEBUI_TOOLS not found"
   exit 1
 fi
 

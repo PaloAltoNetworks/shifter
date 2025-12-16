@@ -99,5 +99,37 @@ resource "aws_vpc_endpoint" "ec2messages" {
   })
 }
 
+# ------------------------------------------------------------------------------
+# Bedrock VPC Endpoints (for Claude Code)
+# ------------------------------------------------------------------------------
+
+# Bedrock Runtime endpoint (for InvokeModel)
+resource "aws_vpc_endpoint" "bedrock_runtime" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.bedrock-runtime"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.ssm_endpoints.id]
+  security_group_ids  = [aws_security_group.ssm_endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-bedrock-runtime-endpoint"
+  })
+}
+
+# STS endpoint (for credential refresh)
+resource "aws_vpc_endpoint" "sts" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.sts"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.ssm_endpoints.id]
+  security_group_ids  = [aws_security_group.ssm_endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-sts-endpoint"
+  })
+}
+
 # Data source for current region
 data "aws_region" "current" {}

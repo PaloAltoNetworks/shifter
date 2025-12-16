@@ -76,6 +76,15 @@ resource "aws_security_group" "victim" {
     security_groups = [aws_security_group.kali.id]
   }
 
+  # HTTPS to VPC for SSM endpoints (required for Systems Manager agent)
+  egress {
+    description = "HTTPS to VPC (SSM endpoints)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
   # HTTPS for XDR agent telemetry (filtered by Network Firewall)
   egress {
     description = "HTTPS for XDR (filtered by ANFW)"

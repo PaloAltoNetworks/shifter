@@ -142,6 +142,15 @@
     background-color: var(--xdr-error);
 }
 
+.status-indicator.retrying {
+    background-color: var(--xdr-warning);
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.status-indicator.failed {
+    background-color: var(--xdr-error);
+}
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }

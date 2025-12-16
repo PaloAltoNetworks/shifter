@@ -57,9 +57,9 @@ const createMockRange = (id = 1) => ({
   id,
   userId: 100,
   status: 'ready',
-  kaliIp: '10.1.1.5',
-  kaliInstanceId: 'i-123',
-  kaliSshKeySecretArn: 'arn:aws:secretsmanager:...',
+  targetIp: '10.1.1.5',
+  targetInstanceId: 'i-123',
+  targetSshKeySecretArn: 'arn:aws:secretsmanager:...',
   chatUrl: null,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -120,7 +120,7 @@ describe('session-manager', () => {
       expect(session?.sessionId).toBe(mcpSessionId);
       expect(session?.userEmail).toBe(userEmail);
       expect(session?.rangeId).toBe(range.id);
-      expect(session?.kaliIp).toBe(range.kaliIp);
+      expect(session?.targetIp).toBe(range.targetIp);
       expect(session?.labConfig).toBe(labConfig);
       expect(session?.transport).toBe(transport);
       expect(session?.createdAt).toBeInstanceOf(Date);

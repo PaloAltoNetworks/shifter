@@ -136,6 +136,9 @@ class Range(models.Model):
     kali_ssh_key_secret_arn = models.CharField(
         max_length=500, blank=True, default="", help_text="Secrets Manager ARN for Kali SSH private key"
     )
+    victim_ssh_key_secret_arn = models.CharField(
+        max_length=500, blank=True, default="", help_text="Secrets Manager ARN for Victim SSH private key"
+    )
     chat_url = models.URLField(max_length=500, blank=True, default="")
 
     # Step Functions tracking

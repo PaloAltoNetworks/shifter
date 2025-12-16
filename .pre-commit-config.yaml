@@ -5,9 +5,9 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-        files: ^portal/
+        files: ^(portal|mcp/openwebui-mcp-wrapper)/
       - id: ruff-format
-        files: ^portal/
+        files: ^(portal|mcp/openwebui-mcp-wrapper)/
 
   # Python - Security
   - repo: https://github.com/PyCQA/bandit
@@ -16,8 +16,8 @@ repos:
       - id: bandit
         args: [-c, portal/pyproject.toml, -r]
         additional_dependencies: ["bandit[toml]"]
-        files: ^portal/
-        exclude: ^portal/(tests|\.venv)/
+        files: ^(portal|mcp/openwebui-mcp-wrapper)/
+        exclude: ^(portal/(tests|\.venv)/|mcp/openwebui-mcp-wrapper/__pycache__/)
 
   # General
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -26,7 +26,7 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-        args: [--unsafe]  # Allow custom YAML constructors (mkdocs plugins)
+        args: [--unsafe] # Allow custom YAML constructors (mkdocs plugins)
       - id: check-json
       - id: check-added-large-files
         args: [--maxkb=500]
@@ -46,11 +46,17 @@ repos:
   # TypeScript/JavaScript - ESLint
   - repo: local
     hooks:
-      - id: eslint-mcp
-        name: eslint (mcp)
-        entry: bash -c 'cd mcp/mcp-red && npm ci --silent && npm run lint'
+      - id: eslint-mcp-shifter
+        name: eslint (mcp-shifter)
+        entry: bash -c 'cd mcp/mcp-shifter && npm ci --silent && npm run lint'
         language: system
-        files: ^mcp/.*\.(ts|js)$
+        files: ^mcp/mcp-shifter/.*\.(ts|js)$
+        pass_filenames: false
+      - id: eslint-aptl-mcp-common
+        name: eslint (aptl-mcp-common)
+        entry: bash -c 'cd mcp/aptl-mcp-common && npm ci --silent && npm run lint'
+        language: system
+        files: ^mcp/aptl-mcp-common/.*\.(ts|js)$
         pass_filenames: false
 
   # Terraform
@@ -68,7 +74,8 @@ repos:
     hooks:
       - id: checkov
         files: ^terraform/
-        args: [--quiet, --compact, --download-external-modules, "true", --soft-fail]
+        args:
+          [--quiet, --compact, --download-external-modules, "true", --soft-fail]
 
   # Shell scripts
   - repo: https://github.com/shellcheck-py/shellcheck-py

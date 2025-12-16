@@ -123,9 +123,9 @@ module "cognito" {
   allowed_emails        = var.allowed_emails
   deletion_protection   = true
 
-  # AgentChat (OpenWebUI) OAuth callback - served at /chat path
-  agentchat_callback_urls = ["https://${var.domain_name}/chat/oauth/oidc/callback"]
-  agentchat_logout_urls   = ["https://${var.domain_name}/chat/"]
+  # AgentChat (OpenWebUI) OAuth callback - served at subdomain
+  agentchat_callback_urls = ["https://chat.${var.domain_name}/oauth/oidc/callback"]
+  agentchat_logout_urls   = ["https://chat.${var.domain_name}/"]
 
   tags = var.tags
 }
@@ -266,7 +266,7 @@ module "provisioner" {
 
   # Range VPC (where resources are created)
   range_vpc_id         = data.terraform_remote_state.range.outputs.vpc_id
-  range_route_table_id = data.terraform_remote_state.range.outputs.public_route_table_id
+  range_route_table_id = data.terraform_remote_state.range.outputs.private_route_table_id
   # Extract CIDR prefix from VPC CIDR (e.g., "10.1.0.0/16" -> "10.1")
   range_cidr_prefix = join(".", slice(split(".", data.terraform_remote_state.range.outputs.vpc_cidr), 0, 2))
   availability_zone = module.vpc.availability_zones[0]
@@ -293,6 +293,6 @@ module "provisioner" {
   enable_alarms = var.enable_provisioner_alarms
   alarm_email   = var.provisioner_alarm_email
 
-  # Chat URL for MCP integration
-  chat_base_url = "https://${var.domain_name}/chat"
+  # Chat URL for MCP integration (subdomain - no /chat path needed)
+  chat_base_url = "https://chat.${var.domain_name}"
 }

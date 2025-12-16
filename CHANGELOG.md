@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.5] - 2025-12-15
 ### Changed
-- Reskin Portal and Risk Registerto Cortex XDR look and feel
+- Reskin Portal and Risk Register to Cortex XDR look and feel
 
 ## [0.4.4] - 2025-12-14
 

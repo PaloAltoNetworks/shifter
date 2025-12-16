@@ -68,7 +68,7 @@ function createMCPServerForSession(labConfig: LabConfig): Server {
   );
 
   // Setup request handlers
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools,
   }));
 
@@ -85,7 +85,8 @@ function createMCPServerForSession(labConfig: LabConfig): Server {
       labConfig,
     };
 
-    return handler(args, context);
+    // Handler returns Promise<unknown> from aptl-mcp-common - type is validated at runtime
+    return (await handler(args, context)) as { content: unknown[]; isError?: boolean };
   });
 
   return server;
@@ -203,7 +204,7 @@ export function createApp(): express.Application {
       transport.onclose = () => {
         const sid = transport.sessionId;
         if (sid) {
-          destroySessionByMcpId(sid);
+          void destroySessionByMcpId(sid);
         }
       };
 
@@ -322,7 +323,8 @@ export function createApp(): express.Application {
     res.json({ status: 'destroyed' });
   });
 
-  // Error handler
+  // Error handler - Express requires 4 params for error middleware signature
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error('Unhandled error', { error: err.message, stack: err.stack });
     res.status(500).json({
@@ -337,7 +339,7 @@ export function createApp(): express.Application {
 /**
  * Start the server.
  */
-export async function startServer(configPath: string): Promise<void> {
+export function startServer(configPath: string): void {
   // Initialize configuration
   initialize(configPath);
   const config = getConfig();
@@ -356,7 +358,7 @@ export async function startServer(configPath: string): Promise<void> {
   });
 
   // Graceful shutdown
-  const shutdown = async () => {
+  const shutdown = async (): Promise<void> => {
     logger.info('Shutting down gracefully...');
 
     // Stop accepting new connections
@@ -378,6 +380,6 @@ export async function startServer(configPath: string): Promise<void> {
     process.exit(0);
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
 }

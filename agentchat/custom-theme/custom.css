@@ -100,6 +100,46 @@ html.dark {
   min-height: 32px !important;
 }
 
+/* ==========================================================================
+   COLLAPSED SIDEBAR - Show Cortex logo and expand icon
+   ========================================================================== */
+
+/* Collapsed sidebar container */
+.dark #sidebar:has([aria-label="Open Sidebar"]) {
+  position: relative !important;
+  background-color: #000000 !important;
+}
+
+/* Add Cortex logo to top of collapsed sidebar */
+.dark #sidebar:has([aria-label="Open Sidebar"])::before {
+  content: "" !important;
+  display: block !important;
+  width: 32px !important;
+  height: 32px !important;
+  background-image: url('/static/logo.png') !important;
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  margin: 8px auto 4px auto !important;
+}
+
+/* Show the sidebar panel toggle icon (SVG) in collapsed state - always visible */
+.dark [aria-label="Open Sidebar"] svg {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 0.7 !important;
+}
+
+/* Hover effect on expand icon */
+.dark [aria-label="Open Sidebar"]:hover svg {
+  opacity: 1 !important;
+}
+
+/* Hide the favicon in the Open Sidebar button (we show Cortex logo separately above) */
+.dark [aria-label="Open Sidebar"] .sidebar-new-chat-icon {
+  display: none !important;
+}
+
 /* Wordmark link - no hover highlight */
 .dark a:has(#sidebar-webui-name) {
   flex-direction: column !important;

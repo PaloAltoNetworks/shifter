@@ -157,7 +157,8 @@ resource "aws_iam_role_policy" "secrets_read" {
   })
 }
 
-# RDS IAM Database Authentication for MCP servers (Kali and Victim)
+# RDS IAM Database Authentication for MCP servers
+# Each MCP container uses its own database user for operational isolation (logging, revocation)
 resource "aws_iam_role_policy" "rds_connect" {
   count = var.db_resource_id != "" ? 1 : 0
   name  = "rds-iam-connect"
@@ -172,8 +173,7 @@ resource "aws_iam_role_policy" "rds_connect" {
         Action = [
           "rds-db:connect"
         ]
-        # Allow connection as 'mcp_user' IAM user for Kali MCP
-        Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${var.db_resource_id}/mcp_user"
+        Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${var.db_resource_id}/kali_mcp_user"
       },
       {
         Sid    = "RdsIamConnectVictim"
@@ -181,7 +181,6 @@ resource "aws_iam_role_policy" "rds_connect" {
         Action = [
           "rds-db:connect"
         ]
-        # Allow connection as 'victim_mcp_user' IAM user for Victim MCP
         Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${var.db_resource_id}/victim_mcp_user"
       }
     ]

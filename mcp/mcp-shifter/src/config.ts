@@ -82,6 +82,11 @@ export function resetConfigCache(): void {
 }
 
 /**
+ * Target mode type - determines which range columns to query
+ */
+export type TargetMode = 'kali' | 'victim';
+
+/**
  * Unified configuration combining file and environment
  */
 export interface UnifiedConfig {
@@ -104,6 +109,7 @@ export interface UnifiedConfig {
   server: {
     port: number;
   };
+  targetMode: TargetMode;
 }
 
 let cachedUnifiedConfig: UnifiedConfig | null = null;
@@ -143,6 +149,7 @@ export function getConfig(): UnifiedConfig {
     server: {
       port: env.PORT,
     },
+    targetMode: env.TARGET_MODE,
   };
 
   return cachedUnifiedConfig;

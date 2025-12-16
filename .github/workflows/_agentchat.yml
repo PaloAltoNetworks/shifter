@@ -162,9 +162,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Set image output
+      - name: Set mcp-shifter image output
         id: image-output
         run: echo "image_uri=${{ steps.ecr-login.outputs.registry }}/shifter-${{ inputs.is_dev && 'dev-' || '' }}mcp-shifter:latest" >> $GITHUB_OUTPUT
+
+      - name: Build and push custom OpenWebUI
+        id: build-push-openwebui
+        uses: docker/build-push-action@v5
+        with:
+          context: ./agentchat
+          file: ./agentchat/Dockerfile
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/shifter-${{ inputs.is_dev && 'dev-' || '' }}openwebui:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set OpenWebUI image output
+        id: openwebui-output
+        run: echo "image_uri=${{ steps.ecr-login.outputs.registry }}/shifter-${{ inputs.is_dev && 'dev-' || '' }}openwebui:latest" >> $GITHUB_OUTPUT
 
       - name: Get Instance ID
         id: instance
@@ -211,6 +226,7 @@ jobs:
           RDS_PORT: ${{ steps.secrets.outputs.rds_port }}
           RDS_DATABASE: ${{ steps.secrets.outputs.rds_database }}
           MCP_SHIFTER_IMAGE: ${{ steps.image-output.outputs.image_uri }}
+          OPENWEBUI_IMAGE: ${{ steps.openwebui-output.outputs.image_uri }}
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           OPENWEBUI_URL: ${{ env.WEBUI_URL }}
         run: |
@@ -218,6 +234,7 @@ jobs:
           SSM_PARAMS=$(jq -n \
             --arg ecr_registry "$ECR_REGISTRY" \
             --arg mcp_image "$MCP_SHIFTER_IMAGE" \
+            --arg openwebui_image "$OPENWEBUI_IMAGE" \
             --arg bedrock_region "$BEDROCK_REGION" \
             --arg rds_region "$RDS_REGION" \
             --arg bag_api_key "$BAG_API_KEY" \
@@ -239,6 +256,7 @@ jobs:
                 "cd src && docker build -f Dockerfile_ecs -t bedrock-gateway . && cd /opt",
                 ("aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin " + $ecr_registry),
                 ("docker pull " + $mcp_image),
+                ("docker pull " + $openwebui_image),
                 "docker stop open-webui bedrock-gateway mcp-shifter mcp-shifter-victim 2>/dev/null || true",
                 "docker rm open-webui bedrock-gateway mcp-shifter mcp-shifter-victim 2>/dev/null || true",
                 "docker network create agentchat 2>/dev/null || true",
@@ -248,8 +266,7 @@ jobs:
                 ("docker run -d --name bedrock-gateway --restart unless-stopped --network agentchat -p 8000:8080 -e AWS_REGION=" + $bedrock_region + " -e API_KEY=" + $bag_api_key + " bedrock-gateway"),
                 ("docker run -d --name mcp-shifter --restart unless-stopped --network agentchat -p 3001:3001 -v /opt/mcp-shifter-config:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=" + $rds_region + " -e COGNITO_USER_POOL_ID=" + $cognito_pool + " -e COGNITO_CLIENT_ID=" + $cognito_client + " -e COGNITO_ISSUER=" + $cognito_issuer + " -e RDS_HOSTNAME=" + $rds_host + " -e RDS_PORT=" + $rds_port + " -e RDS_DATABASE=" + $rds_db + " -e RDS_USERNAME=kali_mcp_user -e TARGET_MODE=kali " + $mcp_image),
                 ("docker run -d --name mcp-shifter-victim --restart unless-stopped --network agentchat -p 3002:3001 -v /opt/mcp-shifter-config-victim:/app/config:ro -e PORT=3001 -e CONFIG_PATH=/app/config/config.json -e AWS_REGION=" + $rds_region + " -e COGNITO_USER_POOL_ID=" + $cognito_pool + " -e COGNITO_CLIENT_ID=" + $cognito_client + " -e COGNITO_ISSUER=" + $cognito_issuer + " -e RDS_HOSTNAME=" + $rds_host + " -e RDS_PORT=" + $rds_port + " -e RDS_DATABASE=" + $rds_db + " -e RDS_USERNAME=victim_mcp_user -e TARGET_MODE=victim " + $mcp_image),
-                "docker pull ghcr.io/open-webui/open-webui:v0.6.41",
-                ("docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=" + $bag_api_key + " -e DATABASE_URL=" + $db_url + " -e WEBUI_URL=" + $webui_url + " -e ENABLE_OAUTH_SIGNUP=true -e ENABLE_LOGIN_FORM=false -e OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true -e OAUTH_PROVIDER_NAME=cognito -e OAUTH_CLIENT_ID=" + $cognito_client + " -e OAUTH_CLIENT_SECRET=" + $cognito_secret + " -e OPENID_PROVIDER_URL=" + $cognito_issuer + "/.well-known/openid-configuration ghcr.io/open-webui/open-webui:v0.6.41"),
+                ("docker run -d --name open-webui --restart unless-stopped --network agentchat -p 8080:8080 -e OLLAMA_BASE_URL= -e ENABLE_OLLAMA_API=false -e OPENAI_API_BASE_URL=http://bedrock-gateway:8080/api/v1 -e OPENAI_API_KEY=" + $bag_api_key + " -e DATABASE_URL=" + $db_url + " -e WEBUI_URL=" + $webui_url + " -e WEBUI_NAME=\"Cortex Shifter\" -e ENABLE_OAUTH_SIGNUP=true -e ENABLE_LOGIN_FORM=false -e OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true -e OAUTH_PROVIDER_NAME=cognito -e OAUTH_CLIENT_ID=" + $cognito_client + " -e OAUTH_CLIENT_SECRET=" + $cognito_secret + " -e OPENID_PROVIDER_URL=" + $cognito_issuer + "/.well-known/openid-configuration " + $openwebui_image),
                 "echo Waiting for health checks...",
                 "sleep 30",
                 "curl -sf http://localhost:8080/health || (docker logs open-webui && exit 1)",
@@ -260,7 +277,7 @@ jobs:
             }')
 
           COMMAND_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" --instance-ids "$INSTANCE_ID" \
-            --parameters "$SSM_PARAMS" --timeout-seconds 600 --query "Command.CommandId" --output text)
+            --parameters "$SSM_PARAMS" --timeout-seconds 900 --query "Command.CommandId" --output text)
 
           echo "SSM Command ID: $COMMAND_ID"
           for i in $(seq 1 60); do

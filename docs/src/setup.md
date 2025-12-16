@@ -2,8 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 22.x
-- Python 3.11+
+- Python 3.12+
 - Terraform 1.14+
 - AWS CLI configured with SSO
 - GitHub CLI (`gh`) for secrets sync
@@ -79,26 +78,6 @@ cd terraform/environments/prod/portal
 terraform init
 terraform plan
 terraform apply
-```
-
-## MCP Development
-
-### aptl-mcp-common
-
-```bash
-cd mcp/aptl-mcp-common
-npm install
-npm run build
-npm test -- --coverage
-```
-
-### mcp-red
-
-```bash
-cd mcp/mcp-red
-npm install
-npm run build
-npx @modelcontextprotocol/inspector build/index.js
 ```
 
 ## Documentation

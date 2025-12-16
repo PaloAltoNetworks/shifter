@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2025-12-15
+
+### Removed
+- OpenWebUI/AgentChat infrastructure (#261)
+  - Deleted agentchat Terraform modules and environments
+  - Removed MCP-Shifter and OpenWebUI MCP wrapper code
+  - Removed agentchat GitHub Actions workflows
+  - Removed ECR repositories for openwebui and mcp-shifter
+  - Removed Cognito agentchat client
+  - Removed openwebui_db Secrets Manager secret
+  - Removed agentchat documentation
+  - Removed migrations for victim_mcp_user and kali_mcp_user rename
+- Entire MCP directory (`mcp/`) including aptl-mcp-common and mcp-red
+
+### Changed
+- Architecture updated: Chat UI replaced with planned browser-based terminal (Django Channels)
+- `chat_base_url` now optional in provisioner module (empty string allowed)
+- Updated CLAUDE.md and architecture docs to reflect new terminal-based approach
+
 ## [0.5.3] - 2025-12-15
 
 ### Added

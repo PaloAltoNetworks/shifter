@@ -35,6 +35,14 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         """Handle WebSocket connection request."""
+        try:
+            await self._do_connect()
+        except Exception:
+            logger.exception("Unexpected error in WebSocket connect")
+            await self.close(code=4500)
+
+    async def _do_connect(self):
+        """Internal connect logic - separated for clean exception handling."""
         # Check authentication
         user = self.scope.get("user")
         if not user or isinstance(user, AnonymousUser):
@@ -54,7 +62,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
             if range_obj.user_id != user.id:
                 logger.warning(
-                    "User %s attempted to access range %d owned by %d",
+                    "User %s attempted to access range %s owned by %s",
                     user.id,
                     self.range_id,
                     range_obj.user_id,
@@ -64,7 +72,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
             if range_obj.status != Range.Status.READY:
                 logger.warning(
-                    "Attempted to connect to non-ready range %d (status: %s)",
+                    "Attempted to connect to non-ready range %s (status: %s)",
                     self.range_id,
                     range_obj.status,
                 )
@@ -82,12 +90,16 @@ class SSHConsumer(AsyncWebsocketConsumer):
                 username = "ec2-user"  # Victim uses Amazon Linux
 
             if not host or not secret_arn:
-                logger.error("Missing connection details for range %d instance %s", self.range_id, self.instance_type)
+                logger.error(
+                    "Missing connection details for range %s instance %s",
+                    self.range_id,
+                    self.instance_type,
+                )
                 await self.close(code=4005)
                 return
 
         except Range.DoesNotExist:
-            logger.warning("Range %d not found", self.range_id)
+            logger.warning("Range %s not found", self.range_id)
             await self.close(code=4004)
             return
 
@@ -95,7 +107,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
         try:
             private_key = await asyncio.get_event_loop().run_in_executor(None, get_ssh_key, secret_arn)
         except SecretsError:
-            logger.exception("Failed to retrieve SSH key for range %d", self.range_id)
+            logger.exception("Failed to retrieve SSH key for range %s", self.range_id)
             await self.close(code=4005)
             return
 
@@ -109,7 +121,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
             await self.ssh_connection.connect()
         except SSHConnectionError:
             logger.exception(
-                "SSH connection failed for range %d instance %s",
+                "SSH connection failed for range %s instance %s",
                 self.range_id,
                 self.instance_type,
             )
@@ -118,32 +130,46 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
         # Accept the WebSocket connection
         await self.accept()
-        logger.info("Terminal WebSocket connected for range %d instance %s", self.range_id, self.instance_type)
+        logger.info(
+            "Terminal WebSocket connected for range %s instance %s",
+            self.range_id,
+            self.instance_type,
+        )
 
         # Start reading SSH output
         self.output_task = asyncio.create_task(self._read_ssh_output())
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
-        # Cancel output reading task
-        if self.output_task:
-            self.output_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.output_task
+        try:
+            # Cancel output reading task
+            if self.output_task:
+                self.output_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self.output_task
 
-        # Close SSH connection
-        if self.ssh_connection:
-            await self.ssh_connection.disconnect()
+            # Close SSH connection
+            if self.ssh_connection:
+                await self.ssh_connection.disconnect()
 
-        logger.info(
-            "Terminal WebSocket disconnected for range %d instance %s (code: %d)",
-            self.range_id,
-            self.instance_type,
-            close_code,
-        )
+            logger.info(
+                "Terminal WebSocket disconnected for range %s instance %s (code: %s)",
+                self.range_id,
+                self.instance_type,
+                close_code,
+            )
+        except Exception:
+            logger.exception("Error during WebSocket disconnect cleanup")
 
     async def receive(self, text_data=None, bytes_data=None):
         """Handle incoming WebSocket messages."""
+        try:
+            await self._do_receive(text_data, bytes_data)
+        except Exception:
+            logger.exception("Unexpected error in WebSocket receive")
+
+    async def _do_receive(self, text_data=None, bytes_data=None):
+        """Internal receive logic - separated for clean exception handling."""
         if text_data:
             try:
                 message = json.loads(text_data)
@@ -167,19 +193,23 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
     async def _read_ssh_output(self):
         """Continuously read SSH output and send to WebSocket."""
-        while self.ssh_connection and self.ssh_connection.is_connected:
-            try:
-                data = await self.ssh_connection.receive(timeout=0.1)
-                if data:
-                    output = data.decode("utf-8", errors="replace")
-                    await self.send(text_data=json.dumps({"type": "output", "data": output}))
-            except SSHConnectionError:
-                logger.info(
-                    "SSH connection lost for range %d instance %s",
-                    self.range_id,
-                    self.instance_type,
-                )
-                await self.close(code=4006)
-                break
-            except asyncio.CancelledError:
-                break
+        try:
+            while self.ssh_connection and self.ssh_connection.is_connected:
+                try:
+                    data = await self.ssh_connection.receive(timeout=0.1)
+                    if data:
+                        output = data.decode("utf-8", errors="replace")
+                        await self.send(text_data=json.dumps({"type": "output", "data": output}))
+                except SSHConnectionError:
+                    logger.info(
+                        "SSH connection lost for range %s instance %s",
+                        self.range_id,
+                        self.instance_type,
+                    )
+                    await self.close(code=4006)
+                    break
+        except asyncio.CancelledError:
+            logger.debug("SSH output task cancelled for range %s", self.range_id)
+        except Exception:
+            logger.exception("Unexpected error reading SSH output")
+            await self.close(code=4500)

@@ -84,20 +84,32 @@ class SSHConnection:
         except asyncssh.PermissionDenied as e:
             logger.exception("SSH permission denied for %s@%s", self.username, self.host)
             raise SSHConnectionError("SSH authentication failed") from e
+        except asyncssh.KeyImportError as e:
+            logger.exception("Invalid SSH key format for %s@%s", self.username, self.host)
+            raise SSHConnectionError("Invalid SSH key format") from e
         except OSError as e:
             logger.exception("Network error connecting to %s", self.host)
             raise SSHConnectionError(f"Network error: {e}") from e
+        except Exception as e:
+            logger.exception("Unexpected error connecting to %s", self.host)
+            raise SSHConnectionError(f"Connection failed: {e}") from e
 
     async def disconnect(self) -> None:
         """Close SSH connection cleanly."""
-        if self._process:
-            self._process.close()
+        try:
+            if self._process:
+                self._process.close()
+                self._process = None
+            if self._conn:
+                self._conn.close()
+                await self._conn.wait_closed()
+                self._conn = None
+            logger.info("SSH connection closed to %s", self.host)
+        except Exception:
+            logger.exception("Error closing SSH connection to %s", self.host)
+            # Ensure we clear references even on error
             self._process = None
-        if self._conn:
-            self._conn.close()
-            await self._conn.wait_closed()
             self._conn = None
-        logger.info("SSH connection closed to %s", self.host)
 
     async def send(self, data: bytes) -> None:
         """

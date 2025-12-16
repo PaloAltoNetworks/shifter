@@ -8,7 +8,7 @@ PROD profile env var: PANW_SHIFTER_PROD_PROFILE
 
 ## Project Overview
 
-**Shifter** is a self-service cyber range platform. Users access a browser-based chat interface with MCPs to configure victims and run AI-driven attacks against XDR/XSIAM-protected targets.
+**Shifter** is a self-service cyber range platform. Users provision isolated attack environments with Kali and victim instances to run penetration tests and demos against XDR/XSIAM-protected targets.
 
 ### Target Users
 
@@ -40,17 +40,18 @@ PANW SecOps Domain Consultants who need to:
 │ • Agent upload      │ execution  │ • create_kali Lambda        │
 │ • Launch range UI   │            │ • create_victim Lambda      │
 │ • Show range status │            │ • Updates RDS directly      │
+│ • Terminal access   │            │                             │
 └─────────────────────┘            └─────────────────────────────┘
          │                                    │
-         │                                    │ AWS APIs
-         ▼                                    ▼
-┌─────────────────────┐            ┌─────────────────────────────┐
-│  Chat UI            │            │  Range VPC (10.1.0.0/16)    │
-│  (shared instance)  │            │                             │
-│                     │            │  Per-user subnet:           │
-│ • Browser-based     │───SSH────▶│  • Kali EC2 (attack tools)  │
-│ • MCP (hexstrike)   │   /MCP     │  • Victim EC2 (XDR agent)   │
-│ • Agent loops       │            │                             │
+         │ SSH via                            │ AWS APIs
+         │ WebSocket                          ▼
+         ▼                         ┌─────────────────────────────┐
+┌─────────────────────┐            │  Range VPC (10.1.0.0/16)    │
+│  Range VPC          │            │                             │
+│  (10.1.0.0/16)      │            │  Per-user subnet:           │
+│                     │            │  • Kali EC2 (attack tools)  │
+│  • Kali EC2         │            │  • Victim EC2 (XDR agent)   │
+│  • Victim EC2       │            │                             │
 └─────────────────────┘            └─────────────────────────────┘
                                               │
                                               ▼
@@ -67,20 +68,20 @@ PANW SecOps Domain Consultants who need to:
    - `create_kali`: Launches Kali EC2 from pre-baked AMI
    - `create_victim`: Launches Victim EC2, installs XDR agent from S3
    - Each Lambda updates RDS directly with resource IDs
-5. **Portal shows "Ready"** → user clicks "Open Range", goes to Chat UI
-6. **User interacts with AI in Chat:**
-   - Uses hexstrike-ai MCP to control Kali instance
-   - Runs attacks against Victim, XDR/XSIAM detects
+5. **Portal shows "Ready"** → user accesses range via browser-based terminal
+6. **User runs attacks from Kali:**
+   - SSH to Kali via Portal terminal
+   - Run attacks against Victim, XDR/XSIAM detects
 
 ### Why This Architecture
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Chat UI | TBD | MCP support, agent loops, open source |
+| Terminal | Django Channels + WebSocket | Browser-based SSH, no client install |
 | Orchestration | Step Functions + Lambda | Reliable, retry logic, error handling |
 | State | RDS only | Single source of truth, no message queues |
-| Auth | Cognito | Same identity across Portal and Chat |
-| Attack Tools | Kali EC2 | Full Linux with hexstrike-ai pre-installed |
+| Auth | Cognito | SSO with MFA, paloaltonetworks.com only |
+| Attack Tools | Kali EC2 | Full Linux with pre-installed pentest tools |
 | Victim VMs | Real EC2 | XDR agent requires real OS |
 
 ---
@@ -95,7 +96,8 @@ PANW SecOps Domain Consultants who need to:
 - Cognito OIDC authentication
 - Agent config CRUD (upload installer to S3)
 - Write `Range(status='pending')` to DB on launch
-- Display range status, link to agentic chat
+- Display range status
+- Browser-based terminal for SSH access
 
 Portal does NOT provision infrastructure. It writes requests to DB.
 
@@ -114,27 +116,16 @@ Portal does NOT provision infrastructure. It writes requests to DB.
 
 **Key Design**: Lambda functions run in Portal VPC, access RDS directly via IAM Database Auth, create Range resources via AWS APIs (no VPC peering needed).
 
-### 3. Chat UI
+### 3. Terminal UI
 
-**Purpose**: Browser-based chat UI with agent loop and MCP tool use
+**Purpose**: Browser-based terminal for SSH access to range instances
 
-**Features needed**:
-- MCP server integration (hexstrike-ai for Kali control)
-- Multi-turn conversations with agent loops
-- Chat history
-- AWS Bedrock for Claude models
+**Features**:
+- WebSocket-based SSH via Django Channels
+- Secure key retrieval from Secrets Manager
+- Integrated into Portal (no separate app)
 
-**Status**: Chat UI component is being evaluated. See GitHub issue #209.
-
-### 4. MCP Servers
-
-**Purpose**: Give AI tools to control Kali and run attacks
-
-**Current**: Uses `hexstrike-ai` MCP for AI-driven pentesting, pre-installed on Kali AMI.
-
-**Two-Context Pattern**:
-- Chat 1: "Set up a vulnerable web server" → AI configures victim via Kali
-- Chat 2: "Hack the target" → AI attacks (no memory of setup)
+**Status**: Planned. See GitHub issue #261.
 
 ---
 
@@ -155,7 +146,7 @@ The authenticated area of the Django portal. See full documentation:
 | `/mission-control/history/` | Range history |
 | `/mission-control/settings/` | Account settings |
 
-**Architecture Note:** Portal handles auth and status display. Chat UI handles the actual AI chat interaction. User clicks "Open Range" → redirects to Chat URL.
+**Architecture Note:** Portal handles auth, status display, and terminal access. User clicks "Open Range" → opens browser-based terminal to Kali.
 
 ---
 
@@ -167,15 +158,6 @@ shifter/
 ├── LICENSE
 ├── README.md
 ├── CHANGELOG.md
-├── mcp/
-│   ├── aptl-mcp-common/         # Core MCP library (SSH, tools, server)
-│   │   ├── src/
-│   │   ├── tests/
-│   │   └── package.json
-│   └── mcp-red/                 # Reference MCP server + config schema
-│       ├── src/index.ts
-│       ├── docker-lab-config.json  # Config template
-│       └── package.json
 ├── portal/                      # Django app
 │   ├── manage.py
 │   ├── config/
@@ -193,35 +175,13 @@ shifter/
 
 ---
 
-## Development Commands
-
-### MCP Common Library
-
-```bash
-cd mcp/aptl-mcp-common
-npm install
-npm run build
-npm test -- --coverage
-```
-
-### MCP Server (mcp-red example)
-
-```bash
-cd mcp/mcp-red
-npm install
-npm run build
-npx @modelcontextprotocol/inspector build/index.js
-```
-
----
-
 ## Implementation Phases
 
 ### Phase 1: Core Platform (Target: Dec 18)
 - [x] Django portal (auth, agent upload, Mission Control UI)
 - [x] Portal infrastructure (VPC, RDS, ALB, Cognito)
-- [ ] Provisioning service (watch DB, Terraform)
-- [ ] Chat UI deployment with MCP integration
+- [x] Provisioning service (Step Functions + Lambda)
+- [ ] Browser-based terminal for SSH access
 - [ ] Range VPC + victim EC2 provisioning
 
 ### Phase 2: Polish
@@ -232,7 +192,7 @@ npx @modelcontextprotocol/inspector build/index.js
 ### Phase 3: Enhanced Features
 - [ ] Windows victim option
 - [ ] Multiple victim scenarios
-- [ ] XSIAM API MCP (verify detections)
+- [ ] XSIAM API integration (verify detections)
 
 ---
 
@@ -288,10 +248,6 @@ Per project rules:
 - Write for technical audience (no marketing language)
 
 ## Active Technologies
-- Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc (001-risk-register)
-- PostgreSQL (existing RDS instance) (001-risk-register)
-- TypeScript 5.3+ (MCP layer), Python 3.12 (Django portal) (226-wire-up-mcp-integration-with-openwebui)
-- PostgreSQL via RDS (existing Range model) (226-wire-up-mcp-integration-with-openwebui)
-
-## Recent Changes
-- 001-risk-register: Added Python 3.12 (per existing `pyproject.toml`) + Django 6.0, Django REST Framework (to add), existing mozilla-django-oidc
+- Python 3.12 + Django 5.x, mozilla-django-oidc
+- PostgreSQL (RDS instance)
+- Terraform for infrastructure

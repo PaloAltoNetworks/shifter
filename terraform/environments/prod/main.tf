@@ -9,27 +9,3 @@ module "portal_ecr" {
     Component = "portal"
   }
 }
-
-module "mcp_shifter_ecr" {
-  source = "../../modules/ecr"
-
-  repository_name      = var.mcp_shifter_repository_name
-  image_tag_mutability = "MUTABLE"
-  scan_on_push         = true
-
-  tags = {
-    Component = "mcp-shifter"
-  }
-}
-
-module "openwebui_ecr" {
-  source = "../../modules/ecr"
-
-  repository_name      = var.openwebui_repository_name
-  image_tag_mutability = "MUTABLE"
-  scan_on_push         = true
-
-  tags = {
-    Component = "openwebui"
-  }
-}

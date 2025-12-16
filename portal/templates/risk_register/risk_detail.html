@@ -1,21 +1,22 @@
 {% extends "risk_register/base.html" %}
 
 {% block content %}
+<!-- T038: Risk detail with XDR component classes -->
 <div class="page-header">
     <div>
         <h1 class="page-title">{{ risk.title }}</h1>
         <p class="page-subtitle">
             <span class="badge badge-{{ risk.severity }}">{{ risk.severity }}</span>
-            <span class="status-{{ risk.status }}" style="margin-left: 0.5rem;">{{ risk.get_status_display }}</span>
-            {% if risk.is_deleted %}<span style="color: var(--red); margin-left: 0.5rem;">[DELETED]</span>{% endif %}
+            <span class="status-{{ risk.status }} ml-sm">{{ risk.get_status_display }}</span>
+            {% if risk.is_deleted %}<span class="text-error ml-sm">[DELETED]</span>{% endif %}
         </p>
     </div>
-    <div style="display: flex; gap: 0.5rem;">
+    <div class="flex-row gap-sm">
         <a href="{% url 'risk_register:risk_edit' pk=risk.pk %}" class="btn btn-secondary btn-sm">Edit</a>
         {% if risk.status != 'closed' %}
         <form method="post" action="{% url 'risk_register:risk_close' pk=risk.pk %}" style="display: inline;">
             {% csrf_token %}
-            <button type="submit" class="btn btn-warning btn-sm">Close</button>
+            <button type="submit" class="btn btn-secondary btn-sm">Close</button>
         </form>
         {% else %}
         <form method="post" action="{% url 'risk_register:risk_reopen' pk=risk.pk %}" style="display: inline;">
@@ -39,7 +40,7 @@
 
 <div class="card">
     <h3 class="card-title">Description</h3>
-    <p style="line-height: 1.6;">{{ risk.description|linebreaks }}</p>
+    <p class="leading-relaxed">{{ risk.description|linebreaks }}</p>
 </div>
 
 <div class="detail-grid">
@@ -51,25 +52,25 @@
                 {% if risk.stride_categories %}
                     {% for cat in risk.stride_categories %}
                         {% for code, name in stride_choices %}
-                            {% if code == cat %}<span class="badge" style="background: rgba(255,255,255,0.1); border: none; margin-right: 0.25rem;">{{ name }}</span>{% endif %}
+                            {% if code == cat %}<span class="badge mr-xs">{{ name }}</span>{% endif %}
                         {% endfor %}
                     {% endfor %}
                 {% else %}
-                    <span style="color: var(--gray);">Not specified</span>
+                    <span class="text-muted">Not specified</span>
                 {% endif %}
             </div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Likelihood Score</div>
-            <div class="detail-value">{% if risk.likelihood_score %}{{ risk.likelihood_score }} / 5{% else %}<span style="color: var(--gray);">—</span>{% endif %}</div>
+            <div class="detail-value">{% if risk.likelihood_score %}{{ risk.likelihood_score }} / 5{% else %}<span class="text-muted">—</span>{% endif %}</div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Impact Score</div>
-            <div class="detail-value">{% if risk.impact_score %}{{ risk.impact_score }} / 5{% else %}<span style="color: var(--gray);">—</span>{% endif %}</div>
+            <div class="detail-value">{% if risk.impact_score %}{{ risk.impact_score }} / 5{% else %}<span class="text-muted">—</span>{% endif %}</div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Risk Score</div>
-            <div class="detail-value">{% if risk.risk_score %}<strong>{{ risk.risk_score }}</strong> / 25{% else %}<span style="color: var(--gray);">—</span>{% endif %}</div>
+            <div class="detail-value">{% if risk.risk_score %}<strong>{{ risk.risk_score }}</strong> / 25{% else %}<span class="text-muted">—</span>{% endif %}</div>
         </div>
     </div>
 
@@ -77,15 +78,15 @@
         <h3 class="card-title">Details</h3>
         <div class="detail-item">
             <div class="detail-label">Attack Vector</div>
-            <div class="detail-value">{% if risk.attack_vector %}{{ risk.attack_vector }}{% else %}<span style="color: var(--gray);">Not specified</span>{% endif %}</div>
+            <div class="detail-value">{% if risk.attack_vector %}{{ risk.attack_vector }}{% else %}<span class="text-muted">Not specified</span>{% endif %}</div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Affected Assets</div>
-            <div class="detail-value">{% if risk.affected_assets %}{{ risk.affected_assets }}{% else %}<span style="color: var(--gray);">Not specified</span>{% endif %}</div>
+            <div class="detail-value">{% if risk.affected_assets %}{{ risk.affected_assets }}{% else %}<span class="text-muted">Not specified</span>{% endif %}</div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Mitigation Status</div>
-            <div class="detail-value">{% if risk.mitigation_status %}{{ risk.mitigation_status }}{% else %}<span style="color: var(--gray);">Not specified</span>{% endif %}</div>
+            <div class="detail-value">{% if risk.mitigation_status %}{{ risk.mitigation_status }}{% else %}<span class="text-muted">Not specified</span>{% endif %}</div>
         </div>
         {% if risk.resolution_reason %}
         <div class="detail-item">
@@ -118,7 +119,7 @@
     <h3 class="card-title">Comments</h3>
 
     {% if comments %}
-    <div style="margin-bottom: 1.5rem;">
+    <div class="mb-lg">
         {% for comment in comments %}
         <div class="comment">
             <div class="comment-header">
@@ -127,7 +128,7 @@
                     <span class="comment-date">{{ comment.created_at|date:"M d, Y H:i" }}</span>
                     <form method="post" action="{% url 'risk_register:comment_delete' risk_pk=risk.pk pk=comment.pk %}" style="display: inline; margin-left: 0.5rem;">
                         {% csrf_token %}
-                        <button type="submit" style="background: none; border: none; color: var(--red); cursor: pointer; font-size: 0.75rem;">Delete</button>
+                        <button type="submit" class="btn btn-danger btn-sm" style="height: auto; padding: 0.125rem 0.5rem;">Delete</button>
                     </form>
                 </div>
             </div>
@@ -136,7 +137,7 @@
         {% endfor %}
     </div>
     {% else %}
-    <p style="color: var(--gray); margin-bottom: 1rem;">No comments yet.</p>
+    <p class="text-muted mb-md">No comments yet.</p>
     {% endif %}
 
     <form method="post" action="{% url 'risk_register:comment_add' risk_pk=risk.pk %}">
@@ -148,7 +149,7 @@
     </form>
 </div>
 
-<div style="margin-top: 1rem;">
+<div class="mt-md">
     <a href="{% url 'risk_register:risk_list' %}" class="btn btn-secondary">&larr; Back to List</a>
 </div>
 {% endblock %}

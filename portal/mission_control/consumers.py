@@ -79,7 +79,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
             else:  # victim
                 host = range_obj.victim_ip
                 secret_arn = range_obj.victim_ssh_key_secret_arn
-                username = "ubuntu"  # Victim uses Ubuntu
+                username = "ec2-user"  # Victim uses Amazon Linux
 
             if not host or not secret_arn:
                 logger.error("Missing connection details for range %d instance %s", self.range_id, self.instance_type)

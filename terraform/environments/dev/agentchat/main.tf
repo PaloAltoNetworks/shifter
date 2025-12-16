@@ -151,7 +151,7 @@ resource "aws_lb_target_group_attachment" "chat" {
 }
 
 # ------------------------------------------------------------------------------
-# ALB Target Group - MCP Server (/mcp)
+# ALB Target Group - MCP Kali Server (/mcp)
 # ------------------------------------------------------------------------------
 
 resource "aws_lb_target_group" "mcp" {
@@ -180,6 +180,38 @@ resource "aws_lb_target_group_attachment" "mcp" {
   target_group_arn = aws_lb_target_group.mcp.arn
   target_id        = module.ec2.instance_id
   port             = 3001
+}
+
+# ------------------------------------------------------------------------------
+# ALB Target Group - MCP Victim Server (/mcp-victim)
+# ------------------------------------------------------------------------------
+
+resource "aws_lb_target_group" "mcp_victim" {
+  name     = "${local.name_prefix}-mcp-victim-tg"
+  port     = 3002
+  protocol = "HTTP"
+  vpc_id   = data.terraform_remote_state.portal.outputs.vpc_id
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    path                = "/health"
+    protocol            = "HTTP"
+    matcher             = "200"
+  }
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-mcp-victim-tg"
+  })
+}
+
+resource "aws_lb_target_group_attachment" "mcp_victim" {
+  target_group_arn = aws_lb_target_group.mcp_victim.arn
+  target_id        = module.ec2.instance_id
+  port             = 3002
 }
 
 # ------------------------------------------------------------------------------
@@ -228,6 +260,30 @@ resource "aws_lb_listener_rule" "mcp" {
   tags = var.tags
 }
 
+resource "aws_lb_listener_rule" "mcp_victim" {
+  listener_arn = data.terraform_remote_state.portal.outputs.alb_https_listener_arn
+  priority     = 12
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.mcp_victim.arn
+  }
+
+  condition {
+    host_header {
+      values = ["chat.${var.domain_name}"]
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/mcp-victim", "/mcp-victim/*"]
+    }
+  }
+
+  tags = var.tags
+}
+
 # ------------------------------------------------------------------------------
 # Security Group Rule - Allow ALB to reach AgentChat EC2
 # ------------------------------------------------------------------------------
@@ -249,7 +305,17 @@ resource "aws_security_group_rule" "alb_to_mcp" {
   protocol                 = "tcp"
   source_security_group_id = data.terraform_remote_state.portal.outputs.alb_security_group_id
   security_group_id        = module.ec2.security_group_id
-  description              = "Allow ALB to reach MCP server"
+  description              = "Allow ALB to reach MCP Kali server"
+}
+
+resource "aws_security_group_rule" "alb_to_mcp_victim" {
+  type                     = "ingress"
+  from_port                = 3002
+  to_port                  = 3002
+  protocol                 = "tcp"
+  source_security_group_id = data.terraform_remote_state.portal.outputs.alb_security_group_id
+  security_group_id        = module.ec2.security_group_id
+  description              = "Allow ALB to reach MCP Victim server"
 }
 
 # ------------------------------------------------------------------------------
@@ -264,4 +330,18 @@ resource "aws_security_group_rule" "mcp_to_kali_ssh" {
   cidr_blocks       = [data.terraform_remote_state.portal.outputs.vpc_cidr]
   security_group_id = data.terraform_remote_state.range.outputs.kali_security_group_id
   description       = "Allow MCP server (Portal VPC) to SSH to Kali instances"
+}
+
+# ------------------------------------------------------------------------------
+# Security Group Rule - Allow MCP Server to SSH to Victim in Range VPC
+# ------------------------------------------------------------------------------
+
+resource "aws_security_group_rule" "mcp_to_victim_ssh" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [data.terraform_remote_state.portal.outputs.vpc_cidr]
+  security_group_id = data.terraform_remote_state.range.outputs.victim_security_group_id
+  description       = "Allow MCP server (Portal VPC) to SSH to Victim instances"
 }

@@ -328,8 +328,30 @@ button.bg-blue-600:hover {
 .dark input:focus,
 .dark textarea:focus,
 .dark select:focus {
-  border-color: #128df3 !important;
-  box-shadow: 0 0 0 2px rgba(18, 141, 243, 0.2) !important;
+  border-color: #ffffff !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Chat input container - white border on focus (specific targeting) */
+.dark form > div.rounded-3xl:has(.ProseMirror):focus-within,
+.dark .shadow-lg.rounded-3xl:has(.ProseMirror):focus-within {
+  border-color: #ffffff !important;
+}
+
+/* Remove outline from ProseMirror itself */
+.dark .ProseMirror:focus {
+  outline: none !important;
+}
+
+/* Voice mode button - fix white icon on white background */
+.dark button[aria-label="Voice mode"],
+.dark button[aria-label="Voice mode"] svg {
+  background-color: #333333 !important;
+  color: #ffffff !important;
+}
+
+.dark button[aria-label="Voice mode"] svg path {
+  fill: #ffffff !important;
 }
 
 .dark input::placeholder,

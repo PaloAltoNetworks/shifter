@@ -134,20 +134,30 @@ resource "aws_iam_role_policy" "secrets_read" {
         ])
       },
       {
-        Sid    = "ReadSshKeySecrets"
+        Sid    = "ReadKaliSshKeySecrets"
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        # MCP server needs to read SSH keys for any range belonging to any user
+        # Kali MCP server needs to read SSH keys for any range
         # Pattern: shifter/{env}/range/{range_id}/kali-ssh-key
         Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter/${var.environment}/range/*/kali-ssh-key-*"
+      },
+      {
+        Sid    = "ReadVictimSshKeySecrets"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        # Victim MCP server needs to read SSH keys for any range
+        # Pattern: shifter/{env}/range/{range_id}/victim-ssh-key
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter/${var.environment}/range/*/victim-ssh-key-*"
       }
     ]
   })
 }
 
-# RDS IAM Database Authentication for MCP server
+# RDS IAM Database Authentication for MCP servers (Kali and Victim)
 resource "aws_iam_role_policy" "rds_connect" {
   count = var.db_resource_id != "" ? 1 : 0
   name  = "rds-iam-connect"
@@ -157,13 +167,22 @@ resource "aws_iam_role_policy" "rds_connect" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "RdsIamConnect"
+        Sid    = "RdsIamConnectKali"
         Effect = "Allow"
         Action = [
           "rds-db:connect"
         ]
-        # Allow connection as 'mcp_user' IAM user to the database
+        # Allow connection as 'mcp_user' IAM user for Kali MCP
         Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${var.db_resource_id}/mcp_user"
+      },
+      {
+        Sid    = "RdsIamConnectVictim"
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        # Allow connection as 'victim_mcp_user' IAM user for Victim MCP
+        Resource = "arn:aws:rds-db:${var.aws_region}:*:dbuser:${var.db_resource_id}/victim_mcp_user"
       }
     ]
   })

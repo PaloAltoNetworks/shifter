@@ -16,6 +16,7 @@ class DashboardManager {
         this.cancelUrl = options.cancelUrl;
         this.destroyUrl = options.destroyUrl;
         this.agentsUrl = options.agentsUrl;
+        this.loginUrl = options.loginUrl || '/oidc/authenticate/';
 
         // State
         this.currentRange = null;
@@ -36,7 +37,6 @@ class DashboardManager {
         this.agentItems = document.getElementById('agent-items');
         this.launchBtn = document.getElementById('launch-btn');
         this.cancelBtn = document.getElementById('cancel-btn');
-        this.openWorkspaceBtn = document.getElementById('open-workspace-btn');
         this.pauseBtn = document.getElementById('pause-btn');
         this.destroyBtn = document.getElementById('destroy-btn');
         this.resumeBtn = document.getElementById('resume-btn');
@@ -45,6 +45,31 @@ class DashboardManager {
 
         this._bindEvents();
         this._bindCleanup();
+    }
+
+    /**
+     * Check if a fetch response indicates session expiration.
+     * This happens when the server redirects to Cognito for re-auth.
+     */
+    _isSessionExpired(response) {
+        // If we got redirected to a different origin (Cognito), session expired
+        if (response.redirected && response.url.includes('cognito')) {
+            return true;
+        }
+        // Also check for 401/403 which might indicate auth issues
+        if (response.status === 401 || response.status === 403) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Redirect to login page when session expires.
+     */
+    _handleSessionExpired() {
+        console.log('Session expired, redirecting to login...');
+        this._stopPolling();
+        globalThis.location.href = this.loginUrl;
     }
 
     _bindCleanup() {
@@ -147,6 +172,11 @@ class DashboardManager {
                 headers: { 'Accept': 'application/json' },
             });
 
+            if (this._isSessionExpired(response)) {
+                this._handleSessionExpired();
+                return;
+            }
+
             if (!response.ok) {
                 console.error('Failed to load status');
                 return;
@@ -161,6 +191,12 @@ class DashboardManager {
                 this._startPolling();
             }
         } catch (error) {
+            // Network errors during fetch can indicate CORS issues from auth redirects
+            if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+                console.warn('Fetch failed, likely session expired');
+                this._handleSessionExpired();
+                return;
+            }
             console.error('Error loading status:', error);
         }
     }
@@ -251,11 +287,6 @@ class DashboardManager {
             rangeAgent.textContent = this.currentRange.agent_name;
         }
 
-        // Set workspace URL to terminal page (internal navigation)
-        if (this.openWorkspaceBtn) {
-            this.openWorkspaceBtn.href = '/mission-control/terminal/';
-            this.openWorkspaceBtn.removeAttribute('target'); // Open in same tab
-        }
     }
 
     _isValidHttpUrl(urlString) {
@@ -406,12 +437,18 @@ class DashboardManager {
                     headers: { 'Accept': 'application/json' },
                 });
 
+                // Check for session expiration first
+                if (this._isSessionExpired(response)) {
+                    this._handleSessionExpired();
+                    return;
+                }
+
                 if (!response.ok) {
                     console.warn('Polling: response not ok', response.status);
                     this.pollErrorCount++;
                     if (this.pollErrorCount >= this.maxPollErrors) {
                         console.error('Too many polling errors, reloading page');
-                        window.location.reload();
+                        globalThis.location.reload();
                     }
                     return;
                 }
@@ -443,6 +480,12 @@ class DashboardManager {
                     }
                 }
             } catch (error) {
+                // Network errors during fetch can indicate CORS issues from auth redirects
+                if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+                    console.warn('Polling fetch failed, likely session expired');
+                    this._handleSessionExpired();
+                    return;
+                }
                 console.error('Polling error:', error);
             }
         }, this.pollIntervalMs);

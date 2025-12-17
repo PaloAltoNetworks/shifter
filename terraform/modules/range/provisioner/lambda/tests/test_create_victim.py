@@ -62,25 +62,44 @@ class TestGetUserDataScript:
     """Tests for user data script generation."""
 
     def test_valid_inputs_returns_base64(self):
-        result = get_user_data_script("my-bucket", "agents/installer.sh")
+        presigned_url = "https://bucket.s3.amazonaws.com/key?X-Amz-Signature=abc"
+        public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@example.com"
+        result = get_user_data_script(
+            presigned_url, "agents/installer.sh", public_key
+        )
         # Should be base64 encoded
         import base64
         decoded = base64.b64decode(result).decode()
         assert "#!/bin/bash" in decoded
-        assert "s3://my-bucket/agents/installer.sh" in decoded
-
-    def test_rejects_invalid_bucket(self):
-        with pytest.raises(ValueError, match="Invalid S3 bucket name"):
-            get_user_data_script("bucket; rm -rf /", "valid/key.sh")
+        assert "curl" in decoded
+        assert presigned_url in decoded
 
     def test_rejects_invalid_key(self):
+        presigned_url = "https://bucket.s3.amazonaws.com/key?sig=abc"
+        public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@example.com"
         with pytest.raises(ValueError, match="Invalid S3 key"):
-            get_user_data_script("valid-bucket", "key$(whoami).sh")
+            get_user_data_script(presigned_url, "key$(whoami).sh", public_key)
 
-    def test_s3_path_is_quoted(self):
-        """Ensure S3 path is single-quoted in script for extra safety."""
-        result = get_user_data_script("my-bucket", "my/key.sh")
+    def test_presigned_url_is_quoted(self):
+        """Ensure presigned URL is single-quoted in script for extra safety."""
+        presigned_url = "https://bucket.s3.amazonaws.com/key?X-Amz-Signature=abc"
+        public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@example.com"
+        result = get_user_data_script(
+            presigned_url, "my/key.sh", public_key
+        )
         import base64
         decoded = base64.b64decode(result).decode()
-        # Path should be in single quotes
-        assert "'s3://my-bucket/my/key.sh'" in decoded
+        # URL should be in single quotes
+        assert f"'{presigned_url}'" in decoded
+
+    def test_includes_ssh_key(self):
+        """Ensure SSH public key is included in authorized_keys."""
+        presigned_url = "https://bucket.s3.amazonaws.com/key?sig=abc"
+        public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@example.com"
+        result = get_user_data_script(
+            presigned_url, "agents/installer.sh", public_key
+        )
+        import base64
+        decoded = base64.b64decode(result).decode()
+        assert public_key in decoded
+        assert "authorized_keys" in decoded

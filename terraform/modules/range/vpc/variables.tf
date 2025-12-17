@@ -10,6 +10,11 @@ variable "vpc_cidr" {
   type        = string
 }
 
+variable "portal_vpc_cidr" {
+  description = "CIDR block for the Portal VPC (for SSH access from browser terminal)"
+  type        = string
+}
+
 variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
@@ -42,6 +47,7 @@ variable "victim_allowed_domains" {
   type        = list(string)
   default = [
     ".paloaltonetworks.com",
-    ".storage.googleapis.com"
+    ".storage.googleapis.com",
+    ".pkg.dev"
   ]
 }

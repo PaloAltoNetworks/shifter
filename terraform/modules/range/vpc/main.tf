@@ -58,13 +58,22 @@ resource "aws_security_group" "victim" {
   description = "Security group for victim EC2 instances"
   vpc_id      = aws_vpc.this.id
 
-  # SSH from within VPC (for MCP access)
+  # SSH from within Range VPC (for MCP access)
   ingress {
-    description = "SSH from VPC"
+    description = "SSH from Range VPC"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
+  }
+
+  # SSH from Portal VPC (for browser terminal)
+  ingress {
+    description = "SSH from Portal VPC (browser terminal)"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.portal_vpc_cidr]
   }
 
   # Allow all inbound from Kali (for attacks)
@@ -126,13 +135,22 @@ resource "aws_security_group" "kali" {
   description = "Security group for Kali attack EC2 instances"
   vpc_id      = aws_vpc.this.id
 
-  # SSH from within VPC (for MCP/Chat UI access)
+  # SSH from within Range VPC (for MCP/Chat UI access)
   ingress {
-    description = "SSH from VPC"
+    description = "SSH from Range VPC"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
+  }
+
+  # SSH from Portal VPC (for browser terminal)
+  ingress {
+    description = "SSH from Portal VPC (browser terminal)"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.portal_vpc_cidr]
   }
 
   # All traffic within VPC (for attacking victim)
@@ -175,4 +193,15 @@ resource "aws_security_group_rule" "kali_from_victim" {
   source_security_group_id = aws_security_group.victim.id
   security_group_id        = aws_security_group.kali.id
   description              = "All traffic from victim (reverse shells)"
+}
+
+# Allow victim to send traffic to Kali (reverse shells, callbacks)
+resource "aws_security_group_rule" "victim_to_kali" {
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.kali.id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic to Kali (reverse shells)"
 }

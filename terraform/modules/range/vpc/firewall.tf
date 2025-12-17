@@ -200,15 +200,13 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     # With DEFAULT_ACTION_ORDER, unmatched traffic is dropped after rules are evaluated
     # This allows the domain allowlist to work properly
 
-    # Block direct IP connections first (highest priority)
+    # Block direct IP connections
     stateful_rule_group_reference {
-      priority     = 50
       resource_arn = aws_networkfirewall_rule_group.block_ip_sni[0].arn
     }
 
     # Victim domains (always included)
     stateful_rule_group_reference {
-      priority     = 100
       resource_arn = aws_networkfirewall_rule_group.victim_domains[0].arn
     }
 
@@ -216,7 +214,6 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     dynamic "stateful_rule_group_reference" {
       for_each = length(var.kali_allowed_domains) > 0 ? [1] : []
       content {
-        priority     = 200
         resource_arn = aws_networkfirewall_rule_group.kali_domains[0].arn
       }
     }

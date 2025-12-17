@@ -251,15 +251,10 @@ class DashboardManager {
             rangeAgent.textContent = this.currentRange.agent_name;
         }
 
-        // Set workspace URL (validate protocol for defense-in-depth)
-        if (this.openWorkspaceBtn && this.currentRange.chat_url) {
-            if (this._isValidHttpUrl(this.currentRange.chat_url)) {
-                this.openWorkspaceBtn.href = this.currentRange.chat_url;
-                this.openWorkspaceBtn.target = '_blank';
-            } else {
-                this.openWorkspaceBtn.removeAttribute('href');
-                this.openWorkspaceBtn.removeAttribute('target');
-            }
+        // Set workspace URL to terminal page (internal navigation)
+        if (this.openWorkspaceBtn) {
+            this.openWorkspaceBtn.href = '/mission-control/terminal/';
+            this.openWorkspaceBtn.removeAttribute('target'); // Open in same tab
         }
     }
 

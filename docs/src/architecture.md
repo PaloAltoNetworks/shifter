@@ -11,7 +11,7 @@ Three components, decoupled via RDS:
 
 ```mermaid
 graph TB
-    subgraph "Portal VPC"
+    subgraph "Portal VPC (10.0.0.0/16)"
         Portal[Django Portal]
         RDS[(PostgreSQL)]
         StepFn[[Step Functions]]
@@ -31,7 +31,8 @@ graph TB
     end
 
     User((User)) -->|HTTPS| Portal
-    Portal -->|SSH via Terminal| Kali
+    Portal -->|SSH via Peering| Kali
+    Portal -->|SSH via Peering| Victim
     Lambda -->|AWS API| Kali
     Lambda -->|AWS API| Victim
     Victim -->|Telemetry| XDR[XDR/XSIAM]
@@ -134,7 +135,8 @@ Per-user ephemeral subnets in Range VPC, provisioned by Step Functions + Lambda.
 
 - Each user gets a dedicated /24 subnet in Range VPC
 - Security groups restrict traffic between subnets
-- Range VPC has no route to Portal VPC (Lambda uses AWS APIs)
+- VPC peering connects Portal to Range for SSH terminal access only (port 22)
+- Lambda functions provision resources via AWS APIs (not through peering)
 - Victim VMs have no IAM role (can't call AWS APIs)
 
 ## Deployment Pipeline
@@ -178,9 +180,9 @@ Creates namespaced secrets: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_POR
 
 ## Range Access
 
-Users access their range instances via browser-based terminal integrated into the Portal. The terminal provides SSH access to:
+Users access their range instances via browser-based terminal integrated into the Portal. Side-by-side terminal panes provide simultaneous SSH access to both instances:
 
-- **Kali instance**: Run attack tools, execute pentesting workflows
-- **Victim instance**: Configure vulnerabilities, check detections
+- **Kali terminal (left)**: Run attack tools, execute pentesting workflows
+- **Victim terminal (right)**: Configure vulnerabilities, check detections
 
-The terminal uses Django Channels with WebSocket connections for real-time SSH interaction.
+The terminal uses Django Channels with WebSocket connections for real-time SSH interaction. See GitHub issue #267.

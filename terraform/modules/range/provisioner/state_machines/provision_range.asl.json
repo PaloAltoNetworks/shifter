@@ -121,9 +121,7 @@
       "ResultSelector": {
         "verification_status.$": "$.Payload.verification_status",
         "agent_installed.$": "$.Payload.agent_installed",
-        "retry_count.$": "$.Payload.retry_count",
-        "error.$": "$.Payload.error",
-        "message.$": "$.Payload.message"
+        "retry_count.$": "$.Payload.retry_count"
       },
       "Next": "CheckVerification",
       "Catch": [

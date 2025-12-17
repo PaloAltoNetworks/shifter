@@ -84,6 +84,13 @@ body.xdr-dark-theme {
     transition: opacity 0.2s ease;
 }
 
+.btn,
+.btn:hover,
+.btn:focus,
+.btn:active {
+    text-decoration: none;
+}
+
 .btn-primary {
     background: #fff;
     color: #000;

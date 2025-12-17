@@ -62,6 +62,30 @@ resource "aws_iam_role_policy" "range_instance_s3" {
   })
 }
 
+# Bedrock access for Claude Code on range instances (Kali and Victim)
+resource "aws_iam_role_policy" "range_instance_bedrock" {
+  name = "bedrock-claude-code"
+  role = aws_iam_role.range_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+          "bedrock:ListInferenceProfiles"
+        ]
+        Resource = [
+          "arn:aws:bedrock:*:*:inference-profile/*",
+          "arn:aws:bedrock:*:*:foundation-model/*"
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "range_instance" {
   name = "${var.name_prefix}-range-instance"
   role = aws_iam_role.range_instance.name
@@ -308,11 +332,11 @@ resource "aws_iam_role_policy" "lambda_s3" {
 }
 
 # ------------------------------------------------------------------------------
-# Secrets Manager - Kali SSH Keys
+# Secrets Manager - SSH Keys (Kali and Victim)
 # ------------------------------------------------------------------------------
 
 resource "aws_iam_role_policy" "lambda_secrets" {
-  name = "secrets-manager-kali-ssh"
+  name = "secrets-manager-ssh-keys"
   role = aws_iam_role.lambda.id
 
   policy = jsonencode({
@@ -325,7 +349,10 @@ resource "aws_iam_role_policy" "lambda_secrets" {
           "secretsmanager:DeleteSecret",
           "secretsmanager:TagResource"
         ]
-        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:shifter/${var.environment}/range/*/kali-ssh-key-*"
+        Resource = [
+          "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:shifter/${var.environment}/range/*/kali-ssh-key-*",
+          "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:shifter/${var.environment}/range/*/victim-ssh-key-*"
+        ]
       }
     ]
   })

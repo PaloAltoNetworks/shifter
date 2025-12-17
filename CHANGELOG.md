@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2025-12-16
+
+### Added
+- Claude Code on Kali and Victim AMIs for AI-assisted penetration testing
+  - Configured for Amazon Bedrock (no internet required)
+  - Role-specific CLAUDE.md system prompts for each instance type
+  - Kali: Authorized pentester role with subnet-only scope
+  - Victim: Scenario setup assistant for vulnerable configurations
+- Bedrock VPC endpoints (bedrock-runtime, sts) for Range VPC
+- Bedrock IAM permissions for range instance role
+
+### Changed
+- Increased Portal EC2 instance to t3.large (from t3.micro) for WebSocket stability
+- Increased Kali and Victim instances to t3.small for Claude Code memory requirements
+
+## [0.6.0] - 2025-12-16
+
+### Added
+- Browser-based Terminal UI for SSH access to range instances (#267)
+  - Side-by-side Kali and Victim terminal panes with xterm.js
+  - WebSocket-based SSH via Django Channels
+  - Terminal sidebar menu item with active range indicator
+- VPC peering between Portal and Range VPCs for SSH connectivity
+- Security group rules allowing SSH from Portal to range instances
+
+### Changed
+- Switched from Gunicorn (WSGI) to Daphne (ASGI) for WebSocket support
+
+### Fixed
+- Buttons should not have underline
+
 ## [0.5.4] - 2025-12-15
 
 ### Removed

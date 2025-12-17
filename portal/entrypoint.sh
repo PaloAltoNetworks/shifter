@@ -100,13 +100,10 @@ python manage.py migrate --noinput
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# Start gunicorn
-echo "Starting gunicorn..."
-exec gunicorn config.wsgi:application \
-    --bind 0.0.0.0:8000 \
-    --workers "${GUNICORN_WORKERS:-2}" \
-    --threads "${GUNICORN_THREADS:-4}" \
-    --timeout "${GUNICORN_TIMEOUT:-30}" \
-    --access-logfile - \
-    --error-logfile - \
-    --capture-output
+# Start daphne (ASGI server for WebSocket support)
+echo "Starting daphne..."
+exec daphne config.asgi:application \
+    --bind 0.0.0.0 \
+    --port 8000 \
+    --access-log - \
+    --verbosity 1

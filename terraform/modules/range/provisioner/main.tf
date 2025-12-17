@@ -41,9 +41,10 @@ locals {
 # ------------------------------------------------------------------------------
 
 data "archive_file" "create_subnet" {
-  type        = "zip"
-  source_dir  = "${local.build_dir}/create_subnet_pkg"
-  output_path = "${local.build_dir}/create_subnet.zip"
+  type             = "zip"
+  source_dir       = "${local.build_dir}/create_subnet_pkg"
+  output_path      = "${local.build_dir}/create_subnet.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_function" "create_subnet" {
@@ -81,9 +82,10 @@ resource "aws_lambda_function" "create_subnet" {
 # ------------------------------------------------------------------------------
 
 data "archive_file" "create_victim" {
-  type        = "zip"
-  source_dir  = "${local.build_dir}/create_victim_pkg"
-  output_path = "${local.build_dir}/create_victim.zip"
+  type             = "zip"
+  source_dir       = "${local.build_dir}/create_victim_pkg"
+  output_path      = "${local.build_dir}/create_victim.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_function" "create_victim" {
@@ -122,9 +124,10 @@ resource "aws_lambda_function" "create_victim" {
 # ------------------------------------------------------------------------------
 
 data "archive_file" "create_kali" {
-  type        = "zip"
-  source_dir  = "${local.build_dir}/create_kali_pkg"
-  output_path = "${local.build_dir}/create_kali.zip"
+  type             = "zip"
+  source_dir       = "${local.build_dir}/create_kali_pkg"
+  output_path      = "${local.build_dir}/create_kali.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_function" "create_kali" {
@@ -162,9 +165,10 @@ resource "aws_lambda_function" "create_kali" {
 # ------------------------------------------------------------------------------
 
 data "archive_file" "mark_ready" {
-  type        = "zip"
-  source_dir  = "${local.build_dir}/mark_ready_pkg"
-  output_path = "${local.build_dir}/mark_ready.zip"
+  type             = "zip"
+  source_dir       = "${local.build_dir}/mark_ready_pkg"
+  output_path      = "${local.build_dir}/mark_ready.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_function" "mark_ready" {
@@ -200,9 +204,10 @@ resource "aws_lambda_function" "mark_ready" {
 # ------------------------------------------------------------------------------
 
 data "archive_file" "verify_agent" {
-  type        = "zip"
-  source_dir  = "${local.build_dir}/verify_agent_pkg"
-  output_path = "${local.build_dir}/verify_agent.zip"
+  type             = "zip"
+  source_dir       = "${local.build_dir}/verify_agent_pkg"
+  output_path      = "${local.build_dir}/verify_agent.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_function" "verify_agent" {
@@ -236,9 +241,10 @@ resource "aws_lambda_function" "verify_agent" {
 # ------------------------------------------------------------------------------
 
 data "archive_file" "cleanup" {
-  type        = "zip"
-  source_dir  = "${local.build_dir}/cleanup_pkg"
-  output_path = "${local.build_dir}/cleanup.zip"
+  type             = "zip"
+  source_dir       = "${local.build_dir}/cleanup_pkg"
+  output_path      = "${local.build_dir}/cleanup.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_function" "cleanup" {
@@ -272,9 +278,10 @@ resource "aws_lambda_function" "cleanup" {
 # ------------------------------------------------------------------------------
 
 data "archive_file" "find_stale_ranges" {
-  type        = "zip"
-  source_dir  = "${local.build_dir}/find_stale_ranges_pkg"
-  output_path = "${local.build_dir}/find_stale_ranges.zip"
+  type             = "zip"
+  source_dir       = "${local.build_dir}/find_stale_ranges_pkg"
+  output_path      = "${local.build_dir}/find_stale_ranges.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_function" "find_stale_ranges" {

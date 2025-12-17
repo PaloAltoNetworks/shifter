@@ -126,8 +126,8 @@ def get_user_data_script(
     - .sh: Shell scripts (executed directly)
     - .deb: Debian packages (installed via dpkg)
     - .rpm: RPM packages (installed via rpm)
-    - .tar.gz/.tgz: Tarballs (extracted and install.sh executed)
-    - .zip: Archives (extracted and install.sh executed)
+    - .tar.gz/.tgz: Tarballs (extracted and first .sh file executed)
+    - .zip: Archives (extracted and first .sh file executed)
     - Binary executables (executed with --install flag)
 
     Args:
@@ -169,6 +169,31 @@ curl -sSf -o "$INSTALLER_FILE" '{presigned_url}'
 
 # Detect file type and install accordingly
 echo "Detecting installer type..."
+
+# Helper to find and run any .sh file in extracted directory
+run_extracted_installer() {{
+    local extract_dir="$1"
+    local script=""
+
+    # Find first .sh file (check root first, then subdirs)
+    script=$(find "$extract_dir" -maxdepth 1 -name "*.sh" -type f | head -1)
+    if [ -z "$script" ]; then
+        script=$(find "$extract_dir" -maxdepth 2 -name "*.sh" -type f | head -1)
+    fi
+
+    if [ -n "$script" ]; then
+        echo "Found installer script: $script"
+        chmod +x "$script"
+        "$script"
+        return 0
+    fi
+
+    echo "ERROR: No .sh installer found in archive"
+    echo "Contents:"
+    find "$extract_dir" -type f
+    return 1
+}}
+
 install_agent() {{
     local file="$1"
     local filename=$(basename "$INSTALLER_KEY")
@@ -195,36 +220,14 @@ install_agent() {{
             echo "Extracting tarball..."
             mkdir -p /tmp/agent-extract
             tar xzf "$file" -C /tmp/agent-extract
-            # Look for install script
-            if [ -f /tmp/agent-extract/install.sh ]; then
-                chmod +x /tmp/agent-extract/install.sh
-                /tmp/agent-extract/install.sh
-            elif [ -f /tmp/agent-extract/*/install.sh ]; then
-                chmod +x /tmp/agent-extract/*/install.sh
-                /tmp/agent-extract/*/install.sh
-            else
-                echo "ERROR: No install.sh found in tarball"
-                ls -la /tmp/agent-extract/
-                exit 1
-            fi
+            run_extracted_installer /tmp/agent-extract
             return
             ;;
         *.zip)
             echo "Extracting zip archive..."
             mkdir -p /tmp/agent-extract
             unzip -o "$file" -d /tmp/agent-extract
-            # Look for install script
-            if [ -f /tmp/agent-extract/install.sh ]; then
-                chmod +x /tmp/agent-extract/install.sh
-                /tmp/agent-extract/install.sh
-            elif [ -f /tmp/agent-extract/*/install.sh ]; then
-                chmod +x /tmp/agent-extract/*/install.sh
-                /tmp/agent-extract/*/install.sh
-            else
-                echo "ERROR: No install.sh found in archive"
-                ls -la /tmp/agent-extract/
-                exit 1
-            fi
+            run_extracted_installer /tmp/agent-extract
             return
             ;;
     esac
@@ -251,31 +254,13 @@ install_agent() {{
             echo "Extracting gzip archive..."
             mkdir -p /tmp/agent-extract
             tar xzf "$file" -C /tmp/agent-extract
-            if [ -f /tmp/agent-extract/install.sh ]; then
-                chmod +x /tmp/agent-extract/install.sh
-                /tmp/agent-extract/install.sh
-            elif [ -f /tmp/agent-extract/*/install.sh ]; then
-                chmod +x /tmp/agent-extract/*/install.sh
-                /tmp/agent-extract/*/install.sh
-            else
-                echo "ERROR: No install.sh found"
-                exit 1
-            fi
+            run_extracted_installer /tmp/agent-extract
             ;;
         application/zip)
             echo "Extracting zip archive..."
             mkdir -p /tmp/agent-extract
             unzip -o "$file" -d /tmp/agent-extract
-            if [ -f /tmp/agent-extract/install.sh ]; then
-                chmod +x /tmp/agent-extract/install.sh
-                /tmp/agent-extract/install.sh
-            elif [ -f /tmp/agent-extract/*/install.sh ]; then
-                chmod +x /tmp/agent-extract/*/install.sh
-                /tmp/agent-extract/*/install.sh
-            else
-                echo "ERROR: No install.sh found"
-                exit 1
-            fi
+            run_extracted_installer /tmp/agent-extract
             ;;
         application/x-executable|application/octet-stream)
             echo "Installing via executable..."

@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Root cause: Missing `output_file_mode` in `archive_file` caused inconsistent zip hashes across CI runners
   - Added `output_file_mode = "0666"` to all Lambda archive_file blocks
   - Extracted Step Functions definitions to external ASL JSON files with `templatefile()`
+- Dashboard polling errors when session expires during range provisioning
+  - CORS errors occurred when API redirected to Cognito for re-authentication
+  - Added session expiration detection and automatic redirect to login page
 
 ### Added
 - S3 Gateway Endpoint for Range VPC

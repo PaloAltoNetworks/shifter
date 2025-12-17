@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Root cause: Network Firewall blocked S3 downloads (S3 domains not in allowlist)
   - Added S3 VPC Gateway Endpoint to Range VPC for direct S3 access
   - Added SSM-based agent verification before marking range as ready
+- CI/CD pipeline not updating Step Functions and Lambdas on code changes
+  - Root cause: Missing `output_file_mode` in `archive_file` caused inconsistent zip hashes across CI runners
+  - Added `output_file_mode = "0666"` to all Lambda archive_file blocks
+  - Extracted Step Functions definitions to external ASL JSON files with `templatefile()`
 
 ### Added
 - S3 Gateway Endpoint for Range VPC
@@ -23,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New `verify_agent` Lambda checks installation via SSM RunCommand
   - Step Functions retry loop with 30s intervals (5 min max)
   - Ranges fail fast with descriptive error if agent install fails
+- External ASL state machine definitions for better maintainability
+  - `provision_range.asl.json`, `teardown_range.asl.json`, `cleanup_stale_ranges.asl.json`
 
 ## [0.7.0] - 2025-12-16
 

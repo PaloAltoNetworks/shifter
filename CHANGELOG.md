@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Network Firewall blocking XDR agent egress to Cortex cloud
+  - Changed from STRICT_ORDER to DEFAULT_ACTION_ORDER for domain allowlist
+  - Added Suricata rule to block direct IP connections (SNI bypass prevention)
+- XDR agent not registering with tenant after installation
+  - Added cortex.conf deployment before running installer script
+
+## [0.7.1] - 2025-12-16
+
+### Fixed
+- XDR agent not installing on victim EC2 instances (#274)
+  - Root cause: User data script used `aws s3 cp` but victim EC2 lacks AWS CLI
+  - Changed to presigned URL + curl for agent download (no AWS CLI required)
+  - Added SSM-based agent verification before marking range as ready
+- CI/CD pipeline not updating Step Functions and Lambdas on code changes
+  - Root cause: Missing `output_file_mode` in `archive_file` caused inconsistent zip hashes across CI runners
+  - Added `output_file_mode = "0666"` to all Lambda archive_file blocks
+  - Extracted Step Functions definitions to external ASL JSON files with `templatefile()`
+- Dashboard polling errors when session expires during range provisioning
+  - CORS errors occurred when API redirected to Cognito for re-authentication
+  - Added session expiration detection and automatic redirect to login page
+
+### Added
+- Agent verification step in provisioning workflow
+  - New `verify_agent` Lambda checks installation via SSM RunCommand
+  - Step Functions retry loop with 30s intervals (5 min max)
+  - Ranges fail fast with descriptive error if agent install fails
+- External ASL state machine definitions for better maintainability
+  - `provision_range.asl.json`, `teardown_range.asl.json`, `cleanup_stale_ranges.asl.json`
+
 ## [0.7.0] - 2025-12-16
 
 ### Added

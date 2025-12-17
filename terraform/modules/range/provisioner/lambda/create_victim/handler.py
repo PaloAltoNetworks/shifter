@@ -116,7 +116,9 @@ def store_ssh_key_in_secrets_manager(
     return response["ARN"]
 
 
-def get_user_data_script(s3_bucket: str, agent_s3_key: str, public_key: str) -> str:
+def get_user_data_script(
+    presigned_url: str, agent_s3_key: str, public_key: str, range_id: int
+) -> str:
     """
     Generate user data script to install XDR agent on boot and configure SSH access.
 
@@ -124,26 +126,28 @@ def get_user_data_script(s3_bucket: str, agent_s3_key: str, public_key: str) -> 
     - .sh: Shell scripts (executed directly)
     - .deb: Debian packages (installed via dpkg)
     - .rpm: RPM packages (installed via rpm)
-    - .tar.gz/.tgz: Tarballs (extracted and install.sh executed)
-    - .zip: Archives (extracted and install.sh executed)
+    - .tar.gz/.tgz: Tarballs (extracted and first .sh file executed)
+    - .zip: Archives (extracted and first .sh file executed)
     - Binary executables (executed with --install flag)
 
     Args:
-        s3_bucket: S3 bucket containing agent installers
-        agent_s3_key: S3 key for the agent installer
+        presigned_url: Pre-signed S3 URL for downloading the agent installer
+        agent_s3_key: S3 key for the agent installer (used to detect file type)
         public_key: SSH public key in OpenSSH format for MCP access
+        range_id: The range ID (used for hostname)
 
     Returns:
         Base64-encoded user data script
 
     Raises:
-        ValueError: If s3_bucket or agent_s3_key contain unsafe characters
+        ValueError: If agent_s3_key contains unsafe characters
     """
     # Validate inputs to prevent shell injection
-    if not validate_s3_path(s3_bucket):
-        raise ValueError(f"Invalid S3 bucket name: {s3_bucket}")
     if not validate_s3_path(agent_s3_key):
         raise ValueError(f"Invalid S3 key: {agent_s3_key}")
+
+    # Hostname for XDR console visibility
+    hostname = f"shifter-victim-{range_id}"
 
     script = f"""#!/bin/bash
 set -euo pipefail
@@ -151,6 +155,12 @@ set -euo pipefail
 # Log output
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting victim instance setup..."
+
+# Set hostname for XDR console visibility
+echo "Setting hostname to {hostname}..."
+hostnamectl set-hostname {hostname}
+echo "127.0.0.1 {hostname}" >> /etc/hosts
+echo "Hostname set"
 
 # Configure SSH access for MCP server
 echo "Configuring SSH access..."
@@ -161,14 +171,64 @@ chmod 600 /home/ubuntu/.ssh/authorized_keys
 chown -R ubuntu:ubuntu /home/ubuntu/.ssh
 echo "SSH access configured"
 
-# Download agent installer from S3
+# Download agent installer using presigned URL (no AWS CLI needed)
 echo "Downloading XDR agent installer..."
 INSTALLER_KEY="{agent_s3_key}"
 INSTALLER_FILE="/tmp/agent-installer"
-aws s3 cp "s3://{s3_bucket}/$INSTALLER_KEY" "$INSTALLER_FILE"
+curl -sSf -o "$INSTALLER_FILE" '{presigned_url}'
 
 # Detect file type and install accordingly
 echo "Detecting installer type..."
+
+# Helper to deploy cortex.conf before running installer
+deploy_cortex_conf() {{
+    local extract_dir="$1"
+    local conf_file=""
+
+    # Find cortex.conf in extracted directory
+    conf_file=$(find "$extract_dir" -name "cortex.conf" -type f | head -1)
+
+    if [ -n "$conf_file" ]; then
+        echo "Found cortex.conf: $conf_file"
+        mkdir -p /etc/panw
+        cp "$conf_file" /etc/panw/cortex.conf
+        chmod 644 /etc/panw/cortex.conf
+        echo "Deployed cortex.conf to /etc/panw/"
+        return 0
+    fi
+
+    echo "WARNING: No cortex.conf found in archive"
+    return 1
+}}
+
+# Helper to find and run any .sh file in extracted directory
+run_extracted_installer() {{
+    local extract_dir="$1"
+    local script=""
+
+    # IMPORTANT: Deploy cortex.conf BEFORE running installer (required by Cortex XDR)
+    deploy_cortex_conf "$extract_dir"
+
+    # Find first .sh file (check root first, then subdirs)
+    script=$(find "$extract_dir" -maxdepth 1 -name "*.sh" -type f | head -1)
+    if [ -z "$script" ]; then
+        script=$(find "$extract_dir" -maxdepth 2 -name "*.sh" -type f | head -1)
+    fi
+
+    if [ -n "$script" ]; then
+        echo "Found installer script: $script"
+        chmod +x "$script"
+        # Run as root (user-data runs as root, but be explicit)
+        "$script"
+        return 0
+    fi
+
+    echo "ERROR: No .sh installer found in archive"
+    echo "Contents:"
+    find "$extract_dir" -type f
+    return 1
+}}
+
 install_agent() {{
     local file="$1"
     local filename=$(basename "$INSTALLER_KEY")
@@ -195,36 +255,14 @@ install_agent() {{
             echo "Extracting tarball..."
             mkdir -p /tmp/agent-extract
             tar xzf "$file" -C /tmp/agent-extract
-            # Look for install script
-            if [ -f /tmp/agent-extract/install.sh ]; then
-                chmod +x /tmp/agent-extract/install.sh
-                /tmp/agent-extract/install.sh
-            elif [ -f /tmp/agent-extract/*/install.sh ]; then
-                chmod +x /tmp/agent-extract/*/install.sh
-                /tmp/agent-extract/*/install.sh
-            else
-                echo "ERROR: No install.sh found in tarball"
-                ls -la /tmp/agent-extract/
-                exit 1
-            fi
+            run_extracted_installer /tmp/agent-extract
             return
             ;;
         *.zip)
             echo "Extracting zip archive..."
             mkdir -p /tmp/agent-extract
             unzip -o "$file" -d /tmp/agent-extract
-            # Look for install script
-            if [ -f /tmp/agent-extract/install.sh ]; then
-                chmod +x /tmp/agent-extract/install.sh
-                /tmp/agent-extract/install.sh
-            elif [ -f /tmp/agent-extract/*/install.sh ]; then
-                chmod +x /tmp/agent-extract/*/install.sh
-                /tmp/agent-extract/*/install.sh
-            else
-                echo "ERROR: No install.sh found in archive"
-                ls -la /tmp/agent-extract/
-                exit 1
-            fi
+            run_extracted_installer /tmp/agent-extract
             return
             ;;
     esac
@@ -251,31 +289,13 @@ install_agent() {{
             echo "Extracting gzip archive..."
             mkdir -p /tmp/agent-extract
             tar xzf "$file" -C /tmp/agent-extract
-            if [ -f /tmp/agent-extract/install.sh ]; then
-                chmod +x /tmp/agent-extract/install.sh
-                /tmp/agent-extract/install.sh
-            elif [ -f /tmp/agent-extract/*/install.sh ]; then
-                chmod +x /tmp/agent-extract/*/install.sh
-                /tmp/agent-extract/*/install.sh
-            else
-                echo "ERROR: No install.sh found"
-                exit 1
-            fi
+            run_extracted_installer /tmp/agent-extract
             ;;
         application/zip)
             echo "Extracting zip archive..."
             mkdir -p /tmp/agent-extract
             unzip -o "$file" -d /tmp/agent-extract
-            if [ -f /tmp/agent-extract/install.sh ]; then
-                chmod +x /tmp/agent-extract/install.sh
-                /tmp/agent-extract/install.sh
-            elif [ -f /tmp/agent-extract/*/install.sh ]; then
-                chmod +x /tmp/agent-extract/*/install.sh
-                /tmp/agent-extract/*/install.sh
-            else
-                echo "ERROR: No install.sh found"
-                exit 1
-            fi
+            run_extracted_installer /tmp/agent-extract
             ;;
         application/x-executable|application/octet-stream)
             echo "Installing via executable..."
@@ -373,8 +393,17 @@ def handler(event: dict, context) -> dict:
         )
         logger.info(f"SSH key stored: {ssh_key_secret_arn}")
 
-        # Generate user data script with public key
-        user_data = get_user_data_script(s3_bucket, agent_s3_key, public_key)
+        # Generate presigned URL for agent installer (valid for 1 hour)
+        s3_client = boto3.client("s3")
+        presigned_url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": s3_bucket, "Key": agent_s3_key},
+            ExpiresIn=3600,
+        )
+        logger.info("Generated presigned URL for agent installer")
+
+        # Generate user data script with presigned URL
+        user_data = get_user_data_script(presigned_url, agent_s3_key, public_key, range_id)
 
         # Create instance
         ec2 = boto3.client("ec2")

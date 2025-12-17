@@ -194,3 +194,14 @@ resource "aws_security_group_rule" "kali_from_victim" {
   security_group_id        = aws_security_group.kali.id
   description              = "All traffic from victim (reverse shells)"
 }
+
+# Allow victim to send traffic to Kali (reverse shells, callbacks)
+resource "aws_security_group_rule" "victim_to_kali" {
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.kali.id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic to Kali (reverse shells)"
+}

@@ -25,8 +25,9 @@ repos:
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
+        exclude: ^assets/styles/
       - id: check-yaml
-        args: [--unsafe]  # Allow custom YAML constructors (mkdocs plugins)
+        args: [--unsafe] # Allow custom YAML constructors (mkdocs plugins)
       - id: check-json
       - id: check-added-large-files
         args: [--maxkb=500]
@@ -43,16 +44,6 @@ repos:
         files: ^portal/static/css/.*\.css$
         types: [css]
 
-  # TypeScript/JavaScript - ESLint
-  - repo: local
-    hooks:
-      - id: eslint-mcp
-        name: eslint (mcp)
-        entry: bash -c 'cd mcp/mcp-red && npm ci --silent && npm run lint'
-        language: system
-        files: ^mcp/.*\.(ts|js)$
-        pass_filenames: false
-
   # Terraform
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.96.3
@@ -68,7 +59,8 @@ repos:
     hooks:
       - id: checkov
         files: ^terraform/
-        args: [--quiet, --compact, --download-external-modules, "true", --soft-fail]
+        args:
+          [--quiet, --compact, --download-external-modules, "true", --soft-fail]
 
   # Shell scripts
   - repo: https://github.com/shellcheck-py/shellcheck-py

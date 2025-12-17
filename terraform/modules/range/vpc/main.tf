@@ -1,8 +1,11 @@
 # Range VPC Module
 #
 # Stable infrastructure for per-user range subnets.
-# Creates VPC, IGW, and public route table only.
-# User subnets are ephemeral (created by user-subnet module).
+# Creates VPC, IGW, NAT Gateway, Network Firewall, and private route table.
+# User subnets are ephemeral (created by provisioner Lambda).
+#
+# Traffic flow: User Subnet -> Network Firewall -> NAT Gateway -> IGW -> Internet
+# Domain-based egress filtering via AWS Network Firewall allowlists.
 
 locals {
   common_tags = merge(var.tags, {
@@ -39,22 +42,11 @@ resource "aws_internet_gateway" "this" {
 }
 
 # ------------------------------------------------------------------------------
-# Public Route Table
+# Route Tables - See nat.tf and firewall.tf
 # ------------------------------------------------------------------------------
-
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.this.id
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-public-rt"
-  })
-}
-
-resource "aws_route" "public_internet" {
-  route_table_id         = aws_route_table.public.id
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.this.id
-}
+# - aws_route_table.private (in firewall.tf) - User subnets route through firewall
+# - aws_route_table.firewall (in firewall.tf) - Firewall routes to NAT
+# - aws_route_table.nat (in nat.tf) - NAT routes to IGW
 
 # ------------------------------------------------------------------------------
 # Victim Security Group (shared by all victim EC2 instances)
@@ -66,13 +58,22 @@ resource "aws_security_group" "victim" {
   description = "Security group for victim EC2 instances"
   vpc_id      = aws_vpc.this.id
 
-  # SSH from within VPC (for MCP access)
+  # SSH from within Range VPC (for MCP access)
   ingress {
-    description = "SSH from VPC"
+    description = "SSH from Range VPC"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
+  }
+
+  # SSH from Portal VPC (for browser terminal)
+  ingress {
+    description = "SSH from Portal VPC (browser terminal)"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.portal_vpc_cidr]
   }
 
   # Allow all inbound from Kali (for attacks)
@@ -84,12 +85,38 @@ resource "aws_security_group" "victim" {
     security_groups = [aws_security_group.kali.id]
   }
 
-  # Allow all outbound (for agent installation, updates)
+  # HTTPS to VPC for SSM endpoints (required for Systems Manager agent)
   egress {
-    description = "Allow all outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS to VPC (SSM endpoints)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # HTTPS for XDR agent telemetry (filtered by Network Firewall)
+  egress {
+    description = "HTTPS for XDR (filtered by ANFW)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # DNS for domain resolution
+  egress {
+    description = "DNS UDP"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "DNS TCP"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -108,21 +135,47 @@ resource "aws_security_group" "kali" {
   description = "Security group for Kali attack EC2 instances"
   vpc_id      = aws_vpc.this.id
 
-  # SSH from within VPC (for MCP/Chat UI access)
+  # SSH from within Range VPC (for MCP/Chat UI access)
   ingress {
-    description = "SSH from VPC"
+    description = "SSH from Range VPC"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
   }
 
-  # Allow all outbound (for apt updates, attacking victim, etc.)
+  # SSH from Portal VPC (for browser terminal)
+  ingress {
+    description = "SSH from Portal VPC (browser terminal)"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.portal_vpc_cidr]
+  }
+
+  # All traffic within VPC (for attacking victim)
   egress {
-    description = "Allow all outbound"
+    description = "All traffic to VPC (attack victim)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # DNS for internal resolution (filtered by Network Firewall for external)
+  egress {
+    description = "DNS UDP"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "DNS TCP"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -140,4 +193,15 @@ resource "aws_security_group_rule" "kali_from_victim" {
   source_security_group_id = aws_security_group.victim.id
   security_group_id        = aws_security_group.kali.id
   description              = "All traffic from victim (reverse shells)"
+}
+
+# Allow victim to send traffic to Kali (reverse shells, callbacks)
+resource "aws_security_group_rule" "victim_to_kali" {
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.kali.id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic to Kali (reverse shells)"
 }

@@ -7,6 +7,125 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Network Firewall blocking XDR agent egress to Cortex cloud
+  - Changed from STRICT_ORDER to DEFAULT_ACTION_ORDER for domain allowlist
+  - Added Suricata rule to block direct IP connections (SNI bypass prevention)
+- XDR agent not registering with tenant after installation
+  - Added cortex.conf deployment before running installer script
+
+## [0.7.1] - 2025-12-16
+
+### Fixed
+- XDR agent not installing on victim EC2 instances (#274)
+  - Root cause: User data script used `aws s3 cp` but victim EC2 lacks AWS CLI
+  - Changed to presigned URL + curl for agent download (no AWS CLI required)
+  - Added SSM-based agent verification before marking range as ready
+- CI/CD pipeline not updating Step Functions and Lambdas on code changes
+  - Root cause: Missing `output_file_mode` in `archive_file` caused inconsistent zip hashes across CI runners
+  - Added `output_file_mode = "0666"` to all Lambda archive_file blocks
+  - Extracted Step Functions definitions to external ASL JSON files with `templatefile()`
+- Dashboard polling errors when session expires during range provisioning
+  - CORS errors occurred when API redirected to Cognito for re-authentication
+  - Added session expiration detection and automatic redirect to login page
+
+### Added
+- Agent verification step in provisioning workflow
+  - New `verify_agent` Lambda checks installation via SSM RunCommand
+  - Step Functions retry loop with 30s intervals (5 min max)
+  - Ranges fail fast with descriptive error if agent install fails
+- External ASL state machine definitions for better maintainability
+  - `provision_range.asl.json`, `teardown_range.asl.json`, `cleanup_stale_ranges.asl.json`
+
+## [0.7.0] - 2025-12-16
+
+### Added
+- Claude Code on Kali and Victim AMIs for AI-assisted penetration testing
+  - Configured for Amazon Bedrock (no internet required)
+  - Role-specific CLAUDE.md system prompts for each instance type
+  - Kali: Authorized pentester role with subnet-only scope
+  - Victim: Scenario setup assistant for vulnerable configurations
+- Bedrock VPC endpoints (bedrock-runtime, sts) for Range VPC
+- Bedrock IAM permissions for range instance role
+
+### Changed
+- Increased Portal EC2 instance to t3.large (from t3.micro) for WebSocket stability
+- Increased Kali and Victim instances to t3.small for Claude Code memory requirements
+
+## [0.6.0] - 2025-12-16
+
+### Added
+- Browser-based Terminal UI for SSH access to range instances (#267)
+  - Side-by-side Kali and Victim terminal panes with xterm.js
+  - WebSocket-based SSH via Django Channels
+  - Terminal sidebar menu item with active range indicator
+- VPC peering between Portal and Range VPCs for SSH connectivity
+- Security group rules allowing SSH from Portal to range instances
+
+### Changed
+- Switched from Gunicorn (WSGI) to Daphne (ASGI) for WebSocket support
+
+### Fixed
+- Buttons should not have underline
+
+## [0.5.4] - 2025-12-15
+
+### Removed
+- OpenWebUI/AgentChat infrastructure (#261)
+  - Deleted agentchat Terraform modules and environments
+  - Removed MCP-Shifter and OpenWebUI MCP wrapper code
+  - Removed agentchat GitHub Actions workflows
+  - Removed ECR repositories for openwebui and mcp-shifter
+  - Removed Cognito agentchat client
+  - Removed openwebui_db Secrets Manager secret
+  - Removed agentchat documentation
+  - Removed migrations for victim_mcp_user and kali_mcp_user rename
+- Entire MCP directory (`mcp/`) including aptl-mcp-common and mcp-red
+
+### Changed
+- Architecture updated: Chat UI replaced with planned browser-based terminal (Django Channels)
+- `chat_base_url` now optional in provisioner module (empty string allowed)
+- Updated CLAUDE.md and architecture docs to reflect new terminal-based approach
+
+## [0.5.3] - 2025-12-15
+
+### Added
+- TARGET_MODE parameterization for MCP-Shifter (`kali` or `victim`)
+  - Same binary serves both target types via environment variable
+  - Dynamic column selection based on target mode
+  - Tool prefixes match target type (`kali_*` or `victim_*`)
+- Victim MCP database user (`victim_mcp_user`) for operational isolation
+- Renamed `mcp_user` to `kali_mcp_user` for consistency
+- SSM VPC Endpoints for Range VPC (ssm, ssmmessages, ec2messages)
+  - Enables Systems Manager access without internet
+  - Traffic stays within AWS network
+- Custom OpenWebUI Docker image with Cortex theme baked in
+  - ECR repository for custom OpenWebUI image
+  - Dockerfile extends base image with custom CSS/assets
+  - CI/CD builds and deploys themed image automatically
+- Victim MCP wrapper for OpenWebUI (`mcp_wrapper_victim.py`)
+
+### Changed
+- Replaced mcp-red with mcp-shifter in CI quality workflow
+- Architecture docs updated with MCP dual-container diagram
+- AgentChat uses custom OpenWebUI image instead of stock ghcr.io image
+
+## Fixed
+- Missing s3 permissions to fetch XDR installer
+- Fix range user_data fails to account for different installer types
+
+## [0.5.2] - 2025-12-15
+
+### Changed
+- Reskin OpenWeb UI UX to match Cortex XDR look and feel
+
+## [0.5.1] - 2025-12-15
+
+### Added
+- AWS Network Firewall for Range VPC egress filtering (#251)
+- NAT Gateway for private subnet internet access
+- Domain allowlists: Victim restricted to XDR endpoints, Kali has no external access
+
 ## [0.5.0] - 2025-12-14
 
 ### Added
@@ -41,7 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.5] - 2025-12-15
 ### Changed
-- Reskin Portal and Risk Registerto Cortex XDR look and feel
+- Reskin Portal and Risk Register to Cortex XDR look and feel
 
 ## [0.4.4] - 2025-12-14
 

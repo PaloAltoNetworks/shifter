@@ -200,6 +200,27 @@ def history(request):
 
 @login_required
 @require_GET
+def terminal(request):
+    """Terminal - SSH access to range instances."""
+    # Get user's active range
+    active_range = Range.get_active_for_user(request.user)
+
+    # Redirect to dashboard if no active range or range not ready
+    if not active_range or active_range.status != Range.Status.READY:
+        messages.warning(request, "You need an active range to access the terminal.")
+        return redirect("mission_control:dashboard")
+
+    context = {
+        "page_title": "Terminal",
+        "active_nav": "terminal",
+        "range": active_range,
+        "range_id": active_range.id,
+    }
+    return render(request, "mission_control/terminal.html", context)
+
+
+@login_required
+@require_GET
 def settings(request):
     """Account settings."""
     context = {

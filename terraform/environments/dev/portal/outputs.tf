@@ -157,3 +157,12 @@ output "provisioner_alerts_sns_topic_arn" {
   description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"
   value       = module.provisioner.alerts_sns_topic_arn
 }
+
+# ------------------------------------------------------------------------------
+# VPC Peering
+# ------------------------------------------------------------------------------
+
+output "vpc_peering_connection_id" {
+  description = "ID of the VPC peering connection to Range VPC"
+  value       = aws_vpc_peering_connection.portal_to_range.id
+}

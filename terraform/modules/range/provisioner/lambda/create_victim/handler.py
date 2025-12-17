@@ -116,7 +116,9 @@ def store_ssh_key_in_secrets_manager(
     return response["ARN"]
 
 
-def get_user_data_script(s3_bucket: str, agent_s3_key: str, public_key: str) -> str:
+def get_user_data_script(
+    presigned_url: str, agent_s3_key: str, public_key: str
+) -> str:
     """
     Generate user data script to install XDR agent on boot and configure SSH access.
 
@@ -129,19 +131,17 @@ def get_user_data_script(s3_bucket: str, agent_s3_key: str, public_key: str) -> 
     - Binary executables (executed with --install flag)
 
     Args:
-        s3_bucket: S3 bucket containing agent installers
-        agent_s3_key: S3 key for the agent installer
+        presigned_url: Pre-signed S3 URL for downloading the agent installer
+        agent_s3_key: S3 key for the agent installer (used to detect file type)
         public_key: SSH public key in OpenSSH format for MCP access
 
     Returns:
         Base64-encoded user data script
 
     Raises:
-        ValueError: If s3_bucket or agent_s3_key contain unsafe characters
+        ValueError: If agent_s3_key contains unsafe characters
     """
     # Validate inputs to prevent shell injection
-    if not validate_s3_path(s3_bucket):
-        raise ValueError(f"Invalid S3 bucket name: {s3_bucket}")
     if not validate_s3_path(agent_s3_key):
         raise ValueError(f"Invalid S3 key: {agent_s3_key}")
 
@@ -161,11 +161,11 @@ chmod 600 /home/ubuntu/.ssh/authorized_keys
 chown -R ubuntu:ubuntu /home/ubuntu/.ssh
 echo "SSH access configured"
 
-# Download agent installer from S3
+# Download agent installer using presigned URL (no AWS CLI needed)
 echo "Downloading XDR agent installer..."
 INSTALLER_KEY="{agent_s3_key}"
 INSTALLER_FILE="/tmp/agent-installer"
-aws s3 cp "s3://{s3_bucket}/$INSTALLER_KEY" "$INSTALLER_FILE"
+curl -sSf -o "$INSTALLER_FILE" '{presigned_url}'
 
 # Detect file type and install accordingly
 echo "Detecting installer type..."
@@ -373,8 +373,17 @@ def handler(event: dict, context) -> dict:
         )
         logger.info(f"SSH key stored: {ssh_key_secret_arn}")
 
-        # Generate user data script with public key
-        user_data = get_user_data_script(s3_bucket, agent_s3_key, public_key)
+        # Generate presigned URL for agent installer (valid for 1 hour)
+        s3_client = boto3.client("s3")
+        presigned_url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": s3_bucket, "Key": agent_s3_key},
+            ExpiresIn=3600,
+        )
+        logger.info("Generated presigned URL for agent installer")
+
+        # Generate user data script with presigned URL
+        user_data = get_user_data_script(presigned_url, agent_s3_key, public_key)
 
         # Create instance
         ec2 = boto3.client("ec2")

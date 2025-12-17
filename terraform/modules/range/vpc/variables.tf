@@ -42,6 +42,7 @@ variable "victim_allowed_domains" {
   type        = list(string)
   default = [
     ".paloaltonetworks.com",
-    ".storage.googleapis.com"
+    ".storage.googleapis.com",
+    ".pkg.dev"
   ]
 }

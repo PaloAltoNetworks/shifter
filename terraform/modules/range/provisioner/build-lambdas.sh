@@ -13,6 +13,7 @@ LAMBDAS=(
     "create_subnet"
     "create_victim"
     "create_kali"
+    "verify_agent"
     "mark_ready"
     "cleanup"
     "find_stale_ranges"

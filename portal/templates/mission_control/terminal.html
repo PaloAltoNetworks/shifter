@@ -10,16 +10,26 @@
     <div class="terminal-header">
         <div class="terminal-header-left">
             <h1 class="terminal-title">Terminal</h1>
+            {% if range_ready %}
             <span class="terminal-range-info">Range #{{ range.id }} - {{ range.agent.name }}</span>
+            {% else %}
+            <span class="terminal-range-info text-muted">No active range</span>
+            {% endif %}
         </div>
         <div class="terminal-header-right">
-            <div class="terminal-status">
+            <div class="terminal-status" id="overall-status">
+                {% if range_ready %}
                 <span class="status-dot status-active"></span>
                 <span>Connected</span>
+                {% else %}
+                <span class="status-dot status-inactive"></span>
+                <span>Disconnected</span>
+                {% endif %}
             </div>
         </div>
     </div>
 
+    {% if range_ready %}
     <div class="terminal-container" id="terminal-container">
         <!-- Kali Terminal Pane -->
         <div class="terminal-pane" id="kali-pane">
@@ -64,10 +74,31 @@
             <div class="terminal-wrapper" id="victim-terminal"></div>
         </div>
     </div>
+    {% else %}
+    <!-- No active range state -->
+    <div class="terminal-disconnected">
+        <div class="disconnected-content">
+            <div class="disconnected-icon">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <h2 class="disconnected-title">No Active Range</h2>
+            <p class="disconnected-message">
+                Launch a range from the dashboard to connect to terminals.
+            </p>
+            <a href="{% url 'mission_control:dashboard' %}" class="btn btn-primary">
+                Go to Dashboard
+            </a>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 
 {% block extra_js %}
+{% if range_ready %}
 <!-- xterm.js from CDN -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
@@ -87,4 +118,5 @@ document.addEventListener('DOMContentLoaded', function() {
     terminalManager.init();
 });
 </script>
+{% endif %}
 {% endblock %}

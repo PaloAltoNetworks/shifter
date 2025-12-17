@@ -60,6 +60,10 @@
     box-shadow: 0 0 6px var(--xdr-success);
 }
 
+.terminal-status .status-dot.status-inactive {
+    background-color: var(--xdr-text-muted);
+}
+
 /* Terminal Container */
 .terminal-container {
     display: flex;
@@ -224,6 +228,41 @@
     opacity: 0.4;
     pointer-events: none;
     cursor: not-allowed;
+}
+
+/* Disconnected State */
+.terminal-disconnected {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--xdr-surface);
+    border-radius: 8px;
+    border: 1px solid var(--xdr-border);
+}
+
+.disconnected-content {
+    text-align: center;
+    padding: 2rem;
+}
+
+.disconnected-icon {
+    color: var(--xdr-text-muted);
+    margin-bottom: 1.5rem;
+    opacity: 0.5;
+}
+
+.disconnected-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 0 0 0.5rem;
+}
+
+.disconnected-message {
+    color: var(--xdr-text-muted);
+    margin: 0 0 1.5rem;
+    font-size: 0.875rem;
 }
 
 /* Responsive */

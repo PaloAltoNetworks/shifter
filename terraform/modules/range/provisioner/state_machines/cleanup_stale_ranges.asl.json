@@ -1,0 +1,102 @@
+{
+  "Comment": "Find and clean up stale ranges stuck in transitional states",
+  "StartAt": "FindStaleRanges",
+  "TimeoutSeconds": 1800,
+  "States": {
+    "FindStaleRanges": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${find_stale_ranges_lambda_arn}",
+        "Payload": {}
+      },
+      "ResultPath": "$.find_result",
+      "ResultSelector": {
+        "stale_ranges.$": "$.Payload.stale_ranges",
+        "checked_at.$": "$.Payload.checked_at"
+      },
+      "Next": "CheckForStaleRanges",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "Failed"
+        }
+      ]
+    },
+    "CheckForStaleRanges": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.find_result.stale_ranges[0]",
+          "IsPresent": true,
+          "Next": "CleanupStaleRanges"
+        }
+      ],
+      "Default": "NoStaleRanges"
+    },
+    "CleanupStaleRanges": {
+      "Type": "Map",
+      "ItemsPath": "$.find_result.stale_ranges",
+      "MaxConcurrency": 2,
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "CleanupRange",
+        "States": {
+          "CleanupRange": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "FunctionName": "${cleanup_lambda_arn}",
+              "Payload": {
+                "range_id.$": "$.range_id",
+                "mark_failed": true,
+                "error_message": "Stale range cleanup - stuck in transitional state"
+              }
+            },
+            "ResultPath": "$.cleanup_result",
+            "End": true,
+            "Retry": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ]
+          }
+        }
+      },
+      "ResultPath": "$.cleanup_results",
+      "Next": "Success",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "Failed"
+        }
+      ]
+    },
+    "NoStaleRanges": {
+      "Type": "Succeed"
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Failed": {
+      "Type": "Fail",
+      "Error": "StaleCleanupFailed",
+      "Cause": "Stale range cleanup failed"
+    }
+  }
+}

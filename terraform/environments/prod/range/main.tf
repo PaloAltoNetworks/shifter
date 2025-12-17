@@ -23,7 +23,8 @@ locals {
 module "vpc" {
   source = "../../../modules/range/vpc"
 
-  name_prefix = local.name_prefix
-  vpc_cidr    = var.vpc_cidr
-  tags        = var.tags
+  name_prefix     = local.name_prefix
+  vpc_cidr        = var.vpc_cidr
+  portal_vpc_cidr = var.portal_vpc_cidr
+  tags            = var.tags
 }

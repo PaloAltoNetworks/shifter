@@ -117,7 +117,7 @@ def store_ssh_key_in_secrets_manager(
 
 
 def get_user_data_script(
-    presigned_url: str, agent_s3_key: str, public_key: str
+    presigned_url: str, agent_s3_key: str, public_key: str, range_id: int
 ) -> str:
     """
     Generate user data script to install XDR agent on boot and configure SSH access.
@@ -134,6 +134,7 @@ def get_user_data_script(
         presigned_url: Pre-signed S3 URL for downloading the agent installer
         agent_s3_key: S3 key for the agent installer (used to detect file type)
         public_key: SSH public key in OpenSSH format for MCP access
+        range_id: The range ID (used for hostname)
 
     Returns:
         Base64-encoded user data script
@@ -145,12 +146,21 @@ def get_user_data_script(
     if not validate_s3_path(agent_s3_key):
         raise ValueError(f"Invalid S3 key: {agent_s3_key}")
 
+    # Hostname for XDR console visibility
+    hostname = f"shifter-victim-{range_id}"
+
     script = f"""#!/bin/bash
 set -euo pipefail
 
 # Log output
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting victim instance setup..."
+
+# Set hostname for XDR console visibility
+echo "Setting hostname to {hostname}..."
+hostnamectl set-hostname {hostname}
+echo "127.0.0.1 {hostname}" >> /etc/hosts
+echo "Hostname set"
 
 # Configure SSH access for MCP server
 echo "Configuring SSH access..."
@@ -393,7 +403,7 @@ def handler(event: dict, context) -> dict:
         logger.info("Generated presigned URL for agent installer")
 
         # Generate user data script with presigned URL
-        user_data = get_user_data_script(presigned_url, agent_s3_key, public_key)
+        user_data = get_user_data_script(presigned_url, agent_s3_key, public_key, range_id)
 
         # Create instance
         ec2 = boto3.client("ec2")

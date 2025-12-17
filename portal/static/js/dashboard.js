@@ -37,7 +37,6 @@ class DashboardManager {
         this.agentItems = document.getElementById('agent-items');
         this.launchBtn = document.getElementById('launch-btn');
         this.cancelBtn = document.getElementById('cancel-btn');
-        this.openWorkspaceBtn = document.getElementById('open-workspace-btn');
         this.pauseBtn = document.getElementById('pause-btn');
         this.destroyBtn = document.getElementById('destroy-btn');
         this.resumeBtn = document.getElementById('resume-btn');
@@ -288,11 +287,6 @@ class DashboardManager {
             rangeAgent.textContent = this.currentRange.agent_name;
         }
 
-        // Set workspace URL to terminal page (internal navigation)
-        if (this.openWorkspaceBtn) {
-            this.openWorkspaceBtn.href = '/mission-control/terminal/';
-            this.openWorkspaceBtn.removeAttribute('target'); // Open in same tab
-        }
     }
 
     _isValidHttpUrl(urlString) {

@@ -126,8 +126,3 @@ Logout clears Django session and optionally redirects to Cognito logout.
 ## Control Workspace
 
 When a range is active, the "Open Workspace" button links to a Kasm session running:
-
-- **Cursor IDE** with MCP servers configured
-- **MCPs** connected to Kali (attack box) and Victim (target)
-
-The DC interacts with AI in Cursor. The AI uses MCPs to execute commands on Kali and the victim - the DC never accesses Kali directly.

@@ -44,6 +44,7 @@ resource "aws_iam_role_policy" "step_functions_lambda" {
           aws_lambda_function.create_subnet.arn,
           aws_lambda_function.create_victim.arn,
           aws_lambda_function.create_kali.arn,
+          aws_lambda_function.verify_agent.arn,
           aws_lambda_function.mark_ready.arn,
           aws_lambda_function.cleanup.arn,
           aws_lambda_function.find_stale_ranges.arn,
@@ -104,173 +105,14 @@ resource "aws_sfn_state_machine" "provision_range" {
   name     = "${var.name_prefix}-provision-range"
   role_arn = aws_iam_role.step_functions.arn
 
-  definition = jsonencode({
-    Comment = "Provision a new range with subnet, victim, and kali"
-    StartAt = "CreateSubnet"
-    # Timeout after 30 minutes to prevent runaway executions
-    TimeoutSeconds = 1800
-    States = {
-      CreateSubnet = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = aws_lambda_function.create_subnet.arn
-          Payload = {
-            "range_id.$" = "$.range_id"
-          }
-        }
-        ResultPath = "$.create_subnet_result"
-        ResultSelector = {
-          "subnet_id.$"   = "$.Payload.subnet_id"
-          "subnet_cidr.$" = "$.Payload.subnet_cidr"
-        }
-        Next = "CreateVictim"
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            ResultPath  = "$.error"
-            Next        = "Cleanup"
-          }
-        ]
-        Retry = [
-          {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
-            IntervalSeconds = 2
-            MaxAttempts     = 3
-            BackoffRate     = 2
-          }
-        ]
-      }
-
-      CreateVictim = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = aws_lambda_function.create_victim.arn
-          Payload = {
-            "range_id.$" = "$.range_id"
-          }
-        }
-        ResultPath = "$.create_victim_result"
-        ResultSelector = {
-          "victim_instance_id.$" = "$.Payload.victim_instance_id"
-          "victim_ip.$"          = "$.Payload.victim_ip"
-        }
-        Next = "CreateKali"
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            ResultPath  = "$.error"
-            Next        = "Cleanup"
-          }
-        ]
-        Retry = [
-          {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
-            IntervalSeconds = 2
-            MaxAttempts     = 3
-            BackoffRate     = 2
-          }
-        ]
-      }
-
-      CreateKali = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = aws_lambda_function.create_kali.arn
-          Payload = {
-            "range_id.$" = "$.range_id"
-          }
-        }
-        ResultPath = "$.create_kali_result"
-        ResultSelector = {
-          "kali_instance_id.$" = "$.Payload.kali_instance_id"
-          "kali_ip.$"          = "$.Payload.kali_ip"
-        }
-        Next = "MarkReady"
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            ResultPath  = "$.error"
-            Next        = "Cleanup"
-          }
-        ]
-        Retry = [
-          {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
-            IntervalSeconds = 2
-            MaxAttempts     = 3
-            BackoffRate     = 2
-          }
-        ]
-      }
-
-      MarkReady = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = aws_lambda_function.mark_ready.arn
-          Payload = {
-            "range_id.$" = "$.range_id"
-          }
-        }
-        ResultPath = "$.mark_ready_result"
-        ResultSelector = {
-          "status.$"   = "$.Payload.status"
-          "chat_url.$" = "$.Payload.chat_url"
-        }
-        Next = "Success"
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            ResultPath  = "$.error"
-            Next        = "Cleanup"
-          }
-        ]
-        Retry = [
-          {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
-            IntervalSeconds = 2
-            MaxAttempts     = 3
-            BackoffRate     = 2
-          }
-        ]
-      }
-
-      Cleanup = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = aws_lambda_function.cleanup.arn
-          Payload = {
-            "range_id.$"    = "$.range_id"
-            "mark_failed"   = true
-            "error_message" = "Provisioning failed - resources cleaned up"
-          }
-        }
-        ResultPath = "$.cleanup_result"
-        Next       = "Failed"
-        Retry = [
-          {
-            ErrorEquals     = ["States.ALL"]
-            IntervalSeconds = 5
-            MaxAttempts     = 3
-            BackoffRate     = 2
-          }
-        ]
-      }
-
-      Success = {
-        Type = "Succeed"
-      }
-
-      Failed = {
-        Type  = "Fail"
-        Error = "ProvisioningFailed"
-        Cause = "Range provisioning failed, resources have been cleaned up"
-      }
-    }
+  definition = templatefile("${path.module}/state_machines/provision_range.asl.json", {
+    create_subnet_lambda_arn     = aws_lambda_function.create_subnet.arn
+    create_victim_lambda_arn     = aws_lambda_function.create_victim.arn
+    create_kali_lambda_arn       = aws_lambda_function.create_kali.arn
+    verify_agent_lambda_arn      = aws_lambda_function.verify_agent.arn
+    mark_ready_lambda_arn        = aws_lambda_function.mark_ready.arn
+    cleanup_lambda_arn           = aws_lambda_function.cleanup.arn
+    find_stale_ranges_lambda_arn = aws_lambda_function.find_stale_ranges.arn
   })
 
   logging_configuration {
@@ -293,54 +135,8 @@ resource "aws_sfn_state_machine" "teardown_range" {
   name     = "${var.name_prefix}-teardown-range"
   role_arn = aws_iam_role.step_functions.arn
 
-  definition = jsonencode({
-    Comment = "Teardown an existing range - destroy all resources"
-    StartAt = "Cleanup"
-    # Timeout after 15 minutes
-    TimeoutSeconds = 900
-    States = {
-      Cleanup = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = aws_lambda_function.cleanup.arn
-          Payload = {
-            "range_id.$"  = "$.range_id"
-            "mark_failed" = false
-          }
-        }
-        ResultPath = "$.cleanup_result"
-        ResultSelector = {
-          "cleaned_up.$" = "$.Payload.cleaned_up"
-        }
-        Next = "Success"
-        Retry = [
-          {
-            ErrorEquals     = ["States.ALL"]
-            IntervalSeconds = 5
-            MaxAttempts     = 5
-            BackoffRate     = 2
-          }
-        ]
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            ResultPath  = "$.error"
-            Next        = "Failed"
-          }
-        ]
-      }
-
-      Success = {
-        Type = "Succeed"
-      }
-
-      Failed = {
-        Type  = "Fail"
-        Error = "TeardownFailed"
-        Cause = "Range teardown failed"
-      }
-    }
+  definition = templatefile("${path.module}/state_machines/teardown_range.asl.json", {
+    cleanup_lambda_arn = aws_lambda_function.cleanup.arn
   })
 
   logging_configuration {
@@ -363,113 +159,9 @@ resource "aws_sfn_state_machine" "cleanup_stale_ranges" {
   name     = "${var.name_prefix}-cleanup-stale-ranges"
   role_arn = aws_iam_role.step_functions.arn
 
-  definition = jsonencode({
-    Comment = "Find and clean up stale ranges stuck in transitional states"
-    StartAt = "FindStaleRanges"
-    # Timeout after 30 minutes
-    TimeoutSeconds = 1800
-    States = {
-      FindStaleRanges = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = aws_lambda_function.find_stale_ranges.arn
-          Payload      = {}
-        }
-        ResultPath = "$.find_result"
-        ResultSelector = {
-          "stale_ranges.$" = "$.Payload.stale_ranges"
-          "checked_at.$"   = "$.Payload.checked_at"
-        }
-        Next = "CheckForStaleRanges"
-        Retry = [
-          {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
-            IntervalSeconds = 2
-            MaxAttempts     = 3
-            BackoffRate     = 2
-          }
-        ]
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            ResultPath  = "$.error"
-            Next        = "Failed"
-          }
-        ]
-      }
-
-      CheckForStaleRanges = {
-        Type = "Choice"
-        Choices = [
-          {
-            Variable  = "$.find_result.stale_ranges[0]"
-            IsPresent = true
-            Next      = "CleanupStaleRanges"
-          }
-        ]
-        Default = "NoStaleRanges"
-      }
-
-      CleanupStaleRanges = {
-        Type           = "Map"
-        ItemsPath      = "$.find_result.stale_ranges"
-        MaxConcurrency = 2
-        ItemProcessor = {
-          ProcessorConfig = {
-            Mode = "INLINE"
-          }
-          StartAt = "CleanupRange"
-          States = {
-            CleanupRange = {
-              Type     = "Task"
-              Resource = "arn:aws:states:::lambda:invoke"
-              Parameters = {
-                FunctionName = aws_lambda_function.cleanup.arn
-                Payload = {
-                  "range_id.$"    = "$.range_id"
-                  "mark_failed"   = true
-                  "error_message" = "Stale range cleanup - stuck in transitional state"
-                }
-              }
-              ResultPath = "$.cleanup_result"
-              End        = true
-              Retry = [
-                {
-                  ErrorEquals     = ["States.ALL"]
-                  IntervalSeconds = 5
-                  MaxAttempts     = 3
-                  BackoffRate     = 2
-                }
-              ]
-            }
-          }
-        }
-        ResultPath = "$.cleanup_results"
-        Next       = "Success"
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            ResultPath  = "$.error"
-            Next        = "Failed"
-          }
-        ]
-      }
-
-      NoStaleRanges = {
-        Type = "Succeed"
-      }
-
-      Success = {
-        Type = "Succeed"
-      }
-
-      Failed = {
-        Type  = "Fail"
-        Error = "StaleCleanupFailed"
-        Cause = "Stale range cleanup failed"
-      }
-    }
+  definition = templatefile("${path.module}/state_machines/cleanup_stale_ranges.asl.json", {
+    find_stale_ranges_lambda_arn = aws_lambda_function.find_stale_ranges.arn
+    cleanup_lambda_arn           = aws_lambda_function.cleanup.arn
   })
 
   logging_configuration {

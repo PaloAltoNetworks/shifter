@@ -117,19 +117,35 @@ def handler(event: dict, context) -> dict:
                     raise
 
         # 3. Delete Kali SSH key secret from Secrets Manager
+        secrets_client = boto3.client("secretsmanager")
         kali_ssh_key_secret_arn = range_data.get("kali_ssh_key_secret_arn")
         if kali_ssh_key_secret_arn:
             try:
-                secrets_client = boto3.client("secretsmanager")
                 secrets_client.delete_secret(
                     SecretId=kali_ssh_key_secret_arn,
                     ForceDeleteWithoutRecovery=True,
                 )
-                logger.info(f"Deleted SSH key secret {kali_ssh_key_secret_arn}")
+                logger.info(f"Deleted Kali SSH key secret {kali_ssh_key_secret_arn}")
                 cleaned_up.append(f"secret:{kali_ssh_key_secret_arn}")
             except ClientError as e:
                 if e.response["Error"]["Code"] == "ResourceNotFoundException":
-                    logger.info(f"SSH key secret {kali_ssh_key_secret_arn} already deleted")
+                    logger.info(f"Kali SSH key secret {kali_ssh_key_secret_arn} already deleted")
+                else:
+                    raise
+
+        # 4. Delete Victim SSH key secret from Secrets Manager
+        victim_ssh_key_secret_arn = range_data.get("victim_ssh_key_secret_arn")
+        if victim_ssh_key_secret_arn:
+            try:
+                secrets_client.delete_secret(
+                    SecretId=victim_ssh_key_secret_arn,
+                    ForceDeleteWithoutRecovery=True,
+                )
+                logger.info(f"Deleted Victim SSH key secret {victim_ssh_key_secret_arn}")
+                cleaned_up.append(f"secret:{victim_ssh_key_secret_arn}")
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                    logger.info(f"Victim SSH key secret {victim_ssh_key_secret_arn} already deleted")
                 else:
                     raise
 
@@ -184,14 +200,15 @@ def handler(event: dict, context) -> dict:
         update_range(
             conn,
             range_id,
-            victim_instance_id=None,
+            victim_instance_id="",
             victim_ip=None,
-            kali_instance_id=None,
+            victim_ssh_key_secret_arn="",
+            kali_instance_id="",
             kali_ip=None,
-            kali_ssh_key_secret_arn=None,
-            subnet_id=None,
-            subnet_cidr=None,
-            chat_url=None,
+            kali_ssh_key_secret_arn="",
+            subnet_id="",
+            subnet_cidr="",
+            chat_url="",
         )
         logger.info(f"Cleared resource fields for range {range_id}")
 

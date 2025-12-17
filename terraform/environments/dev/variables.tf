@@ -9,9 +9,3 @@ variable "portal_repository_name" {
   type        = string
   default     = "shifter-dev-portal"
 }
-
-variable "mcp_shifter_repository_name" {
-  description = "Name for the mcp-shifter ECR repository"
-  type        = string
-  default     = "shifter-dev-mcp-shifter"
-}

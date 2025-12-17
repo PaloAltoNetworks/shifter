@@ -123,10 +123,6 @@ module "cognito" {
   allowed_emails        = var.allowed_emails
   deletion_protection   = false
 
-  # AgentChat (OpenWebUI) OAuth callback - served at subdomain
-  agentchat_callback_urls = ["https://chat.${var.domain_name}/oauth/oidc/callback"]
-  agentchat_logout_urls   = ["https://chat.${var.domain_name}/"]
-
   tags = var.tags
 }
 
@@ -211,42 +207,54 @@ resource "aws_secretsmanager_secret_version" "app" {
 }
 
 # ------------------------------------------------------------------------------
-# OpenWebUI Database Credentials
+# VPC Peering: Portal <-> Range
+# Enables SSH connectivity from Portal to Range instances for Terminal UI
 # ------------------------------------------------------------------------------
-# OpenWebUI uses a separate database in the same RDS instance.
-# After terraform apply, manually create the database and user:
-#   CREATE DATABASE openwebui;
-#   CREATE USER openwebui WITH PASSWORD '<from-secrets-manager>';
-#   GRANT ALL PRIVILEGES ON DATABASE openwebui TO openwebui;
-#   \c openwebui
-#   GRANT ALL ON SCHEMA public TO openwebui;
 
-resource "random_password" "openwebui_db_password" {
-  length  = 32
-  special = false
-}
-
-# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal MVP. See #213
-resource "aws_secretsmanager_secret" "openwebui_db" {
-  name                    = "shifter-${local.name_prefix}-openwebui-db"
-  description             = "OpenWebUI PostgreSQL database credentials"
-  recovery_window_in_days = 0
+resource "aws_vpc_peering_connection" "portal_to_range" {
+  vpc_id      = module.vpc.vpc_id
+  peer_vpc_id = data.terraform_remote_state.range.outputs.vpc_id
+  auto_accept = true # Same account, same region
 
   tags = merge(var.tags, {
-    Name = "shifter-${local.name_prefix}-openwebui-db"
+    Name = "${local.name_prefix}-to-range-peering"
   })
 }
 
-resource "aws_secretsmanager_secret_version" "openwebui_db" {
-  secret_id = aws_secretsmanager_secret.openwebui_db.id
-  secret_string = jsonencode({
-    username     = "openwebui"
-    password     = random_password.openwebui_db_password.result
-    host         = module.rds.db_instance_address
-    port         = 5432
-    dbname       = "openwebui"
-    database_url = "postgresql://openwebui:${random_password.openwebui_db_password.result}@${module.rds.db_instance_address}:5432/openwebui"
-  })
+# Route from Portal private subnets to Range VPC via peering
+resource "aws_route" "portal_to_range" {
+  route_table_id            = module.vpc.private_route_table_id
+  destination_cidr_block    = data.terraform_remote_state.range.outputs.vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.portal_to_range.id
+}
+
+# Route from Range private subnets to Portal VPC via peering
+resource "aws_route" "range_to_portal" {
+  route_table_id            = data.terraform_remote_state.range.outputs.private_route_table_id
+  destination_cidr_block    = module.vpc.vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.portal_to_range.id
+}
+
+# Allow SSH from Portal to Kali instances
+resource "aws_security_group_rule" "kali_ssh_from_portal" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [module.vpc.vpc_cidr]
+  security_group_id = data.terraform_remote_state.range.outputs.kali_security_group_id
+  description       = "SSH from Portal VPC (Terminal UI)"
+}
+
+# Allow SSH from Portal to Victim instances
+resource "aws_security_group_rule" "victim_ssh_from_portal" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [module.vpc.vpc_cidr]
+  security_group_id = data.terraform_remote_state.range.outputs.victim_security_group_id
+  description       = "SSH from Portal VPC (Terminal UI)"
 }
 
 # ------------------------------------------------------------------------------
@@ -266,7 +274,7 @@ module "provisioner" {
 
   # Range VPC (where resources are created)
   range_vpc_id         = data.terraform_remote_state.range.outputs.vpc_id
-  range_route_table_id = data.terraform_remote_state.range.outputs.public_route_table_id
+  range_route_table_id = data.terraform_remote_state.range.outputs.private_route_table_id
   # Extract CIDR prefix from VPC CIDR (e.g., "10.1.0.0/16" -> "10.1")
   range_cidr_prefix = join(".", slice(split(".", data.terraform_remote_state.range.outputs.vpc_cidr), 0, 2))
   availability_zone = module.vpc.availability_zones[0]
@@ -292,7 +300,4 @@ module "provisioner" {
   # Monitoring Configuration
   enable_alarms = var.enable_provisioner_alarms
   alarm_email   = var.provisioner_alarm_email
-
-  # Chat URL for MCP integration (subdomain - no /chat path needed)
-  chat_base_url = "https://chat.${var.domain_name}"
 }

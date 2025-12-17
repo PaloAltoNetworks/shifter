@@ -1,0 +1,281 @@
+{
+  "Comment": "Provision a new range with subnet, victim, and kali",
+  "StartAt": "CreateSubnet",
+  "TimeoutSeconds": 1800,
+  "States": {
+    "CreateSubnet": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${create_subnet_lambda_arn}",
+        "Payload": {
+          "range_id.$": "$.range_id"
+        }
+      },
+      "ResultPath": "$.create_subnet_result",
+      "ResultSelector": {
+        "subnet_id.$": "$.Payload.subnet_id",
+        "subnet_cidr.$": "$.Payload.subnet_cidr"
+      },
+      "Next": "CreateVictim",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "Cleanup"
+        }
+      ],
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "CreateVictim": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${create_victim_lambda_arn}",
+        "Payload": {
+          "range_id.$": "$.range_id"
+        }
+      },
+      "ResultPath": "$.create_victim_result",
+      "ResultSelector": {
+        "victim_instance_id.$": "$.Payload.victim_instance_id",
+        "victim_ip.$": "$.Payload.victim_ip"
+      },
+      "Next": "CreateKali",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "Cleanup"
+        }
+      ],
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "CreateKali": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${create_kali_lambda_arn}",
+        "Payload": {
+          "range_id.$": "$.range_id"
+        }
+      },
+      "ResultPath": "$.create_kali_result",
+      "ResultSelector": {
+        "kali_instance_id.$": "$.Payload.kali_instance_id",
+        "kali_ip.$": "$.Payload.kali_ip"
+      },
+      "Next": "WaitForBoot",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "Cleanup"
+        }
+      ],
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "WaitForBoot": {
+      "Type": "Wait",
+      "Seconds": 60,
+      "Next": "InitializeVerification"
+    },
+    "InitializeVerification": {
+      "Type": "Pass",
+      "Result": 0,
+      "ResultPath": "$.verify_retry_count",
+      "Next": "VerifyAgent"
+    },
+    "VerifyAgent": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${verify_agent_lambda_arn}",
+        "Payload": {
+          "range_id.$": "$.range_id",
+          "retry_count.$": "$.verify_retry_count"
+        }
+      },
+      "ResultPath": "$.verify_agent_result",
+      "ResultSelector": {
+        "verification_status.$": "$.Payload.verification_status",
+        "agent_installed.$": "$.Payload.agent_installed",
+        "retry_count.$": "$.Payload.retry_count"
+      },
+      "Next": "CheckVerification",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "Cleanup"
+        }
+      ],
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "CheckVerification": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.verify_agent_result.verification_status",
+          "StringEquals": "success",
+          "Next": "MarkReady"
+        },
+        {
+          "Variable": "$.verify_agent_result.verification_status",
+          "StringEquals": "failed",
+          "Next": "VerificationFailed"
+        },
+        {
+          "Variable": "$.verify_agent_result.retry_count",
+          "NumericGreaterThanEquals": 10,
+          "Next": "VerificationTimeout"
+        }
+      ],
+      "Default": "WaitBeforeRetry"
+    },
+    "WaitBeforeRetry": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "UpdateRetryCount"
+    },
+    "UpdateRetryCount": {
+      "Type": "Pass",
+      "InputPath": "$.verify_agent_result.retry_count",
+      "ResultPath": "$.verify_retry_count",
+      "Next": "VerifyAgent"
+    },
+    "VerificationFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${cleanup_lambda_arn}",
+        "Payload": {
+          "range_id.$": "$.range_id",
+          "mark_failed": true,
+          "error_message": "XDR agent installation failed on victim instance"
+        }
+      },
+      "ResultPath": "$.cleanup_result",
+      "Next": "Failed",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "VerificationTimeout": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${cleanup_lambda_arn}",
+        "Payload": {
+          "range_id.$": "$.range_id",
+          "mark_failed": true,
+          "error_message": "XDR agent verification timed out after 5 minutes"
+        }
+      },
+      "ResultPath": "$.cleanup_result",
+      "Next": "Failed",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "MarkReady": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${mark_ready_lambda_arn}",
+        "Payload": {
+          "range_id.$": "$.range_id"
+        }
+      },
+      "ResultPath": "$.mark_ready_result",
+      "ResultSelector": {
+        "status.$": "$.Payload.status",
+        "chat_url.$": "$.Payload.chat_url"
+      },
+      "Next": "Success",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "Cleanup"
+        }
+      ],
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "Cleanup": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${cleanup_lambda_arn}",
+        "Payload": {
+          "range_id.$": "$.range_id",
+          "mark_failed": true,
+          "error_message": "Provisioning failed - resources cleaned up"
+        }
+      },
+      "ResultPath": "$.cleanup_result",
+      "Next": "Failed",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Failed": {
+      "Type": "Fail",
+      "Error": "ProvisioningFailed",
+      "Cause": "Range provisioning failed, resources have been cleaned up"
+    }
+  }
+}

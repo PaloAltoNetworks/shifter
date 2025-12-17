@@ -22,7 +22,6 @@ jobs:
       core: ${{ steps.filter.outputs.core }}
       range: ${{ steps.filter.outputs.range }}
       portal: ${{ steps.filter.outputs.portal }}
-      agentchat: ${{ steps.filter.outputs.agentchat }}
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
     steps:
@@ -47,12 +46,6 @@ jobs:
               - 'terraform/environments/*/portal/**'
               - 'portal/**'
               - '.github/workflows/_portal.yml'
-            agentchat:
-              - 'terraform/modules/agentchat/**'
-              - 'terraform/environments/*/agentchat/**'
-              - 'agentchat/**'
-              - 'mcp/mcp-shifter/**'
-              - '.github/workflows/_agentchat.yml'
 
       - name: Set environment
         id: env
@@ -68,7 +61,7 @@ jobs:
           echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> $GITHUB_OUTPUT
 
   # ============================================================================
-  # DEPENDENCY CHAIN: Core -> Range -> Portal -> AgentChat
+  # DEPENDENCY CHAIN: Core -> Range -> Portal
   # Each component waits for its upstream dependency before running
   # ============================================================================
 
@@ -103,19 +96,6 @@ jobs:
       (needs.changes.outputs.portal == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped')
     uses: ./.github/workflows/_portal.yml
-    with:
-      environment: ${{ needs.changes.outputs.environment }}
-      is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
-    secrets: inherit
-
-  agentchat:
-    name: AgentChat
-    needs: [changes, portal]
-    if: |
-      always() &&
-      (needs.changes.outputs.agentchat == 'true' || github.event_name == 'workflow_dispatch') &&
-      (needs.portal.result == 'success' || needs.portal.result == 'skipped')
-    uses: ./.github/workflows/_agentchat.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
       is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}

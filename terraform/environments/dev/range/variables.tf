@@ -19,3 +19,9 @@ variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
 }
+
+variable "agent_s3_bucket_arn" {
+  description = "ARN of S3 bucket containing XDR agent installers for S3 endpoint policy"
+  type        = string
+  default     = ""
+}

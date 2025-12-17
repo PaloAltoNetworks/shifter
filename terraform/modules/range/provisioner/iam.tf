@@ -357,3 +357,31 @@ resource "aws_iam_role_policy" "lambda_secrets" {
     ]
   })
 }
+
+# ------------------------------------------------------------------------------
+# SSM - Agent Verification via RunCommand
+# ------------------------------------------------------------------------------
+
+resource "aws_iam_role_policy" "lambda_ssm" {
+  name = "ssm-verify-agent"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+          "ssm:GetCommandInvocation"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "ssm:SendCommand"
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}::document/AWS-RunShellScript"
+      }
+    ]
+  })
+}

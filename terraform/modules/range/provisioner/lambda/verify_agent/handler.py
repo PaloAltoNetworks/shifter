@@ -170,6 +170,8 @@ def handler(event: dict, context) -> dict:
                     "range_id": range_id,
                     "verification_status": "success",
                     "agent_installed": True,
+                    "retry_count": retry_count + 1,
+                    "message": "Agent installation verified",
                 }
 
             if status == "Failed" or "AGENT_FAILED" in stdout:
@@ -179,7 +181,9 @@ def handler(event: dict, context) -> dict:
                     "range_id": range_id,
                     "verification_status": "failed",
                     "agent_installed": False,
+                    "retry_count": retry_count + 1,
                     "error": f"Agent installation failed: {error_output[:500]}",
+                    "message": "Agent installation failed",
                 }
 
         # Still pending - return for retry

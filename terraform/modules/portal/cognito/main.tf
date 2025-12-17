@@ -116,48 +116,6 @@ resource "aws_cognito_user_pool_client" "portal" {
 }
 
 # ------------------------------------------------------------------------------
-# User Pool Client - AgentChat (OpenWebUI)
-# ------------------------------------------------------------------------------
-
-resource "aws_cognito_user_pool_client" "agentchat" {
-  count = length(var.agentchat_callback_urls) > 0 ? 1 : 0
-
-  name         = "${var.name_prefix}-agentchat-client"
-  user_pool_id = aws_cognito_user_pool.main.id
-
-  # OIDC settings
-  generate_secret                      = true
-  allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_flows                  = ["code"]
-  allowed_oauth_scopes                 = ["openid", "email", "profile"]
-  supported_identity_providers         = ["COGNITO"]
-
-  # Callback URLs
-  callback_urls = var.agentchat_callback_urls
-  logout_urls   = var.agentchat_logout_urls
-
-  # Token validity
-  access_token_validity  = 1  # hours
-  id_token_validity      = 1  # hours
-  refresh_token_validity = 30 # days
-
-  token_validity_units {
-    access_token  = "hours"
-    id_token      = "hours"
-    refresh_token = "days"
-  }
-
-  # Prevent user existence errors (security)
-  prevent_user_existence_errors = "ENABLED"
-
-  # Read attributes
-  read_attributes = ["email", "email_verified"]
-
-  # Write attributes
-  write_attributes = ["email"]
-}
-
-# ------------------------------------------------------------------------------
 # Pre-Signup Lambda
 # ------------------------------------------------------------------------------
 
@@ -242,34 +200,6 @@ resource "aws_secretsmanager_secret_version" "cognito_client" {
   secret_string = jsonencode({
     client_id     = aws_cognito_user_pool_client.portal.id
     client_secret = aws_cognito_user_pool_client.portal.client_secret
-    user_pool_id  = aws_cognito_user_pool.main.id
-    domain        = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
-    issuer_url    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
-  })
-}
-
-# ------------------------------------------------------------------------------
-# Store AgentChat client secret in Secrets Manager
-# ------------------------------------------------------------------------------
-
-# checkov:skip=CKV_AWS_149:Deferred for MVP. AWS-managed keys sufficient for low-usage internal MVP. See #213
-resource "aws_secretsmanager_secret" "agentchat_client" {
-  count = length(var.agentchat_callback_urls) > 0 ? 1 : 0
-
-  name                    = "shifter-${var.name_prefix}-cognito-agentchat"
-  description             = "Cognito client credentials for AgentChat (OpenWebUI)"
-  recovery_window_in_days = 0
-
-  tags = var.tags
-}
-
-resource "aws_secretsmanager_secret_version" "agentchat_client" {
-  count = length(var.agentchat_callback_urls) > 0 ? 1 : 0
-
-  secret_id = aws_secretsmanager_secret.agentchat_client[0].id
-  secret_string = jsonencode({
-    client_id     = aws_cognito_user_pool_client.agentchat[0].id
-    client_secret = aws_cognito_user_pool_client.agentchat[0].client_secret
     user_pool_id  = aws_cognito_user_pool.main.id
     domain        = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
     issuer_url    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"

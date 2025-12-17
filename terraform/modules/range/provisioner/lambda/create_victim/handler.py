@@ -2,7 +2,7 @@
 Create Victim Lambda - Launches a victim EC2 instance with XDR agent.
 
 Input: { "range_id": "uuid", "subnet_id": "subnet-xxx" }
-Output: { "range_id": "uuid", "victim_instance_id": "i-xxx", "victim_ip": "10.1.X.Y" }
+Output: { "range_id": "uuid", "victim_instance_id": "i-xxx", "victim_ip": "10.1.X.Y", "victim_ssh_key_secret_arn": "arn:..." }
 """
 
 import base64
@@ -11,6 +11,8 @@ import os
 import sys
 
 import boto3
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -54,41 +56,265 @@ def validate_s3_path(value: str) -> bool:
     return bool(safe_pattern.match(value))
 
 
-def get_user_data_script(s3_bucket: str, agent_s3_key: str) -> str:
+def generate_ssh_keypair() -> tuple[str, str]:
     """
-    Generate user data script to install XDR agent on boot.
+    Generate an Ed25519 SSH key pair for MCP server access.
+
+    Returns:
+        tuple: (private_key_pem, public_key_openssh)
+    """
+    private_key = ed25519.Ed25519PrivateKey.generate()
+
+    # Private key in PEM format (OpenSSH format)
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.OpenSSH,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+
+    # Public key in OpenSSH format
+    public_key_openssh = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.OpenSSH,
+        format=serialization.PublicFormat.OpenSSH,
+    ).decode("utf-8")
+
+    return private_key_pem, public_key_openssh
+
+
+def store_ssh_key_in_secrets_manager(
+    private_key: str, range_id: int, user_id: int, environment: str
+) -> str:
+    """
+    Store SSH private key in AWS Secrets Manager.
 
     Args:
-        s3_bucket: S3 bucket containing agent installers
-        agent_s3_key: S3 key for the agent installer
+        private_key: The SSH private key in PEM format
+        range_id: The range ID
+        user_id: The user ID
+        environment: Environment name (dev/prod)
+
+    Returns:
+        The ARN of the created secret
+    """
+    secrets_client = boto3.client("secretsmanager")
+
+    secret_name = f"shifter/{environment}/range/{range_id}/victim-ssh-key"
+
+    # Create the secret with tags for lifecycle management
+    response = secrets_client.create_secret(
+        Name=secret_name,
+        Description=f"SSH private key for Victim instance in range {range_id}",
+        SecretString=private_key,
+        Tags=[
+            {"Key": "shifter:range_id", "Value": str(range_id)},
+            {"Key": "shifter:user_id", "Value": str(user_id)},
+            {"Key": "shifter:environment", "Value": environment},
+            {"Key": "shifter:resource_type", "Value": "victim-ssh-key"},
+        ],
+    )
+
+    return response["ARN"]
+
+
+def get_user_data_script(
+    presigned_url: str, agent_s3_key: str, public_key: str, range_id: int
+) -> str:
+    """
+    Generate user data script to install XDR agent on boot and configure SSH access.
+
+    Supports multiple installer formats:
+    - .sh: Shell scripts (executed directly)
+    - .deb: Debian packages (installed via dpkg)
+    - .rpm: RPM packages (installed via rpm)
+    - .tar.gz/.tgz: Tarballs (extracted and first .sh file executed)
+    - .zip: Archives (extracted and first .sh file executed)
+    - Binary executables (executed with --install flag)
+
+    Args:
+        presigned_url: Pre-signed S3 URL for downloading the agent installer
+        agent_s3_key: S3 key for the agent installer (used to detect file type)
+        public_key: SSH public key in OpenSSH format for MCP access
+        range_id: The range ID (used for hostname)
 
     Returns:
         Base64-encoded user data script
 
     Raises:
-        ValueError: If s3_bucket or agent_s3_key contain unsafe characters
+        ValueError: If agent_s3_key contains unsafe characters
     """
     # Validate inputs to prevent shell injection
-    if not validate_s3_path(s3_bucket):
-        raise ValueError(f"Invalid S3 bucket name: {s3_bucket}")
     if not validate_s3_path(agent_s3_key):
         raise ValueError(f"Invalid S3 key: {agent_s3_key}")
+
+    # Hostname for XDR console visibility
+    hostname = f"shifter-victim-{range_id}"
 
     script = f"""#!/bin/bash
 set -euo pipefail
 
 # Log output
 exec > >(tee /var/log/user-data.log) 2>&1
-echo "Starting XDR agent installation..."
+echo "Starting victim instance setup..."
 
-# Download agent installer from S3
-aws s3 cp 's3://{s3_bucket}/{agent_s3_key}' /tmp/agent-installer
+# Set hostname for XDR console visibility
+echo "Setting hostname to {hostname}..."
+hostnamectl set-hostname {hostname}
+echo "127.0.0.1 {hostname}" >> /etc/hosts
+echo "Hostname set"
 
-# Make executable and run
-chmod +x /tmp/agent-installer
-/tmp/agent-installer --install
+# Configure SSH access for MCP server
+echo "Configuring SSH access..."
+mkdir -p /home/ubuntu/.ssh
+chmod 700 /home/ubuntu/.ssh
+echo "{public_key}" >> /home/ubuntu/.ssh/authorized_keys
+chmod 600 /home/ubuntu/.ssh/authorized_keys
+chown -R ubuntu:ubuntu /home/ubuntu/.ssh
+echo "SSH access configured"
 
-echo "XDR agent installation complete"
+# Download agent installer using presigned URL (no AWS CLI needed)
+echo "Downloading XDR agent installer..."
+INSTALLER_KEY="{agent_s3_key}"
+INSTALLER_FILE="/tmp/agent-installer"
+curl -sSf -o "$INSTALLER_FILE" '{presigned_url}'
+
+# Detect file type and install accordingly
+echo "Detecting installer type..."
+
+# Helper to deploy cortex.conf before running installer
+deploy_cortex_conf() {{
+    local extract_dir="$1"
+    local conf_file=""
+
+    # Find cortex.conf in extracted directory
+    conf_file=$(find "$extract_dir" -name "cortex.conf" -type f | head -1)
+
+    if [ -n "$conf_file" ]; then
+        echo "Found cortex.conf: $conf_file"
+        mkdir -p /etc/panw
+        cp "$conf_file" /etc/panw/cortex.conf
+        chmod 644 /etc/panw/cortex.conf
+        echo "Deployed cortex.conf to /etc/panw/"
+        return 0
+    fi
+
+    echo "WARNING: No cortex.conf found in archive"
+    return 1
+}}
+
+# Helper to find and run any .sh file in extracted directory
+run_extracted_installer() {{
+    local extract_dir="$1"
+    local script=""
+
+    # IMPORTANT: Deploy cortex.conf BEFORE running installer (required by Cortex XDR)
+    deploy_cortex_conf "$extract_dir"
+
+    # Find first .sh file (check root first, then subdirs)
+    script=$(find "$extract_dir" -maxdepth 1 -name "*.sh" -type f | head -1)
+    if [ -z "$script" ]; then
+        script=$(find "$extract_dir" -maxdepth 2 -name "*.sh" -type f | head -1)
+    fi
+
+    if [ -n "$script" ]; then
+        echo "Found installer script: $script"
+        chmod +x "$script"
+        # Run as root (user-data runs as root, but be explicit)
+        "$script"
+        return 0
+    fi
+
+    echo "ERROR: No .sh installer found in archive"
+    echo "Contents:"
+    find "$extract_dir" -type f
+    return 1
+}}
+
+install_agent() {{
+    local file="$1"
+    local filename=$(basename "$INSTALLER_KEY")
+
+    # First, try to detect by file extension
+    case "$filename" in
+        *.sh)
+            echo "Installing via shell script..."
+            chmod +x "$file"
+            "$file"
+            return
+            ;;
+        *.deb)
+            echo "Installing via dpkg..."
+            dpkg -i "$file" || apt-get install -f -y
+            return
+            ;;
+        *.rpm)
+            echo "Installing via rpm..."
+            rpm -i "$file" || yum install -y "$file"
+            return
+            ;;
+        *.tar.gz|*.tgz)
+            echo "Extracting tarball..."
+            mkdir -p /tmp/agent-extract
+            tar xzf "$file" -C /tmp/agent-extract
+            run_extracted_installer /tmp/agent-extract
+            return
+            ;;
+        *.zip)
+            echo "Extracting zip archive..."
+            mkdir -p /tmp/agent-extract
+            unzip -o "$file" -d /tmp/agent-extract
+            run_extracted_installer /tmp/agent-extract
+            return
+            ;;
+    esac
+
+    # Fall back to MIME type detection
+    local mime_type=$(file -b --mime-type "$file")
+    echo "Detected MIME type: $mime_type"
+
+    case "$mime_type" in
+        application/x-debian-package|application/vnd.debian.binary-package)
+            echo "Installing via dpkg..."
+            dpkg -i "$file" || apt-get install -f -y
+            ;;
+        application/x-rpm)
+            echo "Installing via rpm..."
+            rpm -i "$file" || yum install -y "$file"
+            ;;
+        text/x-shellscript|application/x-shellscript|application/x-sh)
+            echo "Installing via shell script..."
+            chmod +x "$file"
+            "$file"
+            ;;
+        application/gzip|application/x-gzip)
+            echo "Extracting gzip archive..."
+            mkdir -p /tmp/agent-extract
+            tar xzf "$file" -C /tmp/agent-extract
+            run_extracted_installer /tmp/agent-extract
+            ;;
+        application/zip)
+            echo "Extracting zip archive..."
+            mkdir -p /tmp/agent-extract
+            unzip -o "$file" -d /tmp/agent-extract
+            run_extracted_installer /tmp/agent-extract
+            ;;
+        application/x-executable|application/octet-stream)
+            echo "Installing via executable..."
+            chmod +x "$file"
+            "$file" --install || "$file"
+            ;;
+        *)
+            echo "Unknown installer type: $mime_type"
+            echo "Attempting to run as executable..."
+            chmod +x "$file"
+            "$file" --install || "$file"
+            ;;
+    esac
+}}
+
+echo "Installing XDR agent..."
+install_agent "$INSTALLER_FILE"
+
+echo "Victim instance setup complete"
 """
     return base64.b64encode(script.encode()).decode()
 
@@ -145,6 +371,7 @@ def handler(event: dict, context) -> dict:
                 "range_id": range_id,
                 "victim_instance_id": range_data["victim_instance_id"],
                 "victim_ip": range_data["victim_ip"],
+                "victim_ssh_key_secret_arn": range_data["victim_ssh_key_secret_arn"],
             }
 
         # Get agent config for S3 key
@@ -155,8 +382,28 @@ def handler(event: dict, context) -> dict:
         agent_s3_key = agent_config["s3_key"]
         logger.info(f"Using agent installer: s3://{s3_bucket}/{agent_s3_key}")
 
-        # Generate user data script
-        user_data = get_user_data_script(s3_bucket, agent_s3_key)
+        # Generate SSH key pair for MCP server access
+        logger.info("Generating SSH key pair for MCP access")
+        private_key, public_key = generate_ssh_keypair()
+
+        # Store private key in Secrets Manager
+        logger.info("Storing SSH private key in Secrets Manager")
+        ssh_key_secret_arn = store_ssh_key_in_secrets_manager(
+            private_key, range_id, user_id, environment
+        )
+        logger.info(f"SSH key stored: {ssh_key_secret_arn}")
+
+        # Generate presigned URL for agent installer (valid for 1 hour)
+        s3_client = boto3.client("s3")
+        presigned_url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": s3_bucket, "Key": agent_s3_key},
+            ExpiresIn=3600,
+        )
+        logger.info("Generated presigned URL for agent installer")
+
+        # Generate user data script with presigned URL
+        user_data = get_user_data_script(presigned_url, agent_s3_key, public_key, range_id)
 
         # Create instance
         ec2 = boto3.client("ec2")
@@ -219,6 +466,7 @@ def handler(event: dict, context) -> dict:
             range_id,
             victim_instance_id=instance_id,
             victim_ip=private_ip,
+            victim_ssh_key_secret_arn=ssh_key_secret_arn,
         )
         logger.info(f"Updated range {range_id} with victim info")
 
@@ -226,6 +474,7 @@ def handler(event: dict, context) -> dict:
             "range_id": range_id,
             "victim_instance_id": instance_id,
             "victim_ip": private_ip,
+            "victim_ssh_key_secret_arn": ssh_key_secret_arn,
         }
 
     finally:

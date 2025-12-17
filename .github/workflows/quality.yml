@@ -6,14 +6,12 @@ on:
       - main
       - dev
     paths:
-      - 'mcp/**'
       - 'portal/**'
       - 'terraform/**'
       - '.github/workflows/quality.yml'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - 'mcp/**'
       - 'portal/**'
       - 'terraform/**'
       - '.github/workflows/quality.yml'
@@ -44,28 +42,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: |
-            mcp/aptl-mcp-common/package-lock.json
-            mcp/mcp-red/package-lock.json
-
-      - name: Build and test aptl-mcp-common
-        working-directory: mcp/aptl-mcp-common
-        run: |
-          npm ci
-          npm run build
-          npm run test -- --coverage
-
-      - name: Build mcp-red
-        working-directory: mcp/mcp-red
-        run: |
-          npm ci
-          npm run build
-
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
 
@@ -89,16 +65,6 @@ jobs:
         run: |
           uv run python manage.py collectstatic --noinput
           uv run pytest
-
-      - name: Test openwebui-mcp-wrapper
-        working-directory: mcp/openwebui-mcp-wrapper
-        run: |
-          uv sync --group dev
-          uv run python -m pytest --cov=. --cov-report=xml:coverage.xml
-
-      - name: Lint TypeScript
-        working-directory: mcp/mcp-red
-        run: npm run lint
 
       - name: Setup Python for Checkov
         uses: actions/setup-python@v5

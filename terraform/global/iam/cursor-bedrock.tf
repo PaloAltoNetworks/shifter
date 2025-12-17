@@ -25,7 +25,6 @@ resource "aws_iam_access_key" "cursor_bedrock" {
 }
 
 # Policy granting Bedrock model invocation
-# Matches permissions from agentchat/ec2 module
 resource "aws_iam_user_policy" "cursor_bedrock_invoke" {
   name = "bedrock-invoke-models"
   user = aws_iam_user.cursor_bedrock.name

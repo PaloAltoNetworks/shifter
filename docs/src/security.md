@@ -13,28 +13,40 @@
 
 ### Range VPC
 
-Separate VPC (`10.1.0.0/16`) for attack lab environments.
+Separate VPC (`10.1.0.0/16`) for attack lab environments with egress filtering.
+
+**Network Firewall:**
+
+AWS Network Firewall inspects all egress traffic with domain-based allowlists:
+
+| Instance | Allowed Egress | Blocked |
+|----------|---------------|---------|
+| Kali | VPC internal only | All internet access |
+| Victim | `.paloaltonetworks.com`, `.storage.googleapis.com` | Everything else |
+
+Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Internet`
 
 **Security Groups:**
 
 | SG | Ingress | Egress | Purpose |
 |----|---------|--------|---------|
-| Kali | SSH from VPC, ALL from Victim SG | ALL | Attack box |
-| Victim | SSH from VPC, ALL from Kali SG | ALL | Target with XDR agent |
+| Kali | SSH from VPC, ALL from Victim SG | VPC CIDR, DNS | Attack box |
+| Victim | SSH from VPC, ALL from Kali SG | HTTPS, DNS | Target with XDR agent |
 
 **Design Decisions:**
 
 - **Bidirectional Kali ↔ Victim traffic**: Required for reverse shells, C2 callbacks, and realistic attack scenarios
-- **Unrestricted egress**: Kali needs apt for tools; Victim needs internet for XDR agent callbacks
-- **SSH from VPC CIDR**: Allows MCP/Chat UI to manage both instances
+- **Kali locked down**: No external access—tools are pre-installed on AMI
+- **Victim XDR-only egress**: Only domains required for XDR/XSIAM telemetry
 - **Security group references**: Traffic rules use SG IDs, not CIDR blocks—prevents cross-user subnet attacks
 
 **Isolation:**
 
-- Each user gets their own `/24` subnet
+- Each user gets their own `/24` subnet (starting at 10.1.1.0/24)
+- 10.1.0.0/24 reserved for infrastructure (firewall, NAT subnets)
 - Kali/Victim can only talk to each other within the same subnet
 - No cross-subnet traffic possible (SG rules reference specific SGs, not VPC CIDR)
-- Range VPC has no peering to Portal VPC
+- VPC peering to Portal VPC for SSH access
 
 ## Encryption
 

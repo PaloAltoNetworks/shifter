@@ -6,17 +6,16 @@ Three components, decoupled via RDS:
 
 - **Portal**: Django app for auth, agent upload, range status UI. Triggers Step Functions on launch.
 - **Provisioning Service**: Step Functions + Lambda, provisions range infra (subnet, Kali, Victim)
-- **Chat UI**: Shared multi-tenant chat UI (being evaluated - see issue #209)
+- **Terminal UI**: Browser-based terminal for SSH access to range instances (planned)
 - **Range**: Per-user subnet in Range VPC with Kali + Victim EC2
 
 ```mermaid
 graph TB
-    subgraph "Portal VPC"
+    subgraph "Portal VPC (10.0.0.0/16)"
         Portal[Django Portal]
         RDS[(PostgreSQL)]
         StepFn[[Step Functions]]
         Lambda[Lambda Functions]
-        ChatUI[Chat UI + MCPs]
         Portal --> RDS
         Portal -->|start execution| StepFn
         StepFn --> Lambda
@@ -32,8 +31,8 @@ graph TB
     end
 
     User((User)) -->|HTTPS| Portal
-    User -->|HTTPS| ChatUI
-    ChatUI -->|SSH/MCP| Kali
+    Portal -->|SSH via Peering| Kali
+    Portal -->|SSH via Peering| Victim
     Lambda -->|AWS API| Kali
     Lambda -->|AWS API| Victim
     Victim -->|Telemetry| XDR[XDR/XSIAM]
@@ -129,15 +128,15 @@ Per-user ephemeral subnets in Range VPC, provisioned by Step Functions + Lambda.
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Chat UI | Portal VPC | Shared chat UI, agent loop, MCP tool use |
-| Kali EC2 | Range VPC | Attack tools, MCP-controlled |
+| Kali EC2 | Range VPC | Attack tools, SSH accessible |
 | Victim EC2 | Range VPC | Target with XDR agent |
 
 ### Isolation
 
 - Each user gets a dedicated /24 subnet in Range VPC
 - Security groups restrict traffic between subnets
-- Range VPC has no route to Portal VPC (Lambda uses AWS APIs)
+- VPC peering connects Portal to Range for SSH terminal access only (port 22)
+- Lambda functions provision resources via AWS APIs (not through peering)
 - Victim VMs have no IAM role (can't call AWS APIs)
 
 ## Deployment Pipeline
@@ -179,48 +178,11 @@ Terraform variables stored locally in `.tfvars` files (gitignored). Synced to Gi
 
 Creates namespaced secrets: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_PORTAL`).
 
-## Two-Context Pattern
+## Range Access
 
-MCP enables AI-driven scenario setup via separate chat conversations:
+Users access their range instances via browser-based terminal integrated into the Portal. Side-by-side terminal panes provide simultaneous SSH access to both instances:
 
-1. **Setup chat**: "Set up a PHP command injection on /cmd.php and a SUID privesc"
-   - AI uses victim MCP to configure vulnerabilities
-   - User can specify flags, locations, difficulty
+- **Kali terminal (left)**: Run attack tools, execute pentesting workflows
+- **Victim terminal (right)**: Configure vulnerabilities, check detections
 
-2. **Attack chat**: "Hack the target at 10.0.1.50, get root, find the flag"
-   - Fresh context (no memory of setup)
-   - AI uses attack methodology: recon → exploit → privesc
-   - XDR/XSIAM detects the attack chain
-
-User demos detections to customer.
-
-## MCP Configuration
-
-MCPs connect Chat UI to range instances via SSH. Currently using hexstrike-ai MCP for Kali access.
-
-**Current State:** MCPs are configured manually. Users SSH into their Kali instance from the Chat UI.
-
-**Future State:** Per-range MCP config will be auto-generated:
-
-```json
-{
-  "server": {
-    "name": "shifter-range-${range_id}",
-    "toolPrefix": "kali"
-  },
-  "targets": {
-    "kali": {
-      "host": "${kali_private_ip}",
-      "ssh_user": "kali",
-      "ssh_port": 22
-    },
-    "victim": {
-      "host": "${victim_private_ip}",
-      "ssh_user": "ubuntu",
-      "ssh_port": 22
-    }
-  }
-}
-```
-
-Same MCP binary, different config per range. No code changes needed.
+The terminal uses Django Channels with WebSocket connections for real-time SSH interaction. See GitHub issue #267.

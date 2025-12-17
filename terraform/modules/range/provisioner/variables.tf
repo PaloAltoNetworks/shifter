@@ -132,8 +132,9 @@ variable "lambda_memory" {
 
 # Chat Configuration
 variable "chat_base_url" {
-  description = "Base URL for the chat/MCP interface (e.g., https://chat.example.com)"
+  description = "Base URL for the terminal interface (e.g., https://portal.example.com/range)"
   type        = string
+  default     = ""
 }
 
 # Monitoring Configuration

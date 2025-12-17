@@ -98,23 +98,33 @@ def store_ssh_key_in_secrets_manager(
     return response["ARN"]
 
 
-def get_user_data_script(public_key: str) -> str:
+def get_user_data_script(public_key: str, range_id: int) -> str:
     """
     Generate user data script to install kali-linux-headless tools on boot
     and configure SSH access with the provided public key.
 
     Args:
         public_key: SSH public key in OpenSSH format
+        range_id: The range ID (used for hostname)
 
     Returns:
         Base64-encoded user data script
     """
+    # Hostname for XDR console visibility
+    hostname = f"shifter-kali-{range_id}"
+
     script = f"""#!/bin/bash
 set -euo pipefail
 
 # Log output
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting Kali headless setup..."
+
+# Set hostname for XDR console visibility
+echo "Setting hostname to {hostname}..."
+hostnamectl set-hostname {hostname}
+echo "127.0.0.1 {hostname}" >> /etc/hosts
+echo "Hostname set"
 
 # Configure SSH access for MCP server
 echo "Configuring SSH access..."
@@ -202,7 +212,7 @@ def handler(event: dict, context) -> dict:
         logger.info(f"SSH key stored: {ssh_key_secret_arn}")
 
         # Generate user data script with public key
-        user_data = get_user_data_script(public_key)
+        user_data = get_user_data_script(public_key, range_id)
 
         # Create instance
         ec2 = boto3.client("ec2")

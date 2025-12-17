@@ -170,10 +170,34 @@ curl -sSf -o "$INSTALLER_FILE" '{presigned_url}'
 # Detect file type and install accordingly
 echo "Detecting installer type..."
 
+# Helper to deploy cortex.conf before running installer
+deploy_cortex_conf() {{
+    local extract_dir="$1"
+    local conf_file=""
+
+    # Find cortex.conf in extracted directory
+    conf_file=$(find "$extract_dir" -name "cortex.conf" -type f | head -1)
+
+    if [ -n "$conf_file" ]; then
+        echo "Found cortex.conf: $conf_file"
+        mkdir -p /etc/panw
+        cp "$conf_file" /etc/panw/cortex.conf
+        chmod 644 /etc/panw/cortex.conf
+        echo "Deployed cortex.conf to /etc/panw/"
+        return 0
+    fi
+
+    echo "WARNING: No cortex.conf found in archive"
+    return 1
+}}
+
 # Helper to find and run any .sh file in extracted directory
 run_extracted_installer() {{
     local extract_dir="$1"
     local script=""
+
+    # IMPORTANT: Deploy cortex.conf BEFORE running installer (required by Cortex XDR)
+    deploy_cortex_conf "$extract_dir"
 
     # Find first .sh file (check root first, then subdirs)
     script=$(find "$extract_dir" -maxdepth 1 -name "*.sh" -type f | head -1)
@@ -184,6 +208,7 @@ run_extracted_installer() {{
     if [ -n "$script" ]; then
         echo "Found installer script: $script"
         chmod +x "$script"
+        # Run as root (user-data runs as root, but be explicit)
         "$script"
         return 0
     fi

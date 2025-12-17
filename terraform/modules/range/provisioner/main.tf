@@ -196,6 +196,42 @@ resource "aws_lambda_function" "mark_ready" {
 }
 
 # ------------------------------------------------------------------------------
+# Verify Agent Lambda
+# ------------------------------------------------------------------------------
+
+data "archive_file" "verify_agent" {
+  type        = "zip"
+  source_dir  = "${local.build_dir}/verify_agent_pkg"
+  output_path = "${local.build_dir}/verify_agent.zip"
+}
+
+resource "aws_lambda_function" "verify_agent" {
+  function_name = "${var.name_prefix}-verify-agent"
+  role          = aws_iam_role.lambda.arn
+  handler       = "handler.handler"
+  runtime       = local.lambda_runtime
+  timeout       = 120 # SSM command send + 30s wait for result
+  memory_size   = 128
+
+  filename         = data.archive_file.verify_agent.output_path
+  source_code_hash = data.archive_file.verify_agent.output_base64sha256
+
+  vpc_config {
+    subnet_ids         = var.portal_subnet_ids
+    security_group_ids = [aws_security_group.lambda.id]
+  }
+
+  environment {
+    variables = local.common_env_vars
+  }
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-verify-agent"
+    Module = "provisioner"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Cleanup Lambda
 # ------------------------------------------------------------------------------
 

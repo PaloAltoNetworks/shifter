@@ -44,6 +44,7 @@ resource "aws_iam_role_policy" "step_functions_lambda" {
           aws_lambda_function.create_subnet.arn,
           aws_lambda_function.create_victim.arn,
           aws_lambda_function.create_kali.arn,
+          aws_lambda_function.verify_agent.arn,
           aws_lambda_function.mark_ready.arn,
           aws_lambda_function.cleanup.arn,
           aws_lambda_function.find_stale_ranges.arn,
@@ -188,7 +189,7 @@ resource "aws_sfn_state_machine" "provision_range" {
           "kali_instance_id.$" = "$.Payload.kali_instance_id"
           "kali_ip.$"          = "$.Payload.kali_ip"
         }
-        Next = "MarkReady"
+        Next = "WaitForBoot"
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
@@ -200,6 +201,148 @@ resource "aws_sfn_state_machine" "provision_range" {
           {
             ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
             IntervalSeconds = 2
+            MaxAttempts     = 3
+            BackoffRate     = 2
+          }
+        ]
+      }
+
+      # Wait for EC2 to boot and SSM agent to start
+      WaitForBoot = {
+        Type    = "Wait"
+        Seconds = 60
+        Next    = "InitializeVerification"
+      }
+
+      # Initialize retry counter for verification loop
+      InitializeVerification = {
+        Type       = "Pass"
+        Result     = 0
+        ResultPath = "$.verify_retry_count"
+        Next       = "VerifyAgent"
+      }
+
+      # Verify XDR agent installation via SSM
+      VerifyAgent = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.verify_agent.arn
+          Payload = {
+            "range_id.$"    = "$.range_id"
+            "retry_count.$" = "$.verify_retry_count"
+          }
+        }
+        ResultPath = "$.verify_agent_result"
+        ResultSelector = {
+          "verification_status.$" = "$.Payload.verification_status"
+          "agent_installed.$"     = "$.Payload.agent_installed"
+          "retry_count.$"         = "$.Payload.retry_count"
+          "error.$"               = "$.Payload.error"
+          "message.$"             = "$.Payload.message"
+        }
+        Next = "CheckVerification"
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            ResultPath  = "$.error"
+            Next        = "Cleanup"
+          }
+        ]
+        Retry = [
+          {
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
+            IntervalSeconds = 2
+            MaxAttempts     = 3
+            BackoffRate     = 2
+          }
+        ]
+      }
+
+      # Route based on verification result
+      CheckVerification = {
+        Type = "Choice"
+        Choices = [
+          {
+            # Success - agent installed, proceed to mark ready
+            Variable     = "$.verify_agent_result.verification_status"
+            StringEquals = "success"
+            Next         = "MarkReady"
+          },
+          {
+            # Explicit failure - cleanup and fail
+            Variable     = "$.verify_agent_result.verification_status"
+            StringEquals = "failed"
+            Next         = "VerificationFailed"
+          },
+          {
+            # Too many retries (10 * 30s = 5 min max)
+            Variable                 = "$.verify_agent_result.retry_count"
+            NumericGreaterThanEquals = 10
+            Next                     = "VerificationTimeout"
+          }
+        ]
+        # Default: still pending, wait and retry
+        Default = "WaitBeforeRetry"
+      }
+
+      # Wait between verification attempts
+      WaitBeforeRetry = {
+        Type    = "Wait"
+        Seconds = 30
+        Next    = "UpdateRetryCount"
+      }
+
+      # Update retry counter before next attempt
+      UpdateRetryCount = {
+        Type       = "Pass"
+        InputPath  = "$.verify_agent_result.retry_count"
+        ResultPath = "$.verify_retry_count"
+        Next       = "VerifyAgent"
+      }
+
+      # Handle verification failure
+      VerificationFailed = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.cleanup.arn
+          Payload = {
+            "range_id.$"    = "$.range_id"
+            "mark_failed"   = true
+            "error_message" = "XDR agent installation failed on victim instance"
+          }
+        }
+        ResultPath = "$.cleanup_result"
+        Next       = "Failed"
+        Retry = [
+          {
+            ErrorEquals     = ["States.ALL"]
+            IntervalSeconds = 5
+            MaxAttempts     = 3
+            BackoffRate     = 2
+          }
+        ]
+      }
+
+      # Handle verification timeout
+      VerificationTimeout = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.cleanup.arn
+          Payload = {
+            "range_id.$"    = "$.range_id"
+            "mark_failed"   = true
+            "error_message" = "XDR agent verification timed out after 5 minutes"
+          }
+        }
+        ResultPath = "$.cleanup_result"
+        Next       = "Failed"
+        Retry = [
+          {
+            ErrorEquals     = ["States.ALL"]
+            IntervalSeconds = 5
             MaxAttempts     = 3
             BackoffRate     = 2
           }

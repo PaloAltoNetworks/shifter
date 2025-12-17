@@ -34,23 +34,30 @@ resource "aws_route_table_association" "ssm_endpoints" {
 # Security Group for SSM Endpoints
 # ------------------------------------------------------------------------------
 
+# Note: All rules defined as standalone aws_security_group_rule resources
+# to avoid conflicts between inline rules and standalone rules.
 resource "aws_security_group" "ssm_endpoints" {
   name        = "${var.name_prefix}-ssm-endpoints"
   description = "Security group for SSM VPC endpoints"
   vpc_id      = aws_vpc.this.id
 
-  # HTTPS from VPC (SSM uses HTTPS)
-  ingress {
-    description = "HTTPS from VPC"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-ssm-endpoints-sg"
   })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "ssm_endpoints_https_from_vpc" {
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.ssm_endpoints.id
+  description       = "HTTPS from VPC"
 }
 
 # ------------------------------------------------------------------------------

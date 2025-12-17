@@ -84,8 +84,10 @@ resource "aws_networkfirewall_rule_group" "victim_domains" {
       }
     }
 
+    # Use DEFAULT_ACTION_ORDER so domain allowlist works correctly
+    # STRICT_ORDER with drop_strict drops TCP SYN before TLS SNI can be inspected
     stateful_rule_options {
-      rule_order = "STRICT_ORDER"
+      rule_order = "DEFAULT_ACTION_ORDER"
     }
   }
 
@@ -120,13 +122,59 @@ resource "aws_networkfirewall_rule_group" "kali_domains" {
       }
     }
 
+    # Use DEFAULT_ACTION_ORDER so domain allowlist works correctly
     stateful_rule_options {
-      rule_order = "STRICT_ORDER"
+      rule_order = "DEFAULT_ACTION_ORDER"
     }
   }
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-kali-domains"
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Block Direct IP Connections (no hostname/SNI bypass)
+# ------------------------------------------------------------------------------
+
+resource "aws_networkfirewall_rule_group" "block_ip_sni" {
+  count = var.enable_network_firewall ? 1 : 0
+
+  capacity = 10
+  name     = "${var.name_prefix}-block-ip-sni"
+  type     = "STATEFUL"
+
+  rule_group {
+    rule_variables {
+      ip_sets {
+        key = "HOME_NET"
+        ip_set {
+          definition = [var.vpc_cidr]
+        }
+      }
+      ip_sets {
+        key = "EXTERNAL_NET"
+        ip_set {
+          definition = ["0.0.0.0/0"]
+        }
+      }
+    }
+
+    rules_source {
+      # Suricata rule to reject TLS connections where SNI is an IP address
+      # This prevents bypassing domain allowlist by connecting directly to IPs
+      rules_string = <<-EOT
+        reject tls $HOME_NET any -> $EXTERNAL_NET any (tls.sni; content:"."; pcre:"/^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/"; msg:"Blocked: IP address used as TLS SNI"; sid:1000001; rev:1;)
+      EOT
+    }
+
+    stateful_rule_options {
+      rule_order = "DEFAULT_ACTION_ORDER"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-block-ip-sni"
   })
 }
 
@@ -143,11 +191,20 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     stateless_default_actions          = ["aws:forward_to_sfe"]
     stateless_fragment_default_actions = ["aws:forward_to_sfe"]
 
+    # Use DEFAULT_ACTION_ORDER for domain-based filtering
+    # This allows TCP handshake to complete so TLS SNI can be inspected
     stateful_engine_options {
-      rule_order = "STRICT_ORDER"
+      rule_order = "DEFAULT_ACTION_ORDER"
     }
 
-    stateful_default_actions = ["aws:drop_strict", "aws:alert_strict"]
+    # With DEFAULT_ACTION_ORDER, unmatched traffic is dropped after rules are evaluated
+    # This allows the domain allowlist to work properly
+
+    # Block direct IP connections first (highest priority)
+    stateful_rule_group_reference {
+      priority     = 50
+      resource_arn = aws_networkfirewall_rule_group.block_ip_sni[0].arn
+    }
 
     # Victim domains (always included)
     stateful_rule_group_reference {

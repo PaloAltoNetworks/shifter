@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2025-12-16
+
+### Fixed
+- XDR agent not installing on victim EC2 instances (#274)
+  - Root cause: Network Firewall blocked S3 downloads (S3 domains not in allowlist)
+  - Added S3 VPC Gateway Endpoint to Range VPC for direct S3 access
+  - Added SSM-based agent verification before marking range as ready
+
+### Added
+- S3 Gateway Endpoint for Range VPC
+  - Bypasses Network Firewall for S3 traffic
+  - Optional endpoint policy to restrict access to agent bucket
+- Agent verification step in provisioning workflow
+  - New `verify_agent` Lambda checks installation via SSM RunCommand
+  - Step Functions retry loop with 30s intervals (5 min max)
+  - Ranges fail fast with descriptive error if agent install fails
+
 ## [0.7.0] - 2025-12-16
 
 ### Added

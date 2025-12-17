@@ -45,3 +45,13 @@ variable "victim_allowed_domains" {
     ".storage.googleapis.com"
   ]
 }
+
+# ------------------------------------------------------------------------------
+# S3 Endpoint Configuration
+# ------------------------------------------------------------------------------
+
+variable "agent_s3_bucket_arn" {
+  description = "ARN of S3 bucket containing XDR agent installers. If empty, S3 endpoint allows access to all S3 buckets."
+  type        = string
+  default     = ""
+}

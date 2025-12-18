@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2025-12-17
+
+### Added
+- ElastiCache Redis module for Django Channels
+- Portal autoscaling: launch template, ASG, scaling policies, CloudWatch alarms
+- ALB session stickiness for WebSocket affinity
+
+### Changed
+- Django Channels uses Redis when `REDIS_HOST` env var set, falls back to InMemory
+- EC2 module supports single instance or ASG mode via `enable_autoscaling` flag
+- Dev environment wired for autoscaling (disabled by default)
+- GitHub Actions portal workflow supports ASG deployment via SSM targeting by tag
+- IAM: Added `elasticache_asg` policy for ElastiCache, Auto Scaling, and Launch Template permissions
+
+
 ## [0.7.3] - 2025-12-17
 
 ### Fixed

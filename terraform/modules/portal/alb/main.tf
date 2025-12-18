@@ -129,6 +129,15 @@ resource "aws_lb_target_group" "this" {
     matcher             = "200"
   }
 
+  dynamic "stickiness" {
+    for_each = var.enable_stickiness ? [1] : []
+    content {
+      type            = "lb_cookie"
+      cookie_duration = 86400
+      enabled         = true
+    }
+  }
+
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-tg"
   })

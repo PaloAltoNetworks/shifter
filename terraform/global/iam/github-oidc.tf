@@ -165,7 +165,7 @@ resource "aws_iam_policy" "vpc_networking" {
   })
 }
 
-# EC2 Instances
+# EC2 Instances, Auto Scaling, and Launch Templates
 # checkov:skip=CKV_AWS_355:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
 # checkov:skip=CKV_AWS_290:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
 # checkov:skip=CKV_AWS_289:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
@@ -206,6 +206,44 @@ resource "aws_iam_policy" "ec2_instances" {
           "ec2:DeleteKeyPair",
           "ec2:MonitorInstances",
           "ec2:UnmonitorInstances"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "LaunchTemplate"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateLaunchTemplate",
+          "ec2:DeleteLaunchTemplate",
+          "ec2:DescribeLaunchTemplates",
+          "ec2:DescribeLaunchTemplateVersions",
+          "ec2:ModifyLaunchTemplate",
+          "ec2:CreateLaunchTemplateVersion",
+          "ec2:DeleteLaunchTemplateVersions"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AutoScaling"
+        Effect = "Allow"
+        Action = [
+          "autoscaling:CreateAutoScalingGroup",
+          "autoscaling:DeleteAutoScalingGroup",
+          "autoscaling:DescribeAutoScalingGroups",
+          "autoscaling:UpdateAutoScalingGroup",
+          "autoscaling:CreateLaunchConfiguration",
+          "autoscaling:DeleteLaunchConfiguration",
+          "autoscaling:DescribeLaunchConfigurations",
+          "autoscaling:CreateOrUpdateTags",
+          "autoscaling:DeleteTags",
+          "autoscaling:DescribeTags",
+          "autoscaling:PutScalingPolicy",
+          "autoscaling:DeletePolicy",
+          "autoscaling:DescribePolicies",
+          "autoscaling:SetDesiredCapacity",
+          "autoscaling:TerminateInstanceInAutoScalingGroup",
+          "autoscaling:StartInstanceRefresh",
+          "autoscaling:DescribeInstanceRefreshes"
         ]
         Resource = "*"
       }
@@ -456,11 +494,11 @@ resource "aws_iam_policy" "lambda_sfn" {
   })
 }
 
-# RDS
-# checkov:skip=CKV_AWS_355:CI/CD requires broad RDS permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_290:CI/CD requires broad RDS permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_289:CI/CD requires broad RDS permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_287:CI/CD requires broad RDS permissions. Risk accepted, see #44
+# RDS and ElastiCache (managed data stores)
+# checkov:skip=CKV_AWS_355:CI/CD requires broad RDS/ElastiCache permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires broad RDS/ElastiCache permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires broad RDS/ElastiCache permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires broad RDS/ElastiCache permissions. Risk accepted, see #44
 # NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
 # and size of inline policies outweigh need for pure least privilege. Risk accepted.
 resource "aws_iam_policy" "rds" {
@@ -494,6 +532,27 @@ resource "aws_iam_policy" "rds" {
           "rds:ListTagsForResource",
           "rds:DescribeDBEngineVersions",
           "rds:DescribeOrderableDBInstanceOptions"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ElastiCache"
+        Effect = "Allow"
+        Action = [
+          "elasticache:CreateCacheCluster",
+          "elasticache:DeleteCacheCluster",
+          "elasticache:DescribeCacheClusters",
+          "elasticache:ModifyCacheCluster",
+          "elasticache:CreateCacheSubnetGroup",
+          "elasticache:DeleteCacheSubnetGroup",
+          "elasticache:DescribeCacheSubnetGroups",
+          "elasticache:ModifyCacheSubnetGroup",
+          "elasticache:DescribeCacheParameterGroups",
+          "elasticache:DescribeCacheParameters",
+          "elasticache:DescribeEngineDefaultParameters",
+          "elasticache:AddTagsToResource",
+          "elasticache:RemoveTagsFromResource",
+          "elasticache:ListTagsForResource"
         ]
         Resource = "*"
       }
@@ -588,80 +647,6 @@ resource "aws_iam_policy" "ssm_cognito" {
         Sid      = "Cognito"
         Effect   = "Allow"
         Action   = ["cognito-idp:*"]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-# ElastiCache and Auto Scaling
-# checkov:skip=CKV_AWS_355:CI/CD requires ElastiCache/ASG permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_290:CI/CD requires ElastiCache/ASG permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_289:CI/CD requires ElastiCache/ASG permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_287:CI/CD requires ElastiCache/ASG permissions. Risk accepted, see #44
-resource "aws_iam_policy" "elasticache_asg" {
-  name = "shifter-${var.environment}-elasticache-asg"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "ElastiCache"
-        Effect = "Allow"
-        Action = [
-          "elasticache:CreateCacheCluster",
-          "elasticache:DeleteCacheCluster",
-          "elasticache:DescribeCacheClusters",
-          "elasticache:ModifyCacheCluster",
-          "elasticache:CreateCacheSubnetGroup",
-          "elasticache:DeleteCacheSubnetGroup",
-          "elasticache:DescribeCacheSubnetGroups",
-          "elasticache:ModifyCacheSubnetGroup",
-          "elasticache:DescribeCacheParameterGroups",
-          "elasticache:DescribeCacheParameters",
-          "elasticache:DescribeEngineDefaultParameters",
-          "elasticache:AddTagsToResource",
-          "elasticache:RemoveTagsFromResource",
-          "elasticache:ListTagsForResource"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "AutoScaling"
-        Effect = "Allow"
-        Action = [
-          "autoscaling:CreateAutoScalingGroup",
-          "autoscaling:DeleteAutoScalingGroup",
-          "autoscaling:DescribeAutoScalingGroups",
-          "autoscaling:UpdateAutoScalingGroup",
-          "autoscaling:CreateLaunchConfiguration",
-          "autoscaling:DeleteLaunchConfiguration",
-          "autoscaling:DescribeLaunchConfigurations",
-          "autoscaling:CreateOrUpdateTags",
-          "autoscaling:DeleteTags",
-          "autoscaling:DescribeTags",
-          "autoscaling:PutScalingPolicy",
-          "autoscaling:DeletePolicy",
-          "autoscaling:DescribePolicies",
-          "autoscaling:SetDesiredCapacity",
-          "autoscaling:TerminateInstanceInAutoScalingGroup",
-          "autoscaling:StartInstanceRefresh",
-          "autoscaling:DescribeInstanceRefreshes"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "LaunchTemplate"
-        Effect = "Allow"
-        Action = [
-          "ec2:CreateLaunchTemplate",
-          "ec2:DeleteLaunchTemplate",
-          "ec2:DescribeLaunchTemplates",
-          "ec2:DescribeLaunchTemplateVersions",
-          "ec2:ModifyLaunchTemplate",
-          "ec2:CreateLaunchTemplateVersion",
-          "ec2:DeleteLaunchTemplateVersions"
-        ]
         Resource = "*"
       }
     ]
@@ -769,11 +754,6 @@ resource "aws_iam_role_policy_attachment" "ssm_cognito" {
 resource "aws_iam_role_policy_attachment" "network_firewall" {
   role       = aws_iam_role.github_actions.name
   policy_arn = aws_iam_policy.network_firewall.arn
-}
-
-resource "aws_iam_role_policy_attachment" "elasticache_asg" {
-  role       = aws_iam_role.github_actions.name
-  policy_arn = aws_iam_policy.elasticache_asg.arn
 }
 
 # ------------------------------------------------------------------------------

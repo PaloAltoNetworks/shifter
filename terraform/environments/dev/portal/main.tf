@@ -235,27 +235,9 @@ resource "aws_route" "range_to_portal" {
   vpc_peering_connection_id = aws_vpc_peering_connection.portal_to_range.id
 }
 
-# Allow SSH from Portal to Kali instances
-resource "aws_security_group_rule" "kali_ssh_from_portal" {
-  type              = "ingress"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = [module.vpc.vpc_cidr]
-  security_group_id = data.terraform_remote_state.range.outputs.kali_security_group_id
-  description       = "SSH from Portal VPC (Terminal UI)"
-}
-
-# Allow SSH from Portal to Victim instances
-resource "aws_security_group_rule" "victim_ssh_from_portal" {
-  type              = "ingress"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = [module.vpc.vpc_cidr]
-  security_group_id = data.terraform_remote_state.range.outputs.victim_security_group_id
-  description       = "SSH from Portal VPC (Terminal UI)"
-}
+# Note: SSH rules from Portal to Kali/Victim are defined in the range VPC module
+# (terraform/modules/range/vpc/main.tf) using the portal_vpc_cidr variable.
+# Do not duplicate them here.
 
 # ------------------------------------------------------------------------------
 # Provisioner (Step Functions + Lambda for range provisioning)

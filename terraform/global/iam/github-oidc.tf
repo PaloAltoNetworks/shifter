@@ -594,6 +594,80 @@ resource "aws_iam_policy" "ssm_cognito" {
   })
 }
 
+# ElastiCache and Auto Scaling
+# checkov:skip=CKV_AWS_355:CI/CD requires ElastiCache/ASG permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires ElastiCache/ASG permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires ElastiCache/ASG permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires ElastiCache/ASG permissions. Risk accepted, see #44
+resource "aws_iam_policy" "elasticache_asg" {
+  name = "shifter-${var.environment}-elasticache-asg"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ElastiCache"
+        Effect = "Allow"
+        Action = [
+          "elasticache:CreateCacheCluster",
+          "elasticache:DeleteCacheCluster",
+          "elasticache:DescribeCacheClusters",
+          "elasticache:ModifyCacheCluster",
+          "elasticache:CreateCacheSubnetGroup",
+          "elasticache:DeleteCacheSubnetGroup",
+          "elasticache:DescribeCacheSubnetGroups",
+          "elasticache:ModifyCacheSubnetGroup",
+          "elasticache:DescribeCacheParameterGroups",
+          "elasticache:DescribeCacheParameters",
+          "elasticache:DescribeEngineDefaultParameters",
+          "elasticache:AddTagsToResource",
+          "elasticache:RemoveTagsFromResource",
+          "elasticache:ListTagsForResource"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AutoScaling"
+        Effect = "Allow"
+        Action = [
+          "autoscaling:CreateAutoScalingGroup",
+          "autoscaling:DeleteAutoScalingGroup",
+          "autoscaling:DescribeAutoScalingGroups",
+          "autoscaling:UpdateAutoScalingGroup",
+          "autoscaling:CreateLaunchConfiguration",
+          "autoscaling:DeleteLaunchConfiguration",
+          "autoscaling:DescribeLaunchConfigurations",
+          "autoscaling:CreateOrUpdateTags",
+          "autoscaling:DeleteTags",
+          "autoscaling:DescribeTags",
+          "autoscaling:PutScalingPolicy",
+          "autoscaling:DeletePolicy",
+          "autoscaling:DescribePolicies",
+          "autoscaling:SetDesiredCapacity",
+          "autoscaling:TerminateInstanceInAutoScalingGroup",
+          "autoscaling:StartInstanceRefresh",
+          "autoscaling:DescribeInstanceRefreshes"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "LaunchTemplate"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateLaunchTemplate",
+          "ec2:DeleteLaunchTemplate",
+          "ec2:DescribeLaunchTemplates",
+          "ec2:DescribeLaunchTemplateVersions",
+          "ec2:ModifyLaunchTemplate",
+          "ec2:CreateLaunchTemplateVersion",
+          "ec2:DeleteLaunchTemplateVersions"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # Network Firewall
 # checkov:skip=CKV_AWS_355:CI/CD requires Network Firewall permissions. Risk accepted, see #44
 # checkov:skip=CKV_AWS_290:CI/CD requires Network Firewall permissions. Risk accepted, see #44
@@ -695,6 +769,11 @@ resource "aws_iam_role_policy_attachment" "ssm_cognito" {
 resource "aws_iam_role_policy_attachment" "network_firewall" {
   role       = aws_iam_role.github_actions.name
   policy_arn = aws_iam_policy.network_firewall.arn
+}
+
+resource "aws_iam_role_policy_attachment" "elasticache_asg" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.elasticache_asg.arn
 }
 
 # ------------------------------------------------------------------------------

@@ -211,9 +211,25 @@ resource "aws_iam_role_policy" "lambda_ec2" {
           "ec2:DescribeInstances",
           "ec2:DescribeRouteTables",
           "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSecurityGroupRules",
           "ec2:DescribeVpcs"
         ]
         Resource = "*"
+      },
+      # Security group rules - ensure SSH from Portal VPC (fixes Terraform drift)
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:AuthorizeSecurityGroupIngress"
+        ]
+        Resource = [
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:security-group/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "ec2:Vpc" = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:vpc/${var.range_vpc_id}"
+          }
+        }
       },
       # Subnet operations - scoped to Range VPC
       {

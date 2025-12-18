@@ -103,6 +103,24 @@ module "alb" {
   domain_name       = var.domain_name
   app_port          = var.app_port
   health_check_path = var.health_check_path
+  enable_stickiness = var.enable_autoscaling
+
+  tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# Redis (for Django Channels in ASG mode)
+# ------------------------------------------------------------------------------
+
+module "redis" {
+  source = "../../../modules/portal/redis"
+
+  name_prefix         = local.name_prefix
+  vpc_id              = module.vpc.vpc_id
+  subnet_ids          = module.vpc.private_subnet_ids
+  allowed_cidr_blocks = [module.vpc.vpc_cidr]
+  node_type           = var.redis_node_type
+  engine_version      = var.redis_engine_version
 
   tags = var.tags
 }
@@ -154,14 +172,27 @@ module "ec2" {
     module.provisioner.teardown_range_state_machine_arn,
   ]
 
+  # Autoscaling configuration
+  enable_autoscaling   = var.enable_autoscaling
+  subnet_ids           = module.vpc.private_subnet_ids
+  target_group_arn     = module.alb.target_group_arn
+  asg_min_size         = var.asg_min_size
+  asg_max_size         = var.asg_max_size
+  asg_desired_capacity = var.asg_desired_capacity
+  redis_endpoint       = var.enable_autoscaling ? module.redis.redis_endpoint : ""
+  scale_up_threshold   = var.scale_up_threshold
+  scale_down_threshold = var.scale_down_threshold
+
   tags = var.tags
 }
 
 # ------------------------------------------------------------------------------
-# ALB Target Attachment (after EC2 is created)
+# ALB Target Attachment (single instance mode only - ASG attaches automatically)
 # ------------------------------------------------------------------------------
 
 resource "aws_lb_target_group_attachment" "portal" {
+  count = var.enable_autoscaling ? 0 : 1
+
   target_group_arn = module.alb.target_group_arn
   target_id        = module.ec2.instance_id
   port             = var.app_port

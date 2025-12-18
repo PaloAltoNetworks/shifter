@@ -64,17 +64,32 @@ output "db_resource_id" {
 }
 
 # ------------------------------------------------------------------------------
-# EC2
+# EC2 / Autoscaling
 # ------------------------------------------------------------------------------
 
 output "ec2_instance_id" {
-  description = "ID of the EC2 instance"
+  description = "ID of the EC2 instance (empty if ASG mode)"
   value       = module.ec2.instance_id
 }
 
 output "ec2_private_ip" {
-  description = "Private IP of the EC2 instance"
+  description = "Private IP of the EC2 instance (empty if ASG mode)"
   value       = module.ec2.private_ip
+}
+
+output "asg_name" {
+  description = "Auto Scaling Group name (empty if single instance mode)"
+  value       = module.ec2.asg_name
+}
+
+output "asg_arn" {
+  description = "Auto Scaling Group ARN (empty if single instance mode)"
+  value       = module.ec2.asg_arn
+}
+
+output "launch_template_id" {
+  description = "Launch template ID (empty if single instance mode)"
+  value       = module.ec2.launch_template_id
 }
 
 # ------------------------------------------------------------------------------
@@ -165,4 +180,18 @@ output "provisioner_alerts_sns_topic_arn" {
 output "vpc_peering_connection_id" {
   description = "ID of the VPC peering connection to Range VPC"
   value       = aws_vpc_peering_connection.portal_to_range.id
+}
+
+# ------------------------------------------------------------------------------
+# Redis
+# ------------------------------------------------------------------------------
+
+output "redis_endpoint" {
+  description = "Redis primary endpoint"
+  value       = module.redis.redis_endpoint
+}
+
+output "redis_port" {
+  description = "Redis port"
+  value       = module.redis.redis_port
 }

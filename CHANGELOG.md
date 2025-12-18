@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - XDR agent not registering with tenant after installation
   - Added cortex.conf deployment before running installer script
 
+## [0.7.2] - 2025-12-17
+
+### Changed
+- Removed redundant connection status from terminal header
+- Increased terminal padding for better readability
+
 ## [0.7.1] - 2025-12-16
 
 ### Fixed
@@ -33,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard polling errors when session expires during range provisioning
   - CORS errors occurred when API redirected to Cognito for re-authentication
   - Added session expiration detection and automatic redirect to login page
+  - Network Firewall blocking XDR agent egress to Cortex cloud
+    - Changed from STRICT_ORDER to DEFAULT_ACTION_ORDER for domain allowlist
+    - Added Suricata rule to block direct IP connections (SNI bypass prevention)
+  - XDR agent not registering with tenant after installation
+    - Added cortex.conf deployment before running installer script
 
 ### Added
 - Agent verification step in provisioning workflow

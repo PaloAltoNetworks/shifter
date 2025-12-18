@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from shared import (
+    ensure_ssh_from_portal,
     get_db_connection,
     get_env,
     get_range,
@@ -213,6 +214,11 @@ def handler(event: dict, context) -> dict:
 
         # Generate user data script with public key
         user_data = get_user_data_script(public_key, range_id)
+
+        # Ensure SSH rule from Portal VPC exists (fixes Terraform drift issue)
+        portal_vpc_cidr = get_env("PORTAL_VPC_CIDR", "")
+        if portal_vpc_cidr:
+            ensure_ssh_from_portal(kali_security_group_id, portal_vpc_cidr)
 
         # Create instance
         ec2 = boto3.client("ec2")

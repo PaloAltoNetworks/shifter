@@ -68,3 +68,52 @@ variable "step_function_arns" {
   type        = list(string)
   default     = []
 }
+
+# ------------------------------------------------------------------------------
+# Autoscaling Variables - NO DEFAULTS
+# ------------------------------------------------------------------------------
+
+variable "enable_autoscaling" {
+  description = "Enable Auto Scaling Group instead of single EC2 instance"
+  type        = bool
+}
+
+variable "subnet_ids" {
+  description = "List of subnet IDs for ASG multi-AZ deployment"
+  type        = list(string)
+}
+
+variable "target_group_arn" {
+  description = "ARN of the ALB target group for ASG attachment"
+  type        = string
+}
+
+variable "asg_min_size" {
+  description = "Minimum number of instances in the ASG"
+  type        = number
+}
+
+variable "asg_max_size" {
+  description = "Maximum number of instances in the ASG"
+  type        = number
+}
+
+variable "asg_desired_capacity" {
+  description = "Desired number of instances in the ASG"
+  type        = number
+}
+
+variable "redis_endpoint" {
+  description = "Redis endpoint for Django Channels"
+  type        = string
+}
+
+variable "scale_up_threshold" {
+  description = "CPU percentage threshold to trigger scale up"
+  type        = number
+}
+
+variable "scale_down_threshold" {
+  description = "CPU percentage threshold to trigger scale down"
+  type        = number
+}

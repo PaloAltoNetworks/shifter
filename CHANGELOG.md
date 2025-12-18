@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ElastiCache Redis module for Django Channels (`terraform/modules/portal/redis/`)
 - Portal autoscaling implementation checklist (#295)
 
+### Changed
+- Django Channels uses Redis when `REDIS_HOST` env var set, falls back to InMemory for local dev
+
 
 ## [0.7.3] - 2025-12-17
 

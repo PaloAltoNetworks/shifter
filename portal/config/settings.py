@@ -91,13 +91,25 @@ ASGI_APPLICATION = "config.asgi.application"
 # Django Channels Configuration
 # ------------------------------------------------------------------------------
 
-# Channel layers - use in-memory for single-instance deployment
-# Note: For multi-instance scaling, would need Redis channel layer
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-    },
-}
+# Redis for channel layer (multi-instance ASG deployment)
+# Falls back to in-memory for local dev when REDIS_HOST not set
+REDIS_HOST = os.environ.get("REDIS_HOST", "")
+
+if REDIS_HOST:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [(REDIS_HOST, 6379)],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
 
 # Database
 DATABASES = {

@@ -53,76 +53,20 @@ resource "aws_internet_gateway" "this" {
 # ------------------------------------------------------------------------------
 
 # checkov:skip=CKV2_AWS_5:SG used by dynamically provisioned EC2 instances
+# Note: All rules defined as standalone aws_security_group_rule resources below
+# to avoid conflicts between inline rules and standalone rules.
 resource "aws_security_group" "victim" {
   name        = "${var.name_prefix}-victim"
   description = "Security group for victim EC2 instances"
   vpc_id      = aws_vpc.this.id
 
-  # SSH from within Range VPC (for MCP access)
-  ingress {
-    description = "SSH from Range VPC"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  # SSH from Portal VPC (for browser terminal)
-  ingress {
-    description = "SSH from Portal VPC (browser terminal)"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.portal_vpc_cidr]
-  }
-
-  # Allow all inbound from Kali (for attacks)
-  ingress {
-    description     = "All traffic from Kali"
-    from_port       = 0
-    to_port         = 0
-    protocol        = "-1"
-    security_groups = [aws_security_group.kali.id]
-  }
-
-  # HTTPS to VPC for SSM endpoints (required for Systems Manager agent)
-  egress {
-    description = "HTTPS to VPC (SSM endpoints)"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  # HTTPS for XDR agent telemetry (filtered by Network Firewall)
-  egress {
-    description = "HTTPS for XDR (filtered by ANFW)"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # DNS for domain resolution
-  egress {
-    description = "DNS UDP"
-    from_port   = 53
-    to_port     = 53
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    description = "DNS TCP"
-    from_port   = 53
-    to_port     = 53
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-victim-sg"
   })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -130,61 +74,130 @@ resource "aws_security_group" "victim" {
 # ------------------------------------------------------------------------------
 
 # checkov:skip=CKV2_AWS_5:SG used by dynamically provisioned EC2 instances
+# Note: All rules defined as standalone aws_security_group_rule resources below
+# to avoid conflicts between inline rules and standalone rules.
 resource "aws_security_group" "kali" {
   name        = "${var.name_prefix}-kali"
   description = "Security group for Kali attack EC2 instances"
   vpc_id      = aws_vpc.this.id
 
-  # SSH from within Range VPC (for MCP/Chat UI access)
-  ingress {
-    description = "SSH from Range VPC"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  # SSH from Portal VPC (for browser terminal)
-  ingress {
-    description = "SSH from Portal VPC (browser terminal)"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.portal_vpc_cidr]
-  }
-
-  # All traffic within VPC (for attacking victim)
-  egress {
-    description = "All traffic to VPC (attack victim)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  # DNS for internal resolution (filtered by Network Firewall for external)
-  egress {
-    description = "DNS UDP"
-    from_port   = 53
-    to_port     = 53
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    description = "DNS TCP"
-    from_port   = 53
-    to_port     = 53
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-kali-sg"
   })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
-# Allow victim to connect to Kali (reverse shells, callbacks)
+# ------------------------------------------------------------------------------
+# Victim Security Group Rules
+# ------------------------------------------------------------------------------
+
+resource "aws_security_group_rule" "victim_ssh_from_range" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.victim.id
+  description       = "SSH from Range VPC"
+}
+
+resource "aws_security_group_rule" "victim_ssh_from_portal" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.portal_vpc_cidr]
+  security_group_id = aws_security_group.victim.id
+  description       = "SSH from Portal VPC (browser terminal)"
+}
+
+resource "aws_security_group_rule" "victim_from_kali" {
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.kali.id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic from Kali"
+}
+
+resource "aws_security_group_rule" "victim_to_kali" {
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.kali.id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic to Kali (reverse shells)"
+}
+
+resource "aws_security_group_rule" "victim_https_to_vpc" {
+  type              = "egress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.victim.id
+  description       = "HTTPS to VPC (SSM endpoints)"
+}
+
+resource "aws_security_group_rule" "victim_https_to_internet" {
+  type              = "egress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.victim.id
+  description       = "HTTPS for XDR (filtered by ANFW)"
+}
+
+resource "aws_security_group_rule" "victim_dns_udp" {
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.victim.id
+  description       = "DNS UDP"
+}
+
+resource "aws_security_group_rule" "victim_dns_tcp" {
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.victim.id
+  description       = "DNS TCP"
+}
+
+# ------------------------------------------------------------------------------
+# Kali Security Group Rules
+# ------------------------------------------------------------------------------
+
+resource "aws_security_group_rule" "kali_ssh_from_range" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.kali.id
+  description       = "SSH from Range VPC"
+}
+
+resource "aws_security_group_rule" "kali_ssh_from_portal" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.portal_vpc_cidr]
+  security_group_id = aws_security_group.kali.id
+  description       = "SSH from Portal VPC (browser terminal)"
+}
+
 resource "aws_security_group_rule" "kali_from_victim" {
   type                     = "ingress"
   from_port                = 0
@@ -195,13 +208,32 @@ resource "aws_security_group_rule" "kali_from_victim" {
   description              = "All traffic from victim (reverse shells)"
 }
 
-# Allow victim to send traffic to Kali (reverse shells, callbacks)
-resource "aws_security_group_rule" "victim_to_kali" {
-  type                     = "egress"
-  from_port                = 0
-  to_port                  = 0
-  protocol                 = "-1"
-  source_security_group_id = aws_security_group.kali.id
-  security_group_id        = aws_security_group.victim.id
-  description              = "All traffic to Kali (reverse shells)"
+resource "aws_security_group_rule" "kali_to_vpc" {
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.kali.id
+  description       = "All traffic to VPC (attack victim)"
+}
+
+resource "aws_security_group_rule" "kali_dns_udp" {
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.kali.id
+  description       = "DNS UDP"
+}
+
+resource "aws_security_group_rule" "kali_dns_tcp" {
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.kali.id
+  description       = "DNS TCP"
 }

@@ -240,3 +240,13 @@ variable "redis_engine_version" {
   description = "ElastiCache Redis engine version"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# CI Testing
+# ------------------------------------------------------------------------------
+
+variable "django_secret_key_ci" {
+  description = "Django secret key for CI testing (extracted by quality.yml workflow, not used by Terraform)"
+  type        = string
+  default     = ""
+}

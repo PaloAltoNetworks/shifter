@@ -243,7 +243,8 @@ resource "aws_iam_policy" "ec2_instances" {
           "autoscaling:SetDesiredCapacity",
           "autoscaling:TerminateInstanceInAutoScalingGroup",
           "autoscaling:StartInstanceRefresh",
-          "autoscaling:DescribeInstanceRefreshes"
+          "autoscaling:DescribeInstanceRefreshes",
+          "autoscaling:DescribeScalingActivities"
         ]
         Resource = "*"
       }

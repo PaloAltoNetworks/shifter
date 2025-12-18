@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2025-12-17
+
+### Fixed
+- VPC peering TF drift dev/prod
+
+### Fixed
+- Network Firewall blocking XDR agent egress to Cortex cloud
+  - Changed from STRICT_ORDER to DEFAULT_ACTION_ORDER for domain allowlist
+  - Added Suricata rule to block direct IP connections (SNI bypass prevention)
+- XDR agent not registering with tenant after installation
+  - Added cortex.conf deployment before running installer script
+
 ## [0.7.2] - 2025-12-17
 
 ### Changed

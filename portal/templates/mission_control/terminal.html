@@ -16,17 +16,6 @@
             <span class="terminal-range-info text-muted">No active range</span>
             {% endif %}
         </div>
-        <div class="terminal-header-right">
-            <div class="terminal-status" id="overall-status">
-                {% if range_ready %}
-                <span class="status-dot status-active"></span>
-                <span>Connected</span>
-                {% else %}
-                <span class="status-dot status-inactive"></span>
-                <span>Disconnected</span>
-                {% endif %}
-            </div>
-        </div>
     </div>
 
     {% if range_ready %}

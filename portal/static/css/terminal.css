@@ -35,35 +35,6 @@
     color: var(--xdr-text-muted);
 }
 
-.terminal-header-right {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.terminal-status {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.875rem;
-    color: var(--xdr-text-muted);
-}
-
-.terminal-status .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-}
-
-.terminal-status .status-dot.status-active {
-    background-color: var(--xdr-success);
-    box-shadow: 0 0 6px var(--xdr-success);
-}
-
-.terminal-status .status-dot.status-inactive {
-    background-color: var(--xdr-text-muted);
-}
-
 /* Terminal Container */
 .terminal-container {
     display: flex;
@@ -163,7 +134,7 @@
 /* Terminal Wrapper */
 .terminal-wrapper {
     flex: 1;
-    padding: 0.5rem;
+    padding: 1rem;
     background: #0d0d0d;
     overflow: hidden;
 }
@@ -178,7 +149,7 @@
 }
 
 .terminal-wrapper .xterm-screen {
-    padding: 0.25rem;
+    padding: 0.5rem;
 }
 
 /* Resizable Divider */

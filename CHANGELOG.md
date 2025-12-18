@@ -10,11 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.4] - 2025-12-17
 
 ### Added
-- ElastiCache Redis module for Django Channels (`terraform/modules/portal/redis/`)
+- ElastiCache Redis module for Django Channels
+- Portal autoscaling: launch template, ASG, scaling policies, CloudWatch alarms
 - Portal autoscaling implementation checklist (#295)
 
 ### Changed
 - Django Channels uses Redis when `REDIS_HOST` env var set, falls back to InMemory for local dev
+- EC2 module supports single instance or ASG mode via `enable_autoscaling` flag
 
 
 ## [0.7.3] - 2025-12-17

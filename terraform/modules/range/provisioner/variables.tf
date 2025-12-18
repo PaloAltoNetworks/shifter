@@ -28,6 +28,11 @@ variable "portal_subnet_ids" {
   type        = list(string)
 }
 
+variable "portal_vpc_cidr" {
+  description = "Portal VPC CIDR block (for SSH access from browser terminal)"
+  type        = string
+}
+
 # Range VPC (where resources are created)
 variable "range_vpc_id" {
   description = "VPC ID where range resources will be created"

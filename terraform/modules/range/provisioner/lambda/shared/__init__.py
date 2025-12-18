@@ -9,10 +9,12 @@ from .db import (
     validate_range_id,
 )
 from .env import get_env, validate_env_vars
+from .security_groups import ensure_ssh_from_portal
 from .tagging import get_resource_tags, get_resource_tags_dict
 
 __all__ = [
     "ALLOWED_UPDATE_FIELDS",
+    "ensure_ssh_from_portal",
     "get_db_connection",
     "get_env",
     "get_range",

@@ -192,3 +192,61 @@ variable "provisioner_alarm_email" {
   type        = string
   default     = ""
 }
+
+# ------------------------------------------------------------------------------
+# Autoscaling
+# ------------------------------------------------------------------------------
+
+variable "enable_autoscaling" {
+  description = "Enable Auto Scaling Group instead of single EC2 instance"
+  type        = bool
+}
+
+variable "asg_min_size" {
+  description = "Minimum number of instances in the ASG"
+  type        = number
+}
+
+variable "asg_max_size" {
+  description = "Maximum number of instances in the ASG"
+  type        = number
+}
+
+variable "asg_desired_capacity" {
+  description = "Desired number of instances in the ASG"
+  type        = number
+}
+
+variable "scale_up_threshold" {
+  description = "CPU percentage threshold to trigger scale up"
+  type        = number
+}
+
+variable "scale_down_threshold" {
+  description = "CPU percentage threshold to trigger scale down"
+  type        = number
+}
+
+# ------------------------------------------------------------------------------
+# Redis
+# ------------------------------------------------------------------------------
+
+variable "redis_node_type" {
+  description = "ElastiCache Redis node type"
+  type        = string
+}
+
+variable "redis_engine_version" {
+  description = "ElastiCache Redis engine version"
+  type        = string
+}
+
+# ------------------------------------------------------------------------------
+# CI Testing
+# ------------------------------------------------------------------------------
+
+variable "django_secret_key_ci" {
+  description = "Django secret key for CI testing (extracted by quality.yml workflow, not used by Terraform)"
+  type        = string
+  default     = ""
+}

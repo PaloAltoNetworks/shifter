@@ -32,3 +32,8 @@ variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
 }
+
+variable "enable_stickiness" {
+  description = "Enable session stickiness for WebSocket affinity (required for ASG)"
+  type        = bool
+}

@@ -19,6 +19,7 @@ locals {
     ENVIRONMENT                 = var.environment
     RANGE_VPC_ID                = var.range_vpc_id
     RANGE_INSTANCE_PROFILE_NAME = aws_iam_instance_profile.range_instance.name
+    PORTAL_VPC_CIDR             = var.portal_vpc_cidr
   }
 
   # Lambda source directories

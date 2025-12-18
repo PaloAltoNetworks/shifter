@@ -284,6 +284,7 @@ module "provisioner" {
   # Portal VPC (where Lambda runs)
   portal_vpc_id     = module.vpc.vpc_id
   portal_subnet_ids = module.vpc.private_subnet_ids
+  portal_vpc_cidr   = var.vpc_cidr
 
   # Range VPC (where resources are created)
   range_vpc_id         = data.terraform_remote_state.range.outputs.vpc_id

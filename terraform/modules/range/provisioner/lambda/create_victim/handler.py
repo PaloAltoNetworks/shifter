@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from shared import (
+    ensure_ssh_from_portal,
     get_agent_config,
     get_db_connection,
     get_env,
@@ -404,6 +405,11 @@ def handler(event: dict, context) -> dict:
 
         # Generate user data script with presigned URL
         user_data = get_user_data_script(presigned_url, agent_s3_key, public_key, range_id)
+
+        # Ensure SSH rule from Portal VPC exists (fixes Terraform drift issue)
+        portal_vpc_cidr = get_env("PORTAL_VPC_CIDR", "")
+        if portal_vpc_cidr:
+            ensure_ssh_from_portal(victim_security_group_id, portal_vpc_cidr)
 
         # Create instance
         ec2 = boto3.client("ec2")

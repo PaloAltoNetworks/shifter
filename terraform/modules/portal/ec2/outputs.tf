@@ -1,11 +1,11 @@
 output "instance_id" {
-  description = "EC2 instance ID"
-  value       = aws_instance.this.id
+  description = "EC2 instance ID (empty string if ASG mode)"
+  value       = var.enable_autoscaling ? "" : aws_instance.this[0].id
 }
 
 output "private_ip" {
-  description = "Private IP address of the EC2 instance"
-  value       = aws_instance.this.private_ip
+  description = "Private IP address of the EC2 instance (empty string if ASG mode)"
+  value       = var.enable_autoscaling ? "" : aws_instance.this[0].private_ip
 }
 
 output "security_group_id" {
@@ -16,4 +16,19 @@ output "security_group_id" {
 output "iam_role_arn" {
   description = "IAM role ARN"
   value       = aws_iam_role.this.arn
+}
+
+output "asg_name" {
+  description = "Auto Scaling Group name (empty string if single instance mode)"
+  value       = var.enable_autoscaling ? aws_autoscaling_group.this[0].name : ""
+}
+
+output "asg_arn" {
+  description = "Auto Scaling Group ARN (empty string if single instance mode)"
+  value       = var.enable_autoscaling ? aws_autoscaling_group.this[0].arn : ""
+}
+
+output "launch_template_id" {
+  description = "Launch template ID (empty string if single instance mode)"
+  value       = var.enable_autoscaling ? aws_launch_template.this[0].id : ""
 }

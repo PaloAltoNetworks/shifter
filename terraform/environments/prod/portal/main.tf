@@ -207,6 +207,39 @@ resource "aws_secretsmanager_secret_version" "app" {
 }
 
 # ------------------------------------------------------------------------------
+# VPC Peering: Portal <-> Range
+# Enables SSH connectivity from Portal to Range instances for Terminal UI
+# ------------------------------------------------------------------------------
+
+resource "aws_vpc_peering_connection" "portal_to_range" {
+  vpc_id      = module.vpc.vpc_id
+  peer_vpc_id = data.terraform_remote_state.range.outputs.vpc_id
+  auto_accept = true # Same account, same region
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-to-range-peering"
+  })
+}
+
+# Route from Portal private subnets to Range VPC via peering
+resource "aws_route" "portal_to_range" {
+  route_table_id            = module.vpc.private_route_table_id
+  destination_cidr_block    = data.terraform_remote_state.range.outputs.vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.portal_to_range.id
+}
+
+# Route from Range private subnets to Portal VPC via peering
+resource "aws_route" "range_to_portal" {
+  route_table_id            = data.terraform_remote_state.range.outputs.private_route_table_id
+  destination_cidr_block    = module.vpc.vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.portal_to_range.id
+}
+
+# Note: SSH rules from Portal to Kali/Victim are defined in the range VPC module
+# (terraform/modules/range/vpc/main.tf) using the portal_vpc_cidr variable.
+# Do not duplicate them here.
+
+# ------------------------------------------------------------------------------
 # Provisioner (Step Functions + Lambda for range provisioning)
 # ------------------------------------------------------------------------------
 

@@ -255,18 +255,6 @@ variable "enable_log_aggregation" {
   type        = bool
 }
 
-variable "xdr_aws_account_id" {
-  description = "AWS account ID for XDR cross-account access (empty if not configured)"
-  type        = string
-  default     = ""
-}
-
-variable "xdr_external_id" {
-  description = "External ID for XDR cross-account role assumption"
-  type        = string
-  default     = ""
-}
-
 # ------------------------------------------------------------------------------
 # Phase 5: Additional Log Sources
 # ------------------------------------------------------------------------------

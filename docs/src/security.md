@@ -145,7 +145,17 @@ WAF is enabled by default on all ALBs with AWS managed rules:
 - Known bad inputs (Log4Shell, etc.)
 - Common rule set (OWASP Top 10)
 
+### XDR CloudTrail Integration
+
+XDR ingests CloudTrail audit logs via a CloudFormation template from the Cortex console. This is separate from the application logs above.
+
+| Component | Source | Purpose |
+|-----------|--------|---------|
+| CloudTrail | XDR CloudFormation | API audit logs (who did what in AWS) |
+| App logs | Terraform log-aggregation | Internal debugging (what happened in Shifter) |
+
+CloudFormation templates are in `cloudformation/{env}/` (environment-specific).
+
 ## Not Yet Implemented
 
 - Cloudflare proxy with IP allowlisting
-- XDR/XSIAM cross-account access (Phase 6)

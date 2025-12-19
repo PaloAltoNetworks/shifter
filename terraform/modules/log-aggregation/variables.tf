@@ -51,14 +51,14 @@ variable "source_log_group_names" {
   default     = []
 }
 
-variable "xdr_aws_account_id" {
-  description = "AWS account ID for XDR cross-account access (empty if not configured)"
-  type        = string
-  default     = ""
+variable "enable_alarms" {
+  description = "Enable CloudWatch alarms for log aggregation"
+  type        = bool
+  default     = false
 }
 
-variable "xdr_external_id" {
-  description = "External ID for XDR cross-account role assumption"
+variable "alarm_email" {
+  description = "Email address for alarm notifications (leave empty to skip)"
   type        = string
   default     = ""
 }

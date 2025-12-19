@@ -6,7 +6,6 @@ Output: { "range_id": "uuid", "kali_instance_id": "i-xxx", "kali_ip": "10.1.X.Y"
 """
 
 import base64
-import logging
 import os
 import sys
 
@@ -20,6 +19,7 @@ from shared import (
     ensure_ssh_from_portal,
     get_db_connection,
     get_env,
+    get_logger,
     get_range,
     get_resource_tags,
     get_resource_tags_dict,
@@ -27,8 +27,7 @@ from shared import (
     validate_env_vars,
 )
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Required environment variables for this Lambda
 REQUIRED_ENV_VARS = [

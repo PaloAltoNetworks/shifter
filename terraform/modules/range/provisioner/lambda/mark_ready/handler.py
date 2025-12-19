@@ -10,7 +10,6 @@ Called at the end of successful provisioning to:
 3. Set chat_url for MCP access
 """
 
-import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -20,13 +19,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from shared import (
     get_db_connection,
     get_env,
+    get_logger,
     get_range,
     update_range,
     validate_env_vars,
 )
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Required environment variables for this Lambda
 REQUIRED_ENV_VARS = [

@@ -14,6 +14,11 @@ variable "aws_region" {
   type        = string
 }
 
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+}
+
 variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)

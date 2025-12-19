@@ -8,6 +8,11 @@ variable "environment" {
   type        = string
 }
 
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string

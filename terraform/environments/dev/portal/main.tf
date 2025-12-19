@@ -135,6 +135,7 @@ module "cognito" {
   name_prefix           = local.name_prefix
   environment           = var.environment
   aws_region            = var.aws_region
+  log_retention_days    = var.log_retention_days
   cognito_domain_prefix = var.cognito_domain_prefix
   callback_urls         = ["https://${var.domain_name}/oidc/callback/"]
   logout_urls           = ["https://${var.domain_name}/"]
@@ -183,6 +184,7 @@ module "ec2" {
   redis_endpoint       = var.enable_autoscaling ? module.redis.redis_endpoint : ""
   scale_up_threshold   = var.scale_up_threshold
   scale_down_threshold = var.scale_down_threshold
+  log_retention_days   = var.log_retention_days
 
   tags = var.tags
 }
@@ -278,9 +280,10 @@ resource "aws_route" "range_to_portal" {
 module "provisioner" {
   source = "../../../modules/range/provisioner"
 
-  name_prefix = local.name_prefix
-  environment = var.environment
-  tags        = var.tags
+  name_prefix        = local.name_prefix
+  environment        = var.environment
+  log_retention_days = var.log_retention_days
+  tags               = var.tags
 
   # Portal VPC (where Lambda runs)
   portal_vpc_id     = module.vpc.vpc_id

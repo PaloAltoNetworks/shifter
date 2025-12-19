@@ -4,10 +4,25 @@
 # - EC2 instance with Docker (Amazon Linux 2023)
 # - Security group (app port from ALB only)
 # - IAM role and instance profile (ECR pull, Secrets Manager read, SSM)
+# - CloudWatch log group for container logs
 
 locals {
   common_tags = merge(var.tags, {
     Module = "ec2"
+  })
+  log_group_name = "/portal/${var.name_prefix}"
+}
+
+# ------------------------------------------------------------------------------
+# CloudWatch Log Group for Portal Container
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "portal" {
+  name              = local.log_group_name
+  retention_in_days = var.log_retention_days
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-portal-logs"
   })
 }
 
@@ -74,6 +89,25 @@ resource "aws_iam_role_policy" "secrets_read" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = var.secret_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "cloudwatch_logs" {
+  name = "cloudwatch-logs"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "${aws_cloudwatch_log_group.portal.arn}:*"
       }
     ]
   })
@@ -243,6 +277,7 @@ resource "aws_launch_template" "this" {
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region         = var.aws_region
     ecr_repository_url = var.ecr_repository_url
+    log_group_name     = local.log_group_name
   }))
 
   block_device_mappings {
@@ -420,6 +455,7 @@ resource "aws_instance" "this" {
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region         = var.aws_region
     ecr_repository_url = var.ecr_repository_url
+    log_group_name     = local.log_group_name
   }))
 
   root_block_device {

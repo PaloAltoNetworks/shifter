@@ -8,7 +8,11 @@ variable "name_prefix" {
 variable "environment" {
   description = "Environment name (prod, dev, etc.)"
   type        = string
-  default     = "prod"
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
 }
 
 variable "tags" {

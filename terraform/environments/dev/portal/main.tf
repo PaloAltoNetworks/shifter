@@ -335,7 +335,8 @@ module "provisioner" {
 }
 
 # ------------------------------------------------------------------------------
-# Log Aggregation (S3, SQS, Firehose for XDR/XSIAM)
+# Log Aggregation (S3, SQS, Firehose for internal observability)
+# Note: XDR CloudTrail integration is managed via CloudFormation, not Terraform
 # ------------------------------------------------------------------------------
 
 module "log_aggregation" {
@@ -360,10 +361,6 @@ module "log_aggregation" {
     var.enable_vpc_flow_logs ? [module.vpc.flow_logs_log_group_name] : [],
     var.enable_rds_log_exports ? module.rds.log_group_names : [],
   ) : []
-
-  # XDR cross-account access (configured in Phase 6)
-  xdr_aws_account_id = var.xdr_aws_account_id
-  xdr_external_id    = var.xdr_external_id
 
   tags = var.tags
 }

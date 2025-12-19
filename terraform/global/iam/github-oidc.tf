@@ -259,6 +259,10 @@ resource "aws_iam_policy" "ec2_instances" {
 # checkov:skip=CKV_AWS_287:CI/CD requires broad ELB/ACM permissions for infrastructure management. Risk accepted, see #44
 # NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
 # and size of inline policies outweigh need for pure least privilege. Risk accepted.
+# checkov:skip=CKV_AWS_355:CI/CD requires WAFv2 permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires WAFv2 permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires WAFv2 permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires WAFv2 permissions. Risk accepted, see #44
 resource "aws_iam_policy" "elb_acm" {
   name = "shifter-${var.environment}-elb-acm"
 
@@ -275,6 +279,27 @@ resource "aws_iam_policy" "elb_acm" {
         Sid      = "ACM"
         Effect   = "Allow"
         Action   = ["acm:*"]
+        Resource = "*"
+      },
+      {
+        Sid    = "WAFv2"
+        Effect = "Allow"
+        Action = [
+          "wafv2:CreateWebACL",
+          "wafv2:DeleteWebACL",
+          "wafv2:GetWebACL",
+          "wafv2:UpdateWebACL",
+          "wafv2:ListWebACLs",
+          "wafv2:AssociateWebACL",
+          "wafv2:DisassociateWebACL",
+          "wafv2:GetWebACLForResource",
+          "wafv2:ListResourcesForWebACL",
+          "wafv2:ListTagsForResource",
+          "wafv2:TagResource",
+          "wafv2:UntagResource",
+          "wafv2:DescribeManagedRuleGroup",
+          "wafv2:ListAvailableManagedRuleGroups"
+        ]
         Resource = "*"
       }
     ]
@@ -703,42 +728,6 @@ resource "aws_iam_policy" "network_firewall" {
   })
 }
 
-# WAFv2
-# checkov:skip=CKV_AWS_355:CI/CD requires WAFv2 permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_290:CI/CD requires WAFv2 permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_289:CI/CD requires WAFv2 permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_287:CI/CD requires WAFv2 permissions. Risk accepted, see #44
-resource "aws_iam_policy" "wafv2" {
-  name = "shifter-${var.environment}-wafv2"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "WAFv2"
-        Effect = "Allow"
-        Action = [
-          "wafv2:CreateWebACL",
-          "wafv2:DeleteWebACL",
-          "wafv2:GetWebACL",
-          "wafv2:UpdateWebACL",
-          "wafv2:ListWebACLs",
-          "wafv2:AssociateWebACL",
-          "wafv2:DisassociateWebACL",
-          "wafv2:GetWebACLForResource",
-          "wafv2:ListResourcesForWebACL",
-          "wafv2:ListTagsForResource",
-          "wafv2:TagResource",
-          "wafv2:UntagResource",
-          "wafv2:DescribeManagedRuleGroup",
-          "wafv2:ListAvailableManagedRuleGroups"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
 # ------------------------------------------------------------------------------
 # Policy Attachments
 # ------------------------------------------------------------------------------
@@ -791,11 +780,6 @@ resource "aws_iam_role_policy_attachment" "ssm_cognito" {
 resource "aws_iam_role_policy_attachment" "network_firewall" {
   role       = aws_iam_role.github_actions.name
   policy_arn = aws_iam_policy.network_firewall.arn
-}
-
-resource "aws_iam_role_policy_attachment" "wafv2" {
-  role       = aws_iam_role.github_actions.name
-  policy_arn = aws_iam_policy.wafv2.arn
 }
 
 # ------------------------------------------------------------------------------

@@ -71,3 +71,12 @@ output "s3_endpoint_id" {
   description = "ID of the S3 Gateway Endpoint"
   value       = aws_vpc_endpoint.s3.id
 }
+
+# ------------------------------------------------------------------------------
+# VPC Flow Logs
+# ------------------------------------------------------------------------------
+
+output "flow_logs_log_group_name" {
+  description = "Name of the CloudWatch log group for VPC flow logs"
+  value       = var.enable_flow_logs ? aws_cloudwatch_log_group.flow_logs[0].name : ""
+}

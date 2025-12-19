@@ -33,6 +33,18 @@ variable "enable_sqs_notifications" {
   default     = true
 }
 
+variable "enable_alb_access_logs" {
+  description = "Enable ALB access logs (adds bucket policy for ALB service)"
+  type        = bool
+  default     = false
+}
+
+variable "enable_waf_logging" {
+  description = "Enable WAF logging via dedicated Firehose stream"
+  type        = bool
+  default     = false
+}
+
 variable "source_log_group_names" {
   description = "List of CloudWatch log group names to subscribe to Firehose"
   type        = list(string)

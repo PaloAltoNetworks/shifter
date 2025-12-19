@@ -37,3 +37,9 @@ variable "enable_stickiness" {
   description = "Enable session stickiness for WebSocket affinity (required for ASG)"
   type        = bool
 }
+
+variable "enable_waf" {
+  description = "Enable AWS WAF Web ACL for the ALB"
+  type        = bool
+  default     = true
+}

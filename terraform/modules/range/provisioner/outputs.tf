@@ -79,3 +79,18 @@ output "alerts_sns_topic_arn" {
   description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"
   value       = var.enable_alarms ? aws_sns_topic.alerts[0].arn : null
 }
+
+# Log Groups (for log aggregation)
+output "log_group_names" {
+  description = "Names of all CloudWatch log groups"
+  value = [
+    aws_cloudwatch_log_group.create_subnet.name,
+    aws_cloudwatch_log_group.create_victim.name,
+    aws_cloudwatch_log_group.create_kali.name,
+    aws_cloudwatch_log_group.mark_ready.name,
+    aws_cloudwatch_log_group.verify_agent.name,
+    aws_cloudwatch_log_group.cleanup.name,
+    aws_cloudwatch_log_group.find_stale_ranges.name,
+    aws_cloudwatch_log_group.step_functions.name,
+  ]
+}

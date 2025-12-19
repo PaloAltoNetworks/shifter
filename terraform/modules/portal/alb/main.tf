@@ -94,7 +94,6 @@ resource "aws_acm_certificate_validation" "this" {
 # ------------------------------------------------------------------------------
 
 # checkov:skip=CKV_AWS_150:Deletion protection deferred - see #214
-# checkov:skip=CKV_AWS_91:Access logs deferred - see #57, #58
 resource "aws_lb" "this" {
   name                       = "${var.name_prefix}-alb"
   internal                   = false
@@ -102,6 +101,12 @@ resource "aws_lb" "this" {
   security_groups            = [aws_security_group.this.id]
   subnets                    = var.public_subnet_ids
   drop_invalid_header_fields = true
+
+  access_logs {
+    bucket  = var.logs_bucket_name
+    prefix  = "alb/${var.name_prefix}"
+    enabled = var.enable_access_logs && var.logs_bucket_name != ""
+  }
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-alb"
@@ -331,4 +336,29 @@ resource "aws_wafv2_web_acl_association" "this" {
 
   resource_arn = aws_lb.this.arn
   web_acl_arn  = aws_wafv2_web_acl.this[0].arn
+}
+
+# ------------------------------------------------------------------------------
+# WAF Logging Configuration
+# ------------------------------------------------------------------------------
+
+resource "aws_wafv2_web_acl_logging_configuration" "this" {
+  count = var.enable_waf && var.enable_waf_logging && var.waf_log_destination_arn != "" ? 1 : 0
+
+  log_destination_configs = [var.waf_log_destination_arn]
+  resource_arn            = aws_wafv2_web_acl.this[0].arn
+
+  logging_filter {
+    default_behavior = "KEEP"
+
+    filter {
+      behavior = "KEEP"
+      condition {
+        action_condition {
+          action = "BLOCK"
+        }
+      }
+      requirement = "MEETS_ANY"
+    }
+  }
 }

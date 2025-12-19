@@ -34,3 +34,8 @@ output "xdr_role_arn" {
   description = "ARN of the XDR cross-account access role"
   value       = var.enable_log_aggregation && var.xdr_aws_account_id != "" ? aws_iam_role.xdr_access[0].arn : ""
 }
+
+output "waf_firehose_arn" {
+  description = "ARN of the WAF Kinesis Firehose delivery stream"
+  value       = var.enable_log_aggregation && var.enable_waf_logging ? aws_kinesis_firehose_delivery_stream.waf[0].arn : ""
+}

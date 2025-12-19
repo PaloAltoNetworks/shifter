@@ -136,3 +136,47 @@ resource "aws_kinesis_firehose_delivery_stream" "logs" {
     Name = "${var.name_prefix}-logs-${var.environment}"
   })
 }
+
+# ------------------------------------------------------------------------------
+# WAF Firehose Delivery Stream
+# WAF requires Firehose name to start with "aws-waf-logs-"
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_stream" "firehose_waf_delivery" {
+  count = var.enable_log_aggregation && var.enable_waf_logging ? 1 : 0
+
+  name           = "WAFDelivery"
+  log_group_name = aws_cloudwatch_log_group.firehose_errors[0].name
+}
+
+resource "aws_kinesis_firehose_delivery_stream" "waf" {
+  count = var.enable_log_aggregation && var.enable_waf_logging ? 1 : 0
+
+  # WAF requires this specific prefix
+  name        = "aws-waf-logs-${var.name_prefix}-${var.environment}"
+  destination = "extended_s3"
+
+  extended_s3_configuration {
+    role_arn   = aws_iam_role.firehose[0].arn
+    bucket_arn = aws_s3_bucket.logs[0].arn
+
+    # Partition WAF logs by date
+    prefix              = "waf/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
+    error_output_prefix = "waf-errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/!{firehose:error-output-type}/"
+
+    buffering_size     = 5   # MB
+    buffering_interval = 300 # seconds
+
+    compression_format = "GZIP"
+
+    cloudwatch_logging_options {
+      enabled         = true
+      log_group_name  = aws_cloudwatch_log_group.firehose_errors[0].name
+      log_stream_name = aws_cloudwatch_log_stream.firehose_waf_delivery[0].name
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "aws-waf-logs-${var.name_prefix}-${var.environment}"
+  })
+}

@@ -50,3 +50,15 @@ output "db_resource_id" {
   description = "Resource ID of the RDS instance (for IAM DB authentication)"
   value       = aws_db_instance.this.resource_id
 }
+
+# ------------------------------------------------------------------------------
+# Log Exports
+# ------------------------------------------------------------------------------
+
+output "log_group_names" {
+  description = "Names of the CloudWatch log groups for RDS logs"
+  value = var.enable_log_exports ? [
+    aws_cloudwatch_log_group.rds_postgresql[0].name,
+    aws_cloudwatch_log_group.rds_upgrade[0].name,
+  ] : []
+}

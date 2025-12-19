@@ -24,3 +24,12 @@ variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
 }
+
+# ------------------------------------------------------------------------------
+# Phase 5: Additional Log Sources
+# ------------------------------------------------------------------------------
+
+variable "enable_flow_logs" {
+  description = "Enable VPC flow logs"
+  type        = bool
+}

@@ -7,18 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2025-12-19
+
 ### Added
-- Phase 5 observability: ALB access logs, VPC flow logs, RDS log exports, WAF logging
-- All log sources route to centralized S3 via Firehose (when log_aggregation enabled)
-- VPC flow logs for both Portal and Range VPCs
+- ALB access logs, VPC flow logs, RDS log exports, WAF logging
+- XDR CloudTrail integration via CloudFormation (dev and prod)
+- CloudWatch alarms for log aggregation (Firehose delivery lag, SQS DLQ)
 
 ### Changed
 - Replaced Checkov skip comments with actual implementations (CKV_AWS_91, CKV2_AWS_11, CKV_AWS_129)
-- S3 bucket policy uses aws_iam_policy_document for cleaner conditional statements
-
-## [0.7.6] - 2025-12-18
-
-
+- Removed unused XDR IAM from Terraform (managed by CloudFormation instead)
 
 ## [0.7.5] - 2025-12-18
 

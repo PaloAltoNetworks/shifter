@@ -15,7 +15,6 @@ Uses SSM RunCommand to check /var/log/user-data.log for installation status.
 Returns verification status for Step Functions decision logic.
 """
 
-import logging
 import os
 import sys
 import time
@@ -27,12 +26,12 @@ from botocore.exceptions import ClientError
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from shared import (
     get_db_connection,
+    get_logger,
     get_range,
     validate_env_vars,
 )
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Required environment variables for this Lambda
 REQUIRED_ENV_VARS = [

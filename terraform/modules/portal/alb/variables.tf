@@ -43,3 +43,34 @@ variable "enable_waf" {
   type        = bool
   default     = true
 }
+
+# ------------------------------------------------------------------------------
+# Access Logs
+# ------------------------------------------------------------------------------
+
+variable "enable_access_logs" {
+  description = "Enable ALB access logs to S3"
+  type        = bool
+}
+
+variable "logs_bucket_name" {
+  description = "S3 bucket name for ALB access logs (required when enable_access_logs is true)"
+  type        = string
+  default     = ""
+}
+
+# ------------------------------------------------------------------------------
+# WAF Logging
+# ------------------------------------------------------------------------------
+
+variable "enable_waf_logging" {
+  description = "Enable WAF logging to Firehose"
+  type        = bool
+  default     = false
+}
+
+variable "waf_log_destination_arn" {
+  description = "Firehose ARN for WAF logs (must start with aws-waf-logs-)"
+  type        = string
+  default     = ""
+}

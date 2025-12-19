@@ -6,8 +6,9 @@
 # General
 # ------------------------------------------------------------------------------
 
-environment = ""
-aws_region  = ""
+environment        = ""
+aws_region         = ""
+log_retention_days = 90
 
 tags = {
   Project     = ""

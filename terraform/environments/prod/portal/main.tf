@@ -319,3 +319,30 @@ module "provisioner" {
   enable_alarms = var.enable_provisioner_alarms
   alarm_email   = var.provisioner_alarm_email
 }
+
+# ------------------------------------------------------------------------------
+# Log Aggregation (S3, SQS, Firehose for XDR/XSIAM)
+# ------------------------------------------------------------------------------
+
+module "log_aggregation" {
+  source = "../../../modules/log-aggregation"
+
+  name_prefix            = local.name_prefix
+  environment            = var.environment
+  aws_region             = var.aws_region
+  log_retention_days     = var.log_retention_days
+  enable_log_aggregation = var.enable_log_aggregation
+
+  # Log group sources (for CloudWatch subscription filters)
+  source_log_group_names = var.enable_log_aggregation ? concat(
+    [module.ec2.log_group_name],
+    [module.cognito.log_group_name],
+    module.provisioner.log_group_names,
+  ) : []
+
+  # XDR cross-account access (configured in Phase 6)
+  xdr_aws_account_id = var.xdr_aws_account_id
+  xdr_external_id    = var.xdr_external_id
+
+  tags = var.tags
+}

@@ -32,3 +32,8 @@ output "launch_template_id" {
   description = "Launch template ID (empty string if single instance mode)"
   value       = var.enable_autoscaling ? aws_launch_template.this[0].id : ""
 }
+
+output "log_group_name" {
+  description = "Name of the CloudWatch log group for portal containers"
+  value       = aws_cloudwatch_log_group.portal.name
+}

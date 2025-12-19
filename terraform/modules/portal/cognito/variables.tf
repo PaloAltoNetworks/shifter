@@ -3,6 +3,11 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "environment" {
+  description = "Environment name (e.g., prod, dev) - used for logging"
+  type        = string
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string

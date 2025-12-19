@@ -13,7 +13,6 @@ User-initiated destroy is async: Portal sets status to 'destroyed' immediately,
 then triggers this Lambda to clean up resources in the background.
 """
 
-import logging
 import os
 import sys
 
@@ -22,10 +21,15 @@ from botocore.exceptions import ClientError
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared import get_db_connection, get_range, update_range, validate_env_vars
+from shared import (
+    get_db_connection,
+    get_logger,
+    get_range,
+    update_range,
+    validate_env_vars,
+)
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Required environment variables for this Lambda
 REQUIRED_ENV_VARS = [

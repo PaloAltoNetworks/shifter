@@ -348,14 +348,15 @@ resource "aws_wafv2_web_acl_logging_configuration" "this" {
   log_destination_configs = [var.waf_log_destination_arn]
   resource_arn            = aws_wafv2_web_acl.this[0].arn
 
+  # Only log requests that reach the app (ALLOW), drop blocked request logs (noise)
   logging_filter {
-    default_behavior = "KEEP"
+    default_behavior = "DROP"
 
     filter {
       behavior = "KEEP"
       condition {
         action_condition {
-          action = "BLOCK"
+          action = "ALLOW"
         }
       }
       requirement = "MEETS_ANY"

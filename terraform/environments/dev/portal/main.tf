@@ -133,6 +133,7 @@ module "cognito" {
   source = "../../../modules/portal/cognito"
 
   name_prefix           = local.name_prefix
+  environment           = var.environment
   aws_region            = var.aws_region
   cognito_domain_prefix = var.cognito_domain_prefix
   callback_urls         = ["https://${var.domain_name}/oidc/callback/"]

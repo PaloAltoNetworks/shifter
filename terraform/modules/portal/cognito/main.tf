@@ -140,6 +140,7 @@ resource "aws_lambda_function" "pre_signup" {
     variables = {
       ALLOWED_DOMAINS = join(",", var.allowed_email_domains)
       ALLOWED_EMAILS  = join(",", var.allowed_emails)
+      ENVIRONMENT     = var.environment
     }
   }
 

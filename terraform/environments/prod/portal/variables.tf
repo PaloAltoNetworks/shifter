@@ -268,6 +268,30 @@ variable "xdr_external_id" {
 }
 
 # ------------------------------------------------------------------------------
+# Phase 5: Additional Log Sources
+# ------------------------------------------------------------------------------
+
+variable "enable_alb_access_logs" {
+  description = "Enable ALB access logs to S3"
+  type        = bool
+}
+
+variable "enable_vpc_flow_logs" {
+  description = "Enable VPC flow logs to CloudWatch"
+  type        = bool
+}
+
+variable "enable_rds_log_exports" {
+  description = "Enable RDS CloudWatch log exports"
+  type        = bool
+}
+
+variable "enable_waf_logging" {
+  description = "Enable WAF logging to Firehose"
+  type        = bool
+}
+
+# ------------------------------------------------------------------------------
 # CI Testing
 # ------------------------------------------------------------------------------
 

@@ -98,7 +98,6 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
 # checkov:skip=CKV_AWS_157:IAM auth enabled (line 137)
 # checkov:skip=CKV_AWS_118:Enhanced monitoring deferred - see #215
 # checkov:skip=CKV_AWS_293:CA certificate deferred - see #216
-# checkov:skip=CKV_AWS_129:Log exports deferred - see #217
 resource "aws_db_instance" "this" {
   identifier = "${var.name_prefix}-db"
 
@@ -142,8 +141,45 @@ resource "aws_db_instance" "this" {
   # IAM Database Authentication (for Lambda provisioner)
   iam_database_authentication_enabled = true
 
+  # CloudWatch Log Exports
+  enabled_cloudwatch_logs_exports = var.enable_log_exports ? ["postgresql", "upgrade"] : []
+
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-db"
+    Module = "rds"
+  })
+
+  depends_on = [
+    aws_cloudwatch_log_group.rds_postgresql,
+    aws_cloudwatch_log_group.rds_upgrade,
+  ]
+}
+
+# ------------------------------------------------------------------------------
+# CloudWatch Log Groups for RDS
+# RDS auto-creates these, but we define them for retention control
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "rds_postgresql" {
+  count = var.enable_log_exports ? 1 : 0
+
+  name              = "/aws/rds/instance/${var.name_prefix}-db/postgresql"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-rds-postgresql-logs"
+    Module = "rds"
+  })
+}
+
+resource "aws_cloudwatch_log_group" "rds_upgrade" {
+  count = var.enable_log_exports ? 1 : 0
+
+  name              = "/aws/rds/instance/${var.name_prefix}-db/upgrade"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-rds-upgrade-logs"
     Module = "rds"
   })
 }

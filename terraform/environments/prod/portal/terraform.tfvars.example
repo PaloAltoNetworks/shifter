@@ -67,3 +67,12 @@ user_storage_bucket = ""
 # ------------------------------------------------------------------------------
 
 enable_log_aggregation = false
+
+# ------------------------------------------------------------------------------
+# Phase 5: Additional Log Sources
+# ------------------------------------------------------------------------------
+
+enable_alb_access_logs = true
+enable_vpc_flow_logs   = true
+enable_rds_log_exports = true
+enable_waf_logging     = true

@@ -1,0 +1,166 @@
+#!/bin/bash
+set -euo pipefail
+
+# Log output
+exec > >(tee /var/log/user-data.log) 2>&1
+echo "Starting victim instance setup..."
+
+# Set hostname for XDR console visibility
+echo "Setting hostname to {{ hostname }}..."
+hostnamectl set-hostname {{ hostname }}
+echo "127.0.0.1 {{ hostname }}" >> /etc/hosts
+echo "Hostname set"
+
+# Configure SSH access for MCP server
+echo "Configuring SSH access..."
+mkdir -p /home/ubuntu/.ssh
+chmod 700 /home/ubuntu/.ssh
+echo "{{ public_key }}" >> /home/ubuntu/.ssh/authorized_keys
+chmod 600 /home/ubuntu/.ssh/authorized_keys
+chown -R ubuntu:ubuntu /home/ubuntu/.ssh
+echo "SSH access configured"
+
+{% if presigned_url %}
+# Download agent installer using presigned URL (no AWS CLI needed)
+echo "Downloading XDR agent installer..."
+INSTALLER_KEY="{{ agent_s3_key }}"
+INSTALLER_FILE="/tmp/agent-installer"
+curl -sSf -o "$INSTALLER_FILE" '{{ presigned_url }}'
+
+# Helper to deploy cortex.conf before running installer
+deploy_cortex_conf() {
+    local extract_dir="$1"
+    local conf_file=""
+
+    # Find cortex.conf in extracted directory
+    conf_file=$(find "$extract_dir" -name "cortex.conf" -type f | head -1)
+
+    if [ -n "$conf_file" ]; then
+        echo "Found cortex.conf: $conf_file"
+        mkdir -p /etc/panw
+        cp "$conf_file" /etc/panw/cortex.conf
+        chmod 644 /etc/panw/cortex.conf
+        echo "Deployed cortex.conf to /etc/panw/"
+        return 0
+    fi
+
+    echo "WARNING: No cortex.conf found in archive"
+    return 1
+}
+
+# Helper to find and run any .sh file in extracted directory
+run_extracted_installer() {
+    local extract_dir="$1"
+    local script=""
+
+    # IMPORTANT: Deploy cortex.conf BEFORE running installer (required by Cortex XDR)
+    deploy_cortex_conf "$extract_dir"
+
+    # Find first .sh file (check root first, then subdirs)
+    script=$(find "$extract_dir" -maxdepth 1 -name "*.sh" -type f | head -1)
+    if [ -z "$script" ]; then
+        script=$(find "$extract_dir" -maxdepth 2 -name "*.sh" -type f | head -1)
+    fi
+
+    if [ -n "$script" ]; then
+        echo "Found installer script: $script"
+        chmod +x "$script"
+        "$script"
+        return 0
+    fi
+
+    echo "ERROR: No .sh installer found in archive"
+    echo "Contents:"
+    find "$extract_dir" -type f
+    return 1
+}
+
+install_agent() {
+    local file="$1"
+    local filename=$(basename "$INSTALLER_KEY")
+
+    # First, try to detect by file extension
+    case "$filename" in
+        *.sh)
+            echo "Installing via shell script..."
+            chmod +x "$file"
+            "$file"
+            return
+            ;;
+        *.deb)
+            echo "Installing via dpkg..."
+            dpkg -i "$file" || apt-get install -f -y
+            return
+            ;;
+        *.rpm)
+            echo "Installing via rpm..."
+            rpm -i "$file" || yum install -y "$file"
+            return
+            ;;
+        *.tar.gz|*.tgz)
+            echo "Extracting tarball..."
+            mkdir -p /tmp/agent-extract
+            tar xzf "$file" -C /tmp/agent-extract
+            run_extracted_installer /tmp/agent-extract
+            return
+            ;;
+        *.zip)
+            echo "Extracting zip archive..."
+            mkdir -p /tmp/agent-extract
+            unzip -o "$file" -d /tmp/agent-extract
+            run_extracted_installer /tmp/agent-extract
+            return
+            ;;
+    esac
+
+    # Fall back to MIME type detection
+    local mime_type=$(file -b --mime-type "$file")
+    echo "Detected MIME type: $mime_type"
+
+    case "$mime_type" in
+        application/x-debian-package|application/vnd.debian.binary-package)
+            echo "Installing via dpkg..."
+            dpkg -i "$file" || apt-get install -f -y
+            ;;
+        application/x-rpm)
+            echo "Installing via rpm..."
+            rpm -i "$file" || yum install -y "$file"
+            ;;
+        text/x-shellscript|application/x-shellscript|application/x-sh)
+            echo "Installing via shell script..."
+            chmod +x "$file"
+            "$file"
+            ;;
+        application/gzip|application/x-gzip)
+            echo "Extracting gzip archive..."
+            mkdir -p /tmp/agent-extract
+            tar xzf "$file" -C /tmp/agent-extract
+            run_extracted_installer /tmp/agent-extract
+            ;;
+        application/zip)
+            echo "Extracting zip archive..."
+            mkdir -p /tmp/agent-extract
+            unzip -o "$file" -d /tmp/agent-extract
+            run_extracted_installer /tmp/agent-extract
+            ;;
+        application/x-executable|application/octet-stream)
+            echo "Installing via executable..."
+            chmod +x "$file"
+            "$file" --install || "$file"
+            ;;
+        *)
+            echo "Unknown installer type: $mime_type"
+            echo "Attempting to run as executable..."
+            chmod +x "$file"
+            "$file" --install || "$file"
+            ;;
+    esac
+}
+
+echo "Installing XDR agent..."
+install_agent "$INSTALLER_FILE"
+{% else %}
+echo "No agent installer configured - skipping XDR agent installation"
+{% endif %}
+
+echo "Victim instance setup complete"

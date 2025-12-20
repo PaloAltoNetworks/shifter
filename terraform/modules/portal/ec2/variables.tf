@@ -3,6 +3,11 @@ variable "aws_region" {
   type        = string
 }
 
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+}
+
 variable "name_prefix" {
   description = "Prefix for resource names"
   type        = string

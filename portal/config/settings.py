@@ -271,13 +271,25 @@ REST_FRAMEWORK = {
 }
 
 # ------------------------------------------------------------------------------
+# Environment
+# ------------------------------------------------------------------------------
+
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+
+# ------------------------------------------------------------------------------
 # Logging Configuration
 # ------------------------------------------------------------------------------
+# ECS-formatted logging for XDR/XSIAM ingestion
+# See config/logging.py for ECSFormatter implementation
+# Import must be inline to avoid E402 (settings.py is special)
 
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
+        "ecs": {
+            "()": "config.logging.ECSFormatter",
+        },
         "verbose": {
             "format": "{levelname} {asctime} {module} {message}",
             "style": "{",
@@ -286,7 +298,7 @@ LOGGING = {
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "verbose",
+            "formatter": "ecs",
         },
     },
     "root": {
@@ -301,7 +313,22 @@ LOGGING = {
         },
         "django.request": {
             "handlers": ["console"],
-            "level": "ERROR",
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "mission_control": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "config": {
+            "handlers": ["console"],
+            "level": "INFO",
             "propagate": False,
         },
     },

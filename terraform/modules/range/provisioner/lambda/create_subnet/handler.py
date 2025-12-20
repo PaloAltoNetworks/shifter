@@ -5,7 +5,6 @@ Input: { "range_id": "uuid" }
 Output: { "range_id": "uuid", "subnet_id": "subnet-xxx", "subnet_cidr": "10.1.X.0/24" }
 """
 
-import logging
 import os
 import sys
 
@@ -17,14 +16,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from shared import (
     get_db_connection,
     get_env,
+    get_logger,
     get_range,
     get_resource_tags,
     update_range,
     validate_env_vars,
 )
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Required environment variables for this Lambda
 REQUIRED_ENV_VARS = [

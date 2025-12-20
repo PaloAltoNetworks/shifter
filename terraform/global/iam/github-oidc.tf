@@ -157,7 +157,10 @@ resource "aws_iam_policy" "vpc_networking" {
           "ec2:*Tags",
           "ec2:Describe*",
           "ec2:CreateTags",
-          "ec2:DeleteTags"
+          "ec2:DeleteTags",
+          "ec2:CreateFlowLogs",
+          "ec2:DeleteFlowLogs",
+          "ec2:DescribeFlowLogs"
         ]
         Resource = "*"
       }

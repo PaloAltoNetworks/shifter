@@ -9,6 +9,15 @@ on:
       is_dev:
         required: true
         type: boolean
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+      AWS_ROLE_ARN_DEV:
+        required: true
+      TF_VARS_DEV_RANGE:
+        required: true
+      TF_VARS_PROD_RANGE:
+        required: true
 
 permissions:
   id-token: write

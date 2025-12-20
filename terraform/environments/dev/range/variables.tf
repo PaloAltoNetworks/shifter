@@ -33,3 +33,19 @@ variable "enable_flow_logs" {
   description = "Enable VPC flow logs"
   type        = bool
 }
+
+# ------------------------------------------------------------------------------
+# Pulumi Provisioner
+# ------------------------------------------------------------------------------
+
+variable "enable_pulumi_provisioner" {
+  description = "Enable Pulumi-based range provisioning infrastructure"
+  type        = bool
+  default     = false
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+  default     = 30
+}

@@ -195,3 +195,27 @@ output "redis_port" {
   description = "Redis port"
   value       = module.redis.redis_port
 }
+
+# ------------------------------------------------------------------------------
+# Pulumi Provisioner (v2)
+# ------------------------------------------------------------------------------
+
+output "pulumi_provision_state_machine_arn" {
+  description = "ARN of the Pulumi provision range Step Functions state machine"
+  value       = var.enable_pulumi_provisioner ? module.pulumi_provisioner[0].provision_state_machine_arn : null
+}
+
+output "pulumi_destroy_state_machine_arn" {
+  description = "ARN of the Pulumi destroy range Step Functions state machine"
+  value       = var.enable_pulumi_provisioner ? module.pulumi_provisioner[0].destroy_state_machine_arn : null
+}
+
+output "pulumi_ecs_cluster_arn" {
+  description = "ARN of the Pulumi provisioner ECS cluster"
+  value       = var.enable_pulumi_provisioner ? module.pulumi_provisioner[0].ecs_cluster_arn : null
+}
+
+output "pulumi_task_definition_arn" {
+  description = "ARN of the Pulumi provisioner ECS task definition"
+  value       = var.enable_pulumi_provisioner ? module.pulumi_provisioner[0].task_definition_arn : null
+}

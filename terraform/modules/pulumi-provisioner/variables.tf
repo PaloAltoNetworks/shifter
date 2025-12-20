@@ -138,6 +138,11 @@ variable "range_route_table_id" {
   type        = string
 }
 
+variable "range_availability_zone" {
+  description = "Availability zone for range subnets (e.g., us-east-2a)"
+  type        = string
+}
+
 variable "victim_security_group_id" {
   description = "Security group ID for victim instances"
   type        = string
@@ -155,6 +160,11 @@ variable "range_instance_profile_arn" {
 
 variable "range_instance_profile_name" {
   description = "IAM instance profile name for range instances"
+  type        = string
+}
+
+variable "range_instance_role_arn" {
+  description = "IAM role ARN for range instances (required for iam:PassRole)"
   type        = string
 }
 

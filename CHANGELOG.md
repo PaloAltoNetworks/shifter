@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced Checkov skip comments with actual implementations (CKV_AWS_91, CKV2_AWS_11, CKV_AWS_129)
 - Removed unused XDR IAM from Terraform (managed by CloudFormation instead)
 
+### Fixed
+- Multiple code quality, security, and code smells
+
 ## [0.7.5] - 2025-12-18
 
 ### Added

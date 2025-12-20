@@ -12,7 +12,8 @@
 resource "aws_sns_topic" "log_alarms" {
   count = var.enable_log_aggregation && var.enable_alarms ? 1 : 0
 
-  name = "${var.name_prefix}-log-alarms-${var.environment}"
+  name              = "${var.name_prefix}-log-alarms-${var.environment}"
+  kms_master_key_id = "alias/aws/sns"
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-log-alarms-${var.environment}"

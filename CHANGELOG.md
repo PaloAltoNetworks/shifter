@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - IAM roles with least-privilege permissions for ECS tasks
 - Step Functions state machines for Pulumi-based provisioning and teardown
 - Security groups for ECS to RDS connectivity
+- Pulumi Python program for declarative range provisioning
+- Reusable Pulumi components (NetworkComponent, InstanceComponent, RangeStack)
+- Docker container for Pulumi provisioner with pinned Pulumi CLI version
+- Instance type catalog for extensible OS support (Kali, Ubuntu, Windows, Amazon Linux)
+- User data templates for Kali, Linux victim, and Windows victim instances
 
 ## [0.7.6] - 2025-12-19
 

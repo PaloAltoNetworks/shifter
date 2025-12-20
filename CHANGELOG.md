@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Pulumi state backend module for declarative range provisioning (S3 bucket with versioning, DynamoDB locking table)
 - Feature flag for Pulumi provisioner (enabled in dev, disabled in prod)
+- ECR repository for Pulumi provisioner container (dev and prod)
 
 ## [0.7.6] - 2025-12-19
 

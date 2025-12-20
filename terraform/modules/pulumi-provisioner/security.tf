@@ -27,6 +27,27 @@ resource "aws_security_group_rule" "ecs_https_egress" {
   description       = "HTTPS to AWS APIs"
 }
 
+# DNS egress for hostname resolution (required for AWS API endpoints, RDS, etc.)
+resource "aws_security_group_rule" "ecs_dns_udp_egress" {
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.ecs_task.id
+  description       = "DNS resolution (UDP)"
+}
+
+resource "aws_security_group_rule" "ecs_dns_tcp_egress" {
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.ecs_task.id
+  description       = "DNS resolution (TCP for large responses)"
+}
+
 # PostgreSQL egress to RDS
 resource "aws_security_group_rule" "ecs_to_rds" {
   type                     = "egress"

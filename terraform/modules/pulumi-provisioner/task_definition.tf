@@ -28,6 +28,7 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "RANGE_VPC_ID", value = var.range_vpc_id },
       { name = "RANGE_VPC_CIDR", value = var.range_vpc_cidr },
       { name = "RANGE_ROUTE_TABLE_ID", value = var.range_route_table_id },
+      { name = "RANGE_AVAILABILITY_ZONE", value = var.range_availability_zone },
       { name = "KALI_SECURITY_GROUP_ID", value = var.kali_security_group_id },
       { name = "VICTIM_SECURITY_GROUP_ID", value = var.victim_security_group_id },
       { name = "RANGE_INSTANCE_PROFILE_NAME", value = var.range_instance_profile_name },

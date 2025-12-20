@@ -2,6 +2,11 @@
 
 This module handles loading configuration from Pulumi stack config
 and environment variables.
+
+Note: Presigned URL generation happens here (before Pulumi runs) because:
+1. It's a one-time operation per range, not per-resource
+2. It doesn't create AWS resources, just signs a URL
+3. The signed URL is passed as data to EC2 user data scripts
 """
 
 import os
@@ -13,6 +18,28 @@ import psycopg
 import pulumi
 
 
+def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:
+    """Generate a presigned URL for an S3 object.
+
+    This is called during config loading (before Pulumi runs), not during
+    resource creation. It's safe because it doesn't create any AWS resources.
+
+    Args:
+        bucket: S3 bucket name.
+        key: S3 object key.
+        expires_in: URL expiration time in seconds.
+
+    Returns:
+        Presigned URL string.
+    """
+    s3_client = boto3.client("s3")
+    return s3_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=expires_in,
+    )
+
+
 @dataclass
 class InstanceConfig:
     """Configuration for an instance to be provisioned."""
@@ -22,6 +49,7 @@ class InstanceConfig:
     instance_type: str
     agent_id: Optional[int] = None  # Agent config ID for victim instances
     agent_s3_key: Optional[str] = None  # S3 key for agent installer
+    agent_presigned_url: Optional[str] = None  # Presigned URL for agent download
 
 
 @dataclass
@@ -43,6 +71,7 @@ class RangeConfig:
     victim_ami_id: str
     windows_ami_id: str
     agent_s3_bucket: str
+    availability_zone: str
     portal_vpc_cidr: str = ""
 
 
@@ -116,8 +145,18 @@ def load_config() -> RangeConfig:
     # Parse instance_config from database or use defaults
     db_instance_config = range_data.get("instance_config") or []
 
+    # Get agent bucket for presigned URL generation
+    agent_s3_bucket = config.get("agentS3Bucket") or ""
+
+    # Helper to generate presigned URL if we have bucket and key
+    def get_presigned_url(s3_key: Optional[str]) -> Optional[str]:
+        if agent_s3_bucket and s3_key:
+            return generate_presigned_url(agent_s3_bucket, s3_key)
+        return None
+
     # If no custom config, use default (1 Kali + 1 Victim)
     if not db_instance_config:
+        agent_s3_key = range_data.get("agent_s3_key")
         instances = [
             InstanceConfig(
                 role="attacker",
@@ -129,20 +168,23 @@ def load_config() -> RangeConfig:
                 os_type="ubuntu",
                 instance_type="t3.micro",
                 agent_id=range_data.get("agent_id"),
-                agent_s3_key=range_data.get("agent_s3_key"),
+                agent_s3_key=agent_s3_key,
+                agent_presigned_url=get_presigned_url(agent_s3_key),
             ),
         ]
     else:
         # Parse custom instance configs
         instances = []
         for inst in db_instance_config:
+            agent_s3_key = inst.get("agent_s3_key")
             instances.append(
                 InstanceConfig(
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),
                     instance_type=inst.get("instance_type", "t3.micro"),
                     agent_id=inst.get("agent_id"),
-                    agent_s3_key=inst.get("agent_s3_key"),
+                    agent_s3_key=agent_s3_key,
+                    agent_presigned_url=get_presigned_url(agent_s3_key),
                 )
             )
 
@@ -163,5 +205,6 @@ def load_config() -> RangeConfig:
         victim_ami_id=config.require("victimAmiId"),
         windows_ami_id=config.get("windowsAmiId") or "",
         agent_s3_bucket=config.get("agentS3Bucket") or "",
+        availability_zone=config.require("availabilityZone"),
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
     )

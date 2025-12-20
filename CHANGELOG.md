@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker container for Pulumi provisioner with pinned Pulumi CLI version
 - Instance type catalog for extensible OS support (Kali, Ubuntu, Windows, Amazon Linux)
 - User data templates for Kali, Linux victim, and Windows victim instances
+- Django Range model fields for Pulumi provisioner (`instance_config`, `provisioned_instances`, `pulumi_stack`, `provisioner_version`)
+- Provisioner service routing between Lambda (v1) and Pulumi (v2) based on `provisioner_version`
+- Django settings for Pulumi state machine ARNs and feature flag (`USE_PULUMI_PROVISIONER`)
 
 ## [0.7.6] - 2025-12-19
 

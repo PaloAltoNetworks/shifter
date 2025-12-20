@@ -146,6 +146,29 @@ class Range(models.Model):
         max_length=500, blank=True, default="", help_text="Step Functions execution ARN"
     )
 
+    # Pulumi provisioner fields (v2)
+    instance_config = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="JSON array of instance configurations for Pulumi provisioner",
+    )
+    provisioned_instances = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="JSON array of provisioned instance details from Pulumi",
+    )
+    pulumi_stack = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Pulumi stack name for this range",
+    )
+    provisioner_version = models.CharField(
+        max_length=10,
+        default="v1",
+        help_text="Provisioner version: v1=Lambda, v2=Pulumi",
+    )
+
     # Status and timestamps
     error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -243,6 +266,63 @@ class Range(models.Model):
                 f"No subnet indices available. Maximum {cls.SUBNET_INDEX_MAX} "
                 "concurrent ranges supported. Destroy some ranges first."
             )
+
+    def get_instance_by_role(self, role: str) -> dict | None:
+        """Get instance details by role (works with v1 and v2).
+
+        Args:
+            role: Instance role ("attacker" or "victim")
+
+        Returns:
+            Dictionary with instance details or None if not found
+        """
+        if self.provisioner_version == "v2" and self.provisioned_instances:
+            for instance in self.provisioned_instances:
+                if instance.get("role") == role:
+                    return instance
+            return None
+        # v1 fallback
+        if role == "attacker":
+            return (
+                {
+                    "instance_id": self.kali_instance_id,
+                    "private_ip": str(self.kali_ip) if self.kali_ip else None,
+                    "role": "attacker",
+                    "ssh_key_secret_arn": self.kali_ssh_key_secret_arn,
+                }
+                if self.kali_instance_id
+                else None
+            )
+        elif role == "victim":
+            return (
+                {
+                    "instance_id": self.victim_instance_id,
+                    "private_ip": str(self.victim_ip) if self.victim_ip else None,
+                    "role": "victim",
+                    "ssh_key_secret_arn": self.victim_ssh_key_secret_arn,
+                }
+                if self.victim_instance_id
+                else None
+            )
+        return None
+
+    @property
+    def attacker_instance(self) -> dict | None:
+        """Get the attacker instance details."""
+        return self.get_instance_by_role("attacker")
+
+    @property
+    def victim_instances(self) -> list:
+        """Get all victim instance details.
+
+        Returns:
+            List of victim instance dictionaries
+        """
+        if self.provisioner_version == "v2" and self.provisioned_instances:
+            return [i for i in self.provisioned_instances if i.get("role") == "victim"]
+        # v1: single victim
+        victim = self.get_instance_by_role("victim")
+        return [victim] if victim else []
 
 
 class ActivityLog(models.Model):

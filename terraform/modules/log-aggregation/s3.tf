@@ -100,6 +100,30 @@ resource "aws_s3_bucket_policy" "logs" {
 data "aws_iam_policy_document" "logs" {
   count = var.enable_log_aggregation ? 1 : 0
 
+  # Deny non-HTTPS requests
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = ["s3:*"]
+
+    resources = [
+      aws_s3_bucket.logs[0].arn,
+      "${aws_s3_bucket.logs[0].arn}/*"
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+
   # Firehose write access (always enabled when log aggregation is on)
   statement {
     sid    = "AllowFirehoseWrite"

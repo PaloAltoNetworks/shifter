@@ -87,3 +87,11 @@ output "sfn_log_group_name" {
   description = "Name of the Step Functions CloudWatch log group"
   value       = aws_cloudwatch_log_group.sfn.name
 }
+
+output "log_group_names" {
+  description = "List of all CloudWatch log group names (for log aggregation)"
+  value = [
+    aws_cloudwatch_log_group.ecs.name,
+    aws_cloudwatch_log_group.sfn.name,
+  ]
+}

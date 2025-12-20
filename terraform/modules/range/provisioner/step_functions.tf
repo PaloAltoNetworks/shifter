@@ -89,7 +89,7 @@ resource "aws_iam_role_policy" "step_functions_logs" {
 
 resource "aws_cloudwatch_log_group" "step_functions" {
   name              = "/aws/stepfunctions/${var.name_prefix}-provisioner"
-  retention_in_days = 30
+  retention_in_days = var.log_retention_days
 
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-provisioner-sfn-logs"
@@ -118,7 +118,7 @@ resource "aws_sfn_state_machine" "provision_range" {
   logging_configuration {
     log_destination        = "${aws_cloudwatch_log_group.step_functions.arn}:*"
     include_execution_data = true
-    level                  = "ERROR"
+    level                  = "ALL"
   }
 
   tags = merge(var.tags, {
@@ -142,7 +142,7 @@ resource "aws_sfn_state_machine" "teardown_range" {
   logging_configuration {
     log_destination        = "${aws_cloudwatch_log_group.step_functions.arn}:*"
     include_execution_data = true
-    level                  = "ERROR"
+    level                  = "ALL"
   }
 
   tags = merge(var.tags, {
@@ -167,7 +167,7 @@ resource "aws_sfn_state_machine" "cleanup_stale_ranges" {
   logging_configuration {
     log_destination        = "${aws_cloudwatch_log_group.step_functions.arn}:*"
     include_execution_data = true
-    level                  = "ERROR"
+    level                  = "ALL"
   }
 
   tags = merge(var.tags, {

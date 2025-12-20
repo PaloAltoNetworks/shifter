@@ -27,4 +27,7 @@ module "vpc" {
   vpc_cidr        = var.vpc_cidr
   portal_vpc_cidr = var.portal_vpc_cidr
   tags            = var.tags
+
+  # Phase 5: VPC Flow Logs
+  enable_flow_logs = var.enable_flow_logs
 }

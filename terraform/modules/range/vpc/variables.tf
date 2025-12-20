@@ -51,3 +51,13 @@ variable "victim_allowed_domains" {
     ".pkg.dev"
   ]
 }
+
+# ------------------------------------------------------------------------------
+# VPC Flow Logs
+# ------------------------------------------------------------------------------
+
+variable "enable_flow_logs" {
+  description = "Enable VPC flow logs"
+  type        = bool
+  default     = false
+}

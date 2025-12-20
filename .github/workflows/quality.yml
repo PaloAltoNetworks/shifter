@@ -43,7 +43,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Lint Python
         working-directory: portal
@@ -80,7 +80,7 @@ jobs:
             ${{ runner.os }}-checkov-
 
       - name: Checkov IaC Security
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
         with:
           directory: terraform/
           framework: terraform

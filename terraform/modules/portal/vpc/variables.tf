@@ -24,3 +24,17 @@ variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
 }
+
+# ------------------------------------------------------------------------------
+# VPC Flow Logs
+# ------------------------------------------------------------------------------
+
+variable "enable_flow_logs" {
+  description = "Enable VPC flow logs"
+  type        = bool
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days for VPC flow logs"
+  type        = number
+}

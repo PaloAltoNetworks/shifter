@@ -45,7 +45,7 @@ done
 
 # Validate environment
 if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
-    echo "Error: Environment must be 'dev' or 'prod'"
+    echo "Error: Environment must be 'dev' or 'prod'" >&2
     exit 1
 fi
 
@@ -57,7 +57,7 @@ else
 fi
 
 if [[ -z "$PROFILE" ]]; then
-    echo "Error: AWS profile not set. Export PANW_SHIFTER_${ENV^^}_PROFILE"
+    echo "Error: AWS profile not set. Export PANW_SHIFTER_${ENV^^}_PROFILE" >&2
     exit 1
 fi
 

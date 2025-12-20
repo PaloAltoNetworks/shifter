@@ -62,6 +62,7 @@ class RangeStack(pulumi.ComponentResource):
             subnet_index=config.subnet_index,
             route_table_id=config.route_table_id,
             environment=config.environment,
+            availability_zone=config.availability_zone,
             opts=pulumi.ResourceOptions(parent=self),
         )
 
@@ -107,6 +108,7 @@ class RangeStack(pulumi.ComponentResource):
                 instance_profile_name=config.instance_profile_name,
                 agent_s3_bucket=config.agent_s3_bucket,
                 agent_s3_key=inst_config.agent_s3_key or "",
+                agent_presigned_url=inst_config.agent_presigned_url or "",
                 opts=pulumi.ResourceOptions(
                     parent=self,
                     depends_on=[self.network],

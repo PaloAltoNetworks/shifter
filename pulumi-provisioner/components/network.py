@@ -34,7 +34,7 @@ class NetworkComponent(pulumi.ComponentResource):
         subnet_index: int,
         route_table_id: str,
         environment: str,
-        availability_zone: str = "us-east-2a",
+        availability_zone: str,
         opts: Optional[pulumi.ResourceOptions] = None,
     ):
         """Create network infrastructure for a range.
@@ -48,7 +48,7 @@ class NetworkComponent(pulumi.ComponentResource):
             subnet_index: The index for the third octet of the CIDR.
             route_table_id: The route table to associate with.
             environment: Environment name (dev/prod).
-            availability_zone: The AZ to create the subnet in.
+            availability_zone: The AZ to create the subnet in (e.g., "us-east-2a").
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NetworkComponent", name, None, opts)

@@ -179,7 +179,7 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Sid      = "PassRoleToInstances"
         Effect   = "Allow"
         Action   = "iam:PassRole"
-        Resource = var.range_instance_profile_arn
+        Resource = var.range_instance_role_arn
       }
     ]
   })
@@ -254,27 +254,44 @@ resource "aws_iam_role_policy" "s3_agent" {
 # ------------------------------------------------------------------------------
 # Task Role Policy - KMS (for Pulumi secrets encryption)
 # ------------------------------------------------------------------------------
+# Pulumi's awskms:// secrets provider calls KMS directly (not via Secrets Manager),
+# so we need separate statements for each use case.
 
 resource "aws_iam_role_policy" "kms" {
-  name = "kms-decrypt"
+  name = "kms-access"
   role = aws_iam_role.ecs_task.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "kms:Encrypt",
-        "kms:Decrypt",
-        "kms:GenerateDataKey"
-      ]
-      Resource = "*"
-      Condition = {
-        StringEquals = {
-          "kms:ViaService" = "secretsmanager.${local.region}.amazonaws.com"
+    Statement = [
+      {
+        Sid    = "PulumiSecretsEncryption"
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey"
+        ]
+        # Pulumi uses the aws/secretsmanager key directly for stack secrets
+        Resource = "arn:aws:kms:${local.region}:${local.account_id}:alias/aws/secretsmanager"
+      },
+      {
+        Sid    = "SecretsManagerKMSAccess"
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "secretsmanager.${local.region}.amazonaws.com"
+          }
         }
       }
-    }]
+    ]
   })
 }
 

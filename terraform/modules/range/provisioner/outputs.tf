@@ -74,6 +74,21 @@ output "step_functions_role_arn" {
   value       = aws_iam_role.step_functions.arn
 }
 
+output "range_instance_role_arn" {
+  description = "ARN of the IAM role for range EC2 instances (for iam:PassRole)"
+  value       = aws_iam_role.range_instance.arn
+}
+
+output "range_instance_profile_arn" {
+  description = "ARN of the IAM instance profile for range EC2 instances"
+  value       = aws_iam_instance_profile.range_instance.arn
+}
+
+output "range_instance_profile_name" {
+  description = "Name of the IAM instance profile for range EC2 instances"
+  value       = aws_iam_instance_profile.range_instance.name
+}
+
 # Monitoring
 output "alerts_sns_topic_arn" {
   description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"

@@ -210,6 +210,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
                     break
         except asyncio.CancelledError:
             logger.debug("SSH output task cancelled for range %s", self.range_id)
+            raise
         except Exception:
             logger.exception("Unexpected error reading SSH output")
             await self.close(code=4500)

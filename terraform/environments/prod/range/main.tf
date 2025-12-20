@@ -31,3 +31,17 @@ module "vpc" {
   # Phase 5: VPC Flow Logs
   enable_flow_logs = var.enable_flow_logs
 }
+
+# ------------------------------------------------------------------------------
+# Pulumi State Backend (S3 + DynamoDB)
+# ------------------------------------------------------------------------------
+
+module "pulumi_state" {
+  source = "../../../modules/pulumi-state"
+  count  = var.enable_pulumi_provisioner ? 1 : 0
+
+  name_prefix        = local.name_prefix
+  environment        = var.environment
+  tags               = var.tags
+  log_retention_days = var.log_retention_days
+}

@@ -6,7 +6,6 @@ Output: { "range_id": "uuid", "victim_instance_id": "i-xxx", "victim_ip": "10.1.
 """
 
 import base64
-import logging
 import os
 import sys
 
@@ -21,14 +20,14 @@ from shared import (
     get_agent_config,
     get_db_connection,
     get_env,
+    get_logger,
     get_range,
     get_resource_tags,
     update_range,
     validate_env_vars,
 )
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Required environment variables for this Lambda
 REQUIRED_ENV_VARS = [

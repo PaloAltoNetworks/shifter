@@ -14,6 +14,11 @@ variable "aws_region" {
   type        = string
 }
 
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+}
+
 variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
@@ -239,6 +244,39 @@ variable "redis_node_type" {
 variable "redis_engine_version" {
   description = "ElastiCache Redis engine version"
   type        = string
+}
+
+# ------------------------------------------------------------------------------
+# Log Aggregation
+# ------------------------------------------------------------------------------
+
+variable "enable_log_aggregation" {
+  description = "Enable log aggregation infrastructure (S3, SQS, Firehose)"
+  type        = bool
+}
+
+# ------------------------------------------------------------------------------
+# Phase 5: Additional Log Sources
+# ------------------------------------------------------------------------------
+
+variable "enable_alb_access_logs" {
+  description = "Enable ALB access logs to S3"
+  type        = bool
+}
+
+variable "enable_vpc_flow_logs" {
+  description = "Enable VPC flow logs to CloudWatch"
+  type        = bool
+}
+
+variable "enable_rds_log_exports" {
+  description = "Enable RDS CloudWatch log exports"
+  type        = bool
+}
+
+variable "enable_waf_logging" {
+  description = "Enable WAF logging to Firehose"
+  type        = bool
 }
 
 # ------------------------------------------------------------------------------

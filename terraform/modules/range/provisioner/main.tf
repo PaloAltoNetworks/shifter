@@ -38,6 +38,81 @@ locals {
 }
 
 # ------------------------------------------------------------------------------
+# CloudWatch Log Groups for Lambda Functions
+# ------------------------------------------------------------------------------
+# Explicitly define log groups to control retention and avoid auto-creation
+
+resource "aws_cloudwatch_log_group" "create_subnet" {
+  name              = "/aws/lambda/${var.name_prefix}-create-subnet"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-create-subnet-logs"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_cloudwatch_log_group" "create_victim" {
+  name              = "/aws/lambda/${var.name_prefix}-create-victim"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-create-victim-logs"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_cloudwatch_log_group" "create_kali" {
+  name              = "/aws/lambda/${var.name_prefix}-create-kali"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-create-kali-logs"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_cloudwatch_log_group" "mark_ready" {
+  name              = "/aws/lambda/${var.name_prefix}-mark-ready"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-mark-ready-logs"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_cloudwatch_log_group" "verify_agent" {
+  name              = "/aws/lambda/${var.name_prefix}-verify-agent"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-verify-agent-logs"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_cloudwatch_log_group" "cleanup" {
+  name              = "/aws/lambda/${var.name_prefix}-cleanup"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-cleanup-logs"
+    Module = "provisioner"
+  })
+}
+
+resource "aws_cloudwatch_log_group" "find_stale_ranges" {
+  name              = "/aws/lambda/${var.name_prefix}-find-stale-ranges"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-find-stale-ranges-logs"
+    Module = "provisioner"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Create Subnet Lambda
 # ------------------------------------------------------------------------------
 
@@ -76,6 +151,8 @@ resource "aws_lambda_function" "create_subnet" {
     Name   = "${var.name_prefix}-create-subnet"
     Module = "provisioner"
   })
+
+  depends_on = [aws_cloudwatch_log_group.create_subnet]
 }
 
 # ------------------------------------------------------------------------------
@@ -118,6 +195,8 @@ resource "aws_lambda_function" "create_victim" {
     Name   = "${var.name_prefix}-create-victim"
     Module = "provisioner"
   })
+
+  depends_on = [aws_cloudwatch_log_group.create_victim]
 }
 
 # ------------------------------------------------------------------------------
@@ -159,6 +238,8 @@ resource "aws_lambda_function" "create_kali" {
     Name   = "${var.name_prefix}-create-kali"
     Module = "provisioner"
   })
+
+  depends_on = [aws_cloudwatch_log_group.create_kali]
 }
 
 # ------------------------------------------------------------------------------
@@ -198,6 +279,8 @@ resource "aws_lambda_function" "mark_ready" {
     Name   = "${var.name_prefix}-mark-ready"
     Module = "provisioner"
   })
+
+  depends_on = [aws_cloudwatch_log_group.mark_ready]
 }
 
 # ------------------------------------------------------------------------------
@@ -235,6 +318,8 @@ resource "aws_lambda_function" "verify_agent" {
     Name   = "${var.name_prefix}-verify-agent"
     Module = "provisioner"
   })
+
+  depends_on = [aws_cloudwatch_log_group.verify_agent]
 }
 
 # ------------------------------------------------------------------------------
@@ -272,6 +357,8 @@ resource "aws_lambda_function" "cleanup" {
     Name   = "${var.name_prefix}-cleanup"
     Module = "provisioner"
   })
+
+  depends_on = [aws_cloudwatch_log_group.cleanup]
 }
 
 # ------------------------------------------------------------------------------
@@ -309,4 +396,6 @@ resource "aws_lambda_function" "find_stale_ranges" {
     Name   = "${var.name_prefix}-find-stale-ranges"
     Module = "provisioner"
   })
+
+  depends_on = [aws_cloudwatch_log_group.find_stale_ranges]
 }

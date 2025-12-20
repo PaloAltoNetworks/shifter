@@ -125,9 +125,37 @@ AWS Cognito handles all authentication. Django is a relying party only.
 |------|----------|-------|
 | Range instances can enumerate SSM documents | Low | `ssm:GetDocument` in managed policy. Audit for secrets in docs. |
 
+## Logging and Observability
+
+Phase 5 log sources are implemented but require `enable_log_aggregation = true` to activate:
+
+| Log Type | Destination | Status |
+|----------|-------------|--------|
+| Application logs | CloudWatch → Firehose → S3 | Implemented |
+| Cognito logs | CloudWatch → Firehose → S3 | Implemented |
+| Provisioner Lambda logs | CloudWatch → Firehose → S3 | Implemented |
+| VPC Flow Logs | CloudWatch → Firehose → S3 | Implemented |
+| RDS PostgreSQL logs | CloudWatch → Firehose → S3 | Implemented |
+| ALB access logs | Direct to S3 | Implemented |
+| WAF logs | Firehose → S3 | Implemented |
+
+WAF is enabled by default on all ALBs with AWS managed rules:
+- Rate limiting (2000 requests/5 min per IP)
+- IP reputation list
+- Known bad inputs (Log4Shell, etc.)
+- Common rule set (OWASP Top 10)
+
+### XDR CloudTrail Integration
+
+XDR ingests CloudTrail audit logs via a CloudFormation template from the Cortex console. This is separate from the application logs above.
+
+| Component | Source | Purpose |
+|-----------|--------|---------|
+| CloudTrail | XDR CloudFormation | API audit logs (who did what in AWS) |
+| App logs | Terraform log-aggregation | Internal debugging (what happened in Shifter) |
+
+CloudFormation templates are in `cloudformation/{env}/` (environment-specific).
+
 ## Not Yet Implemented
 
-- WAF on ALB
-- ALB access logging
 - Cloudflare proxy with IP allowlisting
-- VPC Flow Logs

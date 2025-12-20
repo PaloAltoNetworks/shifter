@@ -9,6 +9,7 @@ from .db import (
     validate_range_id,
 )
 from .env import get_env, validate_env_vars
+from .json_logging import JSONFormatter, get_logger
 from .security_groups import ensure_ssh_from_portal
 from .tagging import get_resource_tags, get_resource_tags_dict
 
@@ -17,8 +18,10 @@ __all__ = [
     "ensure_ssh_from_portal",
     "get_db_connection",
     "get_env",
+    "get_logger",
     "get_range",
     "get_agent_config",
+    "JSONFormatter",
     "update_range",
     "validate_env_vars",
     "validate_range_id",

@@ -80,3 +80,17 @@ variable "prevent_destroy" {
   type        = bool
   default     = false
 }
+
+# ------------------------------------------------------------------------------
+# Log Exports
+# ------------------------------------------------------------------------------
+
+variable "enable_log_exports" {
+  description = "Enable CloudWatch log exports for PostgreSQL logs"
+  type        = bool
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days for RDS logs"
+  type        = number
+}

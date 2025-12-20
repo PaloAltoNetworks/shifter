@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pulumi state backend module for declarative range provisioning (S3 bucket with versioning, DynamoDB locking table)
 - Feature flag for Pulumi provisioner (enabled in dev, disabled in prod)
 - ECR repository for Pulumi provisioner container (dev and prod)
+- ECS Fargate cluster and task definition for Pulumi provisioner
+- IAM roles with least-privilege permissions for ECS tasks
+- Step Functions state machines for Pulumi-based provisioning and teardown
+- Security groups for ECS to RDS connectivity
 
 ## [0.7.6] - 2025-12-19
 

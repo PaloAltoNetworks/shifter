@@ -1,0 +1,63 @@
+{
+  "Comment": "Provision range infrastructure using Pulumi",
+  "StartAt": "RunPulumiUp",
+  "TimeoutSeconds": 3600,
+  "States": {
+    "RunPulumiUp": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${ecs_cluster_arn}",
+        "TaskDefinition": "${task_definition_arn}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets.$": "States.StringToJson('${private_subnet_ids}')",
+            "SecurityGroups": ["${ecs_security_group_id}"],
+            "AssignPublicIp": "DISABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [{
+            "Name": "pulumi-provisioner",
+            "Command": ["up"],
+            "Environment": [
+              {"Name": "RANGE_ID", "Value.$": "States.Format('{}', $.range_id)"},
+              {"Name": "OPERATION", "Value": "up"}
+            ]
+          }]
+        }
+      },
+      "ResultPath": "$.ecs_result",
+      "Retry": [{
+        "ErrorEquals": ["ECS.AmazonECSException"],
+        "IntervalSeconds": 30,
+        "MaxAttempts": 2,
+        "BackoffRate": 2
+      }],
+      "Catch": [{
+        "ErrorEquals": ["States.ALL"],
+        "ResultPath": "$.error",
+        "Next": "Failed"
+      }],
+      "Next": "CheckResult"
+    },
+    "CheckResult": {
+      "Type": "Choice",
+      "Choices": [{
+        "Variable": "$.ecs_result.Tasks[0].Containers[0].ExitCode",
+        "NumericEquals": 0,
+        "Next": "Success"
+      }],
+      "Default": "Failed"
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Failed": {
+      "Type": "Fail",
+      "Error": "ProvisioningFailed",
+      "Cause": "Pulumi provisioning task failed"
+    }
+  }
+}

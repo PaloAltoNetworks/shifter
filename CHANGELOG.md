@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Pulumi provisioner module integration in portal environments (dev and prod)
+- Portal environment variables and outputs for Pulumi provisioner:
+  - `enable_pulumi_provisioner` feature flag
+  - `pulumi_container_tag` for container versioning
+  - `windows_ami_id` for Windows victim instances
+  - State machine ARN outputs for provisioning and destruction
+- Pulumi provisioner log groups integrated with log aggregation (ECS + Step Functions logs)
+
 ### Fixed
+- Added Terraform precondition validation to prevent enabling Pulumi provisioner in Portal when Range environment lacks Pulumi state backend
+- Fixed `range_availability_zone` to source from Range VPC state instead of Portal VPC (prevents AZ mismatch if VPCs diverge)
 - Critical: Secrets Manager secrets now created via Pulumi resources (not boto3) for proper lifecycle management
   - SSH keys are deleted on `pulumi destroy` instead of being orphaned
   - Previews no longer create real secrets (boto3 calls executed during `pulumi preview`)

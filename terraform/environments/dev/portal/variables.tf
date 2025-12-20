@@ -280,6 +280,28 @@ variable "enable_waf_logging" {
 }
 
 # ------------------------------------------------------------------------------
+# Pulumi Provisioner (v2)
+# ------------------------------------------------------------------------------
+
+variable "enable_pulumi_provisioner" {
+  description = "Enable Pulumi-based range provisioning (v2)"
+  type        = bool
+  default     = false
+}
+
+variable "pulumi_container_tag" {
+  description = "Docker image tag for Pulumi provisioner container"
+  type        = string
+  default     = "latest"
+}
+
+variable "windows_ami_id" {
+  description = "AMI ID for Windows victim instances"
+  type        = string
+  default     = ""
+}
+
+# ------------------------------------------------------------------------------
 # CI Testing
 # ------------------------------------------------------------------------------
 

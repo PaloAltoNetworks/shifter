@@ -5,6 +5,11 @@ output "vpc_id" {
   value       = aws_vpc.this.id
 }
 
+output "availability_zone" {
+  description = "Primary availability zone used by the Range VPC"
+  value       = local.primary_az
+}
+
 output "vpc_cidr" {
   description = "CIDR block of the VPC"
   value       = aws_vpc.this.cidr_block

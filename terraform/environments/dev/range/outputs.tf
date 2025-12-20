@@ -10,6 +10,11 @@ output "vpc_cidr" {
   value       = module.vpc.vpc_cidr
 }
 
+output "availability_zone" {
+  description = "Primary availability zone used by the Range VPC"
+  value       = module.vpc.availability_zone
+}
+
 output "internet_gateway_id" {
   description = "ID of the internet gateway"
   value       = module.vpc.internet_gateway_id

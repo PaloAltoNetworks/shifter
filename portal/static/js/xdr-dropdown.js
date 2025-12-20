@@ -245,7 +245,7 @@ class XdrDropdown {
     }
 }
 
-// Auto-initialize dropdowns
+// Auto-init: instances manage their own lifecycle via DOM event listeners
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.xdr-dropdown').forEach(el => {
         new XdrDropdown(el);

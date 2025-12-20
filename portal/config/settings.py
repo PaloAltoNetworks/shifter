@@ -246,8 +246,13 @@ AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", 
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
 
 # Step Functions State Machine ARNs (for range provisioning)
+# Lambda-based provisioner (v1)
 PROVISION_STATE_MACHINE_ARN = os.environ.get("PROVISION_STATE_MACHINE_ARN", "")
 TEARDOWN_STATE_MACHINE_ARN = os.environ.get("TEARDOWN_STATE_MACHINE_ARN", "")
+# Pulumi-based provisioner (v2)
+PULUMI_PROVISION_STATE_MACHINE_ARN = os.environ.get("PULUMI_PROVISION_STATE_MACHINE_ARN", "")
+PULUMI_DESTROY_STATE_MACHINE_ARN = os.environ.get("PULUMI_DESTROY_STATE_MACHINE_ARN", "")
+USE_PULUMI_PROVISIONER = os.environ.get("USE_PULUMI_PROVISIONER", "false").lower() == "true"
 
 # Agent upload limits
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file

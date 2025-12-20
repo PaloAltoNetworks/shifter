@@ -119,6 +119,15 @@ resource "aws_cognito_user_pool_client" "portal" {
 # Pre-Signup Lambda
 # ------------------------------------------------------------------------------
 
+resource "aws_cloudwatch_log_group" "pre_signup" {
+  name              = "/aws/lambda/${var.name_prefix}-cognito-pre-signup"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-cognito-pre-signup-logs"
+  })
+}
+
 data "archive_file" "pre_signup" {
   type        = "zip"
   source_file = "${path.module}/lambda/pre_signup.py"
@@ -140,10 +149,13 @@ resource "aws_lambda_function" "pre_signup" {
     variables = {
       ALLOWED_DOMAINS = join(",", var.allowed_email_domains)
       ALLOWED_EMAILS  = join(",", var.allowed_emails)
+      ENVIRONMENT     = var.environment
     }
   }
 
   tags = var.tags
+
+  depends_on = [aws_cloudwatch_log_group.pre_signup]
 }
 
 resource "aws_lambda_permission" "cognito_invoke" {

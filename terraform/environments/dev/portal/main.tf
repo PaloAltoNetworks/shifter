@@ -62,6 +62,10 @@ module "vpc" {
   az_count           = var.az_count
   enable_nat_gateway = var.enable_nat_gateway
   tags               = var.tags
+
+  # Phase 5: VPC Flow Logs
+  enable_flow_logs   = var.enable_vpc_flow_logs
+  log_retention_days = var.log_retention_days
 }
 
 # ------------------------------------------------------------------------------
@@ -87,6 +91,10 @@ module "rds" {
   deletion_protection   = var.db_deletion_protection
   skip_final_snapshot   = var.db_skip_final_snapshot
 
+  # Phase 5: RDS Log Exports
+  enable_log_exports = var.enable_rds_log_exports
+  log_retention_days = var.log_retention_days
+
   tags = var.tags
 }
 
@@ -104,6 +112,12 @@ module "alb" {
   app_port          = var.app_port
   health_check_path = var.health_check_path
   enable_stickiness = var.enable_autoscaling
+
+  # Phase 5: ALB Access Logs and WAF Logging
+  enable_access_logs      = var.enable_alb_access_logs
+  logs_bucket_name        = var.enable_alb_access_logs ? module.log_aggregation.logs_bucket_name : ""
+  enable_waf_logging      = var.enable_waf_logging
+  waf_log_destination_arn = var.enable_waf_logging ? module.log_aggregation.waf_firehose_arn : ""
 
   tags = var.tags
 }
@@ -133,7 +147,9 @@ module "cognito" {
   source = "../../../modules/portal/cognito"
 
   name_prefix           = local.name_prefix
+  environment           = var.environment
   aws_region            = var.aws_region
+  log_retention_days    = var.log_retention_days
   cognito_domain_prefix = var.cognito_domain_prefix
   callback_urls         = ["https://${var.domain_name}/oidc/callback/"]
   logout_urls           = ["https://${var.domain_name}/"]
@@ -182,6 +198,7 @@ module "ec2" {
   redis_endpoint       = var.enable_autoscaling ? module.redis.redis_endpoint : ""
   scale_up_threshold   = var.scale_up_threshold
   scale_down_threshold = var.scale_down_threshold
+  log_retention_days   = var.log_retention_days
 
   tags = var.tags
 }
@@ -277,9 +294,10 @@ resource "aws_route" "range_to_portal" {
 module "provisioner" {
   source = "../../../modules/range/provisioner"
 
-  name_prefix = local.name_prefix
-  environment = var.environment
-  tags        = var.tags
+  name_prefix        = local.name_prefix
+  environment        = var.environment
+  log_retention_days = var.log_retention_days
+  tags               = var.tags
 
   # Portal VPC (where Lambda runs)
   portal_vpc_id     = module.vpc.vpc_id
@@ -314,4 +332,35 @@ module "provisioner" {
   # Monitoring Configuration
   enable_alarms = var.enable_provisioner_alarms
   alarm_email   = var.provisioner_alarm_email
+}
+
+# ------------------------------------------------------------------------------
+# Log Aggregation (S3, SQS, Firehose for internal observability)
+# Note: XDR CloudTrail integration is managed via CloudFormation, not Terraform
+# ------------------------------------------------------------------------------
+
+module "log_aggregation" {
+  source = "../../../modules/log-aggregation"
+
+  name_prefix            = local.name_prefix
+  environment            = var.environment
+  aws_region             = var.aws_region
+  log_retention_days     = var.log_retention_days
+  enable_log_aggregation = var.enable_log_aggregation
+
+  # Phase 5: ALB and WAF logging
+  enable_alb_access_logs = var.enable_alb_access_logs
+  enable_waf_logging     = var.enable_waf_logging
+
+  # Log group sources (for CloudWatch subscription filters)
+  source_log_group_names = var.enable_log_aggregation ? concat(
+    [module.ec2.log_group_name],
+    [module.cognito.log_group_name],
+    module.provisioner.log_group_names,
+    # Phase 5: VPC flow logs and RDS logs
+    var.enable_vpc_flow_logs ? [module.vpc.flow_logs_log_group_name] : [],
+    var.enable_rds_log_exports ? module.rds.log_group_names : [],
+  ) : []
+
+  tags = var.tags
 }

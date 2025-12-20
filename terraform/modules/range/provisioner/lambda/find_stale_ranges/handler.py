@@ -11,17 +11,15 @@ Called by EventBridge on a schedule to find ranges that need cleanup:
 TODO: See issue #204 - rethink this to scan AWS resources first, then reconcile with DB.
 """
 
-import logging
 import os
 import sys
 from datetime import datetime, timedelta, timezone
 
 # Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared import get_db_connection, validate_env_vars
+from shared import get_db_connection, get_logger, validate_env_vars
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Thresholds for stale detection
 PROVISIONING_TIMEOUT_MINUTES = 60  # 1 hour

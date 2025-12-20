@@ -85,19 +85,8 @@ def run_pulumi(operation: str, range_id: int) -> None:
     env["PULUMI_CONFIG_PASSPHRASE"] = ""  # We use AWS KMS for secrets
 
     try:
-        # Select or create stack
-        print(f"Selecting/creating stack: {stack_name}")
-        result = subprocess.run(
-            ["pulumi", "stack", "select", stack_name, "--create"],
-            cwd="/app",
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            # Stack selection failed - check if it's just a "not found" error
-            if "no stack named" not in result.stderr.lower():
-                raise Exception(f"Stack selection failed: {result.stderr}")  # noqa: TRY002
+        # Select or create stack with proper secrets provider
+        _select_or_create_stack(stack_name, env)
 
         # Set stack configuration from environment
         _set_stack_config(env, range_id)
@@ -127,8 +116,61 @@ def run_pulumi(operation: str, range_id: int) -> None:
         raise
 
 
+def _select_or_create_stack(stack_name: str, env: dict) -> None:
+    """Select an existing stack or create a new one with the KMS secrets provider.
+
+    `pulumi stack select --create` does not honor PULUMI_SECRETS_PROVIDER for new
+    stacks. We must use `pulumi stack init --secrets-provider` to ensure new stacks
+    use KMS encryption instead of the default passphrase provider.
+
+    Args:
+        stack_name: The Pulumi stack name.
+        env: Environment dictionary for subprocess.
+
+    Raises:
+        Exception: If stack selection/creation fails.
+    """
+    print(f"Selecting stack: {stack_name}")
+
+    # Try to select existing stack
+    result = subprocess.run(
+        ["pulumi", "stack", "select", stack_name],
+        cwd="/app",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        print(f"Selected existing stack: {stack_name}")
+        return
+
+    # Stack doesn't exist - create with explicit secrets provider
+    # PULUMI_SECRETS_PROVIDER env var is NOT honored by `stack init` without --secrets-provider
+    secrets_provider = os.environ.get(
+        "PULUMI_SECRETS_PROVIDER", "awskms://alias/aws/secretsmanager"
+    )
+    print(f"Creating new stack with secrets provider: {secrets_provider}")
+
+    result = subprocess.run(
+        ["pulumi", "stack", "init", stack_name, "--secrets-provider", secrets_provider],
+        cwd="/app",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        raise Exception(f"Stack creation failed: {result.stderr}")  # noqa: TRY002
+
+    print(f"Created new stack: {stack_name}")
+
+
 def _set_stack_config(env: dict, range_id: int) -> None:
     """Set Pulumi stack configuration from environment variables.
+
+    All config values are explicitly set or removed to prevent stale values
+    from persisting across runs (e.g., old AMI IDs from previous deployments).
 
     Args:
         env: Environment dictionary for subprocess.
@@ -140,6 +182,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "rangeVpcId": os.environ.get("RANGE_VPC_ID", ""),
         "rangeVpcCidr": os.environ.get("RANGE_VPC_CIDR", ""),
         "rangeRouteTableId": os.environ.get("RANGE_ROUTE_TABLE_ID", ""),
+        "availabilityZone": os.environ.get("RANGE_AVAILABILITY_ZONE", ""),
         "kaliSecurityGroupId": os.environ.get("KALI_SECURITY_GROUP_ID", ""),
         "victimSecurityGroupId": os.environ.get("VICTIM_SECURITY_GROUP_ID", ""),
         "rangeInstanceProfileName": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
@@ -156,6 +199,15 @@ def _set_stack_config(env: dict, range_id: int) -> None:
                 cwd="/app",
                 env=env,
                 capture_output=True,
+            )
+        else:
+            # Remove empty config values to prevent stale values from persisting
+            subprocess.run(
+                ["pulumi", "config", "rm", key],
+                cwd="/app",
+                env=env,
+                capture_output=True,
+                # Ignore errors - key may not exist
             )
 
 

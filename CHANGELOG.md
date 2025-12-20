@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Critical: Secrets Manager secrets now created via Pulumi resources (not boto3) for proper lifecycle management
+  - SSH keys are deleted on `pulumi destroy` instead of being orphaned
+  - Previews no longer create real secrets (boto3 calls executed during `pulumi preview`)
+  - Re-runs no longer fail with `ResourceExistsException`
+- Fixed KMS IAM policy to allow Pulumi's direct `awskms://` secrets provider (removed blocking `kms:ViaService` condition)
+- Moved presigned URL generation from Pulumi resource creation to config loading phase
+- Added DNS egress rules (UDP/TCP 53) to ECS task security group for hostname resolution
+- Made availability zone configurable via `availabilityZone` config (removed hardcoded `us-east-2a` default)
+- Windows victims now receive presigned URL and agent S3 key for XDR agent installation
+- Fixed `iam:PassRole` policy to use role ARN instead of instance profile ARN (PassRole requires role ARN)
+- Stack config now removes empty values to prevent stale config (e.g., old AMI IDs) from persisting across runs
+- New stacks now use `pulumi stack init --secrets-provider` to ensure KMS encryption (not passphrase)
+
 ## [0.7.7] - 2025-12-19
 
 ### Added

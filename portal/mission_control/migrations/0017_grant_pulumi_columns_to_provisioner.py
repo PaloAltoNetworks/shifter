@@ -8,6 +8,32 @@
 from django.db import migrations
 
 
+def grant_pulumi_columns(apps, schema_editor):
+    """Grant UPDATE permission on Pulumi columns (PostgreSQL only)."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("""
+        GRANT UPDATE (
+            updated_at,
+            provisioned_instances,
+            pulumi_stack
+        ) ON mission_control_range TO provisioner_lambda;
+    """)
+
+
+def revoke_pulumi_columns(apps, schema_editor):
+    """Revoke UPDATE permission on Pulumi columns (PostgreSQL only)."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("""
+        REVOKE UPDATE (
+            updated_at,
+            provisioned_instances,
+            pulumi_stack
+        ) ON mission_control_range FROM provisioner_lambda;
+    """)
+
+
 class Migration(migrations.Migration):
     """Grant UPDATE permission on Pulumi columns to provisioner_lambda."""
 
@@ -16,22 +42,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            # Forward: Grant UPDATE on Pulumi provisioner columns
-            sql="""
-                GRANT UPDATE (
-                    updated_at,
-                    provisioned_instances,
-                    pulumi_stack
-                ) ON mission_control_range TO provisioner_lambda;
-            """,
-            # Reverse: Revoke UPDATE on these columns
-            reverse_sql="""
-                REVOKE UPDATE (
-                    updated_at,
-                    provisioned_instances,
-                    pulumi_stack
-                ) ON mission_control_range FROM provisioner_lambda;
-            """,
-        ),
+        migrations.RunPython(grant_pulumi_columns, revoke_pulumi_columns),
     ]

@@ -34,6 +34,7 @@ DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
 addopts = "--cov=config --cov=mission_control --cov-report=term-missing --cov-report=xml:coverage.xml"
+env = ["TESTING=1"]
 
 # Ruff - linting and formatting
 [tool.ruff]

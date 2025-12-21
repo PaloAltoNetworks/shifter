@@ -1,5 +1,10 @@
 """Pytest configuration and fixtures for portal tests."""
 
+import os
+
+# Set testing flag before Django loads settings
+os.environ["TESTING"] = "1"
+
 import pytest
 from django.test import Client
 

@@ -200,9 +200,12 @@ resource "aws_iam_role_policy" "secrets_manager" {
       Action = [
         "secretsmanager:CreateSecret",
         "secretsmanager:DeleteSecret",
-        "secretsmanager:PutSecretValue",
+        "secretsmanager:DescribeSecret",
         "secretsmanager:GetSecretValue",
-        "secretsmanager:TagResource"
+        "secretsmanager:ListSecretVersionIds",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:TagResource",
+        "secretsmanager:UpdateSecretVersionStage"
       ]
       Resource = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:shifter/${var.environment}/range/*"
     }]

@@ -273,9 +273,8 @@ resource "aws_iam_role_policy" "kms" {
           "kms:GenerateDataKey",
           "kms:DescribeKey"
         ]
-        # Pulumi uses the aws/secretsmanager key directly for stack secrets
-        # Policy checks are done against the key ARN, not the alias ARN
-        Resource = data.aws_kms_key.secretsmanager.arn
+        # Dedicated CMK for Pulumi stack secrets encryption
+        Resource = var.pulumi_secrets_kms_key_arn
       },
       {
         Sid    = "SecretsManagerKMSAccess"

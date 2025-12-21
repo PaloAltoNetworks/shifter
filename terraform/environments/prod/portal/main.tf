@@ -320,10 +320,12 @@ module "pulumi_provisioner" {
   rds_security_group_id = module.rds.db_security_group_id
 
   # Pulumi state (from Range environment)
-  pulumi_state_bucket     = data.terraform_remote_state.range.outputs.pulumi_state_bucket_name
-  pulumi_state_bucket_arn = data.terraform_remote_state.range.outputs.pulumi_state_bucket_arn
-  pulumi_locks_table      = data.terraform_remote_state.range.outputs.pulumi_locks_table_name
-  pulumi_locks_table_arn  = data.terraform_remote_state.range.outputs.pulumi_locks_table_arn
+  pulumi_state_bucket          = data.terraform_remote_state.range.outputs.pulumi_state_bucket_name
+  pulumi_state_bucket_arn      = data.terraform_remote_state.range.outputs.pulumi_state_bucket_arn
+  pulumi_locks_table           = data.terraform_remote_state.range.outputs.pulumi_locks_table_name
+  pulumi_locks_table_arn       = data.terraform_remote_state.range.outputs.pulumi_locks_table_arn
+  pulumi_secrets_kms_key_arn   = data.terraform_remote_state.range.outputs.pulumi_secrets_kms_key_arn
+  pulumi_secrets_kms_key_alias = data.terraform_remote_state.range.outputs.pulumi_secrets_kms_key_alias
 
   # Range VPC configuration
   range_vpc_id                = data.terraform_remote_state.range.outputs.vpc_id

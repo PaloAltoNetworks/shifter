@@ -147,9 +147,10 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
 
     # Stack doesn't exist - create with explicit secrets provider
     # PULUMI_SECRETS_PROVIDER env var is NOT honored by `stack init` without --secrets-provider
-    secrets_provider = os.environ.get(
-        "PULUMI_SECRETS_PROVIDER", "awskms://alias/aws/secretsmanager"
-    )
+    # The env var is set by the ECS task definition to use our dedicated KMS CMK
+    secrets_provider = os.environ.get("PULUMI_SECRETS_PROVIDER")
+    if not secrets_provider:
+        raise ValueError("PULUMI_SECRETS_PROVIDER environment variable is required")
     print(f"Creating new stack with secrets provider: {secrets_provider}")
 
     result = subprocess.run(

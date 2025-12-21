@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- GitHub Actions workflow for Pulumi provisioner (`_pulumi-provisioner.yml`)
+  - Runs tests with coverage enforcement (80% minimum)
+  - Builds and pushes Docker container to ECR on push to dev/main
+- Pulumi provisioner integrated into deploy workflow dependency chain
+  - Path detection for `pulumi-provisioner/**` and `terraform/modules/pulumi-provisioner/**`
+  - Portal workflow now depends on successful pulumi-provisioner build
+- Portal deployment now passes Pulumi state machine ARNs to container:
+  - `PULUMI_PROVISION_STATE_MACHINE_ARN`
+  - `PULUMI_DESTROY_STATE_MACHINE_ARN`
 - Pulumi provisioner module integration in portal environments (dev and prod)
 - Portal environment variables and outputs for Pulumi provisioner:
   - `enable_pulumi_provisioner` feature flag

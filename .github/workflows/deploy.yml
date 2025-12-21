@@ -50,7 +50,6 @@ jobs:
               - '.github/workflows/deploy.yml'
             portal:
               - 'terraform/modules/portal/**'
-              - 'terraform/modules/range/provisioner/**'
               - 'terraform/environments/*/portal/**'
               - 'portal/**'
               - '.github/workflows/_portal.yml'

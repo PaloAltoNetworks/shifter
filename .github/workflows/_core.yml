@@ -67,7 +67,10 @@ jobs:
     name: Apply (${{ inputs.environment }})
     runs-on: ubuntu-latest
     needs: plan
-    if: always() && (needs.plan.result == 'success' || needs.plan.result == 'skipped')
+    if: |
+      always() &&
+      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      (github.event_name != 'pull_request' || inputs.environment == 'dev')
     defaults:
       run:
         working-directory: terraform/environments/${{ inputs.environment }}

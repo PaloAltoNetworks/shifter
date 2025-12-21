@@ -68,7 +68,10 @@ jobs:
     name: Apply (${{ inputs.environment }})
     runs-on: ubuntu-latest
     needs: plan
-    if: always() && (needs.plan.result == 'success' || needs.plan.result == 'skipped')
+    if: |
+      always() &&
+      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      (github.event_name != 'pull_request' || inputs.environment == 'dev')
     defaults:
       run:
         working-directory: terraform/environments/${{ inputs.environment }}/portal
@@ -93,6 +96,7 @@ jobs:
     name: Build (${{ inputs.environment }})
     runs-on: ubuntu-latest
     needs: apply
+    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:
@@ -127,6 +131,7 @@ jobs:
     name: Deploy (${{ inputs.environment }})
     runs-on: ubuntu-latest
     needs: build
+    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
     env:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}

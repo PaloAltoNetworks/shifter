@@ -196,6 +196,7 @@ resource "aws_iam_role_policy" "secrets_manager" {
       Action = [
         # secret.go - resourceSecretCreate, resourceSecretRead, resourceSecretDelete
         "secretsmanager:CreateSecret",
+        "secretsmanager:TagResource",
         "secretsmanager:DescribeSecret",
         "secretsmanager:GetResourcePolicy",
         "secretsmanager:DeleteSecret",

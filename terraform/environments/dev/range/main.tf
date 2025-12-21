@@ -30,6 +30,9 @@ module "vpc" {
 
   # Phase 5: VPC Flow Logs
   enable_flow_logs = var.enable_flow_logs
+
+  # Range Instance IAM
+  agent_s3_bucket = var.agent_s3_bucket
 }
 
 # ------------------------------------------------------------------------------

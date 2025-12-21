@@ -115,48 +115,38 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
     Version = "2012-10-17"
     Statement = [
       {
+        # Permissions based on Terraform AWS provider ec2_instance.go:
+        # - RunInstances, DescribeInstances, TerminateInstances for lifecycle
+        # - CreateTags for tagging (tags are applied during RunInstances)
+        # - DescribeImages for AMI validation
         Sid    = "EC2InstanceOperations"
         Effect = "Allow"
         Action = [
           "ec2:RunInstances",
-          "ec2:TerminateInstances",
           "ec2:DescribeInstances",
-          "ec2:DescribeInstanceStatus",
+          "ec2:TerminateInstances",
           "ec2:CreateTags",
-          "ec2:DescribeTags",
-          "ec2:DescribeImages",
-          "ec2:DescribeKeyPairs",
-          "ec2:CreateKeyPair",
-          "ec2:DeleteKeyPair"
+          "ec2:DescribeImages"
         ]
         Resource = "*"
       },
       {
+        # Permissions based on Terraform AWS provider vpc_subnet.go:
+        # - CreateSubnet, DescribeSubnets, DeleteSubnet for lifecycle
+        # Note: CreateTags is in EC2InstanceOperations and applies to all EC2 resources
         Sid    = "EC2SubnetOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateSubnet",
-          "ec2:DeleteSubnet",
           "ec2:DescribeSubnets",
-          "ec2:ModifySubnetAttribute"
+          "ec2:DeleteSubnet"
         ]
         Resource = "*"
       },
       {
-        Sid    = "EC2SecurityGroupOperations"
-        Effect = "Allow"
-        Action = [
-          "ec2:CreateSecurityGroup",
-          "ec2:DeleteSecurityGroup",
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:AuthorizeSecurityGroupEgress",
-          "ec2:RevokeSecurityGroupIngress",
-          "ec2:RevokeSecurityGroupEgress",
-          "ec2:DescribeSecurityGroups"
-        ]
-        Resource = "*"
-      },
-      {
+        # Permissions based on Terraform AWS provider vpc_route_table_association.go:
+        # - AssociateRouteTable, DisassociateRouteTable for lifecycle
+        # - DescribeRouteTables for reading association state
         Sid    = "EC2RouteTableOperations"
         Effect = "Allow"
         Action = [
@@ -167,11 +157,13 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Resource = "*"
       },
       {
-        Sid    = "EC2NetworkOperations"
+        # Read-only permissions for validating references (VPC, AZ, SG)
+        Sid    = "EC2ReadOnlyValidation"
         Effect = "Allow"
         Action = [
           "ec2:DescribeVpcs",
-          "ec2:DescribeAvailabilityZones"
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeSecurityGroups"
         ]
         Resource = "*"
       },
@@ -193,18 +185,24 @@ resource "aws_iam_role_policy" "secrets_manager" {
   name = "secrets-manager"
   role = aws_iam_role.ecs_task.id
 
+  # Permissions based on Terraform AWS provider source code analysis:
+  # - secret.go: CreateSecret, DescribeSecret, GetResourcePolicy, DeleteSecret
+  # - secret_version.go: PutSecretValue, GetSecretValue, ListSecretVersionIds, UpdateSecretVersionStage
+  # Ref: github.com/hashicorp/terraform-provider-aws/internal/service/secretsmanager/
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect = "Allow"
       Action = [
+        # secret.go - resourceSecretCreate, resourceSecretRead, resourceSecretDelete
         "secretsmanager:CreateSecret",
-        "secretsmanager:DeleteSecret",
         "secretsmanager:DescribeSecret",
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:DeleteSecret",
+        # secret_version.go - resourceSecretVersionCreate, resourceSecretVersionRead, resourceSecretVersionDelete
+        "secretsmanager:PutSecretValue",
         "secretsmanager:GetSecretValue",
         "secretsmanager:ListSecretVersionIds",
-        "secretsmanager:PutSecretValue",
-        "secretsmanager:TagResource",
         "secretsmanager:UpdateSecretVersionStage"
       ]
       Resource = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:shifter/${var.environment}/range/*"

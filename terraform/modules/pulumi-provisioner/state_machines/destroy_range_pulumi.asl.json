@@ -12,7 +12,7 @@
         "TaskDefinition": "${task_definition_arn}",
         "NetworkConfiguration": {
           "AwsvpcConfiguration": {
-            "Subnets.$": "States.StringToJson('${private_subnet_ids}')",
+            "Subnets": ${private_subnet_ids},
             "SecurityGroups": ["${ecs_security_group_id}"],
             "AssignPublicIp": "DISABLED"
           }

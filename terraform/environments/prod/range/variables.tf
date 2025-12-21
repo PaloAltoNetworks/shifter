@@ -49,3 +49,12 @@ variable "log_retention_days" {
   type        = number
   default     = 90
 }
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM
+# ------------------------------------------------------------------------------
+
+variable "agent_s3_bucket" {
+  description = "S3 bucket name for agent installers (for range instance S3 read access)"
+  type        = string
+}

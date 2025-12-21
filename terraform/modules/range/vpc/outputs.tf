@@ -85,3 +85,22 @@ output "flow_logs_log_group_name" {
   description = "Name of the CloudWatch log group for VPC flow logs"
   value       = var.enable_flow_logs ? aws_cloudwatch_log_group.flow_logs[0].name : ""
 }
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM
+# ------------------------------------------------------------------------------
+
+output "range_instance_role_arn" {
+  description = "ARN of the IAM role for range EC2 instances"
+  value       = aws_iam_role.range_instance.arn
+}
+
+output "range_instance_profile_arn" {
+  description = "ARN of the IAM instance profile for range EC2 instances"
+  value       = aws_iam_instance_profile.range_instance.arn
+}
+
+output "range_instance_profile_name" {
+  description = "Name of the IAM instance profile for range EC2 instances"
+  value       = aws_iam_instance_profile.range_instance.name
+}

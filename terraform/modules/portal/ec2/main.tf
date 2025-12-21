@@ -162,28 +162,45 @@ resource "aws_iam_role_policy" "s3_access" {
   })
 }
 
-resource "aws_iam_role_policy" "step_functions" {
-  count = length(var.step_function_arns) > 0 ? 1 : 0
-  name  = "step-functions-execute"
-  role  = aws_iam_role.this.id
+resource "aws_iam_role_policy" "ecs_run_task" {
+  name = "ecs-run-task"
+  role = aws_iam_role.this.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "RunTask"
         Effect = "Allow"
         Action = [
-          "states:StartExecution"
+          "ecs:RunTask"
         ]
-        Resource = var.step_function_arns
+        Resource = var.ecs_task_definition_arn
       },
       {
+        Sid    = "ManageTasks"
         Effect = "Allow"
         Action = [
-          "states:DescribeExecution",
-          "states:StopExecution"
+          "ecs:DescribeTasks",
+          "ecs:StopTask"
         ]
-        Resource = [for arn in var.step_function_arns : "${arn}:*"]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "ecs:cluster" = var.ecs_cluster_arn
+          }
+        }
+      },
+      {
+        Sid    = "PassRole"
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = [
+          var.ecs_task_role_arn,
+          var.ecs_execution_role_arn
+        ]
       }
     ]
   })

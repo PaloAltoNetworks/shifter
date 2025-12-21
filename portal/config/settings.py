@@ -245,14 +245,11 @@ AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
 AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
 
-# Step Functions State Machine ARNs (for range provisioning)
-# Lambda-based provisioner (v1)
-PROVISION_STATE_MACHINE_ARN = os.environ.get("PROVISION_STATE_MACHINE_ARN", "")
-TEARDOWN_STATE_MACHINE_ARN = os.environ.get("TEARDOWN_STATE_MACHINE_ARN", "")
-# Pulumi-based provisioner (v2)
-PULUMI_PROVISION_STATE_MACHINE_ARN = os.environ.get("PULUMI_PROVISION_STATE_MACHINE_ARN", "")
-PULUMI_DESTROY_STATE_MACHINE_ARN = os.environ.get("PULUMI_DESTROY_STATE_MACHINE_ARN", "")
-USE_PULUMI_PROVISIONER = os.environ.get("USE_PULUMI_PROVISIONER", "false").lower() == "true"
+# Pulumi Provisioner (ECS Fargate)
+PULUMI_ECS_CLUSTER_ARN = os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
+PULUMI_TASK_DEFINITION_ARN = os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
+PULUMI_ECS_SECURITY_GROUP_ID = os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
+PULUMI_PRIVATE_SUBNET_IDS = os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
 
 # Agent upload limits
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file

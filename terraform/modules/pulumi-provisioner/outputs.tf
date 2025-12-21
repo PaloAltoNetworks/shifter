@@ -23,30 +23,6 @@ output "task_definition_family" {
 }
 
 # ------------------------------------------------------------------------------
-# Step Functions Outputs
-# ------------------------------------------------------------------------------
-
-output "provision_state_machine_arn" {
-  description = "ARN of the provision range Step Functions state machine"
-  value       = aws_sfn_state_machine.provision_range_pulumi.arn
-}
-
-output "provision_state_machine_name" {
-  description = "Name of the provision range Step Functions state machine"
-  value       = aws_sfn_state_machine.provision_range_pulumi.name
-}
-
-output "destroy_state_machine_arn" {
-  description = "ARN of the destroy range Step Functions state machine"
-  value       = aws_sfn_state_machine.destroy_range_pulumi.arn
-}
-
-output "destroy_state_machine_name" {
-  description = "Name of the destroy range Step Functions state machine"
-  value       = aws_sfn_state_machine.destroy_range_pulumi.name
-}
-
-# ------------------------------------------------------------------------------
 # Security Group Outputs
 # ------------------------------------------------------------------------------
 
@@ -69,11 +45,6 @@ output "ecs_task_role_arn" {
   value       = aws_iam_role.ecs_task.arn
 }
 
-output "step_functions_role_arn" {
-  description = "ARN of the Step Functions role"
-  value       = aws_iam_role.step_functions.arn
-}
-
 # ------------------------------------------------------------------------------
 # CloudWatch Outputs
 # ------------------------------------------------------------------------------
@@ -83,15 +54,18 @@ output "ecs_log_group_name" {
   value       = aws_cloudwatch_log_group.ecs.name
 }
 
-output "sfn_log_group_name" {
-  description = "Name of the Step Functions CloudWatch log group"
-  value       = aws_cloudwatch_log_group.sfn.name
-}
-
 output "log_group_names" {
   description = "List of all CloudWatch log group names (for log aggregation)"
   value = [
     aws_cloudwatch_log_group.ecs.name,
-    aws_cloudwatch_log_group.sfn.name,
   ]
+}
+
+# ------------------------------------------------------------------------------
+# Networking Outputs (pass-through for Portal)
+# ------------------------------------------------------------------------------
+
+output "private_subnet_ids" {
+  description = "List of private subnet IDs for ECS tasks (pass-through)"
+  value       = var.private_subnet_ids
 }

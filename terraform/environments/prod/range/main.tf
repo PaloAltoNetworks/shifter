@@ -41,7 +41,6 @@ module "vpc" {
 
 module "pulumi_state" {
   source = "../../../modules/pulumi-state"
-  count  = var.enable_pulumi_provisioner ? 1 : 0
 
   name_prefix        = local.name_prefix
   environment        = var.environment

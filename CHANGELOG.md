@@ -7,58 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2025-12-20
+
 ### Added
-- GitHub Actions workflow for Pulumi provisioner (`_pulumi-provisioner.yml`)
-  - Runs tests with coverage enforcement (80% minimum)
-  - Builds and pushes Docker container to ECR on push to dev/main
-- Pulumi provisioner integrated into deploy workflow dependency chain
-  - Path detection for `pulumi-provisioner/**` and `terraform/modules/pulumi-provisioner/**`
-  - Portal workflow now depends on successful pulumi-provisioner build
-- Portal deployment now passes Pulumi state machine ARNs to container:
-  - `PULUMI_PROVISION_STATE_MACHINE_ARN`
-  - `PULUMI_DESTROY_STATE_MACHINE_ARN`
-- Pulumi provisioner module integration in portal environments (dev and prod)
-- Portal environment variables and outputs for Pulumi provisioner:
-  - `enable_pulumi_provisioner` feature flag
-  - `pulumi_container_tag` for container versioning
-  - `windows_ami_id` for Windows victim instances
-  - State machine ARN outputs for provisioning and destruction
-- Pulumi provisioner log groups integrated with log aggregation (ECS + Step Functions logs)
+- Pulumi-based provisioner for declarative multi-OS range infrastructure
+  - ECS Fargate execution with Step Functions orchestration
+  - S3/DynamoDB state backend, ECR container registry
+  - Reusable components: NetworkComponent, InstanceComponent, RangeStack
+  - Instance catalog supporting Kali, Ubuntu, Windows, Amazon Linux
+- CI/CD workflow for Pulumi provisioner (`_pulumi-provisioner.yml`)
+- Django model fields and service routing for v1 (Lambda) / v2 (Pulumi) provisioners
 
 ### Fixed
-- Added Terraform precondition validation to prevent enabling Pulumi provisioner in Portal when Range environment lacks Pulumi state backend
-- Fixed `range_availability_zone` to source from Range VPC state instead of Portal VPC (prevents AZ mismatch if VPCs diverge)
-- Critical: Secrets Manager secrets now created via Pulumi resources (not boto3) for proper lifecycle management
-  - SSH keys are deleted on `pulumi destroy` instead of being orphaned
-  - Previews no longer create real secrets (boto3 calls executed during `pulumi preview`)
-  - Re-runs no longer fail with `ResourceExistsException`
-- Fixed KMS IAM policy to allow Pulumi's direct `awskms://` secrets provider (removed blocking `kms:ViaService` condition)
-- Moved presigned URL generation from Pulumi resource creation to config loading phase
-- Added DNS egress rules (UDP/TCP 53) to ECS task security group for hostname resolution
-- Made availability zone configurable via `availabilityZone` config (removed hardcoded `us-east-2a` default)
-- Windows victims now receive presigned URL and agent S3 key for XDR agent installation
-- Fixed `iam:PassRole` policy to use role ARN instead of instance profile ARN (PassRole requires role ARN)
-- Stack config now removes empty values to prevent stale config (e.g., old AMI IDs) from persisting across runs
-- New stacks now use `pulumi stack init --secrets-provider` to ensure KMS encryption (not passphrase)
-
-## [0.7.7] - 2025-12-19
-
-### Added
-- Pulumi state backend module for declarative range provisioning (S3 bucket with versioning, DynamoDB locking table)
-- Feature flag for Pulumi provisioner (enabled in dev, disabled in prod)
-- ECR repository for Pulumi provisioner container (dev and prod)
-- ECS Fargate cluster and task definition for Pulumi provisioner
-- IAM roles with least-privilege permissions for ECS tasks
-- Step Functions state machines for Pulumi-based provisioning and teardown
-- Security groups for ECS to RDS connectivity
-- Pulumi Python program for declarative range provisioning
-- Reusable Pulumi components (NetworkComponent, InstanceComponent, RangeStack)
-- Docker container for Pulumi provisioner with pinned Pulumi CLI version
-- Instance type catalog for extensible OS support (Kali, Ubuntu, Windows, Amazon Linux)
-- User data templates for Kali, Linux victim, and Windows victim instances
-- Django Range model fields for Pulumi provisioner (`instance_config`, `provisioned_instances`, `pulumi_stack`, `provisioner_version`)
-- Provisioner service routing between Lambda (v1) and Pulumi (v2) based on `provisioner_version`
-- Django settings for Pulumi state machine ARNs and feature flag (`USE_PULUMI_PROVISIONER`)
+- Secrets Manager resources now Pulumi-managed (proper lifecycle, no orphans)
+- KMS policy, DNS egress, availability zone configuration for ECS tasks
 
 ## [0.7.6] - 2025-12-19
 

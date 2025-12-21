@@ -154,6 +154,11 @@ jobs:
           TEARDOWN_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-teardown-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
           echo "provision_state_machine_arn=${PROVISION_ARN}" >> $GITHUB_OUTPUT
           echo "teardown_state_machine_arn=${TEARDOWN_ARN}" >> $GITHUB_OUTPUT
+          # Pulumi provisioner state machines
+          PULUMI_PROVISION_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-provision-range-pulumi')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
+          PULUMI_DESTROY_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-destroy-range-pulumi')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
+          echo "pulumi_provision_state_machine_arn=${PULUMI_PROVISION_ARN}" >> $GITHUB_OUTPUT
+          echo "pulumi_destroy_state_machine_arn=${PULUMI_DESTROY_ARN}" >> $GITHUB_OUTPUT
           # Check if autoscaling is enabled
           ENABLE_AUTOSCALING=$(echo "$TF_VARS" | grep '^enable_autoscaling' | sed 's/.*= *\([^ ]*\).*/\1/' | tr -d ' ')
           echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> $GITHUB_OUTPUT
@@ -220,6 +225,8 @@ jobs:
           S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
           PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.provision_state_machine_arn }}
           TEARDOWN_STATE_MACHINE_ARN: ${{ steps.config.outputs.teardown_state_machine_arn }}
+          PULUMI_PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.pulumi_provision_state_machine_arn }}
+          PULUMI_DESTROY_STATE_MACHINE_ARN: ${{ steps.config.outputs.pulumi_destroy_state_machine_arn }}
           ACCOUNT_ID: ${{ steps.config.outputs.account_id }}
         run: |
           DB_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-db-credentials"
@@ -244,6 +251,8 @@ jobs:
                 -e SITE_URL=https://${PORTAL_DOMAIN} \
                 -e PROVISION_STATE_MACHINE_ARN=${PROVISION_STATE_MACHINE_ARN} \
                 -e TEARDOWN_STATE_MACHINE_ARN=${TEARDOWN_STATE_MACHINE_ARN} \
+                -e PULUMI_PROVISION_STATE_MACHINE_ARN=${PULUMI_PROVISION_STATE_MACHINE_ARN} \
+                -e PULUMI_DESTROY_STATE_MACHINE_ARN=${PULUMI_DESTROY_STATE_MACHINE_ARN} \
                 \$IMAGE'
             ]" --timeout-seconds 300 --query "Command.CommandId" --output text)
 
@@ -266,6 +275,8 @@ jobs:
           S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
           PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.provision_state_machine_arn }}
           TEARDOWN_STATE_MACHINE_ARN: ${{ steps.config.outputs.teardown_state_machine_arn }}
+          PULUMI_PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.pulumi_provision_state_machine_arn }}
+          PULUMI_DESTROY_STATE_MACHINE_ARN: ${{ steps.config.outputs.pulumi_destroy_state_machine_arn }}
           REDIS_ENDPOINT: ${{ steps.config.outputs.redis_endpoint }}
           ACCOUNT_ID: ${{ steps.config.outputs.account_id }}
         run: |
@@ -305,6 +316,8 @@ jobs:
                 -e SITE_URL=https://${PORTAL_DOMAIN} \
                 -e PROVISION_STATE_MACHINE_ARN=${PROVISION_STATE_MACHINE_ARN} \
                 -e TEARDOWN_STATE_MACHINE_ARN=${TEARDOWN_STATE_MACHINE_ARN} \
+                -e PULUMI_PROVISION_STATE_MACHINE_ARN=${PULUMI_PROVISION_STATE_MACHINE_ARN} \
+                -e PULUMI_DESTROY_STATE_MACHINE_ARN=${PULUMI_DESTROY_STATE_MACHINE_ARN} \
                 -e REDIS_HOST=${REDIS_ENDPOINT} \
                 \$IMAGE'
             ]" --timeout-seconds 300 --query "Command.CommandId" --output text)

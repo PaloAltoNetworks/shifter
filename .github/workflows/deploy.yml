@@ -21,6 +21,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
       range: ${{ steps.filter.outputs.range }}
+      pulumi_provisioner: ${{ steps.filter.outputs.pulumi_provisioner }}
       portal: ${{ steps.filter.outputs.portal }}
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
@@ -40,6 +41,13 @@ jobs:
               - 'terraform/modules/range/**'
               - 'terraform/environments/*/range/**'
               - '.github/workflows/_range.yml'
+            pulumi_provisioner:
+              - 'pulumi-provisioner/**'
+              - 'terraform/modules/pulumi-provisioner/**'
+              - 'terraform/modules/ecr/**'
+              - 'terraform/environments/*/*.tf'
+              - '.github/workflows/_pulumi-provisioner.yml'
+              - '.github/workflows/deploy.yml'
             portal:
               - 'terraform/modules/portal/**'
               - 'terraform/modules/range/provisioner/**'
@@ -96,13 +104,29 @@ jobs:
       TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
       TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
 
+  pulumi-provisioner:
+    name: Pulumi Provisioner
+    needs: [changes, core]
+    if: |
+      always() &&
+      (needs.changes.outputs.pulumi_provisioner == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.core.result == 'success' || needs.core.result == 'skipped')
+    uses: ./.github/workflows/_pulumi-provisioner.yml
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+      is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+
   portal:
     name: Portal
-    needs: [changes, range]
+    needs: [changes, range, pulumi-provisioner]
     if: |
       always() &&
       (needs.changes.outputs.portal == 'true' || github.event_name == 'workflow_dispatch') &&
-      (needs.range.result == 'success' || needs.range.result == 'skipped')
+      (needs.range.result == 'success' || needs.range.result == 'skipped') &&
+      (needs.pulumi-provisioner.result == 'success' || needs.pulumi-provisioner.result == 'skipped')
     uses: ./.github/workflows/_portal.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}

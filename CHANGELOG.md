@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secrets Manager resources now Pulumi-managed (proper lifecycle, no orphans)
 - KMS policy, DNS egress, availability zone configuration for ECS tasks
 
+### Removed
+- V1 (Lambda) provisioner
+
 ## [0.7.6] - 2025-12-19
 
 ### Added

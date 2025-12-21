@@ -2,22 +2,6 @@ name: Quality
 
 on:
   workflow_call:
-  push:
-    branches:
-      - main
-      - dev
-    paths:
-      - 'portal/**'
-      - 'terraform/**'
-      - 'pulumi-provisioner/**'
-      - '.github/workflows/quality.yml'
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - 'portal/**'
-      - 'terraform/**'
-      - 'pulumi-provisioner/**'
-      - '.github/workflows/quality.yml'
 
 permissions:
   contents: read

@@ -135,6 +135,8 @@ resource "aws_iam_policy" "core_infrastructure" {
           "s3:GetBucketLocation",
           "s3:GetBucketVersioning",
           "s3:PutBucketVersioning",
+          "s3:GetBucketAcl",
+          "s3:PutBucketAcl",
           "s3:GetBucketPolicy",
           "s3:PutBucketPolicy",
           "s3:DeleteBucketPolicy",

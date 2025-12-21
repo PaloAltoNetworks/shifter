@@ -122,8 +122,12 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=/tmp/.buildx-cache-portal
+          cache-to: type=local,dest=/tmp/.buildx-cache-portal-new,mode=max
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache-portal
+          mv /tmp/.buildx-cache-portal-new /tmp/.buildx-cache-portal || true
 
   deploy:
     name: Deploy (${{ inputs.environment }})

@@ -403,6 +403,7 @@ def mock_env_vars(mocker):
         "DB_USER": "shifter_app",
         "AWS_REGION": "us-east-2",
         "ENVIRONMENT": "dev",
+        "PULUMI_SECRETS_PROVIDER": "awskms://alias/test-pulumi-secrets",
         "RANGE_VPC_ID": "vpc-test",
         "RANGE_VPC_CIDR": "10.1.0.0/16",
         "RANGE_ROUTE_TABLE_ID": "rtb-test",

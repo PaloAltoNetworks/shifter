@@ -57,22 +57,22 @@ output "firewall_arn" {
 
 output "pulumi_state_bucket_name" {
   description = "Name of the Pulumi state S3 bucket"
-  value       = var.enable_pulumi_provisioner ? module.pulumi_state[0].bucket_name : null
+  value       = module.pulumi_state.bucket_name
 }
 
 output "pulumi_state_bucket_arn" {
   description = "ARN of the Pulumi state S3 bucket"
-  value       = var.enable_pulumi_provisioner ? module.pulumi_state[0].bucket_arn : null
+  value       = module.pulumi_state.bucket_arn
 }
 
 output "pulumi_locks_table_name" {
   description = "Name of the Pulumi locks DynamoDB table"
-  value       = var.enable_pulumi_provisioner ? module.pulumi_state[0].dynamodb_table_name : null
+  value       = module.pulumi_state.dynamodb_table_name
 }
 
 output "pulumi_locks_table_arn" {
   description = "ARN of the Pulumi locks DynamoDB table"
-  value       = var.enable_pulumi_provisioner ? module.pulumi_state[0].dynamodb_table_arn : null
+  value       = module.pulumi_state.dynamodb_table_arn
 }
 
 # ------------------------------------------------------------------------------

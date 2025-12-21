@@ -68,10 +68,28 @@ variable "tags" {
   type        = map(string)
 }
 
-variable "step_function_arns" {
-  description = "List of Step Function state machine ARNs the EC2 instance can execute"
-  type        = list(string)
-  default     = []
+# ------------------------------------------------------------------------------
+# ECS Variables (Pulumi Provisioner)
+# ------------------------------------------------------------------------------
+
+variable "ecs_cluster_arn" {
+  description = "ARN of the ECS cluster for Pulumi provisioner"
+  type        = string
+}
+
+variable "ecs_task_definition_arn" {
+  description = "ARN of the ECS task definition for Pulumi provisioner"
+  type        = string
+}
+
+variable "ecs_task_role_arn" {
+  description = "ARN of the ECS task role (for iam:PassRole)"
+  type        = string
+}
+
+variable "ecs_execution_role_arn" {
+  description = "ARN of the ECS execution role (for iam:PassRole)"
+  type        = string
 }
 
 # ------------------------------------------------------------------------------

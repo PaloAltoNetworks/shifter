@@ -150,30 +150,6 @@ output "cognito_issuer_url" {
 }
 
 # ------------------------------------------------------------------------------
-# Provisioner (Step Functions)
-# ------------------------------------------------------------------------------
-
-output "provision_range_state_machine_arn" {
-  description = "ARN of the provision range Step Functions state machine"
-  value       = module.provisioner.provision_range_state_machine_arn
-}
-
-output "teardown_range_state_machine_arn" {
-  description = "ARN of the teardown range Step Functions state machine"
-  value       = module.provisioner.teardown_range_state_machine_arn
-}
-
-output "provisioner_lambda_role_arn" {
-  description = "ARN of the Lambda execution role for provisioner functions"
-  value       = module.provisioner.lambda_role_arn
-}
-
-output "provisioner_alerts_sns_topic_arn" {
-  description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"
-  value       = module.provisioner.alerts_sns_topic_arn
-}
-
-# ------------------------------------------------------------------------------
 # VPC Peering
 # ------------------------------------------------------------------------------
 
@@ -197,25 +173,35 @@ output "redis_port" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner (v2)
+# Pulumi Provisioner
 # ------------------------------------------------------------------------------
-
-output "pulumi_provision_state_machine_arn" {
-  description = "ARN of the Pulumi provision range Step Functions state machine"
-  value       = var.enable_pulumi_provisioner ? module.pulumi_provisioner[0].provision_state_machine_arn : null
-}
-
-output "pulumi_destroy_state_machine_arn" {
-  description = "ARN of the Pulumi destroy range Step Functions state machine"
-  value       = var.enable_pulumi_provisioner ? module.pulumi_provisioner[0].destroy_state_machine_arn : null
-}
 
 output "pulumi_ecs_cluster_arn" {
   description = "ARN of the Pulumi provisioner ECS cluster"
-  value       = var.enable_pulumi_provisioner ? module.pulumi_provisioner[0].ecs_cluster_arn : null
+  value       = module.pulumi_provisioner.ecs_cluster_arn
 }
 
 output "pulumi_task_definition_arn" {
   description = "ARN of the Pulumi provisioner ECS task definition"
-  value       = var.enable_pulumi_provisioner ? module.pulumi_provisioner[0].task_definition_arn : null
+  value       = module.pulumi_provisioner.task_definition_arn
+}
+
+output "pulumi_ecs_security_group_id" {
+  description = "ID of the Pulumi provisioner ECS security group"
+  value       = module.pulumi_provisioner.ecs_security_group_id
+}
+
+output "pulumi_private_subnet_ids" {
+  description = "Private subnet IDs for Pulumi provisioner ECS tasks"
+  value       = module.pulumi_provisioner.private_subnet_ids
+}
+
+output "pulumi_ecs_execution_role_arn" {
+  description = "ARN of the Pulumi provisioner ECS execution role"
+  value       = module.pulumi_provisioner.ecs_execution_role_arn
+}
+
+output "pulumi_ecs_task_role_arn" {
+  description = "ARN of the Pulumi provisioner ECS task role"
+  value       = module.pulumi_provisioner.ecs_task_role_arn
 }

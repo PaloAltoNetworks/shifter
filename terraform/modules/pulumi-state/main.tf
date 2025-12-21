@@ -90,6 +90,46 @@ resource "aws_s3_bucket_lifecycle_configuration" "pulumi_state" {
 }
 
 # ------------------------------------------------------------------------------
+# KMS Key for Pulumi Secrets Encryption
+# ------------------------------------------------------------------------------
+# Pulumi encrypts sensitive config values before storing in state.
+# Using a dedicated CMK provides:
+# - Defense in depth (secrets encrypted even if S3 leaks)
+# - CloudTrail audit trail for all encrypt/decrypt operations
+# - Least privilege access control via key policy
+
+resource "aws_kms_key" "pulumi_secrets" {
+  description             = "Encrypts Pulumi stack secrets"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  # Key policy: allow account root + provisioner role
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowAccountRoot"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-pulumi-secrets"
+  })
+}
+
+resource "aws_kms_alias" "pulumi_secrets" {
+  name          = "alias/${var.name_prefix}-pulumi-secrets"
+  target_key_id = aws_kms_key.pulumi_secrets.key_id
+}
+
+# ------------------------------------------------------------------------------
 # DynamoDB Table for Pulumi Locking
 # ------------------------------------------------------------------------------
 

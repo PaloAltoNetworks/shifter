@@ -24,7 +24,7 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "DB_NAME", value = var.db_name },
       { name = "DB_USER", value = "provisioner_lambda" },
       { name = "PULUMI_BACKEND_URL", value = "s3://${var.pulumi_state_bucket}" },
-      { name = "PULUMI_SECRETS_PROVIDER", value = "awskms://alias/aws/secretsmanager" },
+      { name = "PULUMI_SECRETS_PROVIDER", value = "awskms://${var.pulumi_secrets_kms_key_alias}" },
       { name = "RANGE_VPC_ID", value = var.range_vpc_id },
       { name = "RANGE_VPC_CIDR", value = var.range_vpc_cidr },
       { name = "RANGE_ROUTE_TABLE_ID", value = var.range_route_table_id },

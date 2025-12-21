@@ -75,6 +75,16 @@ output "pulumi_locks_table_arn" {
   value       = module.pulumi_state.dynamodb_table_arn
 }
 
+output "pulumi_secrets_kms_key_arn" {
+  description = "ARN of the KMS key for Pulumi secrets encryption"
+  value       = module.pulumi_state.secrets_kms_key_arn
+}
+
+output "pulumi_secrets_kms_key_alias" {
+  description = "Alias of the KMS key for Pulumi secrets encryption"
+  value       = module.pulumi_state.secrets_kms_key_alias
+}
+
 # ------------------------------------------------------------------------------
 # Range Instance IAM
 # ------------------------------------------------------------------------------

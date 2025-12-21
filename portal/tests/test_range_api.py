@@ -105,8 +105,8 @@ class TestLaunchRange:
         assert response.status_code == 404
 
     def test_successful_launch(self, client, test_agent, settings):
-        # Ensure Step Functions ARN is not set (local dev mode)
-        settings.PROVISION_STATE_MACHINE_ARN = ""
+        # Ensure ECS is not configured (local dev mode)
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
 
         client.force_login(test_agent.user)
         response = client.post(
@@ -121,41 +121,53 @@ class TestLaunchRange:
         assert data["range"]["status"] == "provisioning"
         assert data["range"]["agent_id"] == test_agent.id
 
-    def test_successful_launch_with_step_functions(self, client, test_agent):
-        """Test launch with mocked Step Functions."""
-        with patch("mission_control.services.provisioner._get_sfn_client") as mock_client:
-            mock_client.return_value.start_execution.return_value = {
-                "executionArn": "arn:aws:states:us-east-2:123:execution:test:abc"
+    def test_successful_launch_with_ecs(self, client, test_agent):
+        """Test launch with mocked ECS."""
+        mock_path = "mission_control.services.provisioner._get_ecs_client"
+        with patch(mock_path) as mock_client:
+            task_arn = "arn:aws:ecs:us-east-2:123:task/test/abc123"
+            mock_client.return_value.run_task.return_value = {
+                "tasks": [{"taskArn": task_arn}],
+                "failures": [],
             }
 
             client.force_login(test_agent.user)
-            with patch.object(client.session, "get", return_value=None):
-                # Need to patch settings for this test
-                from django.conf import settings
+            from django.conf import settings
 
-                original_arn = getattr(settings, "PROVISION_STATE_MACHINE_ARN", "")
-                settings.PROVISION_STATE_MACHINE_ARN = "arn:aws:states:us-east-2:123:stateMachine:test"
+            # Set ECS config
+            orig_cluster = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
+            orig_task_def = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", "")
+            orig_sg = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
+            orig_subnets = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
 
-                try:
-                    response = client.post(
-                        reverse("mission_control:launch_range"),
-                        data={"agent_id": test_agent.id},
-                        content_type="application/json",
-                    )
+            settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
+            settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
+            settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
+            settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-abc123"
 
-                    assert response.status_code == 200
-                    data = response.json()
-                    assert data["success"] is True
-                    assert data["range"]["status"] == "provisioning"
+            try:
+                response = client.post(
+                    reverse("mission_control:launch_range"),
+                    data={"agent_id": test_agent.id},
+                    content_type="application/json",
+                )
 
-                    # Verify execution ARN was stored
-                    range_obj = Range.objects.get(id=data["range"]["id"])
-                    assert range_obj.step_function_execution_arn == "arn:aws:states:us-east-2:123:execution:test:abc"
-                finally:
-                    settings.PROVISION_STATE_MACHINE_ARN = original_arn
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] is True
+                assert data["range"]["status"] == "provisioning"
+
+                # Verify task ARN was stored
+                range_obj = Range.objects.get(id=data["range"]["id"])
+                assert range_obj.step_function_execution_arn == task_arn
+            finally:
+                settings.PULUMI_ECS_CLUSTER_ARN = orig_cluster
+                settings.PULUMI_TASK_DEFINITION_ARN = orig_task_def
+                settings.PULUMI_ECS_SECURITY_GROUP_ID = orig_sg
+                settings.PULUMI_PRIVATE_SUBNET_IDS = orig_subnets
 
     def test_rejects_when_range_exists(self, client, test_agent, settings):
-        settings.PROVISION_STATE_MACHINE_ARN = ""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
         # Create existing range
@@ -231,7 +243,7 @@ class TestDestroyRange:
         assert response.status_code == 404
 
     def test_successful_destroy(self, client, test_agent, settings):
-        settings.TEARDOWN_STATE_MACHINE_ARN = ""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
         # Create a ready range
@@ -252,7 +264,7 @@ class TestDestroyRange:
 
     def test_can_destroy_failed_range(self, client, test_agent, settings):
         """Failed ranges can be destroyed to clean up."""
-        settings.TEARDOWN_STATE_MACHINE_ARN = ""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
         # Create a failed range
@@ -278,7 +290,7 @@ class TestLaunchRangeWhileDestroying:
     """Test that users cannot launch while a range is being destroyed."""
 
     def test_cannot_launch_while_destroying(self, client, test_agent, settings):
-        settings.PROVISION_STATE_MACHINE_ARN = ""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
         # Create a range being destroyed
@@ -322,7 +334,7 @@ class TestSubnetIndexAllocation:
 
     def test_allocates_index_on_launch(self, client, test_agent, settings):
         """Launch should allocate a subnet_index."""
-        settings.PROVISION_STATE_MACHINE_ARN = ""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
         response = client.post(
@@ -429,7 +441,7 @@ class TestSubnetIndexAllocation:
 
     def test_capacity_error_returns_503(self, client, test_agent, settings, django_user_model):
         """API should return 503 when no capacity available."""
-        settings.PROVISION_STATE_MACHINE_ARN = ""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
         # Create a different user to hold the 254 ranges (so test_agent.user has no active range)

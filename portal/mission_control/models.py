@@ -268,7 +268,7 @@ class Range(models.Model):
             )
 
     def get_instance_by_role(self, role: str) -> dict | None:
-        """Get instance details by role (works with v1 and v2).
+        """Get instance details by role.
 
         Args:
             role: Instance role ("attacker" or "victim")
@@ -276,34 +276,11 @@ class Range(models.Model):
         Returns:
             Dictionary with instance details or None if not found
         """
-        if self.provisioner_version == "v2" and self.provisioned_instances:
-            for instance in self.provisioned_instances:
-                if instance.get("role") == role:
-                    return instance
+        if not self.provisioned_instances:
             return None
-        # v1 fallback
-        if role == "attacker":
-            return (
-                {
-                    "instance_id": self.kali_instance_id,
-                    "private_ip": str(self.kali_ip) if self.kali_ip else None,
-                    "role": "attacker",
-                    "ssh_key_secret_arn": self.kali_ssh_key_secret_arn,
-                }
-                if self.kali_instance_id
-                else None
-            )
-        elif role == "victim":
-            return (
-                {
-                    "instance_id": self.victim_instance_id,
-                    "private_ip": str(self.victim_ip) if self.victim_ip else None,
-                    "role": "victim",
-                    "ssh_key_secret_arn": self.victim_ssh_key_secret_arn,
-                }
-                if self.victim_instance_id
-                else None
-            )
+        for instance in self.provisioned_instances:
+            if instance.get("role") == role:
+                return instance
         return None
 
     @property
@@ -318,11 +295,9 @@ class Range(models.Model):
         Returns:
             List of victim instance dictionaries
         """
-        if self.provisioner_version == "v2" and self.provisioned_instances:
-            return [i for i in self.provisioned_instances if i.get("role") == "victim"]
-        # v1: single victim
-        victim = self.get_instance_by_role("victim")
-        return [victim] if victim else []
+        if not self.provisioned_instances:
+            return []
+        return [i for i in self.provisioned_instances if i.get("role") == "victim"]
 
 
 class ActivityLog(models.Model):

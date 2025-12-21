@@ -186,18 +186,6 @@ variable "kali_instance_type" {
   default     = "t3.small"
 }
 
-variable "enable_provisioner_alarms" {
-  description = "Enable CloudWatch alarms for provisioner Step Functions and Lambda"
-  type        = bool
-  default     = false
-}
-
-variable "provisioner_alarm_email" {
-  description = "Email address for provisioner alarm notifications (leave empty to skip)"
-  type        = string
-  default     = ""
-}
-
 # ------------------------------------------------------------------------------
 # Autoscaling
 # ------------------------------------------------------------------------------
@@ -280,14 +268,8 @@ variable "enable_waf_logging" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner (v2)
+# Pulumi Provisioner
 # ------------------------------------------------------------------------------
-
-variable "enable_pulumi_provisioner" {
-  description = "Enable Pulumi-based range provisioning (v2)"
-  type        = bool
-  default     = false
-}
 
 variable "pulumi_container_tag" {
   description = "Docker image tag for Pulumi provisioner container"

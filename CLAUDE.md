@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Guiding Principles:
+- Keep things very simple.
+- Don’t re-invent the wheel.
+- Use proven, solid technologies when possible.
+
 AWS access:
 DEV profile env var: PANW_SHIFTER_DEV_PROFILE
 PROD profile env var: PANW_SHIFTER_PROD_PROFILE
@@ -137,36 +142,6 @@ shifter/
 └── .github/
     └── workflows/               # CI/CD pipelines
 ```
-
----
-
-## Implementation Phases
-
-### Phase 1: Core Platform
-- [x] Django portal (auth, agent upload, Mission Control UI)
-- [x] Portal infrastructure (VPC, RDS, ALB, Cognito)
-- [x] Range provisioning service
-- [ ] Browser-based terminal for SSH access
-
-### Phase 2: Polish
-- [ ] Auto-destroy ranges after N hours
-- [ ] Range status webhooks / polling
-
-### Phase 3: Enhanced Features
-- [ ] Windows victim option
-- [ ] Multiple victim scenarios
-- [ ] XSIAM API integration (verify detections)
-
----
-
-### Future: NGFW Integration
-
-When adding PANW NGFW, insert firewall subnet tier:
-- Public: ALB, NAT Gateway
-- Firewall: NGFW interfaces (new)
-- Private: EC2, RDS
-
-Route: ALB → NGFW → EC2
 
 ---
 

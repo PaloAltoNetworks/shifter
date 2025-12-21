@@ -1,0 +1,3674 @@
+commit 5881871ffc90bba042585ddc4831aba9d3a54873
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 20 16:51:10 2025 -0800
+
+    Tests for pulumi infra
+
+commit b65e2d9922436d83a5b40bd1a47da67d12aaeea1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 20 14:59:57 2025 -0800
+
+    Fix log aggregation, potential broken range deploy, AZ config mismatch
+
+commit f39332590e4929b5e2e36eb927d9b55cb895235e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 20 11:35:06 2025 -0800
+
+    Fix ssh keygen, egress issues, var issues, s3 urls, permissions, other small fixes
+
+commit bd027a1acacaf139225db4014c18780ccde8bae7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 20 10:36:05 2025 -0800
+
+    Django model and service updates
+
+commit fba286666dc2b19bba5c21f6e8544b5ca31618cc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 21:45:24 2025 -0800
+
+    Pulumi program and container
+
+commit 191212e861f9f180931fae853cbba8e2e0b59357
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 21:17:13 2025 -0800
+
+    Pulumi provisioner module (ECS + Step Functions)
+
+commit c03c68afe438ce80db90906844626e26cbba68ef
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 21:00:11 2025 -0800
+
+    ECR repo for Pulumi provisioner container
+
+commit c351a4d13b26eeea96de4ca3ab7a4f67cecfe1ea
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 20:45:58 2025 -0800
+
+    Pulumi state
+
+commit 0bf5b0b0385f129c9b78035626e5eb38387f7dc3
+Merge: 7768f6d 4af9311
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 18:45:39 2025 -0800
+
+    Merge pull request #316 from Brad-Edwards/310-infra-unified-logging-strategy-for-cortex-ingestion
+
+    310 infra unified logging strategy for cortex ingestion
+
+commit 4af9311ed4ca47442769738caf6cbfbcdc7920a0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 18:26:38 2025 -0800
+
+    Update changelog
+
+commit 251c6d19a30728627c72085d8b210d7563182e72
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 18:18:20 2025 -0800
+
+    Pin workflow dependencies
+
+commit fcbfc9a4313098f53b112e5f0e3b8d54cf0e8db5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 18:10:57 2025 -0800
+
+    Pinned workflow actions from minor third-parties
+
+commit c0e220c738811bb94c8563638568402d874f229c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 17:07:42 2025 -0800
+
+    Switch to explicit secrets passing in pipeline
+
+commit 3f98660a0b8e5b4a09de10d67a0959238fd1b13e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 16:13:18 2025 -0800
+
+    Clarify need for object
+
+commit 3eec973a1abce52d7159d8506b36b53200235c77
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 16:10:33 2025 -0800
+
+    Re-raise cancelled error after cleanup
+
+commit 95dc4831da3a6f1dc69add3f9106d5dabcb7c9c7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 16:07:21 2025 -0800
+
+    Fix insecure transport on s3
+
+    Add missing flow logs permission
+
+    nitpick: encrypt sns alarm notifications
+
+    Error message redirect
+
+commit e0477a6673ba4d7f457b67636639a2be5c12e806
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 00:28:12 2025 -0800
+
+    Update changelog, bump version
+
+commit f9a8e5221ccaf625362becee9d10b971117db19f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 19 00:21:58 2025 -0800
+
+    XDR log integration, docs
+
+commit 85b14cdfacc55efd9418cdc7ef658d471d9697f2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 23:08:20 2025 -0800
+
+    Enable ALB, VPC flow, RDS log export, WAF logs
+
+commit 4e3a99d9c04f38414944706bc8608faba44faf72
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 22:36:10 2025 -0800
+
+    Log aggregation infra
+
+commit afe92199c15f9f53442177c845e8564e4942ea16
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 22:17:46 2025 -0800
+
+    CloudWatch log group config
+
+commit f2ad69ca4ef186d19bf3065864e2e6bc536a1365
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 21:54:49 2025 -0800
+
+    Terraform vars and env setup
+
+commit cf00ef3e861115a2d52b1aa13f6b2bdb01e8134c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 21:47:28 2025 -0800
+
+    Shared Lambda logging code
+
+commit 7768f6db2cda1c05aedbba088905998a866a256a
+Merge: 1093d55 96e7459
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 20:18:57 2025 -0800
+
+    Merge pull request #308 from Brad-Edwards/52-infra-waf-for-alb
+
+    Add WAF over ALBs
+
+commit 96e74599874e07c10589d9a3cfdf4468128d5a1e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 20:01:12 2025 -0800
+
+    Consolidate policies
+
+commit 2db482fa1b7579ff0f80cd418ea296f8cb0fec97
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 18:39:49 2025 -0800
+
+    Add WAF over ALBs
+
+commit 1093d559cbef6b18926994c83304e63fe09e206c
+Merge: 6c285d6 31462c5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 00:44:52 2025 -0800
+
+    Merge pull request #299 from Brad-Edwards/295-portal-autoscaling
+
+    295 portal autoscaling
+
+commit 31462c53307641d8413845f4cccd850f0afeb936
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 00:13:02 2025 -0800
+
+    Update changelog
+
+commit 023648ba6640a57edb2ccca027410c53b3843f96
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 18 00:07:00 2025 -0800
+
+    Fix sg provisioning for range subnets
+
+commit 6c285d6ae32f041a91146619b97b53d230d8d866
+Merge: fdccec5 0e749c0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 23:24:01 2025 -0800
+
+    Merge pull request #298 from Brad-Edwards/295-portal-autoscaling
+
+    Permissions and prod vars
+
+commit 0e749c0bd512fb0f2d467105a065f2727ed47620
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 23:06:48 2025 -0800
+
+    Add missing Django var to prod TF
+
+commit fdccec53c7bf58a561fe3b5080f08d888441cec0
+Merge: 2cc75c7 d2eaea4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 22:30:38 2025 -0800
+
+    Merge pull request #297 from Brad-Edwards/295-portal-autoscaling
+
+    Autoscaling Support
+
+commit d2eaea490cd73f9c5641064a2af44e75a928f5aa
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 22:00:44 2025 -0800
+
+    Update permissions for autoscaling
+
+commit 78714e62d977ecac8e1bb06a5ecbdf3ed11c9c4b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 21:37:04 2025 -0800
+
+    ElastiCache Redis module for Django Channels
+
+commit 9f4a10065939e5a59110688342bec1811dc894b6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 21:10:17 2025 -0800
+
+    ALB session stickiness for WebSocket affinity
+
+    Django Channels uses Redis when set
+
+    dev env wired for autoscaling
+
+commit d6778d2e3420a7f1a9ba5df859ac772b283ecbd6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 20:43:02 2025 -0800
+
+    Add stickiness to target group
+
+commit 982c3bca02705943bbee85f98e366e41fff8cad9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 20:35:49 2025 -0800
+
+    Launch template, ASG
+
+commit 60a66544ae13a8e640b5d3dde815272b43bd8827
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 20:24:03 2025 -0800
+
+    Add asg and redis vars
+
+commit 8bd83b0c877039850ccc12f58b382e0a629be1b6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 20:15:34 2025 -0800
+
+    Channels uses Redis when env var set
+
+commit d97f37f6f406d2ec91af899a84c85eb15712d254
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 20:06:20 2025 -0800
+
+    Add redis module
+
+commit 98bf50f1b027f55c9e82c4a6ea425f0c7e5f9659
+Merge: 3355450 2cc75c7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 18:06:12 2025 -0800
+
+    Merge pull request #292 from Brad-Edwards/dev
+
+    Fix missing VPC
+
+commit 2cc75c782ab54428fd5f5f86df615083322ec012
+Merge: 8cd2393 80f526b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 17:55:50 2025 -0800
+
+    Merge pull request #291 from Brad-Edwards/290-remove-duplicate-ssh-resources-1
+
+    Remove duplicate ssh rules
+
+commit 80f526b031cdb395d615dcc54c22df75a4214236
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 17:41:43 2025 -0800
+
+    Remove duplicate ssh rules
+
+commit 8cd239383967443f4302e5bc875a3fa9f4e01f00
+Merge: 1a2670f 91a0961
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 17:27:45 2025 -0800
+
+    Merge pull request #287 from Brad-Edwards/285-fix-tf-maindev-drift
+
+    Fix VPC peering missing
+
+commit 91a09614ad4bee35e29e654604857d4cf0fee7e5
+Merge: a6aa94c 1a2670f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 17:23:02 2025 -0800
+
+    Merge commit
+
+commit 1a2670f1d54653fe76b1f89856d45b34f0d3ec11
+Merge: 57bba4c c615d0a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 17:21:47 2025 -0800
+
+    Merge pull request #284 from Brad-Edwards/277-terminal-ui-remove-redundant-header-and-add-padding
+
+    Terminal UI Tweaks
+
+commit c615d0a3f38af9d27b1484e8c6b96585c9bd57da
+Merge: 2905bb8 57bba4c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 17:17:54 2025 -0800
+
+    Merge branch 'dev' into 277-terminal-ui-remove-redundant-header-and-add-padding
+
+commit a6aa94cd22842775bbfc834d7d69bdfcfc0b0bff
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 17:17:32 2025 -0800
+
+    Add missing VPC peering resources
+
+commit 2905bb868a63453e11d1b209097be6933d3ea4ab
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 17:02:27 2025 -0800
+
+    Fix Terminal UI headers and padding
+
+commit 3355450f34f0a6a60c1de1c1942afe2a43285b44
+Merge: b728b41 57bba4c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 16:34:26 2025 -0800
+
+    Merge pull request #283 from Brad-Edwards/dev
+
+    Dev
+
+commit 57bba4c0ace3d2ea396b3210470e9a7de68b491b
+Merge: 90e714a b728b41
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 16:31:22 2025 -0800
+
+    Merge branch 'main' into dev
+
+commit 90e714a24f45a639d8e7a4dd6baaefeeecdd1935
+Merge: 23799bb 48fba7a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 09:06:57 2025 -0800
+
+    Merge pull request #281 from Brad-Edwards/274-fix-xdr-agent-not-installing-or-registering-on-range-victim-ec2
+
+    Fix sg group conflict
+
+commit 48fba7aafc64b2748ecf459e94abc4b3414137eb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 08:56:23 2025 -0800
+
+    Use only standalone resources for sgs due to inline/standalone conflicts
+
+commit b728b41dfb1bf1d188c46c5ada5b6c76407a136d
+Merge: f455a04 23799bb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 07:34:49 2025 -0800
+
+    Merge pull request #280 from Brad-Edwards/dev
+
+    Dev
+
+commit 23799bb2d15ee7e251f04b005deeaccbeab108e2
+Merge: 892c2cd 4eb62b2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 07:09:26 2025 -0800
+
+    Merge pull request #278 from Brad-Edwards/274-fix-xdr-agent-not-installing-or-registering-on-range-victim-ec2
+
+    XDR agent deploys and connects
+
+commit 4eb62b28905c253502bc1eeecec286eb5a3f7917
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 17 01:24:02 2025 -0800
+
+    Unrestricted two way comms between range boxes
+
+commit d36ec1aa4471aafe72a26b01be2133cf40513643
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 23:59:56 2025 -0800
+
+    Remove priority fields from stateful rule group reference blocks
+
+commit 12463f2cf8a8a8055b2579a5dd2463eb6fe5d1d1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 23:24:57 2025 -0800
+
+    Descriptive range hostnames
+
+    Allowlist Cortex urls
+
+commit bba37446352192bb2f86b30c91825b881e72c519
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 21:13:02 2025 -0800
+
+    Allow list XDR/XSIAM IP ranges
+
+commit a2400de878cce6c3c8d766dbd2c25693e58b11db
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 20:37:50 2025 -0800
+
+    Fix incorrect agent install behaviour
+
+commit 38fac77d39c2d0625b974b52181761743c38fcfd
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 20:20:26 2025 -0800
+
+    Fix error message parsing
+
+commit 96448c3c81cf6bdd166d08d9c149c870646cc22f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 20:06:13 2025 -0800
+
+    Handle unexpected installer package names
+
+commit 8f9535fc4176abd2754e2d4ceab6dae266935233
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 19:44:02 2025 -0800
+
+    Handle finding free subnet if there are orphaned ranges waiting for cleanup
+
+commit 6a7f4908f52673c0779c9f47841ef06919fe4ce9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 19:22:58 2025 -0800
+
+    Terminal redirect works all the time
+
+    Terminal UI shows disconnected state when no ready range
+
+    Fix open terminal button
+
+commit 0928ee2a380b99837aedcfe8e740942afb52d5df
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 19:13:08 2025 -0800
+
+    Use presigned URL to download user's XDR/XSIAM agent to s3
+
+commit efd5b3152018156be4eeaa7ee5ddc98aab9a7b3d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 18:56:13 2025 -0800
+
+    Fix dashboard polling errors
+
+    Automatic redirect from portal on session expiry
+
+commit 96f9b27a0a2d4dce6dbf020a4a8c1e8b69d7f14f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 18:35:50 2025 -0800
+
+    Extract ASL files for provisioner to resolve step functions not updating and for maintainability
+
+commit d6f9167b289d701ba6fb1b0cb114bd497d965a17
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 16:53:26 2025 -0800
+
+    Fix vic range box does not get XDR installed.
+
+    Add network infra and more robust install logic for agent install
+
+commit 892c2cd82ace898c2465610cd2159e12f90ae91b
+Merge: c0eb302 04d3f3f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 16:04:07 2025 -0800
+
+    Merge pull request #272 from Brad-Edwards/267-browser-based-terminal-ui-for-range-access-1
+
+    Claude Code for agent control on range boxes
+
+commit 04d3f3fccb2a7884f056fc688950afc3eccef5f3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 15:58:00 2025 -0800
+
+    Better UX while terminals loading
+
+    Terminal UI polls while range boxes spin up
+
+commit 922117cb4029ae3f471641c555ef4623f1d57b18
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 13:07:27 2025 -0800
+
+    Update changelog and version
+
+commit ab5e51413dbed2374a37911136f4377bc6985f7b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 11:01:48 2025 -0800
+
+    Fix ssh keys on vic saved in the wrong place
+
+commit 7df65bb818bbd85fb077008824055b0281c68335
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 10:57:43 2025 -0800
+
+    Add VPC for Bedrock access
+
+commit 9d1fe60ea4dc7294c8baac6804215c9b4d993247
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 03:42:15 2025 -0800
+
+    Fix user names
+
+commit 1bf4881b55ebb72e035f519b2713e1f87b037852
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 02:30:16 2025 -0800
+
+    Better exception handling to prevent Daphne crash
+
+commit 8a1d84925630d73d93f56cee46783bbaf2079c31
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 02:24:51 2025 -0800
+
+    Fix wrong user name in user_data
+
+commit 888df6cc67113292637abf3222ead94a6a60bd56
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 02:14:54 2025 -0800
+
+    Use InMemoryChanelLayer instead of Redis with single portal instance
+
+commit d4f48d706db0ab382326e514cdcdceb4c622f00a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 02:02:09 2025 -0800
+
+    Fix access denied to victim key
+
+commit 3122b3872f643e9cbd99e3ad45af4a50117acbe3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 01:47:23 2025 -0800
+
+    Fix provisioner fails when violates schema constraint
+
+commit 931679190aaa1a35b9850874144be1440aa18df2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 01:32:39 2025 -0800
+
+    Terminal UI for access to range instances
+
+commit c0eb302c19033c4d50cd6d904842510e7854d4a6
+Merge: 0528452 877ba78
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 00:38:16 2025 -0800
+
+    Merge pull request #265 from Brad-Edwards/261-remove-owui
+
+    Remove OWUI and MCP
+
+commit 877ba78e5f929955cb9a85632a30503c862de6a8
+Merge: 06e1457 0528452
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 00:35:48 2025 -0800
+
+    Merge branch 'dev' into 261-remove-owui
+
+commit 06e1457b7b2e234791aea2ea699d949f0bd835a6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 00:22:30 2025 -0800
+
+    Remove unnecessary migration
+
+commit f933d9dec3ee533e445e5bb18b1f30d54b36425f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 16 00:05:56 2025 -0800
+
+    Remove OWUI and MCP, moving to lighter weight UI
+
+commit d129c271a42910e48c9566112fbb185300346a2c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 23:16:19 2025 -0800
+
+    Fix permissions
+
+commit ae8ee52dca736ca3447acbb49679c78bdff45e7b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 21:44:07 2025 -0800
+
+    Fix quality npm install
+
+commit 541f25bc2cfa24d2cba770ca1df764366651142d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 21:32:24 2025 -0800
+
+    Add missing ECR permissions
+
+commit d5aaf9bce2cc775ed9a1b0f757e0123f62750763
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 21:23:28 2025 -0800
+
+    Add missing dependency
+
+commit 052845291da61031a0da1fafec73b51599faef7d
+Merge: f1ba5cc d1bc86a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 21:15:18 2025 -0800
+
+    Merge pull request #262 from Brad-Edwards/260-implement-victim-mcp-for-blue-team-scenario-setup
+
+    Victim MCP
+
+commit d1bc86a5f5308029bb33ddbcd93296845cd1df84
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 21:05:17 2025 -0800
+
+    Fix user data to properly install XDR agents
+
+commit b4d4f53507935119207ad7c03103884e2ac39ea1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 21:00:24 2025 -0800
+
+    Fix permissions to allow xdr install
+
+commit 02fdfb249caddfd7472ed9a2175930f70feac7b2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 20:54:07 2025 -0800
+
+    Add missing test dependency.
+
+commit 40252e257434565abd78702a2e9caae4781c751d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 20:46:42 2025 -0800
+
+    Custom OWUI theme deployment for Cortex look and feel
+
+commit 3215951a2c156a8ee1f94a33ab8b59756c982768
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 20:38:43 2025 -0800
+
+    Add victim mcp wrapper for OWUI
+
+commit 91978629467fc04fca8e148ea1d4988ebfd92727
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 20:24:15 2025 -0800
+
+    Fix SSM access to range boxes cut during hardening
+
+commit 57edcdd799a8ae935102d87dde955d9fb9b2ad30
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 20:18:28 2025 -0800
+
+    Removed mcp-red and added mcp-shifter to quality
+
+commit 9f978c40cc587ce6a8fa49c23c7a8d40baa8e639
+Merge: d13d1ff f1ba5cc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 20:11:13 2025 -0800
+
+    Merge branch 'dev' into 260-implement-victim-mcp-for-blue-team-scenario-setup
+
+commit d13d1ff630b2c8d1eea288d1c2386c88fd2be9ec
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 20:08:54 2025 -0800
+
+    Fix dependency cycle in portal migrations
+
+    Add linting for mcps
+
+commit f1ba5cc779a7e4c889783820c420a3b0c749b148
+Merge: e5ba601 deee825
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 18:57:36 2025 -0800
+
+    Merge pull request #261 from Brad-Edwards/227-cortex-reskin
+
+    Cortex theme for OpenWeb UI
+
+commit deee825e0a1e5e4ca5a97516f1a41416974f2935
+Merge: 4d963ae e5ba601
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 18:52:27 2025 -0800
+
+    Bump version, merge dev
+
+commit 4d963aeb3938eaa9c83caec0d7447383f0161276
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 18:49:31 2025 -0800
+
+    Update changelog, bump version
+
+commit 41ce2a3bc21fd05ea28306a66fe0d0c96fc9499b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 18:46:03 2025 -0800
+
+    Victim MCP impl
+
+commit e5ba601b0e8cdf804ebcf54f866b9a035e68cefa
+Merge: 09b9bfc 49d90e1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 18:10:41 2025 -0800
+
+    Merge pull request #258 from Brad-Edwards/251-add-aws-network-firewall-for-range-vpc-egress-filtering
+
+    Harden range egress
+
+commit 49d90e17adc32ff43efc2b357f462658bed7d407
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 17:15:21 2025 -0800
+
+    Remove route for return traffic, rely on implicit route
+
+    Fix missing permissions for CloudWatch logs
+
+commit 844881c59fb2aa35ea4e0d6c0aa6845314a8918c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:59:24 2025 -0800
+
+    Update docs
+
+commit 69ec5739b85be1d6d471fbb3a1e5b980c9a5ea87
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:56:49 2025 -0800
+
+    Bump version and update changelog
+
+commit dc01c93b355549f048bd2830984cb7eff8f00103
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:53:08 2025 -0800
+
+    Add margin above logo
+
+commit 6a5428873d9fe435f06663291aadab922763d19d
+Merge: b096276 09b9bfc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:50:39 2025 -0800
+
+    Merge branch 'dev' into 251-add-aws-network-firewall-for-range-vpc-egress-filtering
+
+commit b0962768660b05750caa4118a0ce727622971090
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:49:52 2025 -0800
+
+    Restrict all Kali traffic to subnet
+
+    Victim can only egress for XDR/XSIAM telemetry
+
+commit 01ab4f72c59fd639650bff4d6c8b1c3767642d06
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:42:37 2025 -0800
+
+    Remove logo above textbox
+
+commit f455a04bb0a8278b092e76401c168c4dccabc899
+Merge: 15d039b 09b9bfc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:40:32 2025 -0800
+
+    Merge pull request #256 from Brad-Edwards/dev
+
+    AgentChat linked to Auth and MCP for Kali
+
+commit 0f23a0cc0358bc2a13b59f153664a5a3121896f2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:36:55 2025 -0800
+
+    Sidebar should be black
+
+commit f7555271cb6565432ef8e2a14f954262034ed080
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:14:00 2025 -0800
+
+    Sidebar expand icon always viz
+
+commit 09b9bfc7034d58f3f178d1d3e0981fc161051fab
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:01:28 2025 -0800
+
+    Fix PR comments from deploy fail on merge
+
+commit 00510d4062235645af39f6096685822ca1851c5e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 16:00:10 2025 -0800
+
+    Fix text box highlight and logo colours
+
+commit d8620e7dfdc62cceddd2251bbbed62219b19cea9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 15:49:53 2025 -0800
+
+    Fix sidebar background
+
+commit a5dc6470cd2cbbe4849d3549701ffbf60f0806c0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 15:48:45 2025 -0800
+
+    Fix deploy pipeline conditional logic causes undesired job skips
+
+commit 302342b46dde8d24cf71c1dafa3c1867927aa32d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 15:45:29 2025 -0800
+
+    Fix wordmark alignment
+
+commit cd85a3fbcafd49960fff0537164688ea06a60057
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 15:38:02 2025 -0800
+
+    Fix favicon and wordmark
+
+commit eac497772404485c8b3f405e9f9c2f35bc0295f1
+Merge: 918c1b6 475b3bf
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 15:24:56 2025 -0800
+
+    Merge pull request #249 from Brad-Edwards/226-wire-up-mcp-integration-with-openwebui
+
+    Lord have mercy on my deployment.
+
+commit 475b3bff41418ea00148e5aee5c7222117afa026
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 15:12:16 2025 -0800
+
+    Update docs
+
+    Add initial Sonnet 4.5 system prompt
+
+    Fix tests out of sync with code
+
+commit c10aacdf35258e2542c29d2d33beeb599baab0d7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 12:35:38 2025 -0800
+
+    Put tool outputs into chat.
+
+commit 357287797373d6816f427d0aa6c4b26e7a181a78
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 12:24:44 2025 -0800
+
+    Streamline tool descriptions
+
+commit ca77831efae081e05789f7bb928f2aef778fd6bc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 11:32:50 2025 -0800
+
+    Update tests after changes to messaing
+
+commit b4c4bb802b8e4cba46d1206964f3782945e151ff
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 11:30:52 2025 -0800
+
+    Cortex theme for OWUI
+
+commit fb68ab921b4f50a81cfac4e8d6038a2d3c2a60ff
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 11:17:13 2025 -0800
+
+    Add security directive to tool descriptions
+
+commit 5dee92111482dcd96a8f60a01bba81da5a2fc5b3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 10:57:59 2025 -0800
+
+    Fix ssh key passed to mcp incorrectly
+
+commit 150d801d9fdcb73656ce5609cc47776ad97349ff
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 10:34:29 2025 -0800
+
+    Change response format to JSON from SSSE
+
+commit 6f94a60d600fdd6965fa138c21fa4fbd4aed0d08
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 09:59:11 2025 -0800
+
+    Fix secrets naming error
+
+commit 5e77fccae2bdf9b3b41765823f4bde5113eaaa43
+Merge: 3fc70f9 918c1b6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 09:02:03 2025 -0800
+
+    Merge branch 'dev' into 226-wire-up-mcp-integration-with-openwebui
+
+commit 918c1b6bdd66f6a2e08be85ff13c44660eabe97a
+Merge: 2c59d1f f56bc28
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 08:52:52 2025 -0800
+
+    Merge pull request #252 from Brad-Edwards/feature/183-cortex-ui
+
+    Cortex reskin
+
+commit 3fc70f921b40ad7381dfc77bc67f6d2b4e36443d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 08:42:01 2025 -0800
+
+    Fix identifier used to tie users from AgentChat to ranges
+
+commit f56bc281c2896f1f3abe9f38cf8ffda5ce77b6b2
+Merge: 4aebae1 2c59d1f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 08:26:37 2025 -0800
+
+    Merge dev
+
+commit 11ee152da4e2567f40231a6ce315d0a71232e2a4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 02:30:20 2025 -0800
+
+     Add RDS region var to spport auth from MCP
+
+commit 4aebae192aa12eac463e6bc251b48f396ea79b14
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 02:24:19 2025 -0800
+
+    Update favicon
+
+commit 94e79916e3761db48eb122dc03d533404e6cdc80
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 01:57:05 2025 -0800
+
+    Add MCP user to RDS
+
+commit ec22c374b45bd323f37272c0b1d7b7bd69f5be0e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 01:56:03 2025 -0800
+
+    Add spacing for readability
+
+commit bee61da1fd373430a38e6badde8f8f13acb3633f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 01:53:58 2025 -0800
+
+    Fix button style
+
+commit d9acde21ac99d65b7247674c9cb23977cc23c5cf
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 01:48:19 2025 -0800
+
+    Sytled dropdowns
+
+commit ae0415a1f8c105ecaa53b785136b418870581d14
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 01:38:16 2025 -0800
+
+    Fix cert issue on RDS access
+
+commit fa00520b51ecf545bc5c293ba81008ed89176990
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 01:32:25 2025 -0800
+
+    Style risk register
+
+commit 8924b1c990a20f2f9001e07ccb3eb1057a29fb08
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 01:11:56 2025 -0800
+
+    Fix agents list empty image size
+
+commit 4b93ee2dc6ce976691a13a5bcaf9948049001fac
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 01:00:21 2025 -0800
+
+    Fix bottom sidebar footer spacing
+
+commit c61ad70b2a647ff0b87df86e8b3b47136852701e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:56:53 2025 -0800
+
+    Fix sidebar footer spacing
+
+commit 6277711f4672ff04045f37d7ffd0554fa2eeda99
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:54:55 2025 -0800
+
+    Update docs
+
+commit 10c053b7d3a9bf6ba7f46663607e3b5ac00e52e7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:49:36 2025 -0800
+
+    Fix user tile highlight
+
+commit 3ea3f5c59be6ffd531b02697356ee602d5fb535a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:34:40 2025 -0800
+
+    Fix lock colours
+
+commit 335fa6792e4403b9b552e929a1819261d4349efd
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:27:23 2025 -0800
+
+    Align user tile
+
+commit d54c30d7ed235fbc71b120fdaa7e720b054487af
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:24:38 2025 -0800
+
+    Fix settings and help logos
+
+commit 3992e8f523981c8fc365d0596f619fb401899657
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:20:54 2025 -0800
+
+    Add mcp wrapper due to OWUI MCP features not passing JWT properly
+
+commit 467885174142c4f51a6295eebe306eee3b6917e2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:19:13 2025 -0800
+
+    Fix underlines
+
+commit 8cff69982915800df4d330c7487e997482a96ba9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 15 00:06:07 2025 -0800
+
+    Fix logo sizing
+
+commit 7c9371cec36edcdba0f2a06238ed8861bff51e53
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 23:46:25 2025 -0800
+
+    Fix sidebar width.
+
+commit 0c49a566ce139e78cf6a331b3d6ce6a73f2477af
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 23:41:18 2025 -0800
+
+    Closer cortex match
+
+commit a6df6f19e4172c7d6e67bc85a4e797ba9b0f1c33
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 23:02:18 2025 -0800
+
+    Resize logo
+
+commit e0851bf1643b8f4c306ab20386416f70bf60468a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 22:55:07 2025 -0800
+
+    Sidebar styling getting close
+
+commit 96a9249080d5d4d3b31e3c94f5c9e54509e807e6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 22:43:18 2025 -0800
+
+    fix build and deploy look for different agentchat tag lengths
+
+commit c579665794342ecca2a7745491ea0920bb8de4f6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 22:40:35 2025 -0800
+
+    Remove stale var
+
+commit 94d656b0641322c5962692784ec8fd77daad3569
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 22:36:02 2025 -0800
+
+    Sidebar and most cortex styling working
+
+commit 560368779893d32d223f816ba51b86e9f1365383
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 22:17:13 2025 -0800
+
+    Doc updates
+
+commit 5209edba379292ae22527cc300cc48405f834d43
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 22:09:16 2025 -0800
+
+    Add gh layer caching to speed deploy
+
+commit f9f71ca9f72a384ad42452229908c41dc4fb4568
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 22:01:24 2025 -0800
+
+    Route chat traffic through subdomain to deal with OWUI unfriendly pathing
+
+commit e5a3c1955e93c1ee71da05b87adc8478d336f7c1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 20:06:16 2025 -0800
+
+    Add NGINX reverse proxy for OWUI to handle pathing issues
+
+commit 7104ab5b3f461691bd7e1e4d4f8a81b1472609be
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 19:57:41 2025 -0800
+
+    restructure again
+
+commit ab212bea2d21c5bbcd27362570f636da16d76786
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 19:25:53 2025 -0800
+
+    Fixes for OWUI not connecting to Cognito
+
+commit 7ce009bd296f979cff5a3599e977591f5890c09f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 18:35:01 2025 -0800
+
+    Layer backgrounds
+
+    Cortex logo
+
+commit c7cc408e2790219901a3878d3128639d0a0dcf70
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 18:12:48 2025 -0800
+
+    Refinements
+
+commit e39f52ee68742dc6d93af18277e37ba84cafab6a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 18:07:17 2025 -0800
+
+    UX refinement to sidebar
+
+commit 902b0c02ec96ad82350140e13b2eaf79599ad34f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 17:51:34 2025 -0800
+
+    Restructure v1 complete
+
+commit 2e0e81b9b26edb3ce0a9fe5393449db521af450e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 17:46:33 2025 -0800
+
+    Added user avatar in sidebar
+
+commit 8e4ceb716eb1492e5e6cc583171d58b623f925e3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 17:44:05 2025 -0800
+
+    Improved empty states
+
+commit 97bdf97e0bf74646ec956aefb3f6dd56bd6ac2be
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 17:40:45 2025 -0800
+
+    Added secondary navigation panel
+
+commit 9bfd033ec56e5ea07a07ab5a65e73ec3dacc50cb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 17:39:00 2025 -0800
+
+    Deeper restructure to match Cortex layout
+
+commit 09c2f0fcbd1a4b121c0b91b2ab47b1f59b8c3c4f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 17:33:10 2025 -0800
+
+    Fix middleware pathing
+
+commit c97afd0435be946ebd8749e195fcabe4cbcf50d9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 17:20:13 2025 -0800
+
+    Improve django logging
+
+commit 9a2071513b9ed6b925516538fc68a30eb84176d5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 17:01:22 2025 -0800
+
+    Add lint for UX code
+
+    Fix style issues
+
+commit 88cd34586f82ec4f8200d9a4b9baff3a8b248ccd
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 16:52:53 2025 -0800
+
+    Fix escaping
+
+commit 969e5e786a2fe487e3bab884de9d0f9380ca7ab3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 16:47:13 2025 -0800
+
+    Fix symlink bug in MCP dockerfile
+
+    Reliable health check
+
+    Add missed .dockerignore
+
+commit 30e2fe888f67ccf3abd0dda52bafa7c60e0d3c74
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 16:40:51 2025 -0800
+
+    feat(portal): complete Cortex XDR reskin - Phase 6 polish
+
+    - Add utility classes: spacing, lists, code blocks, opacity
+    - Replace inline styles with CSS classes
+    - Add card-flush variant for table cards
+    - Add code/pre styling for API documentation
+    - Final cleanup and validation complete
+
+    All 57 tasks complete. Portal now matches Cortex XDR look and feel.
+
+commit 8a9eaaa1d247062ad5bfc51e540f74110bd57e95
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 16:38:37 2025 -0800
+
+    feat(portal): apply Cortex XDR theme to landing page
+
+    - Update coming_soon.html with Cortex color palette
+    - Switch background from black to #1f1f1f
+    - Replace neon green accent with Cortex blue #128df3
+    - Remove glitch effects for professional appearance
+    - Keep subtle logo pulse and hover effects
+    - Update dev_login.html for consistency
+
+commit 9333143c9ea1e29df47c35ab88927ee2012baa29
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 16:31:56 2025 -0800
+
+    feat(portal): apply Cortex XDR theme to Risk Register
+
+    - Update base template with shared xdr-theme.css
+    - Switch to Lato font family
+    - Remove 250+ lines of inline CSS
+    - Update risk list with XDR tables and severity badges
+    - Update risk detail with cards, comments, metadata grid
+    - Update risk form with bottom-border input styling
+    - Update API keys page with XDR table and code blocks
+
+commit e7a80b58b0c58f81ff069f30b547d42b094c6c05
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 16:28:54 2025 -0800
+
+    feat(portal): apply Cortex XDR theme to Mission Control pages
+
+    - Update dashboard with XDR cards, forms, status indicators
+    - Update agents page with XDR table, badges, upload progress
+    - Update history page with XDR table styling
+    - Update settings page with modal and danger zone
+    - Update help page with FAQ styling
+    - Add utility classes: text, spacing, flex, modal
+
+commit eb1d94674babd530e4c33e5bd7e7551e0a838d36
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 16:24:10 2025 -0800
+
+    feat(portal): update Mission Control base template for Cortex theme
+
+    - Link external xdr-theme.css stylesheet
+    - Switch from Roboto to Lato font family
+    - Add xdr-dark-theme class to body element
+    - Remove 340+ lines of inline CSS (now in xdr-theme.css)
+
+commit 4d824d4b567dab46edbe904ccff347351fe91865
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 16:19:00 2025 -0800
+
+    Phase 1: Setup
+
+commit eeaefcbe55030be52f25756d1bb886adaf7934f2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 15:57:20 2025 -0800
+
+    Fix MCP build context
+
+commit b0ff85480bd3b32a4ad3d383552ae872e7f98d5d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 15:37:06 2025 -0800
+
+    Fix tf state path error
+
+commit 2c59d1fbaac9278b221ee17b2dbd71d2a7e3004c
+Merge: c6729c1 93ff409
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 13:23:34 2025 -0800
+
+    Merge pull request #246 from Brad-Edwards/226-wire-up-mcp-integration-with-openwebui
+
+    Remove CI/CD race conditions
+
+commit 93ff409678e61497f21be2ef0958c8f6e3699e0f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 13:14:02 2025 -0800
+
+    Include changes to workflow files in filters
+
+commit 9f44eebd4344bd0ec680b2740d29a6336b3f5e2d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 13:12:00 2025 -0800
+
+    Refactor CI/CD to remove all race conditions. ffs.
+
+commit 6b8c77c51bac131eff2968d82bbb59cb952530bf
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 12:53:31 2025 -0800
+
+    UX specs
+
+commit d8c55f5bc2ae9aeed801888544054603a9279e97
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 12:49:05 2025 -0800
+
+    Cortex UX reskin constitution
+
+commit c6729c1334aa3354464616bfb01b75dbe47189c6
+Merge: 31c8424 d0b608d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 12:49:43 2025 -0800
+
+    Merge pull request #245 from Brad-Edwards/226-wire-up-mcp-integration-with-openwebui
+
+    226 wire up mcp integration with openwebui
+
+commit d0b608da87fe2ef4888aa248fa12880d00d346db
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 12:33:15 2025 -0800
+
+    Add ECR for MCP
+
+commit 9a49ff02a1bd35634c8f96bdc2a5790f8d192ac0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 11:59:56 2025 -0800
+
+    Add missing argument
+
+commit 2e018efb7b393b3d6744a0027d4cb3434622097a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 11:26:47 2025 -0800
+
+    MCP adaptation for Shifter
+
+commit 15d039b68b7661781c60411bcf00b1ecf6689cf7
+Merge: 7aa7184 31c8424
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 01:39:16 2025 -0800
+
+    Merge pull request #234 from Brad-Edwards/dev
+
+    Update MCP SDK
+
+commit 31c84249ea5aa0740605f1023ece0dbbba6124c3
+Merge: 7aa7184 001e72a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 01:35:15 2025 -0800
+
+    Merge pull request #163 from Brad-Edwards/snyk-upgrade-2bee882fa62667cc1eba0921117e1381
+
+    [Snyk] Upgrade @modelcontextprotocol/sdk from 1.17.3 to 1.22.0
+
+commit 001e72ac184b27b353ef429ec4dfaa07549c2d16
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 01:31:00 2025 -0800
+
+    Fix caching error
+
+commit 8c20a69d360b16b71c6e2dd20be0294f17491123
+Merge: 65ebf62 7aa7184
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 01:27:00 2025 -0800
+
+    Merge branch 'main' into snyk-upgrade-2bee882fa62667cc1eba0921117e1381
+
+commit 65ebf62b3b41db8aad7faa184302ba72e8eebc94
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 01:25:47 2025 -0800
+
+    Add caching for checkov
+
+commit 8a564d1c88e4e42b83dffa9fa5c8fc561ac694ab
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 01:24:06 2025 -0800
+
+    Update instructions for OWUI config - unrelated
+
+commit 02edf71cdd21140c925333ed59216fc7f2e5f9f8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 01:10:19 2025 -0800
+
+    Update changelog and bump version
+
+commit afc96cdc71cc35fa45d0891631d6493478d1a42b
+Merge: af4d13d 33003d0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 01:06:20 2025 -0800
+
+    Merge branch 'dev' into snyk-upgrade-2bee882fa62667cc1eba0921117e1381
+
+commit 7aa7184821e5d06625704a0dbffbc987303aef7e
+Merge: 7beba4f 33003d0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 14 00:05:37 2025 -0800
+
+    Merge pull request #230 from Brad-Edwards/dev
+
+    OpenWeb UI and Risk Register
+
+commit 33003d07a602a9f7f4ddb473281adbff2291fa17
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 23:56:05 2025 -0800
+
+    Fix logic error in portal and agentchat workflows causing them to always target dev
+
+commit 65ec8fddfad2b499e7c0bcd72a18717fcc393d76
+Merge: df6abcf 9c6cb39
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 23:33:38 2025 -0800
+
+    Merge pull request #228 from Brad-Edwards/209-replace-librechat-with-open-webui
+
+    Ensure deploy always runs for agent chat
+
+commit 9c6cb3966b2ff256474b38d62e2533b92516cd92
+Merge: 9a8492f df6abcf
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 23:19:56 2025 -0800
+
+    Merge branch 'dev' into 209-replace-librechat-with-open-webui
+
+commit 9a8492fc9f6ad33f3d4094b6d577117e6f9ba675
+Merge: 8a96a77 7beba4f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 23:16:24 2025 -0800
+
+    Merge remote-tracking branch 'origin/main' into 209-replace-librechat-with-open-webui
+
+commit df6abcfce4a0c5952d1b366b60270a84b165c97f
+Merge: cca776c 8705df7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 23:12:33 2025 -0800
+
+    Merge pull request #227 from Brad-Edwards/001-risk-register
+
+    Linting, tests, sec checks
+
+commit 8705df763ad1631a8b81ec7a8c8111595ddd3f61
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 23:07:20 2025 -0800
+
+    Lint
+
+commit af8c6f67aa88faa244ee69c559998474d83fd7f3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 23:01:53 2025 -0800
+
+    Lint
+
+commit 8a96a77b8535e537f42a16cde10398e3ffe8cd42
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 23:01:05 2025 -0800
+
+    Ensure deploy always runs for agent chat
+
+commit 0afb52f1adffdf63963deade6521c31c6b8f461e
+Merge: 406133d cca776c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 22:51:37 2025 -0800
+
+    Merge dev with 209
+
+commit cca776c91ceeb109dfa42e61b72a8639618a06b5
+Merge: 997f096 e3323c4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 22:31:41 2025 -0800
+
+    Merge pull request #211 from Brad-Edwards/209-replace-librechat-with-open-webui
+
+    209 replace librechat with open webui
+
+commit 406133df4d6c18c5d033bba02d787fd6cd37e4ab
+Merge: e8d93e6 7beba4f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 22:27:10 2025 -0800
+
+    Merge remote-tracking branch 'origin/main' into 001-risk-register
+
+commit e3323c4e9ce3669e8827019dde80c28ebf07f9eb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 22:04:56 2025 -0800
+
+    Add RDS for OpenWeb UI for data persistence
+
+    Add additional delete protection for RDS
+
+commit e8d93e697d9f34399080693064c5c827517a491d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 21:58:20 2025 -0800
+
+    Linting, tests, sec checks
+
+commit 46199c14a6f148da83bda7f0dcd78233452db333
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 21:12:48 2025 -0800
+
+    Fix text checks for None instead of emptry string
+
+commit 6032dd9e5cb0de6d735837eb09d9d7a58ba8d83b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 20:48:06 2025 -0800
+
+    Improve test coverage
+
+commit d37480b509442af46d6da2bdc6e8ea66ea75b270
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 20:01:38 2025 -0800
+
+    Switch to SonarQube automatic analysis
+
+commit f6f064384bfee42c1a7b2912b583f59f73b00f7f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 19:55:05 2025 -0800
+
+    Add missing DeepSeek permission
+
+    Models off by default
+
+commit ab4c9bc3617935e3e0a79b5032465176c37844dc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 19:42:35 2025 -0800
+
+    Add Sonnet 4.5 and DeepSeek R1
+
+    Fix model access permissions
+
+commit d23f0fa940db1f07b07dd6a622b36e7962e621eb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 18:59:57 2025 -0800
+
+    Correct API endpoint
+
+commit 5eada952030385be7ccb6660a986d62c65e37768
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 17:10:17 2025 -0800
+
+    Configure Bedrock availability in OWUI automatically
+
+commit 0ab0c08c125a7dcb52fa5885532bfe1a5ebde6ee
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 16:48:41 2025 -0800
+
+    Collect static files before tests
+
+    Update range destroy test to match new logic.
+
+commit ed408c27307ab92a189aab2a4208d77931fdf2f1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 16:40:33 2025 -0800
+
+    Fix env vars naming for BAG
+
+commit 10431875acb8a3e9cb293e914e4413b5cc958484
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 16:06:56 2025 -0800
+
+    Use postgres service for testing in pipeline
+
+commit 0fb8a8fc42ffd4e04c17d3df4945cca0e3f4ed9c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 15:43:35 2025 -0800
+
+    Add cloud-init wait for all ec2 creation to avoid user_data/deploy race condition
+
+commit 2f3a7c92e10aa9c1e54d667d6d1dce63f021caa3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 14:10:40 2025 -0800
+
+    Add missing EC2 mod permissions
+
+commit 6706d6e7433bb155a9a6a6618d7fb57ff103022d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 13:49:06 2025 -0800
+
+    Accept, defer, or fix all issues surfaced by IaC and code scanning
+
+commit 9f3d80b17f29e523ce63026c07f6e255de65284f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 13:05:57 2025 -0800
+
+    Add additional EC2 monitoring and cost optimization
+
+commit 9db5914a519a07aac50677ac049fd99311ff95cc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 13:01:21 2025 -0800
+
+    Accept OIDC user permissions scope during rapid development
+
+commit 6ade903bcfff66b39d55e420d48399a73926bc7b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 13:00:04 2025 -0800
+
+    Risk and analysis deferred given current timelines and low criticality
+
+commit 873f8a237d4c77d2dc0619d0929561bbba837885
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 12:55:22 2025 -0800
+
+    Checkov soft fail during first warnings pass
+
+commit fee14cbb4d308e401c37b36abb88f36d6dd05b9d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 12:52:31 2025 -0800
+
+    Removed unnecessary manual pipeline triggers, range infra destroy kept for breakglass safety
+
+commit d0aaa39f740e3eb73a0a2ddce5bbb536104b0a72
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 12:34:13 2025 -0800
+
+    Allow access to landing page.
+
+commit 91ba214e75ef8bec77ececb9d5c5e643e9030b27
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 12:18:18 2025 -0800
+
+    Add local and pipeline IaC scanning
+
+    Allow local dev portal auth without Cognito
+
+commit b3629fded3d7f52432aa0ad75dc75c1c388713b4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 12:13:41 2025 -0800
+
+    Bump version
+
+    Move untrusted workflow inputs
+
+    Remove potential attacker controlled values from workflow_run
+
+    Lint fixes
+
+commit ab74e6bd40a97bff4b18a8de5c77ed49758f1236
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 11:05:44 2025 -0800
+
+    Add test gate to quality workflow
+
+commit a3170864f4d2d5dab74b169ad4e14c6d4274415b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 11:04:23 2025 -0800
+
+    Update agentchat docs
+
+    Extend quality workflow
+
+commit 7564531a7c1c4e59e719ac26fd137698ee3239dd
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 10:54:26 2025 -0800
+
+    Bump version
+
+    Move untrusted workflow inputs
+
+    Remove potential attacker controlled values from workflow_run
+
+commit 58590e8ae44678b3b01ae8cc329a4b2b9c5ef517
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 13 10:35:44 2025 -0800
+
+    OpenWeb UI for agent chat
+
+    Bedrock Access Gateway to resolve API translation
+
+    Extend SonarQube coverage
+
+commit 94f8b6f31a7a94b08f99d579fe6cee2ff0c52cc6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 23:30:25 2025 -0800
+
+    Cortex styles
+
+commit 4e1c1c08107ffea797a8d66f48d2fc7226d17752
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 23:25:48 2025 -0800
+
+    Remove LibreChat and LiteLLM due to LC instability
+
+commit 7beba4fa620fbfe89abee29a0786b410ec65b0db
+Merge: 65148a8 997f096
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 19:27:32 2025 -0800
+
+    Merge pull request #206 from Brad-Edwards/dev
+
+    dev
+
+commit 997f09620ad9aef64cb03190028da40c6acd6c1e
+Merge: d09ae10 000abd0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 19:18:49 2025 -0800
+
+    Merge pull request #202 from Brad-Edwards/171-stand-up-dev-environment
+
+    Simplify workflow inner logic
+
+commit 000abd0e998ee6c63f8196d0909000fc74b92304
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 19:09:37 2025 -0800
+
+    Add immediate destroy confirmation to free user
+
+commit a141b6b0f485f96b86d9c19dc18a3c3eb16842a4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 17:54:22 2025 -0800
+
+    Handle polling better on destroy
+
+commit 50140f0def88a5d3e5661366f96905723940ef14
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 17:03:38 2025 -0800
+
+    Fix tf formatting
+
+commit 62d1417bffb54160e54abae5f4d162649824722f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 16:52:20 2025 -0800
+
+    Fix no SSM access to range boxes
+
+commit af6e421891e96a31117e1567837144004b0ba648
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 16:37:27 2025 -0800
+
+    Update user immediately on range deploy fail
+
+commit 4ec1c0f2639032a775b008041c4341318d2dea18
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 16:06:08 2025 -0800
+
+    Simplify workflow inner logic
+
+commit d09ae10eee03a49b0f57e9130568d73bfab48dff
+Merge: 4fde481 b7082cb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 15:49:42 2025 -0800
+
+    Merge pull request #201 from Brad-Edwards/171-stand-up-dev-environment
+
+    Fix ci/cd conditions cause deploy skip
+
+commit b7082cbb0adee10e28c1c0179ad61640d9c576a8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 15:46:40 2025 -0800
+
+    Fix ci/cd conditions cause deploy skip
+
+commit 4fde481a81b7ff72f5492be750436cff0cbee003
+Merge: 65148a8 c9b7fdf
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 15:26:38 2025 -0800
+
+    Merge pull request #200 from Brad-Edwards/171-stand-up-dev-environment
+
+    171 stand up dev environment
+
+commit c9b7fdff94793ed1b4c4a03441b16047190a7fbe
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 15:25:42 2025 -0800
+
+    Do not publish docs publicly [no ci]
+
+commit aae98489dee45814eb59debbec37112a852488b8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 15:20:28 2025 -0800
+
+    Update global IAM to handle multiple envs
+
+commit d9d4dc8ed6696ede7562cf672ee6f543560f0292
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 14:59:50 2025 -0800
+
+    Update readme to reflect current state and more general use case
+
+commit 74e1907e985c15f437f3b49342d9209419aacc5b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 14:50:15 2025 -0800
+
+    Fix s3 lifecycle warning
+
+commit 78a545094ad26a0039ca375f453d5ae8d4c6ab73
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 14:45:00 2025 -0800
+
+    Organize docs
+
+commit a4a7e662c7a35e60fed5c8451e9820facabe1e0e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 13:02:23 2025 -0800
+
+    Update changelog
+
+commit 3e6ee4e587cf1ae88a39dfc3d57b088aeefaac97
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 13:00:23 2025 -0800
+
+    Update utility scripts for multi env
+
+commit 9a40a203771d4da6b31aa8cff9a42fdc96e8bc17
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 12:49:04 2025 -0800
+
+    Update docs with dev account
+
+commit e027c86c56675552566ff9c11b0beb76b5314758
+Merge: ad0ee54 fa94a50
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 12:47:17 2025 -0800
+
+    Merge branch 'main' into 171-stand-up-dev-environment
+
+commit ad0ee543a994623c016b8eb3412eb40ce66cb5b4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 12:42:44 2025 -0800
+
+    Update smoke tests for manual tests
+
+commit 115f63ce6b7de3c632d0b320d8fddab8c7f32d24
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 12:39:34 2025 -0800
+
+    Add smoke test protocols
+
+commit a074fd9564c1519d1fc17e6fda4f6e0ff693abbe
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 11:59:42 2025 -0800
+
+    Streamline CI/CD for consistency
+
+commit b3fb168c009980a8ef45fcc003a921f1bb2f4274
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 01:11:40 2025 -0800
+
+    Dev env infra config
+
+commit f28f24d310a9244c6a4f74eb33c432a45b5b126f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 00:43:31 2025 -0800
+
+    Infra for bootstrapping acct
+
+commit fa94a50080e5ea0773c11c40914d5276395fe949
+Merge: 94a3235 65148a8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 00:42:36 2025 -0800
+
+    xMerge branch 'main' of https://github.com/Brad-Edwards/shifter
+
+commit 94a3235c2a166d96d58873d1e2b366d1b3240dfe
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 00:41:52 2025 -0800
+
+    Bootstrap dev
+
+commit 65148a849cb05c497be7074e7cf8d1b547961462
+Merge: 97be29b 8f1f7aa
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 12 00:05:41 2025 -0800
+
+    Merge pull request #197 from Brad-Edwards/172-bedrock
+
+    172 bedrock
+
+commit 8f1f7aa76df65aa75e52b692ba09f0df4a6423fd
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 23:37:31 2025 -0800
+
+    Rename workflows for simplicity
+
+commit 68845c625ebce1564d4ab48b0cd3e39c3c44e187
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 23:29:56 2025 -0800
+
+    Rationalize workflows to resolve race conditions and reduce complexity
+
+commit 97be29bc0f8cbff2a6eff60302f254f3b2846b2f
+Merge: 3935d52 6ed372f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 22:46:14 2025 -0800
+
+    Merge pull request #196 from Brad-Edwards/172-bedrock
+
+    172-bedrock
+
+commit 6ed372f9a3ac3d64a9f7320bbfa3acf1c2fb3473
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 22:44:57 2025 -0800
+
+    Fix .env heredoc broken in SSM
+
+    Fix handle leading whitespace in .env
+
+    remove unused vars from tf
+
+    Fix Mongo data permissions
+
+    update LibreChat env.example
+
+commit d95f261d0d53d0c28152189214bebd997e77a703
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 22:26:01 2025 -0800
+
+    Remove duplicate env var gen
+
+commit d347ed535f7d7a9c1c7141667a1c0cf2283852ef
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 22:24:13 2025 -0800
+
+    Fix separation of concerns between librechat instance setup and workload deploy
+
+commit 3935d521a60a9d917a97fd42e004cbefd2bcfa05
+Merge: 3ef26b8 bf3d46c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 22:16:11 2025 -0800
+
+    Merge pull request #194 from Brad-Edwards/125-s3-default
+
+    Bump version
+
+commit bf3d46c233a70db99f4de7bf8a0ee492910d85a0
+Merge: a30fec5 3ef26b8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 21:42:31 2025 -0800
+
+    Merge remote-tracking branch 'origin/main' into 125-s3-default
+
+commit a30fec57c42f515bd946465efbe53009c1971181
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 21:42:15 2025 -0800
+
+    Bump version
+
+commit 3ef26b8c1462ff072133df5557b109b81418617b
+Merge: 8b7452e 0a1a9f9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 21:38:56 2025 -0800
+
+    Merge pull request #193 from Brad-Edwards/172-bedrock
+
+    Add default model to LibreChat
+
+commit 0a1a9f90fa818ef2a40c5c1b99e84562783a4630
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 21:34:51 2025 -0800
+
+    Add default model to LibreChat
+
+    Turn off agent builder
+
+commit 8b7452ed16a11965f63937b29bc52d545bf89821
+Merge: 4e6fc42 c263c24
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 21:30:22 2025 -0800
+
+    Merge pull request #192 from Brad-Edwards/172-bedrock
+
+    172 bedrock
+
+commit c263c24bb6a182aedc2a3487bf8a40ff610f0fe8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 21:05:54 2025 -0800
+
+    Update Bedrock permissions
+
+commit f7dbfe76ee2fc55463105a87e8063657eeef4c4d
+Merge: d83c29e 4e6fc42
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 21:02:40 2025 -0800
+
+    Merge remote-tracking branch 'origin/main' into 172-bedrock
+
+commit d83c29e608345e27e9e85fa5c7d28058a06d282e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:50:21 2025 -0800
+
+    Fix LibreChat not able to access Bedrock models
+
+commit 4e6fc42bd35a415db2a237d37fafad075d2fa2fb
+Merge: 5c33ba9 6b6d48f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:48:07 2025 -0800
+
+    Merge pull request #191 from Brad-Edwards/109-s3-versioning
+
+    Make user data s3 no versioning explicit
+
+commit 6b6d48fe2bbe881c3fd6e27bfb25da7fccb8af9f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:44:55 2025 -0800
+
+    Make user data s3 no versioning explicit
+
+commit 5c33ba9c76734416e42fcbacdd8c36bbe5612a14
+Merge: 9262388 63780c9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:26:01 2025 -0800
+
+    Merge pull request #190 from Brad-Edwards/158-provisioner-add-kali-to-subnet
+
+    Fix step function reply parsing
+
+commit 63780c9fc148a1201669c87cb0a9f48ef41bf697
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:24:40 2025 -0800
+
+    Fix step function reply parsing
+
+    Fix provisioner permission for kali columns
+
+commit 9262388534a1965974ddbaac07dcefc9f34015ab
+Merge: 554552d 82f6c07
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:19:56 2025 -0800
+
+    Merge pull request #189 from Brad-Edwards/172-bedrock
+
+    Add Bedrock as LibreChat LLM provider
+
+commit 82f6c0744b40a3577a45ddb1d55a126d018b7ad0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:11:18 2025 -0800
+
+    Add Bedrock as LibreChat LLM provider
+
+commit 554552dba3ed8a97b1d78bd8b241483fe5f323cd
+Merge: 579351b ac4994c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:09:22 2025 -0800
+
+    Merge pull request #187 from Brad-Edwards/186-rds-protection
+
+    Update changlog, examples, and version
+
+commit ac4994c6a06b00a6803177d7ea035984d9f50bee
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 20:07:28 2025 -0800
+
+    Update changlog, examples, and version
+
+commit 579351bbebcac95cc809396d06e9129cc09b9ac2
+Merge: cc7d74b 9cb2d0f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 19:39:46 2025 -0800
+
+    Merge pull request #185 from Brad-Edwards/158-provisioner-add-kali-to-subnet
+
+    Guard against portal infra triggered twice and not triggered when range isn't deployed
+
+commit 9cb2d0f4854fccdcc3ec71d1feee5c7390903a71
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 19:37:53 2025 -0800
+
+    Guard against portal infra triggered twice and not triggered when range isn't deployed
+
+commit cc7d74b29db89efaf60ea51eb21e57970dab4fab
+Merge: 35d2e83 970c4dc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 19:23:06 2025 -0800
+
+    Merge pull request #184 from Brad-Edwards/158-provisioner-add-kali-to-subnet
+
+    Kali range box deploys with official image
+
+commit 970c4dce7587b5067baa19aca373791532253ef5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 19:18:54 2025 -0800
+
+    Update example tfvars
+
+commit 817048ca1581109cbdb905cdac963650e11d02bb
+Merge: 1439e0b 35d2e83
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 19:08:41 2025 -0800
+
+    Merge branch 'main' into 158-provisioner-add-kali-to-subnet
+
+commit 35d2e839ebd6f1f6838439a161345da540224d58
+Merge: 5a607ed bc0cb43
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 19:04:58 2025 -0800
+
+    Merge pull request #182 from Brad-Edwards/159-librechat
+
+    Fixed portal and librechat workflows fail to on direct push to main without core infra change
+
+commit bc0cb43cff3cf0805d3711e6aae2c2623e84380c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 19:04:04 2025 -0800
+
+    Fix overlapping trigger conditions between workflows
+
+commit 1439e0b08bc2793f8579f52b230fa6b9d166f3ed
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 18:58:04 2025 -0800
+
+    Kali range box deploys with official image
+
+    All traffic permitted between victim and kali
+
+commit 86a257228c419940f84cb7b7608ae28559095e52
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 18:10:50 2025 -0800
+
+    Fixed portal and librechat workflows fail to on direct push to main without core infra change
+
+commit 5a607edd438c5cb2f136db3564bb7b7443b130dd
+Merge: f4ca7ab ce10439
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 13:46:18 2025 -0800
+
+    Merge pull request #170 from Brad-Edwards/159-librechat
+
+    159 librechat
+
+commit ce10439d6ebe7d606bec2fe091d45c92df625b9d
+Merge: 79296ec f4ca7ab
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 13:29:44 2025 -0800
+
+    Merge main, resolve conflicts
+
+commit f4ca7ab90998e8b449231e40317acb0d41a9c3a4
+Merge: 1931354 a768a03
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 13:26:56 2025 -0800
+
+    Merge pull request #174 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    Fix teardown flow fails
+
+commit a768a032ca333073a21b849f338f9cb7c2d0ce17
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 13:25:04 2025 -0800
+
+    Fix teardown flow fails
+
+commit 193135495bf97a510d92d538090a076e908c27a0
+Merge: 5ca6252 45ed2af
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 13:12:30 2025 -0800
+
+    Merge pull request #173 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    Fix permissions for subnet creation
+
+commit 45ed2afb3e18d914b2cd8f92798f04f07b040173
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 13:09:30 2025 -0800
+
+    Fix permissions for subnet creation
+
+commit 5ca6252cf451564e3f7c0d506f64b19109c3156a
+Merge: c8531ad de43ca6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 13:02:01 2025 -0800
+
+    Merge pull request #169 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    Fixes for provisioner lambdas
+
+commit de43ca6d882a2ca1cbbe84b8c428f0fd3a44a410
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 12:58:02 2025 -0800
+
+    Fix Changelog
+
+commit ff57bfc41f7a7053d871337064eb6d72704c0f0c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 12:51:06 2025 -0800
+
+    Fixes for provisioner lambdas
+
+commit 79296ec566726f0af5d651ced09ec50f5abf99f8
+Merge: 2509cfa c8531ad
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 12:35:47 2025 -0800
+
+    Merge remote-tracking branch 'origin/main' into 159-librechat
+
+commit 2509cfab83fa0b9a15f72e2c8a0a8b79e33cf385
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 12:34:58 2025 -0800
+
+    Add management utils
+
+commit c8531ada5d5a3e48f7c2da0f1df1d165a2db1eaf
+Merge: f85ec59 8e6a1b2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 12:23:17 2025 -0800
+
+    Merge pull request #166 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    Fix RDS setting pending
+
+commit 8e6a1b264d37dad57bb7472be23a83d6b29f67b4
+Author: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>
+Date:   Wed Dec 10 00:49:37 2025 +0000
+
+    Add comprehensive release documentation for all sales audiences
+
+    Co-authored-by: Brad-Edwards <56809295+Brad-Edwards@users.noreply.github.com>
+
+commit b960888caa08100eef3e71252d3ad77911c56cc8
+Author: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>
+Date:   Wed Dec 10 00:40:49 2025 +0000
+
+    Initial plan
+
+commit ae6d9ab326fc0a9b9b2d49bd62b38a564b88b6fd
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 12:08:05 2025 -0800
+
+    Fix docstring causing security scanner fp
+
+commit 887a7c9643d7b598a79b1eba2303d89f287cc991
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 12:03:21 2025 -0800
+
+    Fix RDS setting pending
+
+    Doc maintenance windows
+
+    Fix schema mismatch
+
+commit e4f9bbabf748fd08d4bb4b14896cde3b197eac7b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 09:48:33 2025 -0800
+
+    Add missing psycopg package for Lambdas
+
+commit 6da8468864f6a3bfe111e5820e238dbc5548591b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 09:33:30 2025 -0800
+
+    Update docs location in CI/CD
+
+commit 4ba892c3c000faa97314c817a5f84f6cc73283e6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 08:35:27 2025 -0800
+
+    Fix Lambda build order
+
+commit 009a7d661b9c3c613c512f54d6c5b55ad0466206
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 08:09:05 2025 -0800
+
+    Update Claude instructions
+
+commit e9102a4cacf3f2e1becf554e228158b09c670d05
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 08:07:10 2025 -0800
+
+    Move docs for cleaner repo org
+
+commit 1679f4593303d18807bcd3671c630348b63717f3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 11:58:17 2025 -0800
+
+    Bump version
+
+commit f85ec59bd253bbcf8d26b124933620f28c617662
+Merge: 3c90f39 736a8a1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 09:51:18 2025 -0800
+
+    Merge pull request #165 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    141 provisioning service with step functions
+
+commit 736a8a1287c6a81c88332c5650d3af8d5fa78179
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 09:48:33 2025 -0800
+
+    Add missing psycopg package for Lambdas
+
+commit f9cab9fdba803da24f9953c587a48274a216fe4e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 09:33:30 2025 -0800
+
+    Update docs location in CI/CD
+
+commit 3c90f39b68708cbbe93ae24f979c2d3e9397934b
+Merge: b48873d cfd4d10
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 09:30:02 2025 -0800
+
+    Merge pull request #164 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    141 provisioning service with step functions
+
+commit cfd4d1018e1f73c48aacd49e06906be724f052de
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 08:35:27 2025 -0800
+
+    Fix Lambda build order
+
+commit 7048521ef0dd26495f068acc09443e3952bfc435
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 08:09:05 2025 -0800
+
+    Update Claude instructions
+
+commit 537407ef83c6fbdf719b15a1ec67645e4d6115f8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 08:07:10 2025 -0800
+
+    Move docs for cleaner repo org
+
+commit af4d13d56b951a0becc8c5124e45934fbb9f2fd5
+Author: snyk-bot <snyk-bot@snyk.io>
+Date:   Thu Dec 11 10:17:43 2025 +0000
+
+    fix: upgrade @modelcontextprotocol/sdk from 1.17.3 to 1.22.0
+
+    Snyk has created this PR to upgrade @modelcontextprotocol/sdk from 1.17.3 to 1.22.0.
+
+    See this package in npm:
+    @modelcontextprotocol/sdk
+
+    See this project in Snyk:
+    https://app.snyk.io/org/brad-edwards/project/ca4b6f48-d190-4a63-894d-73d1d8cdc48d?utm_source=github&utm_medium=referral&page=upgrade-pr
+
+commit b48873db7e16befaec850d640fb4f2df87bd2a3c
+Merge: 21df6c3 9b85d1b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 00:26:24 2025 -0800
+
+    Merge pull request #155 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    141 provisioning service with step functions
+
+commit 9b85d1bcac26c0cd1aaa78b255a14383325ad0de
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 00:25:36 2025 -0800
+
+    Resolve minor bugs
+
+commit 64a52ea90896818fc6f8fc3f8fd71f8ddaf96b1e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 00:20:56 2025 -0800
+
+    Update terraform/modules/range/provisioner/lambda/create_kali/handler.py
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit f059181b93d5eb83c9b7131c9d9320a4264d1f13
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 00:20:42 2025 -0800
+
+    Update terraform/modules/range/provisioner/lambda/tests/test_env.py
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 81ea274ee9ca0c77a9a5d43499113e0620cff490
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 00:19:47 2025 -0800
+
+    Copy shared provisioner lambda code properly.
+
+commit 51eca53be14c21e57004ff9a4f4959dcd6353436
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 11 00:01:03 2025 -0800
+
+    Fix Terraform formatting issue
+
+commit 341ba07ae819043d4be84bb90519b33378d3e184
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 23:58:26 2025 -0800
+
+    Fix instance wait has no timer
+
+commit e32400e429235e171d2f10f00d727bcf44add51a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 23:56:14 2025 -0800
+
+    Add env var validation for provisioner
+
+commit 1e9aff0106b9441fe9071637b6c17da7c6653bff
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 23:48:27 2025 -0800
+
+    Fix hardcoded CIDR range
+
+commit f13b1ce08c528522565d2e315e9af449cf8c01b8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 23:45:21 2025 -0800
+
+    Fix SSL cert verification gap
+
+commit 23f2a5ff2663bb658c51f8dd0736856a369547b7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 23:40:09 2025 -0800
+
+    Add missing state validation
+
+commit caa033818d948f7211490ef795f1f0dc5fd91c6b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 23:37:17 2025 -0800
+
+    Fix type mismatch bug
+
+commit 21df6c371579cf1aac6b78127e03f48812436f08
+Merge: 0939cec 2354f7e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 23:16:32 2025 -0800
+
+    Merge pull request #154 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    Remove var
+
+commit 2354f7e84fe135b1003abc3f5182b86bcc660815
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 23:15:11 2025 -0800
+
+    Remove var
+
+commit 0939cec2d57245c49300b31a14445f34ecf27b07
+Merge: ad10b45 999ed92
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 22:55:39 2025 -0800
+
+    Merge pull request #153 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    fix race condition
+
+commit 999ed9223312637220b89329d3b3fe03f9279270
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 22:45:02 2025 -0800
+
+    fix race condition
+
+commit ad10b45b3ecdb33903992a889bfb1491d7c9236b
+Merge: fff804e 9097d2e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 22:28:32 2025 -0800
+
+    Merge pull request #152 from Brad-Edwards/141-provisioning-service-with-step-functions
+
+    141 provisioning service with step functions
+
+commit 9097d2e764f5d8c31805008ef8db34c63571be67
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 22:01:40 2025 -0800
+
+    Fix permissions
+
+commit ac1be1502ba7eba86431260090be75055a73ad77
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 21:35:27 2025 -0800
+
+    Update changelog
+
+commit b5192c10b2efa238d45ed3f7ddd9cbdcef1b61d3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 21:34:25 2025 -0800
+
+    Subnet index allocation
+
+    CloudWatch alarms for provision error states
+
+    Range clean up
+
+commit 1a443ad35fd8065ae86d38cd0b1d749f7c10a9bf
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 20:29:23 2025 -0800
+
+    Add RDS awareness to skip role grant on local db
+
+commit 5f2cdc04edf6ebc54bd8a4b22332abe6d74794a6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 19:50:00 2025 -0800
+
+    Provisioner module wiring to Portal VPC
+
+    Vic security group
+
+commit 012175d024dbf0d2da83c2a7a21ef4ea230caa40
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 19:39:56 2025 -0800
+
+    Step function state machines for provisioning
+
+commit 19020418f5d0648582e47abae8354e53116abb61
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 19:01:44 2025 -0800
+
+    Add provisioner lambda functions, some are placeholder
+
+commit dc246bda541b20f0f037cea98d5a2a5bdee2d0fb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 18:49:36 2025 -0800
+
+    Range provisioner lambda functions
+
+commit cc19a35a08f0a96c6a6de50439c517f14179ac10
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 18:26:24 2025 -0800
+
+    Portal DB migration to add provisioner user
+
+commit 5e7efafdd70d6c0d5560a4d8d264ae8a88e35570
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Wed Dec 10 17:37:13 2025 -0800
+
+    Add range provisioner fields on range model
+
+commit fff804ea13d3b3caf6b80d346a0b7469bcd0e9a6
+Merge: 820d606 4bb373c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 12:00:43 2025 -0800
+
+    Merge pull request #150 from Brad-Edwards/129-the-deployment-workflow-passes-aws_region-environment-variable-but-settingspy-reads-aws_s3_region-this-means-the-s3-client-will-always-use-the-hardcoded-default-us-east-2-rather-than-the-region-from-the-environment
+
+    Fix health check 400 error
+
+commit 4bb373c3f6b39283a45d2ff965ec9e57eb6f3f51
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 11:57:24 2025 -0800
+
+    Fix health check 400 error
+
+    Fix region mismatch in portal
+
+commit 820d606e79129357cd11b998eedf4639ad150bde
+Merge: 17244d6 29c2dbb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 11:43:52 2025 -0800
+
+    Merge pull request #149 from Brad-Edwards/148-add-site_url-environment-variable-to-portal-deploy
+
+    148 add site url environment variable to portal deploy
+
+commit 29c2dbb987a56f228f320bbaf5a83c85be8991b2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 11:40:42 2025 -0800
+
+    Update Changelog, bump version
+
+commit 599257df4174f918ef1228c1b08fee336175e13d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 11:36:36 2025 -0800
+
+    Fix missing env var for range provisioner
+
+    Remove default site url in provisioner
+
+commit 17244d6b17086a64e04b8d79686b3a8c59c30110
+Merge: 25909db 83bf0c9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 10:47:54 2025 -0800
+
+    Merge pull request #145 from Brad-Edwards/142-wire-dashboard-launch-to-range-creation
+
+    Range launch flow with status polling
+
+commit 83bf0c9f9a22a98f3f39574aeaebc1b21f8d17cb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 10:43:13 2025 -0800
+
+    Add client-side url validation to protect against XSS attacks
+
+commit 79c2f356678e20519bc81ba3c6d186422219255e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 10:40:59 2025 -0800
+
+    Handle range destroy race conditions for user that could leave them stuck.
+
+    Failed ranges can be destroyed
+
+commit 8b57445714c9d71a1904eb9807f45d6f13cf03ce
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 10:37:37 2025 -0800
+
+    Plling cleanup on page unload or viz change
+
+commit 953f3ab40ecff9336ceb6a02e5b37d78c62df336
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 10:33:19 2025 -0800
+
+    Add cancel range test coverage
+
+commit 865d3b04d7742e96ce161c4d75f713dfb7a48825
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 10:28:32 2025 -0800
+
+    Add state transition validation to prevent callback replay attack
+
+    Prevent injection attack through error
+
+commit 66fc562cdb1d33961d2b4d8850e6f6fa537d64ba
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 02:03:07 2025 -0800
+
+    Range launch flow with status polling
+
+    Range API
+
+    Client dashboard manager
+
+commit 25909dbd5e91d6fa1c594b946ed538f47f3aa430
+Merge: 2ce8910 ed6dbb1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 07:49:51 2025 +0000
+
+    Merge pull request #140 from Brad-Edwards/137-replace-session-based-upload-lock-with-atomic-implementation
+
+    Fix upload lock not clearing on cancel
+
+commit ed6dbb11f69a69fffc55304beb03483384f53ec2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 23:40:25 2025 -0800
+
+    Fix upload lock not clearing on cancel
+
+commit 2ce89109a8afa2336b98a2aa591ad4a858b61bc3
+Merge: 6d7e651 005ac05
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 06:48:14 2025 +0000
+
+    Merge pull request #138 from Brad-Edwards/135-add-upload-progress-indicator-for-agent-uploads
+
+    Fix upload limit too low
+
+commit 005ac05cff9d8e2bde5d810b7d697bef0e502c06
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 22:31:10 2025 -0800
+
+    Fix upload limit too low
+
+    Add storage quota
+
+    security improvemetns for upload
+
+commit 6d7e651fa16cc5472ef0afe6ab2b86e7c9997ac4
+Merge: 710a438 880603d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 05:17:18 2025 +0000
+
+    Merge pull request #133 from Brad-Edwards/130-portal-oidc-logout-doesnt-invalidate-cognito-session
+
+    130 portal oidc logout doesnt invalidate cognito session
+
+commit 880603d78307bf9eb6ae8a454223bcb347c01c6a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 21:14:40 2025 -0800
+
+    Update settings for controlling loops.
+
+commit 1ea54905aba2e3d2ef263b1d8f085c3c451713d9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 20:31:59 2025 -0800
+
+    Fix: Logout now clears Cognito session
+
+    Local dev uses dev logout instead of OIDC
+
+commit 710a438d9363a89a937749538ccd2af593f7ff79
+Merge: bb12298 f1039bb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 04:10:35 2025 +0000
+
+    Merge pull request #132 from Brad-Edwards/131-portal-agent-upload-failing-in-production
+
+    Simplify and secure docker/s3 connections
+
+commit f1039bb1410d2a7f95c2e608090852daba2279c2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 20:06:25 2025 -0800
+
+    Simplify and secure docker/s3 connections
+
+commit bb12298bd95890acbe30f091bb9cb4a3908faf07
+Merge: a97b2ec 64534b1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 03:35:06 2025 +0000
+
+    Merge pull request #124 from Brad-Edwards/117-portal-agent-upload-to-s3
+
+    117 portal agent upload to s3
+
+commit 64534b1aa055f800e3f8007a7048b3a39635f3de
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 19:24:14 2025 -0800
+
+    Bump version and update changelog
+
+    Unrelated: note change in range UX approach
+
+commit db41aaebe479c1e97b1ba0ae8deb9e212ac0bdae
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 19:21:02 2025 -0800
+
+    feat(portal): implement agent upload to S3 with validation (#117)
+
+commit a97b2eccc1cb046f75813a725a6bef9efd548b42
+Merge: 48b4c12 c6a8dcc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 02:20:56 2025 +0000
+
+    Merge pull request #122 from Brad-Edwards/116-portal-django-models-for-agentconfig-and-range
+
+    Wire models
+
+commit c6a8dcc4171f8f990f9ddcd7409e5615377efaa2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 18:09:56 2025 -0800
+
+    Wire models
+
+    Add tests
+
+    Migrations and seeds
+
+commit 48b4c127ba5c391a398d50e2bf5b3d0e9df59f84
+Merge: c5e0f4c c787668
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Tue Dec 9 00:37:07 2025 +0000
+
+    Merge pull request #121 from Brad-Edwards/114-user-flow
+
+    114 user flow
+
+commit c787668e1bd050b44627f8b4b0ad5460b57193af
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 16:21:44 2025 -0800
+
+    Update changelog and version
+
+commit 2d6036cc1b635f0baf4564aeeb4bc34bd2f96a6c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 16:15:25 2025 -0800
+
+    Add configurable support email
+
+commit e6b6a0ed1fcedec3cbd248ff91cfcd653e07c30d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 15:55:11 2025 -0800
+
+    Add help nav
+
+    Fix margins
+
+commit 94448f33675670138592bc72ed62c98259b1cdc1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 15:54:40 2025 -0800
+
+    Add UX elements for Mission Control user stories
+
+commit c5e0f4ca079cadbee50ec9805366be27bca8b400
+Merge: c64b800 1791aaa
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 23:28:51 2025 +0000
+
+    Merge pull request #115 from Brad-Edwards/114-user-flow
+
+    114 user flow
+
+commit 1791aaaa974c556d049003d6ac17d54c79407c65
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 15:26:29 2025 -0800
+
+    Rebrand to Cortex
+
+    Update landing page for new design and new assets
+
+    Improve glitch animation
+
+commit 31d5d54c6952c9cb4eb899f72cc625a5a8947f4e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 15:01:53 2025 -0800
+
+    Harmonize design system with Cortex
+
+commit 949cff40419230a628f046d15f1c8eb4393747df
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 14:55:29 2025 -0800
+
+    Design system
+
+    Mission control docs
+
+    Image assets moved for new design system
+
+    Planning for Claude
+
+commit 910bf2999727b3a7b970ecc341dd609ad865eacf
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 11:27:12 2025 -0800
+
+    Update user stories
+
+    Add mission control plan
+
+commit dfcf06bf97f4825e9d69ce4acf94cdf62999c89c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 11:18:42 2025 -0800
+
+    Add user stories for user flows on portal
+
+commit 6730bbc048faadec1903913e09f886d61d150de5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 11:10:00 2025 -0800
+
+    Fix too long inline policy. Least privilege still preserved by restricting to shifter buckets
+
+commit c64b800fcc1097254c8adb5c4ec43f727b15fb32
+Merge: aee38b9 5995cc4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 19:00:10 2025 +0000
+
+    Merge pull request #113 from Brad-Edwards/80-add-bastion-host-for-admin-access
+
+    Control portal admin access
+
+commit 5995cc411ebb53536b4d260b692de44a330b3d46
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 10:41:08 2025 -0800
+
+    Control portal admin access
+
+    Add proprietary license along with moving repo private to preserve IP for owner
+
+commit aee38b9dc4769440a6f2f809303e15efa027f403
+Merge: 426a6a4 5587a69
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 17:52:09 2025 +0000
+
+    Merge pull request #112 from Brad-Edwards/111-coming-soon-page
+
+    Add improved landing page
+
+commit 5587a69d944939acfe7d32b2a2053242e1460ef5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 09:50:29 2025 -0800
+
+    Add improved landing page
+
+commit 426a6a48646db316f8945d634c74f65fbf5e79c9
+Merge: 8a39978 c7f025a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 08:46:29 2025 +0000
+
+    Merge pull request #110 from Brad-Edwards/106-security-insecure-tls-configuration-in-mcp-http-client-cwe-327
+
+    Fix MCP TLS config
+
+commit c7f025a3e823ab910b0a75f61c3b838b6c581ab0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 00:43:15 2025 -0800
+
+    Update CHANGELOG
+
+commit 40c099be8cbc5083f701331b7499326826537077
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 00:42:41 2025 -0800
+
+    Bump modelcontextprotocol to patch vuln
+
+commit 7c2a7b559213bdf5125d1d202546f0bb7fc5d07f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 00:40:32 2025 -0800
+
+    Fix MCP TLS config
+
+    Fix possible portal race condition
+
+commit 8a399788f95e9dcabb0e0cef042e8468e07def48
+Merge: 083f556 66bba41
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 08:24:12 2025 +0000
+
+    Merge pull request #108 from Brad-Edwards/75-docs-update-readme-with-current-project-state
+
+    75 docs update readme with current project state
+
+commit 66bba413ee0cf82bf050e3f707b2371435de1332
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 00:23:12 2025 -0800
+
+    Update text
+
+commit 86d12f52369f2b3ac42fef940dc68bd70620068c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 00:21:23 2025 -0800
+
+    Update readme
+
+commit 083f5561c0d2f1e6a5c919273ab5091c239265ed
+Merge: 7e725af 11cfd5e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 07:18:51 2025 +0000
+
+    Merge pull request #97 from Brad-Edwards/39-agent-storage
+
+    feat: add S3 user storage module
+
+commit 11cfd5eac972abe74789fabd1851793bba2af11a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 23:17:38 2025 -0800
+
+    Update terraform/modules/portal/s3/main.tf
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit c8f5a183737c231d58c6fc83735b781c1c7b4183
+Merge: d1d905f 7e725af
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 23:16:37 2025 -0800
+
+    merge commit
+
+commit 7e725aff01ac2416461716b7fc65881c460dae5e
+Merge: 5bae00e d80d650
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 07:08:51 2025 +0000
+
+    Merge pull request #102 from Brad-Edwards/100-fix-redirect-loop
+
+    Fix wrong Cognito URL
+
+commit d80d650730054e91d8e3cd46a26f58b72219b724
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 23:07:18 2025 -0800
+
+    Fix wrong Cognito URL
+
+commit d1d905fe9a2f0e7018f9fb58cc0ad8dde8e3826f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 23:05:07 2025 -0800
+
+    Remove generic fallback passwords
+
+commit 5bae00e1ba60539e1e61776ba1ff1dfae568f83b
+Merge: bbe743b 7e147b7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 06:58:32 2025 +0000
+
+    Merge pull request #101 from Brad-Edwards/100-fix-redirect-loop
+
+    Add temp landing page for target after login
+
+commit 7e147b7139d39bb1206b78b78c4e1a3b1ec12690
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 22:57:26 2025 -0800
+
+    Add temp landing page for target after login
+
+commit bbe743b445b245eb91ec79b4c585ba82fc89ff4d
+Merge: 09db5a5 3526fc7
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 06:51:19 2025 +0000
+
+    Merge pull request #99 from Brad-Edwards/98-fix-resource-name-mismatch
+
+    Fix Cognito secret key: issuer -> issuer_url
+
+commit 3526fc7cfd6d78a1907914fc51307d065fe54ae0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 22:49:33 2025 -0800
+
+    Fix Cognito secret key: issuer -> issuer_url
+
+    The entrypoint.sh reads 'issuer_url' from the secret but Terraform
+    was creating it as 'issuer'. This mismatch caused OIDC_ISSUER_URL
+    to be empty, breaking the authentication redirect.
+
+commit 485e301df9cee16089757b883a37cd88873f9014
+Merge: 8a499af 09db5a5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 22:40:52 2025 -0800
+
+    Merge commit
+
+commit 09db5a524a230db0b69ff45ebfa1f3ed1cdd53ba
+Merge: 6d8f374 374364c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 06:35:44 2025 +0000
+
+    Merge pull request #96 from Brad-Edwards/18-django-auth-with-email-domain-restriction
+
+    Add missing permission
+
+commit 374364c6cb2bd5cd8abb1eaf6b42755ba1dbdf6a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 22:34:00 2025 -0800
+
+    Add missing permission
+
+commit 8a499afc8b984044d44400423d709039ba05f2a4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 22:31:04 2025 -0800
+
+    feat: add S3 user storage module
+
+commit 6d8f3741ebe1350aaf81828cc66875398b4472b4
+Merge: 377a463 a56bb89
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 06:28:36 2025 +0000
+
+    Merge pull request #90 from Brad-Edwards/18-django-auth-with-email-domain-restriction
+
+    18 django auth with email domain restriction
+
+commit a56bb8935a37f79833477fa593b9bbc73523edee
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 22:21:10 2025 -0800
+
+    Update docs/security.md
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 7e04b55bee1449dd04a7d5c5875bf3807e3147d9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 22:20:23 2025 -0800
+
+    Update docs/security.md
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 0cc72a8b91dc4bb9cbe2e8e953413d6ceb2f8633
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 22:19:02 2025 -0800
+
+    Add Django username validation to OIDC generate_username
+
+    Fail loudly if email exceeds 150 chars or contains invalid chars.
+    Adds 27 tests covering happy/sad/weird paths.
+
+commit ed1ca95f39d9750a3698c0e0093cff26e42f9e69
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 21:58:53 2025 -0800
+
+    Update terraform/modules/portal/cognito/variables.tf
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 88ccba48455a659c51edb83b079273f405a4f21d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 21:52:50 2025 -0800
+
+    Update portal/config/settings.py
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit fd75914f65689568928bfecff51bbd0040b9debc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 21:38:49 2025 -0800
+
+    Add logo assets for later, unrelated to this branch. Sue me.
+
+commit a1c6bea01b9d4dfef38456751915cd3eb5b18ac4
+Merge: 97fcd48 377a463
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 21:31:26 2025 -0800
+
+    Fix merge conflict in changelog
+
+commit 97fcd4887ac764eb8de37571b1968f129c90d72d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 21:28:00 2025 -0800
+
+    Add Cognito OIDC auth for Django portal
+
+commit 6d31ee0d81e1b3d6a1053e6942dbd08a67cfce0f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 21:15:54 2025 -0800
+
+    Add COGNITO_SECRET_ARN to deploy workflow
+
+commit 377a4637cd40e5a37235c93d7171a999c08835af
+Merge: 2e9fe1f 748ce27
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 05:15:47 2025 +0000
+
+    Merge pull request #89 from Brad-Edwards/24-range-vpcs
+
+    24 range vpcs
+
+commit da734d94d9426e4b54d51366accfb90f1064712c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 21:11:41 2025 -0800
+
+    Add Django OIDC integration with Cognito
+
+commit f24bf7f96b476a7c6df2d90eaae599d406d2a8df
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 20:50:35 2025 -0800
+
+    Add IAM permissions for Cognito and Lambda
+
+commit 748ce27c01ae1736d96797e87550e2f0ea5daa58
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 20:48:18 2025 -0800
+
+    Add range infrastructure workflow
+
+commit 4f7cdff3b34df3dbd0e62ce342726c81fc65e81a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 20:42:29 2025 -0800
+
+    Wire Cognito module into portal environment
+
+commit 861d8935656bfa93ee4a3ac839f254dd02a5be32
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 20:37:45 2025 -0800
+
+    Add range environment config
+
+commit 0e8733c3cfdf47cead9ed20657204288ff56fc3f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 20:23:21 2025 -0800
+
+    Add range VPC module and docs
+
+commit 602fd256ffea4c767653c09e416f4485f895f5a3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 20:20:15 2025 -0800
+
+    Add Cognito module with pre-signup Lambda for email domain restriction
+
+commit 2e9fe1f5eadf5fe157ac4d6e3861dcc569478662
+Merge: 50e76bf a6aa1cc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 03:18:22 2025 +0000
+
+    Merge pull request #79 from Brad-Edwards/76-fix-allowed-hosts
+
+    Adopt review suggestion
+
+commit a6aa1ccce6e913cbfb71adf837918ad69d239dd5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 19:09:04 2025 -0800
+
+    Adopt review suggestion
+
+commit 50e76bf4dd2e3a841a6e1682a5ff1061b1d4c3fe
+Merge: 59aa083 b5771ee
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 03:07:56 2025 +0000
+
+    Merge pull request #78 from Brad-Edwards/76-fix-allowed-hosts
+
+    Fix incorrect url in Django allow
+
+commit b5771eeb753b9e17ea19fb08f105ccec1797e3c2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 19:05:24 2025 -0800
+
+    Update CHANGELOG.md
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit de0eefe9c7a7f312a242750fc97f0ada56f97974
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 18:58:47 2025 -0800
+
+    Fix incorrect url in Django allow
+
+commit 59aa08351c74047d23d4d364b1ae7ba7b8cb0f66
+Merge: aed99ae 4ae3533
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Mon Dec 8 01:05:29 2025 +0000
+
+    Merge pull request #74 from Brad-Edwards/73-fix-ssm-command-permissions
+
+    73 fix ssm command permissions
+
+commit 4ae35333ac4fff874586d3376c1ba4548c24795d
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 17:01:47 2025 -0800
+
+    Update changelog
+
+commit ed4e07c9b4e7e0f94381d46d25286f1c1ea06185
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 17:01:24 2025 -0800
+
+    Fix static files permission in portal docker container
+
+commit 5b0b63f07b94fbdbea25f40cd302b6ca2c68e8ba
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 16:55:22 2025 -0800
+
+    Update changelog and version
+
+commit aed99aed434885cd93081a279da0c75895f67a9b
+Merge: f7bdb90 a4b171a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 23:37:36 2025 +0000
+
+    Merge pull request #67 from Brad-Edwards/38-django-dockerfile-and-docker-compose
+
+    38 django dockerfile and docker compose
+
+commit a4b171a6b8e28f4e24610cfeec1514dab3cf95c1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 15:33:53 2025 -0800
+
+    Fix dummy secret value in Django settings
+
+commit 4e4f7d52a09b7569823a5bfa058863c40ba50f3c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 15:27:24 2025 -0800
+
+    Fix static files not served by gunicorn
+
+    Add unit test support and a lonely useless test
+
+commit 6c6151ad87f7654b7df8863ac88aa7a5bad878b5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 15:02:27 2025 -0800
+
+    Update changelog and version
+
+commit 9430ee5dd0bfe4c2915a891f6d6a2ae4c4ce6ef1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 14:58:31 2025 -0800
+
+    Add Django and DB secrets fetch
+
+commit 00b73c9cbc3b5256ec64813de9bfd605bf2822d5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 14:58:07 2025 -0800
+
+    Update portal-dev.md with .env setup and production secrets docs
+
+    - Add cp .env.example .env to quick start instructions
+    - Clarify that DB_HOST is set automatically by docker-compose
+    - Add Production Secrets section documenting:
+      - Local vs prod secrets flow
+      - AWS Secrets Manager structure (DB + App secrets)
+      - IAM user permissions
+      - How entrypoint.sh fetches secrets at startup
+
+commit ac7c0b5d6d72ec6579bb53bee67f9b5e9c7c1ce3
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 14:52:45 2025 -0800
+
+    Add secrets management for portal prod deployment
+
+    - IAM user shifter-portal-prod for container secrets access
+    - App secret (shifter-prod-portal-app) with Django secret key
+    - Entrypoint fetches DB_SECRET_ARN and APP_SECRET_ARN from Secrets Manager
+    - docker-compose reads all secrets from .env (no hardcoded values)
+    - Local dev uses .env, prod uses Secrets Manager
+
+commit 41ec41e907a6362bd4168b559284a5e57a482e7b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 14:46:10 2025 -0800
+
+    Move secrets to .env, secrets changed from values in compose.
+
+commit 7da50abed1ad4da41d895e2cdbb795eb7c0ecdad
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 14:41:12 2025 -0800
+
+    Remove unnecessary env user
+
+commit af347952df06f6f0f77306f289c0d1a06d76f07a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 14:33:21 2025 -0800
+
+    Add IAM users for portal container secrets access
+
+    - shifter-portal-dev user for local development
+    - shifter-portal-prod user for production
+    - Least privilege: only secretsmanager:GetSecretValue on respective env secrets
+    - Access keys output for configuration
+
+commit fedecd41719b1a85d533f8f9cce9732d84a37b62
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 14:01:01 2025 -0800
+
+    Update gitignore
+
+commit 089a5de59bb96c7ec89008cf73a9f1afcb76f8f8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 13:59:20 2025 -0800
+
+    Add Django portal Docker setup and CI/CD pipeline
+
+    - Dockerfile with multi-stage build using uv
+    - entrypoint.sh for DB wait, migrations, gunicorn
+    - docker-compose.yml for local dev with Postgres
+    - Makefile with dev commands (up, down, build, logs, shell, migrate, init)
+    - GitHub Actions workflow for build, ECR push, SSM deploy
+    - SSM permissions added to GitHub OIDC role
+    - Portal dev docs and architecture updates
+
+commit f7bdb90f690db0b2a8c77468f5d9e659d8c219e0
+Merge: ab9a640 85a802c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 20:20:45 2025 +0000
+
+    Merge pull request #54 from Brad-Edwards/36-infra-ec2-for-django-portal
+
+    36 infra ec2 for django portal
+
+commit 85a802cf46ba9a5619fc4f89a43929eb9a21cec2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 10:38:41 2025 -0800
+
+    Add missing permission for CI/CD
+
+commit 62c9530e4cbb2e9a57d5338b0f79e3c585de1af6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 10:35:57 2025 -0800
+
+    Update docs, including adding ethics and security
+
+    Bump versions
+
+commit de21b344ecc4bc8e5dfccd4b09957c0c115b48c8
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 09:39:27 2025 -0800
+
+    Security hardening and fixes from PR review
+
+    - Remove duplicate iam:PassRole (use conditioned statement only)
+    - Enforce IMDSv2 on EC2 to prevent SSRF attacks
+    - Use ECR credential helper instead of manual docker login
+    - Add drop_invalid_header_fields to ALB
+    - Add EC2/ALB variables to tfvars.example
+
+commit 5b6f33841966df5daa05f53b15b2121020fab14f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 09:22:53 2025 -0800
+
+    Add ACM certificate validation with 45m timeout
+
+    - Add aws_acm_certificate_validation resource to wait for DNS validation
+    - Update HTTPS listener to use validated certificate ARN
+    - Update setup docs to explain first-deploy workflow
+
+commit 742c11ac84706e006f6e4a74880b52d4cc0e151f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sun Dec 7 09:14:36 2025 -0800
+
+    Fix ALB module circular dependency and improve EC2 user data
+
+    - Remove unused ec2_instance_id variable from ALB module (attachment
+      handled at environment level to avoid circular dependency)
+    - Add IAM credential wait loop in user_data.sh before ECR login
+    - Add error handling for ECR authentication
+    - Document ACM certificate DNS validation steps in setup.md
+
+commit 5d755937aabd4863b491364bc8eaa5042f4f1a11
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 22:53:54 2025 -0800
+
+    Bump versions
+
+commit 12049729b350e54a96631ace4b4335d0912d2991
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 22:53:05 2025 -0800
+
+    Update CI/CD permissions
+
+commit fd3cedfb913530b91768845fbc039f13350814aa
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 22:47:28 2025 -0800
+
+    Add ALB for portal
+
+commit fb5f7522b189274c3824f2f277cabc323f750873
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 22:37:00 2025 -0800
+
+    Add ALB for portal ec2
+
+commit a4db65c3d38f33a477f0fd34cdcdc8944fb521dc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 21:41:59 2025 -0800
+
+    Add portal EC2 which will host Django site
+
+commit ab9a640e7ae1a1dc836cf1b8aa95921ba59f7a34
+Merge: ab92ab8 1fc8925
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 6 04:51:50 2025 +0000
+
+    Merge pull request #50 from Brad-Edwards/49-insufficient-permissions-to-create-rds
+
+    Fix CI/CD permissions for RDS deploy
+
+commit 1fc892526c47c7b31ceba2a6dc4eb70aa2157866
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 20:49:37 2025 -0800
+
+    Fix CI/CD permissions for RDS deploy
+
+commit ab92ab890c9ec712d181d362ef2963b92c80e822
+Merge: 8e17fc5 8759613
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 6 04:40:07 2025 +0000
+
+    Merge pull request #47 from Brad-Edwards/35-infra-rds-postgresql-for-django
+
+    35 infra rds postgresql for django
+
+commit 875961344ac8f48301e9ef222edc72f95166b0d2
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 20:35:59 2025 -0800
+
+    Portal VPC module
+
+    Portal RDS module
+
+    Namespaces for tfvars sync'd to GitHub to handle additional envs later
+
+    GitHub permissions for additional terraform resources
+
+commit 9920ef2519e660f556137cfec651d812163d08dc
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 19:57:13 2025 -0800
+
+    Add VPC for RDS and portal site with supporting CI/CD. Better arch than for ECR module. ECR will be addressed in separate issue
+
+commit 71b4a2366eb40706e7b314c7fb57cfd448fea1c1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 19:35:02 2025 -0800
+
+    Add utility for synchronizing tfvars with github
+
+commit 02b601e51dcf3411b94262cc1bf397735b27505f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 19:34:30 2025 -0800
+
+    Add CI/CD permissions needed for portal data layer
+
+commit 8e17fc52f8f43aaf1b63d0a81347ba9071806bf3
+Merge: 1c4bae3 8750dae
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Sat Dec 6 02:12:50 2025 +0000
+
+    Merge pull request #43 from Brad-Edwards/34-infra-ecr-repository-for-portal-container
+
+    Add OIDC auth for Github and AWS
+
+commit 8750daeb174348ababbaa1d3e31ab0f3dab7d6d0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 16:57:26 2025 -0800
+
+    Hardcode bucket target until final infra decisions, then pass as env vars
+
+commit 2abac0a1449615b66da2ca56ef964f688f0f771c
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 16:43:01 2025 -0800
+
+    Update terraform/environments/prod/backend.tf
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 5e697ed4277ded0e541830a7f81387d754df1eee
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 16:42:12 2025 -0800
+
+    Update terraform/global/iam/github-oidc.tf
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 0feba510d9d4ec0afc273b15474c4e72108526f6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 16:40:47 2025 -0800
+
+    Fix Terraform formatting
+
+commit 6aa0b81b77ab471bcfbed5b052ae93ae18306256
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 16:34:08 2025 -0800
+
+    Add OIDC auth for Github and AWS
+
+    Add base infra, single env only for demo
+
+    add base infra ci/cd
+
+    Add utility for bumping versions. Current strategy is lockstep.
+
+commit 1c4bae3caac25b4ae411ab4486e20219fd93b123
+Merge: 7aed95b ab0acfb
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 15:55:38 2025 +0000
+
+    Merge pull request #42 from Brad-Edwards/41-docs-setup-mkdocs-for-project-documentation
+
+    Add mkdocs
+
+commit ab0acfbdf7248ae783f63777165ce183155a0e0e
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 07:53:58 2025 -0800
+
+    Update .github/workflows/docs.yml
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 3a52dbede397672d5d72555be3d8a319f099c8a1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 07:53:48 2025 -0800
+
+    Update .github/workflows/docs.yml
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit d000884b078862ba12d000d0e114540a4f594a01
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 07:53:34 2025 -0800
+
+    Update .github/workflows/docs.yml
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 2f9fde92663374ea34240443275a71765ad06a5b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 07:53:23 2025 -0800
+
+    Update requirements-docs.txt
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit f36d9f71162bf7d0d7dc07dc7b9c358da14d438a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 07:18:25 2025 -0800
+
+    Add mkdocs
+
+commit 7aed95b2db8f64656d48929220ee7a591e8f3e56
+Merge: 86a42dc c2f19ef
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 07:22:13 2025 +0000
+
+    Merge pull request #33 from Brad-Edwards/15-update-arch-plan-and-docs
+
+    Add new arch plan
+
+commit c2f19ef5d49e53db93f53390feccc4b207339e30
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 23:20:46 2025 -0800
+
+    Fix inconsistent formatting
+
+commit e5f265a84d00f73d59a9d8d628830c85c52a9613
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 23:18:53 2025 -0800
+
+    Fix date error
+
+commit 4fb1786db395fa04e318b8bd9f76d8661e4760f9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 23:17:31 2025 -0800
+
+    Only run build when affected code changes
+
+commit ce4a8ff94b8748e2548514c6046fb94c651707f1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 23:16:04 2025 -0800
+
+    Update gitignore
+
+commit b46c817d583514163107f35b68bf8c28bf2797f4
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 23:13:36 2025 -0800
+
+    Add new arch plan
+
+    Add assets for future docs
+
+commit 86a42dcb368ecadaebdfbebfd8224556be98f869
+Merge: e2e2185 8038d4b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 06:44:00 2025 +0000
+
+    Merge pull request #11 from Brad-Edwards/10-configure-scanning
+
+    10 configure scanning
+
+commit 8038d4b117937e787c10b7b25ed5ab88382e4867
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:42:27 2025 -0800
+
+    Update sonar-project.properties
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit d0452ac2c9ee47b4aebe427a91ec4a8bb8a2bdb9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:40:05 2025 -0800
+
+    Update sonar-project.properties
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 27fd55ecbf494bd8641db12857992b2a43207dc5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:39:52 2025 -0800
+
+    Update CHANGELOG.md
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 47e934e2eeddaf38a48ff73f144310141a41a2c5
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:38:54 2025 -0800
+
+    Update CHANGELOG.md
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit f459811348e28c096025b6ecda96eebbfffa71f6
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:37:35 2025 -0800
+
+    Update CHANGELOG.md
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 632b1a665bb93f4b761d6e33d9b812215969e49a
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:36:46 2025 -0800
+
+    Update .github/workflows/sonar.yml
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 736af8925310cdb6f014633b241ed389cc69b1a0
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:36:37 2025 -0800
+
+    Update .github/workflows/sonar.yml
+
+    Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+    Signed-off-by: Brad Edwards <j.bradley.edwards@gmail.com>
+
+commit 60f01e9d973391ef1b547a13136ea8923f2ed0e9
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:35:29 2025 -0800
+
+    Fix npm version and tests broken by upgrade
+
+commit 6dfa8e416e35b00bd57cf7f1f2246434f81cef2b
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:22:56 2025 -0800
+
+    Increment
+
+commit 0defac0e1b70a069b429f60545014c8ab621b9e1
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 22:22:35 2025 -0800
+
+    Add SonarCloud scanning
+
+commit e2e218588e5974312bb41a8bd1568e209a07ab01
+Merge: 2f753e4 5b7f62f
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Fri Dec 5 05:05:03 2025 +0000
+
+    Merge pull request #9 from Brad-Edwards/cleanup
+
+    Removed all unneeded APTL code
+
+commit 5b7f62f8811c6e1806d400d167315daee52bee33
+Author: Brad Edwards <j.bradley.edwards@gmail.com>
+Date:   Thu Dec 4 21:04:11 2025 -0800
+
+    Removed all unneeded APTL code

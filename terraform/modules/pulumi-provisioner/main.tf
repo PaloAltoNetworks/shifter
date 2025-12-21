@@ -17,12 +17,6 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-# Look up the actual KMS key ARN from the alias
-# Policy checks are done against the key ARN, not the alias ARN
-data "aws_kms_key" "secretsmanager" {
-  key_id = "alias/aws/secretsmanager"
-}
-
 # ------------------------------------------------------------------------------
 # Local Variables
 # ------------------------------------------------------------------------------

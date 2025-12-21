@@ -119,6 +119,16 @@ variable "pulumi_locks_table_arn" {
   type        = string
 }
 
+variable "pulumi_secrets_kms_key_arn" {
+  description = "ARN of the KMS key for Pulumi secrets encryption"
+  type        = string
+}
+
+variable "pulumi_secrets_kms_key_alias" {
+  description = "Alias of the KMS key for Pulumi secrets encryption (e.g., alias/dev-range-pulumi-secrets)"
+  type        = string
+}
+
 # ------------------------------------------------------------------------------
 # Range VPC Configuration
 # ------------------------------------------------------------------------------

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Instance catalog supporting Kali, Ubuntu, Windows, Amazon Linux
 - CI/CD workflow for Pulumi provisioner (`_pulumi-provisioner.yml`)
 - Django model fields and service routing for v1 (Lambda) / v2 (Pulumi) provisioners
+- Self-hosted Github Actions runners for CI/CD
 
 ### Fixed
 - Secrets Manager resources now Pulumi-managed (proper lifecycle, no orphans)

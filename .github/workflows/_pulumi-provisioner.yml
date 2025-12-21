@@ -58,5 +58,9 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=/tmp/.buildx-cache-pulumi
+          cache-to: type=local,dest=/tmp/.buildx-cache-pulumi-new,mode=max
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache-pulumi
+          mv /tmp/.buildx-cache-pulumi-new /tmp/.buildx-cache-pulumi || true

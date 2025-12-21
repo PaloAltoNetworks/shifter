@@ -74,3 +74,22 @@ output "pulumi_locks_table_arn" {
   description = "ARN of the Pulumi locks DynamoDB table"
   value       = var.enable_pulumi_provisioner ? module.pulumi_state[0].dynamodb_table_arn : null
 }
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM
+# ------------------------------------------------------------------------------
+
+output "range_instance_role_arn" {
+  description = "ARN of the IAM role for range EC2 instances"
+  value       = module.vpc.range_instance_role_arn
+}
+
+output "range_instance_profile_arn" {
+  description = "ARN of the IAM instance profile for range EC2 instances"
+  value       = module.vpc.range_instance_profile_arn
+}
+
+output "range_instance_profile_name" {
+  description = "Name of the IAM instance profile for range EC2 instances"
+  value       = module.vpc.range_instance_profile_name
+}

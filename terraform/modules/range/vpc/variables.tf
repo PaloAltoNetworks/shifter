@@ -61,3 +61,12 @@ variable "enable_flow_logs" {
   type        = bool
   default     = false
 }
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM
+# ------------------------------------------------------------------------------
+
+variable "agent_s3_bucket" {
+  description = "S3 bucket name for agent installers (for range instance S3 read access)"
+  type        = string
+}

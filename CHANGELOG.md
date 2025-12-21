@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.7] - 2025-12-20
+## [0.7.7] - 2025-12-21
 
 ### Added
 - Pulumi-based provisioner for declarative multi-OS range infrastructure
@@ -17,11 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Instance catalog supporting Kali, Ubuntu, Windows, Amazon Linux
 - CI/CD workflow for Pulumi provisioner (`_pulumi-provisioner.yml`)
 - Django model fields and service routing for v1 (Lambda) / v2 (Pulumi) provisioners
-- Self-hosted Github Actions runners for CI/CD
+- Self-hosted GitHub Actions runner for CI/CD
+
+### Changed
+- Range instance types bumped to t3.medium (4GB min for Claude Code)
+- CI Docker builds use local caching instead of GitHub Actions cache
 
 ### Fixed
 - Secrets Manager resources now Pulumi-managed (proper lifecycle, no orphans)
 - KMS policy, DNS egress, availability zone configuration for ECS tasks
+- WebSocket terminal consumer reads from `provisioned_instances` field (v2 provisioner compatibility)
 
 ### Removed
 - V1 (Lambda) provisioner

@@ -9,9 +9,9 @@ from typing import Optional
 
 import pulumi
 
-from ..config import RangeConfig
-from .instance import InstanceComponent
-from .network import NetworkComponent
+from config import RangeConfig
+from components.instance import InstanceComponent
+from components.network import NetworkComponent
 
 
 class RangeStack(pulumi.ComponentResource):

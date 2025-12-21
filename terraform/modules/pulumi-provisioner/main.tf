@@ -4,11 +4,10 @@
 # This module creates ECS Fargate infrastructure for running Pulumi-based
 # range provisioning tasks. It includes:
 # - ECS cluster with Fargate capacity provider
-# - CloudWatch log groups for ECS and Step Functions
+# - CloudWatch log groups for ECS tasks
 # - Task definitions (see task_definition.tf)
 # - IAM roles (see iam.tf)
 # - Security groups (see security.tf)
-# - Step Functions state machines (see step_functions.tf)
 # ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
@@ -67,14 +66,5 @@ resource "aws_cloudwatch_log_group" "ecs" {
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-pulumi-provisioner-logs"
-  })
-}
-
-resource "aws_cloudwatch_log_group" "sfn" {
-  name              = "/aws/stepfunctions/${var.name_prefix}-pulumi-provisioner"
-  retention_in_days = var.log_retention_days
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-pulumi-provisioner-sfn-logs"
   })
 }

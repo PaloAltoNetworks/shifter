@@ -440,30 +440,6 @@ resource "aws_iam_policy" "lambda_sfn" {
         Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:layer:*"
       },
       {
-        Sid    = "StepFunctions"
-        Effect = "Allow"
-        Action = [
-          "states:CreateStateMachine",
-          "states:DeleteStateMachine",
-          "states:DescribeStateMachine",
-          "states:UpdateStateMachine",
-          "states:ListStateMachines",
-          "states:ListStateMachineVersions",
-          "states:TagResource",
-          "states:UntagResource",
-          "states:ListTagsForResource"
-        ]
-        Resource = "arn:aws:states:${var.aws_region}:${data.aws_caller_identity.current.account_id}:stateMachine:*"
-      },
-      {
-        Sid    = "StepFunctionsValidate"
-        Effect = "Allow"
-        Action = [
-          "states:ValidateStateMachineDefinition"
-        ]
-        Resource = "*"
-      },
-      {
         Sid    = "CloudWatchLogs"
         Effect = "Allow"
         Action = [

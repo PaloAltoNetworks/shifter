@@ -2,11 +2,9 @@
 
 ## Infrastructure Overview
 
-Three components, decoupled via RDS:
+Two VPCs, decoupled via RDS:
 
-- **Portal**: Django app for auth, agent upload, range status UI. Triggers Step Functions on launch.
-- **Provisioning Service**: Step Functions + Lambda, provisions range infra (subnet, Kali, Victim)
-- **Terminal UI**: Browser-based terminal for SSH access to range instances (planned)
+- **Portal**: Django app for auth, agent upload, range status UI
 - **Range**: Per-user subnet in Range VPC with Kali + Victim EC2
 
 ```mermaid
@@ -14,12 +12,7 @@ graph TB
     subgraph "Portal VPC (10.0.0.0/16)"
         Portal[Django Portal]
         RDS[(PostgreSQL)]
-        StepFn[[Step Functions]]
-        Lambda[Lambda Functions]
         Portal --> RDS
-        Portal -->|start execution| StepFn
-        StepFn --> Lambda
-        Lambda --> RDS
     end
 
     subgraph "Range VPC (10.1.0.0/16)"
@@ -33,12 +26,8 @@ graph TB
     User((User)) -->|HTTPS| Portal
     Portal -->|SSH via Peering| Kali
     Portal -->|SSH via Peering| Victim
-    Lambda -->|AWS API| Kali
-    Lambda -->|AWS API| Victim
     Victim -->|Telemetry| XDR[XDR/XSIAM]
 ```
-
-Portal writes to RDS and triggers Step Functions. Lambda functions create AWS resources and update RDS directly.
 
 ## Portal Infrastructure
 
@@ -110,21 +99,7 @@ RDS credentials auto-generated at provision time, stored in Secrets Manager. Sec
 
 ## Range Infrastructure
 
-Per-user ephemeral subnets in Range VPC, provisioned by Step Functions + Lambda.
-
-### Provisioning Flow
-
-1. Portal writes `Range(status='provisioning', agent_id=X)` to RDS
-2. Portal starts Step Functions execution with `{ range_id }`
-3. Lambda functions execute sequentially:
-   - `create_subnet`: Create /24 subnet in Range VPC
-   - `create_kali`: Launch Kali EC2 from pre-baked AMI
-   - `create_victim`: Launch Victim EC2, install XDR agent from S3
-   - `mark_ready`: Update Range status to 'ready'
-4. Each Lambda reads from RDS, creates AWS resources, writes back to RDS
-5. On error: `cleanup` Lambda destroys any created resources
-
-### Components
+Per-user ephemeral subnets in Range VPC.
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
@@ -136,7 +111,6 @@ Per-user ephemeral subnets in Range VPC, provisioned by Step Functions + Lambda.
 - Each user gets a dedicated /24 subnet in Range VPC
 - Security groups restrict traffic between subnets
 - VPC peering connects Portal to Range for SSH terminal access only (port 22)
-- Lambda functions provision resources via AWS APIs (not through peering)
 - Victim VMs have no IAM role (can't call AWS APIs)
 
 ## Deployment Pipeline

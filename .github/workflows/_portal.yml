@@ -27,7 +27,7 @@ permissions:
 jobs:
   plan:
     name: Plan (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: terraform/environments/${{ inputs.environment }}/portal
@@ -65,7 +65,7 @@ jobs:
 
   apply:
     name: Apply (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: plan
     if: |
       always() &&
@@ -92,7 +92,7 @@ jobs:
 
   build:
     name: Build (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: apply
     if: github.event_name != 'pull_request' || inputs.environment == 'dev'
     outputs:
@@ -127,7 +127,7 @@ jobs:
 
   deploy:
     name: Deploy (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build
     if: github.event_name != 'pull_request' || inputs.environment == 'dev'
     env:

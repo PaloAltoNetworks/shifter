@@ -160,8 +160,8 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Sid    = "EC2RouteTableOperations"
         Effect = "Allow"
         Action = [
-          "ec2:CreateRouteTableAssociation",
-          "ec2:DeleteRouteTableAssociation",
+          "ec2:AssociateRouteTable",
+          "ec2:DisassociateRouteTable",
           "ec2:DescribeRouteTables"
         ]
         Resource = "*"

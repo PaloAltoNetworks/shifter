@@ -633,56 +633,60 @@ class TestMainEntryPoint:
     """Tests for __main__ entry point logic.
 
     These tests actually execute the main.py script as a subprocess to verify
-    CLI behavior including argument parsing, environment variable handling,
-    and exit codes.
+    CLI behavior including argument parsing and exit codes.
     """
 
     def test_main_requires_operation_arg(self):
-        """Exit with code 1 and usage message if no operation argument."""
+        """Exit with error if no operation argument provided."""
         result = subprocess.run(
             [sys.executable, "main.py"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
-            env={**os.environ, "RANGE_ID": "42"},
         )
 
-        assert result.returncode == 1
-        assert "Usage:" in result.stdout or "Usage:" in result.stderr
+        assert result.returncode != 0
+        # argparse shows usage/error on missing required args
+        assert "usage:" in result.stderr.lower() or "error:" in result.stderr.lower()
 
-    def test_main_missing_range_id_env(self):
-        """Exit with error when RANGE_ID env var is missing."""
-        # Create minimal env without RANGE_ID
-        minimal_env = {
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", ""),
-        }
-
+    def test_main_missing_range_id_arg(self):
+        """Exit with error when --range-id argument is missing."""
         result = subprocess.run(
-            [sys.executable, "main.py", "up"],
+            [sys.executable, "main.py", "provision"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
-            env=minimal_env,
         )
 
-        # Should fail due to missing RANGE_ID
+        # Should fail due to missing --range-id
         assert result.returncode != 0
-        assert "RANGE_ID" in result.stderr or "KeyError" in result.stderr
+        assert "--range-id" in result.stderr or "required" in result.stderr.lower()
 
-    def test_main_invalid_range_id_env(self):
-        """Exit with error when RANGE_ID is not an integer."""
+    def test_main_invalid_range_id_arg(self):
+        """Exit with error when --range-id is not an integer."""
         result = subprocess.run(
-            [sys.executable, "main.py", "up"],
+            [sys.executable, "main.py", "provision", "--range-id", "not-a-number"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
-            env={**os.environ, "RANGE_ID": "not-a-number"},
         )
 
-        # Should fail due to invalid RANGE_ID (not an integer)
+        # Should fail due to invalid --range-id (not an integer)
         assert result.returncode != 0
-        assert "ValueError" in result.stderr or "invalid literal" in result.stderr
+        assert "invalid int value" in result.stderr.lower()
+
+    def test_main_invalid_operation(self):
+        """Exit with error for invalid operation."""
+        result = subprocess.run(
+            [sys.executable, "main.py", "invalid_op", "--range-id", "42"],
+            cwd=str(Path(__file__).parent.parent),
+            capture_output=True,
+            text=True,
+        )
+
+        # argparse rejects invalid choices
+        assert result.returncode != 0
+        assert "invalid choice" in result.stderr.lower()
 
     def test_main_unknown_operation_error(self, mock_env_vars, mock_subprocess, mocker):
         """Unknown operation should raise ValueError from run_pulumi."""

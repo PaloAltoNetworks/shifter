@@ -302,12 +302,29 @@ def _run_destroy(range_id: int, stack_name: str, env: dict) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <up|destroy>")
-        sys.exit(1)
+    import argparse
 
-    operation = sys.argv[1]
-    range_id = int(os.environ["RANGE_ID"])
+    parser = argparse.ArgumentParser(
+        description="Pulumi provisioner for Shifter cyber ranges"
+    )
+    parser.add_argument(
+        "operation",
+        choices=["provision", "destroy"],
+        help="Operation to perform: provision (create) or destroy (teardown)",
+    )
+    parser.add_argument(
+        "--range-id",
+        type=int,
+        required=True,
+        help="Database ID of the range to operate on",
+    )
+
+    args = parser.parse_args()
+
+    # Map Django command names to Pulumi operations
+    operation_map = {"provision": "up", "destroy": "destroy"}
+    operation = operation_map[args.operation]
+    range_id = args.range_id
 
     print(f"Starting {operation} for range {range_id}")
     print(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")

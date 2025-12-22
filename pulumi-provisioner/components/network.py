@@ -7,8 +7,53 @@ This component creates the network infrastructure for a range:
 
 from typing import Optional
 
+import boto3
 import pulumi
 import pulumi_aws as aws
+
+
+def _cleanup_orphaned_subnet(vpc_id: str, cidr_block: str) -> None:
+    """Check for and delete any orphaned subnet with the given CIDR.
+
+    This handles edge cases where a previous range's subnet wasn't properly
+    cleaned up (e.g., cleanup failure, manual intervention, race condition).
+
+    Args:
+        vpc_id: The VPC ID to check in.
+        cidr_block: The CIDR block to check for.
+    """
+    ec2 = boto3.client("ec2")
+
+    # Check if a subnet with this CIDR already exists
+    response = ec2.describe_subnets(
+        Filters=[
+            {"Name": "vpc-id", "Values": [vpc_id]},
+            {"Name": "cidr-block", "Values": [cidr_block]},
+        ]
+    )
+
+    subnets = response.get("Subnets", [])
+    if not subnets:
+        return  # No conflict, proceed normally
+
+    # Found an orphaned subnet - delete it
+    subnet_id = subnets[0]["SubnetId"]
+    subnet_name = next(
+        (tag["Value"] for tag in subnets[0].get("Tags", []) if tag["Key"] == "Name"),
+        "unknown",
+    )
+    print(f"Found orphaned subnet {subnet_id} ({subnet_name}) with CIDR {cidr_block}")
+    print(f"Deleting orphaned subnet to allow new range creation...")
+
+    try:
+        ec2.delete_subnet(SubnetId=subnet_id)
+        print(f"Successfully deleted orphaned subnet {subnet_id}")
+    except Exception as e:
+        # If deletion fails, let Pulumi handle the error with a clear message
+        raise RuntimeError(
+            f"Cannot create subnet {cidr_block}: orphaned subnet {subnet_id} exists "
+            f"and could not be deleted: {e}"
+        ) from e
 
 
 class NetworkComponent(pulumi.ComponentResource):
@@ -56,6 +101,11 @@ class NetworkComponent(pulumi.ComponentResource):
         # Calculate subnet CIDR (use subnet_index + 1 to reserve .0 for infra)
         third_octet = subnet_index + 1
         subnet_cidr = f"{cidr_prefix}.{third_octet}.0/24"
+
+        # Defensive check: clean up any orphaned subnet with this CIDR
+        # This handles edge cases where a previous range's subnet wasn't properly
+        # cleaned up (e.g., cleanup failure, manual intervention, race condition)
+        _cleanup_orphaned_subnet(vpc_id, subnet_cidr)
 
         # Common tags for all resources
         common_tags = {

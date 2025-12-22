@@ -36,6 +36,7 @@ nav:
   - Mission Control: mission-control.md
   - Design System: design-system.md
   - Architecture: architecture.md
+  - Security: security.md
   - Range: range.md
   - Setup: setup.md
   - Portal Dev: portal-dev.md

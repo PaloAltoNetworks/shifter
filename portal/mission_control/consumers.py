@@ -79,21 +79,41 @@ class SSHConsumer(AsyncWebsocketConsumer):
                 await self.close(code=4004)
                 return
 
-            # Get connection details
+            # Get connection details from provisioned_instances
             if self.instance_type == "kali":
-                host = range_obj.kali_ip
-                secret_arn = range_obj.kali_ssh_key_secret_arn
-                username = "kali"
+                instance = range_obj.attacker_instance
             else:  # victim
-                host = range_obj.victim_ip
-                secret_arn = range_obj.victim_ssh_key_secret_arn
-                username = "ubuntu"  # Victim uses Ubuntu
+                victims = range_obj.victim_instances
+                instance = victims[0] if victims else None
+
+            if not instance:
+                logger.error(
+                    "No %s instance found in range %s provisioned_instances",
+                    self.instance_type,
+                    self.range_id,
+                )
+                await self.close(code=4005)
+                return
+
+            host = instance.get("private_ip")
+            secret_arn = instance.get("ssh_key_secret_arn")
+            os_type = instance.get("os", "")
+
+            # Determine SSH username based on OS
+            if os_type.startswith("kali"):
+                username = "kali"
+            elif os_type.startswith("amazon-linux"):
+                username = "ec2-user"
+            else:  # ubuntu, debian, etc.
+                username = "ubuntu"
 
             if not host or not secret_arn:
                 logger.error(
-                    "Missing connection details for range %s instance %s",
+                    "Missing connection details for range %s instance %s: host=%s, secret_arn=%s",
                     self.range_id,
                     self.instance_type,
+                    host,
+                    secret_arn,
                 )
                 await self.close(code=4005)
                 return

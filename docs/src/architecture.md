@@ -1,82 +1,146 @@
 # Architecture
 
-## Infrastructure Overview
+Current system architecture. Documents what exists, not what is planned.
 
-Three components, decoupled via RDS:
-
-- **Portal**: Django app for auth, agent upload, range status UI. Triggers Step Functions on launch.
-- **Provisioning Service**: Step Functions + Lambda, provisions range infra (subnet, Kali, Victim)
-- **Terminal UI**: Browser-based terminal for SSH access to range instances (planned)
-- **Range**: Per-user subnet in Range VPC with Kali + Victim EC2
+## System Overview
 
 ```mermaid
-graph TB
-    subgraph "Portal VPC (10.0.0.0/16)"
-        Portal[Django Portal]
+flowchart TB
+    subgraph PORTAL_VPC["Portal VPC (10.0.0.0/16)"]
+        ALB[ALB]
+        EC2[Django EC2]
         RDS[(PostgreSQL)]
-        StepFn[[Step Functions]]
-        Lambda[Lambda Functions]
-        Portal --> RDS
-        Portal -->|start execution| StepFn
-        StepFn --> Lambda
-        Lambda --> RDS
-    end
-
-    subgraph "Range VPC (10.1.0.0/16)"
-        subgraph "User Subnet"
-            Kali[Kali Instance]
-            Victim[Victim Instance]
-            Kali -->|attacks| Victim
-        end
-    end
-
-    User((User)) -->|HTTPS| Portal
-    Portal -->|SSH via Peering| Kali
-    Portal -->|SSH via Peering| Victim
-    Lambda -->|AWS API| Kali
-    Lambda -->|AWS API| Victim
-    Victim -->|Telemetry| XDR[XDR/XSIAM]
-```
-
-Portal writes to RDS and triggers Step Functions. Lambda functions create AWS resources and update RDS directly.
-
-## Portal Infrastructure
-
-### Network
-
-```mermaid
-graph TB
-    subgraph "Portal VPC (10.0.0.0/16)"
-        subgraph "Public Subnets (2 AZs)"
-            ALB[ALB]
-            NAT[NAT Gateway]
-        end
-        subgraph "Private Subnets (2 AZs)"
-            EC2[Django on EC2]
-            RDS[(RDS PostgreSQL)]
-        end
         ALB --> EC2
         EC2 --> RDS
-        EC2 --> NAT
     end
-    Internet((Internet)) --> ALB
-    NAT --> Internet
+
+    subgraph ECS["ECS"]
+        PROV[Pulumi Provisioner]
+    end
+
+    subgraph RANGE_VPC["Range VPC (10.1.0.0/16)"]
+        subgraph SUBNET["User Subnet (/24)"]
+            KALI[Kali EC2]
+            VICTIM[Victim EC2]
+        end
+    end
+
+    USER((User)) -->|HTTPS| ALB
+    USER <-->|Login/MFA| COGNITO[Cognito]
+    COGNITO <-->|OIDC| EC2
+    EC2 -->|WebSocket SSH| KALI
+    EC2 -->|WebSocket SSH| VICTIM
+    EC2 -->|Start Task| PROV
+    PROV -->|IAM Auth| RDS
+    PROV -->|Create| SUBNET
+    VICTIM -->|Telemetry| XDR[XDR/XSIAM]
 ```
 
-Two AZs required for RDS subnet group. ALB in public subnets with ACM cert. EC2 in private subnet pulls container from ECR.
+## Components
 
-### Components
+### Portal (`portal/`)
 
-| Component | Purpose |
-|-----------|---------|
-| ALB | HTTPS termination, routes to EC2 |
-| EC2 | Runs Django container, pulls from ECR |
-| ECR | Container registry for Django image |
-| VPC | Network isolation, public/private subnet separation |
-| RDS | PostgreSQL 16, encrypted, credentials in Secrets Manager |
-| Cognito | User authentication, MFA, email verification |
+Single Django codebase with two apps:
 
-### Authentication
+| App | Purpose |
+|-----|---------|
+| `mission_control` | Auth, agent config, range lifecycle, terminal UI |
+| `risk_register` | Security risk tracking (admin-only) |
+
+**Models in `mission_control`:**
+
+| Model | Purpose |
+|-------|---------|
+| `UserProfile` | Cognito user metadata |
+| `AgentConfig` | XDR agent installer configs (S3 references) |
+| `OperatingSystem` | OS types available for ranges |
+| `Range` | Range instance state and resource IDs |
+| `ActivityLog` | Audit trail |
+
+**Key services:**
+- `services/ssh.py` - Async SSH connection management
+- `services/secrets.py` - Secrets Manager retrieval
+- `consumers.py` - WebSocket SSH terminal consumer
+
+### Pulumi Provisioner (`pulumi-provisioner/`)
+
+ECS Fargate task that provisions/destroys range infrastructure.
+
+| File | Purpose |
+|------|---------|
+| `main.py` | Entrypoint, DB connection, Pulumi orchestration |
+| `config.py` | Stack configuration from env/DB |
+| `catalog/instances.py` | Instance type definitions |
+| `components/` | Reusable Pulumi components |
+| `templates/` | Cloud-init user data (Jinja2) |
+
+**Instance catalog:**
+- `kali-2024` - Kali Linux attacker
+- `ubuntu-22.04-victim` - Ubuntu 22.04 victim
+- `ubuntu-24.04-victim` - Ubuntu 24.04 victim
+- `windows-server-2022-victim` - Windows Server 2022 victim
+- `amazon-linux-2023-victim` - Amazon Linux 2023 victim
+
+### Terraform (`terraform/`)
+
+Infrastructure as code.
+
+| Module | Purpose |
+|--------|---------|
+| `portal/` | Portal VPC, RDS, ALB, EC2, Cognito, S3 |
+| `range/` | Range VPC, subnets, security groups |
+| `pulumi-provisioner/` | ECS task definition, IAM roles |
+| `pulumi-state/` | S3 bucket + DynamoDB for Pulumi state |
+| `ecr/` | Container registries |
+| `log-aggregation/` | CloudWatch log groups |
+
+**Environments:** `dev`, `prod`
+
+## Data Flow
+
+### Range Provisioning
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Portal
+    participant ECS
+    participant Pulumi
+    participant RDS
+    participant AWS
+
+    User->>Portal: Launch Range
+    Portal->>RDS: Insert Range(status=pending)
+    Portal->>ECS: Start provisioner task
+    ECS->>Pulumi: Run 'up'
+    Pulumi->>RDS: status=provisioning
+    Pulumi->>AWS: Create subnet, EC2s
+    Pulumi->>RDS: status=ready, IPs, ARNs
+    Portal->>User: Range ready
+```
+
+### Terminal Access
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Django
+    participant SecretsManager
+    participant Kali
+
+    Browser->>Django: WebSocket connect
+    Django->>Django: Verify user owns range
+    Django->>SecretsManager: Get SSH key
+    Django->>Kali: SSH connect
+    Browser->>Django: Terminal input
+    Django->>Kali: Forward to SSH
+    Kali->>Django: SSH output
+    Django->>Browser: Terminal output
+```
+
+## Authentication
+
+Cognito OIDC with domain restriction.
 
 ```mermaid
 sequenceDiagram
@@ -85,104 +149,45 @@ sequenceDiagram
     participant Cognito
 
     User->>Django: GET /protected
-    Django->>User: 302 → Cognito hosted UI
+    Django->>User: 302 → Cognito
     User->>Cognito: Login + MFA
     Cognito->>User: 302 → /callback?code=xxx
-    User->>Django: GET /callback?code=xxx
-    Django->>Cognito: Exchange code for tokens
-    Cognito->>Django: JWT (id_token, access_token)
-    Django->>Django: Validate JWT, create session
-    Django->>User: 302 → /protected (with session cookie)
+    User->>Django: GET /callback
+    Django->>Cognito: Exchange code
+    Cognito->>Django: JWT tokens
+    Django->>User: Session cookie
 ```
-
-Cognito user pool configured with:
 
 - Email as username
 - MFA required (TOTP)
-- Pre-signup Lambda for domain restriction (`@paloaltonetworks.com`)
-- Email verification required
+- Pre-signup Lambda restricts to `@paloaltonetworks.com`
 
-Django stores minimal user data (email from token claims). No passwords in DB.
+## Network
 
-### Secrets Management
+### Portal VPC
 
-RDS credentials auto-generated at provision time, stored in Secrets Manager. Secret configured with `recovery_window_in_days = 0` to allow immediate deletion and avoid naming conflicts on destroy/recreate cycles.
+| Subnet | Components |
+|--------|------------|
+| Public (2 AZs) | ALB, NAT Gateway |
+| Private (2 AZs) | EC2, RDS |
 
-## Range Infrastructure
+### Range VPC
 
-Per-user ephemeral subnets in Range VPC, provisioned by Step Functions + Lambda.
+| Subnet | Components |
+|--------|------------|
+| Public | NAT Gateway |
+| Private (/24 per user) | Kali EC2, Victim EC2 |
 
-### Provisioning Flow
+VPC peering connects Portal to Range for SSH access (port 22 only).
 
-1. Portal writes `Range(status='provisioning', agent_id=X)` to RDS
-2. Portal starts Step Functions execution with `{ range_id }`
-3. Lambda functions execute sequentially:
-   - `create_subnet`: Create /24 subnet in Range VPC
-   - `create_kali`: Launch Kali EC2 from pre-baked AMI
-   - `create_victim`: Launch Victim EC2, install XDR agent from S3
-   - `mark_ready`: Update Range status to 'ready'
-4. Each Lambda reads from RDS, creates AWS resources, writes back to RDS
-5. On error: `cleanup` Lambda destroys any created resources
+## Deployment
 
-### Components
+GitHub Actions on merge:
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Kali EC2 | Range VPC | Attack tools, SSH accessible |
-| Victim EC2 | Range VPC | Target with XDR agent |
+| Trigger | Action |
+|---------|--------|
+| `terraform/**` → main | `terraform apply` |
+| `portal/**` → main | Build image → ECR → SSM restart EC2 |
+| `pulumi-provisioner/**` → main | Build image → ECR |
 
-### Isolation
-
-- Each user gets a dedicated /24 subnet in Range VPC
-- Security groups restrict traffic between subnets
-- VPC peering connects Portal to Range for SSH terminal access only (port 22)
-- Lambda functions provision resources via AWS APIs (not through peering)
-- Victim VMs have no IAM role (can't call AWS APIs)
-
-## Deployment Pipeline
-
-### Infrastructure
-
-GitHub Actions deploys infra via Terraform on merge to main.
-
-```mermaid
-graph LR
-    Push[Push to main] --> GHA[GitHub Actions]
-    GHA -->|OIDC| AWS[AWS]
-    GHA -->|terraform apply| Infra[Infrastructure]
-```
-
-### Portal Application
-
-Portal deploys on push to `portal/**`:
-
-```mermaid
-graph LR
-    Push[Push portal/*] --> Build[Build Docker]
-    Build --> ECR[Push to ECR]
-    ECR --> SSM[SSM Run Command]
-    SSM --> EC2[Pull + Restart]
-```
-
-EC2 user data bootstraps Docker and ECR auth. SSM pulls new image and restarts container.
-
-IAM via OIDC federation. No static credentials. Role permissions scoped to shifter-* resources.
-
-### Secrets Sync
-
-Terraform variables stored locally in `.tfvars` files (gitignored). Synced to GitHub secrets before PR:
-
-```bash
-./scripts/sync-tfvars.sh
-```
-
-Creates namespaced secrets: `TF_VARS_{ENV}_{COMPONENT}` (e.g., `TF_VARS_PROD_PORTAL`).
-
-## Range Access
-
-Users access their range instances via browser-based terminal integrated into the Portal. Side-by-side terminal panes provide simultaneous SSH access to both instances:
-
-- **Kali terminal (left)**: Run attack tools, execute pentesting workflows
-- **Victim terminal (right)**: Configure vulnerabilities, check detections
-
-The terminal uses Django Channels with WebSocket connections for real-time SSH interaction. See GitHub issue #267.
+IAM via OIDC federation. No static credentials.

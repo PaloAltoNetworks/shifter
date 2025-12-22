@@ -27,7 +27,7 @@ permissions:
 jobs:
   plan:
     name: Plan (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: terraform/environments/${{ inputs.environment }}/portal
@@ -46,7 +46,6 @@ jobs:
         run: echo "$TF_VARS" > terraform.tfvars
       - run: terraform fmt -check -recursive
         working-directory: terraform
-      - run: bash ../../../modules/range/provisioner/build-lambdas.sh
       - run: terraform init
       - run: terraform validate
       - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
@@ -66,9 +65,12 @@ jobs:
 
   apply:
     name: Apply (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: plan
-    if: always() && (needs.plan.result == 'success' || needs.plan.result == 'skipped')
+    if: |
+      always() &&
+      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      (github.event_name != 'pull_request' || inputs.environment == 'dev')
     defaults:
       run:
         working-directory: terraform/environments/${{ inputs.environment }}/portal
@@ -85,14 +87,14 @@ jobs:
         env:
           TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
         run: echo "$TF_VARS" > terraform.tfvars
-      - run: bash ../../../modules/range/provisioner/build-lambdas.sh
       - run: terraform init
       - run: terraform apply -auto-approve
 
   build:
     name: Build (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: apply
+    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:
@@ -120,13 +122,18 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=/tmp/.buildx-cache-portal
+          cache-to: type=local,dest=/tmp/.buildx-cache-portal-new,mode=max
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache-portal
+          mv /tmp/.buildx-cache-portal-new /tmp/.buildx-cache-portal || true
 
   deploy:
     name: Deploy (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build
+    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
     env:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}
@@ -150,10 +157,15 @@ jobs:
           echo "domain=${PORTAL_DOMAIN}" >> $GITHUB_OUTPUT
           S3_BUCKET=$(echo "$TF_VARS" | grep '^user_storage_bucket' | sed 's/.*= *"\([^"]*\)".*/\1/')
           echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
-          PROVISION_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-provision-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
-          TEARDOWN_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-teardown-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
-          echo "provision_state_machine_arn=${PROVISION_ARN}" >> $GITHUB_OUTPUT
-          echo "teardown_state_machine_arn=${TEARDOWN_ARN}" >> $GITHUB_OUTPUT
+          # Pulumi provisioner ECS configuration
+          PULUMI_ECS_CLUSTER=$(aws ecs list-clusters --query "clusterArns[?contains(@, '${ENV}-portal-pulumi')]" --output text)
+          echo "pulumi_ecs_cluster_arn=${PULUMI_ECS_CLUSTER}" >> $GITHUB_OUTPUT
+          PULUMI_TASK_DEF=$(aws ecs list-task-definitions --family-prefix "${ENV}-portal-pulumi-provisioner" --sort DESC --query "taskDefinitionArns[0]" --output text)
+          echo "pulumi_task_definition_arn=${PULUMI_TASK_DEF}" >> $GITHUB_OUTPUT
+          PULUMI_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=${ENV}-portal-pulumi-ecs-sg" --query "SecurityGroups[0].GroupId" --output text)
+          echo "pulumi_ecs_security_group_id=${PULUMI_SG}" >> $GITHUB_OUTPUT
+          PULUMI_SUBNETS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=${ENV}-portal-private-*" --query "Subnets[*].SubnetId" --output text | tr '\t' ',')
+          echo "pulumi_private_subnet_ids=${PULUMI_SUBNETS}" >> $GITHUB_OUTPUT
           # Check if autoscaling is enabled
           ENABLE_AUTOSCALING=$(echo "$TF_VARS" | grep '^enable_autoscaling' | sed 's/.*= *\([^ ]*\).*/\1/' | tr -d ' ')
           echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> $GITHUB_OUTPUT
@@ -218,8 +230,10 @@ jobs:
           IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
           PORTAL_DOMAIN: ${{ steps.config.outputs.domain }}
           S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
-          PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.provision_state_machine_arn }}
-          TEARDOWN_STATE_MACHINE_ARN: ${{ steps.config.outputs.teardown_state_machine_arn }}
+          PULUMI_ECS_CLUSTER_ARN: ${{ steps.config.outputs.pulumi_ecs_cluster_arn }}
+          PULUMI_TASK_DEFINITION_ARN: ${{ steps.config.outputs.pulumi_task_definition_arn }}
+          PULUMI_ECS_SECURITY_GROUP_ID: ${{ steps.config.outputs.pulumi_ecs_security_group_id }}
+          PULUMI_PRIVATE_SUBNET_IDS: ${{ steps.config.outputs.pulumi_private_subnet_ids }}
           ACCOUNT_ID: ${{ steps.config.outputs.account_id }}
         run: |
           DB_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-db-credentials"
@@ -242,8 +256,10 @@ jobs:
                 -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
                 -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
                 -e SITE_URL=https://${PORTAL_DOMAIN} \
-                -e PROVISION_STATE_MACHINE_ARN=${PROVISION_STATE_MACHINE_ARN} \
-                -e TEARDOWN_STATE_MACHINE_ARN=${TEARDOWN_STATE_MACHINE_ARN} \
+                -e PULUMI_ECS_CLUSTER_ARN=${PULUMI_ECS_CLUSTER_ARN} \
+                -e PULUMI_TASK_DEFINITION_ARN=${PULUMI_TASK_DEFINITION_ARN} \
+                -e PULUMI_ECS_SECURITY_GROUP_ID=${PULUMI_ECS_SECURITY_GROUP_ID} \
+                -e PULUMI_PRIVATE_SUBNET_IDS=${PULUMI_PRIVATE_SUBNET_IDS} \
                 \$IMAGE'
             ]" --timeout-seconds 300 --query "Command.CommandId" --output text)
 
@@ -264,8 +280,10 @@ jobs:
           IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
           PORTAL_DOMAIN: ${{ steps.config.outputs.domain }}
           S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
-          PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.provision_state_machine_arn }}
-          TEARDOWN_STATE_MACHINE_ARN: ${{ steps.config.outputs.teardown_state_machine_arn }}
+          PULUMI_ECS_CLUSTER_ARN: ${{ steps.config.outputs.pulumi_ecs_cluster_arn }}
+          PULUMI_TASK_DEFINITION_ARN: ${{ steps.config.outputs.pulumi_task_definition_arn }}
+          PULUMI_ECS_SECURITY_GROUP_ID: ${{ steps.config.outputs.pulumi_ecs_security_group_id }}
+          PULUMI_PRIVATE_SUBNET_IDS: ${{ steps.config.outputs.pulumi_private_subnet_ids }}
           REDIS_ENDPOINT: ${{ steps.config.outputs.redis_endpoint }}
           ACCOUNT_ID: ${{ steps.config.outputs.account_id }}
         run: |
@@ -303,8 +321,10 @@ jobs:
                 -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
                 -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
                 -e SITE_URL=https://${PORTAL_DOMAIN} \
-                -e PROVISION_STATE_MACHINE_ARN=${PROVISION_STATE_MACHINE_ARN} \
-                -e TEARDOWN_STATE_MACHINE_ARN=${TEARDOWN_STATE_MACHINE_ARN} \
+                -e PULUMI_ECS_CLUSTER_ARN=${PULUMI_ECS_CLUSTER_ARN} \
+                -e PULUMI_TASK_DEFINITION_ARN=${PULUMI_TASK_DEFINITION_ARN} \
+                -e PULUMI_ECS_SECURITY_GROUP_ID=${PULUMI_ECS_SECURITY_GROUP_ID} \
+                -e PULUMI_PRIVATE_SUBNET_IDS=${PULUMI_PRIVATE_SUBNET_IDS} \
                 -e REDIS_HOST=${REDIS_ENDPOINT} \
                 \$IMAGE'
             ]" --timeout-seconds 300 --query "Command.CommandId" --output text)

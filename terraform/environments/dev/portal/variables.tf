@@ -172,7 +172,6 @@ variable "victim_ami_id" {
 variable "victim_instance_type" {
   description = "Instance type for victim EC2 instances"
   type        = string
-  default     = "t3.micro"
 }
 
 variable "kali_ami_id" {
@@ -183,7 +182,6 @@ variable "kali_ami_id" {
 variable "kali_instance_type" {
   description = "Instance type for Kali EC2 instances"
   type        = string
-  default     = "t3.small"
 }
 
 # ------------------------------------------------------------------------------

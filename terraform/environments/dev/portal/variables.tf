@@ -186,18 +186,6 @@ variable "kali_instance_type" {
   default     = "t3.small"
 }
 
-variable "enable_provisioner_alarms" {
-  description = "Enable CloudWatch alarms for provisioner Step Functions and Lambda"
-  type        = bool
-  default     = false
-}
-
-variable "provisioner_alarm_email" {
-  description = "Email address for provisioner alarm notifications (leave empty to skip)"
-  type        = string
-  default     = ""
-}
-
 # ------------------------------------------------------------------------------
 # Autoscaling
 # ------------------------------------------------------------------------------
@@ -277,6 +265,22 @@ variable "enable_rds_log_exports" {
 variable "enable_waf_logging" {
   description = "Enable WAF logging to Firehose"
   type        = bool
+}
+
+# ------------------------------------------------------------------------------
+# Pulumi Provisioner
+# ------------------------------------------------------------------------------
+
+variable "pulumi_container_tag" {
+  description = "Docker image tag for Pulumi provisioner container"
+  type        = string
+  default     = "latest"
+}
+
+variable "windows_ami_id" {
+  description = "AMI ID for Windows victim instances"
+  type        = string
+  default     = ""
 }
 
 # ------------------------------------------------------------------------------

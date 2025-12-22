@@ -112,20 +112,29 @@ else:
     }
 
 # Database
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "shifter"),
-        "USER": os.environ.get("DB_USER"),
-        "PASSWORD": os.environ.get("DB_PASSWORD"),
-        "HOST": os.environ.get("DB_HOST", "localhost"),
-        "PORT": os.environ.get("DB_PORT", "5432"),
-        "CONN_MAX_AGE": 60,
-        "OPTIONS": {
-            "connect_timeout": 10,
-        },
+# Use SQLite for tests, PostgreSQL otherwise
+if os.environ.get("TESTING") == "1":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DB_NAME", "shifter"),
+            "USER": os.environ.get("DB_USER"),
+            "PASSWORD": os.environ.get("DB_PASSWORD"),
+            "HOST": os.environ.get("DB_HOST", "localhost"),
+            "PORT": os.environ.get("DB_PORT", "5432"),
+            "CONN_MAX_AGE": 60,
+            "OPTIONS": {
+                "connect_timeout": 10,
+            },
+        }
+    }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -245,9 +254,11 @@ AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
 AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
 
-# Step Functions State Machine ARNs (for range provisioning)
-PROVISION_STATE_MACHINE_ARN = os.environ.get("PROVISION_STATE_MACHINE_ARN", "")
-TEARDOWN_STATE_MACHINE_ARN = os.environ.get("TEARDOWN_STATE_MACHINE_ARN", "")
+# Pulumi Provisioner (ECS Fargate)
+PULUMI_ECS_CLUSTER_ARN = os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
+PULUMI_TASK_DEFINITION_ARN = os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
+PULUMI_ECS_SECURITY_GROUP_ID = os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
+PULUMI_PRIVATE_SUBNET_IDS = os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
 
 # Agent upload limits
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file

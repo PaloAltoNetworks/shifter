@@ -534,6 +534,21 @@ resource "aws_iam_policy" "lambda_sfn" {
           "ecs:*"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "StepFunctions"
+        Effect = "Allow"
+        Action = [
+          "states:CreateStateMachine",
+          "states:DeleteStateMachine",
+          "states:DescribeStateMachine",
+          "states:UpdateStateMachine",
+          "states:ListStateMachines",
+          "states:TagResource",
+          "states:UntagResource",
+          "states:ListTagsForResource"
+        ]
+        Resource = "*"
       }
     ]
   })

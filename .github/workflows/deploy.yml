@@ -39,6 +39,7 @@ jobs:
               - '.github/workflows/deploy.yml'
             range:
               - 'terraform/modules/range/**'
+              - 'terraform/modules/pulumi-state/**'
               - 'terraform/environments/*/range/**'
               - '.github/workflows/_range.yml'
             pulumi_provisioner:

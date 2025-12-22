@@ -169,8 +169,36 @@ case "${1:-status}" in
             --target "$instance_id"
         ;;
 
+    tunnel)
+        instance_id=$(get_instance_id)
+        if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
+            echo "Dev box not found"
+            exit 1
+        fi
+
+        state=$(get_instance_state "$instance_id")
+        if [ "$state" != "running" ]; then
+            echo "Dev box is not running. Start it first:"
+            echo "  ./scripts/dev-box.sh start"
+            exit 1
+        fi
+
+        local_port="${2:-33389}"
+        echo "Starting RDP tunnel to $instance_id..."
+        echo "Connect your RDP client to: localhost:$local_port"
+        echo ""
+        echo "Press Ctrl+C to close the tunnel"
+        echo ""
+        aws ssm start-session \
+            --profile "$AWS_PROFILE" \
+            --region "$REGION" \
+            --target "$instance_id" \
+            --document-name AWS-StartPortForwardingSession \
+            --parameters "{\"portNumber\":[\"3389\"],\"localPortNumber\":[\"$local_port\"]}"
+        ;;
+
     *)
-        echo "Usage: $0 {start|stop|status|connect|ssh}"
+        echo "Usage: $0 {start|stop|status|connect|ssh|tunnel}"
         echo ""
         echo "Commands:"
         echo "  start   - Start the dev box"
@@ -178,6 +206,7 @@ case "${1:-status}" in
         echo "  status  - Show current status"
         echo "  connect - Open Fleet Manager RDP in browser"
         echo "  ssh     - Start SSM CLI session"
+        echo "  tunnel  - Start RDP tunnel (default: localhost:33389)"
         exit 1
         ;;
 esac

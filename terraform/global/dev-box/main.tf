@@ -230,3 +230,72 @@ resource "aws_ec2_tag" "dev_box_project" {
   key         = "Project"
   value       = "shifter"
 }
+
+# =============================================================================
+# Automatic shutdown at 11pm Pacific every night
+# =============================================================================
+
+# IAM role for EventBridge to stop the instance
+resource "aws_iam_role" "scheduler" {
+  name = "shifter-dev-box-scheduler"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "scheduler.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name    = "shifter-dev-box-scheduler"
+    Project = "shifter"
+  }
+}
+
+resource "aws_iam_role_policy" "scheduler_stop_instance" {
+  name = "stop-dev-box"
+  role = aws_iam_role.scheduler.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ec2:StopInstances"
+        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/${aws_spot_instance_request.dev_box.spot_instance_id}"
+      }
+    ]
+  })
+}
+
+# EventBridge Scheduler to stop instance at 11pm Pacific every night
+resource "aws_scheduler_schedule" "stop_dev_box" {
+  name        = "shifter-dev-box-nightly-shutdown"
+  description = "Stop dev box at 11pm Pacific every night"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  # 11pm Pacific = 7am UTC (during PST) or 6am UTC (during PDT)
+  # Using America/Los_Angeles handles DST automatically
+  schedule_expression          = "cron(0 23 * * ? *)"
+  schedule_expression_timezone = "America/Los_Angeles"
+
+  target {
+    arn      = "arn:aws:scheduler:::aws-sdk:ec2:stopInstances"
+    role_arn = aws_iam_role.scheduler.arn
+
+    input = jsonencode({
+      InstanceIds = [aws_spot_instance_request.dev_box.spot_instance_id]
+    })
+  }
+
+  state = "ENABLED"
+}

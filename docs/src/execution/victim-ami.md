@@ -7,8 +7,23 @@ Pre-baked victim images with vulnerable services and Claude Code.
 ### What's In It
 
 - Ubuntu 22.04
-- Claude Code (configured for Bedrock)
-- Vulnerable services: Apache, MySQL, Docker, PHP, Samba, FTP
+- Claude Code 2.x (configured for Bedrock)
+
+**Services (running on boot):**
+- Apache 2.4 with mod_php
+- MySQL 8.0
+- Docker
+- OpenSSH Server
+- vsftpd (FTP)
+
+**Services (installed, not running):**
+- Samba
+
+**Development Tools:**
+- build-essential (gcc, g++, make)
+- Python 3.10
+- Node.js 20.x
+- Git, curl, nano, netcat
 
 ## Windows Victim
 

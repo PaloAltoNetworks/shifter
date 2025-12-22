@@ -343,6 +343,10 @@ module "pulumi_provisioner" {
   victim_ami_id  = var.victim_ami_id
   windows_ami_id = var.windows_ami_id
 
+  # Instance types
+  kali_instance_type   = var.kali_instance_type
+  victim_instance_type = var.victim_instance_type
+
   # S3
   agent_s3_bucket     = module.s3.bucket_name
   agent_s3_bucket_arn = module.s3.bucket_arn

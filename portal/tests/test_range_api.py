@@ -258,9 +258,9 @@ class TestDestroyRange:
         data = response.json()
         assert data["success"] is True
 
-        # Verify range was marked as destroyed in DB
+        # Verify range was marked as DESTROYING (async cleanup will set DESTROYED)
         range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYED
+        assert range_obj.status == Range.Status.DESTROYING
 
     def test_can_destroy_failed_range(self, client, test_agent, settings):
         """Failed ranges can be destroyed to clean up."""
@@ -280,16 +280,17 @@ class TestDestroyRange:
         data = response.json()
         assert data["success"] is True
 
-        # Verify range was marked as destroyed in DB
+        # Verify range was marked as DESTROYING (async cleanup will set DESTROYED)
         range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYED
+        assert range_obj.status == Range.Status.DESTROYING
 
 
 @pytest.mark.django_db
 class TestLaunchRangeWhileDestroying:
-    """Test that users cannot launch while a range is being destroyed."""
+    """Test that users CAN launch while a range is being destroyed."""
 
-    def test_cannot_launch_while_destroying(self, client, test_agent, settings):
+    def test_can_launch_while_destroying(self, client, test_agent, settings):
+        """User can launch a new range while old one is being cleaned up."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
@@ -298,17 +299,21 @@ class TestLaunchRangeWhileDestroying:
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.DESTROYING,
+            subnet_index=1,
         )
 
-        # Try to launch a new range
+        # User can launch a new range (gets different subnet)
         response = client.post(
             reverse("mission_control:launch_range"),
             data={"agent_id": test_agent.id},
             content_type="application/json",
         )
 
-        assert response.status_code == 409
-        assert "already have an active range" in response.json()["error"]
+        assert response.status_code == 200
+        # New range should get subnet_index=2 (1 is reserved by DESTROYING range)
+        new_range = Range.objects.filter(status=Range.Status.PROVISIONING).first()
+        assert new_range is not None
+        assert new_range.subnet_index == 2
 
 
 @pytest.mark.django_db
@@ -402,15 +407,14 @@ class TestSubnetIndexAllocation:
         assert index == 2
 
     def test_skips_active_indices(self, test_agent):
-        """Should not reuse indices from non-destroyed ranges."""
-        # Create ranges in various active states
+        """Should not reuse indices from active ranges (excludes DESTROYED and FAILED)."""
+        # Create ranges in various active states (FAILED is now excluded like DESTROYED)
         for i, status in enumerate(
             [
                 Range.Status.PROVISIONING,
                 Range.Status.READY,
                 Range.Status.PAUSED,
                 Range.Status.DESTROYING,
-                Range.Status.FAILED,
             ],
             start=1,
         ):
@@ -421,9 +425,23 @@ class TestSubnetIndexAllocation:
                 subnet_index=i,
             )
 
-        # Next allocation should be 6
+        # Next allocation should be 5
         index = Range.allocate_subnet_index()
-        assert index == 6
+        assert index == 5
+
+    def test_reuses_failed_indices(self, test_agent):
+        """Failed ranges should free up their indices (like destroyed ranges)."""
+        # Create a failed range with index 1
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.FAILED,
+            subnet_index=1,
+        )
+
+        # Should reuse index 1 since FAILED ranges are excluded from allocation
+        index = Range.allocate_subnet_index()
+        assert index == 1
 
     def test_raises_when_exhausted(self, test_agent):
         """Should raise ValueError when all indices are used."""

@@ -28,6 +28,26 @@ try {
     # Allow WinRM through firewall
     Set-NetFirewallRule -Name "WINRM-HTTP-In-TCP" -RemoteAddress Any
 
+    # Configure OpenSSH Server for Terminal UI access
+    Log-Message "Configuring OpenSSH Server..."
+    Start-Service sshd
+    Set-Service -Name sshd -StartupType Automatic
+
+    # Set up SSH key authentication for Administrator
+    {% if public_key %}
+    Log-Message "Setting up SSH key authentication..."
+    $sshDir = "C:\ProgramData\ssh"
+    if (!(Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir -Force }
+    "{{ public_key }}" | Out-File -Encoding ascii "$sshDir\administrators_authorized_keys"
+    icacls "$sshDir\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+    Log-Message "SSH key authentication configured"
+    {% endif %}
+
+    # Set environment variables for Claude Code with Bedrock
+    Log-Message "Configuring Claude Code environment..."
+    [Environment]::SetEnvironmentVariable("CLAUDE_CODE_USE_BEDROCK", "1", "Machine")
+    [Environment]::SetEnvironmentVariable("AWS_REGION", "us-east-2", "Machine")
+
     {% if presigned_url %}
     # Download agent installer
     Log-Message "Downloading XDR agent installer..."

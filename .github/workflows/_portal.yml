@@ -9,6 +9,15 @@ on:
       is_dev:
         required: true
         type: boolean
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+      AWS_ROLE_ARN_DEV:
+        required: true
+      TF_VARS_DEV_PORTAL:
+        required: true
+      TF_VARS_PROD_PORTAL:
+        required: true
 
 permissions:
   id-token: write
@@ -18,7 +27,7 @@ permissions:
 jobs:
   plan:
     name: Plan (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: terraform/environments/${{ inputs.environment }}/portal
@@ -37,7 +46,6 @@ jobs:
         run: echo "$TF_VARS" > terraform.tfvars
       - run: terraform fmt -check -recursive
         working-directory: terraform
-      - run: bash ../../../modules/range/provisioner/build-lambdas.sh
       - run: terraform init
       - run: terraform validate
       - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
@@ -57,9 +65,12 @@ jobs:
 
   apply:
     name: Apply (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: plan
-    if: always() && (needs.plan.result == 'success' || needs.plan.result == 'skipped')
+    if: |
+      always() &&
+      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      (github.event_name != 'pull_request' || inputs.environment == 'dev')
     defaults:
       run:
         working-directory: terraform/environments/${{ inputs.environment }}/portal
@@ -76,14 +87,14 @@ jobs:
         env:
           TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
         run: echo "$TF_VARS" > terraform.tfvars
-      - run: bash ../../../modules/range/provisioner/build-lambdas.sh
       - run: terraform init
       - run: terraform apply -auto-approve
 
   build:
     name: Build (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: apply
+    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:
@@ -111,13 +122,18 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=/tmp/.buildx-cache-portal
+          cache-to: type=local,dest=/tmp/.buildx-cache-portal-new,mode=max
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache-portal
+          mv /tmp/.buildx-cache-portal-new /tmp/.buildx-cache-portal || true
 
   deploy:
     name: Deploy (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build
+    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
     env:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}
@@ -141,13 +157,31 @@ jobs:
           echo "domain=${PORTAL_DOMAIN}" >> $GITHUB_OUTPUT
           S3_BUCKET=$(echo "$TF_VARS" | grep '^user_storage_bucket' | sed 's/.*= *"\([^"]*\)".*/\1/')
           echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
-          PROVISION_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-provision-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
-          TEARDOWN_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?contains(name, '${ENV}-portal-teardown-range')].stateMachineArn | [0]" --output text 2>/dev/null || echo "")
-          echo "provision_state_machine_arn=${PROVISION_ARN}" >> $GITHUB_OUTPUT
-          echo "teardown_state_machine_arn=${TEARDOWN_ARN}" >> $GITHUB_OUTPUT
+          # Pulumi provisioner ECS configuration
+          PULUMI_ECS_CLUSTER=$(aws ecs list-clusters --query "clusterArns[?contains(@, '${ENV}-portal-pulumi')]" --output text)
+          echo "pulumi_ecs_cluster_arn=${PULUMI_ECS_CLUSTER}" >> $GITHUB_OUTPUT
+          PULUMI_TASK_DEF=$(aws ecs list-task-definitions --family-prefix "${ENV}-portal-pulumi-provisioner" --sort DESC --query "taskDefinitionArns[0]" --output text)
+          echo "pulumi_task_definition_arn=${PULUMI_TASK_DEF}" >> $GITHUB_OUTPUT
+          PULUMI_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=${ENV}-portal-pulumi-ecs-sg" --query "SecurityGroups[0].GroupId" --output text)
+          echo "pulumi_ecs_security_group_id=${PULUMI_SG}" >> $GITHUB_OUTPUT
+          PULUMI_SUBNETS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=${ENV}-portal-private-*" --query "Subnets[*].SubnetId" --output text | tr '\t' ',')
+          echo "pulumi_private_subnet_ids=${PULUMI_SUBNETS}" >> $GITHUB_OUTPUT
+          # Check if autoscaling is enabled
+          ENABLE_AUTOSCALING=$(echo "$TF_VARS" | grep '^enable_autoscaling' | sed 's/.*= *\([^ ]*\).*/\1/' | tr -d ' ')
+          echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> $GITHUB_OUTPUT
+          # Get Redis endpoint if autoscaling enabled
+          if [ "$ENABLE_AUTOSCALING" = "true" ]; then
+            REDIS_ENDPOINT=$(aws elasticache describe-cache-clusters \
+              --cache-cluster-id "${ENV}-portal-redis" \
+              --show-cache-node-info \
+              --query "CacheClusters[0].CacheNodes[0].Endpoint.Address" \
+              --output text 2>/dev/null || echo "")
+            echo "redis_endpoint=${REDIS_ENDPOINT}" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Get Instance ID
+      - name: Get Instance ID (single instance mode)
         id: instance
+        if: steps.config.outputs.enable_autoscaling != 'true'
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances \
             --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
@@ -157,7 +191,20 @@ jobs:
           fi
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
 
-      - name: Wait for cloud-init
+      - name: Get ASG Name (ASG mode)
+        id: asg
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        run: |
+          ASG_NAME=$(aws autoscaling describe-auto-scaling-groups \
+            --query "AutoScalingGroups[?contains(AutoScalingGroupName, '${ENV}-portal-asg')].AutoScalingGroupName | [0]" \
+            --output text)
+          if [ "$ASG_NAME" == "None" ] || [ -z "$ASG_NAME" ]; then
+            echo "Error: Could not find ASG with name containing: ${ENV}-portal-asg"; exit 1
+          fi
+          echo "asg_name=$ASG_NAME" >> $GITHUB_OUTPUT
+
+      - name: Wait for cloud-init (single instance mode)
+        if: steps.config.outputs.enable_autoscaling != 'true'
         env:
           INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
         run: |
@@ -175,15 +222,18 @@ jobs:
           done
           echo "Warning: cloud-init wait timed out"
 
-      - name: Deploy via SSM
+      - name: Deploy via SSM (single instance mode)
+        if: steps.config.outputs.enable_autoscaling != 'true'
         env:
           INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
           ECR_REGISTRY: ${{ steps.config.outputs.registry }}
           IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
           PORTAL_DOMAIN: ${{ steps.config.outputs.domain }}
           S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
-          PROVISION_STATE_MACHINE_ARN: ${{ steps.config.outputs.provision_state_machine_arn }}
-          TEARDOWN_STATE_MACHINE_ARN: ${{ steps.config.outputs.teardown_state_machine_arn }}
+          PULUMI_ECS_CLUSTER_ARN: ${{ steps.config.outputs.pulumi_ecs_cluster_arn }}
+          PULUMI_TASK_DEFINITION_ARN: ${{ steps.config.outputs.pulumi_task_definition_arn }}
+          PULUMI_ECS_SECURITY_GROUP_ID: ${{ steps.config.outputs.pulumi_ecs_security_group_id }}
+          PULUMI_PRIVATE_SUBNET_IDS: ${{ steps.config.outputs.pulumi_private_subnet_ids }}
           ACCOUNT_ID: ${{ steps.config.outputs.account_id }}
         run: |
           DB_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-db-credentials"
@@ -206,8 +256,10 @@ jobs:
                 -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
                 -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
                 -e SITE_URL=https://${PORTAL_DOMAIN} \
-                -e PROVISION_STATE_MACHINE_ARN=${PROVISION_STATE_MACHINE_ARN} \
-                -e TEARDOWN_STATE_MACHINE_ARN=${TEARDOWN_STATE_MACHINE_ARN} \
+                -e PULUMI_ECS_CLUSTER_ARN=${PULUMI_ECS_CLUSTER_ARN} \
+                -e PULUMI_TASK_DEFINITION_ARN=${PULUMI_TASK_DEFINITION_ARN} \
+                -e PULUMI_ECS_SECURITY_GROUP_ID=${PULUMI_ECS_SECURITY_GROUP_ID} \
+                -e PULUMI_PRIVATE_SUBNET_IDS=${PULUMI_PRIVATE_SUBNET_IDS} \
                 \$IMAGE'
             ]" --timeout-seconds 300 --query "Command.CommandId" --output text)
 
@@ -219,3 +271,86 @@ jobs:
             exit 1
           fi
           echo "Portal deployment successful!"
+
+      - name: Deploy via SSM to ASG instances
+        if: steps.config.outputs.enable_autoscaling == 'true'
+        env:
+          ASG_NAME: ${{ steps.asg.outputs.asg_name }}
+          ECR_REGISTRY: ${{ steps.config.outputs.registry }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          PORTAL_DOMAIN: ${{ steps.config.outputs.domain }}
+          S3_BUCKET: ${{ steps.config.outputs.s3_bucket }}
+          PULUMI_ECS_CLUSTER_ARN: ${{ steps.config.outputs.pulumi_ecs_cluster_arn }}
+          PULUMI_TASK_DEFINITION_ARN: ${{ steps.config.outputs.pulumi_task_definition_arn }}
+          PULUMI_ECS_SECURITY_GROUP_ID: ${{ steps.config.outputs.pulumi_ecs_security_group_id }}
+          PULUMI_PRIVATE_SUBNET_IDS: ${{ steps.config.outputs.pulumi_private_subnet_ids }}
+          REDIS_ENDPOINT: ${{ steps.config.outputs.redis_endpoint }}
+          ACCOUNT_ID: ${{ steps.config.outputs.account_id }}
+        run: |
+          DB_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-db-credentials"
+          APP_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-app"
+          COGNITO_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-cognito"
+
+          # Get all running instances in the ASG
+          INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
+            --output text)
+
+          if [ -z "$INSTANCE_IDS" ]; then
+            echo "Error: No running instances in ASG"; exit 1
+          fi
+
+          echo "Deploying to ASG instances: $INSTANCE_IDS"
+
+          # Deploy to all instances via SSM (targets by tag)
+          COMMAND_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+            --targets "Key=tag:aws:autoscaling:groupName,Values=${ASG_NAME}" \
+            --parameters "commands=[
+              'set -e',
+              'IMAGE=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}',
+              'docker pull \$IMAGE',
+              'docker stop portal 2>/dev/null || true',
+              'docker rm portal 2>/dev/null || true',
+              'docker run -d --name portal --restart unless-stopped -p 8000:8000 \
+                -e AWS_REGION=${AWS_REGION} \
+                -e AWS_S3_BUCKET_NAME=${S3_BUCKET} \
+                -e DB_SECRET_ARN=${DB_SECRET_ARN} \
+                -e APP_SECRET_ARN=${APP_SECRET_ARN} \
+                -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
+                -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
+                -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
+                -e SITE_URL=https://${PORTAL_DOMAIN} \
+                -e PULUMI_ECS_CLUSTER_ARN=${PULUMI_ECS_CLUSTER_ARN} \
+                -e PULUMI_TASK_DEFINITION_ARN=${PULUMI_TASK_DEFINITION_ARN} \
+                -e PULUMI_ECS_SECURITY_GROUP_ID=${PULUMI_ECS_SECURITY_GROUP_ID} \
+                -e PULUMI_PRIVATE_SUBNET_IDS=${PULUMI_PRIVATE_SUBNET_IDS} \
+                -e REDIS_HOST=${REDIS_ENDPOINT} \
+                \$IMAGE'
+            ]" --timeout-seconds 300 --query "Command.CommandId" --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          # Wait for command to complete on all instances
+          sleep 30
+          for INSTANCE_ID in $INSTANCE_IDS; do
+            echo "Checking deployment status for $INSTANCE_ID..."
+            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text 2>/dev/null || echo "Pending")
+            RETRIES=0
+            while [ "$STATUS" = "Pending" ] || [ "$STATUS" = "InProgress" ]; do
+              sleep 10
+              STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text 2>/dev/null || echo "Pending")
+              RETRIES=$((RETRIES + 1))
+              if [ $RETRIES -gt 30 ]; then
+                echo "Timeout waiting for $INSTANCE_ID"; exit 1
+              fi
+            done
+            if [ "$STATUS" != "Success" ]; then
+              echo "Deployment failed on $INSTANCE_ID"
+              aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "StandardErrorContent" --output text
+              exit 1
+            fi
+            echo "Deployment successful on $INSTANCE_ID"
+          done
+
+          echo "Portal ASG deployment successful!"

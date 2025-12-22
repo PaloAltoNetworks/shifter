@@ -6,8 +6,9 @@
 # General
 # ------------------------------------------------------------------------------
 
-environment = ""
-aws_region  = ""
+environment        = ""
+aws_region         = ""
+log_retention_days = 90
 
 tags = {
   Project     = ""
@@ -60,3 +61,18 @@ health_check_path = "/health"
 # ------------------------------------------------------------------------------
 
 user_storage_bucket = ""
+
+# ------------------------------------------------------------------------------
+# Log Aggregation
+# ------------------------------------------------------------------------------
+
+enable_log_aggregation = false
+
+# ------------------------------------------------------------------------------
+# Phase 5: Additional Log Sources
+# ------------------------------------------------------------------------------
+
+enable_alb_access_logs = true
+enable_vpc_flow_logs   = true
+enable_rds_log_exports = true
+enable_waf_logging     = true

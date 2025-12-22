@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2025-12-21
+
+### Added
+- Pulumi-based provisioner for declarative multi-OS range infrastructure
+  - ECS Fargate execution with Step Functions orchestration
+  - S3/DynamoDB state backend, ECR container registry
+  - Reusable components: NetworkComponent, InstanceComponent, RangeStack
+  - Instance catalog supporting Kali, Ubuntu, Windows, Amazon Linux
+- CI/CD workflow for Pulumi provisioner (`_pulumi-provisioner.yml`)
+- Django model fields and service routing for v1 (Lambda) / v2 (Pulumi) provisioners
+- Self-hosted GitHub Actions runner for CI/CD
+
+### Changed
+- Range instance types bumped to t3.medium (4GB min for Claude Code)
+- CI Docker builds use local caching instead of GitHub Actions cache
+
+### Fixed
+- Secrets Manager resources now Pulumi-managed (proper lifecycle, no orphans)
+- KMS policy, DNS egress, availability zone configuration for ECS tasks
+- WebSocket terminal consumer reads from `provisioned_instances` field (v2 provisioner compatibility)
+
+### Removed
+- V1 (Lambda) provisioner
+
+## [0.7.6] - 2025-12-19
+
+### Added
+- ALB access logs, VPC flow logs, RDS log exports, WAF logging
+- XDR CloudTrail integration via CloudFormation (dev and prod)
+- CloudWatch alarms for log aggregation (Firehose delivery lag, SQS DLQ)
+
+### Changed
+- Replaced Checkov skip comments with actual implementations (CKV_AWS_91, CKV2_AWS_11, CKV_AWS_129)
+- Removed unused XDR IAM from Terraform (managed by CloudFormation instead)
+
+### Fixed
+- Multiple code quality, security, and code smells
+
+## [0.7.5] - 2025-12-18
+
+### Added
+- AWS WAF protection for ALB with rate limiting and AWS managed rules
+
+## [0.7.4] - 2025-12-18
+
+### Added
+- ElastiCache Redis module for Django Channels
+- Portal autoscaling: launch template, ASG, scaling policies, CloudWatch alarms
+- ALB session stickiness for WebSocket affinity
+- Lambda auto-fix for range security group SSH rules from Portal VPC
+
+### Changed
+- Django Channels uses Redis when `REDIS_HOST` env var set, falls back to InMemory
+- EC2 module supports single instance or ASG mode via `enable_autoscaling` flag
+- Dev environment: autoscaling enabled with 2 instances
+- GitHub Actions portal workflow supports ASG deployment via SSM targeting by tag
+- IAM: Added `elasticache_asg` policy for ElastiCache, Auto Scaling, and Launch Template permissions
+
+
 ## [0.7.3] - 2025-12-17
 
 ### Fixed

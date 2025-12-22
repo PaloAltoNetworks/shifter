@@ -198,7 +198,8 @@ class Range(models.Model):
     def get_active_for_user(cls, user):
         """Return the user's active range, or None.
 
-        Includes DESTROYING to prevent launching a new range while one is being torn down.
+        DESTROYING ranges are excluded - user can launch a new range while
+        the old one is being cleaned up (subnet allocation handles the race).
         """
         return cls.objects.filter(
             user=user,
@@ -208,7 +209,6 @@ class Range(models.Model):
                 cls.Status.READY,
                 cls.Status.PAUSED,
                 cls.Status.RESUMING,
-                cls.Status.DESTROYING,
             ],
         ).first()
 

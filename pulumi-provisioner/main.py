@@ -102,9 +102,9 @@ def run_pulumi(operation: str, range_id: int) -> None:
         error_msg = str(e)[:1000]
         print(f"Operation failed: {error_msg}", file=sys.stderr)
 
-        if os.environ.get("ENVIRONMENT") == "prod" and operation == "up":
-            # Auto-cleanup in prod on failure
-            print("Production environment - attempting auto-cleanup...")
+        if operation == "up":
+            # Auto-cleanup on failure to avoid orphaned resources
+            print("Provision failed - attempting auto-cleanup...")
             subprocess.run(
                 ["pulumi", "destroy", "--yes", "--non-interactive"],
                 cwd="/app",

@@ -249,10 +249,12 @@ class Range(models.Model):
         """
         with transaction.atomic():
             # Lock rows to prevent race conditions
-            # Get all subnet_index values currently in use by non-destroyed ranges
+            # Get all subnet_index values currently in use by active ranges
+            # Exclude terminal states (DESTROYED, FAILED) - those ranges don't have
+            # AWS resources or their resources are being cleaned up
             used_indices = set(
                 cls.objects.select_for_update()
-                .exclude(status=cls.Status.DESTROYED)
+                .exclude(status__in=[cls.Status.DESTROYED, cls.Status.FAILED])
                 .exclude(subnet_index__isnull=True)
                 .values_list("subnet_index", flat=True)
             )

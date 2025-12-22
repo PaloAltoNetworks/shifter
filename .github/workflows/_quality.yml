@@ -1,0 +1,100 @@
+name: Quality
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and Analyze
+    runs-on: self-hosted
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: shifter
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: portal
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Test portal
+        working-directory: portal
+        env:
+          DJANGO_DEBUG: "true"
+          DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: shifter
+          DB_USER: test
+          DB_PASSWORD: test
+        run: |
+          uv run python manage.py collectstatic --noinput
+          uv run pytest
+
+      - name: Cache Checkov
+        uses: actions/cache@v4
+        with:
+          path: ~/.local
+          key: ${{ runner.os }}-checkov-${{ hashFiles('.github/workflows/quality.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-checkov-
+
+      - name: Checkov IaC Security
+        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        with:
+          directory: terraform/
+          framework: terraform
+          download_external_modules: true
+          quiet: true
+          compact: true
+          soft_fail: true
+      # SonarCloud uses automatic analysis (configured in SonarCloud settings)
+
+  pulumi-provisioner-tests:
+    name: Pulumi Provisioner Tests
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        working-directory: pulumi-provisioner
+        run: |
+          python3.12 -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        working-directory: pulumi-provisioner
+        run: |
+          source .venv/bin/activate
+          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=80
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: pulumi-provisioner/coverage.xml
+          flags: pulumi-provisioner
+          fail_ci_if_error: false

@@ -9,3 +9,9 @@ variable "portal_repository_name" {
   type        = string
   default     = "shifter-portal"
 }
+
+variable "pulumi_provisioner_repository_name" {
+  description = "Name for the Pulumi provisioner ECR repository"
+  type        = string
+  default     = "shifter-prod-pulumi-provisioner"
+}

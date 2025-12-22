@@ -6,15 +6,277 @@ without making real AWS API calls. Tests verify that the component:
 - Associates route tables correctly
 - Applies proper tags
 - Exports correct outputs
+- Cleans up orphaned subnets before creating new ones
 """
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pulumi
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from components.network import _cleanup_orphaned_subnet
+
+
+# =============================================================================
+# Unit Tests for _cleanup_orphaned_subnet
+# =============================================================================
+
+
+class TestCleanupOrphanedSubnetHappyPath:
+    """Happy path tests for _cleanup_orphaned_subnet."""
+
+    def test_no_orphaned_subnet_exists(self):
+        """No orphaned subnet exists, function returns without action."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+        mock_ec2.describe_subnets.assert_called_once_with(
+            Filters=[
+                {"Name": "vpc-id", "Values": ["vpc-12345"]},
+                {"Name": "cidr-block", "Values": ["10.1.5.0/24"]},
+            ]
+        )
+        mock_ec2.delete_subnet.assert_not_called()
+
+    def test_orphaned_subnet_deleted_successfully(self):
+        """Orphaned subnet exists and is deleted successfully."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {
+                    "SubnetId": "subnet-orphan123",
+                    "CidrBlock": "10.1.5.0/24",
+                    "Tags": [{"Key": "Name", "Value": "shifter-range-42"}],
+                }
+            ]
+        }
+        mock_ec2.delete_subnet.return_value = {}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-orphan123")
+
+    def test_orphaned_subnet_no_name_tag(self):
+        """Subnet without Name tag should still be deleted."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {
+                    "SubnetId": "subnet-notag",
+                    "CidrBlock": "10.1.5.0/24",
+                    "Tags": [],
+                }
+            ]
+        }
+        mock_ec2.delete_subnet.return_value = {}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-notag")
+
+
+class TestCleanupOrphanedSubnetFailures:
+    """Failure case tests for _cleanup_orphaned_subnet."""
+
+    def test_delete_fails_dependency_violation(self):
+        """Subnet has resources attached and cannot be deleted."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {
+                    "SubnetId": "subnet-inuse",
+                    "CidrBlock": "10.1.5.0/24",
+                    "Tags": [{"Key": "Name", "Value": "shifter-range-99"}],
+                }
+            ]
+        }
+        from botocore.exceptions import ClientError
+
+        mock_ec2.delete_subnet.side_effect = ClientError(
+            {
+                "Error": {
+                    "Code": "DependencyViolation",
+                    "Message": "The subnet 'subnet-inuse' has dependencies.",
+                }
+            },
+            "DeleteSubnet",
+        )
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            with pytest.raises(RuntimeError) as exc_info:
+                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+        assert "subnet-inuse" in str(exc_info.value)
+        assert "could not be deleted" in str(exc_info.value)
+        assert "DependencyViolation" in str(exc_info.value)
+
+    def test_delete_fails_access_denied(self):
+        """IAM permissions prevent subnet deletion."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {
+                    "SubnetId": "subnet-noaccess",
+                    "CidrBlock": "10.1.5.0/24",
+                    "Tags": [],
+                }
+            ]
+        }
+        from botocore.exceptions import ClientError
+
+        mock_ec2.delete_subnet.side_effect = ClientError(
+            {
+                "Error": {
+                    "Code": "UnauthorizedOperation",
+                    "Message": "You are not authorized to perform this operation.",
+                }
+            },
+            "DeleteSubnet",
+        )
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            with pytest.raises(RuntimeError) as exc_info:
+                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+        assert "subnet-noaccess" in str(exc_info.value)
+        assert "UnauthorizedOperation" in str(exc_info.value)
+
+    def test_describe_subnets_fails_invalid_vpc(self):
+        """AWS API call to describe subnets fails with invalid VPC."""
+        mock_ec2 = MagicMock()
+        from botocore.exceptions import ClientError
+
+        mock_ec2.describe_subnets.side_effect = ClientError(
+            {
+                "Error": {
+                    "Code": "InvalidVpcID.NotFound",
+                    "Message": "The vpc ID 'vpc-invalid' does not exist",
+                }
+            },
+            "DescribeSubnets",
+        )
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            with pytest.raises(ClientError) as exc_info:
+                _cleanup_orphaned_subnet("vpc-invalid", "10.1.5.0/24")
+
+        assert "InvalidVpcID.NotFound" in str(exc_info.value)
+
+
+class TestCleanupOrphanedSubnetUnexpected:
+    """Unexpected/edge case tests for _cleanup_orphaned_subnet."""
+
+    def test_multiple_subnets_found_deletes_first(self):
+        """Multiple subnets with same CIDR - deletes first one only."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {
+                    "SubnetId": "subnet-first",
+                    "CidrBlock": "10.1.5.0/24",
+                    "Tags": [{"Key": "Name", "Value": "first"}],
+                },
+                {
+                    "SubnetId": "subnet-second",
+                    "CidrBlock": "10.1.5.0/24",
+                    "Tags": [{"Key": "Name", "Value": "second"}],
+                },
+            ]
+        }
+        mock_ec2.delete_subnet.return_value = {}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-first")
+
+    def test_subnet_missing_tags_key(self):
+        """Subnet response missing 'Tags' key entirely."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {
+                    "SubnetId": "subnet-notags",
+                    "CidrBlock": "10.1.5.0/24",
+                    # No 'Tags' key at all
+                }
+            ]
+        }
+        mock_ec2.delete_subnet.return_value = {}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-notags")
+
+    def test_connection_error_to_aws(self):
+        """Network error connecting to AWS."""
+        mock_ec2 = MagicMock()
+        from botocore.exceptions import EndpointConnectionError
+
+        mock_ec2.describe_subnets.side_effect = EndpointConnectionError(
+            endpoint_url="https://ec2.us-east-2.amazonaws.com"
+        )
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            with pytest.raises(EndpointConnectionError):
+                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+    def test_empty_vpc_id(self):
+        """Empty VPC ID passed - let AWS validate."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            _cleanup_orphaned_subnet("", "10.1.5.0/24")
+
+        mock_ec2.describe_subnets.assert_called_once()
+
+    def test_empty_cidr_block(self):
+        """Empty CIDR block passed - let AWS validate."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            _cleanup_orphaned_subnet("vpc-12345", "")
+
+        mock_ec2.describe_subnets.assert_called_once()
+
+    def test_subnet_with_other_tags_but_no_name(self):
+        """Subnet has tags but none with Key='Name'."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {
+                    "SubnetId": "subnet-othertags",
+                    "CidrBlock": "10.1.5.0/24",
+                    "Tags": [
+                        {"Key": "Environment", "Value": "dev"},
+                        {"Key": "ManagedBy", "Value": "pulumi"},
+                    ],
+                }
+            ]
+        }
+        mock_ec2.delete_subnet.return_value = {}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+
+        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-othertags")
+
+
+# =============================================================================
+# NetworkComponent Pulumi Tests
+# =============================================================================
 
 
 class TestNetworkComponentWithPulumiMocks:

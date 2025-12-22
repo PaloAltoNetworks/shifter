@@ -146,6 +146,29 @@ class Range(models.Model):
         max_length=500, blank=True, default="", help_text="Step Functions execution ARN"
     )
 
+    # Pulumi provisioner fields (v2)
+    instance_config = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="JSON array of instance configurations for Pulumi provisioner",
+    )
+    provisioned_instances = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="JSON array of provisioned instance details from Pulumi",
+    )
+    pulumi_stack = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Pulumi stack name for this range",
+    )
+    provisioner_version = models.CharField(
+        max_length=10,
+        default="v1",
+        help_text="Provisioner version: v1=Lambda, v2=Pulumi",
+    )
+
     # Status and timestamps
     error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -243,6 +266,38 @@ class Range(models.Model):
                 f"No subnet indices available. Maximum {cls.SUBNET_INDEX_MAX} "
                 "concurrent ranges supported. Destroy some ranges first."
             )
+
+    def get_instance_by_role(self, role: str) -> dict | None:
+        """Get instance details by role.
+
+        Args:
+            role: Instance role ("attacker" or "victim")
+
+        Returns:
+            Dictionary with instance details or None if not found
+        """
+        if not self.provisioned_instances:
+            return None
+        for instance in self.provisioned_instances:
+            if instance.get("role") == role:
+                return instance
+        return None
+
+    @property
+    def attacker_instance(self) -> dict | None:
+        """Get the attacker instance details."""
+        return self.get_instance_by_role("attacker")
+
+    @property
+    def victim_instances(self) -> list:
+        """Get all victim instance details.
+
+        Returns:
+            List of victim instance dictionaries
+        """
+        if not self.provisioned_instances:
+            return []
+        return [i for i in self.provisioned_instances if i.get("role") == "victim"]
 
 
 class ActivityLog(models.Model):

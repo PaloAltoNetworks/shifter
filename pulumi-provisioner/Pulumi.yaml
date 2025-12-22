@@ -1,0 +1,6 @@
+name: shifter-range-provisioner
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: Declarative range provisioning for Shifter cyber range

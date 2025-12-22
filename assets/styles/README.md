@@ -42,3 +42,4 @@ To use these styles, apply the `.xdr-dark-theme` class to your root element (e.g
 Extracted from: https://077a95d2a-b8c1.xdr.ca.paloaltonetworks.com/dashboard?id=3
 Date: Extracted on request for project alignment
 
+

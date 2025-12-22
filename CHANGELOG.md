@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Provisioner fails to install .deb or .rpm agent packages properly
+- Provisioner fails to rollback range if agent installation fails
 
 ## [0.7.8] - 2025-12-21
 

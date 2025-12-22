@@ -1,12 +1,44 @@
 # Victim AMI
 
-Pre-baked Ubuntu victim with vulnerable services and Claude Code.
+Pre-baked victim images with vulnerable services and Claude Code.
 
-## What's In It
+## Ubuntu Victim
+
+### What's In It
 
 - Ubuntu 22.04
 - Claude Code (configured for Bedrock)
 - Vulnerable services: Apache, MySQL, Docker, PHP, Samba, FTP
+
+## Windows Victim
+
+### What's In It
+
+- Windows Server 2022 Datacenter
+- Claude Code (configured for Bedrock, installed to system path)
+- XAMPP (Apache, MySQL, PHP)
+- IIS, FTP Server, OpenSSH Server
+- Python, Node.js, Git
+
+### Baking Process
+
+Windows AMIs require sysprep to reset for first boot. Key considerations:
+
+1. **Claude Code must be in a system path** - npm global prefix set to `C:\Program Files\nodejs` before install
+2. **Env vars at Machine level** - `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION=us-east-2`
+3. **Disable services that slow boot or conflict with XDR:**
+   - Print Spooler, Remote Registry, Edge Update, Themes
+   - Windows Defender (via Group Policy registry keys)
+4. **Run EC2Launch sysprep with shutdown** - `& "C:\Program Files\Amazon\EC2Launch\EC2Launch.exe" sysprep --shutdown`
+
+### SSH for Terminal UI
+
+Windows uses OpenSSH Server. User data must:
+- Start sshd service
+- Configure `C:\ProgramData\ssh\administrators_authorized_keys` with public key
+- Set proper ACLs on the authorized_keys file
+
+Django consumer uses `Administrator` as SSH username for Windows.
 
 ## Why Pre-Bake
 
@@ -15,7 +47,7 @@ XDR/XSIAM needs real services to detect attacks against. Pre-baking ensures cons
 ## Provisioning Flow
 
 1. Portal triggers provisioner with range config
-2. Provisioner reads `VICTIM_AMI_ID` from env
+2. Provisioner reads `VICTIM_AMI_ID` or `WINDOWS_AMI_ID` from env based on agent OS
 3. EC2 launched from pre-baked AMI
 4. User data runs on boot:
    - Sets hostname
@@ -31,4 +63,5 @@ The XDR agent is NOT in the AMI. Users upload their agent installer to S3 via th
 
 | Env Var | Value |
 |---------|-------|
-| `VICTIM_AMI_ID` | Set in terraform.tfvars per environment |
+| `VICTIM_AMI_ID` | Ubuntu AMI, set in terraform.tfvars |
+| `WINDOWS_AMI_ID` | Windows AMI, set in terraform.tfvars |

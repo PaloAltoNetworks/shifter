@@ -4,10 +4,25 @@
 # - EC2 instance with Docker (Amazon Linux 2023)
 # - Security group (app port from ALB only)
 # - IAM role and instance profile (ECR pull, Secrets Manager read, SSM)
+# - CloudWatch log group for container logs
 
 locals {
   common_tags = merge(var.tags, {
     Module = "ec2"
+  })
+  log_group_name = "/portal/${var.name_prefix}"
+}
+
+# ------------------------------------------------------------------------------
+# CloudWatch Log Group for Portal Container
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "portal" {
+  name              = local.log_group_name
+  retention_in_days = var.log_retention_days
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-portal-logs"
   })
 }
 
@@ -79,6 +94,25 @@ resource "aws_iam_role_policy" "secrets_read" {
   })
 }
 
+resource "aws_iam_role_policy" "cloudwatch_logs" {
+  name = "cloudwatch-logs"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "${aws_cloudwatch_log_group.portal.arn}:*"
+      }
+    ]
+  })
+}
+
 # IAM policy for reading range SSH keys from Secrets Manager
 # SSH keys are stored at: shifter/{env}/range/{range_id}/*-ssh-key
 # Required for Terminal UI feature to connect to Kali/Victim instances
@@ -128,28 +162,45 @@ resource "aws_iam_role_policy" "s3_access" {
   })
 }
 
-resource "aws_iam_role_policy" "step_functions" {
-  count = length(var.step_function_arns) > 0 ? 1 : 0
-  name  = "step-functions-execute"
-  role  = aws_iam_role.this.id
+resource "aws_iam_role_policy" "ecs_run_task" {
+  name = "ecs-run-task"
+  role = aws_iam_role.this.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "RunTask"
         Effect = "Allow"
         Action = [
-          "states:StartExecution"
+          "ecs:RunTask"
         ]
-        Resource = var.step_function_arns
+        Resource = var.ecs_task_definition_arn
       },
       {
+        Sid    = "ManageTasks"
         Effect = "Allow"
         Action = [
-          "states:DescribeExecution",
-          "states:StopExecution"
+          "ecs:DescribeTasks",
+          "ecs:StopTask"
         ]
-        Resource = [for arn in var.step_function_arns : "${arn}:*"]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "ecs:cluster" = var.ecs_cluster_arn
+          }
+        }
+      },
+      {
+        Sid    = "PassRole"
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = [
+          var.ecs_task_role_arn,
+          var.ecs_execution_role_arn
+        ]
       }
     ]
   })
@@ -221,10 +272,195 @@ data "aws_ami" "amazon_linux_2023" {
 }
 
 # ------------------------------------------------------------------------------
-# EC2 Instance
+# Launch Template (for ASG mode)
+# ------------------------------------------------------------------------------
+
+resource "aws_launch_template" "this" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  name_prefix   = "${var.name_prefix}-lt-"
+  image_id      = data.aws_ami.amazon_linux_2023.id
+  instance_type = var.instance_type
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.this.name
+  }
+
+  network_interfaces {
+    associate_public_ip_address = false
+    security_groups             = [aws_security_group.this.id]
+  }
+
+  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
+    aws_region         = var.aws_region
+    ecr_repository_url = var.ecr_repository_url
+    log_group_name     = local.log_group_name
+  }))
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      volume_type           = "gp3"
+      volume_size           = var.root_volume_size
+      encrypted             = true
+      delete_on_termination = true
+    }
+  }
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+    instance_metadata_tags      = "enabled"
+  }
+
+  monitoring {
+    enabled = true
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = merge(local.common_tags, {
+      Name = "${var.name_prefix}-ec2"
+    })
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+    tags = merge(local.common_tags, {
+      Name = "${var.name_prefix}-ec2-vol"
+    })
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-launch-template"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ------------------------------------------------------------------------------
+# Auto Scaling Group (for ASG mode)
+# ------------------------------------------------------------------------------
+
+resource "aws_autoscaling_group" "this" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  name_prefix               = "${var.name_prefix}-asg-"
+  vpc_zone_identifier       = var.subnet_ids
+  target_group_arns         = [var.target_group_arn]
+  health_check_type         = "ELB"
+  health_check_grace_period = 300
+
+  min_size         = var.asg_min_size
+  max_size         = var.asg_max_size
+  desired_capacity = var.asg_desired_capacity
+
+  launch_template {
+    id      = aws_launch_template.this[0].id
+    version = "$Latest"
+  }
+
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 50
+    }
+  }
+
+  dynamic "tag" {
+    for_each = merge(local.common_tags, {
+      Name = "${var.name_prefix}-ec2"
+    })
+    content {
+      key                 = tag.key
+      value               = tag.value
+      propagate_at_launch = true
+    }
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ------------------------------------------------------------------------------
+# Auto Scaling Policies
+# ------------------------------------------------------------------------------
+
+resource "aws_autoscaling_policy" "scale_up" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  name                   = "${var.name_prefix}-scale-up"
+  scaling_adjustment     = 1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = aws_autoscaling_group.this[0].name
+}
+
+resource "aws_autoscaling_policy" "scale_down" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  name                   = "${var.name_prefix}-scale-down"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = aws_autoscaling_group.this[0].name
+}
+
+resource "aws_cloudwatch_metric_alarm" "cpu_high" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  alarm_name          = "${var.name_prefix}-cpu-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 120
+  statistic           = "Average"
+  threshold           = var.scale_up_threshold
+  alarm_description   = "Scale up when CPU > ${var.scale_up_threshold}%"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.this[0].name
+  }
+
+  alarm_actions = [aws_autoscaling_policy.scale_up[0].arn]
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "cpu_low" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  alarm_name          = "${var.name_prefix}-cpu-low"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 120
+  statistic           = "Average"
+  threshold           = var.scale_down_threshold
+  alarm_description   = "Scale down when CPU < ${var.scale_down_threshold}%"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.this[0].name
+  }
+
+  alarm_actions = [aws_autoscaling_policy.scale_down[0].arn]
+
+  tags = local.common_tags
+}
+
+# ------------------------------------------------------------------------------
+# EC2 Instance (for single instance mode)
 # ------------------------------------------------------------------------------
 
 resource "aws_instance" "this" {
+  count = var.enable_autoscaling ? 0 : 1
+
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = var.instance_type
   subnet_id              = var.subnet_id
@@ -236,6 +472,7 @@ resource "aws_instance" "this" {
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region         = var.aws_region
     ecr_repository_url = var.ecr_repository_url
+    log_group_name     = local.log_group_name
   }))
 
   root_block_device {

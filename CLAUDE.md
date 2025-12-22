@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Guiding Principles:
+- Keep things very simple.
+- Don’t re-invent the wheel.
+- Use proven, solid technologies when possible.
+
 AWS access:
 DEV profile env var: PANW_SHIFTER_DEV_PROFILE
 PROD profile env var: PANW_SHIFTER_PROD_PROFILE
@@ -27,62 +32,44 @@ PANW SecOps Domain Consultants who need to:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         RDS (PostgreSQL)                                │
-│            Range table: user_id, status, kali_ip, victim_ip             │
+│            Range table: user_id, status, instance details               │
 └─────────────────────────────────────────────────────────────────────────┘
-         │                                    │
-         │ writes                             │ reads/writes
-         ▼                                    ▼
-┌─────────────────────┐            ┌─────────────────────────────┐
-│       Portal        │            │    Provisioning Service     │
-│     (Django)        │            │   (Step Functions + Lambda) │
-│                     │            │                             │
-│ • Auth (Cognito)    │──start───▶│ • create_subnet Lambda      │
-│ • Agent upload      │ execution  │ • create_kali Lambda        │
-│ • Launch range UI   │            │ • create_victim Lambda      │
-│ • Show range status │            │ • Updates RDS directly      │
-│ • Terminal access   │            │                             │
-└─────────────────────┘            └─────────────────────────────┘
-         │                                    │
-         │ SSH via                            │ AWS APIs
-         │ WebSocket                          ▼
-         ▼                         ┌─────────────────────────────┐
-┌─────────────────────┐            │  Range VPC (10.1.0.0/16)    │
-│  Range VPC          │            │                             │
-│  (10.1.0.0/16)      │            │  Per-user subnet:           │
-│                     │            │  • Kali EC2 (attack tools)  │
-│  • Kali EC2         │            │  • Victim EC2 (XDR agent)   │
-│  • Victim EC2       │            │                             │
-└─────────────────────┘            └─────────────────────────────┘
-                                              │
-                                              ▼
-                                   User's XSIAM Tenant (telemetry)
+                           │
+                           │ reads/writes
+                           ▼
+              ┌─────────────────────┐
+              │       Portal        │
+              │     (Django)        │
+              │                     │
+              │ • Auth (Cognito)    │
+              │ • Agent upload      │
+              │ • Launch range UI   │
+              │ • Show range status │
+              │ • Terminal access   │
+              └─────────────────────┘
+                         │
+                         │ SSH via WebSocket
+                         ▼
+              ┌─────────────────────────────┐
+              │  Range VPC (10.1.0.0/16)    │
+              │                             │
+              │  Per-user subnet:           │
+              │  • Kali EC2 (attack tools)  │
+              │  • Victim EC2 (XDR agent)   │
+              │                             │
+              └─────────────────────────────┘
+                           │
+                           ▼
+                User's XSIAM Tenant (telemetry)
 ```
 
 ### How It Works
 
 1. **User logs into Portal** (Cognito, paloaltonetworks.com email)
 2. **Uploads XDR/XSIAM agent installer** (stored in S3)
-3. **Clicks "Launch Range"** → Portal writes `Range(status='provisioning')` to DB, starts Step Functions
-4. **Step Functions orchestrates Lambda functions:**
-   - `create_subnet`: Creates /24 subnet in Range VPC
-   - `create_kali`: Launches Kali EC2 from pre-baked AMI
-   - `create_victim`: Launches Victim EC2, installs XDR agent from S3
-   - Each Lambda updates RDS directly with resource IDs
-5. **Portal shows "Ready"** → user accesses range via browser-based terminal
-6. **User runs attacks from Kali:**
-   - SSH to Kali via Portal terminal
-   - Run attacks against Victim, XDR/XSIAM detects
-
-### Why This Architecture
-
-| Component | Choice | Reason |
-|-----------|--------|--------|
-| Terminal | Django Channels + WebSocket | Browser-based SSH, no client install |
-| Orchestration | Step Functions + Lambda | Reliable, retry logic, error handling |
-| State | RDS only | Single source of truth, no message queues |
-| Auth | Cognito | SSO with MFA, paloaltonetworks.com only |
-| Attack Tools | Kali EC2 | Full Linux with pre-installed pentest tools |
-| Victim VMs | Real EC2 | XDR agent requires real OS |
+3. **Clicks "Launch Range"** → Portal triggers provisioning
+4. **Portal shows "Ready"** → user accesses range via browser-based terminal
+5. **User runs attacks from Kali** → XDR/XSIAM detects
 
 ---
 
@@ -95,28 +82,11 @@ PANW SecOps Domain Consultants who need to:
 **Responsibilities**:
 - Cognito OIDC authentication
 - Agent config CRUD (upload installer to S3)
-- Write `Range(status='pending')` to DB on launch
+- Trigger range provisioning on launch
 - Display range status
 - Browser-based terminal for SSH access
 
-Portal does NOT provision infrastructure. It writes requests to DB.
-
-### 2. Provisioning Service
-
-**Purpose**: Provision range infra (subnet, Kali, Victim EC2)
-
-**Trigger**: Portal starts Step Functions execution with `{ range_id }`
-
-**Lambda Functions**:
-- `create_subnet`: Creates /24 subnet in Range VPC
-- `create_kali`: Launches Kali EC2 from pre-baked AMI
-- `create_victim`: Launches Victim EC2, installs XDR agent
-- `mark_ready`: Updates Range status to 'ready'
-- `cleanup`: Destroys resources on error
-
-**Key Design**: Lambda functions run in Portal VPC, access RDS directly via IAM Database Auth, create Range resources via AWS APIs (no VPC peering needed).
-
-### 3. Terminal UI
+### 2. Terminal UI
 
 **Purpose**: Browser-based terminal for SSH access to range instances
 
@@ -172,38 +142,6 @@ shifter/
 └── .github/
     └── workflows/               # CI/CD pipelines
 ```
-
----
-
-## Implementation Phases
-
-### Phase 1: Core Platform (Target: Dec 18)
-- [x] Django portal (auth, agent upload, Mission Control UI)
-- [x] Portal infrastructure (VPC, RDS, ALB, Cognito)
-- [x] Provisioning service (Step Functions + Lambda)
-- [ ] Browser-based terminal for SSH access
-- [ ] Range VPC + victim EC2 provisioning
-
-### Phase 2: Polish
-- [ ] Auto-destroy ranges after N hours
-- [ ] Range status webhooks / polling
-- [ ] Error handling and retry logic
-
-### Phase 3: Enhanced Features
-- [ ] Windows victim option
-- [ ] Multiple victim scenarios
-- [ ] XSIAM API integration (verify detections)
-
----
-
-### Future: NGFW Integration
-
-When adding PANW NGFW, insert firewall subnet tier:
-- Public: ALB, NAT Gateway
-- Firewall: NGFW interfaces (new)
-- Private: EC2, RDS
-
-Route: ALB → NGFW → EC2
 
 ---
 

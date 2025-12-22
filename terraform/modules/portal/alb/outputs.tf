@@ -43,3 +43,8 @@ output "https_listener_arn" {
   description = "ARN of the HTTPS listener (for adding path-based rules)"
   value       = aws_lb_listener.https.arn
 }
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAF Web ACL (null if WAF disabled)"
+  value       = var.enable_waf ? aws_wafv2_web_acl.this[0].arn : null
+}

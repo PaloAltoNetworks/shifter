@@ -24,3 +24,27 @@ variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
 }
+
+# ------------------------------------------------------------------------------
+# Phase 5: Additional Log Sources
+# ------------------------------------------------------------------------------
+
+variable "enable_flow_logs" {
+  description = "Enable VPC flow logs"
+  type        = bool
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+  default     = 90
+}
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM
+# ------------------------------------------------------------------------------
+
+variable "agent_s3_bucket" {
+  description = "S3 bucket name for agent installers (for range instance S3 read access)"
+  type        = string
+}

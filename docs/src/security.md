@@ -1,5 +1,46 @@
 # Security
 
+## Architecture Overview
+
+```
+                              INTERNET
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+                    ▼                           ▼
+          ┌─────────────────┐         ┌─────────────────┐
+          │   PORTAL VPC    │         │    RANGE VPC    │
+          │  (10.0.0.0/16)  │         │  (10.1.0.0/16)  │
+          │                 │         │                 │
+          │  ┌───────────┐  │  VPC    │  ┌───────────┐  │
+          │  │ ALB + WAF │  │ Peering │  │  AWS NET  │  │
+          │  └─────┬─────┘  │◄───────►│  │ FIREWALL  │  │
+          │        │        │ SSH only│  └─────┬─────┘  │
+          │  ┌─────▼─────┐  │         │        │        │
+          │  │  Django   │  │         │  ┌─────▼─────┐  │
+          │  │   EC2     │  │         │  │    NAT    │  │
+          │  └─────┬─────┘  │         │  └─────┬─────┘  │
+          │        │        │         │        │        │
+          │  ┌─────▼─────┐  │         │  User Subnets   │
+          │  │    RDS    │  │         │  ┌─────┬─────┐  │
+          │  └───────────┘  │         │  │Kali │Victim│ │
+          └─────────────────┘         │  └─────┴─────┘  │
+                                      └─────────────────┘
+```
+
+## Web Application Firewall (WAF)
+
+AWS WAFv2 protects the Portal ALB with managed rule sets:
+
+| Rule | Purpose |
+|------|---------|
+| `RateLimitRule` | 2000 requests/5 min per IP |
+| `AWSManagedRulesAmazonIpReputationList` | Known malicious IPs |
+| `AWSManagedRulesKnownBadInputsRuleSet` | Log4Shell, SSRF, etc. |
+| `AWSManagedRulesCommonRuleSet` | OWASP Top 10 |
+
+WAF is enabled by default in both dev and prod environments.
+
 ## Network
 
 ### Portal VPC
@@ -22,7 +63,11 @@ AWS Network Firewall inspects all egress traffic with domain-based allowlists:
 | Instance | Allowed Egress | Blocked |
 |----------|---------------|---------|
 | Kali | VPC internal only | All internet access |
-| Victim | `.paloaltonetworks.com`, `.storage.googleapis.com` | Everything else |
+| Victim (Linux/Windows) | `.paloaltonetworks.com`, `.storage.googleapis.com` | Everything else |
+
+Additional protections:
+- **SNI bypass prevention**: Blocks TLS connections using IP addresses as SNI (prevents domain allowlist bypass)
+- **Suricata rules**: Custom rules reject direct IP connections
 
 Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Internet`
 
@@ -30,8 +75,8 @@ Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Inte
 
 | SG | Ingress | Egress | Purpose |
 |----|---------|--------|---------|
-| Kali | SSH from VPC, ALL from Victim SG | VPC CIDR, DNS | Attack box |
-| Victim | SSH from VPC, ALL from Kali SG | HTTPS, DNS | Target with XDR agent |
+| Kali | SSH from Portal+Range VPC, ALL from Victim SG | VPC CIDR, DNS | Attack box |
+| Victim | SSH from Portal+Range VPC, ALL from Kali SG | HTTPS, DNS | Target with XDR agent |
 
 **Design Decisions:**
 
@@ -46,7 +91,15 @@ Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Inte
 - 10.1.0.0/24 reserved for infrastructure (firewall, NAT subnets)
 - Kali/Victim can only talk to each other within the same subnet
 - No cross-subnet traffic possible (SG rules reference specific SGs, not VPC CIDR)
-- VPC peering to Portal VPC for SSH access
+
+### VPC Peering
+
+Portal VPC ↔ Range VPC peering enables browser-based SSH terminal access:
+
+- Portal initiates peering connection
+- Routes added to both VPCs' private route tables
+- Traffic restricted to SSH (port 22) via security groups
+- No direct internet path between VPCs
 
 ## Encryption
 
@@ -82,6 +135,7 @@ Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Inte
 ## Secrets
 
 - RDS credentials in Secrets Manager, auto-generated
+- Range SSH keys stored in Secrets Manager (per-range)
 - Terraform variables in GitHub Secrets, synced via `sync-tfvars.sh`
 - `.tfvars` files gitignored
 
@@ -127,23 +181,18 @@ AWS Cognito handles all authentication. Django is a relying party only.
 
 ## Logging and Observability
 
-Phase 5 log sources are implemented but require `enable_log_aggregation = true` to activate:
+Log aggregation requires `enable_log_aggregation = true` to activate:
 
 | Log Type | Destination | Status |
 |----------|-------------|--------|
 | Application logs | CloudWatch → Firehose → S3 | Implemented |
 | Cognito logs | CloudWatch → Firehose → S3 | Implemented |
-| Provisioner Lambda logs | CloudWatch → Firehose → S3 | Implemented |
+| Pulumi Provisioner logs | CloudWatch → Firehose → S3 | Implemented |
 | VPC Flow Logs | CloudWatch → Firehose → S3 | Implemented |
 | RDS PostgreSQL logs | CloudWatch → Firehose → S3 | Implemented |
 | ALB access logs | Direct to S3 | Implemented |
 | WAF logs | Firehose → S3 | Implemented |
-
-WAF is enabled by default on all ALBs with AWS managed rules:
-- Rate limiting (2000 requests/5 min per IP)
-- IP reputation list
-- Known bad inputs (Log4Shell, etc.)
-- Common rule set (OWASP Top 10)
+| Network Firewall logs | CloudWatch (ALERT + FLOW) | Implemented |
 
 ### XDR CloudTrail Integration
 

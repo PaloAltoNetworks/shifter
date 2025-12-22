@@ -199,6 +199,20 @@ variable "windows_ami_id" {
 }
 
 # ------------------------------------------------------------------------------
+# Instance Types
+# ------------------------------------------------------------------------------
+
+variable "kali_instance_type" {
+  description = "EC2 instance type for Kali attacker instances"
+  type        = string
+}
+
+variable "victim_instance_type" {
+  description = "EC2 instance type for victim instances"
+  type        = string
+}
+
+# ------------------------------------------------------------------------------
 # S3 Agent Bucket
 # ------------------------------------------------------------------------------
 

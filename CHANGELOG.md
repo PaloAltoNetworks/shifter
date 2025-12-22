@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Windows victim support in provisioner v2
 
+### Fixed
+- Range destroy race condition leads to subnet collision
+
 ## [0.7.11] - 2025-12-21
 
 .deb and .rpm packages confirmed fix as part of provisioner v2 in 0.7.7

@@ -5,7 +5,6 @@ import secrets
 from typing import Any
 
 from django.conf import settings
-from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
 
@@ -48,11 +47,11 @@ class Risk(models.Model):
     severity = models.CharField(max_length=10, choices=Severity.choices, default=Severity.MEDIUM)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
 
-    # Threat modeling fields
-    stride_categories = ArrayField(
-        models.CharField(max_length=1, choices=StrideCategory.choices),
+    # Threat modeling fields (JSONField for SQLite compatibility)
+    stride_categories = models.JSONField(
         default=list,
         blank=True,
+        help_text="List of STRIDE category codes (S, T, R, I, D, E)",
     )
     likelihood_score = models.PositiveSmallIntegerField(null=True, blank=True, help_text="1-5 scale")
     impact_score = models.PositiveSmallIntegerField(null=True, blank=True, help_text="1-5 scale")

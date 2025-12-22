@@ -382,10 +382,11 @@ class TestLoadConfigIntegration:
         assert len(result.instances) == 2
         assert result.instances[0].role == "attacker"
         assert result.instances[0].os_type == "kali"
-        assert result.instances[0].instance_type == "t3.small"
+        # Instance types come from env vars (set by autouse fixture)
+        assert result.instances[0].instance_type == os.environ["KALI_INSTANCE_TYPE"]
         assert result.instances[1].role == "victim"
         assert result.instances[1].os_type == "ubuntu"
-        assert result.instances[1].instance_type == "t3.micro"
+        assert result.instances[1].instance_type == os.environ["VICTIM_INSTANCE_TYPE"]
         assert result.instances[1].agent_id == 1
         assert result.instances[1].agent_s3_key == "agents/xdr.tar.gz"
 

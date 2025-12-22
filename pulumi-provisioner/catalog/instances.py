@@ -2,10 +2,38 @@
 
 This module defines the available instance types and their configurations.
 Add new OS types here to extend the platform's capabilities.
+
+Instance types (EC2 sizes like t3.medium) are configured via environment variables:
+- KALI_INSTANCE_TYPE: Default instance type for Kali attacker instances
+- VICTIM_INSTANCE_TYPE: Default instance type for victim instances
+- WINDOWS_INSTANCE_TYPE: Default instance type for Windows instances (optional)
 """
 
+import os
 from dataclasses import dataclass
 from typing import Optional
+
+
+def _get_kali_instance_type() -> str:
+    """Get default instance type for Kali from environment."""
+    value = os.environ.get("KALI_INSTANCE_TYPE")
+    if not value:
+        raise ValueError("KALI_INSTANCE_TYPE environment variable is required")
+    return value
+
+
+def _get_victim_instance_type() -> str:
+    """Get default instance type for victims from environment."""
+    value = os.environ.get("VICTIM_INSTANCE_TYPE")
+    if not value:
+        raise ValueError("VICTIM_INSTANCE_TYPE environment variable is required")
+    return value
+
+
+def _get_windows_instance_type() -> str:
+    """Get default instance type for Windows from environment."""
+    # Windows defaults to VICTIM_INSTANCE_TYPE if not specified
+    return os.environ.get("WINDOWS_INSTANCE_TYPE") or _get_victim_instance_type()
 
 
 @dataclass
@@ -14,12 +42,17 @@ class InstanceType:
 
     name: str
     role: str  # "attacker" or "victim"
-    default_instance_type: str
     user_data_template: str
     description: str
+    _instance_type_getter: callable  # Function to get default instance type
     ami_lookup: Optional[dict] = None  # For dynamic AMI lookup
     requires_agent: bool = False
     ssh_user: str = "ubuntu"  # Default SSH user for the OS
+
+    @property
+    def default_instance_type(self) -> str:
+        """Get the default instance type from environment."""
+        return self._instance_type_getter()
 
 
 # Instance type catalog - add new OS types here
@@ -27,7 +60,7 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
     "kali-2024": InstanceType(
         name="kali-2024",
         role="attacker",
-        default_instance_type="t3.small",
+        _instance_type_getter=_get_kali_instance_type,
         user_data_template="kali.sh.j2",
         description="Kali Linux with kali-linux-headless tools",
         ami_lookup={"name": "kali-linux-*", "owner": "679593333241"},
@@ -37,7 +70,7 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
     "ubuntu-22.04-victim": InstanceType(
         name="ubuntu-22.04-victim",
         role="victim",
-        default_instance_type="t3.micro",
+        _instance_type_getter=_get_victim_instance_type,
         user_data_template="victim_linux.sh.j2",
         description="Ubuntu 22.04 LTS victim with XDR agent",
         ami_lookup={
@@ -50,7 +83,7 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
     "ubuntu-24.04-victim": InstanceType(
         name="ubuntu-24.04-victim",
         role="victim",
-        default_instance_type="t3.micro",
+        _instance_type_getter=_get_victim_instance_type,
         user_data_template="victim_linux.sh.j2",
         description="Ubuntu 24.04 LTS victim with XDR agent",
         ami_lookup={
@@ -63,7 +96,7 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
     "windows-server-2022-victim": InstanceType(
         name="windows-server-2022-victim",
         role="victim",
-        default_instance_type="t3.medium",
+        _instance_type_getter=_get_windows_instance_type,
         user_data_template="victim_windows.ps1.j2",
         description="Windows Server 2022 victim with XDR agent",
         ami_lookup={
@@ -76,7 +109,7 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
     "amazon-linux-2023-victim": InstanceType(
         name="amazon-linux-2023-victim",
         role="victim",
-        default_instance_type="t3.micro",
+        _instance_type_getter=_get_victim_instance_type,
         user_data_template="victim_linux.sh.j2",
         description="Amazon Linux 2023 victim with XDR agent",
         ami_lookup={

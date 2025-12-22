@@ -393,6 +393,16 @@ Write-Host "Windows setup complete"
 # =============================================================================
 
 
+@pytest.fixture(autouse=True)
+def set_instance_type_env_vars(monkeypatch):
+    """Set required instance type environment variables for all tests.
+
+    These are required by config.py and catalog/instances.py.
+    """
+    monkeypatch.setenv("KALI_INSTANCE_TYPE", "t3.medium")
+    monkeypatch.setenv("VICTIM_INSTANCE_TYPE", "t3.medium")
+
+
 @pytest.fixture
 def mock_env_vars(mocker):
     """Fixture providing mock environment variables for testing."""
@@ -416,6 +426,8 @@ def mock_env_vars(mocker):
         "WINDOWS_AMI_ID": "ami-windows-test",
         "AGENT_S3_BUCKET": "test-agents-bucket",
         "RANGE_ID": "42",
+        "KALI_INSTANCE_TYPE": "t3.medium",
+        "VICTIM_INSTANCE_TYPE": "t3.medium",
     }
 
     mocker.patch.dict(os.environ, env_vars, clear=False)
@@ -430,6 +442,8 @@ def mock_env_vars_minimal(mocker):
         "DB_NAME": "shifter",
         "DB_USER": "shifter_app",
         "AWS_REGION": "us-east-2",
+        "KALI_INSTANCE_TYPE": "t3.medium",
+        "VICTIM_INSTANCE_TYPE": "t3.medium",
     }
     mocker.patch.dict(os.environ, env_vars, clear=False)
     return env_vars

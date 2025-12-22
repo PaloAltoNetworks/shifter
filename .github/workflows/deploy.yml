@@ -17,17 +17,18 @@ jobs:
   # ============================================================================
   changes:
     name: Detect Changes
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       core: ${{ steps.filter.outputs.core }}
       range: ${{ steps.filter.outputs.range }}
+      pulumi_provisioner: ${{ steps.filter.outputs.pulumi_provisioner }}
       portal: ${{ steps.filter.outputs.portal }}
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
         id: filter
         with:
           filters: |
@@ -38,11 +39,18 @@ jobs:
               - '.github/workflows/deploy.yml'
             range:
               - 'terraform/modules/range/**'
+              - 'terraform/modules/pulumi-state/**'
               - 'terraform/environments/*/range/**'
               - '.github/workflows/_range.yml'
+            pulumi_provisioner:
+              - 'pulumi-provisioner/**'
+              - 'terraform/modules/pulumi-provisioner/**'
+              - 'terraform/modules/ecr/**'
+              - 'terraform/environments/*/*.tf'
+              - '.github/workflows/_pulumi-provisioner.yml'
+              - '.github/workflows/deploy.yml'
             portal:
               - 'terraform/modules/portal/**'
-              - 'terraform/modules/range/provisioner/**'
               - 'terraform/environments/*/portal/**'
               - 'portal/**'
               - '.github/workflows/_portal.yml'
@@ -65,38 +73,82 @@ jobs:
   # Each component waits for its upstream dependency before running
   # ============================================================================
 
+  quality:
+    name: Quality
+    needs: changes
+    if: |
+      needs.changes.outputs.core == 'true' ||
+      needs.changes.outputs.range == 'true' ||
+      needs.changes.outputs.pulumi_provisioner == 'true' ||
+      needs.changes.outputs.portal == 'true' ||
+      github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/_quality.yml
+
   core:
     name: Core
-    needs: changes
-    if: needs.changes.outputs.core == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [changes, quality]
+    if: |
+      (needs.changes.outputs.core == 'true' || github.event_name == 'workflow_dispatch') &&
+      needs.quality.result == 'success'
     uses: ./.github/workflows/_core.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
       is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
-    secrets: inherit
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      TF_VARS_DEV_FOUNDATION: ${{ secrets.TF_VARS_DEV_FOUNDATION }}
+      TF_VARS_PROD_FOUNDATION: ${{ secrets.TF_VARS_PROD_FOUNDATION }}
 
   range:
     name: Range
-    needs: [changes, core]
+    needs: [changes, quality, core]
     if: |
       always() &&
       (needs.changes.outputs.range == 'true' || github.event_name == 'workflow_dispatch') &&
-      (needs.core.result == 'success' || needs.core.result == 'skipped')
+      (needs.core.result == 'success' || needs.core.result == 'skipped') &&
+      needs.quality.result == 'success'
     uses: ./.github/workflows/_range.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
       is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
-    secrets: inherit
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
+      TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
+
+  pulumi-provisioner:
+    name: Pulumi Provisioner
+    needs: [changes, quality, core]
+    if: |
+      always() &&
+      (needs.changes.outputs.pulumi_provisioner == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.core.result == 'success' || needs.core.result == 'skipped') &&
+      needs.quality.result == 'success'
+    uses: ./.github/workflows/_pulumi-provisioner.yml
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+      is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
 
   portal:
     name: Portal
-    needs: [changes, range]
+    needs: [changes, quality, range, pulumi-provisioner]
     if: |
       always() &&
       (needs.changes.outputs.portal == 'true' || github.event_name == 'workflow_dispatch') &&
-      (needs.range.result == 'success' || needs.range.result == 'skipped')
+      (needs.range.result == 'success' || needs.range.result == 'skipped') &&
+      (needs.pulumi-provisioner.result == 'success' || needs.pulumi-provisioner.result == 'skipped') &&
+      needs.quality.result == 'success'
     uses: ./.github/workflows/_portal.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
       is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
-    secrets: inherit
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+      TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}

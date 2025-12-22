@@ -6,6 +6,24 @@
 from django.db import migrations
 
 
+def grant_victim_ssh_key(apps, schema_editor):
+    """Grant UPDATE permission on victim_ssh_key_secret_arn (PostgreSQL only)."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("""
+        GRANT UPDATE (victim_ssh_key_secret_arn) ON mission_control_range TO provisioner_lambda;
+    """)
+
+
+def revoke_victim_ssh_key(apps, schema_editor):
+    """Revoke UPDATE permission on victim_ssh_key_secret_arn (PostgreSQL only)."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("""
+        REVOKE UPDATE (victim_ssh_key_secret_arn) ON mission_control_range FROM provisioner_lambda;
+    """)
+
+
 class Migration(migrations.Migration):
     """Grant UPDATE permission on victim_ssh_key_secret_arn to provisioner_lambda."""
 
@@ -15,14 +33,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            # Forward: Grant UPDATE on victim_ssh_key_secret_arn column
-            sql="""
-                GRANT UPDATE (victim_ssh_key_secret_arn) ON mission_control_range TO provisioner_lambda;
-            """,
-            # Reverse: Revoke UPDATE on victim_ssh_key_secret_arn column
-            reverse_sql="""
-                REVOKE UPDATE (victim_ssh_key_secret_arn) ON mission_control_range FROM provisioner_lambda;
-            """,
-        ),
+        migrations.RunPython(grant_victim_ssh_key, revoke_victim_ssh_key),
     ]

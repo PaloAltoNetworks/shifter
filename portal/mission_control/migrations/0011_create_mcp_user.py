@@ -11,6 +11,56 @@
 from django.db import migrations
 
 
+def create_mcp_user(apps, schema_editor):
+    """Create mcp_user on PostgreSQL only."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mcp_user') THEN
+                CREATE USER mcp_user;
+            END IF;
+        END
+        $$;
+
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'rds_iam') THEN
+                EXECUTE 'GRANT rds_iam TO mcp_user';
+            END IF;
+        END
+        $$;
+
+        GRANT CONNECT ON DATABASE shifter TO mcp_user;
+        GRANT USAGE ON SCHEMA public TO mcp_user;
+        GRANT SELECT ON mission_control_range TO mcp_user;
+        GRANT SELECT ON auth_user TO mcp_user;
+    """)
+
+
+def drop_mcp_user(apps, schema_editor):
+    """Drop mcp_user on PostgreSQL only."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("""
+        REVOKE ALL PRIVILEGES ON mission_control_range FROM mcp_user;
+        REVOKE ALL PRIVILEGES ON auth_user FROM mcp_user;
+        REVOKE USAGE ON SCHEMA public FROM mcp_user;
+        REVOKE CONNECT ON DATABASE shifter FROM mcp_user;
+
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'rds_iam') THEN
+                EXECUTE 'REVOKE rds_iam FROM mcp_user';
+            END IF;
+        END
+        $$;
+
+        DROP USER IF EXISTS mcp_user;
+    """)
+
+
 class Migration(migrations.Migration):
     """Create mcp_user PostgreSQL user with IAM auth and read-only Range permissions."""
 
@@ -22,57 +72,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            # Forward: Create user with IAM auth and grant permissions
-            # NOTE: rds_iam role only exists on AWS RDS, skip on local PostgreSQL
-            sql="""
-                -- Create user for MCP server (no password - uses IAM auth)
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mcp_user') THEN
-                        CREATE USER mcp_user;
-                    END IF;
-                END
-                $$;
-
-                -- Grant IAM authentication capability (only on RDS where rds_iam exists)
-                DO $$
-                BEGIN
-                    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'rds_iam') THEN
-                        EXECUTE 'GRANT rds_iam TO mcp_user';
-                    END IF;
-                END
-                $$;
-
-                -- Grant minimal connection permissions
-                GRANT CONNECT ON DATABASE shifter TO mcp_user;
-                GRANT USAGE ON SCHEMA public TO mcp_user;
-
-                -- Grant read access to tables the MCP server needs
-                -- Range: to look up user's active range and Kali connection info
-                GRANT SELECT ON mission_control_range TO mcp_user;
-                -- auth_user: to look up user by email (from JWT)
-                GRANT SELECT ON auth_user TO mcp_user;
-            """,
-            # Reverse: Remove user and permissions
-            reverse_sql="""
-                -- Revoke all permissions
-                REVOKE ALL PRIVILEGES ON mission_control_range FROM mcp_user;
-                REVOKE ALL PRIVILEGES ON auth_user FROM mcp_user;
-                REVOKE USAGE ON SCHEMA public FROM mcp_user;
-                REVOKE CONNECT ON DATABASE shifter FROM mcp_user;
-
-                -- Revoke rds_iam only if it exists (RDS only)
-                DO $$
-                BEGIN
-                    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'rds_iam') THEN
-                        EXECUTE 'REVOKE rds_iam FROM mcp_user';
-                    END IF;
-                END
-                $$;
-
-                -- Drop user
-                DROP USER IF EXISTS mcp_user;
-            """,
-        ),
+        migrations.RunPython(create_mcp_user, drop_mcp_user),
     ]

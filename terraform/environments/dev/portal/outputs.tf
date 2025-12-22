@@ -64,17 +64,32 @@ output "db_resource_id" {
 }
 
 # ------------------------------------------------------------------------------
-# EC2
+# EC2 / Autoscaling
 # ------------------------------------------------------------------------------
 
 output "ec2_instance_id" {
-  description = "ID of the EC2 instance"
+  description = "ID of the EC2 instance (empty if ASG mode)"
   value       = module.ec2.instance_id
 }
 
 output "ec2_private_ip" {
-  description = "Private IP of the EC2 instance"
+  description = "Private IP of the EC2 instance (empty if ASG mode)"
   value       = module.ec2.private_ip
+}
+
+output "asg_name" {
+  description = "Auto Scaling Group name (empty if single instance mode)"
+  value       = module.ec2.asg_name
+}
+
+output "asg_arn" {
+  description = "Auto Scaling Group ARN (empty if single instance mode)"
+  value       = module.ec2.asg_arn
+}
+
+output "launch_template_id" {
+  description = "Launch template ID (empty if single instance mode)"
+  value       = module.ec2.launch_template_id
 }
 
 # ------------------------------------------------------------------------------
@@ -135,34 +150,58 @@ output "cognito_issuer_url" {
 }
 
 # ------------------------------------------------------------------------------
-# Provisioner (Step Functions)
-# ------------------------------------------------------------------------------
-
-output "provision_range_state_machine_arn" {
-  description = "ARN of the provision range Step Functions state machine"
-  value       = module.provisioner.provision_range_state_machine_arn
-}
-
-output "teardown_range_state_machine_arn" {
-  description = "ARN of the teardown range Step Functions state machine"
-  value       = module.provisioner.teardown_range_state_machine_arn
-}
-
-output "provisioner_lambda_role_arn" {
-  description = "ARN of the Lambda execution role for provisioner functions"
-  value       = module.provisioner.lambda_role_arn
-}
-
-output "provisioner_alerts_sns_topic_arn" {
-  description = "ARN of the SNS topic for provisioner alerts (null if alarms disabled)"
-  value       = module.provisioner.alerts_sns_topic_arn
-}
-
-# ------------------------------------------------------------------------------
 # VPC Peering
 # ------------------------------------------------------------------------------
 
 output "vpc_peering_connection_id" {
   description = "ID of the VPC peering connection to Range VPC"
   value       = aws_vpc_peering_connection.portal_to_range.id
+}
+
+# ------------------------------------------------------------------------------
+# Redis
+# ------------------------------------------------------------------------------
+
+output "redis_endpoint" {
+  description = "Redis primary endpoint"
+  value       = module.redis.redis_endpoint
+}
+
+output "redis_port" {
+  description = "Redis port"
+  value       = module.redis.redis_port
+}
+
+# ------------------------------------------------------------------------------
+# Pulumi Provisioner
+# ------------------------------------------------------------------------------
+
+output "pulumi_ecs_cluster_arn" {
+  description = "ARN of the Pulumi provisioner ECS cluster"
+  value       = module.pulumi_provisioner.ecs_cluster_arn
+}
+
+output "pulumi_task_definition_arn" {
+  description = "ARN of the Pulumi provisioner ECS task definition"
+  value       = module.pulumi_provisioner.task_definition_arn
+}
+
+output "pulumi_ecs_security_group_id" {
+  description = "ID of the Pulumi provisioner ECS security group"
+  value       = module.pulumi_provisioner.ecs_security_group_id
+}
+
+output "pulumi_private_subnet_ids" {
+  description = "Private subnet IDs for Pulumi provisioner ECS tasks"
+  value       = module.pulumi_provisioner.private_subnet_ids
+}
+
+output "pulumi_ecs_execution_role_arn" {
+  description = "ARN of the Pulumi provisioner ECS execution role"
+  value       = module.pulumi_provisioner.ecs_execution_role_arn
+}
+
+output "pulumi_ecs_task_role_arn" {
+  description = "ARN of the Pulumi provisioner ECS task role"
+  value       = module.pulumi_provisioner.ecs_task_role_arn
 }

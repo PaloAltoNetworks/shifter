@@ -17,6 +17,7 @@ cat <<EOF > /etc/docker/daemon.json
   "log-opts": {
     "awslogs-region": "${aws_region}",
     "awslogs-group": "${log_group_name}",
+    "awslogs-stream-prefix": "portal",
     "awslogs-create-group": "false"
   }
 }

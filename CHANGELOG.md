@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.11] - 2025-12-21
+
+.deb and .rpm packages confirmed fix as part of provisioner v2 in 0.7.7
+
+### Added
+- Provisioner confirms assigned subnet index is available before provisioning
+
+### Fixed
+- Kali boots slow due to redundant kali headless install
+- Failed range auto-cleanup not running in dev
+
+
+## [0.7.10] - 2025-12-21
+
+### Fixed
+- Provisioner fails to install .deb or .rpm agent packages properly
+- Provisioner fails to rollback range if agent installation fails
+
 ## [0.7.9] - 2025-12-21
 
 ### Fixed

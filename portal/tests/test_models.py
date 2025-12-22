@@ -201,9 +201,12 @@ class TestAgentConfig:
 
 @pytest.mark.django_db
 class TestRange:
-    def test_str_with_agent(self):
+    @pytest.fixture
+    def user(self):
+        return User.objects.create_user(username="test@example.com", email="test@example.com")
+
+    def test_str_with_agent(self, user):
         """__str__ includes agent name when agent exists."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
         windows_os = OperatingSystem.objects.get(slug="windows")
         agent = AgentConfig.objects.create(
             user=user,
@@ -217,11 +220,97 @@ class TestRange:
         range_obj = Range.objects.create(user=user, agent=agent)
         assert "Test Agent" in str(range_obj)
 
-    def test_str_without_agent(self):
+    def test_str_without_agent(self, user):
         """__str__ shows 'Unknown Agent' when agent is None."""
-        user = User.objects.create_user(username="test@example.com", email="test@example.com")
         range_obj = Range.objects.create(user=user, agent=None)
         assert "Unknown Agent" in str(range_obj)
+
+    # --- kali_private_ip property tests ---
+
+    def test_kali_private_ip_returns_attacker_ip(self, user):
+        """kali_private_ip returns the attacker instance's private_ip."""
+        range_obj = Range.objects.create(
+            user=user,
+            provisioned_instances=[
+                {"role": "attacker", "os": "kali", "private_ip": "10.1.5.10"},
+                {"role": "victim", "os": "ubuntu", "private_ip": "10.1.5.20"},
+            ],
+        )
+        assert range_obj.kali_private_ip == "10.1.5.10"
+
+    def test_kali_private_ip_returns_none_when_no_provisioned_instances(self, user):
+        """kali_private_ip returns None when provisioned_instances is empty."""
+        range_obj = Range.objects.create(user=user, provisioned_instances=None)
+        assert range_obj.kali_private_ip is None
+
+    def test_kali_private_ip_returns_none_when_no_attacker(self, user):
+        """kali_private_ip returns None when no attacker instance exists."""
+        range_obj = Range.objects.create(
+            user=user,
+            provisioned_instances=[
+                {"role": "victim", "os": "ubuntu", "private_ip": "10.1.5.20"},
+            ],
+        )
+        assert range_obj.kali_private_ip is None
+
+    def test_kali_private_ip_returns_none_when_attacker_missing_ip(self, user):
+        """kali_private_ip returns None when attacker has no private_ip field."""
+        range_obj = Range.objects.create(
+            user=user,
+            provisioned_instances=[
+                {"role": "attacker", "os": "kali"},
+            ],
+        )
+        assert range_obj.kali_private_ip is None
+
+    # --- victim_private_ip property tests ---
+
+    def test_victim_private_ip_returns_first_victim_ip(self, user):
+        """victim_private_ip returns the first victim instance's private_ip."""
+        range_obj = Range.objects.create(
+            user=user,
+            provisioned_instances=[
+                {"role": "attacker", "os": "kali", "private_ip": "10.1.5.10"},
+                {"role": "victim", "os": "ubuntu", "private_ip": "10.1.5.20"},
+            ],
+        )
+        assert range_obj.victim_private_ip == "10.1.5.20"
+
+    def test_victim_private_ip_returns_none_when_no_provisioned_instances(self, user):
+        """victim_private_ip returns None when provisioned_instances is empty."""
+        range_obj = Range.objects.create(user=user, provisioned_instances=None)
+        assert range_obj.victim_private_ip is None
+
+    def test_victim_private_ip_returns_none_when_no_victims(self, user):
+        """victim_private_ip returns None when no victim instances exist."""
+        range_obj = Range.objects.create(
+            user=user,
+            provisioned_instances=[
+                {"role": "attacker", "os": "kali", "private_ip": "10.1.5.10"},
+            ],
+        )
+        assert range_obj.victim_private_ip is None
+
+    def test_victim_private_ip_returns_none_when_victim_missing_ip(self, user):
+        """victim_private_ip returns None when victim has no private_ip field."""
+        range_obj = Range.objects.create(
+            user=user,
+            provisioned_instances=[
+                {"role": "victim", "os": "ubuntu"},
+            ],
+        )
+        assert range_obj.victim_private_ip is None
+
+    def test_victim_private_ip_returns_first_when_multiple_victims(self, user):
+        """victim_private_ip returns first victim's IP when multiple victims exist."""
+        range_obj = Range.objects.create(
+            user=user,
+            provisioned_instances=[
+                {"role": "victim", "os": "ubuntu", "private_ip": "10.1.5.20"},
+                {"role": "victim", "os": "windows", "private_ip": "10.1.5.30"},
+            ],
+        )
+        assert range_obj.victim_private_ip == "10.1.5.20"
 
 
 # --- ActivityLog ---

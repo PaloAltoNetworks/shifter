@@ -301,6 +301,30 @@ class Range(models.Model):
             return []
         return [i for i in self.provisioned_instances if i.get("role") == "victim"]
 
+    @property
+    def kali_private_ip(self) -> str | None:
+        """Get the Kali (attacker) instance private IP address.
+
+        Returns:
+            The private IP address string or None if not available
+        """
+        attacker = self.attacker_instance
+        if not attacker:
+            return None
+        return attacker.get("private_ip")
+
+    @property
+    def victim_private_ip(self) -> str | None:
+        """Get the first victim instance private IP address.
+
+        Returns:
+            The private IP address string or None if not available
+        """
+        victims = self.victim_instances
+        if not victims:
+            return None
+        return victims[0].get("private_ip")
+
 
 class ActivityLog(models.Model):
     """Generic activity/event log for analytics and auditing."""

@@ -4,12 +4,20 @@ Tests the instance type catalog which defines available instance configurations.
 These are pure Python tests with no external dependencies.
 """
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+@pytest.fixture(autouse=True)
+def set_instance_type_env_vars(monkeypatch):
+    """Set required instance type environment variables for all tests."""
+    monkeypatch.setenv("KALI_INSTANCE_TYPE", "t3.medium")
+    monkeypatch.setenv("VICTIM_INSTANCE_TYPE", "t3.medium")
 
 from catalog.instances import (
     INSTANCE_CATALOG,
@@ -30,7 +38,7 @@ class TestInstanceTypeCatalog:
         assert kali is not None
         assert kali.name == "kali-2024"
         assert kali.role == "attacker"
-        assert kali.default_instance_type == "t3.small"
+        assert kali.default_instance_type == os.environ["KALI_INSTANCE_TYPE"]
         assert kali.user_data_template == "kali.sh.j2"
         assert kali.ssh_user == "kali"
         assert kali.requires_agent is False
@@ -43,7 +51,7 @@ class TestInstanceTypeCatalog:
         assert ubuntu is not None
         assert ubuntu.name == "ubuntu-22.04-victim"
         assert ubuntu.role == "victim"
-        assert ubuntu.default_instance_type == "t3.micro"
+        assert ubuntu.default_instance_type == os.environ["VICTIM_INSTANCE_TYPE"]
         assert ubuntu.user_data_template == "victim_linux.sh.j2"
         assert ubuntu.ssh_user == "ubuntu"
         assert ubuntu.requires_agent is True
@@ -56,7 +64,7 @@ class TestInstanceTypeCatalog:
         assert ubuntu is not None
         assert ubuntu.name == "ubuntu-24.04-victim"
         assert ubuntu.role == "victim"
-        assert ubuntu.default_instance_type == "t3.micro"
+        assert ubuntu.default_instance_type == os.environ["VICTIM_INSTANCE_TYPE"]
         assert ubuntu.user_data_template == "victim_linux.sh.j2"
         assert ubuntu.ssh_user == "ubuntu"
         assert ubuntu.requires_agent is True
@@ -69,7 +77,8 @@ class TestInstanceTypeCatalog:
         assert windows is not None
         assert windows.name == "windows-server-2022-victim"
         assert windows.role == "victim"
-        assert windows.default_instance_type == "t3.medium"
+        # Windows falls back to VICTIM_INSTANCE_TYPE if WINDOWS_INSTANCE_TYPE not set
+        assert windows.default_instance_type == os.environ["VICTIM_INSTANCE_TYPE"]
         assert windows.user_data_template == "victim_windows.ps1.j2"
         assert windows.ssh_user == "Administrator"
         assert windows.requires_agent is True
@@ -82,7 +91,7 @@ class TestInstanceTypeCatalog:
         assert amzn is not None
         assert amzn.name == "amazon-linux-2023-victim"
         assert amzn.role == "victim"
-        assert amzn.default_instance_type == "t3.micro"
+        assert amzn.default_instance_type == os.environ["VICTIM_INSTANCE_TYPE"]
         assert amzn.user_data_template == "victim_linux.sh.j2"
         assert amzn.ssh_user == "ec2-user"
         assert amzn.requires_agent is True
@@ -217,20 +226,21 @@ class TestInstanceTypeDataclass:
         it = InstanceType(
             name="test",
             role="victim",
-            default_instance_type="t3.micro",
+            _instance_type_getter=lambda: "t3.micro",
             user_data_template="test.sh.j2",
             description="Test instance",
         )
         assert it.ami_lookup is None
         assert it.requires_agent is False
         assert it.ssh_user == "ubuntu"
+        assert it.default_instance_type == "t3.micro"
 
     def test_instance_type_all_fields(self):
         """InstanceType can be created with all fields populated."""
         it = InstanceType(
             name="test-full",
             role="attacker",
-            default_instance_type="t3.large",
+            _instance_type_getter=lambda: "t3.large",
             user_data_template="custom.sh.j2",
             description="Fully configured instance",
             ami_lookup={"name": "test-ami-*", "owner": "123456789"},
@@ -245,6 +255,23 @@ class TestInstanceTypeDataclass:
         assert it.ami_lookup == {"name": "test-ami-*", "owner": "123456789"}
         assert it.requires_agent is True
         assert it.ssh_user == "admin"
+
+    def test_instance_type_reads_from_env(self, monkeypatch):
+        """InstanceType.default_instance_type reads from environment at access time."""
+        monkeypatch.setenv("TEST_INSTANCE_TYPE", "t3.small")
+
+        it = InstanceType(
+            name="test-env",
+            role="victim",
+            _instance_type_getter=lambda: os.environ["TEST_INSTANCE_TYPE"],
+            user_data_template="test.sh.j2",
+            description="Test instance",
+        )
+        assert it.default_instance_type == "t3.small"
+
+        # Change the env var and verify it picks up the new value
+        monkeypatch.setenv("TEST_INSTANCE_TYPE", "t3.xlarge")
+        assert it.default_instance_type == "t3.xlarge"
 
 
 class TestCatalogConsistency:

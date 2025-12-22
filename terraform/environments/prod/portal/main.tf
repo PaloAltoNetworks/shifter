@@ -62,6 +62,10 @@ module "vpc" {
   az_count           = var.az_count
   enable_nat_gateway = var.enable_nat_gateway
   tags               = var.tags
+
+  # Phase 5: VPC Flow Logs
+  enable_flow_logs   = var.enable_vpc_flow_logs
+  log_retention_days = var.log_retention_days
 }
 
 # ------------------------------------------------------------------------------
@@ -87,6 +91,10 @@ module "rds" {
   deletion_protection   = var.db_deletion_protection
   skip_final_snapshot   = var.db_skip_final_snapshot
 
+  # Phase 5: RDS Log Exports
+  enable_log_exports = var.enable_rds_log_exports
+  log_retention_days = var.log_retention_days
+
   tags = var.tags
 }
 
@@ -103,6 +111,30 @@ module "alb" {
   domain_name       = var.domain_name
   app_port          = var.app_port
   health_check_path = var.health_check_path
+  enable_stickiness = var.enable_autoscaling
+
+  # Phase 5: ALB Access Logs and WAF Logging
+  enable_access_logs      = var.enable_alb_access_logs
+  logs_bucket_name        = var.enable_alb_access_logs ? module.log_aggregation.logs_bucket_name : ""
+  enable_waf_logging      = var.enable_waf_logging
+  waf_log_destination_arn = var.enable_waf_logging ? module.log_aggregation.waf_firehose_arn : ""
+
+  tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# Redis (for Django Channels in ASG mode)
+# ------------------------------------------------------------------------------
+
+module "redis" {
+  source = "../../../modules/portal/redis"
+
+  name_prefix         = local.name_prefix
+  vpc_id              = module.vpc.vpc_id
+  subnet_ids          = module.vpc.private_subnet_ids
+  allowed_cidr_blocks = [module.vpc.vpc_cidr]
+  node_type           = var.redis_node_type
+  engine_version      = var.redis_engine_version
 
   tags = var.tags
 }
@@ -115,7 +147,9 @@ module "cognito" {
   source = "../../../modules/portal/cognito"
 
   name_prefix           = local.name_prefix
+  environment           = var.environment
   aws_region            = var.aws_region
+  log_retention_days    = var.log_retention_days
   cognito_domain_prefix = var.cognito_domain_prefix
   callback_urls         = ["https://${var.domain_name}/oidc/callback/"]
   logout_urls           = ["https://${var.domain_name}/"]
@@ -149,19 +183,35 @@ module "ec2" {
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port
   root_volume_size = var.ec2_root_volume_size
-  step_function_arns = [
-    module.provisioner.provision_range_state_machine_arn,
-    module.provisioner.teardown_range_state_machine_arn,
-  ]
+
+  # ECS permissions for Pulumi provisioner
+  ecs_cluster_arn         = module.pulumi_provisioner.ecs_cluster_arn
+  ecs_task_definition_arn = module.pulumi_provisioner.task_definition_arn
+  ecs_task_role_arn       = module.pulumi_provisioner.ecs_task_role_arn
+  ecs_execution_role_arn  = module.pulumi_provisioner.ecs_execution_role_arn
+
+  # Autoscaling configuration
+  enable_autoscaling   = var.enable_autoscaling
+  subnet_ids           = module.vpc.private_subnet_ids
+  target_group_arn     = module.alb.target_group_arn
+  asg_min_size         = var.asg_min_size
+  asg_max_size         = var.asg_max_size
+  asg_desired_capacity = var.asg_desired_capacity
+  redis_endpoint       = var.enable_autoscaling ? module.redis.redis_endpoint : ""
+  scale_up_threshold   = var.scale_up_threshold
+  scale_down_threshold = var.scale_down_threshold
+  log_retention_days   = var.log_retention_days
 
   tags = var.tags
 }
 
 # ------------------------------------------------------------------------------
-# ALB Target Attachment (after EC2 is created)
+# ALB Target Attachment (single instance mode only - ASG attaches automatically)
 # ------------------------------------------------------------------------------
 
 resource "aws_lb_target_group_attachment" "portal" {
+  count = var.enable_autoscaling ? 0 : 1
+
   target_group_arn = module.alb.target_group_arn
   target_id        = module.ec2.instance_id
   port             = var.app_port
@@ -240,46 +290,96 @@ resource "aws_route" "range_to_portal" {
 # Do not duplicate them here.
 
 # ------------------------------------------------------------------------------
-# Provisioner (Step Functions + Lambda for range provisioning)
+# Pulumi Provisioner (ECS Fargate)
+# Note: Defined before log_aggregation so its log groups can be included
 # ------------------------------------------------------------------------------
 
-module "provisioner" {
-  source = "../../../modules/range/provisioner"
+module "pulumi_provisioner" {
+  source = "../../../modules/pulumi-provisioner"
 
-  name_prefix = local.name_prefix
-  environment = var.environment
-  tags        = var.tags
+  name_prefix        = local.name_prefix
+  environment        = var.environment
+  tags               = var.tags
+  log_retention_days = var.log_retention_days
 
-  # Portal VPC (where Lambda runs)
-  portal_vpc_id     = module.vpc.vpc_id
-  portal_subnet_ids = module.vpc.private_subnet_ids
+  # ECR
+  ecr_repository_url  = data.terraform_remote_state.foundation.outputs.pulumi_provisioner_ecr_url
+  container_image_tag = var.pulumi_container_tag
 
-  # Range VPC (where resources are created)
-  range_vpc_id         = data.terraform_remote_state.range.outputs.vpc_id
-  range_route_table_id = data.terraform_remote_state.range.outputs.private_route_table_id
-  # Extract CIDR prefix from VPC CIDR (e.g., "10.1.0.0/16" -> "10.1")
-  range_cidr_prefix = join(".", slice(split(".", data.terraform_remote_state.range.outputs.vpc_cidr), 0, 2))
-  availability_zone = module.vpc.availability_zones[0]
+  # Networking (Portal VPC for RDS access)
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
 
-  # RDS Configuration (IAM DB auth)
-  db_host               = module.rds.db_instance_address
-  db_port               = 5432
-  db_name               = var.db_name
-  db_resource_id        = module.rds.db_resource_id
+  # Database
+  db_host        = module.rds.db_instance_address
+  db_port        = 5432
+  db_name        = var.db_name
+  db_resource_id = module.rds.db_resource_id
+
+  # RDS security group (for adding ingress rule)
   rds_security_group_id = module.rds.db_security_group_id
 
-  # Victim Configuration
-  victim_ami_id            = var.victim_ami_id
-  victim_instance_type     = var.victim_instance_type
-  victim_security_group_id = data.terraform_remote_state.range.outputs.victim_security_group_id
-  agent_s3_bucket          = var.user_storage_bucket
+  # Pulumi state (from Range environment)
+  pulumi_state_bucket          = data.terraform_remote_state.range.outputs.pulumi_state_bucket_name
+  pulumi_state_bucket_arn      = data.terraform_remote_state.range.outputs.pulumi_state_bucket_arn
+  pulumi_locks_table           = data.terraform_remote_state.range.outputs.pulumi_locks_table_name
+  pulumi_locks_table_arn       = data.terraform_remote_state.range.outputs.pulumi_locks_table_arn
+  pulumi_secrets_kms_key_arn   = data.terraform_remote_state.range.outputs.pulumi_secrets_kms_key_arn
+  pulumi_secrets_kms_key_alias = data.terraform_remote_state.range.outputs.pulumi_secrets_kms_key_alias
 
-  # Kali Configuration
-  kali_ami_id            = var.kali_ami_id
-  kali_instance_type     = var.kali_instance_type
-  kali_security_group_id = data.terraform_remote_state.range.outputs.kali_security_group_id
+  # Range VPC configuration
+  range_vpc_id                = data.terraform_remote_state.range.outputs.vpc_id
+  range_vpc_cidr              = data.terraform_remote_state.range.outputs.vpc_cidr
+  range_route_table_id        = data.terraform_remote_state.range.outputs.private_route_table_id
+  range_availability_zone     = data.terraform_remote_state.range.outputs.availability_zone
+  victim_security_group_id    = data.terraform_remote_state.range.outputs.victim_security_group_id
+  kali_security_group_id      = data.terraform_remote_state.range.outputs.kali_security_group_id
+  range_instance_profile_arn  = data.terraform_remote_state.range.outputs.range_instance_profile_arn
+  range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
+  range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
 
-  # Monitoring Configuration
-  enable_alarms = var.enable_provisioner_alarms
-  alarm_email   = var.provisioner_alarm_email
+  # AMIs
+  kali_ami_id    = var.kali_ami_id
+  victim_ami_id  = var.victim_ami_id
+  windows_ami_id = var.windows_ami_id
+
+  # S3
+  agent_s3_bucket     = module.s3.bucket_name
+  agent_s3_bucket_arn = module.s3.bucket_arn
+}
+
+# ------------------------------------------------------------------------------
+# Log Aggregation (S3, SQS, Firehose for internal observability)
+# Note: XDR CloudTrail integration is managed via CloudFormation, not Terraform
+# ------------------------------------------------------------------------------
+
+module "log_aggregation" {
+  source = "../../../modules/log-aggregation"
+
+  name_prefix            = local.name_prefix
+  environment            = var.environment
+  aws_region             = var.aws_region
+  log_retention_days     = var.log_retention_days
+  enable_log_aggregation = var.enable_log_aggregation
+
+  # Phase 5: ALB and WAF logging
+  enable_alb_access_logs = var.enable_alb_access_logs
+  enable_waf_logging     = var.enable_waf_logging
+
+  # Log group sources (for CloudWatch subscription filters)
+  source_log_group_names = var.enable_log_aggregation ? concat(
+    [module.ec2.log_group_name],
+    [module.cognito.log_group_name],
+    # Phase 5: VPC flow logs and RDS logs
+    var.enable_vpc_flow_logs ? [module.vpc.flow_logs_log_group_name] : [],
+    var.enable_rds_log_exports ? module.rds.log_group_names : [],
+    # Pulumi provisioner logs
+    module.pulumi_provisioner.log_group_names,
+  ) : []
+
+  # Monitoring
+  enable_alarms = true
+  alarm_email   = "bedwards@paloaltonetworks.com"
+
+  tags = var.tags
 }

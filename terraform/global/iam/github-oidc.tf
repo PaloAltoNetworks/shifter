@@ -124,6 +124,38 @@ resource "aws_iam_policy" "core_infrastructure" {
           "dynamodb:DeleteItem"
         ]
         Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/shifter-terraform-*"
+      },
+      {
+        Sid    = "PulumiStateS3"
+        Effect = "Allow"
+        Action = [
+          "s3:*"
+        ]
+        Resource = [
+          "arn:aws:s3:::*-range-pulumi-state",
+          "arn:aws:s3:::*-range-pulumi-state/*"
+        ]
+      },
+      {
+        Sid    = "PulumiStateDynamoDB"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:CreateTable",
+          "dynamodb:DeleteTable",
+          "dynamodb:DescribeTable",
+          "dynamodb:UpdateTable",
+          "dynamodb:DescribeTimeToLive",
+          "dynamodb:UpdateTimeToLive",
+          "dynamodb:ListTagsOfResource",
+          "dynamodb:TagResource",
+          "dynamodb:UntagResource",
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:DescribeContinuousBackups",
+          "dynamodb:UpdateContinuousBackups"
+        ]
+        Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*-range-pulumi-locks"
       }
     ]
   })
@@ -157,7 +189,10 @@ resource "aws_iam_policy" "vpc_networking" {
           "ec2:*Tags",
           "ec2:Describe*",
           "ec2:CreateTags",
-          "ec2:DeleteTags"
+          "ec2:DeleteTags",
+          "ec2:CreateFlowLogs",
+          "ec2:DeleteFlowLogs",
+          "ec2:DescribeFlowLogs"
         ]
         Resource = "*"
       }
@@ -165,7 +200,7 @@ resource "aws_iam_policy" "vpc_networking" {
   })
 }
 
-# EC2 Instances
+# EC2 Instances, Auto Scaling, and Launch Templates
 # checkov:skip=CKV_AWS_355:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
 # checkov:skip=CKV_AWS_290:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
 # checkov:skip=CKV_AWS_289:CI/CD requires broad EC2 permissions for infrastructure management. Risk accepted, see #44
@@ -208,6 +243,45 @@ resource "aws_iam_policy" "ec2_instances" {
           "ec2:UnmonitorInstances"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "LaunchTemplate"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateLaunchTemplate",
+          "ec2:DeleteLaunchTemplate",
+          "ec2:DescribeLaunchTemplates",
+          "ec2:DescribeLaunchTemplateVersions",
+          "ec2:ModifyLaunchTemplate",
+          "ec2:CreateLaunchTemplateVersion",
+          "ec2:DeleteLaunchTemplateVersions"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AutoScaling"
+        Effect = "Allow"
+        Action = [
+          "autoscaling:CreateAutoScalingGroup",
+          "autoscaling:DeleteAutoScalingGroup",
+          "autoscaling:DescribeAutoScalingGroups",
+          "autoscaling:UpdateAutoScalingGroup",
+          "autoscaling:CreateLaunchConfiguration",
+          "autoscaling:DeleteLaunchConfiguration",
+          "autoscaling:DescribeLaunchConfigurations",
+          "autoscaling:CreateOrUpdateTags",
+          "autoscaling:DeleteTags",
+          "autoscaling:DescribeTags",
+          "autoscaling:PutScalingPolicy",
+          "autoscaling:DeletePolicy",
+          "autoscaling:DescribePolicies",
+          "autoscaling:SetDesiredCapacity",
+          "autoscaling:TerminateInstanceInAutoScalingGroup",
+          "autoscaling:StartInstanceRefresh",
+          "autoscaling:DescribeInstanceRefreshes",
+          "autoscaling:DescribeScalingActivities"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -220,6 +294,10 @@ resource "aws_iam_policy" "ec2_instances" {
 # checkov:skip=CKV_AWS_287:CI/CD requires broad ELB/ACM permissions for infrastructure management. Risk accepted, see #44
 # NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
 # and size of inline policies outweigh need for pure least privilege. Risk accepted.
+# checkov:skip=CKV_AWS_355:CI/CD requires WAFv2 permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires WAFv2 permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires WAFv2 permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires WAFv2 permissions. Risk accepted, see #44
 resource "aws_iam_policy" "elb_acm" {
   name = "shifter-${var.environment}-elb-acm"
 
@@ -236,6 +314,27 @@ resource "aws_iam_policy" "elb_acm" {
         Sid      = "ACM"
         Effect   = "Allow"
         Action   = ["acm:*"]
+        Resource = "*"
+      },
+      {
+        Sid    = "WAFv2"
+        Effect = "Allow"
+        Action = [
+          "wafv2:CreateWebACL",
+          "wafv2:DeleteWebACL",
+          "wafv2:GetWebACL",
+          "wafv2:UpdateWebACL",
+          "wafv2:ListWebACLs",
+          "wafv2:AssociateWebACL",
+          "wafv2:DisassociateWebACL",
+          "wafv2:GetWebACLForResource",
+          "wafv2:ListResourcesForWebACL",
+          "wafv2:ListTagsForResource",
+          "wafv2:TagResource",
+          "wafv2:UntagResource",
+          "wafv2:DescribeManagedRuleGroup",
+          "wafv2:ListAvailableManagedRuleGroups"
+        ]
         Resource = "*"
       }
     ]
@@ -341,30 +440,6 @@ resource "aws_iam_policy" "lambda_sfn" {
         Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:layer:*"
       },
       {
-        Sid    = "StepFunctions"
-        Effect = "Allow"
-        Action = [
-          "states:CreateStateMachine",
-          "states:DeleteStateMachine",
-          "states:DescribeStateMachine",
-          "states:UpdateStateMachine",
-          "states:ListStateMachines",
-          "states:ListStateMachineVersions",
-          "states:TagResource",
-          "states:UntagResource",
-          "states:ListTagsForResource"
-        ]
-        Resource = "arn:aws:states:${var.aws_region}:${data.aws_caller_identity.current.account_id}:stateMachine:*"
-      },
-      {
-        Sid    = "StepFunctionsValidate"
-        Effect = "Allow"
-        Action = [
-          "states:ValidateStateMachineDefinition"
-        ]
-        Resource = "*"
-      },
-      {
         Sid    = "CloudWatchLogs"
         Effect = "Allow"
         Action = [
@@ -451,16 +526,40 @@ resource "aws_iam_policy" "lambda_sfn" {
           "events:UntagResource"
         ]
         Resource = "arn:aws:events:${var.aws_region}:${data.aws_caller_identity.current.account_id}:rule/*-portal-*"
+      },
+      {
+        Sid    = "ECS"
+        Effect = "Allow"
+        Action = [
+          "ecs:*"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "StepFunctions"
+        Effect = "Allow"
+        Action = [
+          "states:CreateStateMachine",
+          "states:DeleteStateMachine",
+          "states:DescribeStateMachine",
+          "states:UpdateStateMachine",
+          "states:ListStateMachines",
+          "states:ListStateMachineVersions",
+          "states:TagResource",
+          "states:UntagResource",
+          "states:ListTagsForResource"
+        ]
+        Resource = "*"
       }
     ]
   })
 }
 
-# RDS
-# checkov:skip=CKV_AWS_355:CI/CD requires broad RDS permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_290:CI/CD requires broad RDS permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_289:CI/CD requires broad RDS permissions. Risk accepted, see #44
-# checkov:skip=CKV_AWS_287:CI/CD requires broad RDS permissions. Risk accepted, see #44
+# RDS and ElastiCache (managed data stores)
+# checkov:skip=CKV_AWS_355:CI/CD requires broad RDS/ElastiCache permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_290:CI/CD requires broad RDS/ElastiCache permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_289:CI/CD requires broad RDS/ElastiCache permissions. Risk accepted, see #44
+# checkov:skip=CKV_AWS_287:CI/CD requires broad RDS/ElastiCache permissions. Risk accepted, see #44
 # NOTE: Not best practice. Project in rapid development - velocity impact of permissions errors
 # and size of inline policies outweigh need for pure least privilege. Risk accepted.
 resource "aws_iam_policy" "rds" {
@@ -494,6 +593,27 @@ resource "aws_iam_policy" "rds" {
           "rds:ListTagsForResource",
           "rds:DescribeDBEngineVersions",
           "rds:DescribeOrderableDBInstanceOptions"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ElastiCache"
+        Effect = "Allow"
+        Action = [
+          "elasticache:CreateCacheCluster",
+          "elasticache:DeleteCacheCluster",
+          "elasticache:DescribeCacheClusters",
+          "elasticache:ModifyCacheCluster",
+          "elasticache:CreateCacheSubnetGroup",
+          "elasticache:DeleteCacheSubnetGroup",
+          "elasticache:DescribeCacheSubnetGroups",
+          "elasticache:ModifyCacheSubnetGroup",
+          "elasticache:DescribeCacheParameterGroups",
+          "elasticache:DescribeCacheParameters",
+          "elasticache:DescribeEngineDefaultParameters",
+          "elasticache:AddTagsToResource",
+          "elasticache:RemoveTagsFromResource",
+          "elasticache:ListTagsForResource"
         ]
         Resource = "*"
       }

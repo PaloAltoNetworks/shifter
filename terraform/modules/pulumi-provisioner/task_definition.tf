@@ -36,6 +36,8 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "VICTIM_AMI_ID", value = var.victim_ami_id },
       { name = "WINDOWS_AMI_ID", value = var.windows_ami_id },
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
+      { name = "KALI_INSTANCE_TYPE", value = var.kali_instance_type },
+      { name = "VICTIM_INSTANCE_TYPE", value = var.victim_instance_type },
     ]
 
     logConfiguration = {

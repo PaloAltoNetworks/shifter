@@ -32,3 +32,8 @@ output "lambda_function_arn" {
   description = "ARN of pre-signup Lambda function"
   value       = aws_lambda_function.pre_signup.arn
 }
+
+output "log_group_name" {
+  description = "Name of the CloudWatch log group for pre-signup Lambda"
+  value       = aws_cloudwatch_log_group.pre_signup.name
+}

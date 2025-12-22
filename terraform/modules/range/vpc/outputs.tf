@@ -5,6 +5,11 @@ output "vpc_id" {
   value       = aws_vpc.this.id
 }
 
+output "availability_zone" {
+  description = "Primary availability zone used by the Range VPC"
+  value       = local.primary_az
+}
+
 output "vpc_cidr" {
   description = "CIDR block of the VPC"
   value       = aws_vpc.this.cidr_block
@@ -70,4 +75,32 @@ output "firewall_arn" {
 output "s3_endpoint_id" {
   description = "ID of the S3 Gateway Endpoint"
   value       = aws_vpc_endpoint.s3.id
+}
+
+# ------------------------------------------------------------------------------
+# VPC Flow Logs
+# ------------------------------------------------------------------------------
+
+output "flow_logs_log_group_name" {
+  description = "Name of the CloudWatch log group for VPC flow logs"
+  value       = var.enable_flow_logs ? aws_cloudwatch_log_group.flow_logs[0].name : ""
+}
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM
+# ------------------------------------------------------------------------------
+
+output "range_instance_role_arn" {
+  description = "ARN of the IAM role for range EC2 instances"
+  value       = aws_iam_role.range_instance.arn
+}
+
+output "range_instance_profile_arn" {
+  description = "ARN of the IAM instance profile for range EC2 instances"
+  value       = aws_iam_instance_profile.range_instance.arn
+}
+
+output "range_instance_profile_name" {
+  description = "Name of the IAM instance profile for range EC2 instances"
+  value       = aws_iam_instance_profile.range_instance.name
 }

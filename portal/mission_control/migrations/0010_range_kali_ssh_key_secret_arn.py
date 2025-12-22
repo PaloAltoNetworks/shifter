@@ -3,6 +3,24 @@
 from django.db import migrations, models
 
 
+def grant_kali_ssh_key(apps, schema_editor):
+    """Grant UPDATE permission on kali_ssh_key_secret_arn (PostgreSQL only)."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("""
+        GRANT UPDATE (kali_ssh_key_secret_arn) ON mission_control_range TO provisioner_lambda;
+    """)
+
+
+def revoke_kali_ssh_key(apps, schema_editor):
+    """Revoke UPDATE permission on kali_ssh_key_secret_arn (PostgreSQL only)."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("""
+        REVOKE UPDATE (kali_ssh_key_secret_arn) ON mission_control_range FROM provisioner_lambda;
+    """)
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("mission_control", "0009_grant_kali_columns_to_provisioner"),
@@ -20,12 +38,5 @@ class Migration(migrations.Migration):
             ),
         ),
         # Grant provisioner_lambda permission to update this column
-        migrations.RunSQL(
-            sql="""
-                GRANT UPDATE (kali_ssh_key_secret_arn) ON mission_control_range TO provisioner_lambda;
-            """,
-            reverse_sql="""
-                REVOKE UPDATE (kali_ssh_key_secret_arn) ON mission_control_range FROM provisioner_lambda;
-            """,
-        ),
+        migrations.RunPython(grant_kali_ssh_key, revoke_kali_ssh_key),
     ]

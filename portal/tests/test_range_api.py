@@ -258,9 +258,9 @@ class TestDestroyRange:
         data = response.json()
         assert data["success"] is True
 
-        # Verify range was marked as destroyed in DB
+        # Verify range was marked as DESTROYING (async cleanup will set DESTROYED)
         range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYED
+        assert range_obj.status == Range.Status.DESTROYING
 
     def test_can_destroy_failed_range(self, client, test_agent, settings):
         """Failed ranges can be destroyed to clean up."""
@@ -280,16 +280,17 @@ class TestDestroyRange:
         data = response.json()
         assert data["success"] is True
 
-        # Verify range was marked as destroyed in DB
+        # Verify range was marked as DESTROYING (async cleanup will set DESTROYED)
         range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYED
+        assert range_obj.status == Range.Status.DESTROYING
 
 
 @pytest.mark.django_db
 class TestLaunchRangeWhileDestroying:
-    """Test that users cannot launch while a range is being destroyed."""
+    """Test that users CAN launch while a range is being destroyed."""
 
-    def test_cannot_launch_while_destroying(self, client, test_agent, settings):
+    def test_can_launch_while_destroying(self, client, test_agent, settings):
+        """User can launch a new range while old one is being cleaned up."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
@@ -298,17 +299,21 @@ class TestLaunchRangeWhileDestroying:
             user=test_agent.user,
             agent=test_agent,
             status=Range.Status.DESTROYING,
+            subnet_index=1,
         )
 
-        # Try to launch a new range
+        # User can launch a new range (gets different subnet)
         response = client.post(
             reverse("mission_control:launch_range"),
             data={"agent_id": test_agent.id},
             content_type="application/json",
         )
 
-        assert response.status_code == 409
-        assert "already have an active range" in response.json()["error"]
+        assert response.status_code == 200
+        # New range should get subnet_index=2 (1 is reserved by DESTROYING range)
+        new_range = Range.objects.filter(status=Range.Status.PROVISIONING).first()
+        assert new_range is not None
+        assert new_range.subnet_index == 2
 
 
 @pytest.mark.django_db

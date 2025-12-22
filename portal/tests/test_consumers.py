@@ -163,6 +163,54 @@ class TestSSHConsumerConnectionDetails:
                 assert call_kwargs["username"] == "ec2-user"
 
     @pytest.mark.asyncio
+    async def test_windows_victim_uses_administrator(self):
+        """Consumer should use Administrator for Windows instances."""
+        from mission_control.consumers import SSHConsumer
+
+        mock_range = MagicMock()
+        mock_range.user_id = 1
+        mock_range.status = "ready"
+        mock_range.victim_instances = [
+            {
+                "os": "windows",
+                "role": "victim",
+                "private_ip": "10.1.1.20",
+                "instance_id": "i-victim123",
+                "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123456789:secret:victim-key",
+            }
+        ]
+
+        mock_user = MagicMock()
+        mock_user.id = 1
+
+        consumer = SSHConsumer()
+        consumer.scope = {
+            "user": mock_user,
+            "url_route": {"kwargs": {"range_id": 1, "instance": "victim"}},
+        }
+        consumer.close = AsyncMock()
+        consumer.accept = AsyncMock()
+
+        with (
+            patch("mission_control.consumers.Range") as mock_range_class,
+            patch("mission_control.consumers.get_ssh_key", return_value="fake-key"),
+            patch("mission_control.consumers.SSHConnection") as mock_ssh,
+        ):
+            mock_range_class.Status.READY = "ready"
+            mock_get = AsyncMock(return_value=mock_range)
+
+            with patch("asgiref.sync.sync_to_async", return_value=mock_get):
+                mock_ssh_instance = MagicMock()
+                mock_ssh_instance.connect = AsyncMock()
+                mock_ssh.return_value = mock_ssh_instance
+
+                await consumer._do_connect()
+
+                mock_ssh.assert_called_once()
+                call_kwargs = mock_ssh.call_args.kwargs
+                assert call_kwargs["username"] == "Administrator"
+
+    @pytest.mark.asyncio
     async def test_missing_instance_closes_connection(self):
         """Consumer should close with 4005 if instance not found in provisioned_instances."""
         from mission_control.consumers import SSHConsumer

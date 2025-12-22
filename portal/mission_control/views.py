@@ -726,11 +726,10 @@ def destroy_range(request):
     if not range_to_destroy:
         return JsonResponse({"error": "No range to destroy"}, status=404)
 
-    # Mark as DESTROYED immediately - user gets instant feedback
-    # Resource cleanup happens async in Step Functions
-    range_to_destroy.status = Range.Status.DESTROYED
-    range_to_destroy.destroyed_at = timezone.now()
-    range_to_destroy.save(update_fields=["status", "destroyed_at"])
+    # Mark as DESTROYING - user sees it as gone, can launch new range
+    # Resource cleanup happens async, provisioner sets DESTROYED when done
+    range_to_destroy.status = Range.Status.DESTROYING
+    range_to_destroy.save(update_fields=["status"])
 
     ActivityLog.log(
         "range_destroyed",

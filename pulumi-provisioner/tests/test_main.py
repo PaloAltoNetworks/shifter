@@ -525,8 +525,8 @@ class TestRunPulumi:
             destroy_calls = [c for c in calls if "destroy" in str(c)]
             assert len(destroy_calls) >= 1
 
-    def test_run_pulumi_dev_no_auto_cleanup(self, mock_subprocess, mocker, mock_boto3_clients):
-        """Dev failure should NOT trigger auto-destroy."""
+    def test_run_pulumi_dev_auto_cleanup(self, mock_subprocess, mocker, mock_boto3_clients):
+        """Dev failure should also trigger auto-destroy (same as prod)."""
         mock_run, mock_result = mock_subprocess
 
         # Set up environment as dev
@@ -558,11 +558,10 @@ class TestRunPulumi:
             with pytest.raises(Exception):
                 run_pulumi("up", 42)
 
-            # Verify destroy was NOT attempted (only up was called)
+            # Verify destroy WAS attempted - auto-cleanup now enabled for all environments
             calls = mock_run.call_args_list
             destroy_calls = [c for c in calls if "destroy" in str(c)]
-            # No auto-cleanup in dev
-            assert len(destroy_calls) == 0
+            assert len(destroy_calls) >= 1
 
     def test_run_pulumi_error_message_truncation(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients

@@ -48,28 +48,44 @@ deploy_cortex_conf() {
     return 1
 }
 
-# Helper to find and run any .sh file in extracted directory
+# Helper to find and run installer in extracted directory
+# Supports .sh scripts, .deb packages, and .rpm packages
 run_extracted_installer() {
     local extract_dir="$1"
-    local script=""
+    local installer=""
 
     # IMPORTANT: Deploy cortex.conf BEFORE running installer (required by Cortex XDR)
     deploy_cortex_conf "$extract_dir"
 
-    # Find first .sh file (check root first, then subdirs)
-    script=$(find "$extract_dir" -maxdepth 1 -name "*.sh" -type f | head -1)
-    if [ -z "$script" ]; then
-        script=$(find "$extract_dir" -maxdepth 2 -name "*.sh" -type f | head -1)
+    # Try .sh first (check root first, then subdirs)
+    installer=$(find "$extract_dir" -maxdepth 1 -name "*.sh" -type f | head -1)
+    if [ -z "$installer" ]; then
+        installer=$(find "$extract_dir" -maxdepth 2 -name "*.sh" -type f | head -1)
     fi
-
-    if [ -n "$script" ]; then
-        echo "Found installer script: $script"
-        chmod +x "$script"
-        "$script"
+    if [ -n "$installer" ]; then
+        echo "Found installer script: $installer"
+        chmod +x "$installer"
+        "$installer"
         return 0
     fi
 
-    echo "ERROR: No .sh installer found in archive"
+    # Try .deb
+    installer=$(find "$extract_dir" -maxdepth 2 -name "*.deb" -type f | head -1)
+    if [ -n "$installer" ]; then
+        echo "Found .deb package: $installer"
+        dpkg -i "$installer" || apt-get install -f -y
+        return 0
+    fi
+
+    # Try .rpm
+    installer=$(find "$extract_dir" -maxdepth 2 -name "*.rpm" -type f | head -1)
+    if [ -n "$installer" ]; then
+        echo "Found .rpm package: $installer"
+        rpm -i "$installer" || yum install -y "$installer"
+        return 0
+    fi
+
+    echo "ERROR: No installer found in archive (.sh, .deb, or .rpm)"
     echo "Contents:"
     find "$extract_dir" -type f
     return 1
@@ -85,31 +101,31 @@ install_agent() {
             echo "Installing via shell script..."
             chmod +x "$file"
             "$file"
-            return
+            return $?
             ;;
         *.deb)
             echo "Installing via dpkg..."
             dpkg -i "$file" || apt-get install -f -y
-            return
+            return $?
             ;;
         *.rpm)
             echo "Installing via rpm..."
             rpm -i "$file" || yum install -y "$file"
-            return
+            return $?
             ;;
         *.tar.gz|*.tgz)
             echo "Extracting tarball..."
             mkdir -p /tmp/agent-extract
             tar xzf "$file" -C /tmp/agent-extract
             run_extracted_installer /tmp/agent-extract
-            return
+            return $?
             ;;
         *.zip)
             echo "Extracting zip archive..."
             mkdir -p /tmp/agent-extract
             unzip -o "$file" -d /tmp/agent-extract
             run_extracted_installer /tmp/agent-extract
-            return
+            return $?
             ;;
     esac
 

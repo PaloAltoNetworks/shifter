@@ -198,7 +198,8 @@ class Range(models.Model):
     def get_active_for_user(cls, user):
         """Return the user's active range, or None.
 
-        Includes DESTROYING to prevent launching a new range while one is being torn down.
+        DESTROYING ranges are excluded - user can launch a new range while
+        the old one is being cleaned up (subnet allocation handles the race).
         """
         return cls.objects.filter(
             user=user,
@@ -208,7 +209,6 @@ class Range(models.Model):
                 cls.Status.READY,
                 cls.Status.PAUSED,
                 cls.Status.RESUMING,
-                cls.Status.DESTROYING,
             ],
         ).first()
 
@@ -249,10 +249,12 @@ class Range(models.Model):
         """
         with transaction.atomic():
             # Lock rows to prevent race conditions
-            # Get all subnet_index values currently in use by non-destroyed ranges
+            # Get all subnet_index values currently in use by active ranges
+            # Exclude terminal states (DESTROYED, FAILED) - those ranges don't have
+            # AWS resources or their resources are being cleaned up
             used_indices = set(
                 cls.objects.select_for_update()
-                .exclude(status=cls.Status.DESTROYED)
+                .exclude(status__in=[cls.Status.DESTROYED, cls.Status.FAILED])
                 .exclude(subnet_index__isnull=True)
                 .values_list("subnet_index", flat=True)
             )

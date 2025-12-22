@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.9] - 2025-12-21
+
+### Fixed
+- Provisioner fails to install .deb or .rpm agent packages properly
+
 ## [0.7.8] - 2025-12-21
 
 ### Added

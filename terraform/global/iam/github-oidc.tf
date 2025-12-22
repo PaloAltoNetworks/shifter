@@ -124,6 +124,38 @@ resource "aws_iam_policy" "core_infrastructure" {
           "dynamodb:DeleteItem"
         ]
         Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/shifter-terraform-*"
+      },
+      {
+        Sid    = "PulumiStateS3"
+        Effect = "Allow"
+        Action = [
+          "s3:*"
+        ]
+        Resource = [
+          "arn:aws:s3:::*-range-pulumi-state",
+          "arn:aws:s3:::*-range-pulumi-state/*"
+        ]
+      },
+      {
+        Sid    = "PulumiStateDynamoDB"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:CreateTable",
+          "dynamodb:DeleteTable",
+          "dynamodb:DescribeTable",
+          "dynamodb:UpdateTable",
+          "dynamodb:DescribeTimeToLive",
+          "dynamodb:UpdateTimeToLive",
+          "dynamodb:ListTagsOfResource",
+          "dynamodb:TagResource",
+          "dynamodb:UntagResource",
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:DescribeContinuousBackups",
+          "dynamodb:UpdateContinuousBackups"
+        ]
+        Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*-range-pulumi-locks"
       }
     ]
   })
@@ -408,30 +440,6 @@ resource "aws_iam_policy" "lambda_sfn" {
         Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:layer:*"
       },
       {
-        Sid    = "StepFunctions"
-        Effect = "Allow"
-        Action = [
-          "states:CreateStateMachine",
-          "states:DeleteStateMachine",
-          "states:DescribeStateMachine",
-          "states:UpdateStateMachine",
-          "states:ListStateMachines",
-          "states:ListStateMachineVersions",
-          "states:TagResource",
-          "states:UntagResource",
-          "states:ListTagsForResource"
-        ]
-        Resource = "arn:aws:states:${var.aws_region}:${data.aws_caller_identity.current.account_id}:stateMachine:*"
-      },
-      {
-        Sid    = "StepFunctionsValidate"
-        Effect = "Allow"
-        Action = [
-          "states:ValidateStateMachineDefinition"
-        ]
-        Resource = "*"
-      },
-      {
         Sid    = "CloudWatchLogs"
         Effect = "Allow"
         Action = [
@@ -518,6 +526,14 @@ resource "aws_iam_policy" "lambda_sfn" {
           "events:UntagResource"
         ]
         Resource = "arn:aws:events:${var.aws_region}:${data.aws_caller_identity.current.account_id}:rule/*-portal-*"
+      },
+      {
+        Sid    = "ECS"
+        Effect = "Allow"
+        Action = [
+          "ecs:*"
+        ]
+        Resource = "*"
       }
     ]
   })

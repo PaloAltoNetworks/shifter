@@ -183,10 +183,12 @@ module "ec2" {
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port
   root_volume_size = var.ec2_root_volume_size
-  step_function_arns = [
-    module.provisioner.provision_range_state_machine_arn,
-    module.provisioner.teardown_range_state_machine_arn,
-  ]
+
+  # ECS permissions for Pulumi provisioner
+  ecs_cluster_arn         = module.pulumi_provisioner.ecs_cluster_arn
+  ecs_task_definition_arn = module.pulumi_provisioner.task_definition_arn
+  ecs_task_role_arn       = module.pulumi_provisioner.ecs_task_role_arn
+  ecs_execution_role_arn  = module.pulumi_provisioner.ecs_execution_role_arn
 
   # Autoscaling configuration
   enable_autoscaling   = var.enable_autoscaling
@@ -288,50 +290,62 @@ resource "aws_route" "range_to_portal" {
 # Do not duplicate them here.
 
 # ------------------------------------------------------------------------------
-# Provisioner (Step Functions + Lambda for range provisioning)
+# Pulumi Provisioner (ECS Fargate)
+# Note: Defined before log_aggregation so its log groups can be included
 # ------------------------------------------------------------------------------
 
-module "provisioner" {
-  source = "../../../modules/range/provisioner"
+module "pulumi_provisioner" {
+  source = "../../../modules/pulumi-provisioner"
 
   name_prefix        = local.name_prefix
   environment        = var.environment
-  log_retention_days = var.log_retention_days
   tags               = var.tags
+  log_retention_days = var.log_retention_days
 
-  # Portal VPC (where Lambda runs)
-  portal_vpc_id     = module.vpc.vpc_id
-  portal_subnet_ids = module.vpc.private_subnet_ids
-  portal_vpc_cidr   = var.vpc_cidr
+  # ECR
+  ecr_repository_url  = data.terraform_remote_state.foundation.outputs.pulumi_provisioner_ecr_url
+  container_image_tag = var.pulumi_container_tag
 
-  # Range VPC (where resources are created)
-  range_vpc_id         = data.terraform_remote_state.range.outputs.vpc_id
-  range_route_table_id = data.terraform_remote_state.range.outputs.private_route_table_id
-  # Extract CIDR prefix from VPC CIDR (e.g., "10.1.0.0/16" -> "10.1")
-  range_cidr_prefix = join(".", slice(split(".", data.terraform_remote_state.range.outputs.vpc_cidr), 0, 2))
-  availability_zone = module.vpc.availability_zones[0]
+  # Networking (Portal VPC for RDS access)
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
 
-  # RDS Configuration (IAM DB auth)
-  db_host               = module.rds.db_instance_address
-  db_port               = 5432
-  db_name               = var.db_name
-  db_resource_id        = module.rds.db_resource_id
+  # Database
+  db_host        = module.rds.db_instance_address
+  db_port        = 5432
+  db_name        = var.db_name
+  db_resource_id = module.rds.db_resource_id
+
+  # RDS security group (for adding ingress rule)
   rds_security_group_id = module.rds.db_security_group_id
 
-  # Victim Configuration
-  victim_ami_id            = var.victim_ami_id
-  victim_instance_type     = var.victim_instance_type
-  victim_security_group_id = data.terraform_remote_state.range.outputs.victim_security_group_id
-  agent_s3_bucket          = var.user_storage_bucket
+  # Pulumi state (from Range environment)
+  pulumi_state_bucket          = data.terraform_remote_state.range.outputs.pulumi_state_bucket_name
+  pulumi_state_bucket_arn      = data.terraform_remote_state.range.outputs.pulumi_state_bucket_arn
+  pulumi_locks_table           = data.terraform_remote_state.range.outputs.pulumi_locks_table_name
+  pulumi_locks_table_arn       = data.terraform_remote_state.range.outputs.pulumi_locks_table_arn
+  pulumi_secrets_kms_key_arn   = data.terraform_remote_state.range.outputs.pulumi_secrets_kms_key_arn
+  pulumi_secrets_kms_key_alias = data.terraform_remote_state.range.outputs.pulumi_secrets_kms_key_alias
 
-  # Kali Configuration
-  kali_ami_id            = var.kali_ami_id
-  kali_instance_type     = var.kali_instance_type
-  kali_security_group_id = data.terraform_remote_state.range.outputs.kali_security_group_id
+  # Range VPC configuration
+  range_vpc_id                = data.terraform_remote_state.range.outputs.vpc_id
+  range_vpc_cidr              = data.terraform_remote_state.range.outputs.vpc_cidr
+  range_route_table_id        = data.terraform_remote_state.range.outputs.private_route_table_id
+  range_availability_zone     = data.terraform_remote_state.range.outputs.availability_zone
+  victim_security_group_id    = data.terraform_remote_state.range.outputs.victim_security_group_id
+  kali_security_group_id      = data.terraform_remote_state.range.outputs.kali_security_group_id
+  range_instance_profile_arn  = data.terraform_remote_state.range.outputs.range_instance_profile_arn
+  range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
+  range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
 
-  # Monitoring Configuration
-  enable_alarms = var.enable_provisioner_alarms
-  alarm_email   = var.provisioner_alarm_email
+  # AMIs
+  kali_ami_id    = var.kali_ami_id
+  victim_ami_id  = var.victim_ami_id
+  windows_ami_id = var.windows_ami_id
+
+  # S3
+  agent_s3_bucket     = module.s3.bucket_name
+  agent_s3_bucket_arn = module.s3.bucket_arn
 }
 
 # ------------------------------------------------------------------------------
@@ -356,10 +370,11 @@ module "log_aggregation" {
   source_log_group_names = var.enable_log_aggregation ? concat(
     [module.ec2.log_group_name],
     [module.cognito.log_group_name],
-    module.provisioner.log_group_names,
     # Phase 5: VPC flow logs and RDS logs
     var.enable_vpc_flow_logs ? [module.vpc.flow_logs_log_group_name] : [],
     var.enable_rds_log_exports ? module.rds.log_group_names : [],
+    # Pulumi provisioner logs
+    module.pulumi_provisioner.log_group_names,
   ) : []
 
   # Monitoring

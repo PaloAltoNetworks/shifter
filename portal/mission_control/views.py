@@ -657,14 +657,14 @@ def launch_range(request):
         agent.name,
     )
 
-    # Trigger provisioning via Step Functions
+    # Trigger provisioning via ECS Fargate
     from .services.provisioner import start_provisioning
 
-    execution_arn = start_provisioning(range_obj.id)
+    task_arn = start_provisioning(range_obj.id)
 
-    # Store execution ARN if returned (None in local dev without Step Functions)
-    if execution_arn:
-        range_obj.step_function_execution_arn = execution_arn
+    # Store task ARN if returned (None in local dev without ECS)
+    if task_arn:
+        range_obj.step_function_execution_arn = task_arn
         range_obj.save(update_fields=["step_function_execution_arn"])
 
     return JsonResponse(
@@ -744,15 +744,15 @@ def destroy_range(request):
         range_to_destroy.id,
     )
 
-    # Trigger async resource cleanup via Step Functions
+    # Trigger async resource cleanup via ECS Fargate
     # This runs in background - user doesn't wait for it
     from .services.provisioner import start_teardown
 
-    execution_arn = start_teardown(range_to_destroy.id)
+    task_arn = start_teardown(range_to_destroy.id)
 
-    # Store execution ARN if returned (None in local dev without Step Functions)
-    if execution_arn:
-        range_to_destroy.step_function_execution_arn = execution_arn
+    # Store task ARN if returned (None in local dev without ECS)
+    if task_arn:
+        range_to_destroy.step_function_execution_arn = task_arn
         range_to_destroy.save(update_fields=["step_function_execution_arn"])
 
     # Return success - no range data since it's now destroyed

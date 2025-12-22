@@ -3,6 +3,20 @@
 from django.db import migrations, models
 
 
+def grant_userprofile_select(apps, schema_editor):
+    """Grant SELECT on userprofile to mcp_user (PostgreSQL only)."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("GRANT SELECT ON mission_control_userprofile TO mcp_user;")
+
+
+def revoke_userprofile_select(apps, schema_editor):
+    """Revoke SELECT on userprofile from mcp_user (PostgreSQL only)."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("REVOKE SELECT ON mission_control_userprofile FROM mcp_user;")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -83,8 +97,5 @@ class Migration(migrations.Migration):
             ),
         ),
         # Grant mcp_user SELECT on userprofile table for cognito_sub lookups
-        migrations.RunSQL(
-            sql="GRANT SELECT ON mission_control_userprofile TO mcp_user;",
-            reverse_sql="REVOKE SELECT ON mission_control_userprofile FROM mcp_user;",
-        ),
+        migrations.RunPython(grant_userprofile_select, revoke_userprofile_select),
     ]

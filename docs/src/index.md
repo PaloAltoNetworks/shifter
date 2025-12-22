@@ -1,31 +1,28 @@
 # Shifter
 
-Self-service cyber range platform for PANW SecOps Domain Consultants.
+Self-service cyber range platform. Users provision isolated Kali + victim environments for XDR/XSIAM testing.
 
-## What It Does
+## Docs
 
-- Browser-based chat UI with AI-driven pentesting
-- Per-user Kali + Victim instances in isolated subnets
-- AI-driven vulnerability deployment and attack simulation
-- XDR/XSIAM detection testing
+- [Architecture](architecture.md) - System overview, components, data flow
+- [Ethics](ops/ethics.md) - Why this exists, responsible use
 
-## Quick Links
+### Portal
 
-- [Architecture](architecture.md)
-- [Security](security.md)
-- [Setup](setup.md)
-- [Ethics](ethics.md)
+- [Overview](portal/index.md) - Django app, routes, auth, terminal
+- [Design System](portal/design-system.md) - Cortex XDR theme
 
-## Portal
+### Execution
 
-- [Mission Control](portal/index.md)
-- [API Reference](portal/api.md)
-- [Design System](portal/design-system.md)
-- [Development](portal/dev.md)
-- [User Stories](portal/user-stories.md)
+- [Overview](execution/index.md) - Provisioner and range runtime
+- [Provisioner](execution/provisioner.md) - Pulumi ECS task
+- [Kali AMI](execution/kali-ami.md) - Pre-baked attacker
+- [Victim AMI](execution/victim-ami.md) - Pre-baked victim
 
-## Range
+### Orchestration
 
-- [Overview](range/index.md)
-- [Kali AMI](range/kali-ami.md)
-- [Provisioner](range/provisioner.md)
+- [Overview](orchestration/index.md) - Range lifecycle
+
+### SCMS
+
+- [Overview](scms/index.md) - Scenario content (goal-state, not implemented)

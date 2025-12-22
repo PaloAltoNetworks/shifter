@@ -27,6 +27,7 @@ dev = [
     "ruff>=0.14.9",
     "bandit>=1.9.2",
     "pre-commit>=4.5.0",
+    "pytest-asyncio>=1.3.0",
 ]
 
 [tool.pytest.ini_options]
@@ -34,6 +35,7 @@ DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
 addopts = "--cov=config --cov=mission_control --cov-report=term-missing --cov-report=xml:coverage.xml"
+env = ["TESTING=1"]
 
 # Ruff - linting and formatting
 [tool.ruff]

@@ -51,3 +51,22 @@ variable "victim_allowed_domains" {
     ".pkg.dev"
   ]
 }
+
+# ------------------------------------------------------------------------------
+# VPC Flow Logs
+# ------------------------------------------------------------------------------
+
+variable "enable_flow_logs" {
+  description = "Enable VPC flow logs"
+  type        = bool
+  default     = false
+}
+
+# ------------------------------------------------------------------------------
+# Range Instance IAM
+# ------------------------------------------------------------------------------
+
+variable "agent_s3_bucket" {
+  description = "S3 bucket name for agent installers (for range instance S3 read access)"
+  type        = string
+}

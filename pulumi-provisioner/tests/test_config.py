@@ -64,6 +64,7 @@ class TestGetRangeFromDb:
                 1,  # agent_id
                 None,  # instance_config
                 "agents/xdr.tar.gz",  # agent_s3_key
+                "linux-debian",  # agent_os_slug
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -79,6 +80,31 @@ class TestGetRangeFromDb:
             assert result["subnet_index"] == 5
             assert result["agent_id"] == 1
             assert result["agent_s3_key"] == "agents/xdr.tar.gz"
+            assert result["agent_os_slug"] == "linux-debian"
+
+    def test_get_range_from_db_returns_agent_os_slug(self, mock_boto3_clients, mock_env_vars_minimal):
+        """Range data should include agent's OS slug from OperatingSystem table."""
+        with patch("psycopg.connect") as mock_connect:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (
+                42,  # id
+                1,  # user_id
+                5,  # subnet_index
+                1,  # agent_id
+                None,  # instance_config
+                "agents/xdr.msi",  # agent_s3_key
+                "windows",  # agent_os_slug - from OperatingSystem.slug
+            )
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_connect.return_value = mock_conn
+
+            result = get_range_from_db(42)
+
+            assert result["agent_os_slug"] == "windows"
 
     def test_get_range_from_db_not_found(self, mock_boto3_clients, mock_env_vars_minimal):
         """ValueError should be raised for missing range."""
@@ -106,6 +132,7 @@ class TestGetRangeFromDb:
                 None,  # agent_id (no agent)
                 None,  # instance_config
                 None,  # agent_s3_key (no agent)
+                None,  # agent_os_slug (no agent)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -119,6 +146,7 @@ class TestGetRangeFromDb:
             assert result["id"] == 43
             assert result["agent_id"] is None
             assert result["agent_s3_key"] is None
+            assert result["agent_os_slug"] is None
 
     def test_get_range_from_db_custom_instance_config(self, mock_boto3_clients, mock_env_vars_minimal):
         """Range with custom instance_config should return it."""
@@ -136,6 +164,7 @@ class TestGetRangeFromDb:
                 None,  # agent_id
                 custom_config,  # instance_config
                 None,  # agent_s3_key
+                None,  # agent_os_slug
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -329,7 +358,7 @@ class TestLoadConfigIntegration:
     @pytest.fixture
     def mock_db_range_data(self, mocker):
         """Mock get_range_from_db to return test data."""
-        def _mock_db(range_id, instance_config=None, agent_id=None, agent_s3_key=None):
+        def _mock_db(range_id, instance_config=None, agent_id=None, agent_s3_key=None, agent_os_slug=None):
             mock_data = {
                 "id": range_id,
                 "user_id": 1,
@@ -337,6 +366,7 @@ class TestLoadConfigIntegration:
                 "agent_id": agent_id,
                 "instance_config": instance_config,
                 "agent_s3_key": agent_s3_key,
+                "agent_os_slug": agent_os_slug,
             }
             mocker.patch("config.get_range_from_db", return_value=mock_data)
             return mock_data
@@ -520,6 +550,165 @@ class TestLoadConfigIntegration:
         assert "kaliAmiId" in require_calls
         assert "victimAmiId" in require_calls
         assert "availabilityZone" in require_calls
+
+
+class TestAgentOsToVictimOsMapping:
+    """Tests for agent OS slug → victim os_type mapping.
+
+    When a user uploads a Windows agent (.msi), the victim instance should
+    be Windows. When they upload a Linux agent (.deb, .rpm), the victim
+    should be Ubuntu (Linux).
+    """
+
+    @pytest.fixture
+    def mock_pulumi_config(self, mocker):
+        """Mock Pulumi Config object with required values."""
+        mock_config = MagicMock()
+
+        mock_config.require.side_effect = lambda key: {
+            "environment": "dev",
+            "rangeVpcId": "vpc-test123",
+            "rangeVpcCidr": "10.1.0.0/16",
+            "rangeRouteTableId": "rtb-test123",
+            "kaliSecurityGroupId": "sg-kali-test",
+            "victimSecurityGroupId": "sg-victim-test",
+            "kaliAmiId": "ami-kali-test",
+            "victimAmiId": "ami-victim-test",
+            "availabilityZone": "us-east-2a",
+        }.get(key, f"mock-{key}")
+
+        mock_config.require_int.side_effect = lambda key: {
+            "rangeId": 42,
+        }.get(key, 0)
+
+        mock_config.get.side_effect = lambda key: {
+            "agentS3Bucket": "test-agents-bucket",
+            "windowsAmiId": "ami-windows-test",
+            "rangeInstanceProfileName": "test-profile",
+            "portalVpcCidr": "10.0.0.0/16",
+        }.get(key)
+
+        mocker.patch("pulumi.Config", return_value=mock_config)
+        return mock_config
+
+    def test_windows_agent_creates_windows_victim(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """When agent OS is 'windows', victim os_type should be 'windows'."""
+        from config import load_config
+
+        # Agent is Windows (.msi installer)
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42,
+            "user_id": 1,
+            "subnet_index": 5,
+            "agent_id": 1,
+            "instance_config": None,  # Use default config
+            "agent_s3_key": "agents/xdr-installer.msi",
+            "agent_os_slug": "windows",  # Windows agent!
+        })
+
+        result = load_config()
+
+        # Victim should be Windows
+        victim = result.instances[1]
+        assert victim.role == "victim"
+        assert victim.os_type == "windows", f"Expected 'windows' but got '{victim.os_type}'"
+
+    def test_linux_debian_agent_creates_ubuntu_victim(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """When agent OS is 'linux-debian', victim os_type should be 'ubuntu'."""
+        from config import load_config
+
+        # Agent is Linux Debian (.deb installer)
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42,
+            "user_id": 1,
+            "subnet_index": 5,
+            "agent_id": 1,
+            "instance_config": None,
+            "agent_s3_key": "agents/xdr-installer.deb",
+            "agent_os_slug": "linux-debian",
+        })
+
+        result = load_config()
+
+        # Victim should be Ubuntu (Linux)
+        victim = result.instances[1]
+        assert victim.role == "victim"
+        assert victim.os_type == "ubuntu", f"Expected 'ubuntu' but got '{victim.os_type}'"
+
+    def test_linux_rhel_agent_creates_ubuntu_victim(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """When agent OS is 'linux-rhel', victim os_type should be 'ubuntu'."""
+        from config import load_config
+
+        # Agent is Linux RHEL (.rpm installer)
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42,
+            "user_id": 1,
+            "subnet_index": 5,
+            "agent_id": 1,
+            "instance_config": None,
+            "agent_s3_key": "agents/xdr-installer.rpm",
+            "agent_os_slug": "linux-rhel",
+        })
+
+        result = load_config()
+
+        # Victim should be Ubuntu (Linux) - we use Ubuntu as our Linux victim
+        victim = result.instances[1]
+        assert victim.role == "victim"
+        assert victim.os_type == "ubuntu", f"Expected 'ubuntu' but got '{victim.os_type}'"
+
+    def test_null_agent_os_defaults_to_ubuntu(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """When agent_os_slug is None, victim os_type should default to 'ubuntu'."""
+        from config import load_config
+
+        # No agent OS (legacy data or no agent)
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42,
+            "user_id": 1,
+            "subnet_index": 5,
+            "agent_id": None,
+            "instance_config": None,
+            "agent_s3_key": None,
+            "agent_os_slug": None,  # No OS info
+        })
+
+        result = load_config()
+
+        # Should default to Ubuntu
+        victim = result.instances[1]
+        assert victim.role == "victim"
+        assert victim.os_type == "ubuntu", f"Expected 'ubuntu' but got '{victim.os_type}'"
+
+    def test_empty_agent_os_defaults_to_ubuntu(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """When agent_os_slug is empty string, victim os_type should default to 'ubuntu'."""
+        from config import load_config
+
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42,
+            "user_id": 1,
+            "subnet_index": 5,
+            "agent_id": 1,
+            "instance_config": None,
+            "agent_s3_key": "agents/xdr.tar.gz",
+            "agent_os_slug": "",  # Empty string
+        })
+
+        result = load_config()
+
+        # Should default to Ubuntu
+        victim = result.instances[1]
+        assert victim.role == "victim"
+        assert victim.os_type == "ubuntu", f"Expected 'ubuntu' but got '{victim.os_type}'"
 
 
 class TestConfigValidation:

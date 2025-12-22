@@ -106,9 +106,11 @@ def get_range_from_db(range_id: int) -> dict:
                     r.subnet_index,
                     r.agent_id,
                     r.instance_config,
-                    a.s3_key as agent_s3_key
+                    a.s3_key as agent_s3_key,
+                    os.slug as agent_os_slug
                 FROM mission_control_range r
                 LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
+                LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
                 WHERE r.id = %s
                 """,
                 (range_id,),
@@ -124,6 +126,7 @@ def get_range_from_db(range_id: int) -> dict:
                 "agent_id": row[3],
                 "instance_config": row[4],
                 "agent_s3_key": row[5],
+                "agent_os_slug": row[6],
             }
 
 
@@ -166,6 +169,9 @@ def load_config() -> RangeConfig:
     # If no custom config, use default (1 Kali + 1 Victim)
     if not db_instance_config:
         agent_s3_key = range_data.get("agent_s3_key")
+        # Map agent OS to victim OS type: Windows agent → Windows victim
+        agent_os_slug = range_data.get("agent_os_slug") or ""
+        victim_os_type = "windows" if agent_os_slug == "windows" else "ubuntu"
         instances = [
             InstanceConfig(
                 role="attacker",
@@ -174,7 +180,7 @@ def load_config() -> RangeConfig:
             ),
             InstanceConfig(
                 role="victim",
-                os_type="ubuntu",
+                os_type=victim_os_type,
                 instance_type=victim_instance_type,
                 agent_id=range_data.get("agent_id"),
                 agent_s3_key=agent_s3_key,

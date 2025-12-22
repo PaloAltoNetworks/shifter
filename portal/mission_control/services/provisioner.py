@@ -1,11 +1,9 @@
-"""Range provisioner service using AWS Step Functions.
+"""Range provisioner service using AWS ECS Fargate.
 
-This module triggers Step Functions state machines to provision and teardown
-range infrastructure. The Lambda functions in the state machines write directly
-to RDS, so no callback endpoint is needed.
+This module triggers ECS tasks to provision and teardown range infrastructure.
+The Pulumi container writes directly to RDS, so no callback endpoint is needed.
 """
 
-import json
 import logging
 
 import boto3
@@ -15,110 +13,153 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
-def _get_sfn_client():
-    """Get boto3 Step Functions client."""
-    return boto3.client("stepfunctions", region_name=settings.AWS_REGION)
+def _get_ecs_client():
+    """Get boto3 ECS client."""
+    return boto3.client("ecs", region_name=settings.AWS_REGION)
+
+
+def _start_ecs_task(range_id: int, command: str) -> str | None:
+    """Start an ECS Fargate task for provisioning operations.
+
+    Args:
+        range_id: Database ID of the Range
+        command: Command to run ("provision" or "destroy")
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured
+
+    Raises:
+        ClientError: If ECS task fails to start
+    """
+    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
+    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
+    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
+    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+
+    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
+        logger.warning(
+            "ECS configuration incomplete, skipping ECS task. "
+            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
+            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
+        )
+        return None
+
+    # Parse subnet IDs (comma-separated string)
+    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
+
+    if not subnet_ids:
+        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
+        return None
+
+    logger.info(f"Starting ECS task for range_id={range_id} command={command}")
+
+    ecs = _get_ecs_client()
+
+    try:
+        response = ecs.run_task(
+            cluster=cluster_arn,
+            taskDefinition=task_definition_arn,
+            launchType="FARGATE",
+            networkConfiguration={
+                "awsvpcConfiguration": {
+                    "subnets": subnet_ids,
+                    "securityGroups": [security_group_id],
+                    "assignPublicIp": "DISABLED",
+                }
+            },
+            overrides={
+                "containerOverrides": [
+                    {
+                        "name": "pulumi-provisioner",
+                        "command": [command, "--range-id", str(range_id)],
+                    }
+                ]
+            },
+        )
+
+        # Check if task was started successfully
+        if not response.get("tasks"):
+            failures = response.get("failures", [])
+            failure_reasons = [f.get("reason", "unknown") for f in failures]
+            logger.error(f"ECS task failed to start: {failure_reasons}")
+            raise ClientError(
+                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
+                "RunTask",
+            )
+
+        task_arn = response["tasks"][0]["taskArn"]
+        logger.info(f"Started ECS task: range_id={range_id} command={command} task_arn={task_arn}")
+        return task_arn
+
+    except ClientError as e:
+        logger.error(f"Failed to start ECS task for range_id={range_id}: {e}")
+        raise
 
 
 def start_provisioning(range_id: int) -> str | None:
-    """Start provisioning a range via Step Functions.
+    """Start provisioning a range via ECS Fargate.
 
     Args:
         range_id: Database ID of the Range to provision
 
     Returns:
-        Execution ARN if successful, None if Step Functions is not configured
+        ECS task ARN if successful, None if ECS is not configured
         (falls back to stub behavior for local dev)
 
     Raises:
-        ClientError: If Step Functions execution fails to start
+        ClientError: If ECS task fails to start
     """
-    provision_arn = getattr(settings, "PROVISION_STATE_MACHINE_ARN", None)
-
-    if not provision_arn:
-        logger.warning(
-            "PROVISION_STATE_MACHINE_ARN not configured, skipping Step Functions. Set this in settings for production."
-        )
-        return None
-
-    logger.info(f"Starting provisioning for range_id={range_id}")
-
-    sfn = _get_sfn_client()
-
-    try:
-        response = sfn.start_execution(
-            stateMachineArn=provision_arn,
-            input=json.dumps({"range_id": range_id}),
-        )
-        execution_arn = response["executionArn"]
-        logger.info(f"Started provisioning execution: range_id={range_id} execution_arn={execution_arn}")
-        return execution_arn
-
-    except ClientError as e:
-        logger.error(f"Failed to start provisioning for range_id={range_id}: {e}")
-        raise
+    return _start_ecs_task(range_id, "provision")
 
 
 def start_teardown(range_id: int) -> str | None:
-    """Start teardown of a range via Step Functions.
+    """Start teardown of a range via ECS Fargate.
 
     Args:
         range_id: Database ID of the Range to teardown
 
     Returns:
-        Execution ARN if successful, None if Step Functions is not configured
+        ECS task ARN if successful, None if ECS is not configured
         (falls back to stub behavior for local dev)
 
     Raises:
-        ClientError: If Step Functions execution fails to start
+        ClientError: If ECS task fails to start
     """
-    teardown_arn = getattr(settings, "TEARDOWN_STATE_MACHINE_ARN", None)
-
-    if not teardown_arn:
-        logger.warning(
-            "TEARDOWN_STATE_MACHINE_ARN not configured, skipping Step Functions. Set this in settings for production."
-        )
-        return None
-
-    logger.info(f"Starting teardown for range_id={range_id}")
-
-    sfn = _get_sfn_client()
-
-    try:
-        response = sfn.start_execution(
-            stateMachineArn=teardown_arn,
-            input=json.dumps({"range_id": range_id}),
-        )
-        execution_arn = response["executionArn"]
-        logger.info(f"Started teardown execution: range_id={range_id} execution_arn={execution_arn}")
-        return execution_arn
-
-    except ClientError as e:
-        logger.error(f"Failed to start teardown for range_id={range_id}: {e}")
-        raise
+    return _start_ecs_task(range_id, "destroy")
 
 
-def get_execution_status(execution_arn: str) -> dict | None:
-    """Get the status of a Step Functions execution.
+def get_task_status(task_arn: str) -> dict | None:
+    """Get the status of an ECS task.
 
     Args:
-        execution_arn: ARN of the execution to check
+        task_arn: ARN of the ECS task to check
 
     Returns:
         Dict with status info, or None if not configured
     """
-    if not execution_arn:
+    if not task_arn:
         return None
 
-    sfn = _get_sfn_client()
+    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
+    if not cluster_arn:
+        return None
+
+    ecs = _get_ecs_client()
 
     try:
-        response = sfn.describe_execution(executionArn=execution_arn)
+        response = ecs.describe_tasks(cluster=cluster_arn, tasks=[task_arn])
+
+        if not response.get("tasks"):
+            return {"status": "UNKNOWN", "reason": "Task not found"}
+
+        task = response["tasks"][0]
         return {
-            "status": response["status"],
-            "start_date": response.get("startDate"),
-            "stop_date": response.get("stopDate"),
+            "status": task.get("lastStatus", "UNKNOWN"),
+            "desired_status": task.get("desiredStatus"),
+            "started_at": task.get("startedAt"),
+            "stopped_at": task.get("stoppedAt"),
+            "stopped_reason": task.get("stoppedReason"),
         }
     except ClientError as e:
-        logger.error(f"Failed to get execution status: {e}")
+        logger.error(f"Failed to get task status: {e}")
         return None

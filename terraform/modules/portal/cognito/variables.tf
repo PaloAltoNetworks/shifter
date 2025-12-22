@@ -3,6 +3,16 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "environment" {
+  description = "Environment name (e.g., prod, dev) - used for logging"
+  type        = string
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string

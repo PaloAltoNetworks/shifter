@@ -1,0 +1,1048 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cortex XDR Cloud Role to set read permissions
+Parameters:
+  CortexPlatformRoleName:
+    Type: String
+    Description: 'Provide an role ARN name (Example: CortexPlatformRoleName)'
+    AllowedPattern: '[-_a-zA-Z0-9]+'
+    Default: CortexPlatformRole-m-a-1101513494371
+  ExternalID:
+    Type: String
+    Description: 'Provide an ExternalID (Example: 20e96a18-34ff-493d-b10a-0a8c2a22792a)'
+    MinLength: '1'
+    AllowedPattern: '[a-zA-Z0-9\=\,\.\@\:\/\-_]*'
+    ConstraintDescription: 'ExternalID must contain alphanumeric characters and only these special characters are allowed =,.@:/-. '
+    Default: f4c8f6ea-e4d8-45fa-9f06-1cf2ef0c134b
+  OutpostRoleArn:
+    Type: String
+    Description: Assume Role Principal
+    Default: arn:aws:iam::860165147812:role/gcp_saas_role
+  OutpostAccountId:
+    Type: String
+    Description: Outpost Account Id
+    Default: '860165147812'
+    NoEcho: true
+    AllowedValues:
+      - '860165147812'
+  KmsAccountADS:
+    Type: String
+    Description: Kms Account
+    Default: '047719626164'
+    NoEcho: true
+    AllowedValues:
+      - '047719626164'
+  CopySnapshotSuffix:
+    Type: String
+    Description: ''
+    Default: ${*}
+    NoEcho: true
+    AllowedValues:
+      - ${*}
+  Audience:
+    Type: String
+    Description: Audience for federated principal
+    Default: cortex-audit-logs
+    NoEcho: true
+    AllowedValues:
+      - cortex-audit-logs
+  CollectorServiceAccountId:
+    Type: String
+    Description: Unique ID of the service account used by AWS collector
+    Default: '108622549087672156057'
+    NoEcho: true
+    AllowedValues:
+      - '108622549087672156057'
+  IsOrgTrail:
+    Type: String
+    Description: Whether or not to create an organizational cloud trail
+    Default: 'false'
+  TrailScope:
+    Type: String
+    Description: Connector's scope
+    Default: ACCOUNT
+    NoEcho: true
+    AllowedValues:
+      - ACCOUNT
+  MTKmsAccountDSPM:
+    Type: String
+    Description: MT Kms Account
+    Default: '047719626164'
+    NoEcho: true
+    AllowedValues:
+      - '047719626164'
+  CortexPlatformScannerRoleName:
+    Type: String
+    Description: Cortex Cloud Scanners Cloud Role
+    Default: CortexPlatformScannerRole
+    NoEcho: true
+    AllowedValues:
+      - CortexPlatformScannerRole
+Resources:
+  CortexPlatformRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref 'CortexPlatformRoleName'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonMemoryDBReadOnlyAccess
+        - arn:aws:iam::aws:policy/SecurityAudit
+        - arn:aws:iam::aws:policy/AmazonSQSReadOnlyAccess
+        - arn:aws:iam::aws:policy/AWSOrganizationsReadOnlyAccess
+        - !Ref 'CortexADSPolicy'
+        - !Ref 'CortexDISCOVERYPolicy'
+        - !Ref 'CortexAutomationPolicy'
+        - !Ref 'CortexDSPMPolicy'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub '${OutpostRoleArn}'
+                - arn:aws:iam::860165147812:role/dspm_scanner
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref 'ExternalID'
+          - Effect: Allow
+            Principal:
+              Service: export.rds.amazonaws.com
+            Action: sts:AssumeRole
+      Policies: []
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+    DependsOn:
+      - CortexADSPolicy
+      - CortexDISCOVERYPolicy
+      - CortexAutomationPolicy
+      - CortexDSPMPolicy
+  CortexTemplateCustomLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    DependsOn:
+      - CortexPlatformRole
+      - CloudTrailKMSKey
+      - CloudTrailLogsBucket
+      - CloudTrailLogsBucketPolicy
+      - CloudTrailLogsQueue
+      - CloudTrailSNSTopic
+      - CloudTrailSNSTopicPolicy
+      - CloudTrailSNSTopicSubscription
+      - SNSPolicy
+      - CloudTrailReadRole
+      - EmptyBucketLambdaExecutionRole
+      - EmptyBucketLambda
+      - EmptyBucketCustomResource
+      - CloudTrail
+      - CortexPlatformScannerRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  CortexTemplateCustomLambdaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - CortexPlatformRole
+      - CloudTrailKMSKey
+      - CloudTrailLogsBucket
+      - CloudTrailLogsBucketPolicy
+      - CloudTrailLogsQueue
+      - CloudTrailSNSTopic
+      - CloudTrailSNSTopicPolicy
+      - CloudTrailSNSTopicSubscription
+      - SNSPolicy
+      - CloudTrailReadRole
+      - EmptyBucketLambdaExecutionRole
+      - EmptyBucketLambda
+      - EmptyBucketCustomResource
+      - CloudTrail
+      - CortexPlatformScannerRole
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt 'CortexTemplateCustomLambdaExecutionRole.Arn'
+      Code:
+        ZipFile: "import json\nimport urllib.request\nimport urllib.parse\nimport cfnresponse\nimport ssl\nimport time\n\n\ndef handler(event, context):\n    if event['RequestType'] == \"Delete\":\n   \
+          \     cfnresponse.send(event, context, cfnresponse.SUCCESS, {})\n        return {'Status': 'RequestType=Delete'}\n\n    error = \"\"\n    resources_data = {}\n    account_id = \"\"\n    role_arn\
+          \ = \"\"\n    external_id = \"\"\n    template_id = \"\"\n    count = 0\n    MAX_TRIES = 5\n\n    while count < MAX_TRIES:\n        count += 1\n        try:\n            context_ssl = ssl.create_default_context()\n\
+          \n            if count == 1:\n                resources_data = event.get(\"ResourceProperties\")\n                account_id = resources_data.pop(\"AccountId\")\n                role_arn = resources_data.pop(\"\
+          RoleArn\")\n                external_id = resources_data.pop(\"ExternalID\")\n                template_id = resources_data.pop(\"TemplateId\")\n                upload_output_url = resources_data.pop(\"\
+          UploadOutputUrl\")\n                template_version = resources_data.pop(\"TemplateVersion\")\n                connector_id = resources_data.pop(\"ConnectorId\", \"\")\n                module_permission_scope\
+          \ = resources_data.pop(\"ModulePermissionScope\")\n                \n            data = {\n                \"operation\": \"create_connector\",\n                \"resources_data\": resources_data,\n\
+          \                \"provisioning_method\": \"CF\",\n                \"account_id\": account_id,\n                \"account_name\": \"\",\n                \"organization_id\": \"\",\n          \
+          \      \"account_group\": \"\",\n                \"credentials\": {\n                    \"role_arn\": role_arn,\n                    \"external_id\": external_id\n                },\n       \
+          \         \"template_id\": template_id,\n                \"template_version\": template_version,\n                \"connector_id\": connector_id,\n                \"module_permission_scope\":\
+          \ module_permission_scope\n            }\n            data = json.dumps(data)\n            data = data.encode('utf-8')\n            req = urllib.request.Request(upload_output_url, data = data,\
+          \ method = 'PUT')\n            req.add_header('Content-Type', 'application/json')\n            with urllib.request.urlopen(req, context=context_ssl, timeout=10) as response:\n                if\
+          \ response.status == 200:\n                    print({\"Success\": True, \"Upload Status Code\": response.status, \"Resources Data\": resources_data})\n                    cfnresponse.send(event,\
+          \ context, cfnresponse.SUCCESS, {\"Success\": True, \"Upload Status Code\": response.status, \"Resources Data\": resources_data})\n                    return {'Status': 'Completed'}\n\n      \
+          \          print({\"Success\": False, \"retry\": count, \"error\": response.read(), \"Upload Status Code\": response.status, \"Resources Data\": resources_data})\n        except Exception as e:\n\
+          \            error = str(e)\n            print({\"Success\": False, \"retry\": count, \"error\": error})\n            time.sleep(3)\n    cfnresponse.send(event, context, cfnresponse.SUCCESS, {\"\
+          Success\": False, \"error\": error})\n    print({\"Success\": False, \"error\": error})\n    return {'Status': 'Failed to send'}\n"
+      Runtime: python3.12
+      Timeout: 75
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  MyCustomResource:
+    Type: Custom::PublishRoleDetail
+    Properties:
+      ServiceToken: !GetAtt 'CortexTemplateCustomLambdaFunction.Arn'
+      RoleArn: !GetAtt 'CortexPlatformRole.Arn'
+      TemplateId: fe31f751e0e742a68bb3efbde9264e6b
+      UploadOutputUrl: >-
+        https://xdr-ca-1101513494371-cloud-onboarding-templates.storage.googleapis.com/notification/connectors/aws/cf-fe31f751e0e742a68bb3efbde9264e6b-1766129201-output.json?Expires=1766734002&GoogleAccessId=api-pod%40xdr-ca-1101513494371.iam.gserviceaccount.com&Signature=hovHihIsLFPDrlETA1cn%2BXdRPuDf41WEImDQXtA2uFkT3GMIIVlsRIoS5H%2FQd%2BQ5%2BBXJeTJrDSF2qV8a4OK4babzLjksN2NFE3ZKjGThzGcfiP8WErmt3uC31ANqOEJ1SMn3paMJxQhkOFrV1ax%2B5qLnJqWqPV6701XHO%2F9R%2B4EV2onourTU%2F%2BCTDg7IyApNABmm%2Fm4wWFRuYTy6ABxMASI8oqcpwWVUAGRohd2Gy2QtlMJBVZKKFBFMvmA4JvBQJhdk7Q%2FyUusdrFR9nx4FEbZ62gbFcKhkr14Y%2FU0sQrbXX%2BwN5B%2Bax5kP9EK3SCZ93G9rHG5muo79NN%2BLrlYy3w%3D%3D
+      TemplateVersion:
+        ADS-agentless_disk_scanning: 1.1.5
+        DISCOVERY-assets_discovery: 1.0.3
+        AUDIT_LOGS-audit_logs_without_cloud_trail: 1.1.2
+        AUDIT_LOGS-audit_logs_with_cloud_trail_and_data_events: 1.0.2
+        AUTOMATION-automation: 1.0.2
+        BASE-base_account: 1.2.0
+        DSPM-data_security_posture_management: 1.0.8
+        OUTPOST_SCANNER-outpost_scanner: 1.1.0
+        REGISTRY-registry_scanning: 1.0.1
+        SERVERLESS-serverless_scanning: 1.1.0
+      ConnectorId: ''
+      ExternalID: !Ref 'ExternalID'
+      AccountId: !Ref 'AWS::AccountId'
+      ModulePermissionScope:
+        CortexCOMMONPolicyArns:
+          - arn:aws:iam::aws:policy/ReadOnlyAccess
+          - arn:aws:iam::aws:policy/AmazonMemoryDBReadOnlyAccess
+          - arn:aws:iam::aws:policy/SecurityAudit
+          - arn:aws:iam::aws:policy/AmazonSQSReadOnlyAccess
+          - arn:aws:iam::aws:policy/AWSOrganizationsReadOnlyAccess
+        CortexADSPolicyArn: !Ref 'CortexADSPolicy'
+        CortexDISCOVERYPolicyArn: !Ref 'CortexDISCOVERYPolicy'
+        CortexAutomationPolicyArn: !Ref 'CortexAutomationPolicy'
+        CortexDSPMPolicyArn: !Ref 'CortexDSPMPolicy'
+      audit_logs_without_cloud_trail:
+        sqs_url: !GetAtt 'CloudTrailLogsQueue.QueueUrl'
+        role_arn: !GetAtt 'CloudTrailReadRole.Arn'
+        audience: !Ref 'Audience'
+      audit_logs_with_cloud_trail_and_data_events:
+        sqs_url: !GetAtt 'CloudTrailLogsQueue.QueueUrl'
+        role_arn: !GetAtt 'CloudTrailReadRole.Arn'
+        audience: !Ref 'Audience'
+      outpost_scanner:
+        outpost_scanner_role_arn: !GetAtt 'CortexPlatformScannerRole.Arn'
+  CloudTrailKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for CloudTrail logs encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: Allow CloudTrail to Encrypt Logs
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Encrypt
+            Resource: '*'
+          - Sid: Allow S3 Access
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  CloudTrailLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'cortex-ct-logs-${AWS::AccountId}-m-a-1101513494371'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref 'CloudTrailKMSKey'
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 7
+            Prefix: ''
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  CloudTrailLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref 'CloudTrailLogsBucket'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudTrailWrite1
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub 'arn:aws:s3:::${CloudTrailLogsBucket}/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: AllowCloudTrailACL1
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !Sub 'arn:aws:s3:::${CloudTrailLogsBucket}'
+  CloudTrailLogsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'cortex-ct-logs-queue-${AWS::AccountId}-m-a-1101513494371'
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  CloudTrailSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'cortex-ct-logs-notification-${AWS::AccountId}-m-a-1101513494371'
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  CloudTrailSNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref 'CloudTrailSNSTopic'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref 'CloudTrailSNSTopic'
+  CloudTrailSNSTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      Endpoint: !GetAtt 'CloudTrailLogsQueue.Arn'
+      TopicArn: !Ref 'CloudTrailSNSTopic'
+  SNSPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref 'CloudTrailLogsQueue'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: SQS:SendMessage
+            Resource: !GetAtt 'CloudTrailLogsQueue.Arn'
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref 'CloudTrailSNSTopic'
+  CloudTrailReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cortex-logs-ingestion-access-m-a-1101513494371'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: accounts.google.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                accounts.google.com:oaud: !Sub '${Audience}'
+                accounts.google.com:sub: !Sub '${CollectorServiceAccountId}'
+      Policies:
+        - PolicyName: CloudTrailReadAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${CloudTrailLogsBucket}'
+                  - !Sub 'arn:aws:s3:::${CloudTrailLogsBucket}/*'
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource: !GetAtt 'CloudTrailLogsQueue.Arn'
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${CloudTrailKMSKey}'
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  EmptyBucketLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EmptyS3BucketPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource:
+                  - !Sub
+                    - arn:aws:s3:::${BucketName}
+                    - BucketName: !Ref 'CloudTrailLogsBucket'
+                  - !Sub
+                    - arn:aws:s3:::${BucketName}/*
+                    - BucketName: !Ref 'CloudTrailLogsBucket'
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  EmptyBucketLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt 'EmptyBucketLambdaExecutionRole.Arn'
+      Runtime: python3.12
+      Timeout: 600
+      Code:
+        ZipFile: "import boto3\nimport cfnresponse\n\ndef handler(event, context):\n    if event['RequestType'] != 'Delete':\n        cfnresponse.send(event, context, cfnresponse.SUCCESS, {})\n        return\
+          \ {'Status': 'RequestType=Delete'}\n    \n    try:\n        physical_resource_id = event['PhysicalResourceId']\n        s3 = boto3.resource('s3')\n        bucket_name = event['ResourceProperties']['BucketDetails']['BucketName']\n\
+          \        print(f\"cleaning up bucket {bucket_name}\")\n\n        bucket = s3.Bucket(bucket_name)\n        bucket.objects.delete()\n      \n        cfnresponse.send(event, context, cfnresponse.SUCCESS,\
+          \ {}, physical_resource_id)\n        print(f\"finished cleaning up bucket {bucket_name}\")\n        return {'Status': 'Success'}\n    except Exception as e:\n        cfnresponse.send(event, context,\
+          \ cfnresponse.SUCCESS, {\"Success\": False, \"error\": str(e)}, physical_resource_id)\n        print(f\"failed at cleaning up bucket {bucket_name}: {e}\")\n        return {'Status': 'Failure'}\n"
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  EmptyBucketCustomResource:
+    Type: Custom::EmptyBucketDetails
+    Properties:
+      ServiceToken: !GetAtt 'EmptyBucketLambda.Arn'
+      BucketDetails:
+        BucketName: !Ref 'CloudTrailLogsBucket'
+  CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      TrailName: !Sub 'cortex-trail-${AWS::AccountId}-m-a-1101513494371'
+      S3BucketName: !Ref 'CloudTrailLogsBucket'
+      KMSKeyId: !Ref 'CloudTrailKMSKey'
+      IsLogging: true
+      IsMultiRegionTrail: true
+      IncludeGlobalServiceEvents: true
+      IsOrganizationTrail: !If
+        - CreateOrgTrail
+        - true
+        - false
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+        - ReadWriteType: All
+          IncludeManagementEvents: false
+          DataResources:
+            - Type: AWS::S3::Object
+              Values:
+                - arn:aws:s3
+            - Type: AWS::Lambda::Function
+              Values:
+                - arn:aws:lambda
+      SnsTopicName: !Ref 'CloudTrailSNSTopic'
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+    DependsOn:
+      - CloudTrailSNSTopicPolicy
+      - CloudTrailLogsBucketPolicy
+  CortexPlatformScannerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${CortexPlatformScannerRoleName}-m-a-1101513494371'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonMemoryDBReadOnlyAccess
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - arn:aws:iam::860165147812:role/dspm_scanner
+                - arn:aws:iam::860165147812:role/registry_scanner
+                - arn:aws:iam::860165147812:role/scanner_of_serverless
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Sub '${ExternalID}'
+      Policies:
+        - PolicyName: Cortex-DSPM-Scanner-Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - s3:PutObject*
+                  - s3:List*
+                  - s3:Get*
+                  - s3:DeleteObject*
+                Resource:
+                  - arn:aws:s3:::cortex-artifact*
+                  - arn:aws:s3:::cortex-artifact*/*
+                Effect: Allow
+              - Sid: DescribeAndGenerateKeyWithoutPlaintext
+                Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:GenerateDataKeyWithoutPlaintext
+                Resource: !Join
+                  - ''
+                  - - 'arn:'
+                    - !Ref 'AWS::Partition'
+                    - !Sub ':kms:*:${MTKmsAccountDSPM}:key/*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Join
+                    - ''
+                    - - 'arn:aws:iam::'
+                      - !Ref 'AWS::AccountId'
+                      - !Sub ':role/${CortexPlatformScannerRoleName}*'
+              - Sid: DynamoDBAndCloudWatchAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:Scan
+                  - cloudwatch:GetMetricStatistics
+                Resource:
+                  - '*'
+        - PolicyName: ECRAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ECRAccessSid
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+                Effect: Allow
+        - PolicyName: LAMBDAAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: LAMBDAAccessSid
+                Action:
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:GetLayerVersion
+                  - iam:GetRole
+                Resource: '*'
+                Effect: Allow
+      Tags:
+        - Key: managed_by
+          Value: paloaltonetworks
+  CortexADSPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: Cortex-ADS-Policy-m-a-1101513494371
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ModifySnapshotAttribute
+            Effect: Allow
+            Action:
+              - ec2:ModifySnapshotAttribute
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::snapshot/*'
+            Condition:
+              StringEquals:
+                ec2:Add/userId: !Sub '${OutpostAccountId}'
+                ec2:ResourceTag/managed_by: paloaltonetworks
+          - Sid: DeleteSnapshot
+            Effect: Allow
+            Action:
+              - ec2:DeleteSnapshot
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::snapshot/*'
+            Condition:
+              StringEquals:
+                ec2:ResourceTag/managed_by: paloaltonetworks
+          - Sid: TagSnapshot
+            Effect: Allow
+            Action:
+              - ec2:CreateTags
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::snapshot/*'
+            Condition:
+              StringEquals:
+                ec2:CreateAction:
+                  - CreateSnapshot
+                  - CopySnapshot
+                  - CreateSnapshots
+                  - CopyImage
+          - Sid: CreateSnapshotAccessVolume
+            Effect: Allow
+            Action:
+              - ec2:CreateSnapshot
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*:*:volume/*'
+          - Sid: CreateSnapshot
+            Effect: Allow
+            Action:
+              - ec2:CreateSnapshot
+            Condition:
+              StringEquals:
+                aws:RequestTag/managed_by: paloaltonetworks
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::snapshot/*'
+          - Sid: CopySnapshotSource
+            Effect: Allow
+            Action:
+              - ec2:CopySnapshot
+            Condition:
+              StringEquals:
+                aws:ResourceTag/managed_by: paloaltonetworks
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::snapshot/snap-*'
+          - Sid: CopySnapshotDestination
+            Effect: Allow
+            Action:
+              - ec2:CopySnapshot
+            Condition:
+              StringEquals:
+                aws:RequestTag/managed_by: paloaltonetworks
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::snapshot/${CopySnapshotSuffix}'
+          - Sid: DescribeSnapshots
+            Effect: Allow
+            Action:
+              - ec2:DescribeSnapshots
+            Resource: '*'
+          - Sid: DescribeAndGenerateKeyWithoutPlaintext
+            Effect: Allow
+            Action:
+              - kms:DescribeKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:kms:*:${KmsAccountADS}:key/*'
+            Condition:
+              StringLike:
+                kms:ViaService: ec2.*.amazonaws.com
+          - Sid: TargetKeyGrant
+            Effect: Allow
+            Action:
+              - kms:CreateGrant
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:kms:*:*:key/*'
+            Condition:
+              StringLike:
+                kms:ViaService: ec2.*.amazonaws.com
+              Bool:
+                kms:GrantIsForAWSResource: 'true'
+              ForAllValues:StringEquals:
+                kms:GrantOperations:
+                  - Decrypt
+                  - Encrypt
+          - Sid: ScanningKeyGrant
+            Effect: Allow
+            Action:
+              - kms:CreateGrant
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:kms:*:${KmsAccountADS}:key/*'
+            Condition:
+              StringLike:
+                kms:ViaService: ec2.*.amazonaws.com
+              Bool:
+                kms:GrantIsForAWSResource: 'true'
+              ForAllValues:StringEquals:
+                kms:GrantOperations:
+                  - Encrypt
+          - Sid: CreateSnapshotsAccessInstanceAndVolume
+            Effect: Allow
+            Action:
+              - ec2:CreateSnapshots
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*:*:instance/*'
+              - !Sub 'arn:${AWS::Partition}:ec2:*:*:volume/*'
+          - Sid: CreateSnapshotsAccessSnapshot
+            Effect: Allow
+            Action:
+              - ec2:CreateSnapshots
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::snapshot/*'
+            Condition:
+              StringEquals:
+                aws:RequestTag/managed_by: paloaltonetworks
+          - Sid: CopyImageAccessImage
+            Effect: Allow
+            Action:
+              - ec2:CopyImage
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::image/*'
+          - Sid: CopyImageAccessSnapshot
+            Effect: Allow
+            Action:
+              - ec2:CopyImage
+            Condition:
+              StringEquals:
+                aws:RequestTag/managed_by: paloaltonetworks
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::snapshot/*'
+          - Sid: DescribeImages
+            Effect: Allow
+            Action:
+              - ec2:DescribeImages
+            Resource: '*'
+          - Sid: DeregisterImage
+            Effect: Allow
+            Action:
+              - ec2:DeregisterImage
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::image/*'
+            Condition:
+              StringEquals:
+                ec2:ResourceTag/managed_by: paloaltonetworks
+          - Sid: TagImages
+            Effect: Allow
+            Action:
+              - ec2:CreateTags
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ec2:*::image/*'
+            Condition:
+              StringEquals:
+                ec2:CreateAction:
+                  - CopyImage
+                aws:RequestTag/managed_by: paloaltonetworks
+  CortexDISCOVERYPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: Cortex-DISCOVERY-Policy-m-a-1101513494371
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - cloudwatch:describeAlarms
+              - comprehendmedical:ListEntitiesDetectionV2Jobs
+              - connect-campaigns:DescribeCampaign
+              - connect-campaigns:ListCampaigns
+              - controltower:*
+              - directconnect:*
+              - ds:DescribeDirectories
+              - ds:ListTagsForResource
+              - forecast:ListTagsForResource
+              - glue:*
+              - lakeformation:*
+              - memorydb:DescribeSnapshots
+              - memorydb:DescribeSubnetGroups
+              - workspaces:*
+            Effect: Allow
+            Resource: '*'
+  CortexAutomationPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: Cortex-Automation-Policy-m-a-1101513494371
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ACMPermissions
+            Effect: Allow
+            Action:
+              - acm:UpdateCertificateOptions
+            Resource: '*'
+          - Sid: ELBPermissions
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:ModifyLoadBalancerAttributes
+            Resource: '*'
+          - Sid: RDSPermissions
+            Effect: Allow
+            Action:
+              - rds:AddTagsToResource
+              - rds:CreateTenantDatabase
+              - rds:ModifyDBCluster
+              - rds:ModifyDBClusterSnapshotAttribute
+              - rds:ModifyDBInstance
+              - rds:ModifyDBSnapshotAttribute
+              - rds:ModifyEventSubscription
+            Resource: '*'
+          - Sid: S3Permissions
+            Effect: Allow
+            Action:
+              - s3:PutBucketAcl
+              - s3:PutBucketLogging
+              - s3:PutBucketPolicy
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketVersioning
+              - s3:GetBucketPolicy
+              - s3:GetBucketPublicAccessBlock
+              - s3:GetEncryptionConfiguration
+              - s3:DeleteBucketPolicy
+              - s3:PutObject
+              - s3:GetObject
+              - s3:GetBucketWebsite
+              - s3:GetBucketAcl
+              - s3:DeleteBucketWebsite
+              - s3:PutBucketOwnershipControls
+            Resource: '*'
+          - Sid: EC2Permissions
+            Effect: Allow
+            Action:
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:ModifyImageAttribute
+              - ec2:ModifyInstanceAttribute
+              - ec2:ModifyInstanceMetadataOptions
+              - ec2:ModifySnapshotAttribute
+              - ec2:RevokeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeInstances
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:DescribeInstances
+              - ec2:StartInstances
+              - ec2:StopInstances
+              - ec2:TerminateInstances
+              - ec2:RunInstances
+              - ec2:CreateTags
+              - ec2:CreateSnapshot
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+              - ec2:DescribeIpamResourceDiscoveries
+              - ec2:DescribeIpamResourceDiscoveryAssociations
+              - ec2:DescribeImages
+              - ec2:CreateNetworkAcl
+              - ec2:GetIpamDiscoveredPublicAddresses
+              - ec2:ModifySubnetAttribute
+            Resource: '*'
+          - Sid: CloudTrailPermissions
+            Effect: Allow
+            Action:
+              - cloudtrail:UpdateTrail
+              - cloudtrail:StartLogging
+              - cloudtrail:DescribeTrails
+            Resource: '*'
+          - Sid: EKSPermissions
+            Effect: Allow
+            Action:
+              - eks:UpdateClusterConfig
+              - eks:DescribeCluster
+              - eks:AssociateAccessPolicy
+            Resource: '*'
+          - Sid: ECSPermissions
+            Effect: Allow
+            Action:
+              - ecs:UpdateClusterSettings
+            Resource: '*'
+          - Sid: IAMPermissions
+            Effect: Allow
+            Action:
+              - iam:DeleteLoginProfile
+              - iam:GetAccountAuthorizationDetails
+              - iam:GetAccountPasswordPolicy
+              - iam:PassRole
+              - iam:PutUserPolicy
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:UpdateAccessKey
+              - iam:UpdateAccountPasswordPolicy
+            Resource: '*'
+          - Sid: KMSPermissions
+            Effect: Allow
+            Action:
+              - kms:CreateGrant
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+              - kms:EnableKeyRotation
+            Resource: '*'
+          - Sid: LAMBDAPermissions
+            Effect: Allow
+            Action:
+              - lambda:GetFunctionConfiguration
+              - lambda:GetFunctionUrlConfig
+              - lambda:GetPolicy
+              - lambda:InvokeFunction
+              - lambda:UpdateFunctionUrlConfig
+            Resource: '*'
+          - Sid: SecretsManagerPermissions
+            Effect: Allow
+            Action:
+              - secretsmanager:CreateSecret
+              - secretsmanager:RotateSecret
+              - secretsmanager:TagResource
+            Resource: '*'
+          - Sid: CostExplorerPermissions
+            Effect: Allow
+            Action:
+              - ce:GetCostAndUsage
+              - ce:GetCostForecast
+            Resource: '*'
+          - Sid: BudgetsPermissions
+            Effect: Allow
+            Action:
+              - budgets:DescribeBudgets
+              - budgets:DescribeNotificationsForBudget
+            Resource: '*'
+  CortexDSPMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: Cortex-DSPM-Policy-m-a-1101513494371
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Condition:
+              StringEquals:
+                aws:ResourceTag/managed_by: paloaltonetworks
+            Action:
+              - rds:DeleteDBClusterSnapshot
+              - rds:DeleteDBSnapshot
+              - redshift:DeleteClusterSnapshot
+            Resource:
+              - '*'
+            Effect: Allow
+          - Action:
+              - rds:AddTagsToResource
+              - rds:CancelExportTask
+              - rds:CreateDBClusterSnapshot
+              - rds:CreateDBSnapshot
+              - rds:Describe*
+              - rds:List*
+              - rds:StartExportTask
+            Resource:
+              - '*'
+            Effect: Allow
+          - Action:
+              - s3:PutObject*
+              - s3:ListBucket
+              - s3:GetObject*
+              - s3:DeleteObject*
+              - s3:GetBucketLocation
+            Resource:
+              - arn:aws:s3:::cortex-artifact*
+              - arn:aws:s3:::cortex-artifact*/*
+            Effect: Allow
+          - Action:
+              - s3:List*
+              - s3:Get*
+            Resource:
+              - arn:aws:s3:::*
+            Effect: Allow
+          - Sid: DescribeAndGenerateKeyWithoutPlaintext
+            Effect: Allow
+            Action:
+              - kms:DescribeKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource: !Join
+              - ''
+              - - 'arn:'
+                - !Ref 'AWS::Partition'
+                - !Sub ':kms:*:${MTKmsAccountDSPM}:key/*'
+          - Sid: TargetKeyGrant
+            Effect: Allow
+            Action:
+              - kms:CreateGrant
+            Resource: !Join
+              - ''
+              - - 'arn:'
+                - !Ref 'AWS::Partition'
+                - :kms:*:*:key/*
+          - Sid: ScanningKeyGrant
+            Effect: Allow
+            Action:
+              - kms:CreateGrant
+            Resource: !Join
+              - ''
+              - - 'arn:'
+                - !Ref 'AWS::Partition'
+                - !Sub ':kms:*:${MTKmsAccountDSPM}:key/*'
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource:
+              - !Join
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'AWS::AccountId'
+                  - !Sub ':role/${CortexPlatformRoleName}*'
+          - Sid: DynamoDBAndCloudWatchAccess
+            Effect: Allow
+            Action:
+              - dynamodb:DescribeTable
+              - dynamodb:Scan
+              - cloudwatch:GetMetricStatistics
+            Resource:
+              - '*'
+          - Sid: RedshiftServerlessAccess
+            Effect: Allow
+            Action:
+              - redshift-serverless:DeleteResourcePolicy
+              - redshift-serverless:GetResourcePolicy
+              - redshift-serverless:PutResourcePolicy
+            Resource:
+              - '*'
+          - Sid: RedshiftSnapshotAccess
+            Effect: Allow
+            Action:
+              - redshift:AuthorizeSnapshotAccess
+              - redshift:CopyClusterSnapshot
+              - redshift:CreateClusterSnapshot
+              - redshift:CreateSnapshotCopyGrant
+              - redshift:CreateTags
+              - redshift:DeleteSnapshotCopyGrant
+              - redshift:DisableSnapshotCopy
+              - redshift:EnableSnapshotCopy
+              - redshift:RevokeSnapshotAccess
+            Resource:
+              - '*'
+          - Sid: RedshiftDescribeAndListAccess
+            Effect: Allow
+            Action:
+              - redshift:Describe*
+              - redshift:List*
+            Resource:
+              - '*'
+Outputs:
+  CORTEXXDRARN:
+    Value: !GetAtt 'CortexPlatformRole.Arn'
+    Description: Role ARN to configure within Cortex Platform Account Setup
+Conditions:
+  CreateOrgTrail: !Or
+    - !Equals
+      - !Sub '${TrailScope}'
+      - ORGANIZATION
+    - !And
+      - !Equals
+        - !Sub '${TrailScope}'
+        - ACCOUNT_GROUP
+      - !Equals
+        - !Sub '${IsOrgTrail}'
+        - 'true'

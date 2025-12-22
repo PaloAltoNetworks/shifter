@@ -7,6 +7,7 @@
 # - HTTPS listener (443) with ACM cert
 # - HTTP listener (80) redirects to HTTPS
 # - Security group (80/443 from internet)
+# - WAF Web ACL with AWS managed rules (optional)
 
 locals {
   common_tags = merge(var.tags, {
@@ -93,8 +94,6 @@ resource "aws_acm_certificate_validation" "this" {
 # ------------------------------------------------------------------------------
 
 # checkov:skip=CKV_AWS_150:Deletion protection deferred - see #214
-# checkov:skip=CKV_AWS_91:Access logs deferred - see #57, #58
-# checkov:skip=CKV2_AWS_28:WAF deferred - see #52
 resource "aws_lb" "this" {
   name                       = "${var.name_prefix}-alb"
   internal                   = false
@@ -102,6 +101,12 @@ resource "aws_lb" "this" {
   security_groups            = [aws_security_group.this.id]
   subnets                    = var.public_subnet_ids
   drop_invalid_header_fields = true
+
+  access_logs {
+    bucket  = var.logs_bucket_name
+    prefix  = "alb/${var.name_prefix}"
+    enabled = var.enable_access_logs && var.logs_bucket_name != ""
+  }
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-alb"
@@ -127,6 +132,15 @@ resource "aws_lb_target_group" "this" {
     path                = var.health_check_path
     protocol            = "HTTP"
     matcher             = "200"
+  }
+
+  dynamic "stickiness" {
+    for_each = var.enable_stickiness ? [1] : []
+    content {
+      type            = "lb_cookie"
+      cookie_duration = 86400
+      enabled         = true
+    }
   }
 
   tags = merge(local.common_tags, {
@@ -196,4 +210,156 @@ resource "aws_lb_listener" "http" {
   }
 
   tags = local.common_tags
+}
+
+# ------------------------------------------------------------------------------
+# WAF Web ACL
+# ------------------------------------------------------------------------------
+
+resource "aws_wafv2_web_acl" "this" {
+  count = var.enable_waf ? 1 : 0
+
+  name        = "${var.name_prefix}-waf"
+  description = "WAF for ${var.name_prefix} ALB"
+  scope       = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  # Rate limiting - 2000 requests per 5 minutes per IP
+  rule {
+    name     = "RateLimitRule"
+    priority = 1
+
+    action {
+      block {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = 2000
+        aggregate_key_type = "IP"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-rate-limit"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # AWS Managed Rules - IP Reputation List (free)
+  rule {
+    name     = "AWSManagedRulesAmazonIpReputationList"
+    priority = 2
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesAmazonIpReputationList"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-ip-reputation"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # AWS Managed Rules - Known Bad Inputs (Log4Shell, etc.)
+  rule {
+    name     = "AWSManagedRulesKnownBadInputsRuleSet"
+    priority = 3
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-known-bad-inputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # AWS Managed Rules - Common Rule Set (OWASP Top 10)
+  rule {
+    name     = "AWSManagedRulesCommonRuleSet"
+    priority = 4
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-common-rules"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${var.name_prefix}-waf"
+    sampled_requests_enabled   = true
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-waf"
+  })
+}
+
+# Associate WAF with ALB
+resource "aws_wafv2_web_acl_association" "this" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_lb.this.arn
+  web_acl_arn  = aws_wafv2_web_acl.this[0].arn
+}
+
+# ------------------------------------------------------------------------------
+# WAF Logging Configuration
+# ------------------------------------------------------------------------------
+
+resource "aws_wafv2_web_acl_logging_configuration" "this" {
+  count = var.enable_waf && var.enable_waf_logging && var.waf_log_destination_arn != "" ? 1 : 0
+
+  log_destination_configs = [var.waf_log_destination_arn]
+  resource_arn            = aws_wafv2_web_acl.this[0].arn
+
+  # Only log requests that reach the app (ALLOW), drop blocked request logs (noise)
+  logging_filter {
+    default_behavior = "DROP"
+
+    filter {
+      behavior = "KEEP"
+      condition {
+        action_condition {
+          action = "ALLOW"
+        }
+      }
+      requirement = "MEETS_ANY"
+    }
+  }
 }

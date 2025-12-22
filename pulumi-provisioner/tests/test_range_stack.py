@@ -22,11 +22,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import InstanceConfig, RangeConfig
 
 
+@pytest.fixture
+def mock_cleanup_orphaned_subnet():
+    """Mock _cleanup_orphaned_subnet for RangeStack tests.
+
+    The cleanup function makes real AWS API calls, which we don't want
+    during Pulumi component tests.
+    """
+    with patch("components.network._cleanup_orphaned_subnet"):
+        yield
+
+
 class TestRangeStackComposition:
     """Tests for RangeStack component composition."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -124,7 +135,7 @@ class TestRangeStackSecurityGroupAssignment:
     """Tests for security group assignment logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -215,7 +226,7 @@ class TestRangeStackAmiSelection:
     """Tests for AMI selection logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -345,7 +356,7 @@ class TestRangeStackMultipleInstances:
     """Tests for multiple instance handling and indexing."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -490,7 +501,7 @@ class TestRangeStackCidrPrefixExtraction:
     """Tests for CIDR prefix extraction logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 

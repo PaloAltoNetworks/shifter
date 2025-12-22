@@ -402,15 +402,14 @@ class TestSubnetIndexAllocation:
         assert index == 2
 
     def test_skips_active_indices(self, test_agent):
-        """Should not reuse indices from non-destroyed ranges."""
-        # Create ranges in various active states
+        """Should not reuse indices from active ranges (excludes DESTROYED and FAILED)."""
+        # Create ranges in various active states (FAILED is now excluded like DESTROYED)
         for i, status in enumerate(
             [
                 Range.Status.PROVISIONING,
                 Range.Status.READY,
                 Range.Status.PAUSED,
                 Range.Status.DESTROYING,
-                Range.Status.FAILED,
             ],
             start=1,
         ):
@@ -421,9 +420,23 @@ class TestSubnetIndexAllocation:
                 subnet_index=i,
             )
 
-        # Next allocation should be 6
+        # Next allocation should be 5
         index = Range.allocate_subnet_index()
-        assert index == 6
+        assert index == 5
+
+    def test_reuses_failed_indices(self, test_agent):
+        """Failed ranges should free up their indices (like destroyed ranges)."""
+        # Create a failed range with index 1
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.FAILED,
+            subnet_index=1,
+        )
+
+        # Should reuse index 1 since FAILED ranges are excluded from allocation
+        index = Range.allocate_subnet_index()
+        assert index == 1
 
     def test_raises_when_exhausted(self, test_agent):
         """Should raise ValueError when all indices are used."""

@@ -20,11 +20,4 @@ chmod 600 /home/kali/.ssh/authorized_keys
 chown -R kali:kali /home/kali/.ssh
 echo "SSH access configured"
 
-# Update package lists
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-
-# Install kali-linux-headless metapackage (core pentesting tools)
-apt-get install -y kali-linux-headless
-
-echo "Kali headless setup complete"
+echo "Kali setup complete"

@@ -544,6 +544,7 @@ resource "aws_iam_policy" "lambda_sfn" {
           "states:DescribeStateMachine",
           "states:UpdateStateMachine",
           "states:ListStateMachines",
+          "states:ListStateMachineVersions",
           "states:TagResource",
           "states:UntagResource",
           "states:ListTagsForResource"

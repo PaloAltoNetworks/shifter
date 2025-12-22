@@ -6,12 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
-## [0.7.9] - 2025-12-21
+## [0.7.10] - 2025-12-21
 
 ### Fixed
 - Provisioner fails to install .deb or .rpm agent packages properly
 - Provisioner fails to rollback range if agent installation fails
+
+## [0.7.9] - 2025-12-21
+
+### Fixed
+- Provisioner uses vars for instance types instead of hardcoded values
 
 ## [0.7.8] - 2025-12-21
 

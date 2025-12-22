@@ -154,6 +154,15 @@ def load_config() -> RangeConfig:
             return generate_presigned_url(agent_s3_bucket, s3_key)
         return None
 
+    # Get instance types from environment (required - no defaults)
+    kali_instance_type = os.environ.get("KALI_INSTANCE_TYPE")
+    victim_instance_type = os.environ.get("VICTIM_INSTANCE_TYPE")
+
+    if not kali_instance_type or not victim_instance_type:
+        raise ValueError(
+            "KALI_INSTANCE_TYPE and VICTIM_INSTANCE_TYPE environment variables are required"
+        )
+
     # If no custom config, use default (1 Kali + 1 Victim)
     if not db_instance_config:
         agent_s3_key = range_data.get("agent_s3_key")
@@ -161,27 +170,31 @@ def load_config() -> RangeConfig:
             InstanceConfig(
                 role="attacker",
                 os_type="kali",
-                instance_type="t3.small",
+                instance_type=kali_instance_type,
             ),
             InstanceConfig(
                 role="victim",
                 os_type="ubuntu",
-                instance_type="t3.micro",
+                instance_type=victim_instance_type,
                 agent_id=range_data.get("agent_id"),
                 agent_s3_key=agent_s3_key,
                 agent_presigned_url=get_presigned_url(agent_s3_key),
             ),
         ]
     else:
-        # Parse custom instance configs
+        # Parse custom instance configs - instance_type is required in config
         instances = []
         for inst in db_instance_config:
+            if "instance_type" not in inst:
+                raise ValueError(
+                    f"instance_type is required in instance_config: {inst}"
+                )
             agent_s3_key = inst.get("agent_s3_key")
             instances.append(
                 InstanceConfig(
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),
-                    instance_type=inst.get("instance_type", "t3.micro"),
+                    instance_type=inst["instance_type"],
                     agent_id=inst.get("agent_id"),
                     agent_s3_key=agent_s3_key,
                     agent_presigned_url=get_presigned_url(agent_s3_key),

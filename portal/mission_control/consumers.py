@@ -102,6 +102,8 @@ class SSHConsumer(AsyncWebsocketConsumer):
             # Determine SSH username based on OS
             if os_type.startswith("kali"):
                 username = "kali"
+            elif os_type.startswith("windows"):
+                username = "Administrator"
             elif os_type.startswith("amazon-linux"):
                 username = "ec2-user"
             else:  # ubuntu, debian, etc.

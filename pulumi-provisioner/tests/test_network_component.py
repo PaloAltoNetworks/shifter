@@ -279,6 +279,17 @@ class TestCleanupOrphanedSubnetUnexpected:
 # =============================================================================
 
 
+@pytest.fixture
+def mock_cleanup_orphaned_subnet():
+    """Mock _cleanup_orphaned_subnet for NetworkComponent tests.
+
+    The cleanup function makes real AWS API calls, which we don't want
+    during Pulumi component tests.
+    """
+    with patch("components.network._cleanup_orphaned_subnet"):
+        yield
+
+
 class TestNetworkComponentWithPulumiMocks:
     """Tests for NetworkComponent using Pulumi runtime mocks.
 
@@ -287,7 +298,7 @@ class TestNetworkComponentWithPulumiMocks:
     """
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -520,7 +531,7 @@ class TestNetworkComponentEdgeCases:
     """Edge case tests for NetworkComponent."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -597,7 +608,7 @@ class TestResourceCreationVerification:
     """Tests that verify resources are created correctly via pulumi_mocks."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 

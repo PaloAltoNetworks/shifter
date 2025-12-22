@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.13] - 2025-12-22
+
+### Fixed
+- Terminal UI does not show IP address for Windows victims
+
 ## [0.7.12] - 2025-12-22
 
 ### Added

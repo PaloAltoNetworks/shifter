@@ -12,13 +12,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-
-@pytest.fixture(autouse=True)
-def set_instance_type_env_vars(monkeypatch):
-    """Set required instance type environment variables for all tests."""
-    monkeypatch.setenv("KALI_INSTANCE_TYPE", "t3.medium")
-    monkeypatch.setenv("VICTIM_INSTANCE_TYPE", "t3.medium")
-
 from catalog.instances import (
     INSTANCE_CATALOG,
     InstanceType,

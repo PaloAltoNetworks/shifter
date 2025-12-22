@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars and fill in values
+# DO NOT commit terraform.tfvars to git
+
+admin_password = ""
+
+# Optional: Add your IP for direct RDP access (SSM Fleet Manager is more secure)
+# allowed_rdp_cidrs = []
+
+# Optional: Override instance type
+# instance_type = ""

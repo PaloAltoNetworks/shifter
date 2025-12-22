@@ -1,0 +1,10 @@
+# Don't commit actual tfvars with password
+terraform.tfvars
+*.tfvars
+!*.tfvars.example
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl

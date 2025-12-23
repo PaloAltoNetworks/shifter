@@ -1,8 +1,0 @@
-# AWS Configuration
-# Copy to terraform.tfvars and fill in values
-# DO NOT commit terraform.tfvars - sync to GitHub secrets
-
-aws_region = ""
-
-# ECR Repository Names
-portal_repository_name = ""

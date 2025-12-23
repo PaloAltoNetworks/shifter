@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.14] - 2025-12-22
+
+### Fixed
+- Terminal UI text overflows container
+
 ## [0.7.13] - 2025-12-22
 
 ### Fixed

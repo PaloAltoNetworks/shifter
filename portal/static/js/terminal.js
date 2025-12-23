@@ -101,7 +101,8 @@ class TerminalManager {
 
         const kaliContainer = document.getElementById(this.kaliContainerId);
         this.kaliTerminal.open(kaliContainer);
-        this.kaliFitAddon.fit();
+        // Delay fit to ensure DOM layout is complete
+        setTimeout(() => this.kaliFitAddon.fit(), 0);
 
         // Create Victim terminal
         this.victimTerminal = new Terminal(terminalOptions);
@@ -112,7 +113,8 @@ class TerminalManager {
 
         const victimContainer = document.getElementById(this.victimContainerId);
         this.victimTerminal.open(victimContainer);
-        this.victimFitAddon.fit();
+        // Delay fit to ensure DOM layout is complete
+        setTimeout(() => this.victimFitAddon.fit(), 0);
 
         // Setup input handlers
         this.kaliTerminal.onData((data) => this.sendInput('kali', data));
@@ -140,6 +142,7 @@ class TerminalManager {
 
         this.kaliSocket.onopen = () => {
             this.updateStatus('kali', 'connected');
+            this.kaliFitAddon.fit();
             this.kaliTerminal.focus();
             // Send initial size
             const { cols, rows } = this.kaliTerminal;
@@ -176,6 +179,7 @@ class TerminalManager {
 
         this.victimSocket.onopen = () => {
             this.updateStatus('victim', 'connected');
+            this.victimFitAddon.fit();
             // Send initial size
             const { cols, rows } = this.victimTerminal;
             this.sendResize('victim', cols, rows);

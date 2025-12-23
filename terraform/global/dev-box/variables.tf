@@ -13,12 +13,6 @@ variable "root_volume_size" {
   type        = number
 }
 
-variable "admin_password" {
-  description = "Windows Administrator password"
-  type        = string
-  sensitive   = true
-}
-
 variable "allowed_rdp_cidrs" {
   description = "CIDR blocks allowed to RDP (use your IP). Leave empty to use SSM only."
   type        = list(string)

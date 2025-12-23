@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "mission_control.apps.MissionControlConfig",
     "risk_register.apps.RiskRegisterConfig",
+    "documentation.apps.DocumentationConfig",
 ]
 
 MIDDLEWARE = [

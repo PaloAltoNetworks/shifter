@@ -83,7 +83,7 @@ See [GitHub Issues](https://github.com/Brad-Edwards/shifter/issues).
 
 ## Ethics
 
-AI-driven attack capabilities already exist in the wild. Defenders need realistic exposure to understand what they're facing. [Read more](docs/src/ethics.md).
+AI-driven attack capabilities already exist in the wild. Defenders need realistic exposure to understand what they're facing. [Read more](portal/documentation/docs/ops/ethics.md).
 
 ## Safety
 

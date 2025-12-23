@@ -137,11 +137,14 @@
     padding: 1rem;
     background: #0d0d0d;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 /* xterm.js customization */
 .terminal-wrapper .xterm {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
 }
 
 .terminal-wrapper .xterm-viewport {

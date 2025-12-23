@@ -118,15 +118,9 @@ npm install
 npm run build  # If applicable
 ```
 
-## Using the Dev Box (Alternative)
+## Dev Box
 
-Instead of local setup, you can use the Windows dev-box in AWS:
-
-1. Start the instance (if stopped)
-2. Connect via SSM Fleet Manager RDP
-3. Password is in Secrets Manager: `shifter-dev-box-admin-password`
-
-The dev-box has all tools pre-installed (Git, Python, Node, Terraform, VS Code).
+The Windows dev-box in `terraform/global/dev-box/` is currently used by Brad Edwards for development. Not part of the standard dev workflow.
 
 ## Troubleshooting
 

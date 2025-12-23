@@ -1,4 +1,4 @@
-"""Documentation views - serve markdown files from docs/src/.
+"""Documentation views - serve markdown files from documentation/docs/.
 
 Renders markdown documentation with:
 - Login required access via @login_required
@@ -18,8 +18,8 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
-# Path to docs source relative to project root (portal/../docs/src)
-DOCS_ROOT = Path(settings.BASE_DIR).parent / "docs" / "src"
+# Path to docs source inside the documentation app
+DOCS_ROOT = Path(settings.BASE_DIR) / "documentation" / "docs"
 
 # Folders to exclude from navigation and access
 EXCLUDED_FOLDERS = {"_deprecated"}

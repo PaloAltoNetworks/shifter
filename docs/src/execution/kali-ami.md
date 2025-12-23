@@ -4,10 +4,27 @@ Pre-baked Kali Linux with pentesting tools and Claude Code.
 
 ## What's In It
 
-- Kali Linux 2025.3.0
-- SSM agent
-- kali-linux-headless metapackage
-- Claude Code (configured for Bedrock)
+- Kali Linux Rolling (2025.3)
+- Claude Code 2.x (configured for Bedrock)
+- SSM Agent
+
+**Metapackages:**
+- `kali-linux-headless` — 195 tools including:
+
+| Category | Tools |
+|----------|-------|
+| Exploitation | Metasploit Framework 6.4 |
+| Scanning | Nmap, Nikto, dirb, gobuster, amass, dnsrecon |
+| Web Testing | Burp Suite, sqlmap, commix, davtest |
+| Password | John, Hashcat, Hydra, crunch, cewl |
+| Wireless | Aircrack-ng, bully |
+| AD/Windows | certipy-ad, enum4linux, chntpw |
+| Network | Wireshark libs, arp-scan, dns2tcp |
+
+**Development:**
+- Python 3.13, pip
+- Node.js 20.x, PHP 8.4
+- GCC, make, git, curl, wget
 
 ## Why Pre-Bake
 

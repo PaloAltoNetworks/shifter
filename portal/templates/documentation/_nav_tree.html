@@ -1,0 +1,22 @@
+<ul class="nav-tree-list">
+{% for item in items %}
+    <li class="nav-tree-item {% if item.is_folder %}nav-tree-folder{% endif %}">
+        {% if item.is_folder %}
+            <button class="nav-tree-toggle" aria-expanded="false" type="button">
+                <svg class="nav-tree-arrow" width="16" height="16" viewBox="0 0 16 16">
+                    <path fill="currentColor" d="M6 4l4 4-4 4"/>
+                </svg>
+                <span>{{ item.name }}</span>
+            </button>
+            <div class="nav-tree-children">
+                {% include "documentation/_nav_tree.html" with items=item.children %}
+            </div>
+        {% else %}
+            <a href="{% url 'documentation:page' path=item.path %}"
+               class="nav-tree-link {% if current_path == item.path %}active{% endif %}">
+                {{ item.name }}
+            </a>
+        {% endif %}
+    </li>
+{% endfor %}
+</ul>

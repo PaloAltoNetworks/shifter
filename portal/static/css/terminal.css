@@ -131,24 +131,32 @@
     50% { opacity: 0.4; }
 }
 
-/* Terminal Wrapper */
+/* Terminal Wrapper - outer container with padding */
 .terminal-wrapper {
     flex: 1;
-    padding: 1rem;
+    padding: 1rem 1.25rem 1rem 1rem;
     background: #0d0d0d;
     overflow: hidden;
+    display: flex;
+}
+
+/* Inner container that xterm measures for fit */
+.terminal-inner {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
 }
 
 /* xterm.js customization */
-.terminal-wrapper .xterm {
+.terminal-inner .xterm {
     height: 100%;
 }
 
-.terminal-wrapper .xterm-viewport {
+.terminal-inner .xterm-viewport {
     background-color: #0d0d0d !important;
 }
 
-.terminal-wrapper .xterm-screen {
+.terminal-inner .xterm-screen {
     padding: 0;
 }
 

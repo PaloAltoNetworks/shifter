@@ -10,17 +10,65 @@ Renders markdown documentation with:
 import os
 from pathlib import Path
 
+import bleach
 import markdown
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
+from django.views.decorators.http import require_GET
 
 # Path to docs source relative to project root (portal/../docs/src)
 DOCS_ROOT = Path(settings.BASE_DIR).parent / "docs" / "src"
 
 # Folders to exclude from navigation and access
 EXCLUDED_FOLDERS = {"_deprecated"}
+
+# Bleach allowlist for HTML sanitization
+# Covers standard markdown output + code highlighting
+ALLOWED_TAGS = [
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "p",
+    "br",
+    "hr",
+    "ul",
+    "ol",
+    "li",
+    "pre",
+    "code",
+    "blockquote",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "a",
+    "strong",
+    "em",
+    "del",
+    "ins",
+    "img",
+    "div",
+    "span",  # For code highlighting classes
+    "details",
+    "summary",  # Collapsible sections
+]
+ALLOWED_ATTRIBUTES = {
+    "a": ["href", "title"],
+    "img": ["src", "alt", "title"],
+    "code": ["class"],  # For language-* classes
+    "pre": ["class"],
+    "div": ["class"],  # For codehilite, mermaid
+    "span": ["class"],  # For syntax highlighting
+    "th": ["align"],
+    "td": ["align"],
+}
 
 
 def _title_from_filename(filename: str) -> str:
@@ -123,6 +171,7 @@ def _render_markdown(file_path: Path) -> str:
     """Read and render markdown file to HTML.
 
     Raises Http404 if file doesn't exist.
+    HTML output is sanitized with bleach to prevent XSS.
     """
     try:
         content = file_path.read_text(encoding="utf-8")
@@ -132,7 +181,15 @@ def _render_markdown(file_path: Path) -> str:
     md = markdown.Markdown(extensions=_get_markdown_extensions())
     html = md.convert(content)
 
-    return html
+    # Sanitize HTML to prevent XSS from markdown content
+    sanitized = bleach.clean(
+        html,
+        tags=ALLOWED_TAGS,
+        attributes=ALLOWED_ATTRIBUTES,
+        strip=True,
+    )
+
+    return sanitized
 
 
 def _sanitize_path(path: str) -> str:
@@ -160,6 +217,7 @@ def _sanitize_path(path: str) -> str:
 
 
 @login_required
+@require_GET
 def doc_index(request: HttpRequest) -> HttpResponse:
     """Display documentation index page."""
     nav_tree = _build_nav_tree(DOCS_ROOT)
@@ -179,6 +237,7 @@ def doc_index(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@require_GET
 def doc_page(request: HttpRequest, path: str) -> HttpResponse:
     """Display a specific documentation page."""
     nav_tree = _build_nav_tree(DOCS_ROOT)

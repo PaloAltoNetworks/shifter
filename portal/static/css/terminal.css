@@ -149,6 +149,7 @@
 
 .terminal-wrapper .xterm-viewport {
     background-color: #0d0d0d !important;
+    padding-right: 1rem;
 }
 
 .terminal-wrapper .xterm-screen {

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.15] - 2025-12-23
+
+### Added
+- Documentation section in Mission Control sidebar
+- Renders markdown docs from `docs/src/` with navigation tree
+- Mermaid.js diagram support for architecture diagrams
+- Cortex XDR dark theme styling for documentation pages
+
 ## [0.7.14] - 2025-12-22
 
 ### Fixed

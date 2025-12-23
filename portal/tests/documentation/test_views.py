@@ -113,7 +113,7 @@ class TestHappyPath:
         nav_names = [item["name"] for item in nav_tree]
 
         # Check for expected top-level sections (folders and files)
-        # These should exist in docs/src/
+        # These should exist in documentation/docs/
         assert any("Portal" in name or "portal" in name.lower() for name in nav_names) or len(nav_tree) > 0
 
     def test_mermaid_code_blocks_preserved(self, staff_user):

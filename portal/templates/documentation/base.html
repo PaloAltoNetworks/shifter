@@ -1,0 +1,102 @@
+{% load static user_extras %}
+<!DOCTYPE html>
+<html lang="en" class="xdr-dark-theme">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ page_title|default:"Documentation" }}{% endblock %} - Cortex Shifter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/xdr-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/xdr-sidebar.css' %}">
+    <link rel="stylesheet" href="{% static 'css/documentation.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="xdr-dark-theme">
+    {% include "partials/icon_sidebar.html" %}
+
+    <div class="layout">
+        <main class="main docs-main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="{% static 'js/sidebar.js' %}"></script>
+    <script type="module">
+        // Mermaid.js for diagram rendering
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#00cc66',
+                primaryTextColor: '#eaebeb',
+                primaryBorderColor: '#333',
+                lineColor: '#666',
+                secondaryColor: '#151515',
+                tertiaryColor: '#1f1f1f',
+                background: '#151515',
+                mainBkg: '#151515',
+                nodeBorder: '#333',
+                clusterBkg: '#1f1f1f',
+                clusterBorder: '#333',
+                titleColor: '#eaebeb',
+                edgeLabelBackground: '#1f1f1f',
+            }
+        });
+
+        // Convert mermaid code blocks to mermaid divs
+        document.querySelectorAll('pre code.language-mermaid').forEach((block) => {
+            const pre = block.parentElement;
+            const div = document.createElement('div');
+            div.className = 'mermaid';
+            div.textContent = block.textContent;
+            pre.parentNode.replaceChild(div, pre);
+        });
+
+        // Also handle code blocks without language class but containing mermaid
+        document.querySelectorAll('pre code').forEach((block) => {
+            const text = block.textContent.trim();
+            if (text.startsWith('flowchart') || text.startsWith('sequenceDiagram') ||
+                text.startsWith('graph') || text.startsWith('classDiagram') ||
+                text.startsWith('stateDiagram') || text.startsWith('erDiagram') ||
+                text.startsWith('gantt') || text.startsWith('pie')) {
+                const pre = block.parentElement;
+                const div = document.createElement('div');
+                div.className = 'mermaid';
+                div.textContent = text;
+                pre.parentNode.replaceChild(div, pre);
+            }
+        });
+    </script>
+    <script>
+        // Navigation tree toggle
+        document.addEventListener('DOMContentLoaded', function() {
+            const toggleButtons = document.querySelectorAll('.nav-tree-toggle');
+
+            toggleButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const isExpanded = this.getAttribute('aria-expanded') === 'true';
+                    this.setAttribute('aria-expanded', !isExpanded);
+                });
+            });
+
+            // Auto-expand sections containing active link
+            const activeLink = document.querySelector('.nav-tree-link.active');
+            if (activeLink) {
+                let parent = activeLink.closest('.nav-tree-children');
+                while (parent) {
+                    const toggle = parent.previousElementSibling;
+                    if (toggle && toggle.classList.contains('nav-tree-toggle')) {
+                        toggle.setAttribute('aria-expanded', 'true');
+                    }
+                    parent = parent.parentElement.closest('.nav-tree-children');
+                }
+            }
+        });
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

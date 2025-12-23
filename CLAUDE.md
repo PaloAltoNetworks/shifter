@@ -103,9 +103,9 @@ PANW SecOps Domain Consultants who need to:
 
 The authenticated area of the Django portal. See full documentation:
 
-- [docs/src/portal/index.md](docs/src/portal/index.md) - Pages, layout, user flows
-- [docs/src/portal/design-system.md](docs/src/portal/design-system.md) - Colors, typography, effects
-- [docs/src/portal/user-stories.md](docs/src/portal/user-stories.md) - User stories US-1 through US-10
+- [portal/documentation/docs/portal/index.md](portal/documentation/docs/portal/index.md) - Pages, layout, user flows
+- [portal/documentation/docs/portal/design-system.md](portal/documentation/docs/portal/design-system.md) - Colors, typography, effects
+- [portal/documentation/docs/portal/user-stories.md](portal/documentation/docs/portal/user-stories.md) - User stories US-1 through US-10
 
 **Key Routes:**
 

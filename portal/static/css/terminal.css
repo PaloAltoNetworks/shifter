@@ -137,19 +137,17 @@
     padding: 1rem;
     background: #0d0d0d;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
 }
 
 /* xterm.js customization */
 .terminal-wrapper .xterm {
-    flex: 1;
-    min-height: 0;
+    height: 100%;
 }
 
 .terminal-wrapper .xterm-viewport {
     background-color: #0d0d0d !important;
     padding-right: 1rem;
+    padding-bottom: 1rem;
 }
 
 .terminal-wrapper .xterm-screen {

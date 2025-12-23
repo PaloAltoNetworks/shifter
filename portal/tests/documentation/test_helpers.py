@@ -239,3 +239,60 @@ class TestPathSanitization:
         path = "/some/path"
         result = path.lstrip("/")
         assert result == "some/path"
+
+
+class TestBleachSanitization:
+    """Tests for bleach HTML sanitization."""
+
+    def test_strips_script_tags(self):
+        """Script tags are stripped from output."""
+        from documentation.views import _render_markdown
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# Hello\n\n<script>alert('xss')</script>")
+            f.flush()
+
+            result = _render_markdown(Path(f.name))
+
+            # Script tags are removed, content becomes harmless text
+            assert "<script>" not in result
+            assert "</script>" not in result
+
+    def test_strips_onclick_handlers(self):
+        """Event handlers are stripped from links."""
+        from documentation.views import _render_markdown
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write('<a href="#" onclick="alert(1)">Click</a>')
+            f.flush()
+
+            result = _render_markdown(Path(f.name))
+
+            assert "onclick" not in result
+
+    def test_preserves_safe_html(self):
+        """Safe HTML elements are preserved."""
+        from documentation.views import _render_markdown
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# Title\n\n**bold** and *italic*\n\n[link](https://example.com)")
+            f.flush()
+
+            result = _render_markdown(Path(f.name))
+
+            assert "<strong>" in result
+            assert "<em>" in result
+            assert '<a href="https://example.com">' in result
+
+    def test_preserves_code_classes(self):
+        """Code block classes for syntax highlighting are preserved."""
+        from documentation.views import _render_markdown
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("```python\nprint('hello')\n```")
+            f.flush()
+
+            result = _render_markdown(Path(f.name))
+
+            # codehilite creates div with class
+            assert "class=" in result

@@ -134,7 +134,7 @@
 /* Terminal Wrapper - outer container with padding */
 .terminal-wrapper {
     flex: 1;
-    padding: 1rem;
+    padding: 1rem 1.25rem 1rem 1rem;
     background: #0d0d0d;
     overflow: hidden;
     display: flex;

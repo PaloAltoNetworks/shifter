@@ -5,7 +5,17 @@ Self-service cyber range platform. Users provision isolated Kali + victim enviro
 ## Docs
 
 - [Architecture](architecture.md) - System overview, components, data flow
+- [Security](security.md) - Security controls and considerations
 - [Ethics](ops/ethics.md) - Why this exists, responsible use
+
+### Developer Guide
+
+- [Getting Started](dev/index.md) - Onboarding overview
+- [Local Setup](dev/local-setup.md) - Run portal locally
+- [CI/CD](dev/ci-cd.md) - GitHub Actions, deployments
+- [Secrets](dev/secrets.md) - Where secrets live
+- [Terraform](dev/terraform.md) - Infrastructure patterns
+- [Principles](dev/principles.md) - Engineering philosophy
 
 ### Portal
 

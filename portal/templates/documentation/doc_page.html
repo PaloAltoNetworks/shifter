@@ -1,0 +1,32 @@
+{% extends "documentation/base.html" %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="docs-layout">
+    {# Left sidebar with navigation tree #}
+    <aside class="docs-nav">
+        <div class="docs-nav-header">
+            <h2>Documentation</h2>
+        </div>
+        <nav class="docs-nav-tree">
+            <ul class="nav-tree-list">
+                <li class="nav-tree-item">
+                    <a href="{% url 'documentation:index' %}"
+                       class="nav-tree-link {% if current_path == '' %}active{% endif %}">
+                        Overview
+                    </a>
+                </li>
+            </ul>
+            {% include "documentation/_nav_tree.html" with items=nav_tree %}
+        </nav>
+    </aside>
+
+    {# Main content area #}
+    <article class="docs-content">
+        <div class="docs-content-inner markdown-body">
+            {{ content|safe }}
+        </div>
+    </article>
+</div>
+{% endblock %}

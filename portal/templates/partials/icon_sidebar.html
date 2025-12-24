@@ -77,24 +77,10 @@
                 </a>
             </div>
 
-            {# History #}
-            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'history' %}active-top-item{% endif %}">
-                <a href="{% url 'mission_control:history' %}"
-                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'history' %}active-link{% endif %}">
-                    <span class="nav-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 5C12 5 13.4269 6.52073 16.6146 7.34527C17.1362 7.47993 17.5 7.94061 17.5 8.4672V13.509C17.5 14.3393 17.1075 15.1225 16.4363 15.6319L12 19L7.56374 15.6319C6.89252 15.1225 6.5 14.3393 6.5 13.509V8.4672C6.5 7.94004 6.86377 7.47993 7.38537 7.34527C10.5731 6.52073 12 5 12 5ZM12.7702 8.55002H11.1202V12.4H12.7702V8.55002ZM12.7704 14.05H11.1204V15.7H12.7704V14.05Z"></path>
-                        </svg>
-                    </span>
-                    <span class="hide-when-minimized nav-menu-item-content">History</span>
-                </a>
-            </div>
-
-            {# Terminal - only enabled when user has an active range #}
+            {# Terminal - always accessible, shows "no range" state if needed #}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'terminal' %}active-top-item{% endif %}">
-                <a href="{% if has_active_range %}{% url 'mission_control:terminal' %}{% else %}#{% endif %}"
-                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'terminal' %}active-link{% endif %}{% if not has_active_range %} nav-disabled{% endif %}"
-                   {% if not has_active_range %}aria-disabled="true" tabindex="-1"{% endif %}>
+                <a href="{% url 'mission_control:terminal' %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'terminal' %}active-link{% endif %}">
                     <span class="nav-icon">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path fill="currentColor" d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -108,7 +94,8 @@
                 </a>
             </div>
 
-            {# Risk Register #}
+            {# Risk Register - Staff only #}
+            {% if user.is_staff %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'risks' %}active-top-item{% endif %}">
                 <a href="{% url 'risk_register:risk_list' %}"
                    class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'risks' %}active-link{% endif %}">
@@ -122,6 +109,7 @@
                     <span class="hide-when-minimized nav-menu-item-content">Risk Register</span>
                 </a>
             </div>
+            {% endif %}
 
             {# Documentation #}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'docs' %}active-top-item{% endif %}">

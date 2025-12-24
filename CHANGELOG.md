@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.18] - 2025-12-24
+
+### Added
+- Claude Code Skills for common repo/ops tasks
+
 ## [0.7.16] - 2025-12-23
 
 ### Added

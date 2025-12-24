@@ -138,7 +138,7 @@ jobs:
       - name: Get deployment config
         id: config
         run: |
-          TFVARS_FILE="terraform/environments/${{ inputs.environment }}/portal/terraform.tfvars"
+          TFVARS_FILE="terraform/environments/${ENV}/portal/terraform.tfvars"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "registry=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> $GITHUB_OUTPUT
           echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT

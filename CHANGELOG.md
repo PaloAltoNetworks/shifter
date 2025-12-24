@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.16] - 2025-12-23
+
+### Added
+- Developer documentation section (`docs/dev/`) with onboarding guides
+  - Local setup, CI/CD, secrets management, Terraform patterns, engineering principles
+- Commit tfvars to repository (no longer gitignored)
+- Dev-box admin password auto-generated and stored in Secrets Manager
+
+### Changed
+- Removed `*.tfvars` from `.gitignore` - config values are not secrets
+- Dev-box no longer requires manual password in tfvars
+
+### Removed
+- `terraform.tfvars.example` files (redundant now that tfvars are committed)
+- `admin_password` variable from dev-box Terraform
+
 ## [0.7.15] - 2025-12-23
 
 ### Added

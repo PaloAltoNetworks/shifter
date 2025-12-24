@@ -14,10 +14,6 @@ on:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
-      TF_VARS_DEV_RANGE:
-        required: true
-      TF_VARS_PROD_RANGE:
-        required: true
 
 permissions:
   id-token: write
@@ -40,10 +36,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.7.1"
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_RANGE || secrets.TF_VARS_PROD_RANGE }}
-        run: echo "$TF_VARS" > terraform.tfvars
       - run: terraform fmt -check -recursive
         working-directory: terraform
       - run: terraform init
@@ -83,10 +75,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.7.1"
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_RANGE || secrets.TF_VARS_PROD_RANGE }}
-        run: echo "$TF_VARS" > terraform.tfvars
       - run: terraform init
       - run: terraform apply -auto-approve
       - run: terraform output -json

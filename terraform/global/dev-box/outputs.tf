@@ -27,3 +27,13 @@ output "fleet_manager_url" {
   description = "URL for SSM Fleet Manager RDP access"
   value       = "https://us-east-2.console.aws.amazon.com/systems-manager/fleet-manager/managed-nodes/${aws_spot_instance_request.dev_box.spot_instance_id}/connect?region=us-east-2"
 }
+
+output "admin_password_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing the admin password"
+  value       = aws_secretsmanager_secret.admin_password.arn
+}
+
+output "admin_password_console_url" {
+  description = "URL to retrieve admin password from Secrets Manager console"
+  value       = "https://us-east-2.console.aws.amazon.com/secretsmanager/secret?name=shifter-dev-box-admin-password&region=us-east-2"
+}

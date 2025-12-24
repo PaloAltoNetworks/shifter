@@ -11,6 +11,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   backend "s3" {
@@ -26,6 +30,31 @@ provider "aws" {
 }
 
 data "aws_caller_identity" "current" {}
+
+# =============================================================================
+# Admin Password - Generated and stored in Secrets Manager
+# =============================================================================
+
+resource "random_password" "admin" {
+  length           = 24
+  special          = true
+  override_special = "!@#$%^&*"
+}
+
+resource "aws_secretsmanager_secret" "admin_password" {
+  name        = "shifter-dev-box-admin-password"
+  description = "Windows Administrator password for dev-box"
+
+  tags = {
+    Name    = "shifter-dev-box-admin-password"
+    Project = "shifter"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "admin_password" {
+  secret_id     = aws_secretsmanager_secret.admin_password.id
+  secret_string = random_password.admin.result
+}
 
 # Latest Windows Server 2022 AMI
 data "aws_ami" "windows" {
@@ -184,7 +213,7 @@ resource "aws_spot_instance_request" "dev_box" {
   user_data = base64encode(<<-EOF
     <powershell>
     # Set administrator password
-    $Password = ConvertTo-SecureString "${var.admin_password}" -AsPlainText -Force
+    $Password = ConvertTo-SecureString "${random_password.admin.result}" -AsPlainText -Force
     Set-LocalUser -Name "Administrator" -Password $Password
 
     # Enable RDP

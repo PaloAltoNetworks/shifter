@@ -14,10 +14,6 @@ on:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
-      TF_VARS_DEV_PORTAL:
-        required: true
-      TF_VARS_PROD_PORTAL:
-        required: true
 
 permissions:
   id-token: write
@@ -40,10 +36,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.7.1"
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
-        run: echo "$TF_VARS" > terraform.tfvars
       - run: terraform fmt -check -recursive
         working-directory: terraform
       - run: terraform init
@@ -83,10 +75,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.7.1"
-      - name: Write tfvars
-        env:
-          TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
-        run: echo "$TF_VARS" > terraform.tfvars
       - run: terraform init
       - run: terraform apply -auto-approve
 
@@ -140,6 +128,8 @@ jobs:
       ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-portal' || 'shifter-portal' }}
       INSTANCE_TAG: ${{ inputs.is_dev && 'dev-portal-ec2' || 'prod-portal-ec2' }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
@@ -147,15 +137,14 @@ jobs:
 
       - name: Get deployment config
         id: config
-        env:
-          TF_VARS: ${{ inputs.is_dev && secrets.TF_VARS_DEV_PORTAL || secrets.TF_VARS_PROD_PORTAL }}
         run: |
+          TFVARS_FILE="terraform/environments/${ENV}/portal/terraform.tfvars"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "registry=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> $GITHUB_OUTPUT
           echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
-          PORTAL_DOMAIN=$(echo "$TF_VARS" | grep '^domain_name' | sed 's/.*= *"\([^"]*\)".*/\1/')
+          PORTAL_DOMAIN=$(grep '^domain_name' "$TFVARS_FILE" | sed 's/.*= *"\([^"]*\)".*/\1/')
           echo "domain=${PORTAL_DOMAIN}" >> $GITHUB_OUTPUT
-          S3_BUCKET=$(echo "$TF_VARS" | grep '^user_storage_bucket' | sed 's/.*= *"\([^"]*\)".*/\1/')
+          S3_BUCKET=$(grep '^user_storage_bucket' "$TFVARS_FILE" | sed 's/.*= *"\([^"]*\)".*/\1/')
           echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
           # Pulumi provisioner ECS configuration
           PULUMI_ECS_CLUSTER=$(aws ecs list-clusters --query "clusterArns[?contains(@, '${ENV}-portal-pulumi')]" --output text)
@@ -167,7 +156,7 @@ jobs:
           PULUMI_SUBNETS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=${ENV}-portal-private-*" --query "Subnets[*].SubnetId" --output text | tr '\t' ',')
           echo "pulumi_private_subnet_ids=${PULUMI_SUBNETS}" >> $GITHUB_OUTPUT
           # Check if autoscaling is enabled
-          ENABLE_AUTOSCALING=$(echo "$TF_VARS" | grep '^enable_autoscaling' | sed 's/.*= *\([^ ]*\).*/\1/' | tr -d ' ')
+          ENABLE_AUTOSCALING=$(grep '^enable_autoscaling' "$TFVARS_FILE" | sed 's/.*= *\([^ ]*\).*/\1/' | tr -d ' ')
           echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> $GITHUB_OUTPUT
           # Get Redis endpoint if autoscaling enabled
           if [ "$ENABLE_AUTOSCALING" = "true" ]; then

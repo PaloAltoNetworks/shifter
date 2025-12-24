@@ -1,7 +1,7 @@
 """Risk Register UI views."""
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
+from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -16,7 +16,7 @@ from risk_register.models import (
 )
 
 
-@login_required
+@staff_member_required
 def risk_list(request: HttpRequest) -> HttpResponse:
     """Display list of all active risks."""
     include_deleted = request.GET.get("include_deleted") == "true"
@@ -46,7 +46,7 @@ def risk_list(request: HttpRequest) -> HttpResponse:
     return render(request, "risk_register/risk_list.html", context)
 
 
-@login_required
+@staff_member_required
 def risk_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """Display risk details with comments."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -61,7 +61,7 @@ def risk_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "risk_register/risk_detail.html", context)
 
 
-@login_required
+@staff_member_required
 def risk_create(request: HttpRequest) -> HttpResponse:
     """Create a new risk."""
     if request.method == "POST":
@@ -129,7 +129,7 @@ def risk_create(request: HttpRequest) -> HttpResponse:
     return render(request, "risk_register/risk_form.html", context)
 
 
-@login_required
+@staff_member_required
 def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """Edit an existing risk."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -180,7 +180,7 @@ def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "risk_register/risk_form.html", context)
 
 
-@login_required
+@staff_member_required
 def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
     """Soft-delete a risk."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -205,7 +205,7 @@ def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("risk_register:risk_detail", pk=pk)
 
 
-@login_required
+@staff_member_required
 def risk_restore(request: HttpRequest, pk: int) -> HttpResponse:
     """Restore a soft-deleted risk."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -229,7 +229,7 @@ def risk_restore(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("risk_register:risk_detail", pk=pk)
 
 
-@login_required
+@staff_member_required
 def risk_close(request: HttpRequest, pk: int) -> HttpResponse:
     """Close a risk."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -258,7 +258,7 @@ def risk_close(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("risk_register:risk_detail", pk=pk)
 
 
-@login_required
+@staff_member_required
 def risk_reopen(request: HttpRequest, pk: int) -> HttpResponse:
     """Reopen a closed risk."""
     risk = get_object_or_404(Risk, pk=pk)
@@ -283,7 +283,7 @@ def risk_reopen(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("risk_register:risk_detail", pk=pk)
 
 
-@login_required
+@staff_member_required
 def comment_add(request: HttpRequest, risk_pk: int) -> HttpResponse:
     """Add a comment to a risk."""
     risk = get_object_or_404(Risk, pk=risk_pk)
@@ -314,7 +314,7 @@ def comment_add(request: HttpRequest, risk_pk: int) -> HttpResponse:
     return redirect("risk_register:risk_detail", pk=risk_pk)
 
 
-@login_required
+@staff_member_required
 def comment_delete(request: HttpRequest, risk_pk: int, pk: int) -> HttpResponse:
     """Soft-delete a comment."""
     comment = get_object_or_404(Comment, pk=pk, risk__pk=risk_pk)
@@ -335,7 +335,7 @@ def comment_delete(request: HttpRequest, risk_pk: int, pk: int) -> HttpResponse:
     return redirect("risk_register:risk_detail", pk=risk_pk)
 
 
-@login_required
+@staff_member_required
 def apikey_list(request: HttpRequest) -> HttpResponse:
     """List API keys for the current user."""
     # Show all keys for staff, own keys for regular users
@@ -349,7 +349,7 @@ def apikey_list(request: HttpRequest) -> HttpResponse:
     return render(request, "risk_register/apikey_list.html", context)
 
 
-@login_required
+@staff_member_required
 def apikey_create(request: HttpRequest) -> HttpResponse:
     """Create a new API key."""
     if request.method == "POST":
@@ -382,7 +382,7 @@ def apikey_create(request: HttpRequest) -> HttpResponse:
     return redirect("risk_register:apikey_list")
 
 
-@login_required
+@staff_member_required
 def apikey_revoke(request: HttpRequest, pk: int) -> HttpResponse:
     """Revoke an API key."""
     api_key = get_object_or_404(APIKey, pk=pk)

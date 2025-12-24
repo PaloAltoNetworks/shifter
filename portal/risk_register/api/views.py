@@ -5,7 +5,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from risk_register.api.permissions import IsAdminUser, IsAuthenticatedOrAPIKey
+from risk_register.api.permissions import IsAdminUser
 from risk_register.api.serializers import (
     APIKeyCreatedSerializer,
     APIKeyCreateSerializer,
@@ -48,9 +48,9 @@ def risk_to_dict(risk: Risk) -> dict:
 
 
 class RiskViewSet(viewsets.ModelViewSet):
-    """ViewSet for Risk CRUD operations."""
+    """ViewSet for Risk CRUD operations. Admin only."""
 
-    permission_classes = [IsAuthenticatedOrAPIKey]
+    permission_classes = [IsAdminUser]
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -195,9 +195,9 @@ class RiskViewSet(viewsets.ModelViewSet):
 
 
 class CommentViewSet(viewsets.ViewSet):
-    """ViewSet for Comment operations (nested under risks)."""
+    """ViewSet for Comment operations (nested under risks). Admin only."""
 
-    permission_classes = [IsAuthenticatedOrAPIKey]
+    permission_classes = [IsAdminUser]
 
     def list(self, request, risk_pk=None):
         """List comments for a risk."""

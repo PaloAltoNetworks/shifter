@@ -78,7 +78,7 @@ Runs on every PR and push:
 Each component follows the same pattern:
 
 1. **Plan job**:
-   - Write tfvars from GitHub secret
+   - Checkout repo (tfvars are committed)
    - `terraform init`
    - `terraform validate`
    - `terraform plan -out=tfplan`
@@ -87,6 +87,8 @@ Each component follows the same pattern:
 2. **Apply job** (if plan succeeds):
    - Skip on PRs to prod
    - `terraform apply -auto-approve`
+
+**Note**: Terraform variables are committed to the repo in `terraform.tfvars` files. CI/CD reads them directly after checkout - no secrets or environment variables needed for tfvars.
 
 ## Portal Deployment
 

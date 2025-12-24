@@ -4,43 +4,24 @@ Where secrets live and how to manage them.
 
 ## Principles
 
-1. **Never in code** - No secrets in source files, tfvars, or environment configs
-2. **GitHub Secrets for CI/CD** - Workflow credentials and tfvars
+1. **Never in code** - No secrets in source files or environment configs
+2. **GitHub Secrets for CI/CD** - OIDC role ARNs only
 3. **AWS Secrets Manager for runtime** - Application secrets at runtime
 4. **Explicit, not default** - No silent fallbacks; fail if secret missing
+5. **tfvars are config, not secrets** - Committed to repo, no sensitive values
 
 ## GitHub Secrets
 
 These must be configured in repository Settings > Secrets and variables > Actions.
 
-### IAM Roles (OIDC)
-
 | Secret | Purpose |
 |--------|---------|
-| `AWS_ROLE_ARN` | GitHub Actions IAM role for **prod** |
-| `AWS_ROLE_ARN_DEV` | GitHub Actions IAM role for **dev** |
+| `AWS_ROLE_ARN` | GitHub Actions IAM role for **prod** (OIDC) |
+| `AWS_ROLE_ARN_DEV` | GitHub Actions IAM role for **dev** (OIDC) |
 
 These are IAM role ARNs for OIDC federation. No static access keys.
 
-### Terraform Variables
-
-| Secret | Purpose | Format |
-|--------|---------|--------|
-| `TF_VARS_DEV_FOUNDATION` | Core infra vars (dev) | HCL |
-| `TF_VARS_PROD_FOUNDATION` | Core infra vars (prod) | HCL |
-| `TF_VARS_DEV_RANGE` | Range VPC vars (dev) | HCL |
-| `TF_VARS_PROD_RANGE` | Range VPC vars (prod) | HCL |
-| `TF_VARS_DEV_PORTAL` | Portal infra vars (dev) | HCL |
-| `TF_VARS_PROD_PORTAL` | Portal infra vars (prod) | HCL |
-
-**Format**: Plain HCL, written directly to `terraform.tfvars` by workflows.
-
-Example structure:
-```hcl
-aws_region     = "us-east-2"
-domain_name    = "dev.shifter.example.com"
-instance_type  = "t3.large"
-```
+**Note**: Terraform variables (tfvars) are committed to the repository. CI/CD reads them directly from the checked-out code. No `TF_VARS_*` secrets needed.
 
 ## AWS Secrets Manager
 

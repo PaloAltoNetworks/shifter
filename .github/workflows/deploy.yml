@@ -97,8 +97,6 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-      TF_VARS_DEV_FOUNDATION: ${{ secrets.TF_VARS_DEV_FOUNDATION }}
-      TF_VARS_PROD_FOUNDATION: ${{ secrets.TF_VARS_PROD_FOUNDATION }}
 
   range:
     name: Range
@@ -115,8 +113,6 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-      TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
-      TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
 
   pulumi-provisioner:
     name: Pulumi Provisioner
@@ -150,5 +146,3 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-      TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
-      TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}

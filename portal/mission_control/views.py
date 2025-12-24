@@ -189,17 +189,6 @@ def delete_agent(request, agent_id):
 
 @login_required
 @require_GET
-def history(request):
-    """Range history - view past sessions."""
-    context = {
-        "page_title": "History",
-        "active_nav": "history",
-    }
-    return render(request, "mission_control/history.html", context)
-
-
-@login_required
-@require_GET
 def terminal(request):
     """Terminal - SSH access to range instances."""
     # Get user's active range (may be None or not ready)

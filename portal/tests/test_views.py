@@ -1,4 +1,4 @@
-"""Tests for page-rendering views (dashboard, history, settings, help)."""
+"""Tests for page-rendering views (dashboard, settings, help)."""
 
 import time
 
@@ -51,31 +51,6 @@ class TestDashboardView:
         # Check context
         assert response.context["page_title"] == "Dashboard"
         assert response.context["active_nav"] == "dashboard"
-
-
-# -----------------------------------------------------------------------------
-# History View Tests
-# -----------------------------------------------------------------------------
-
-
-@pytest.mark.django_db
-class TestHistoryView:
-    def test_requires_login(self, client):
-        response = client.get(reverse("mission_control:history"))
-        assert response.status_code == 302
-
-    def test_requires_get(self, user):
-        client = get_authenticated_client(user)
-        response = client.post(reverse("mission_control:history"))
-        assert response.status_code == 405
-
-    def test_renders_history(self, user):
-        client = get_authenticated_client(user)
-        response = client.get(reverse("mission_control:history"))
-
-        assert response.status_code == 200
-        assert response.context["page_title"] == "History"
-        assert response.context["active_nav"] == "history"
 
 
 # -----------------------------------------------------------------------------

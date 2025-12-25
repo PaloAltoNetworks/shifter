@@ -91,6 +91,13 @@ class PulumiMocks:
             outputs["subnetId"] = inputs.get("subnetId", "subnet-mock")
             outputs["routeTableId"] = inputs.get("routeTableId", "rtb-mock")
 
+        elif resource_type == "aws:ssm/parameter:Parameter":
+            param_name = inputs.get("name", f"/mock/param/{name}")
+            outputs["arn"] = f"arn:aws:ssm:us-east-2:123456789012:parameter{param_name}"
+            outputs["name"] = param_name
+            outputs["type"] = inputs.get("type", "String")
+            outputs["value"] = inputs.get("value", "{}")
+
         return resource_id, outputs
 
     def call(self, args: Any) -> dict:
@@ -381,6 +388,25 @@ Invoke-WebRequest -Uri '{{ presigned_url }}' -OutFile C:\agent
 Write-Host "No agent installer configured"
 {% endif %}
 Write-Host "Windows setup complete"
+</powershell>
+"""
+        )
+
+        # DC template for Domain Controller tests
+        dc_template = templates_path / "dc_windows.ps1.j2"
+        dc_template.write_text(
+            """<powershell>
+$ErrorActionPreference = "Stop"
+Write-Host "Setting hostname to {{ hostname }}..."
+Rename-Computer -NewName "{{ hostname }}" -Force
+Write-Host "Domain: {{ domain_name }}"
+Write-Host "NetBIOS: {{ netbios_name }}"
+Write-Host "DC Config Param: {{ dc_config_param_name }}"
+Write-Host "DSRM Password configured"
+Install-WindowsFeature -Name AD-Domain-Services
+Install-ADDSForest -DomainName "{{ domain_name }}" -DomainNetbiosName "{{ netbios_name }}"
+aws ssm put-parameter --name "{{ dc_config_param_name }}" --type SecureString --overwrite
+Write-Host "DC setup complete"
 </powershell>
 """
         )

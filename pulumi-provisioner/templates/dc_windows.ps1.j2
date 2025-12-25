@@ -7,7 +7,7 @@
 #   public_key         - SSH public key for Administrator access
 #   domain_name        - FQDN for the AD domain (e.g., internal.shifter)
 #   netbios_name       - NetBIOS name for the domain (e.g., SHIFTER)
-#   dc_config_secret_arn - Secrets Manager ARN to write DC config to
+#   dc_config_param_name - SSM Parameter Store path for DC config (e.g., /shifter/dev/range/42/dc-config)
 #   dsrm_password      - Directory Services Restore Mode password
 
 $ErrorActionPreference = "Stop"
@@ -158,14 +158,16 @@ try {
         domain_functional_level = "WinThreshold"
     } | ConvertTo-Json -Compress
 
-    # Write config to Secrets Manager
-    Log-Message "Writing DC config to Secrets Manager..."
-    aws secretsmanager put-secret-value ``
-        --secret-id "{{ dc_config_secret_arn }}" ``
-        --secret-string `$DcConfig ``
+    # Write config to SSM Parameter Store
+    Log-Message "Writing DC config to SSM Parameter Store..."
+    aws ssm put-parameter ``
+        --name "{{ dc_config_param_name }}" ``
+        --value `$DcConfig ``
+        --type SecureString ``
+        --overwrite ``
         --region (Invoke-RestMethod -Uri http://169.254.169.254/latest/meta-data/placement/region)
 
-    Log-Message "DC config written to Secrets Manager"
+    Log-Message "DC config written to SSM Parameter Store"
 
     # Clean up sensitive temp file
     Remove-Item "C:\Windows\Temp\domain_admin_pw.txt" -Force -ErrorAction SilentlyContinue

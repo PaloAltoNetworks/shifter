@@ -316,6 +316,60 @@ resource "aws_iam_role_policy" "ssm_parameters" {
 }
 
 # ------------------------------------------------------------------------------
+# Task Role Policy - SSM Run Command (for DC setup orchestration)
+# ------------------------------------------------------------------------------
+# Pulumi uses SSM Run Command to orchestrate DC setup:
+# - Install AD DS feature
+# - Reboot and wait for instance
+# - Promote to Domain Controller
+# - Verify AD DS is running
+
+resource "aws_iam_role_policy" "ssm_run_command" {
+  name = "ssm-run-command"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "SSMRunCommand"
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations"
+        ]
+        Resource = [
+          # Allow running commands on any instance in the account
+          # (Pulumi creates instances dynamically)
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
+          # Allow using AWS-RunPowerShellScript document
+          "arn:aws:ssm:${local.region}::document/AWS-RunPowerShellScript",
+          "arn:aws:ssm:${local.region}::document/AWS-RunShellScript"
+        ]
+      },
+      {
+        Sid    = "SSMDescribeInstanceInformation"
+        Effect = "Allow"
+        Action = [
+          "ssm:DescribeInstanceInformation"
+        ]
+        Resource = "*"
+      },
+      {
+        # EC2 reboot is needed for DC setup (feature install, promotion)
+        Sid    = "EC2RebootInstances"
+        Effect = "Allow"
+        Action = [
+          "ec2:RebootInstances"
+        ]
+        Resource = "arn:aws:ec2:${local.region}:${local.account_id}:instance/*"
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Task Role Policy - KMS (for Pulumi secrets encryption)
 # ------------------------------------------------------------------------------
 # Pulumi's awskms:// secrets provider calls KMS directly (not via Secrets Manager),

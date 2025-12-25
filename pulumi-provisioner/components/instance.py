@@ -4,6 +4,7 @@ This component creates EC2 instances for a range with:
 - SSH key generation and storage in Secrets Manager (Pulumi-managed)
 - User data scripts for setup
 - Proper security group attachment
+- DC setup orchestration via SSM Run Command (for DC role)
 
 All AWS resources are created via Pulumi to ensure proper lifecycle management.
 """
@@ -13,6 +14,7 @@ import os
 import re
 import secrets
 import string
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +23,24 @@ import pulumi_aws as aws
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from jinja2 import Environment, FileSystemLoader
+
+from .ssm_executor import SSMExecutor
+from .setup_orchestrator import SetupOrchestrator, SetupError
+from .plans.dc_setup import DCSetupPlan
+
+
+@dataclass
+class DCContext:
+    """Context object for DC setup plan.
+
+    Contains all the variables needed by DCSetupPlan.get_context().
+    """
+    domain_name: str
+    netbios_name: str
+    dsrm_password: str
+    domain_admin_password: str
+    hostname: str = ""
+    private_ip: str = ""
 
 
 def validate_s3_path(value: str) -> bool:
@@ -93,6 +113,11 @@ class InstanceComponent(pulumi.ComponentResource):
     dc_config_param: Optional[aws.ssm.Parameter]
     dc_config_param_name: Optional[str]
     dsrm_password: Optional[str]  # nosec B105 - generated at runtime, not hardcoded
+    domain_admin_password: Optional[str]  # nosec B105 - generated at runtime
+    domain_name: Optional[str]
+    netbios_name: Optional[str]
+    hostname: Optional[str]
+    setup_result: Optional[pulumi.Output[bool]]  # Result of DC setup orchestration
 
     def __init__(
         self,
@@ -186,19 +211,30 @@ class InstanceComponent(pulumi.ComponentResource):
         self.dc_config_param = None
         self.dc_config_param_name = None
         self.dsrm_password = None
+        self.domain_admin_password = None
+        self.domain_name = None
+        self.netbios_name = None
+        self.hostname = None
+        self.setup_result = None
 
-        # For DC role, create SSM Parameter and generate DSRM password
+        # For DC role, create SSM Parameter and generate passwords
         if role == "dc":
-            # Generate DSRM password
+            # Generate passwords
             self.dsrm_password = self._generate_secure_password()
+            self.domain_admin_password = self._generate_secure_password()
 
-            # Create SSM Parameter for DC config (initially empty, DC will populate)
+            # Store DC config for orchestration
+            self.domain_name = dc_config.get("domain_name", "internal.shifter") if dc_config else "internal.shifter"
+            self.netbios_name = dc_config.get("netbios_name", "SHIFTER") if dc_config else "SHIFTER"
+            self.hostname = f"shifter-dc-{range_id}"
+
+            # Create SSM Parameter for DC config (initially empty, orchestration will populate)
             self.dc_config_param_name = f"/shifter/{environment}/range/{range_id}/dc-config"
             self.dc_config_param = aws.ssm.Parameter(
                 f"{name}-dc-config",
                 name=self.dc_config_param_name,
                 type="SecureString",
-                value="{}",  # Empty JSON, DC will populate after promotion
+                value="{}",  # Empty JSON, orchestration will populate after promotion
                 description=f"Domain controller configuration for range {range_id}",
                 tags=common_tags,
                 opts=pulumi.ResourceOptions(parent=self),
@@ -262,6 +298,74 @@ class InstanceComponent(pulumi.ComponentResource):
             }
         )
 
+    def run_dc_setup(self, region: Optional[str] = None) -> pulumi.Output[bool]:
+        """Run DC setup orchestration via SSM Run Command.
+
+        This method should be called after the instance is created to set up
+        Active Directory Domain Services. It:
+        1. Waits for SSM agent to come online
+        2. Installs AD DS feature and reboots
+        3. Promotes to Domain Controller and reboots
+        4. Verifies AD DS is running
+
+        Args:
+            region: AWS region (uses default if not provided)
+
+        Returns:
+            pulumi.Output[bool] that resolves to True on success
+
+        Raises:
+            SetupError: If any step fails (propagates to Pulumi as stack failure)
+        """
+        if self.role != "dc":
+            # Not a DC instance, return immediately
+            return pulumi.Output.from_input(True)
+
+        # Create DC context for the setup plan
+        dc_context = DCContext(
+            domain_name=self.domain_name,
+            netbios_name=self.netbios_name,
+            dsrm_password=self.dsrm_password,
+            domain_admin_password=self.domain_admin_password,
+            hostname=self.hostname,
+        )
+
+        def do_setup(instance_id: str) -> bool:
+            """Run the DC setup synchronously (called within apply)."""
+            pulumi.log.info(f"Starting DC setup for instance {instance_id}")
+
+            # Create executor and orchestrator
+            executor = SSMExecutor(region=region)
+            orchestrator = SetupOrchestrator(executor=executor)
+            plan = DCSetupPlan()
+
+            try:
+                # Wait for SSM agent to come online
+                pulumi.log.info(f"Waiting for SSM agent on {instance_id}...")
+                executor.wait_for_agent(instance_id, timeout_seconds=300)
+                pulumi.log.info(f"SSM agent is online on {instance_id}")
+
+                # Get context from plan
+                context = plan.get_context(dc_context)
+
+                # Run the orchestration
+                pulumi.log.info(f"Running DC setup orchestration on {instance_id}...")
+                result = orchestrator.orchestrate(instance_id, plan, context)
+
+                if result.success:
+                    pulumi.log.info(f"DC setup completed successfully on {instance_id}")
+                    return True
+                else:
+                    raise SetupError(f"DC setup failed on {instance_id}")
+
+            except Exception as e:
+                pulumi.log.error(f"DC setup failed on {instance_id}: {e}")
+                raise
+
+        # Use apply to run the setup when instance_id is resolved
+        self.setup_result = self.instance_id.apply(do_setup)
+        return self.setup_result
+
     def _generate_user_data(
         self,
         role: str,
@@ -316,14 +420,11 @@ class InstanceComponent(pulumi.ComponentResource):
                 "public_key": public_key,
             }
         elif role == "dc":
+            # DC bootstrap only - AD DS setup is handled via SSM orchestration
             template = env.get_template("dc_windows.ps1.j2")
             context = {
                 "hostname": f"shifter-dc-{range_id}",
                 "public_key": public_key,
-                "domain_name": dc_config.get("domain_name", "internal.shifter") if dc_config else "internal.shifter",
-                "netbios_name": dc_config.get("netbios_name", "SHIFTER") if dc_config else "SHIFTER",
-                "dc_config_param_name": self.dc_config_param_name,
-                "dsrm_password": self.dsrm_password,
             }
         elif os_type == "windows" and join_domain and member_dc_config_param_name:
             # Domain member - Windows instance joining a domain

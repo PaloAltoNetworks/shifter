@@ -1,7 +1,10 @@
 """DC user data template tests for Pulumi provisioner.
 
 Tests for the Domain Controller PowerShell template (dc_windows.ps1.j2).
-Uses TDD approach - these tests are written before the template exists.
+
+NOTE: The DC template is now a minimal bootstrap script (hostname, SSH).
+AD DS installation is handled via SSM Run Command orchestration.
+See test_dc_setup_plan.py for AD DS setup tests.
 """
 
 import sys
@@ -23,7 +26,11 @@ class TestDCTemplateExists:
 
 
 class TestDCTemplateRendering:
-    """Tests for DC template rendering."""
+    """Tests for DC bootstrap template rendering.
+
+    NOTE: The DC template is now a minimal bootstrap script.
+    AD DS installation is handled via SSM Run Command orchestration.
+    """
 
     @pytest.fixture
     def dc_template(self):
@@ -35,24 +42,24 @@ class TestDCTemplateRendering:
 
     @pytest.fixture
     def dc_template_context(self):
-        """Standard context for DC template tests."""
+        """Standard context for DC bootstrap template tests."""
         return {
             "hostname": "DC1",
             "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost",
-            "domain_name": "internal.shifter",
-            "netbios_name": "SHIFTER",
-            "dc_config_param_name": "/shifter/dev/range/42/dc-config",
-            "dsrm_password": "TestDsrmP@ss!",  # nosec B105 - test fixture
         }
 
     def test_dc_template_renders_without_error(self, dc_template, dc_template_context):
-        """DC template should render with required variables."""
+        """DC bootstrap template should render with required variables."""
         result = dc_template.render(**dc_template_context)
 
-        # Should contain AD DS installation commands
-        assert "Install-WindowsFeature" in result, "Template should install Windows features"
-        assert "Install-ADDSForest" in result, "Template should promote to DC"
-        assert "internal.shifter" in result, "Template should include domain name"
+        # Bootstrap template should set hostname
+        assert "DC1" in result, "Template should include hostname"
+        # Bootstrap template should configure SSH
+        assert "sshd" in result, "Template should configure SSH"
+        # AD DS setup is via SSM, not user data
+        assert "AD DS setup will be orchestrated via SSM" in result, (
+            "Template should indicate SSM orchestration"
+        )
 
     def test_dc_template_includes_ssh_setup(self, dc_template, dc_template_context):
         """DC template should set up SSH access like victim template."""
@@ -62,39 +69,12 @@ class TestDCTemplateRendering:
         assert "sshd" in result, "Template should configure SSH service"
         assert "administrators_authorized_keys" in result, "Template should set up SSH key auth"
 
-    def test_dc_template_writes_config_to_ssm_parameter(
-        self, dc_template, dc_template_context
-    ):
-        """DC template should write DC config to SSM Parameter Store."""
-        result = dc_template.render(**dc_template_context)
-
-        # Should write config to SSM Parameter Store using AWS CLI
-        assert "aws ssm put-parameter" in result, "Template should use aws ssm put-parameter"
-
-        # Should use SecureString type for encryption
-        assert "--type SecureString" in result, "Template should use SecureString type"
-
-        # Should use --overwrite for idempotent updates
-        assert "--overwrite" in result, "Template should use --overwrite flag"
-
-        # Should reference the parameter name
-        assert (
-            dc_template_context["dc_config_param_name"] in result
-        ), "Template should use dc_config_param_name"
-
     def test_dc_template_hostname(self, dc_template, dc_template_context):
         """hostname variable should be replaced."""
         result = dc_template.render(**dc_template_context)
 
         assert "DC1" in result, "Hostname should appear in rendered template"
         assert "{{ hostname }}" not in result, "Jinja variable should be replaced"
-
-    def test_dc_template_netbios_name(self, dc_template, dc_template_context):
-        """netbios_name variable should be replaced."""
-        result = dc_template.render(**dc_template_context)
-
-        assert "SHIFTER" in result, "NetBIOS name should appear in rendered template"
-        assert "{{ netbios_name }}" not in result, "Jinja variable should be replaced"
 
     def test_dc_template_valid_powershell(self, dc_template, dc_template_context):
         """Output should be a valid PowerShell script with required sections."""
@@ -108,37 +88,24 @@ class TestDCTemplateRendering:
         assert "ErrorActionPreference" in result, "Template should set error handling"
         assert "Stop" in result, "Template should use strict error handling"
 
-    def test_dc_template_configures_dns_forwarder(self, dc_template, dc_template_context):
-        """DC template should configure DNS forwarder for AWS."""
-        result = dc_template.render(**dc_template_context)
-
-        # AWS VPC DNS resolver
-        has_dns_forwarder = (
-            "Add-DnsServerForwarder" in result or "169.254.169.253" in result
-        )
-        assert has_dns_forwarder, "Template should configure AWS DNS forwarder"
-
-    def test_dc_template_generates_domain_admin_password(
-        self, dc_template, dc_template_context
-    ):
-        """DC template should generate a domain admin password at runtime."""
-        result = dc_template.render(**dc_template_context)
-
-        # Should generate password (not hardcode it)
-        has_password_gen = (
-            "Get-Random" in result
-            or "New-Guid" in result
-            or "[System.Web.Security.Membership]::GeneratePassword" in result
-            or "ConvertTo-SecureString" in result
-        )
-        assert has_password_gen, "Template should generate domain admin password securely"
-
     def test_dc_template_has_logging(self, dc_template, dc_template_context):
         """DC template should log its progress."""
         result = dc_template.render(**dc_template_context)
 
         # Should have logging function like victim template
         assert "Log-Message" in result or "Write-Host" in result, "Template should log progress"
+
+    def test_dc_template_no_ad_installation(self, dc_template, dc_template_context):
+        """DC bootstrap template should NOT install AD DS (that's via SSM)."""
+        result = dc_template.render(**dc_template_context)
+
+        # AD DS installation is via SSM orchestration, not user data
+        assert "Install-WindowsFeature" not in result, (
+            "Bootstrap template should not install features"
+        )
+        assert "Install-ADDSForest" not in result, (
+            "Bootstrap template should not promote to DC"
+        )
 
 
 # =============================================================================
@@ -347,69 +314,42 @@ class TestDomainMemberTemplateRendering:
 # =============================================================================
 
 
-class TestDCConfigJsonStructure:
-    """Tests for DC config JSON structure written to SSM.
+class TestDCSetupScriptsJsonStructure:
+    """Tests for DC setup scripts JSON structure.
 
-    The DC writes a JSON object to SSM that domain members read.
-    These tests verify all required fields are present in the JSON.
+    NOTE: DC config JSON is now populated by SSM orchestration scripts.
+    See test_dc_setup_plan.py for comprehensive DCSetupPlan tests.
+
+    These tests verify the SSM orchestration scripts include required elements.
     """
 
-    @pytest.fixture
-    def dc_template(self):
-        """Load the DC template."""
-        templates_dir = Path(__file__).parent.parent / "templates"
-        # NOSONAR: autoescape=False is intentional - these are PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
-        return env.get_template("dc_windows.ps1.j2")
+    def test_dc_setup_scripts_exist(self):
+        """Verify DCSetupPlan scripts are defined."""
+        from components.plans.dc_setup import (
+            INSTALL_AD_FEATURE_SCRIPT,
+            PROMOTE_DC_SCRIPT,
+            VERIFY_AD_SCRIPT,
+        )
 
-    @pytest.fixture
-    def dc_template_context(self):
-        """Standard context for DC template tests."""
-        return {
-            "hostname": "DC1",
-            "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost",
-            "domain_name": "internal.shifter",
-            "netbios_name": "SHIFTER",
-            "dc_config_param_name": "/shifter/dev/range/42/dc-config",
-            "dsrm_password": "TestDsrmP@ss!",  # nosec B105 - test fixture
-        }
+        assert INSTALL_AD_FEATURE_SCRIPT, "Install AD feature script should exist"
+        assert PROMOTE_DC_SCRIPT, "Promote DC script should exist"
+        assert VERIFY_AD_SCRIPT, "Verify AD script should exist"
 
-    def test_dc_config_includes_domain_name(self, dc_template, dc_template_context):
-        """DC config JSON must include domain_name field."""
-        result = dc_template.render(**dc_template_context)
+    def test_promote_script_uses_secure_password(self):
+        """Promote DC script should use SecureString for passwords."""
+        from components.plans.dc_setup import PROMOTE_DC_SCRIPT
 
-        # The JSON object being built should include domain_name
-        assert "domain_name" in result, "DC config JSON must include domain_name field"
+        assert "ConvertTo-SecureString" in PROMOTE_DC_SCRIPT, (
+            "Promote script should convert passwords to SecureString"
+        )
 
-    def test_dc_config_includes_netbios_name(self, dc_template, dc_template_context):
-        """DC config JSON must include netbios_name field."""
-        result = dc_template.render(**dc_template_context)
+    def test_verify_script_checks_ad_services(self):
+        """Verify script should check AD DS services."""
+        from components.plans.dc_setup import VERIFY_AD_SCRIPT
 
-        assert "netbios_name" in result, "DC config JSON must include netbios_name field"
-
-    def test_dc_config_includes_dc_ip(self, dc_template, dc_template_context):
-        """DC config JSON must include dc_ip field."""
-        result = dc_template.render(**dc_template_context)
-
-        assert "dc_ip" in result, "DC config JSON must include dc_ip field"
-
-    def test_dc_config_includes_domain_admin_password(self, dc_template, dc_template_context):
-        """DC config JSON must include domain_admin_password field."""
-        result = dc_template.render(**dc_template_context)
-
-        assert "domain_admin_password" in result, "DC config JSON must include domain_admin_password"
-
-    def test_dc_config_includes_domain_admin_username(self, dc_template, dc_template_context):
-        """DC config JSON must include domain_admin_username field."""
-        result = dc_template.render(**dc_template_context)
-
-        assert "domain_admin_username" in result, "DC config JSON must include domain_admin_username"
-
-    def test_dc_config_uses_convert_to_json(self, dc_template, dc_template_context):
-        """DC config should use ConvertTo-Json for proper JSON serialization."""
-        result = dc_template.render(**dc_template_context)
-
-        assert "ConvertTo-Json" in result, "DC config must use ConvertTo-Json for serialization"
+        assert "NTDS" in VERIFY_AD_SCRIPT or "Get-ADDomainController" in VERIFY_AD_SCRIPT, (
+            "Verify script should check AD DS status"
+        )
 
 
 # =============================================================================

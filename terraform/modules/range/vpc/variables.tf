@@ -70,3 +70,19 @@ variable "agent_s3_bucket" {
   description = "S3 bucket name for agent installers (for range instance S3 read access)"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# VM-Series NGFW Configuration
+# ------------------------------------------------------------------------------
+
+variable "vm_series_ami_id" {
+  description = "VM-Series AMI ID. Empty string disables NGFW provisioning."
+  type        = string
+  default     = ""
+}
+
+variable "vm_series_instance_type" {
+  description = "EC2 instance type for VM-Series NGFW"
+  type        = string
+  default     = "m5.xlarge"
+}

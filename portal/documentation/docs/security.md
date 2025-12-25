@@ -75,8 +75,8 @@ Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Inte
 
 | SG | Ingress | Egress | Purpose |
 |----|---------|--------|---------|
-| Kali | SSH from Portal+Range VPC, ALL from Victim SG | VPC CIDR, DNS | Attack box |
-| Victim | SSH from Portal+Range VPC, ALL from Kali SG | HTTPS, DNS | Target with XDR agent |
+| Kali | SSH from Portal+Range VPC, ALL from Victim SG, ALL from DC SG | VPC CIDR, DNS | Attack box |
+| Victim | SSH from Portal+Range VPC, ALL from Kali SG, ALL from DC SG | HTTPS, DNS | Target with XDR agent |
 | DC | SSH from Portal+Range VPC, ALL from Kali SG, AD ports from Victim SG | HTTPS, DNS | Domain controller |
 
 DC security group allows AD traffic (LDAP, Kerberos, DNS, SMB) from domain members.
@@ -84,6 +84,7 @@ DC security group allows AD traffic (LDAP, Kerberos, DNS, SMB) from domain membe
 **Design Decisions:**
 
 - **Bidirectional Kali ↔ Victim traffic**: Required for reverse shells, C2 callbacks, and realistic attack scenarios
+- **Bidirectional DC ↔ Kali/Victim traffic**: DC needs to reach Kali/Victim for lateral movement demos, reverse shells from compromised DC, and AD replication scenarios
 - **Kali locked down**: No external access—tools are pre-installed on AMI
 - **Victim XDR-only egress**: Only domains required for XDR/XSIAM telemetry
 - **Security group references**: Traffic rules use SG IDs, not CIDR blocks—prevents cross-user subnet attacks

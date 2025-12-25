@@ -29,6 +29,7 @@ class TestDCTemplateRendering:
     def dc_template(self):
         """Load the DC template."""
         templates_dir = Path(__file__).parent.parent / "templates"
+        # NOSONAR: autoescape=False is intentional - these are PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return env.get_template("dc_windows.ps1.j2")
 
@@ -163,6 +164,7 @@ class TestDomainMemberTemplateRendering:
     def domain_member_template(self):
         """Load the domain member template."""
         templates_dir = Path(__file__).parent.parent / "templates"
+        # NOSONAR: autoescape=False is intentional - these are PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return env.get_template("domain_member_windows.ps1.j2")
 
@@ -356,6 +358,7 @@ class TestDCConfigJsonStructure:
     def dc_template(self):
         """Load the DC template."""
         templates_dir = Path(__file__).parent.parent / "templates"
+        # NOSONAR: autoescape=False is intentional - these are PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return env.get_template("dc_windows.ps1.j2")
 
@@ -431,6 +434,7 @@ class TestDomainMemberCommandOrdering:
     def domain_member_template(self):
         """Load the domain member template."""
         templates_dir = Path(__file__).parent.parent / "templates"
+        # NOSONAR: autoescape=False is intentional - these are PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return env.get_template("domain_member_windows.ps1.j2")
 

@@ -138,7 +138,7 @@ class DashboardManager {
     _initScenarioDropdown() {
         // Initialize the scenario dropdown with XdrDropdown if available
         if (this.scenarioDropdown && window.XdrDropdown) {
-            new window.XdrDropdown(this.scenarioDropdown);
+            void new window.XdrDropdown(this.scenarioDropdown);
         }
     }
 
@@ -170,7 +170,7 @@ class DashboardManager {
 
                 // Reinitialize dropdown after adding items
                 if (this.agentDropdown && window.XdrDropdown) {
-                    new window.XdrDropdown(this.agentDropdown);
+                    void new window.XdrDropdown(this.agentDropdown);
                 }
             }
         } catch (error) {

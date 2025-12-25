@@ -1,4 +1,4 @@
-.PHONY: up down build logs shell migrate makemigrations createsuperuser test clean init
+.PHONY: up down build logs shell migrate makemigrations createsuperuser test test-js test-js-coverage clean init
 
 # First-time setup
 init: up
@@ -41,6 +41,14 @@ createsuperuser:
 # Run tests
 test:
 	docker compose exec web python -m pytest
+
+# Run JavaScript tests
+test-js:
+	npm test
+
+# Run JavaScript tests with coverage
+test-js-coverage:
+	npm run test:coverage
 
 # Clean up volumes
 clean:

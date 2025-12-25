@@ -169,6 +169,16 @@ class Range(models.Model):
         help_text="Provisioner version: v1=Lambda, v2=Pulumi",
     )
 
+    # NGFW (VM-Series) fields
+    ngfw_enabled = models.BooleanField(default=False, help_text="Deploy VM-Series NGFW inline between Kali and Victim")
+    ngfw_instance_id = models.CharField(max_length=50, blank=True, default="", help_text="NGFW EC2 instance ID")
+    ngfw_untrust_ip = models.GenericIPAddressField(
+        null=True, blank=True, help_text="NGFW untrust interface IP (Kali-facing)"
+    )
+    ngfw_trust_ip = models.GenericIPAddressField(
+        null=True, blank=True, help_text="NGFW trust interface IP (Victim-facing)"
+    )
+
     # Status and timestamps
     error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

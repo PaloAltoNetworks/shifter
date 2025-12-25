@@ -78,6 +78,12 @@ class RangeConfig:
     ngfw_ami_id: str = ""
     ngfw_instance_type: str = "m5.xlarge"
     ngfw_security_group_id: str = ""
+    # NGFW Panorama config (from NGFWConfig model)
+    ngfw_panorama_server: str = ""
+    ngfw_vm_auth_key: str = ""
+    ngfw_panorama_server_2: str = ""
+    ngfw_template_stack: str = ""
+    ngfw_device_group: str = ""
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -113,10 +119,16 @@ def get_range_from_db(range_id: int) -> dict:
                     r.instance_config,
                     a.s3_key as agent_s3_key,
                     os.slug as agent_os_slug,
-                    r.ngfw_enabled
+                    r.ngfw_enabled,
+                    nc.panorama_server as ngfw_panorama_server,
+                    nc.vm_auth_key as ngfw_vm_auth_key,
+                    nc.panorama_server_2 as ngfw_panorama_server_2,
+                    nc.template_stack as ngfw_template_stack,
+                    nc.device_group as ngfw_device_group
                 FROM mission_control_range r
                 LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
                 LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
+                LEFT JOIN mission_control_ngfwconfig nc ON r.ngfw_config_id = nc.id
                 WHERE r.id = %s
                 """,
                 (range_id,),
@@ -134,6 +146,11 @@ def get_range_from_db(range_id: int) -> dict:
                 "agent_s3_key": row[5],
                 "agent_os_slug": row[6],
                 "ngfw_enabled": row[7],
+                "ngfw_panorama_server": row[8] or "",
+                "ngfw_vm_auth_key": row[9] or "",
+                "ngfw_panorama_server_2": row[10] or "",
+                "ngfw_template_stack": row[11] or "",
+                "ngfw_device_group": row[12] or "",
             }
 
 
@@ -238,4 +255,10 @@ def load_config() -> RangeConfig:
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
         ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+        # NGFW Panorama config from database (via NGFWConfig model)
+        ngfw_panorama_server=range_data.get("ngfw_panorama_server", ""),
+        ngfw_vm_auth_key=range_data.get("ngfw_vm_auth_key", ""),
+        ngfw_panorama_server_2=range_data.get("ngfw_panorama_server_2", ""),
+        ngfw_template_stack=range_data.get("ngfw_template_stack", ""),
+        ngfw_device_group=range_data.get("ngfw_device_group", ""),
     )

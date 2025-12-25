@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import ActivityLog, AgentConfig, OperatingSystem, Range
+from .models import ActivityLog, AgentConfig, NGFWConfig, OperatingSystem, Range
 from .services.s3 import (
     S3Error,
     generate_presigned_upload_url,
@@ -612,13 +612,26 @@ def launch_range(request):
     if not agent_id:
         return JsonResponse({"error": "agent_id is required"}, status=400)
 
-    # Get optional NGFW flag (defaults to False)
+    # Get NGFW options
     ngfw_enabled = data.get("ngfw_enabled", False)
+    ngfw_config_id = data.get("ngfw_config_id")
 
     # Verify agent belongs to user and is not deleted
     agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).first()
     if not agent:
         return JsonResponse({"error": "Agent not found"}, status=404)
+
+    # Validate NGFW config if NGFW is enabled
+    ngfw_config = None
+    if ngfw_enabled:
+        if not ngfw_config_id:
+            return JsonResponse(
+                {"error": "NGFW config is required when NGFW is enabled"},
+                status=400,
+            )
+        ngfw_config = NGFWConfig.active_for_user(request.user).filter(id=ngfw_config_id).first()
+        if not ngfw_config:
+            return JsonResponse({"error": "NGFW config not found"}, status=404)
 
     # Allocate subnet index for this range
     try:
@@ -637,16 +650,20 @@ def launch_range(request):
         status=Range.Status.PROVISIONING,
         subnet_index=subnet_index,
         ngfw_enabled=ngfw_enabled,
+        ngfw_config=ngfw_config,
     )
 
     # Log activity
-    ActivityLog.log(
-        "range_launched",
-        user=request.user,
-        range_id=range_obj.id,
-        agent_id=agent.id,
-        agent_name=agent.name,
-    )
+    log_metadata = {
+        "range_id": range_obj.id,
+        "agent_id": agent.id,
+        "agent_name": agent.name,
+        "ngfw_enabled": ngfw_enabled,
+    }
+    if ngfw_config:
+        log_metadata["ngfw_config_id"] = ngfw_config.id
+        log_metadata["ngfw_config_name"] = ngfw_config.name
+    ActivityLog.log("range_launched", user=request.user, **log_metadata)
 
     logger.info(
         "Range launched: user=%s range_id=%s agent=%s",
@@ -776,3 +793,138 @@ def list_agents_for_launch(request):
         for agent in agents
     ]
     return JsonResponse({"agents": agent_list})
+
+
+# -----------------------------------------------------------------------------
+# NGFW Config Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def ngfw_configs(request):
+    """NGFW config management - create and manage Panorama configurations."""
+    user_configs = NGFWConfig.active_for_user(request.user)
+
+    context = {
+        "page_title": "NGFW",
+        "active_nav": "ngfw",
+        "configs": user_configs,
+    }
+    return render(request, "mission_control/ngfw.html", context)
+
+
+@login_required
+@require_POST
+def create_ngfw_config(request):
+    """Create a new NGFW config."""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    name = data.get("name", "").strip()
+    panorama_server = data.get("panorama_server", "").strip()
+    vm_auth_key = data.get("vm_auth_key", "").strip()
+    panorama_server_2 = data.get("panorama_server_2", "").strip()
+    template_stack = data.get("template_stack", "").strip()
+    device_group = data.get("device_group", "").strip()
+
+    # Validate required fields
+    if not name:
+        return JsonResponse({"error": "Name is required"}, status=400)
+    if not panorama_server:
+        return JsonResponse({"error": "Panorama server is required"}, status=400)
+    if not vm_auth_key:
+        return JsonResponse({"error": "VM auth key is required"}, status=400)
+
+    # Create config
+    config = NGFWConfig.objects.create(
+        user=request.user,
+        name=name,
+        panorama_server=panorama_server,
+        vm_auth_key=vm_auth_key,
+        panorama_server_2=panorama_server_2,
+        template_stack=template_stack,
+        device_group=device_group,
+    )
+
+    ActivityLog.log(
+        "ngfw_config_created",
+        user=request.user,
+        config_id=config.id,
+        config_name=config.name,
+    )
+
+    logger.info(
+        "NGFW config created: user=%s config_id=%s name=%s",
+        request.user.email,
+        config.id,
+        config.name,
+    )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "config": {
+                "id": config.id,
+                "name": config.name,
+                "panorama_server": config.panorama_server,
+            },
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_POST
+def delete_ngfw_config(request, config_id):
+    """Delete an NGFW config (soft delete)."""
+    config = get_object_or_404(NGFWConfig, id=config_id, user=request.user, deleted_at__isnull=True)
+
+    # Soft delete
+    config.deleted_at = timezone.now()
+    config.save(update_fields=["deleted_at"])
+
+    ActivityLog.log(
+        "ngfw_config_deleted",
+        user=request.user,
+        config_id=config.id,
+        config_name=config.name,
+    )
+
+    logger.info(
+        "NGFW config deleted: user=%s config_id=%s name=%s",
+        request.user.email,
+        config.id,
+        config.name,
+    )
+
+    # Return JSON for API calls, redirect for HTML form submissions
+    if request.content_type == "application/json" or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"success": True})
+
+    messages.success(request, f"NGFW config '{config.name}' deleted.")
+    return redirect("mission_control:ngfw_configs")
+
+
+@login_required
+@require_GET
+def list_ngfw_configs(request):
+    """
+    Get user's NGFW configs for the launch dropdown.
+
+    Response (JSON):
+        - configs: List of {id, name, panorama_server}
+        Note: vm_auth_key is NOT included for security
+    """
+    configs = NGFWConfig.active_for_user(request.user)
+    config_list = [
+        {
+            "id": config.id,
+            "name": config.name,
+            "panorama_server": config.panorama_server,
+        }
+        for config in configs
+    ]
+    return JsonResponse({"configs": config_list})

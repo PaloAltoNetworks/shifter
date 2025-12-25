@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from .models import ActivityLog, AgentConfig, OperatingSystem, Range, UserProfile
+from .models import ActivityLog, AgentConfig, NGFWConfig, OperatingSystem, Range, UserProfile
 
 
 @admin.register(OperatingSystem)
@@ -36,16 +36,47 @@ class AgentConfigAdmin(admin.ModelAdmin):
     readonly_fields = ("s3_key", "sha256_hash", "file_size_bytes", "created_at")
 
 
+@admin.register(NGFWConfig)
+class NGFWConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "user",
+        "panorama_server",
+        "created_at",
+        "deleted_at",
+    )
+    list_filter = ("deleted_at", "created_at")
+    search_fields = ("name", "user__email", "panorama_server")
+    raw_id_fields = ("user",)
+    readonly_fields = ("created_at",)
+    fieldsets = (
+        (None, {"fields": ("user", "name")}),
+        (
+            "Panorama Configuration",
+            {
+                "fields": (
+                    "panorama_server",
+                    "vm_auth_key",
+                    "panorama_server_2",
+                    "template_stack",
+                    "device_group",
+                )
+            },
+        ),
+        ("Metadata", {"fields": ("created_at", "deleted_at")}),
+    )
+
+
 @admin.register(Range)
 class RangeAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "agent", "status", "ngfw_enabled", "created_at")
     list_filter = ("status", "ngfw_enabled", "created_at")
     search_fields = ("user__email", "agent__name")
-    raw_id_fields = ("user", "agent")
+    raw_id_fields = ("user", "agent", "ngfw_config")
     readonly_fields = ("ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")
     fieldsets = (
         (None, {"fields": ("user", "agent", "status")}),
-        ("NGFW", {"fields": ("ngfw_enabled", "ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")}),
+        ("NGFW", {"fields": ("ngfw_enabled", "ngfw_config", "ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")}),
         ("Timestamps", {"fields": ("created_at", "ready_at", "destroyed_at")}),
     )
 

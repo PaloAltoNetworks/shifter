@@ -577,6 +577,45 @@ def get_range_status(request):
     )
 
 
+def _get_scenario_instance_config(scenario: str, agent_os: str) -> list:
+    """
+    Get instance configuration for a scenario.
+
+    Args:
+        scenario: Scenario identifier (basic, ad_attack_lab)
+        agent_os: Operating system from agent (linux, windows)
+
+    Returns:
+        List of instance configuration dicts for the provisioner
+    """
+    # Map agent OS names to provisioner os_type
+    os_type = "windows" if agent_os.lower() == "windows" else "ubuntu"
+
+    scenarios = {
+        "basic": [
+            {"role": "attacker", "os_type": "kali", "instance_type": "t3.medium"},
+            {"role": "victim", "os_type": os_type, "instance_type": "t3.medium"},
+        ],
+        "ad_attack_lab": [
+            {"role": "attacker", "os_type": "kali", "instance_type": "t3.medium"},
+            {
+                "role": "dc",
+                "os_type": "windows",
+                "instance_type": "t3.large",
+                "dc_config": {"domain_name": "shifter.local", "netbios_name": "SHIFTER"},
+            },
+            {
+                "role": "victim",
+                "os_type": "windows",
+                "instance_type": "t3.medium",
+                "join_domain": True,
+            },
+        ],
+    }
+
+    return scenarios.get(scenario, scenarios["basic"])
+
+
 @login_required
 @require_POST
 def launch_range(request):
@@ -585,6 +624,7 @@ def launch_range(request):
 
     Request body (JSON):
         - agent_id: ID of agent to use
+        - scenario: Scenario type (basic, ad_attack_lab). Defaults to basic.
 
     Response (JSON):
         - success: true
@@ -607,6 +647,10 @@ def launch_range(request):
     if not agent_id:
         return JsonResponse({"error": "agent_id is required"}, status=400)
 
+    scenario = data.get("scenario", "basic")
+    if scenario not in ("basic", "ad_attack_lab"):
+        return JsonResponse({"error": "Invalid scenario"}, status=400)
+
     # Verify agent belongs to user and is not deleted
     agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).first()
     if not agent:
@@ -622,12 +666,16 @@ def launch_range(request):
             status=503,
         )
 
-    # Create range record with allocated subnet index
+    # Get instance configuration for scenario
+    instance_config = _get_scenario_instance_config(scenario, agent.os.name)
+
+    # Create range record with allocated subnet index and instance config
     range_obj = Range.objects.create(
         user=request.user,
         agent=agent,
         status=Range.Status.PROVISIONING,
         subnet_index=subnet_index,
+        instance_config=instance_config,
     )
 
     # Log activity
@@ -637,13 +685,15 @@ def launch_range(request):
         range_id=range_obj.id,
         agent_id=agent.id,
         agent_name=agent.name,
+        scenario=scenario,
     )
 
     logger.info(
-        "Range launched: user=%s range_id=%s agent=%s",
+        "Range launched: user=%s range_id=%s agent=%s scenario=%s",
         request.user.email,
         range_obj.id,
         agent.name,
+        scenario,
     )
 
     # Trigger provisioning via ECS Fargate

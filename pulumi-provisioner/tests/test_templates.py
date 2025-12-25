@@ -41,7 +41,7 @@ class TestDCTemplateRendering:
             "domain_name": "internal.shifter",
             "netbios_name": "SHIFTER",
             "dc_config_param_name": "/shifter/dev/range/42/dc-config",
-            "dsrm_password": "ComplexP@ss123!",
+            "dsrm_password": "TestDsrmP@ss!",  # nosec B105 - test fixture
         }
 
     def test_dc_template_renders_without_error(self, dc_template, dc_template_context):
@@ -368,7 +368,7 @@ class TestDCConfigJsonStructure:
             "domain_name": "internal.shifter",
             "netbios_name": "SHIFTER",
             "dc_config_param_name": "/shifter/dev/range/42/dc-config",
-            "dsrm_password": "ComplexP@ss123!",
+            "dsrm_password": "TestDsrmP@ss!",  # nosec B105 - test fixture
         }
 
     def test_dc_config_includes_domain_name(self, dc_template, dc_template_context):

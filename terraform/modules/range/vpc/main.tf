@@ -507,6 +507,34 @@ resource "aws_security_group_rule" "dc_https_egress" {
 }
 
 # ------------------------------------------------------------------------------
+# Kali/Victim Ingress from DC (for reverse shells and lateral movement)
+# ------------------------------------------------------------------------------
+
+resource "aws_security_group_rule" "kali_all_from_dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.dc[0].id
+  security_group_id        = aws_security_group.kali.id
+  description              = "All traffic from DC (reverse shells, lateral movement)"
+}
+
+resource "aws_security_group_rule" "victim_all_from_dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.dc[0].id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic from DC (lateral movement scenarios)"
+}
+
+# ------------------------------------------------------------------------------
 # VPC Flow Logs
 # ------------------------------------------------------------------------------
 

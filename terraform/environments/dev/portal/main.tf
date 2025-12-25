@@ -185,10 +185,10 @@ module "ec2" {
   root_volume_size = var.ec2_root_volume_size
 
   # ECS permissions for Pulumi provisioner
-  ecs_cluster_arn         = module.pulumi_provisioner.ecs_cluster_arn
-  ecs_task_definition_arn = module.pulumi_provisioner.task_definition_arn
-  ecs_task_role_arn       = module.pulumi_provisioner.ecs_task_role_arn
-  ecs_execution_role_arn  = module.pulumi_provisioner.ecs_execution_role_arn
+  ecs_cluster_arn            = module.pulumi_provisioner.ecs_cluster_arn
+  ecs_task_definition_family = module.pulumi_provisioner.task_definition_family
+  ecs_task_role_arn          = module.pulumi_provisioner.ecs_task_role_arn
+  ecs_execution_role_arn     = module.pulumi_provisioner.ecs_execution_role_arn
 
   # Autoscaling configuration
   enable_autoscaling   = var.enable_autoscaling

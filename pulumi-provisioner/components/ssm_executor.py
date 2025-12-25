@@ -10,12 +10,16 @@ This is a generic executor - it has no knowledge of what it's running.
 The setup logic is handled by SetupPlan implementations.
 """
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Optional
 
 import boto3
 from botocore.exceptions import ClientError
+
+# Logger for timing info - useful for tuning timeouts
+logger = logging.getLogger(__name__)
 
 
 # Custom exceptions for clear error handling
@@ -168,6 +172,8 @@ class SSMExecutor:
                     stderr = stderr[:max_output] + "\n... (truncated)"
 
                 if status == "Success":
+                    elapsed = time.time() - start_time
+                    logger.info(f"SSM command completed in {elapsed:.1f}s on {instance_id}")
                     return CommandResult(
                         success=True,
                         exit_code=exit_code,

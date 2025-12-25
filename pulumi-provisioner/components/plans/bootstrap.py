@@ -83,13 +83,13 @@ class BootstrapPlan:
         SetupStep(
             name="set_hostname",
             script=SET_HOSTNAME_SCRIPT,
-            timeout_seconds=60,
+            timeout_seconds=180,  # First command after boot - SSM agent needs time to initialize
             requires_reboot=True,  # Hostname change requires reboot
         ),
         SetupStep(
             name="configure_ssh",
             script=CONFIGURE_SSH_SCRIPT,
-            timeout_seconds=60,
+            timeout_seconds=180,  # First command after reboot
             requires_reboot=False,
         ),
     ]

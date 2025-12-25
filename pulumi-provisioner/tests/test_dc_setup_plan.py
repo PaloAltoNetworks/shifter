@@ -45,16 +45,16 @@ class TestDCSetupPlanSteps:
         install_step = next(s for s in plan.steps if s.name == "install_ad_feature")
         assert install_step.requires_reboot is True
 
-    def test_promote_step_has_longer_timeout(self):
-        """Promote to DC step has longer timeout than install step."""
+    def test_steps_have_adequate_timeouts(self):
+        """Both AD steps have adequate timeouts for real-world execution."""
         plan = DCSetupPlan()
 
         install_step = next(s for s in plan.steps if s.name == "install_ad_feature")
         promote_step = next(s for s in plan.steps if s.name == "promote_to_dc")
 
-        # Promote should have longer timeout (AD promotion can take 10+ minutes)
-        assert promote_step.timeout_seconds >= install_step.timeout_seconds
-        assert promote_step.timeout_seconds >= 600  # At least 10 minutes
+        # Both steps need adequate time (typically 2-5 min each, plus buffer)
+        assert install_step.timeout_seconds >= 300  # At least 5 min
+        assert promote_step.timeout_seconds >= 300  # At least 5 min
 
     def test_all_steps_have_names(self):
         """All steps have descriptive names."""

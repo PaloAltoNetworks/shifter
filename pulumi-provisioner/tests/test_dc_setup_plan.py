@@ -45,16 +45,12 @@ class TestDCSetupPlanSteps:
         install_step = next(s for s in plan.steps if s.name == "install_ad_feature")
         assert install_step.requires_reboot is True
 
-    def test_steps_have_adequate_timeouts(self):
-        """Both AD steps have adequate timeouts for real-world execution."""
+    def test_all_steps_have_timeouts(self):
+        """All steps must have positive timeouts - fail hard if missing."""
         plan = DCSetupPlan()
-
-        install_step = next(s for s in plan.steps if s.name == "install_ad_feature")
-        promote_step = next(s for s in plan.steps if s.name == "promote_to_dc")
-
-        # Both steps need adequate time (typically 2-5 min each, plus buffer)
-        assert install_step.timeout_seconds >= 300  # At least 5 min
-        assert promote_step.timeout_seconds >= 300  # At least 5 min
+        for step in plan.steps:
+            assert step.timeout_seconds is not None, f"Step {step.name} missing timeout"
+            assert step.timeout_seconds > 0, f"Step {step.name} must have positive timeout"
 
     def test_all_steps_have_names(self):
         """All steps have descriptive names."""

@@ -52,7 +52,7 @@ class InstanceConfig:
     agent_presigned_url: Optional[str] = None  # Presigned URL for agent download
     dc_config: Optional[dict] = None  # {"domain_name": "...", "netbios_name": "..."}
     join_domain: bool = False  # Whether this instance should join a domain
-    dc_config_secret_arn: Optional[str] = None  # ARN for domain members to read DC config
+    dc_config_param_name: Optional[str] = None  # SSM parameter path for DC config
 
 
 @dataclass

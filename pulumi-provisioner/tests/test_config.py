@@ -757,25 +757,25 @@ class TestDCConfiguration:
         )
         assert config.join_domain is False
 
-    def test_instance_config_supports_dc_config_secret_arn(self):
-        """InstanceConfig should support dc_config_secret_arn for domain members."""
+    def test_instance_config_supports_dc_config_param_name(self):
+        """InstanceConfig should support dc_config_param_name for domain members."""
         config = InstanceConfig(
             role="victim",
             os_type="windows",
             instance_type="t3.medium",
             join_domain=True,
-            dc_config_secret_arn="arn:aws:secretsmanager:us-east-2:123456789012:secret:test-dc-config",
+            dc_config_param_name="/shifter/dev/range/42/dc-config",
         )
-        assert config.dc_config_secret_arn == "arn:aws:secretsmanager:us-east-2:123456789012:secret:test-dc-config"
+        assert config.dc_config_param_name == "/shifter/dev/range/42/dc-config"
 
-    def test_instance_config_dc_config_secret_arn_optional(self):
-        """dc_config_secret_arn should be optional (None by default)."""
+    def test_instance_config_dc_config_param_name_optional(self):
+        """dc_config_param_name should be optional (None by default)."""
         config = InstanceConfig(
             role="victim",
             os_type="windows",
             instance_type="t3.medium",
         )
-        assert config.dc_config_secret_arn is None
+        assert config.dc_config_param_name is None
 
 
 class TestLoadConfigDCSupport:

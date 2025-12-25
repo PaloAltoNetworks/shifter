@@ -591,23 +591,23 @@ def _get_scenario_instance_config(scenario: str, agent_os: str) -> list:
     # Map agent OS names to provisioner os_type
     os_type = "windows" if agent_os.lower() == "windows" else "ubuntu"
 
+    # Instance types are not specified here - the provisioner uses
+    # its catalog defaults from environment variables
     scenarios = {
         "basic": [
-            {"role": "attacker", "os_type": "kali", "instance_type": "t3.medium"},
-            {"role": "victim", "os_type": os_type, "instance_type": "t3.medium"},
+            {"role": "attacker", "os_type": "kali"},
+            {"role": "victim", "os_type": os_type},
         ],
         "ad_attack_lab": [
-            {"role": "attacker", "os_type": "kali", "instance_type": "t3.medium"},
+            {"role": "attacker", "os_type": "kali"},
             {
                 "role": "dc",
                 "os_type": "windows",
-                "instance_type": "t3.large",
                 "dc_config": {"domain_name": "shifter.local", "netbios_name": "SHIFTER"},
             },
             {
                 "role": "victim",
                 "os_type": "windows",
-                "instance_type": "t3.medium",
                 "join_domain": True,
             },
         ],

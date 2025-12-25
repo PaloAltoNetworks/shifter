@@ -262,18 +262,56 @@ resource "aws_iam_role_policy" "ssm_parameters" {
   name = "ssm-parameters"
   role = aws_iam_role.ecs_task.id
 
+  # Permissions based on AWS docs for SSM Parameter Store:
+  # https://docs.aws.amazon.com/systems-manager/latest/userguide/sysman-paramstore-access.html
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "ssm:PutParameter",
-        "ssm:GetParameter",
-        "ssm:DeleteParameter",
-        "ssm:AddTagsToResource"
-      ]
-      Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/${var.environment}/range/*"
-    }]
+    Statement = [
+      {
+        Sid    = "SSMParameterOperations"
+        Effect = "Allow"
+        Action = [
+          # Create/Update
+          "ssm:PutParameter",
+          # Read
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParameterHistory",
+          # Delete
+          "ssm:DeleteParameter",
+          # Tagging
+          "ssm:AddTagsToResource",
+          "ssm:ListTagsForResource",
+          "ssm:RemoveTagsFromResource"
+        ]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/${var.environment}/range/*"
+      },
+      {
+        # DescribeParameters required by Pulumi/Terraform for metadata lookup
+        # Must be * resource per AWS API requirements
+        Sid      = "SSMDescribeParameters"
+        Effect   = "Allow"
+        Action   = "ssm:DescribeParameters"
+        Resource = "*"
+      },
+      {
+        # KMS permissions for SecureString parameters
+        # Uses AWS managed key for SSM via service condition
+        Sid    = "KMSForSecureStringParameters"
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${local.region}.amazonaws.com"
+          }
+        }
+      }
+    ]
   })
 }
 

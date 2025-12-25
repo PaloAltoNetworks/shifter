@@ -1,18 +1,14 @@
 <powershell>
-# Windows Domain Controller setup script
-# Note: persist tag enables re-run on every boot (EC2Launch v2)
-# This runs during instance boot via EC2 user data
+# Windows Domain Controller bootstrap script
+# This ONLY sets up basic instance configuration (hostname, SSH)
+# AD DS installation is handled separately via SSM Run Command orchestration
 #
 # Template variables:
-#   hostname           - Computer name for the DC
-#   public_key         - SSH public key for Administrator access
-#   domain_name        - FQDN for the AD domain (e.g., internal.shifter)
-#   netbios_name       - NetBIOS name for the domain (e.g., SHIFTER)
-#   dc_config_param_name - SSM Parameter Store path for DC config (e.g., /shifter/dev/range/42/dc-config)
-#   dsrm_password      - Directory Services Restore Mode password
+#   hostname    - Computer name for the DC
+#   public_key  - SSH public key for Administrator access
 
 $ErrorActionPreference = "Stop"
-$LogFile = "C:\Windows\Temp\dc-setup.log"
+$LogFile = "C:\Windows\Temp\dc-bootstrap.log"
 
 function Log-Message {
     param([string]$Message)
@@ -21,90 +17,15 @@ function Log-Message {
     Write-Host $Message
 }
 
-function Generate-SecurePassword {
-    # Generate a cryptographically secure random password
-    # Uses .NET cryptographic random number generator
-    param([int]$Length = 24)
-
-    $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
-    $bytes = New-Object byte[] $Length
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    $rng.GetBytes($bytes)
-
-    $password = ""
-    foreach ($byte in $bytes) {
-        $password += $chars[$byte % $chars.Length]
-    }
-
-    # Ensure complexity requirements: at least one of each type
-    $password = $password.Substring(0, $Length - 4)
-    $password += "Aa1!"
-
-    return $password
-}
-
-function Test-PendingReboot {
-    # Check if a reboot is pending (common after sysprep or Windows updates)
-    $rebootPending = $false
-
-    # Check Component Based Servicing
-    if (Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending" -ErrorAction SilentlyContinue) {
-        $rebootPending = $true
-    }
-
-    # Check Windows Update
-    if (Get-Item "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired" -ErrorAction SilentlyContinue) {
-        $rebootPending = $true
-    }
-
-    # Check PendingFileRenameOperations
-    $pfro = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
-    if ($pfro.PendingFileRenameOperations) {
-        $rebootPending = $true
-    }
-
-    return $rebootPending
-}
-
-# Create a marker file to track script progress across reboots
-$ProgressFile = "C:\Windows\Temp\dc-setup-progress.txt"
-
-# Check if we're continuing after a sysprep reboot
-$setupPhase = "initial"
-if (Test-Path $ProgressFile) {
-    $setupPhase = Get-Content $ProgressFile -ErrorAction SilentlyContinue
-}
-
-# Exit early if setup is already complete (prevents re-running on every boot)
-if ($setupPhase -eq "complete") {
-    Log-Message "DC setup already complete, exiting."
-    exit 0
-}
-
 try {
-    Log-Message "Starting Windows Domain Controller setup (phase: $setupPhase)..."
+    Log-Message "Starting Windows DC bootstrap..."
 
     # --------------------------------------------------------------------------
-    # Handle pending reboot from sysprep (script will re-run via persist tag)
-    # --------------------------------------------------------------------------
-    if ($setupPhase -eq "initial" -and (Test-PendingReboot)) {
-        Log-Message "Pending reboot detected (likely from sysprep). Rebooting first..."
-        "post-sysprep-reboot" | Out-File -FilePath $ProgressFile -Encoding UTF8
-        Restart-Computer -Force
-        exit 0
-    }
-
-    # Log continuation after reboot
-    if ($setupPhase -ne "initial") {
-        Log-Message "Continuing setup after reboot..."
-    }
-
-    # --------------------------------------------------------------------------
-    # 1. Set hostname for AD visibility
+    # 1. Set hostname
     # --------------------------------------------------------------------------
     Log-Message "Setting hostname to {{ hostname }}..."
     Rename-Computer -NewName "{{ hostname }}" -Force
-    Log-Message "Hostname set (reboot will apply after DC promotion)"
+    Log-Message "Hostname set (will take effect on reboot)"
 
     # --------------------------------------------------------------------------
     # 2. Configure OpenSSH Server for Terminal UI access
@@ -123,175 +44,10 @@ try {
     Log-Message "SSH key authentication configured"
     {% endif %}
 
-    # --------------------------------------------------------------------------
-    # 3. Install AD DS Role (skip if already installed)
-    # --------------------------------------------------------------------------
-    $addsFeature = Get-WindowsFeature -Name AD-Domain-Services
-    if ($addsFeature.Installed) {
-        Log-Message "AD DS role already installed, skipping..."
-    } else {
-        Log-Message "Installing Active Directory Domain Services role..."
-        $installResult = Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools -ErrorAction Stop
-        if ($installResult.RestartNeeded -eq "Yes") {
-            Log-Message "AD DS role installed but requires reboot before promotion..."
-            "post-adds-install" | Out-File -FilePath $ProgressFile -Encoding UTF8
-            Restart-Computer -Force
-            exit 0
-        }
-        Log-Message "AD DS role installed"
-    }
-
-    # --------------------------------------------------------------------------
-    # 4. Generate domain admin password
-    # --------------------------------------------------------------------------
-    Log-Message "Generating domain admin password..."
-    $DomainAdminPassword = Generate-SecurePassword -Length 24
-    # Note: Password is NOT logged for security
-
-    # --------------------------------------------------------------------------
-    # 5. Promote to Domain Controller (skip if already a DC)
-    # --------------------------------------------------------------------------
-    # Check if server is already a DC
-    try {
-        $domain = Get-ADDomain -ErrorAction Stop
-        Log-Message "Server is already a Domain Controller for $($domain.DNSRoot). Exiting main script."
-        # Post-reboot scheduled task will handle the rest
-        exit 0
-    } catch {
-        Log-Message "Server is not yet a DC, proceeding with promotion..."
-    }
-
-    Log-Message "Promoting server to Domain Controller..."
-    Log-Message "Domain: {{ domain_name }}"
-    Log-Message "NetBIOS: {{ netbios_name }}"
-
-    $DsrmSecurePassword = ConvertTo-SecureString "{{ dsrm_password }}" -AsPlainText -Force
-
-    # Install-ADDSForest will reboot the server automatically
-    # We need to schedule a post-reboot script to complete setup
-    $PostRebootScript = @"
-
-`$ErrorActionPreference = "Stop"
-`$LogFile = "C:\Windows\Temp\dc-setup.log"
-
-function Log-Message {
-    param([string]`$Message)
-    `$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "`$timestamp - `$Message" | Out-File -FilePath `$LogFile -Append
-    Write-Host `$Message
-}
-
-try {
-    Log-Message "Post-reboot DC configuration starting..."
-
-    # Wait for AD DS to be fully operational
-    Log-Message "Waiting for AD DS to be ready..."
-    `$maxAttempts = 30
-    `$attempt = 0
-    while (`$attempt -lt `$maxAttempts) {
-        try {
-            Get-ADDomain -ErrorAction Stop | Out-Null
-            Log-Message "AD DS is ready"
-            break
-        } catch {
-            `$attempt++
-            Log-Message "AD DS not ready yet (attempt `$attempt/`$maxAttempts)..."
-            Start-Sleep -Seconds 10
-        }
-    }
-
-    if (`$attempt -eq `$maxAttempts) {
-        throw "AD DS did not become ready within timeout"
-    }
-
-    # Get DC IP address
-    `$DcIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
-        `$_.InterfaceAlias -notlike "*Loopback*" -and
-        `$_.IPAddress -notlike "169.254.*"
-    } | Select-Object -First 1).IPAddress
-
-    Log-Message "DC IP Address: `$DcIp"
-
-    # Configure DNS forwarder to AWS VPC DNS
-    Log-Message "Configuring DNS forwarder..."
-    Add-DnsServerForwarder -IPAddress "169.254.169.253" -ErrorAction SilentlyContinue
-    Log-Message "DNS forwarder configured for AWS VPC"
-
-    # Read the domain admin password from the temp file
-    `$DomainAdminPassword = Get-Content "C:\Windows\Temp\domain_admin_pw.txt" -ErrorAction Stop
-
-    # Build DC config JSON
-    `$DcConfig = @{
-        domain_name = "{{ domain_name }}"
-        netbios_name = "{{ netbios_name }}"
-        dc_ip = `$DcIp
-        dc_hostname = "{{ hostname }}"
-        domain_admin_username = "Administrator"
-        domain_admin_password = `$DomainAdminPassword
-        dns_servers = @(`$DcIp, "169.254.169.253")
-        forest_functional_level = "WinThreshold"
-        domain_functional_level = "WinThreshold"
-    } | ConvertTo-Json -Compress
-
-    # Write config to SSM Parameter Store
-    Log-Message "Writing DC config to SSM Parameter Store..."
-    aws ssm put-parameter ``
-        --name "{{ dc_config_param_name }}" ``
-        --value `$DcConfig ``
-        --type SecureString ``
-        --overwrite ``
-        --region (Invoke-RestMethod -Uri http://169.254.169.254/latest/meta-data/placement/region)
-
-    Log-Message "DC config written to SSM Parameter Store"
-
-    # Clean up sensitive temp file
-    Remove-Item "C:\Windows\Temp\domain_admin_pw.txt" -Force -ErrorAction SilentlyContinue
-
-    # Remove the scheduled task
-    Unregister-ScheduledTask -TaskName "DC-PostRebootConfig" -Confirm:`$false -ErrorAction SilentlyContinue
-
-    # Mark setup as complete so main script doesn't re-run
-    "complete" | Out-File -FilePath "C:\Windows\Temp\dc-setup-progress.txt" -Encoding UTF8
-
-    Log-Message "Domain Controller setup complete!"
-
-} catch {
-    Log-Message "ERROR in post-reboot script: `$_"
-    throw
-}
-"@
-
-    # Save post-reboot script
-    $PostRebootScript | Out-File -FilePath "C:\Windows\Temp\dc-post-reboot.ps1" -Encoding UTF8
-
-    # Save domain admin password temporarily (will be deleted after use)
-    $DomainAdminPassword | Out-File -FilePath "C:\Windows\Temp\domain_admin_pw.txt" -Encoding UTF8
-    icacls "C:\Windows\Temp\domain_admin_pw.txt" /inheritance:r /grant "SYSTEM:F" /grant "Administrators:F"
-
-    # Create scheduled task to run post-reboot script
-    Log-Message "Creating post-reboot scheduled task..."
-    $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\Windows\Temp\dc-post-reboot.ps1"
-    $Trigger = New-ScheduledTaskTrigger -AtStartup
-    $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName "DC-PostRebootConfig" -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force
-
-    Log-Message "Starting AD DS Forest installation..."
-
-    # This will trigger an automatic reboot
-    Install-ADDSForest `
-        -DomainName "{{ domain_name }}" `
-        -DomainNetbiosName "{{ netbios_name }}" `
-        -SafeModeAdministratorPassword $DsrmSecurePassword `
-        -InstallDns `
-        -NoRebootOnCompletion:$false `
-        -Force
-
-    # Note: Server will reboot here, post-reboot script will complete setup
+    Log-Message "DC bootstrap complete. AD DS setup will be orchestrated via SSM."
 
 } catch {
     Log-Message "ERROR: $_"
     throw
 }
 </powershell>
-<persist>true</persist>

@@ -403,8 +403,12 @@ class TestDCInstanceComponent:
             assert len(component.dsrm_password) >= 16
 
     @pulumi.runtime.test
-    def test_dc_instance_user_data_includes_dc_params(self, temp_templates):
-        """DC user data should include domain configuration."""
+    def test_dc_instance_stores_config_for_orchestration(self, temp_templates):
+        """DC instance should store config for SSM orchestration.
+
+        NOTE: DC user data is now a minimal bootstrap script.
+        AD DS setup (domain_name, netbios_name) is handled via SSM.
+        """
         from components.instance import InstanceComponent
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
@@ -423,13 +427,23 @@ class TestDCInstanceComponent:
                 dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
             )
 
+            # DC config should be stored on component for SSM orchestration
+            assert component.domain_name == "internal.shifter"
+            assert component.netbios_name == "SHIFTER"
+            assert component.dsrm_password is not None
+            assert component.domain_admin_password is not None
+            assert component.hostname == "shifter-dc-42"
+
+            # User data should be bootstrap (hostname, SSH) not AD DS setup
             def check_user_data(user_data_b64):
                 import base64
 
                 user_data = base64.b64decode(user_data_b64).decode()
-                assert "internal.shifter" in user_data
-                assert "SHIFTER" in user_data
-                assert "/shifter/dev/range/42/dc-config" in user_data
+                # Bootstrap template should have hostname
+                assert "shifter-dc-42" in user_data
+                # Bootstrap template should NOT have AD DS setup
+                assert "Install-WindowsFeature" not in user_data
+                assert "Install-ADDSForest" not in user_data
 
             component.instance.user_data_base64.apply(check_user_data)
 

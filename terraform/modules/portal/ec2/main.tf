@@ -6,6 +6,9 @@
 # - IAM role and instance profile (ECR pull, Secrets Manager read, SSM)
 # - CloudWatch log group for container logs
 
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
 locals {
   common_tags = merge(var.tags, {
     Module = "ec2"
@@ -175,7 +178,8 @@ resource "aws_iam_role_policy" "ecs_run_task" {
         Action = [
           "ecs:RunTask"
         ]
-        Resource = var.ecs_task_definition_arn
+        # Allow all revisions of the task definition (CI/CD creates new revisions)
+        Resource = "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task-definition/${var.ecs_task_definition_family}:*"
       },
       {
         Sid    = "ManageTasks"

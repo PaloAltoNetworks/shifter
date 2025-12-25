@@ -1,5 +1,6 @@
 <powershell>
 # Windows Domain Controller setup script
+# Note: persist tag enables re-run on every boot (EC2Launch v2)
 # This runs during instance boot via EC2 user data
 #
 # Template variables:
@@ -42,8 +43,61 @@ function Generate-SecurePassword {
     return $password
 }
 
+function Test-PendingReboot {
+    # Check if a reboot is pending (common after sysprep or Windows updates)
+    $rebootPending = $false
+
+    # Check Component Based Servicing
+    if (Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending" -ErrorAction SilentlyContinue) {
+        $rebootPending = $true
+    }
+
+    # Check Windows Update
+    if (Get-Item "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired" -ErrorAction SilentlyContinue) {
+        $rebootPending = $true
+    }
+
+    # Check PendingFileRenameOperations
+    $pfro = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+    if ($pfro.PendingFileRenameOperations) {
+        $rebootPending = $true
+    }
+
+    return $rebootPending
+}
+
+# Create a marker file to track script progress across reboots
+$ProgressFile = "C:\Windows\Temp\dc-setup-progress.txt"
+
+# Check if we're continuing after a sysprep reboot
+$setupPhase = "initial"
+if (Test-Path $ProgressFile) {
+    $setupPhase = Get-Content $ProgressFile -ErrorAction SilentlyContinue
+}
+
+# Exit early if setup is already complete (prevents re-running on every boot)
+if ($setupPhase -eq "complete") {
+    Log-Message "DC setup already complete, exiting."
+    exit 0
+}
+
 try {
-    Log-Message "Starting Windows Domain Controller setup..."
+    Log-Message "Starting Windows Domain Controller setup (phase: $setupPhase)..."
+
+    # --------------------------------------------------------------------------
+    # Handle pending reboot from sysprep (script will re-run via persist tag)
+    # --------------------------------------------------------------------------
+    if ($setupPhase -eq "initial" -and (Test-PendingReboot)) {
+        Log-Message "Pending reboot detected (likely from sysprep). Rebooting first..."
+        "post-sysprep-reboot" | Out-File -FilePath $ProgressFile -Encoding UTF8
+        Restart-Computer -Force
+        exit 0
+    }
+
+    # Log continuation after reboot
+    if ($setupPhase -ne "initial") {
+        Log-Message "Continuing setup after reboot..."
+    }
 
     # --------------------------------------------------------------------------
     # 1. Set hostname for AD visibility
@@ -70,11 +124,22 @@ try {
     {% endif %}
 
     # --------------------------------------------------------------------------
-    # 3. Install AD DS Role
+    # 3. Install AD DS Role (skip if already installed)
     # --------------------------------------------------------------------------
-    Log-Message "Installing Active Directory Domain Services role..."
-    Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
-    Log-Message "AD DS role installed"
+    $addsFeature = Get-WindowsFeature -Name AD-Domain-Services
+    if ($addsFeature.Installed) {
+        Log-Message "AD DS role already installed, skipping..."
+    } else {
+        Log-Message "Installing Active Directory Domain Services role..."
+        $installResult = Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools -ErrorAction Stop
+        if ($installResult.RestartNeeded -eq "Yes") {
+            Log-Message "AD DS role installed but requires reboot before promotion..."
+            "post-adds-install" | Out-File -FilePath $ProgressFile -Encoding UTF8
+            Restart-Computer -Force
+            exit 0
+        }
+        Log-Message "AD DS role installed"
+    }
 
     # --------------------------------------------------------------------------
     # 4. Generate domain admin password
@@ -84,8 +149,18 @@ try {
     # Note: Password is NOT logged for security
 
     # --------------------------------------------------------------------------
-    # 5. Promote to Domain Controller
+    # 5. Promote to Domain Controller (skip if already a DC)
     # --------------------------------------------------------------------------
+    # Check if server is already a DC
+    try {
+        $domain = Get-ADDomain -ErrorAction Stop
+        Log-Message "Server is already a Domain Controller for $($domain.DNSRoot). Exiting main script."
+        # Post-reboot scheduled task will handle the rest
+        exit 0
+    } catch {
+        Log-Message "Server is not yet a DC, proceeding with promotion..."
+    }
+
     Log-Message "Promoting server to Domain Controller..."
     Log-Message "Domain: {{ domain_name }}"
     Log-Message "NetBIOS: {{ netbios_name }}"
@@ -175,6 +250,9 @@ try {
     # Remove the scheduled task
     Unregister-ScheduledTask -TaskName "DC-PostRebootConfig" -Confirm:`$false -ErrorAction SilentlyContinue
 
+    # Mark setup as complete so main script doesn't re-run
+    "complete" | Out-File -FilePath "C:\Windows\Temp\dc-setup-progress.txt" -Encoding UTF8
+
     Log-Message "Domain Controller setup complete!"
 
 } catch {
@@ -216,3 +294,4 @@ try {
     throw
 }
 </powershell>
+<persist>true</persist>

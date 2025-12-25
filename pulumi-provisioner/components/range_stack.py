@@ -187,12 +187,13 @@ class RangeStack(pulumi.ComponentResource):
 
             self.instances.append(instance)
 
-        # Build instance output list (use tags from instances since order may differ from config)
+        # Build instance output list using stored role/os_type to avoid closure issues
+        # (using .apply() in a loop would capture loop variable by reference)
         instance_outputs = []
         for inst in self.instances:
             instance_outputs.append({
-                "role": inst.instance.tags.apply(lambda t: t.get("shifter:role", "unknown")),
-                "os": inst.instance.tags.apply(lambda t: t.get("shifter:os", "unknown")),
+                "role": inst.role,
+                "os": inst.os_type,
                 "instance_id": inst.instance_id,
                 "private_ip": inst.private_ip,
                 "ssh_key_secret_arn": inst.ssh_key_secret_arn,
@@ -220,9 +221,8 @@ class RangeStack(pulumi.ComponentResource):
             "subnet_cidr": self.subnet_cidr,
             "instances": [
                 {
-                    "role": inst.instance.tags.apply(
-                        lambda t: t.get("shifter:role", "unknown")
-                    ),
+                    "role": inst.role,
+                    "os": inst.os_type,
                     "instance_id": inst.instance_id,
                     "private_ip": inst.private_ip,
                     "ssh_key_secret_arn": inst.ssh_key_secret_arn,

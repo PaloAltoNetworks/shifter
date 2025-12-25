@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.19] - 2025-12-24
+- Add TDD planning Claude Code skill
+
 ## [0.7.18] - 2025-12-24
 
 ### Added

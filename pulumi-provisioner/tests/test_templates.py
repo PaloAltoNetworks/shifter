@@ -338,3 +338,212 @@ class TestDomainMemberTemplateRendering:
 
         # Should still work (domain join is primary function)
         assert "Add-Computer" in result, "Template should still join domain"
+
+
+# =============================================================================
+# DC Template SSM Parameter JSON Structure Tests
+# =============================================================================
+
+
+class TestDCConfigJsonStructure:
+    """Tests for DC config JSON structure written to SSM.
+
+    The DC writes a JSON object to SSM that domain members read.
+    These tests verify all required fields are present in the JSON.
+    """
+
+    @pytest.fixture
+    def dc_template(self):
+        """Load the DC template."""
+        templates_dir = Path(__file__).parent.parent / "templates"
+        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
+        return env.get_template("dc_windows.ps1.j2")
+
+    @pytest.fixture
+    def dc_template_context(self):
+        """Standard context for DC template tests."""
+        return {
+            "hostname": "DC1",
+            "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost",
+            "domain_name": "internal.shifter",
+            "netbios_name": "SHIFTER",
+            "dc_config_param_name": "/shifter/dev/range/42/dc-config",
+            "dsrm_password": "ComplexP@ss123!",
+        }
+
+    def test_dc_config_includes_domain_name(self, dc_template, dc_template_context):
+        """DC config JSON must include domain_name field."""
+        result = dc_template.render(**dc_template_context)
+
+        # The JSON object being built should include domain_name
+        assert "domain_name" in result, "DC config JSON must include domain_name field"
+
+    def test_dc_config_includes_netbios_name(self, dc_template, dc_template_context):
+        """DC config JSON must include netbios_name field."""
+        result = dc_template.render(**dc_template_context)
+
+        assert "netbios_name" in result, "DC config JSON must include netbios_name field"
+
+    def test_dc_config_includes_dc_ip(self, dc_template, dc_template_context):
+        """DC config JSON must include dc_ip field."""
+        result = dc_template.render(**dc_template_context)
+
+        assert "dc_ip" in result, "DC config JSON must include dc_ip field"
+
+    def test_dc_config_includes_domain_admin_password(self, dc_template, dc_template_context):
+        """DC config JSON must include domain_admin_password field."""
+        result = dc_template.render(**dc_template_context)
+
+        assert "domain_admin_password" in result, "DC config JSON must include domain_admin_password"
+
+    def test_dc_config_includes_domain_admin_username(self, dc_template, dc_template_context):
+        """DC config JSON must include domain_admin_username field."""
+        result = dc_template.render(**dc_template_context)
+
+        assert "domain_admin_username" in result, "DC config JSON must include domain_admin_username"
+
+    def test_dc_config_uses_convert_to_json(self, dc_template, dc_template_context):
+        """DC config should use ConvertTo-Json for proper JSON serialization."""
+        result = dc_template.render(**dc_template_context)
+
+        assert "ConvertTo-Json" in result, "DC config must use ConvertTo-Json for serialization"
+
+
+# =============================================================================
+# Domain Member Template Command Ordering Tests
+# =============================================================================
+
+
+class TestDomainMemberCommandOrdering:
+    """Tests for critical command ordering in domain member template.
+
+    The order of operations matters:
+    1. SSH setup (early, for debugging access)
+    2. Read DC config from SSM (with retry)
+    3. Set DNS to DC IP (required before domain join)
+    4. Schedule post-reboot agent task (before domain join triggers reboot)
+    5. Join domain with Add-Computer -Restart (LAST, triggers reboot)
+
+    If these are out of order, domain join will fail.
+    """
+
+    @pytest.fixture
+    def domain_member_template(self):
+        """Load the domain member template."""
+        templates_dir = Path(__file__).parent.parent / "templates"
+        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
+        return env.get_template("domain_member_windows.ps1.j2")
+
+    @pytest.fixture
+    def domain_member_context(self):
+        """Standard context for domain member template tests."""
+        return {
+            "hostname": "WORKSTATION1",
+            "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost",
+            "dc_config_param_name": "/shifter/dev/range/42/dc-config",
+            "presigned_url": "https://s3.amazonaws.com/bucket/agent.msi?signature=xxx",
+            "agent_s3_key": "agents/xdr-agent.msi",
+        }
+
+    def test_dns_set_before_domain_join(
+        self, domain_member_template, domain_member_context
+    ):
+        """DNS must be configured BEFORE Add-Computer (domain join requires DNS)."""
+        result = domain_member_template.render(**domain_member_context)
+
+        dns_pos = result.find("Set-DnsClientServerAddress")
+        join_pos = result.find("Add-Computer")
+
+        assert dns_pos != -1, "Template must set DNS"
+        assert join_pos != -1, "Template must join domain"
+        assert dns_pos < join_pos, "DNS must be configured BEFORE domain join"
+
+    def test_dc_config_read_before_dns_set(
+        self, domain_member_template, domain_member_context
+    ):
+        """DC config must be read from SSM BEFORE setting DNS (need DC IP)."""
+        result = domain_member_template.render(**domain_member_context)
+
+        ssm_pos = result.find("aws ssm get-parameter")
+        dns_pos = result.find("Set-DnsClientServerAddress")
+
+        assert ssm_pos != -1, "Template must read DC config from SSM"
+        assert dns_pos != -1, "Template must set DNS"
+        assert ssm_pos < dns_pos, "SSM read must happen BEFORE DNS configuration"
+
+    def test_scheduled_task_before_domain_join(
+        self, domain_member_template, domain_member_context
+    ):
+        """Scheduled task must be registered BEFORE Add-Computer (join triggers reboot)."""
+        result = domain_member_template.render(**domain_member_context)
+
+        task_pos = result.find("Register-ScheduledTask")
+        join_pos = result.find("Add-Computer")
+
+        assert task_pos != -1, "Template must register scheduled task"
+        assert join_pos != -1, "Template must join domain"
+        assert task_pos < join_pos, "Scheduled task must be registered BEFORE domain join"
+
+    def test_ssh_setup_before_dc_config_read(
+        self, domain_member_template, domain_member_context
+    ):
+        """SSH should be configured early for debugging access if later steps fail."""
+        result = domain_member_template.render(**domain_member_context)
+
+        ssh_pos = result.find("Start-Service sshd")
+        ssm_pos = result.find("aws ssm get-parameter")
+
+        assert ssh_pos != -1, "Template must start SSH service"
+        assert ssm_pos != -1, "Template must read DC config"
+        assert ssh_pos < ssm_pos, "SSH should be set up early for debugging"
+
+    def test_add_computer_is_last_operation(
+        self, domain_member_template, domain_member_context
+    ):
+        """Add-Computer with -Restart must be the final operation (triggers reboot)."""
+        result = domain_member_template.render(**domain_member_context)
+
+        join_pos = result.find("Add-Computer")
+        end_pos = result.find("</powershell>")
+
+        # Find any other significant operations after Add-Computer
+        after_join = result[join_pos:end_pos]
+
+        # The only things after Add-Computer should be:
+        # - The rest of the Add-Computer command itself
+        # - Comments
+        # - Closing braces for try/catch
+        # - Empty lines
+
+        # Check that there's no other major operation
+        forbidden_after = [
+            "Invoke-WebRequest",  # No downloads after join
+            "Set-DnsClientServerAddress",  # No DNS changes after join
+            "Register-ScheduledTask",  # No new tasks after join
+            "aws ssm",  # No SSM operations after join
+        ]
+
+        for forbidden in forbidden_after:
+            # Skip if it's part of the Add-Computer line or in a comment
+            remaining = result[join_pos + len("Add-Computer"):end_pos]
+            if forbidden in remaining:
+                # Check if it's in a comment context (rough check)
+                forbidden_pos = remaining.find(forbidden)
+                line_start = remaining.rfind("\n", 0, forbidden_pos)
+                line = remaining[line_start:forbidden_pos]
+                if "#" not in line and "Note:" not in line:
+                    pytest.fail(f"'{forbidden}' should not appear after Add-Computer")
+
+    def test_domain_join_uses_restart_flag(
+        self, domain_member_template, domain_member_context
+    ):
+        """Add-Computer must use -Restart flag to trigger reboot."""
+        result = domain_member_template.render(**domain_member_context)
+
+        # Find the Add-Computer command and verify -Restart is present
+        join_pos = result.find("Add-Computer")
+        assert join_pos != -1, "Template must have Add-Computer"
+
+        # Look at the Add-Computer command block (next ~200 chars)
+        add_computer_block = result[join_pos:join_pos + 200]
+        assert "-Restart" in add_computer_block, "Add-Computer must use -Restart flag"

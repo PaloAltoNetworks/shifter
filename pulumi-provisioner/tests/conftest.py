@@ -392,21 +392,21 @@ Write-Host "Windows setup complete"
 """
         )
 
-        # DC template for Domain Controller tests
+        # DC bootstrap template (AD DS setup is via SSM orchestration)
         dc_template = templates_path / "dc_windows.ps1.j2"
         dc_template.write_text(
             """<powershell>
 $ErrorActionPreference = "Stop"
 Write-Host "Setting hostname to {{ hostname }}..."
 Rename-Computer -NewName "{{ hostname }}" -Force
-Write-Host "Domain: {{ domain_name }}"
-Write-Host "NetBIOS: {{ netbios_name }}"
-Write-Host "DC Config Param: {{ dc_config_param_name }}"
-Write-Host "DSRM Password configured"
-Install-WindowsFeature -Name AD-Domain-Services
-Install-ADDSForest -DomainName "{{ domain_name }}" -DomainNetbiosName "{{ netbios_name }}"
-aws ssm put-parameter --name "{{ dc_config_param_name }}" --type SecureString --overwrite
-Write-Host "DC setup complete"
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+{% if public_key %}
+$sshDir = "C:\\ProgramData\\ssh"
+if (!(Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir -Force }
+"{{ public_key }}" | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
+{% endif %}
+Write-Host "DC bootstrap complete. AD DS setup will be orchestrated via SSM."
 </powershell>
 """
         )

@@ -74,8 +74,11 @@ ECS Fargate task that provisions/destroys range infrastructure.
 | `main.py` | Entrypoint, DB connection, Pulumi orchestration |
 | `config.py` | Stack configuration from env/DB |
 | `catalog/instances.py` | Instance type definitions |
-| `components/` | Reusable Pulumi components |
-| `templates/` | Cloud-init user data (Jinja2) |
+| `components/instance.py` | EC2 creation, SSH keys, DC orchestration |
+| `components/ssm_executor.py` | Generic SSM Run Command execution |
+| `components/setup_orchestrator.py` | Runs setup plans step-by-step |
+| `components/plans/dc_setup.py` | AD DS installation steps |
+| `templates/` | Bootstrap user data (Jinja2) |
 
 **Instance catalog:**
 - `kali-2024` - Kali Linux attacker
@@ -112,6 +115,7 @@ sequenceDiagram
     participant Pulumi
     participant RDS
     participant AWS
+    participant SSM
 
     User->>Portal: Launch Range
     Portal->>RDS: Insert Range(status=pending)
@@ -119,9 +123,14 @@ sequenceDiagram
     ECS->>Pulumi: Run 'up'
     Pulumi->>RDS: status=provisioning
     Pulumi->>AWS: Create subnet, EC2s
+    opt DC in scenario
+        Pulumi->>SSM: Orchestrate AD DS setup
+    end
     Pulumi->>RDS: status=ready, IPs, ARNs
     Portal->>User: Range ready
 ```
+
+DC setup uses SSM Run Command for multi-step AD DS installation. See [Provisioner docs](execution/provisioner.md#dc-setup-via-ssm) for details.
 
 ### Terminal Access
 

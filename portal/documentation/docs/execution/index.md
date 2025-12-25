@@ -56,6 +56,8 @@ Each range creates:
 - SSH key per instance (Secrets Manager)
 - SSM Parameter for DC config (when DC present)
 
+DC instances require post-creation setup via SSM Run Command (AD DS install, reboot, promotion). Non-DC instances use user data only.
+
 ## Terraform Modules
 
 | Module | Purpose |

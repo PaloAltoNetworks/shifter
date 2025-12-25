@@ -11,13 +11,19 @@ sequenceDiagram
     participant Pulumi
     participant RDS
     participant AWS
+    participant SSM
 
     Portal->>ECS: run_task(provision, range_id)
     ECS->>Pulumi: python main.py provision --range-id N
     Pulumi->>RDS: status = provisioning
-    Pulumi->>Pulumi: pulumi up
     Pulumi->>AWS: Create subnet, EC2s, secrets
-    Pulumi->>Pulumi: pulumi stack output --json
+    alt DC Present
+        Pulumi->>SSM: Wait for agent online
+        Pulumi->>SSM: Install AD DS feature
+        Pulumi->>SSM: Reboot, wait for instance
+        Pulumi->>SSM: Promote to DC
+        Pulumi->>SSM: Verify AD DS running
+    end
     Pulumi->>RDS: status = ready, IPs, ARNs
 ```
 
@@ -25,14 +31,18 @@ sequenceDiagram
 
 ```
 pulumi-provisioner/
-├── main.py           # Container entrypoint
-├── __main__.py       # Pulumi program entry
-├── config.py         # Config from env + DB
+├── main.py              # Container entrypoint
+├── __main__.py          # Pulumi program entry
+├── config.py            # Config from env + DB
 ├── components/
-│   ├── network.py    # Subnet creation
-│   ├── instance.py   # EC2 + SSH key secrets
-│   └── range_stack.py # Composes network + instances
-└── templates/        # User data (Jinja2)
+│   ├── network.py       # Subnet creation
+│   ├── instance.py      # EC2 + SSH key secrets
+│   ├── range_stack.py   # Composes network + instances
+│   ├── ssm_executor.py  # Generic SSM command runner
+│   ├── setup_orchestrator.py  # Executes setup plans
+│   └── plans/
+│       └── dc_setup.py  # DC-specific setup steps
+└── templates/           # Bootstrap user data (Jinja2)
 ```
 
 ## Operations
@@ -62,7 +72,26 @@ Per range:
 - SSH keys in Secrets Manager (per instance)
 - SSM Parameter for DC config (when DC present)
 
-DC instances are created before victims. Domain member victims depend on DC completion.
+## DC Setup via SSM
+
+DC instances require multi-step setup that cannot run in user data (reboots required). Setup uses SSM Run Command orchestration:
+
+1. **Instance Creation** - EC2 created with bootstrap-only user data (hostname, SSH)
+2. **Agent Wait** - Provisioner polls until SSM agent reports online
+3. **AD DS Install** - `Install-WindowsFeature AD-Domain-Services` via SSM
+4. **Reboot** - Instance reboots, provisioner waits for it to return
+5. **DC Promotion** - `Install-ADDSForest` via SSM
+6. **Verification** - Confirm AD DS service running
+
+If any step fails, the Pulumi stack fails and resources are cleaned up.
+
+**Why SSM instead of user data:**
+- User data runs fire-and-forget with no visibility
+- AD DS install requires reboot before promotion
+- SSM provides exit codes and output for each step
+- Failures become Pulumi errors, triggering stack rollback
+
+Domain member victims use user data with retry logic to join the domain once DC is ready.
 
 ## State Backend
 

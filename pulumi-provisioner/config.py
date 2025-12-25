@@ -73,6 +73,11 @@ class RangeConfig:
     agent_s3_bucket: str
     availability_zone: str
     portal_vpc_cidr: str = ""
+    # NGFW (VM-Series) configuration
+    ngfw_enabled: bool = False
+    ngfw_ami_id: str = ""
+    ngfw_instance_type: str = "m5.xlarge"
+    ngfw_security_group_id: str = ""
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -107,7 +112,8 @@ def get_range_from_db(range_id: int) -> dict:
                     r.agent_id,
                     r.instance_config,
                     a.s3_key as agent_s3_key,
-                    os.slug as agent_os_slug
+                    os.slug as agent_os_slug,
+                    r.ngfw_enabled
                 FROM mission_control_range r
                 LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
                 LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
@@ -127,6 +133,7 @@ def get_range_from_db(range_id: int) -> dict:
                 "instance_config": row[4],
                 "agent_s3_key": row[5],
                 "agent_os_slug": row[6],
+                "ngfw_enabled": row[7],
             }
 
 
@@ -226,4 +233,9 @@ def load_config() -> RangeConfig:
         agent_s3_bucket=config.get("agentS3Bucket") or "",
         availability_zone=config.require("availabilityZone"),
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
+        # NGFW (VM-Series) configuration - enabled from DB, config from env vars
+        ngfw_enabled=range_data.get("ngfw_enabled", False),
+        ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
+        ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
+        ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
     )

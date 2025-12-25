@@ -26,7 +26,18 @@ from jinja2 import Environment, FileSystemLoader
 
 from .ssm_executor import SSMExecutor
 from .setup_orchestrator import SetupOrchestrator, SetupError
+from .plans.bootstrap import BootstrapPlan
 from .plans.dc_setup import DCSetupPlan
+
+
+@dataclass
+class BootstrapContext:
+    """Context object for BootstrapPlan.
+
+    Contains variables needed by BootstrapPlan.get_context().
+    """
+    hostname: str
+    public_key: str = ""
 
 
 @dataclass
@@ -117,6 +128,7 @@ class InstanceComponent(pulumi.ComponentResource):
     domain_name: Optional[str]
     netbios_name: Optional[str]
     hostname: Optional[str]
+    public_key: Optional[str]  # Stored for SSM orchestration
     setup_result: Optional[pulumi.Output[bool]]  # Result of DC setup orchestration
 
     def __init__(
@@ -215,6 +227,7 @@ class InstanceComponent(pulumi.ComponentResource):
         self.domain_name = None
         self.netbios_name = None
         self.hostname = None
+        self.public_key = None
         self.setup_result = None
 
         # For DC role, create SSM Parameter and generate passwords
@@ -227,6 +240,7 @@ class InstanceComponent(pulumi.ComponentResource):
             self.domain_name = dc_config.get("domain_name", "internal.shifter") if dc_config else "internal.shifter"
             self.netbios_name = dc_config.get("netbios_name", "SHIFTER") if dc_config else "SHIFTER"
             self.hostname = f"shifter-dc-{range_id}"
+            self.public_key = public_key  # Store for SSM bootstrap
 
             # Create SSM Parameter for DC config (initially empty, orchestration will populate)
             self.dc_config_param_name = f"/shifter/{environment}/range/{range_id}/dc-config"
@@ -302,11 +316,10 @@ class InstanceComponent(pulumi.ComponentResource):
         """Run DC setup orchestration via SSM Run Command.
 
         This method should be called after the instance is created to set up
-        Active Directory Domain Services. It:
-        1. Waits for SSM agent to come online
-        2. Installs AD DS feature and reboots
-        3. Promotes to Domain Controller and reboots
-        4. Verifies AD DS is running
+        Active Directory Domain Services. It runs two plans in sequence:
+
+        1. BootstrapPlan: Sets hostname, configures SSH, reboots
+        2. DCSetupPlan: Installs AD DS, promotes to DC, verifies
 
         Args:
             region: AWS region (uses default if not provided)
@@ -321,7 +334,11 @@ class InstanceComponent(pulumi.ComponentResource):
             # Not a DC instance, return immediately
             return pulumi.Output.from_input(True)
 
-        # Create DC context for the setup plan
+        # Create contexts for both plans
+        bootstrap_context = BootstrapContext(
+            hostname=self.hostname,
+            public_key=self.public_key,
+        )
         dc_context = DCContext(
             domain_name=self.domain_name,
             netbios_name=self.netbios_name,
@@ -337,7 +354,6 @@ class InstanceComponent(pulumi.ComponentResource):
             # Create executor and orchestrator
             executor = SSMExecutor(region=region)
             orchestrator = SetupOrchestrator(executor=executor)
-            plan = DCSetupPlan()
 
             try:
                 # Wait for SSM agent to come online
@@ -345,18 +361,25 @@ class InstanceComponent(pulumi.ComponentResource):
                 executor.wait_for_agent(instance_id, timeout_seconds=300)
                 pulumi.log.info(f"SSM agent is online on {instance_id}")
 
-                # Get context from plan
-                context = plan.get_context(dc_context)
+                # Phase 1: Bootstrap (hostname + SSH + reboot)
+                pulumi.log.info(f"Running BootstrapPlan on {instance_id}...")
+                bootstrap_plan = BootstrapPlan()
+                bootstrap_ctx = bootstrap_plan.get_context(bootstrap_context)
+                result = orchestrator.orchestrate(instance_id, bootstrap_plan, bootstrap_ctx)
+                if not result.success:
+                    raise SetupError(f"Bootstrap failed on {instance_id}")
+                pulumi.log.info(f"Bootstrap completed on {instance_id}")
 
-                # Run the orchestration
-                pulumi.log.info(f"Running DC setup orchestration on {instance_id}...")
-                result = orchestrator.orchestrate(instance_id, plan, context)
-
-                if result.success:
-                    pulumi.log.info(f"DC setup completed successfully on {instance_id}")
-                    return True
-                else:
+                # Phase 2: DC setup (AD DS install + promote)
+                pulumi.log.info(f"Running DCSetupPlan on {instance_id}...")
+                dc_plan = DCSetupPlan()
+                dc_ctx = dc_plan.get_context(dc_context)
+                result = orchestrator.orchestrate(instance_id, dc_plan, dc_ctx)
+                if not result.success:
                     raise SetupError(f"DC setup failed on {instance_id}")
+
+                pulumi.log.info(f"DC setup completed successfully on {instance_id}")
+                return True
 
             except Exception as e:
                 pulumi.log.error(f"DC setup failed on {instance_id}: {e}")
@@ -420,12 +443,9 @@ class InstanceComponent(pulumi.ComponentResource):
                 "public_key": public_key,
             }
         elif role == "dc":
-            # DC bootstrap only - AD DS setup is handled via SSM orchestration
+            # DC user_data is minimal - all setup via SSM (BootstrapPlan + DCSetupPlan)
             template = env.get_template("dc_windows.ps1.j2")
-            context = {
-                "hostname": f"shifter-dc-{range_id}",
-                "public_key": public_key,
-            }
+            context = {}  # No variables needed - template just logs SSM will handle setup
         elif os_type == "windows" and join_domain and member_dc_config_param_name:
             # Domain member - Windows instance joining a domain
             template = env.get_template("domain_member_windows.ps1.j2")

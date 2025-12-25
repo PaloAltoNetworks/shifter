@@ -433,15 +433,18 @@ class TestDCInstanceComponent:
             assert component.dsrm_password is not None
             assert component.domain_admin_password is not None
             assert component.hostname == "shifter-dc-42"
+            assert component.public_key is not None  # Stored for BootstrapPlan
 
-            # User data should be bootstrap (hostname, SSH) not AD DS setup
+            # User data should be minimal - all setup via SSM
             def check_user_data(user_data_b64):
                 import base64
 
                 user_data = base64.b64decode(user_data_b64).decode()
-                # Bootstrap template should have hostname
-                assert "shifter-dc-42" in user_data
-                # Bootstrap template should NOT have AD DS setup
+                # Minimal template just logs that SSM will handle setup
+                assert "SSM" in user_data
+                # Should NOT have any setup logic (hostname, SSH, AD DS)
+                assert "Rename-Computer" not in user_data
+                assert "Start-Service sshd" not in user_data
                 assert "Install-WindowsFeature" not in user_data
                 assert "Install-ADDSForest" not in user_data
 

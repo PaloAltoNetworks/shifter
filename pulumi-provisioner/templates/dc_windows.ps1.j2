@@ -1,53 +1,12 @@
 <powershell>
-# Windows Domain Controller bootstrap script
-# This ONLY sets up basic instance configuration (hostname, SSH)
-# AD DS installation is handled separately via SSM Run Command orchestration
+# Windows DC user_data - intentionally minimal
+# All setup is handled via SSM Run Command orchestration:
+#   1. BootstrapPlan: hostname + SSH configuration + reboot
+#   2. DCSetupPlan: AD DS install + DC promotion + verification
 #
-# Template variables:
-#   hostname    - Computer name for the DC
-#   public_key  - SSH public key for Administrator access
+# This script just logs that the instance started and waits for SSM.
 
-$ErrorActionPreference = "Stop"
-$LogFile = "C:\Windows\Temp\dc-bootstrap.log"
-
-function Log-Message {
-    param([string]$Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Out-File -FilePath $LogFile -Append
-    Write-Host $Message
-}
-
-try {
-    Log-Message "Starting Windows DC bootstrap..."
-
-    # --------------------------------------------------------------------------
-    # 1. Set hostname
-    # --------------------------------------------------------------------------
-    Log-Message "Setting hostname to {{ hostname }}..."
-    Rename-Computer -NewName "{{ hostname }}" -Force
-    Log-Message "Hostname set (will take effect on reboot)"
-
-    # --------------------------------------------------------------------------
-    # 2. Configure OpenSSH Server for Terminal UI access
-    # --------------------------------------------------------------------------
-    Log-Message "Configuring OpenSSH Server..."
-    Start-Service sshd
-    Set-Service -Name sshd -StartupType Automatic
-
-    # Set up SSH key authentication for Administrator
-    {% if public_key %}
-    Log-Message "Setting up SSH key authentication..."
-    $sshDir = "C:\ProgramData\ssh"
-    if (!(Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir -Force }
-    "{{ public_key }}" | Out-File -Encoding ascii "$sshDir\administrators_authorized_keys"
-    icacls "$sshDir\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
-    Log-Message "SSH key authentication configured"
-    {% endif %}
-
-    Log-Message "DC bootstrap complete. AD DS setup will be orchestrated via SSM."
-
-} catch {
-    Log-Message "ERROR: $_"
-    throw
-}
+$LogFile = "C:\Windows\Temp\dc-userdata.log"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+"$timestamp - DC instance started. Setup will be orchestrated via SSM." | Out-File -FilePath $LogFile
 </powershell>

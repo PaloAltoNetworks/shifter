@@ -596,3 +596,160 @@ class TestUserDataGeneration:
                 )
 
             assert "shell injection" in str(exc_info.value).lower()
+
+
+class TestDomainMemberInstanceComponent:
+    """Tests for domain member instance component functionality (Phase 7)."""
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pytest.fixture
+    def temp_templates(self, temp_templates_dir):
+        """Provide temp templates directory."""
+        return temp_templates_dir
+
+    @pulumi.runtime.test
+    def test_domain_member_accepts_dc_config_param_name(self, temp_templates):
+        """Domain member instance should accept dc_config_param_name parameter."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            # Should not raise an error
+            component = InstanceComponent(
+                name="test-domain-member",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                join_domain=True,
+                dc_config_param_name="/shifter/dev/range/42/dc-config",
+            )
+
+            # Component should be created successfully
+            assert component.instance is not None
+
+    @pulumi.runtime.test
+    def test_domain_member_uses_domain_member_template(self, temp_templates):
+        """Domain member should use domain_member_windows.ps1.j2 template."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-domain-member",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                join_domain=True,
+                dc_config_param_name="/shifter/dev/range/42/dc-config",
+            )
+
+            def check_user_data(user_data_b64):
+                user_data = base64.b64decode(user_data_b64).decode()
+                # Should contain domain join commands
+                assert "Add-Computer" in user_data, "Should use domain member template with Add-Computer"
+                assert "/shifter/dev/range/42/dc-config" in user_data, "Should include dc_config_param_name"
+
+            component.instance.user_data_base64.apply(check_user_data)
+
+    @pulumi.runtime.test
+    def test_domain_member_without_dc_param_uses_regular_template(self, temp_templates):
+        """Domain member without dc_config_param_name should use regular template."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-victim",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                join_domain=True,  # Wants to join but no DC param
+                dc_config_param_name=None,  # No DC available
+            )
+
+            def check_user_data(user_data_b64):
+                user_data = base64.b64decode(user_data_b64).decode()
+                # Should use regular Windows template
+                assert "Windows setup complete" in user_data, "Should use regular Windows template"
+
+            component.instance.user_data_base64.apply(check_user_data)
+
+    @pulumi.runtime.test
+    def test_domain_member_includes_agent_download(self, temp_templates):
+        """Domain member should include agent download in user data."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-domain-member",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                join_domain=True,
+                dc_config_param_name="/shifter/dev/range/42/dc-config",
+                agent_presigned_url="https://s3.example.com/agent.msi",
+                agent_s3_key="agents/xdr.msi",
+            )
+
+            def check_user_data(user_data_b64):
+                user_data = base64.b64decode(user_data_b64).decode()
+                assert "https://s3.example.com/agent.msi" in user_data, "Should include agent URL"
+
+            component.instance.user_data_base64.apply(check_user_data)
+
+    @pulumi.runtime.test
+    def test_regular_victim_not_affected_by_new_params(self, temp_templates):
+        """Regular victim (join_domain=False) should work as before."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-victim",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                # No join_domain or dc_config_param_name
+            )
+
+            def check_user_data(user_data_b64):
+                user_data = base64.b64decode(user_data_b64).decode()
+                assert "Windows setup complete" in user_data
+                assert "Add-Computer" not in user_data, "Regular victim should not join domain"
+
+            component.instance.user_data_base64.apply(check_user_data)

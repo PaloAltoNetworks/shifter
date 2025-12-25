@@ -156,6 +156,11 @@ class RangeStack(pulumi.ComponentResource):
             if inst_config.join_domain and dc_components:
                 depends_on.extend(dc_components)
 
+            # Determine dc_config_param_name for domain members
+            member_dc_config_param_name = None
+            if inst_config.join_domain and dc_components:
+                member_dc_config_param_name = self.dc_config_param_name
+
             instance = InstanceComponent(
                 instance_name,
                 range_id=config.range_id,
@@ -172,6 +177,8 @@ class RangeStack(pulumi.ComponentResource):
                 agent_s3_bucket=config.agent_s3_bucket,
                 agent_s3_key=inst_config.agent_s3_key or "",
                 agent_presigned_url=inst_config.agent_presigned_url or "",
+                join_domain=inst_config.join_domain,
+                dc_config_param_name=member_dc_config_param_name,
                 opts=pulumi.ResourceOptions(
                     parent=self,
                     depends_on=depends_on,

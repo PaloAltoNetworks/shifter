@@ -1080,6 +1080,149 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
             "Victim with join_domain=True but no DC should only depend on network"
 
 
+class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
+    """Tests for passing dc_config_param_name to domain members (Phase 7)."""
+
+    @pulumi.runtime.test
+    def test_domain_member_receives_dc_config_param_name(self, temp_templates, dc_range_config):
+        """Domain member (join_domain=True) should receive dc_config_param_name."""
+        from components.range_stack import RangeStack
+        from components.instance import InstanceComponent
+
+        created_instances = []
+        original_init = InstanceComponent.__init__
+
+        def capture_init(self, *args, **kwargs):
+            created_instances.append({
+                "name": args[0] if args else kwargs.get("name"),
+                "role": kwargs.get("role"),
+                "join_domain": kwargs.get("join_domain"),
+                "dc_config_param_name": kwargs.get("dc_config_param_name"),
+            })
+            return original_init(self, *args, **kwargs)
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            with patch.object(InstanceComponent, "__init__", capture_init):
+                stack = RangeStack("test-range", config=dc_range_config)
+
+        # Find the domain member victim
+        victim_creation = next((c for c in created_instances if c["role"] == "victim"), None)
+
+        assert victim_creation is not None, "Victim should be created"
+        assert victim_creation["dc_config_param_name"] == "/shifter/dev/range/42/dc-config", \
+            f"Domain member should receive dc_config_param_name, got {victim_creation['dc_config_param_name']}"
+
+    @pulumi.runtime.test
+    def test_non_domain_member_does_not_receive_dc_config_param_name(self, temp_templates, dc_range_config):
+        """Non-domain member should NOT receive dc_config_param_name."""
+        from components.range_stack import RangeStack
+        from components.instance import InstanceComponent
+
+        created_instances = []
+        original_init = InstanceComponent.__init__
+
+        def capture_init(self, *args, **kwargs):
+            created_instances.append({
+                "name": args[0] if args else kwargs.get("name"),
+                "role": kwargs.get("role"),
+                "dc_config_param_name": kwargs.get("dc_config_param_name"),
+            })
+            return original_init(self, *args, **kwargs)
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            with patch.object(InstanceComponent, "__init__", capture_init):
+                stack = RangeStack("test-range", config=dc_range_config)
+
+        # Attacker should NOT receive dc_config_param_name
+        attacker_creation = next((c for c in created_instances if c["role"] == "attacker"), None)
+
+        assert attacker_creation is not None, "Attacker should be created"
+        assert attacker_creation["dc_config_param_name"] is None, \
+            f"Attacker should NOT receive dc_config_param_name, got {attacker_creation['dc_config_param_name']}"
+
+    @pulumi.runtime.test
+    def test_join_domain_flag_passed_to_instance(self, temp_templates, dc_range_config):
+        """join_domain flag should be passed to InstanceComponent."""
+        from components.range_stack import RangeStack
+        from components.instance import InstanceComponent
+
+        created_instances = []
+        original_init = InstanceComponent.__init__
+
+        def capture_init(self, *args, **kwargs):
+            created_instances.append({
+                "role": kwargs.get("role"),
+                "join_domain": kwargs.get("join_domain"),
+            })
+            return original_init(self, *args, **kwargs)
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            with patch.object(InstanceComponent, "__init__", capture_init):
+                stack = RangeStack("test-range", config=dc_range_config)
+
+        # Victim with join_domain=True should have it passed
+        victim_creation = next((c for c in created_instances if c["role"] == "victim"), None)
+        assert victim_creation["join_domain"] is True, "Victim join_domain should be True"
+
+        # Attacker should have join_domain=False (default)
+        attacker_creation = next((c for c in created_instances if c["role"] == "attacker"), None)
+        assert attacker_creation["join_domain"] is False or attacker_creation["join_domain"] is None, \
+            "Attacker join_domain should be False or None"
+
+    @pulumi.runtime.test
+    def test_range_without_dc_domain_member_gets_none(self, temp_templates):
+        """Domain member in range without DC should get None for dc_config_param_name."""
+        from components.range_stack import RangeStack
+        from components.instance import InstanceComponent
+
+        config = RangeConfig(
+            range_id=42,
+            user_id=1,
+            subnet_index=5,
+            environment="dev",
+            instances=[
+                InstanceConfig(
+                    role="victim",
+                    os_type="windows",
+                    instance_type="t3.medium",
+                    join_domain=True,  # Wants to join but no DC!
+                ),
+                InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
+            ],
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            route_table_id="rtb-12345",
+            kali_security_group_id="sg-kali",
+            victim_security_group_id="sg-victim",
+            dc_security_group_id="sg-dc",
+            instance_profile_name="range-profile",
+            kali_ami_id="ami-kali123",
+            victim_ami_id="ami-ubuntu123",
+            windows_ami_id="ami-windows123",
+            agent_s3_bucket="shifter-agents",
+            availability_zone="us-east-2a",
+        )
+
+        created_instances = []
+        original_init = InstanceComponent.__init__
+
+        def capture_init(self, *args, **kwargs):
+            created_instances.append({
+                "role": kwargs.get("role"),
+                "dc_config_param_name": kwargs.get("dc_config_param_name"),
+            })
+            return original_init(self, *args, **kwargs)
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            with patch.object(InstanceComponent, "__init__", capture_init):
+                stack = RangeStack("test-range", config=config)
+
+        # Victim should get None since no DC exists
+        victim_creation = next((c for c in created_instances if c["role"] == "victim"), None)
+        assert victim_creation["dc_config_param_name"] is None, \
+            "Domain member without DC should get None for dc_config_param_name"
+
+
 class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
     """Tests ensuring existing functionality isn't broken."""
 

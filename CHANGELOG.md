@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-12-24
+
+### Added
+- Domain Controller component (Windows Server 2022 with AD DS)
+- Domain member support for Windows victims (automatic domain join)
+- DC security group with AD ports (LDAP, Kerberos, DNS, SMB)
+- SSM Parameter Store for DC config distribution to domain members
+
 ## [0.7.19] - 2025-12-24
 - Add TDD planning Claude Code skill
 

@@ -251,6 +251,9 @@ def _run_provision(range_id: int, stack_name: str, env: dict) -> None:
     output_data = json.loads(outputs.stdout)
     print(f"Stack outputs: {json.dumps(output_data, indent=2)}")
 
+    # Extract NGFW details if present
+    ngfw_data = output_data.get("ngfw") or {}
+
     # Update range with provisioned resources
     update_range_status(
         range_id,
@@ -260,6 +263,10 @@ def _run_provision(range_id: int, stack_name: str, env: dict) -> None:
         provisioned_instances=json.dumps(output_data.get("instances", [])),
         pulumi_stack=stack_name,
         ready_at="NOW()",
+        # NGFW fields (will be None/empty if NGFW not enabled)
+        ngfw_instance_id=ngfw_data.get("instance_id", ""),
+        ngfw_untrust_ip=ngfw_data.get("untrust_private_ip"),
+        ngfw_trust_ip=ngfw_data.get("trust_private_ip"),
     )
 
 

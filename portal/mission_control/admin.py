@@ -38,10 +38,16 @@ class AgentConfigAdmin(admin.ModelAdmin):
 
 @admin.register(Range)
 class RangeAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "agent", "created_at")
-    list_filter = ("created_at",)
+    list_display = ("id", "user", "agent", "status", "ngfw_enabled", "created_at")
+    list_filter = ("status", "ngfw_enabled", "created_at")
     search_fields = ("user__email", "agent__name")
     raw_id_fields = ("user", "agent")
+    readonly_fields = ("ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")
+    fieldsets = (
+        (None, {"fields": ("user", "agent", "status")}),
+        ("NGFW", {"fields": ("ngfw_enabled", "ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")}),
+        ("Timestamps", {"fields": ("created_at", "ready_at", "destroyed_at")}),
+    )
 
 
 @admin.register(ActivityLog)

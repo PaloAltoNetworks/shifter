@@ -551,6 +551,11 @@ def _range_to_json(range_obj):
         "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
         "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
         "paused_at": range_obj.paused_at.isoformat() if range_obj.paused_at else None,
+        # NGFW (VM-Series) fields
+        "ngfw_enabled": range_obj.ngfw_enabled,
+        "ngfw_instance_id": range_obj.ngfw_instance_id,
+        "ngfw_untrust_ip": range_obj.ngfw_untrust_ip,
+        "ngfw_trust_ip": range_obj.ngfw_trust_ip,
     }
 
 
@@ -607,6 +612,9 @@ def launch_range(request):
     if not agent_id:
         return JsonResponse({"error": "agent_id is required"}, status=400)
 
+    # Get optional NGFW flag (defaults to False)
+    ngfw_enabled = data.get("ngfw_enabled", False)
+
     # Verify agent belongs to user and is not deleted
     agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).first()
     if not agent:
@@ -628,6 +636,7 @@ def launch_range(request):
         agent=agent,
         status=Range.Status.PROVISIONING,
         subnet_index=subnet_index,
+        ngfw_enabled=ngfw_enabled,
     )
 
     # Log activity

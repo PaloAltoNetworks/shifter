@@ -40,7 +40,7 @@ class TestDCTemplateRendering:
             "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost",
             "domain_name": "internal.shifter",
             "netbios_name": "SHIFTER",
-            "dc_config_secret_arn": "arn:aws:secretsmanager:us-east-2:123456789012:secret:test-dc-config",
+            "dc_config_param_name": "/shifter/dev/range/42/dc-config",
             "dsrm_password": "ComplexP@ss123!",
         }
 
@@ -61,23 +61,25 @@ class TestDCTemplateRendering:
         assert "sshd" in result, "Template should configure SSH service"
         assert "administrators_authorized_keys" in result, "Template should set up SSH key auth"
 
-    def test_dc_template_writes_config_to_secrets_manager(
+    def test_dc_template_writes_config_to_ssm_parameter(
         self, dc_template, dc_template_context
     ):
-        """DC template should write DC config to Secrets Manager."""
+        """DC template should write DC config to SSM Parameter Store."""
         result = dc_template.render(**dc_template_context)
 
-        # Should write config to Secrets Manager using AWS CLI
-        has_secrets_write = (
-            "Write-SecretString" in result
-            or "aws secretsmanager put-secret-value" in result
-        )
-        assert has_secrets_write, "Template should write to Secrets Manager"
+        # Should write config to SSM Parameter Store using AWS CLI
+        assert "aws ssm put-parameter" in result, "Template should use aws ssm put-parameter"
 
-        # Should reference the secret ARN
+        # Should use SecureString type for encryption
+        assert "--type SecureString" in result, "Template should use SecureString type"
+
+        # Should use --overwrite for idempotent updates
+        assert "--overwrite" in result, "Template should use --overwrite flag"
+
+        # Should reference the parameter name
         assert (
-            dc_template_context["dc_config_secret_arn"] in result
-        ), "Template should use dc_config_secret_arn"
+            dc_template_context["dc_config_param_name"] in result
+        ), "Template should use dc_config_param_name"
 
     def test_dc_template_hostname(self, dc_template, dc_template_context):
         """hostname variable should be replaced."""

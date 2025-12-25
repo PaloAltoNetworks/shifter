@@ -57,6 +57,11 @@ class NGFWComponent(pulumi.ComponentResource):
         subnet_index: int,
         environment: str,
         instance_profile_name: str = "",
+        panorama_server: str = "",
+        vm_auth_key: str = "",
+        panorama_server_2: str = "",
+        template_stack: str = "",
+        device_group: str = "",
         opts: Optional[pulumi.ResourceOptions] = None,
     ):
         """Create a VM-Series NGFW for a range.
@@ -74,6 +79,11 @@ class NGFWComponent(pulumi.ComponentResource):
             subnet_index: The index for the third octet of the CIDR.
             environment: Environment name.
             instance_profile_name: IAM instance profile name (optional).
+            panorama_server: Primary Panorama IP/hostname.
+            vm_auth_key: VM auth key from Panorama.
+            panorama_server_2: Secondary Panorama (HA).
+            template_stack: Template stack name.
+            device_group: Device group name.
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NGFWComponent", name, None, opts)
@@ -126,6 +136,11 @@ class NGFWComponent(pulumi.ComponentResource):
         bootstrap_prefix = f"ngfw-bootstrap/{environment}/range-{range_id}"
         init_cfg_content = self._generate_init_cfg(
             hostname=f"shifter-ngfw-{range_id}",
+            panorama_server=panorama_server,
+            vm_auth_key=vm_auth_key,
+            panorama_server_2=panorama_server_2,
+            template_stack=template_stack,
+            device_group=device_group,
         )
 
         # Upload init-cfg.txt to S3
@@ -199,11 +214,24 @@ class NGFWComponent(pulumi.ComponentResource):
             }
         )
 
-    def _generate_init_cfg(self, hostname: str) -> str:
+    def _generate_init_cfg(
+        self,
+        hostname: str,
+        panorama_server: str = "",
+        vm_auth_key: str = "",
+        panorama_server_2: str = "",
+        template_stack: str = "",
+        device_group: str = "",
+    ) -> str:
         """Generate VM-Series init-cfg.txt content.
 
         Args:
             hostname: Hostname for the NGFW.
+            panorama_server: Primary Panorama IP/hostname.
+            vm_auth_key: VM auth key from Panorama.
+            panorama_server_2: Secondary Panorama (HA).
+            template_stack: Template stack name.
+            device_group: Device group name.
 
         Returns:
             init-cfg.txt content string.
@@ -219,7 +247,14 @@ class NGFWComponent(pulumi.ComponentResource):
         )
 
         template = env.get_template("ngfw_init_cfg.txt.j2")
-        return template.render(hostname=hostname)
+        return template.render(
+            hostname=hostname,
+            panorama_server=panorama_server,
+            vm_auth_key=vm_auth_key,
+            panorama_server_2=panorama_server_2,
+            template_stack=template_stack,
+            device_group=device_group,
+        )
 
     def _generate_user_data(
         self,

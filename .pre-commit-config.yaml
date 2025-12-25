@@ -9,6 +9,17 @@ repos:
       - id: ruff-format
         files: ^portal/
 
+  # Python - Tests (portal)
+  - repo: local
+    hooks:
+      - id: pytest-portal
+        name: pytest (portal)
+        entry: bash -c 'cd portal && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q'
+        language: system
+        files: ^portal/
+        pass_filenames: false
+        always_run: true
+
   # Python - Security
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.2

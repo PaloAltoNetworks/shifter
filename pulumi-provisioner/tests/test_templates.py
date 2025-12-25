@@ -26,10 +26,14 @@ class TestDCTemplateExists:
 
 
 class TestDCTemplateRendering:
-    """Tests for DC bootstrap template rendering.
+    """Tests for DC user_data template rendering.
 
-    NOTE: The DC template is now a minimal bootstrap script.
-    AD DS installation is handled via SSM Run Command orchestration.
+    ARCHITECTURE NOTE: DC user_data is intentionally minimal.
+    All setup (hostname, SSH, AD DS) is handled via SSM Run Command orchestration:
+    - BootstrapPlan: hostname + SSH + reboot
+    - DCSetupPlan: AD DS install + promote
+
+    See test_bootstrap_plan.py and test_dc_setup_plan.py for setup tests.
     """
 
     @pytest.fixture
@@ -42,70 +46,48 @@ class TestDCTemplateRendering:
 
     @pytest.fixture
     def dc_template_context(self):
-        """Standard context for DC bootstrap template tests."""
-        return {
-            "hostname": "DC1",
-            "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost",
-        }
+        """Standard context for DC template tests (may be empty - template is minimal)."""
+        return {}
 
     def test_dc_template_renders_without_error(self, dc_template, dc_template_context):
-        """DC bootstrap template should render with required variables."""
+        """DC template should render successfully."""
         result = dc_template.render(**dc_template_context)
 
-        # Bootstrap template should set hostname
-        assert "DC1" in result, "Template should include hostname"
-        # Bootstrap template should configure SSH
-        assert "sshd" in result, "Template should configure SSH"
-        # AD DS setup is via SSM, not user data
-        assert "AD DS setup will be orchestrated via SSM" in result, (
-            "Template should indicate SSM orchestration"
-        )
-
-    def test_dc_template_includes_ssh_setup(self, dc_template, dc_template_context):
-        """DC template should set up SSH access like victim template."""
-        result = dc_template.render(**dc_template_context)
-
-        # SSH setup for remote access
-        assert "sshd" in result, "Template should configure SSH service"
-        assert "administrators_authorized_keys" in result, "Template should set up SSH key auth"
-
-    def test_dc_template_hostname(self, dc_template, dc_template_context):
-        """hostname variable should be replaced."""
-        result = dc_template.render(**dc_template_context)
-
-        assert "DC1" in result, "Hostname should appear in rendered template"
-        assert "{{ hostname }}" not in result, "Jinja variable should be replaced"
+        # Template is minimal - just logs that SSM will handle setup
+        assert "SSM" in result, "Template should mention SSM orchestration"
+        assert "<powershell>" in result, "Template should have PowerShell tags"
 
     def test_dc_template_valid_powershell(self, dc_template, dc_template_context):
-        """Output should be a valid PowerShell script with required sections."""
+        """Output should be valid PowerShell with proper tags."""
         result = dc_template.render(**dc_template_context)
 
         # PowerShell EC2 user data format
         assert "<powershell>" in result, "Template should start with <powershell> tag"
         assert "</powershell>" in result, "Template should end with </powershell> tag"
 
-        # Error handling
-        assert "ErrorActionPreference" in result, "Template should set error handling"
-        assert "Stop" in result, "Template should use strict error handling"
-
     def test_dc_template_has_logging(self, dc_template, dc_template_context):
-        """DC template should log its progress."""
+        """DC template should log that instance started."""
         result = dc_template.render(**dc_template_context)
 
-        # Should have logging function like victim template
-        assert "Log-Message" in result or "Write-Host" in result, "Template should log progress"
+        # Minimal logging - just indicates SSM will take over
+        assert "Out-File" in result or "Write-Host" in result, "Template should log startup"
 
-    def test_dc_template_no_ad_installation(self, dc_template, dc_template_context):
-        """DC bootstrap template should NOT install AD DS (that's via SSM)."""
+    def test_dc_template_no_setup_logic(self, dc_template, dc_template_context):
+        """DC template should NOT do any setup (SSM handles everything)."""
         result = dc_template.render(**dc_template_context)
 
-        # AD DS installation is via SSM orchestration, not user data
-        assert "Install-WindowsFeature" not in result, (
-            "Bootstrap template should not install features"
-        )
-        assert "Install-ADDSForest" not in result, (
-            "Bootstrap template should not promote to DC"
-        )
+        # Setup is via SSM orchestration, not user data
+        assert "Rename-Computer" not in result, "Hostname set via SSM BootstrapPlan"
+        assert "Start-Service sshd" not in result, "SSH configured via SSM BootstrapPlan"
+        assert "Install-WindowsFeature" not in result, "AD DS installed via SSM DCSetupPlan"
+        assert "Install-ADDSForest" not in result, "DC promotion via SSM DCSetupPlan"
+
+    def test_dc_template_no_template_variables(self, dc_template, dc_template_context):
+        """DC template should not require any template variables (minimal bootstrap)."""
+        # Template should render with empty context
+        result = dc_template.render()
+        assert result, "Template should render with no context"
+        assert "{{" not in result, "No unrendered template variables"
 
 
 # =============================================================================

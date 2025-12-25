@@ -392,21 +392,18 @@ Write-Host "Windows setup complete"
 """
         )
 
-        # DC bootstrap template (AD DS setup is via SSM orchestration)
+        # DC user_data is minimal - all setup via SSM (BootstrapPlan + DCSetupPlan)
         dc_template = templates_path / "dc_windows.ps1.j2"
         dc_template.write_text(
             """<powershell>
-$ErrorActionPreference = "Stop"
-Write-Host "Setting hostname to {{ hostname }}..."
-Rename-Computer -NewName "{{ hostname }}" -Force
-Start-Service sshd
-Set-Service -Name sshd -StartupType Automatic
-{% if public_key %}
-$sshDir = "C:\\ProgramData\\ssh"
-if (!(Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir -Force }
-"{{ public_key }}" | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
-{% endif %}
-Write-Host "DC bootstrap complete. AD DS setup will be orchestrated via SSM."
+# Windows DC user_data - intentionally minimal
+# All setup is handled via SSM Run Command orchestration:
+#   1. BootstrapPlan: hostname + SSH configuration + reboot
+#   2. DCSetupPlan: AD DS install + DC promotion + verification
+
+$LogFile = "C:\\Windows\\Temp\\dc-userdata.log"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+"$timestamp - DC instance started. Setup will be orchestrated via SSM." | Out-File -FilePath $LogFile
 </powershell>
 """
         )
@@ -416,7 +413,7 @@ Write-Host "DC bootstrap complete. AD DS setup will be orchestrated via SSM."
         domain_member_template.write_text(
             """<powershell>
 $ErrorActionPreference = "Stop"
-$LogFile = "C:\Windows\Temp\domain-member-setup.log"
+$LogFile = "C:\\Windows\\Temp\\domain-member-setup.log"
 function Log-Message {
     param([string]$Message)
     Write-Host $Message
@@ -427,7 +424,7 @@ try {
     Start-Service sshd
     Set-Service -Name sshd -StartupType Automatic
     {% if public_key %}
-    $sshDir = "C:\ProgramData\ssh"
+    $sshDir = "C:\\ProgramData\\ssh"
     "{{ public_key }}" | Out-File "$sshDir/administrators_authorized_keys"
     {% endif %}
     # Read DC config with retry

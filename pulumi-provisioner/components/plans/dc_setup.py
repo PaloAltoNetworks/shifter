@@ -103,6 +103,9 @@ try {
 class DCSetupPlan:
     """Setup plan for Windows Domain Controller.
 
+    This plan runs AFTER BootstrapPlan completes (hostname set, SSH configured,
+    instance rebooted). The instance is in a clean state ready for AD DS.
+
     Steps:
     1. Install AD DS feature (requires reboot)
     2. Promote to Domain Controller (requires reboot)

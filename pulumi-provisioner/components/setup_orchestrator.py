@@ -112,15 +112,17 @@ class SetupOrchestrator:
                     cause=e,
                 )
 
-        # Run verification
-        try:
-            verify_result = self._execute_step(instance_id, plan.verify_step, context)
-        except (CommandError, TimeoutError, SSMExecutorError) as e:
-            raise SetupError(
-                f"Verification failed: {e}",
-                step_name=plan.verify_step.name,
-                cause=e,
-            )
+        # Run verification if defined
+        verify_result = None
+        if plan.verify_step is not None:
+            try:
+                verify_result = self._execute_step(instance_id, plan.verify_step, context)
+            except (CommandError, TimeoutError, SSMExecutorError) as e:
+                raise SetupError(
+                    f"Verification failed: {e}",
+                    step_name=plan.verify_step.name,
+                    cause=e,
+                )
 
         return SetupResult(
             success=True,

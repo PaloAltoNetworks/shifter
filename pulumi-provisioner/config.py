@@ -75,6 +75,7 @@ class RangeConfig:
     windows_ami_id: str
     agent_s3_bucket: str
     availability_zone: str
+    dc_security_group_id: str = ""  # Security group for Domain Controller instances
     portal_vpc_cidr: str = ""
 
 

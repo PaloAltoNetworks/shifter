@@ -574,3 +574,36 @@ def sample_db_range_row_custom_config():
         ],
         None,  # agent_s3_key (per-instance)
     )
+
+
+@pytest.fixture
+def mock_pulumi_config(mocker):
+    """Mock Pulumi Config object with required values for load_config tests."""
+    mock_config = MagicMock()
+
+    mock_config.require.side_effect = lambda key: {
+        "environment": "dev",
+        "rangeVpcId": "vpc-test123",
+        "rangeVpcCidr": "10.1.0.0/16",
+        "rangeRouteTableId": "rtb-test123",
+        "kaliSecurityGroupId": "sg-kali-test",
+        "victimSecurityGroupId": "sg-victim-test",
+        "kaliAmiId": "ami-kali-test",
+        "victimAmiId": "ami-victim-test",
+        "availabilityZone": "us-east-2a",
+    }.get(key, f"mock-{key}")
+
+    mock_config.require_int.side_effect = lambda key: {
+        "rangeId": 42,
+    }.get(key, 0)
+
+    mock_config.get.side_effect = lambda key: {
+        "agentS3Bucket": "test-agents-bucket",
+        "windowsAmiId": "ami-windows-test",
+        "dcSecurityGroupId": "sg-dc-test",
+        "rangeInstanceProfileName": "test-profile",
+        "portalVpcCidr": "10.0.0.0/16",
+    }.get(key)
+
+    mocker.patch("pulumi.Config", return_value=mock_config)
+    return mock_config

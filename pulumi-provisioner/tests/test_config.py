@@ -319,41 +319,8 @@ class TestLoadConfigIntegration:
     """Integration tests for load_config function.
 
     These tests actually call load_config() with mocked dependencies.
+    Uses mock_pulumi_config fixture from conftest.py.
     """
-
-    @pytest.fixture
-    def mock_pulumi_config(self, mocker):
-        """Mock Pulumi Config object with required values."""
-        mock_config = MagicMock()
-
-        # Required string configs
-        mock_config.require.side_effect = lambda key: {
-            "environment": "dev",
-            "rangeVpcId": "vpc-test123",
-            "rangeVpcCidr": "10.1.0.0/16",
-            "rangeRouteTableId": "rtb-test123",
-            "kaliSecurityGroupId": "sg-kali-test",
-            "victimSecurityGroupId": "sg-victim-test",
-            "kaliAmiId": "ami-kali-test",
-            "victimAmiId": "ami-victim-test",
-            "availabilityZone": "us-east-2a",
-        }.get(key, f"mock-{key}")
-
-        # Required int configs
-        mock_config.require_int.side_effect = lambda key: {
-            "rangeId": 42,
-        }.get(key, 0)
-
-        # Optional configs
-        mock_config.get.side_effect = lambda key: {
-            "agentS3Bucket": "test-agents-bucket",
-            "windowsAmiId": "ami-windows-test",
-            "rangeInstanceProfileName": "test-profile",
-            "portalVpcCidr": "10.0.0.0/16",
-        }.get(key)
-
-        mocker.patch("pulumi.Config", return_value=mock_config)
-        return mock_config
 
     @pytest.fixture
     def mock_db_range_data(self, mocker):
@@ -558,38 +525,9 @@ class TestAgentOsToVictimOsMapping:
     When a user uploads a Windows agent (.msi), the victim instance should
     be Windows. When they upload a Linux agent (.deb, .rpm), the victim
     should be Ubuntu (Linux).
+
+    Uses mock_pulumi_config fixture from conftest.py.
     """
-
-    @pytest.fixture
-    def mock_pulumi_config(self, mocker):
-        """Mock Pulumi Config object with required values."""
-        mock_config = MagicMock()
-
-        mock_config.require.side_effect = lambda key: {
-            "environment": "dev",
-            "rangeVpcId": "vpc-test123",
-            "rangeVpcCidr": "10.1.0.0/16",
-            "rangeRouteTableId": "rtb-test123",
-            "kaliSecurityGroupId": "sg-kali-test",
-            "victimSecurityGroupId": "sg-victim-test",
-            "kaliAmiId": "ami-kali-test",
-            "victimAmiId": "ami-victim-test",
-            "availabilityZone": "us-east-2a",
-        }.get(key, f"mock-{key}")
-
-        mock_config.require_int.side_effect = lambda key: {
-            "rangeId": 42,
-        }.get(key, 0)
-
-        mock_config.get.side_effect = lambda key: {
-            "agentS3Bucket": "test-agents-bucket",
-            "windowsAmiId": "ami-windows-test",
-            "rangeInstanceProfileName": "test-profile",
-            "portalVpcCidr": "10.0.0.0/16",
-        }.get(key)
-
-        mocker.patch("pulumi.Config", return_value=mock_config)
-        return mock_config
 
     def test_windows_agent_creates_windows_victim(
         self, mock_pulumi_config, mocker, mock_boto3_clients
@@ -779,39 +717,10 @@ class TestDCConfiguration:
 
 
 class TestLoadConfigDCSupport:
-    """Tests for load_config parsing DC configuration from database."""
+    """Tests for load_config parsing DC configuration from database.
 
-    @pytest.fixture
-    def mock_pulumi_config(self, mocker):
-        """Mock Pulumi Config object with required values."""
-        mock_config = MagicMock()
-
-        mock_config.require.side_effect = lambda key: {
-            "environment": "dev",
-            "rangeVpcId": "vpc-test123",
-            "rangeVpcCidr": "10.1.0.0/16",
-            "rangeRouteTableId": "rtb-test123",
-            "kaliSecurityGroupId": "sg-kali-test",
-            "victimSecurityGroupId": "sg-victim-test",
-            "kaliAmiId": "ami-kali-test",
-            "victimAmiId": "ami-victim-test",
-            "availabilityZone": "us-east-2a",
-        }.get(key, f"mock-{key}")
-
-        mock_config.require_int.side_effect = lambda key: {
-            "rangeId": 42,
-        }.get(key, 0)
-
-        mock_config.get.side_effect = lambda key: {
-            "agentS3Bucket": "test-agents-bucket",
-            "windowsAmiId": "ami-windows-test",
-            "dcAmiId": "ami-dc-test",
-            "rangeInstanceProfileName": "test-profile",
-            "portalVpcCidr": "10.0.0.0/16",
-        }.get(key)
-
-        mocker.patch("pulumi.Config", return_value=mock_config)
-        return mock_config
+    Uses mock_pulumi_config fixture from conftest.py.
+    """
 
     def test_load_config_parses_dc_config_from_db(
         self, mock_pulumi_config, mocker, mock_boto3_clients
@@ -956,39 +865,8 @@ class TestOsTypeKeySupport:
     """Tests for os_type key support in instance_config JSON.
 
     The Portal sends 'os_type' but we also support legacy 'os' key.
+    Uses mock_pulumi_config fixture from conftest.py.
     """
-
-    @pytest.fixture
-    def mock_pulumi_config(self, mocker):
-        """Mock Pulumi Config object with required values."""
-        mock_config = MagicMock()
-
-        mock_config.require.side_effect = lambda key: {
-            "environment": "dev",
-            "rangeVpcId": "vpc-test123",
-            "rangeVpcCidr": "10.1.0.0/16",
-            "rangeRouteTableId": "rtb-test123",
-            "kaliSecurityGroupId": "sg-kali-test",
-            "victimSecurityGroupId": "sg-victim-test",
-            "kaliAmiId": "ami-kali-test",
-            "victimAmiId": "ami-victim-test",
-            "availabilityZone": "us-east-2a",
-        }.get(key, f"mock-{key}")
-
-        mock_config.require_int.side_effect = lambda key: {
-            "rangeId": 42,
-        }.get(key, 0)
-
-        mock_config.get.side_effect = lambda key: {
-            "agentS3Bucket": "test-agents-bucket",
-            "windowsAmiId": "ami-windows-test",
-            "dcSecurityGroupId": "sg-dc-test",
-            "rangeInstanceProfileName": "test-profile",
-            "portalVpcCidr": "10.0.0.0/16",
-        }.get(key)
-
-        mocker.patch("pulumi.Config", return_value=mock_config)
-        return mock_config
 
     def test_load_config_supports_os_type_key(
         self, mock_pulumi_config, mocker, mock_boto3_clients

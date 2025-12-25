@@ -17,6 +17,13 @@ import boto3
 import psycopg
 import pulumi
 
+from catalog.instances import (
+    _get_dc_instance_type,
+    _get_kali_instance_type,
+    _get_victim_instance_type,
+    _get_windows_instance_type,
+)
+
 
 def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:
     """Generate a presigned URL for an S3 object.
@@ -192,19 +199,30 @@ def load_config() -> RangeConfig:
             ),
         ]
     else:
-        # Parse custom instance configs - instance_type is required in config
+        # Parse custom instance configs - use catalog defaults if instance_type not specified
         instances = []
         for inst in db_instance_config:
-            if "instance_type" not in inst:
-                raise ValueError(
-                    f"instance_type is required in instance_config: {inst}"
-                )
+            role = inst.get("role", "victim")
+            os_type = inst.get("os_type") or inst.get("os", "ubuntu")
+
+            # Get instance_type from config or use catalog default based on role/os
+            instance_type = inst.get("instance_type")
+            if not instance_type:
+                if role == "attacker":
+                    instance_type = _get_kali_instance_type()
+                elif role == "dc":
+                    instance_type = _get_dc_instance_type()
+                elif os_type == "windows":
+                    instance_type = _get_windows_instance_type()
+                else:
+                    instance_type = _get_victim_instance_type()
+
             agent_s3_key = inst.get("agent_s3_key")
             instances.append(
                 InstanceConfig(
-                    role=inst.get("role", "victim"),
-                    os_type=inst.get("os_type") or inst.get("os", "ubuntu"),
-                    instance_type=inst["instance_type"],
+                    role=role,
+                    os_type=os_type,
+                    instance_type=instance_type,
                     agent_id=inst.get("agent_id"),
                     agent_s3_key=agent_s3_key,
                     agent_presigned_url=get_presigned_url(agent_s3_key),

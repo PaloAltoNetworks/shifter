@@ -253,6 +253,31 @@ resource "aws_iam_role_policy" "s3_agent" {
 }
 
 # ------------------------------------------------------------------------------
+# Task Role Policy - SSM Parameters (DC Config)
+# ------------------------------------------------------------------------------
+# DC component creates SSM parameters to store domain config (credentials, etc.)
+# that domain members retrieve during setup.
+
+resource "aws_iam_role_policy" "ssm_parameters" {
+  name = "ssm-parameters"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ssm:PutParameter",
+        "ssm:GetParameter",
+        "ssm:DeleteParameter",
+        "ssm:AddTagsToResource"
+      ]
+      Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/${var.environment}/range/*"
+    }]
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Task Role Policy - KMS (for Pulumi secrets encryption)
 # ------------------------------------------------------------------------------
 # Pulumi's awskms:// secrets provider calls KMS directly (not via Secrets Manager),

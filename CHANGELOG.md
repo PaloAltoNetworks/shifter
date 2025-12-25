@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.20] - 2025-12-24
+
+### Added
+- JavaScript unit tests for DirectUploader (upload.js) with Jest (#136)
+  - 79 tests covering happy paths, failure modes, edge cases, order of operations
+  - Proper mocks for fetch, XMLHttpRequest, navigator.sendBeacon, window events
+  - `make test-js` and `make test-js-coverage` Makefile targets
+  - CI integration via `portal-js-tests` job in quality workflow
+
 ## [0.7.19] - 2025-12-24
 - Add TDD planning Claude Code skill
 

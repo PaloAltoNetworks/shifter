@@ -711,6 +711,175 @@ class TestAgentOsToVictimOsMapping:
         assert victim.os_type == "ubuntu", f"Expected 'ubuntu' but got '{victim.os_type}'"
 
 
+class TestDCConfiguration:
+    """Tests for Domain Controller configuration support."""
+
+    def test_instance_config_supports_dc_config(self):
+        """InstanceConfig should accept dc_config dict."""
+        config = InstanceConfig(
+            role="dc",
+            os_type="windows",
+            instance_type="t3.large",
+            dc_config={
+                "domain_name": "internal.shifter",
+                "netbios_name": "SHIFTER",
+            }
+        )
+        assert config.dc_config is not None
+        assert config.dc_config["domain_name"] == "internal.shifter"
+        assert config.dc_config["netbios_name"] == "SHIFTER"
+
+    def test_instance_config_dc_config_optional(self):
+        """dc_config should be optional (None by default)."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="ubuntu",
+            instance_type="t3.small",
+        )
+        assert config.dc_config is None
+
+    def test_instance_config_supports_join_domain(self):
+        """InstanceConfig should support join_domain flag."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="windows",
+            instance_type="t3.medium",
+            join_domain=True,
+        )
+        assert config.join_domain is True
+
+    def test_instance_config_join_domain_default_false(self):
+        """join_domain should default to False."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="windows",
+            instance_type="t3.medium",
+        )
+        assert config.join_domain is False
+
+    def test_instance_config_supports_dc_config_secret_arn(self):
+        """InstanceConfig should support dc_config_secret_arn for domain members."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="windows",
+            instance_type="t3.medium",
+            join_domain=True,
+            dc_config_secret_arn="arn:aws:secretsmanager:us-east-2:123456789012:secret:test-dc-config",
+        )
+        assert config.dc_config_secret_arn == "arn:aws:secretsmanager:us-east-2:123456789012:secret:test-dc-config"
+
+    def test_instance_config_dc_config_secret_arn_optional(self):
+        """dc_config_secret_arn should be optional (None by default)."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="windows",
+            instance_type="t3.medium",
+        )
+        assert config.dc_config_secret_arn is None
+
+
+class TestLoadConfigDCSupport:
+    """Tests for load_config parsing DC configuration from database."""
+
+    @pytest.fixture
+    def mock_pulumi_config(self, mocker):
+        """Mock Pulumi Config object with required values."""
+        mock_config = MagicMock()
+
+        mock_config.require.side_effect = lambda key: {
+            "environment": "dev",
+            "rangeVpcId": "vpc-test123",
+            "rangeVpcCidr": "10.1.0.0/16",
+            "rangeRouteTableId": "rtb-test123",
+            "kaliSecurityGroupId": "sg-kali-test",
+            "victimSecurityGroupId": "sg-victim-test",
+            "kaliAmiId": "ami-kali-test",
+            "victimAmiId": "ami-victim-test",
+            "availabilityZone": "us-east-2a",
+        }.get(key, f"mock-{key}")
+
+        mock_config.require_int.side_effect = lambda key: {
+            "rangeId": 42,
+        }.get(key, 0)
+
+        mock_config.get.side_effect = lambda key: {
+            "agentS3Bucket": "test-agents-bucket",
+            "windowsAmiId": "ami-windows-test",
+            "dcAmiId": "ami-dc-test",
+            "rangeInstanceProfileName": "test-profile",
+            "portalVpcCidr": "10.0.0.0/16",
+        }.get(key)
+
+        mocker.patch("pulumi.Config", return_value=mock_config)
+        return mock_config
+
+    def test_load_config_parses_dc_config_from_db(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should parse dc_config from instance_config JSON."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "dc", "os": "windows", "instance_type": "t3.large",
+             "dc_config": {"domain_name": "test.local", "netbios_name": "TEST"}},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 1
+        dc_instance = result.instances[0]
+        assert dc_instance.role == "dc"
+        assert dc_instance.dc_config is not None
+        assert dc_instance.dc_config["domain_name"] == "test.local"
+        assert dc_instance.dc_config["netbios_name"] == "TEST"
+
+    def test_load_config_parses_join_domain_from_db(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should parse join_domain flag from instance_config JSON."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os": "windows", "instance_type": "t3.medium",
+             "join_domain": True},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 1
+        victim_instance = result.instances[0]
+        assert victim_instance.join_domain is True
+
+    def test_load_config_join_domain_defaults_false(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should default join_domain to False when not specified."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os": "windows", "instance_type": "t3.medium"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].join_domain is False
+
+
 class TestConfigValidation:
     """Tests for configuration validation edge cases."""
 

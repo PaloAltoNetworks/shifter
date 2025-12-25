@@ -411,6 +411,47 @@ Write-Host "DC setup complete"
 """
         )
 
+        # Domain member template for Windows instances joining a domain (Phase 7)
+        domain_member_template = templates_path / "domain_member_windows.ps1.j2"
+        domain_member_template.write_text(
+            """<powershell>
+$ErrorActionPreference = "Stop"
+$LogFile = "C:\Windows\Temp\domain-member-setup.log"
+function Log-Message {
+    param([string]$Message)
+    Write-Host $Message
+}
+try {
+    Log-Message "Setting hostname to {{ hostname }}..."
+    Rename-Computer -NewName "{{ hostname }}" -Force
+    Start-Service sshd
+    Set-Service -Name sshd -StartupType Automatic
+    {% if public_key %}
+    $sshDir = "C:\ProgramData\ssh"
+    "{{ public_key }}" | Out-File "$sshDir/administrators_authorized_keys"
+    {% endif %}
+    # Read DC config with retry
+    $maxAttempts = 30
+    $attempt = 0
+    while ($attempt -lt $maxAttempts) {
+        aws ssm get-parameter --name "{{ dc_config_param_name }}" --with-decryption
+        $attempt++
+    }
+    Set-DnsClientServerAddress -InterfaceIndex 1 -ServerAddresses @($DcIp)
+    {% if presigned_url %}
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe"
+    Register-ScheduledTask -TaskName "DomainMember-PostRebootAgent" -Action $Action
+    Invoke-WebRequest -Uri '{{ presigned_url }}' -OutFile $InstallerPath
+    {% endif %}
+    Add-Computer -DomainName $domain -Credential $cred -Restart -Force
+} catch {
+    Log-Message "ERROR: $_"
+    throw
+}
+</powershell>
+"""
+        )
+
         yield templates_path
 
 

@@ -1,0 +1,266 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">NGFW Configurations</h1>
+    <p class="page-subtitle">Manage your VM-Series Panorama configurations</p>
+</div>
+
+<!-- Messages -->
+{% if messages %}
+<div class="mb-lg">
+    {% for message in messages %}
+    <div class="message message-{{ message.tags }}">
+        {{ message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Create Config Card -->
+<div class="card">
+    <div class="card-title">Add NGFW Configuration</div>
+    <form id="ngfw-config-form">
+        {% csrf_token %}
+        <div class="form-group">
+            <label class="form-label" for="config-name">Configuration Name</label>
+            <input type="text" class="form-input" placeholder="e.g., Production Panorama" id="config-name" name="name" required maxlength="100">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="panorama-server">Panorama Server (Primary)</label>
+            <input type="text" class="form-input" placeholder="e.g., panorama.example.com or 192.168.1.100" id="panorama-server" name="panorama_server" required maxlength="255">
+            <p class="text-small text-muted mt-sm">IP address or hostname of your primary Panorama server</p>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="vm-auth-key">VM Auth Key</label>
+            <input type="password" class="form-input" placeholder="Enter your VM auth key from Panorama" id="vm-auth-key" name="vm_auth_key" required maxlength="255">
+            <p class="text-small text-muted mt-sm">Generate this key in Panorama under Setup > VM-Series Auth Key</p>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="panorama-server-2">Panorama Server (Secondary) <span class="text-muted">(Optional)</span></label>
+            <input type="text" class="form-input" placeholder="e.g., panorama2.example.com" id="panorama-server-2" name="panorama_server_2" maxlength="255">
+            <p class="text-small text-muted mt-sm">For Panorama HA deployments</p>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="template-stack">Template Stack <span class="text-muted">(Optional)</span></label>
+            <input type="text" class="form-input" placeholder="e.g., Cloud-VM-Stack" id="template-stack" name="template_stack" maxlength="100">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="device-group">Device Group <span class="text-muted">(Optional)</span></label>
+            <input type="text" class="form-input" placeholder="e.g., Cloud-DG" id="device-group" name="device_group" maxlength="100">
+        </div>
+
+        <div id="form-error" class="form-error text-error mb-md" style="display: none;"></div>
+
+        <button type="submit" class="btn btn-primary" id="save-btn">Save Configuration</button>
+    </form>
+</div>
+
+<!-- Config List -->
+<div class="card">
+    <div class="card-title">Your NGFW Configurations</div>
+
+    <div id="configs-container">
+        <!-- Populated by JavaScript -->
+    </div>
+
+    <!-- Empty state template -->
+    <div id="empty-state" class="empty-state" style="display: none;">
+        <div class="empty-state-graphic">
+            <div class="empty-state-graphic-arc"></div>
+            <div class="empty-state-graphic-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    <path d="M9 12l2 2 4-4"/>
+                </svg>
+            </div>
+        </div>
+        <h3>No NGFW configurations yet</h3>
+        <p>Add a Panorama configuration to enable NGFW features in your ranges</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('ngfw-config-form');
+    const configsContainer = document.getElementById('configs-container');
+    const emptyState = document.getElementById('empty-state');
+    const errorDiv = document.getElementById('form-error');
+    const saveBtn = document.getElementById('save-btn');
+
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    // Load configs on page load
+    loadConfigs();
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const formData = {
+            name: document.getElementById('config-name').value.trim(),
+            panorama_server: document.getElementById('panorama-server').value.trim(),
+            vm_auth_key: document.getElementById('vm-auth-key').value,
+            panorama_server_2: document.getElementById('panorama-server-2').value.trim(),
+            template_stack: document.getElementById('template-stack').value.trim(),
+            device_group: document.getElementById('device-group').value.trim()
+        };
+
+        if (!formData.name || !formData.panorama_server || !formData.vm_auth_key) {
+            showError('Please fill in all required fields.');
+            return;
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        hideError();
+
+        try {
+            const response = await fetch('{% url "mission_control:create_ngfw_config" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify(formData)
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to save configuration');
+            }
+
+            // Clear form and reload configs
+            form.reset();
+            loadConfigs();
+        } catch (error) {
+            showError(error.message);
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Configuration';
+        }
+    });
+
+    async function loadConfigs() {
+        try {
+            const response = await fetch('{% url "mission_control:list_ngfw_configs" %}');
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to load configurations');
+            }
+
+            renderConfigs(data.configs);
+        } catch (error) {
+            configsContainer.innerHTML = '<p class="text-error">Failed to load configurations: ' + error.message + '</p>';
+        }
+    }
+
+    function renderConfigs(configs) {
+        if (!configs || configs.length === 0) {
+            configsContainer.innerHTML = '';
+            emptyState.style.display = 'block';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+
+        const html = `
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>NAME</th>
+                        <th>PANORAMA SERVER</th>
+                        <th>TEMPLATE / DEVICE GROUP</th>
+                        <th>CREATED</th>
+                        <th class="text-right">ACTIONS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${configs.map(config => `
+                        <tr>
+                            <td>
+                                <span class="text-bold">${escapeHtml(config.name)}</span>
+                            </td>
+                            <td>
+                                <span>${escapeHtml(config.panorama_server)}</span>
+                                ${config.panorama_server_2 ? `<br><span class="text-small text-muted">HA: ${escapeHtml(config.panorama_server_2)}</span>` : ''}
+                            </td>
+                            <td>
+                                ${config.template_stack || config.device_group ? `
+                                    ${config.template_stack ? `<span class="badge">${escapeHtml(config.template_stack)}</span>` : ''}
+                                    ${config.device_group ? `<span class="badge">${escapeHtml(config.device_group)}</span>` : ''}
+                                ` : '<span class="text-muted">-</span>'}
+                            </td>
+                            <td>
+                                <span class="text-muted">${formatDate(config.created_at)}</span>
+                            </td>
+                            <td class="text-right">
+                                <button type="button" class="btn btn-secondary btn-small" onclick="deleteConfig(${config.id}, '${escapeHtml(config.name)}')">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+
+        configsContainer.innerHTML = html;
+    }
+
+    window.deleteConfig = async function(configId, configName) {
+        if (!confirm(`Are you sure you want to delete "${configName}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/mission-control/api/ngfw-configs/${configId}/delete/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to delete configuration');
+            }
+
+            loadConfigs();
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    };
+
+    function showError(message) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+    }
+
+    function hideError() {
+        errorDiv.style.display = 'none';
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatDate(isoString) {
+        if (!isoString) return '-';
+        const date = new Date(isoString);
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+});
+</script>
+{% endblock %}

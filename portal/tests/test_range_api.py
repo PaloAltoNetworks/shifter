@@ -3,9 +3,14 @@
 from unittest.mock import patch
 
 import pytest
+from django.contrib.auth import get_user_model
+from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
-from mission_control.models import AgentConfig, OperatingSystem, Range
+from mission_control.models import AgentConfig, NGFWConfig, OperatingSystem, Range
+
+User = get_user_model()
 
 
 @pytest.fixture
@@ -513,13 +518,25 @@ class TestLaunchRangeNGFW:
         assert range_obj.ngfw_enabled is False
 
     def test_launch_range_with_ngfw_enabled(self, client, test_agent, settings):
-        """Launching with ngfw_enabled=True should set it on the Range and return it in response."""
+        """Launching with ngfw_enabled=True requires ngfw_config_id and sets both on Range."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
+        # Create NGFW config (required when NGFW is enabled)
+        ngfw_config = NGFWConfig.objects.create(
+            user=test_agent.user,
+            name="Test Panorama Config",
+            panorama_server="panorama.test.com",
+            vm_auth_key="test-auth-key",
+        )
+
         response = client.post(
             reverse("mission_control:launch_range"),
-            data={"agent_id": test_agent.id, "ngfw_enabled": True},
+            data={
+                "agent_id": test_agent.id,
+                "ngfw_enabled": True,
+                "ngfw_config_id": ngfw_config.id,
+            },
             content_type="application/json",
         )
 
@@ -530,6 +547,7 @@ class TestLaunchRangeNGFW:
         # Verify DB was updated
         range_obj = Range.objects.get(id=data["range"]["id"])
         assert range_obj.ngfw_enabled is True
+        assert range_obj.ngfw_config_id == ngfw_config.id
 
     def test_launch_range_with_ngfw_disabled_explicit(self, client, test_agent, settings):
         """Launching with ngfw_enabled=False should set it to False in both response and DB."""
@@ -595,3 +613,459 @@ class TestRangeStatusNGFW:
         assert data["range"]["ngfw_instance_id"] == "i-ngfw12345"
         assert data["range"]["ngfw_untrust_ip"] == "10.1.5.10"
         assert data["range"]["ngfw_trust_ip"] == "10.1.5.11"
+
+
+# --- NGFW Config CRUD API ---
+
+
+@pytest.mark.django_db
+class TestNGFWConfigAPI:
+    """Tests for NGFW configuration CRUD API endpoints."""
+
+    @pytest.fixture
+    def user(self):
+        return User.objects.create_user(username="test@example.com", email="test@example.com")
+
+    @pytest.fixture
+    def other_user(self):
+        return User.objects.create_user(username="other@example.com", email="other@example.com")
+
+    @pytest.fixture
+    def client(self, user):
+        client = Client()
+        client.force_login(user)
+        return client
+
+    @pytest.fixture
+    def ngfw_config(self, user):
+        from mission_control.models import NGFWConfig
+
+        return NGFWConfig.objects.create(
+            user=user,
+            name="Test Config",
+            panorama_server="panorama.example.com",
+            vm_auth_key="secret_vm_auth_key_123",
+            panorama_server_2="panorama2.example.com",
+            template_stack="My-Stack",
+            device_group="My-DG",
+        )
+
+    # --- List Configs ---
+
+    def test_list_configs_returns_user_configs(self, client, ngfw_config):
+        """list_ngfw_configs returns configs belonging to the authenticated user."""
+        response = client.get(reverse("mission_control:list_ngfw_configs"))
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["configs"]) == 1
+        assert data["configs"][0]["id"] == ngfw_config.id
+        assert data["configs"][0]["name"] == "Test Config"
+
+    def test_list_configs_does_not_expose_vm_auth_key(self, client, ngfw_config):
+        """list_ngfw_configs does NOT expose vm_auth_key in response."""
+        response = client.get(reverse("mission_control:list_ngfw_configs"))
+        assert response.status_code == 200
+        data = response.json()
+        assert "vm_auth_key" not in data["configs"][0]
+        # Verify the secret is really not there
+        assert "secret_vm_auth_key_123" not in str(data)
+
+    def test_list_configs_excludes_other_users(self, client, user, other_user):
+        """list_ngfw_configs does not return configs from other users."""
+        from mission_control.models import NGFWConfig
+
+        # Create config for other user
+        NGFWConfig.objects.create(
+            user=other_user,
+            name="Other User Config",
+            panorama_server="other.example.com",
+            vm_auth_key="otherkey",
+        )
+
+        response = client.get(reverse("mission_control:list_ngfw_configs"))
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["configs"]) == 0
+
+    def test_list_configs_excludes_deleted(self, client, user):
+        """list_ngfw_configs does not return soft-deleted configs."""
+        from mission_control.models import NGFWConfig
+
+        # Create active and deleted configs
+        active = NGFWConfig.objects.create(
+            user=user, name="Active", panorama_server="p1.example.com", vm_auth_key="key1"
+        )
+        NGFWConfig.objects.create(
+            user=user,
+            name="Deleted",
+            panorama_server="p2.example.com",
+            vm_auth_key="key2",
+            deleted_at=timezone.now(),
+        )
+
+        response = client.get(reverse("mission_control:list_ngfw_configs"))
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["configs"]) == 1
+        assert data["configs"][0]["id"] == active.id
+
+    def test_list_configs_returns_minimal_display_fields(self, client, ngfw_config):
+        """list_ngfw_configs returns only essential fields for dropdown (id, name, panorama_server)."""
+        response = client.get(reverse("mission_control:list_ngfw_configs"))
+        data = response.json()
+        config = data["configs"][0]
+
+        # Should include only minimal fields for dropdown
+        assert "id" in config
+        assert "name" in config
+        assert "panorama_server" in config
+        # Optional fields are NOT included in list API (minimal response)
+        assert "panorama_server_2" not in config
+        assert "template_stack" not in config
+        assert "device_group" not in config
+        # vm_auth_key should NEVER be exposed
+        assert "vm_auth_key" not in config
+
+    # --- Create Config ---
+
+    def test_create_config_with_required_fields(self, client, user):
+        """create_ngfw_config creates config with required fields."""
+        response = client.post(
+            reverse("mission_control:create_ngfw_config"),
+            data={
+                "name": "New Config",
+                "panorama_server": "new-panorama.example.com",
+                "vm_auth_key": "new_auth_key_456",
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["success"] is True
+        assert data["config"]["name"] == "New Config"
+        assert data["config"]["panorama_server"] == "new-panorama.example.com"
+        # vm_auth_key should NOT be in response
+        assert "vm_auth_key" not in data["config"]
+
+    def test_create_config_with_all_fields(self, client, user):
+        """create_ngfw_config creates config with all fields including optional, stores them in DB."""
+        response = client.post(
+            reverse("mission_control:create_ngfw_config"),
+            data={
+                "name": "Full Config",
+                "panorama_server": "p1.example.com",
+                "vm_auth_key": "authkey",
+                "panorama_server_2": "p2.example.com",
+                "template_stack": "Stack-1",
+                "device_group": "DG-1",
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["success"] is True
+        # Response returns minimal fields (id, name, panorama_server)
+        assert data["config"]["name"] == "Full Config"
+        assert data["config"]["panorama_server"] == "p1.example.com"
+
+        # Verify optional fields ARE stored in DB
+        config = NGFWConfig.objects.get(id=data["config"]["id"])
+        assert config.panorama_server_2 == "p2.example.com"
+        assert config.template_stack == "Stack-1"
+        assert config.device_group == "DG-1"
+
+    def test_create_config_stores_vm_auth_key_in_db(self, client, user):
+        """create_ngfw_config stores vm_auth_key in database."""
+        from mission_control.models import NGFWConfig
+
+        response = client.post(
+            reverse("mission_control:create_ngfw_config"),
+            data={
+                "name": "Config With Key",
+                "panorama_server": "p.example.com",
+                "vm_auth_key": "my_secret_key_789",
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 201
+
+        config = NGFWConfig.objects.get(name="Config With Key")
+        assert config.vm_auth_key == "my_secret_key_789"
+
+    def test_create_config_missing_name_fails(self, client):
+        """create_ngfw_config fails when name is missing."""
+        response = client.post(
+            reverse("mission_control:create_ngfw_config"),
+            data={
+                "panorama_server": "p.example.com",
+                "vm_auth_key": "key",
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        assert "name" in response.json()["error"].lower()
+
+    def test_create_config_missing_panorama_server_fails(self, client):
+        """create_ngfw_config fails when panorama_server is missing."""
+        response = client.post(
+            reverse("mission_control:create_ngfw_config"),
+            data={
+                "name": "Config",
+                "vm_auth_key": "key",
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        assert "panorama" in response.json()["error"].lower()
+
+    def test_create_config_missing_vm_auth_key_fails(self, client):
+        """create_ngfw_config fails when vm_auth_key is missing."""
+        response = client.post(
+            reverse("mission_control:create_ngfw_config"),
+            data={
+                "name": "Config",
+                "panorama_server": "p.example.com",
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        # Error message is "VM auth key is required"
+        assert "auth key" in response.json()["error"].lower()
+
+    # --- Delete Config ---
+
+    def test_delete_config_soft_deletes(self, client, ngfw_config):
+        """delete_ngfw_config soft-deletes the config."""
+        from mission_control.models import NGFWConfig
+
+        response = client.post(
+            reverse("mission_control:delete_ngfw_config", args=[ngfw_config.id]),
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+
+        # Config still exists in DB but has deleted_at set
+        config = NGFWConfig.objects.get(pk=ngfw_config.id)
+        assert config.deleted_at is not None
+
+    def test_delete_config_not_in_list_after_delete(self, client, ngfw_config):
+        """Deleted config does not appear in list_ngfw_configs."""
+        # Delete the config
+        client.post(reverse("mission_control:delete_ngfw_config", args=[ngfw_config.id]))
+
+        # List should be empty
+        response = client.get(reverse("mission_control:list_ngfw_configs"))
+        data = response.json()
+        assert len(data["configs"]) == 0
+
+    def test_delete_other_users_config_fails(self, client, other_user):
+        """Cannot delete another user's config."""
+        from mission_control.models import NGFWConfig
+
+        other_config = NGFWConfig.objects.create(
+            user=other_user,
+            name="Other Config",
+            panorama_server="other.example.com",
+            vm_auth_key="otherkey",
+        )
+
+        response = client.post(reverse("mission_control:delete_ngfw_config", args=[other_config.id]))
+        assert response.status_code == 404
+
+        # Config should still exist and not be deleted
+        other_config.refresh_from_db()
+        assert other_config.deleted_at is None
+
+    def test_delete_nonexistent_config_fails(self, client):
+        """Deleting nonexistent config returns 404."""
+        response = client.post(reverse("mission_control:delete_ngfw_config", args=[99999]))
+        assert response.status_code == 404
+
+
+@pytest.mark.django_db
+class TestLaunchRangeWithNGFWConfig:
+    """Tests for launching ranges with NGFW config selection."""
+
+    @pytest.fixture
+    def user(self):
+        from mission_control.models import OperatingSystem
+
+        OperatingSystem.objects.get_or_create(
+            slug="linux-debian", defaults={"name": "Linux (Debian/Ubuntu)", "extensions": ".deb,.tar.gz"}
+        )
+        return User.objects.create_user(username="test@example.com", email="test@example.com")
+
+    @pytest.fixture
+    def other_user(self):
+        return User.objects.create_user(username="other@example.com", email="other@example.com")
+
+    @pytest.fixture
+    def agent(self, user):
+        from mission_control.models import AgentConfig, OperatingSystem
+
+        os_obj = OperatingSystem.objects.get(slug="linux-debian")
+        return AgentConfig.objects.create(
+            user=user,
+            name="Test Agent",
+            os=os_obj,
+            s3_key="agents/test.tar.gz",
+            original_filename="test.tar.gz",
+            file_size_bytes=50000000,
+            sha256_hash="abc123",
+        )
+
+    @pytest.fixture
+    def ngfw_config(self, user):
+        from mission_control.models import NGFWConfig
+
+        return NGFWConfig.objects.create(
+            user=user,
+            name="My Panorama",
+            panorama_server="panorama.example.com",
+            vm_auth_key="secret123",
+        )
+
+    @pytest.fixture
+    def other_ngfw_config(self, other_user):
+        from mission_control.models import NGFWConfig
+
+        return NGFWConfig.objects.create(
+            user=other_user,
+            name="Other Panorama",
+            panorama_server="other.example.com",
+            vm_auth_key="othersecret",
+        )
+
+    @pytest.fixture
+    def client(self, user):
+        client = Client()
+        client.force_login(user)
+        return client
+
+    def test_launch_ngfw_enabled_requires_config_id(self, client, agent, settings):
+        """Launching with ngfw_enabled=True without ngfw_config_id fails."""
+        settings.PROVISIONER_TYPE = "local"
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={"agent_id": agent.id, "ngfw_enabled": True},
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        assert "config" in response.json()["error"].lower()
+
+    def test_launch_ngfw_enabled_with_valid_config(self, client, agent, ngfw_config, settings):
+        """Launching with ngfw_enabled=True and valid ngfw_config_id succeeds."""
+        settings.PROVISIONER_TYPE = "local"
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={
+                "agent_id": agent.id,
+                "ngfw_enabled": True,
+                "ngfw_config_id": ngfw_config.id,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["range"]["ngfw_enabled"] is True
+
+        # Verify the FK was set in DB
+        range_obj = Range.objects.get(pk=data["range"]["id"])
+        assert range_obj.ngfw_config == ngfw_config
+
+    def test_launch_ngfw_enabled_with_invalid_config_id(self, client, agent, settings):
+        """Launching with ngfw_enabled=True and nonexistent ngfw_config_id fails."""
+        settings.PROVISIONER_TYPE = "local"
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={
+                "agent_id": agent.id,
+                "ngfw_enabled": True,
+                "ngfw_config_id": 99999,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 404
+        assert "not found" in response.json()["error"].lower()
+
+    def test_launch_ngfw_enabled_with_other_users_config(self, client, agent, other_ngfw_config, settings):
+        """Cannot launch with another user's ngfw_config_id."""
+        settings.PROVISIONER_TYPE = "local"
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={
+                "agent_id": agent.id,
+                "ngfw_enabled": True,
+                "ngfw_config_id": other_ngfw_config.id,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 404
+        assert "not found" in response.json()["error"].lower()
+
+    def test_launch_ngfw_enabled_with_deleted_config(self, client, agent, ngfw_config, settings):
+        """Cannot launch with a soft-deleted ngfw_config."""
+
+        settings.PROVISIONER_TYPE = "local"
+
+        # Soft-delete the config
+        ngfw_config.deleted_at = timezone.now()
+        ngfw_config.save()
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={
+                "agent_id": agent.id,
+                "ngfw_enabled": True,
+                "ngfw_config_id": ngfw_config.id,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 404
+        assert "not found" in response.json()["error"].lower()
+
+    def test_launch_ngfw_disabled_no_config_required(self, client, agent, settings):
+        """Launching with ngfw_enabled=False does not require ngfw_config_id."""
+        settings.PROVISIONER_TYPE = "local"
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={
+                "agent_id": agent.id,
+                "ngfw_enabled": False,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["range"]["ngfw_enabled"] is False
+
+        # Verify ngfw_config is None in DB
+        range_obj = Range.objects.get(pk=data["range"]["id"])
+        assert range_obj.ngfw_config is None
+
+    def test_launch_ngfw_disabled_ignores_config_id(self, client, agent, ngfw_config, settings):
+        """When ngfw_enabled=False, ngfw_config_id is ignored."""
+        settings.PROVISIONER_TYPE = "local"
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={
+                "agent_id": agent.id,
+                "ngfw_enabled": False,
+                "ngfw_config_id": ngfw_config.id,  # Should be ignored
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+
+        # ngfw_config should NOT be set since ngfw_enabled is False
+        range_obj = Range.objects.get(pk=response.json()["range"]["id"])
+        assert range_obj.ngfw_config is None

@@ -66,6 +66,11 @@ class TestGetRangeFromDb:
                 "agents/xdr.tar.gz",  # agent_s3_key
                 "linux-debian",  # agent_os_slug
                 False,  # ngfw_enabled
+                None,  # ngfw_panorama_server
+                None,  # ngfw_vm_auth_key
+                None,  # ngfw_panorama_server_2
+                None,  # ngfw_template_stack
+                None,  # ngfw_device_group
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -96,6 +101,11 @@ class TestGetRangeFromDb:
                 "agents/xdr.msi",  # agent_s3_key
                 "windows",  # agent_os_slug - from OperatingSystem.slug
                 False,  # ngfw_enabled
+                None,  # ngfw_panorama_server
+                None,  # ngfw_vm_auth_key
+                None,  # ngfw_panorama_server_2
+                None,  # ngfw_template_stack
+                None,  # ngfw_device_group
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -136,6 +146,11 @@ class TestGetRangeFromDb:
                 None,  # agent_s3_key (no agent)
                 None,  # agent_os_slug (no agent)
                 False,  # ngfw_enabled
+                None,  # ngfw_panorama_server
+                None,  # ngfw_vm_auth_key
+                None,  # ngfw_panorama_server_2
+                None,  # ngfw_template_stack
+                None,  # ngfw_device_group
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -169,6 +184,11 @@ class TestGetRangeFromDb:
                 None,  # agent_s3_key
                 None,  # agent_os_slug
                 False,  # ngfw_enabled
+                None,  # ngfw_panorama_server
+                None,  # ngfw_vm_auth_key
+                None,  # ngfw_panorama_server_2
+                None,  # ngfw_template_stack
+                None,  # ngfw_device_group
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -799,6 +819,11 @@ class TestGetRangeFromDbNGFW:
                 None,   # agent_s3_key
                 None,   # agent_os_slug
                 True,   # ngfw_enabled
+                "panorama.example.com",  # ngfw_panorama_server
+                "vmauth123",  # ngfw_vm_auth_key
+                "panorama2.example.com",  # ngfw_panorama_server_2
+                "my-template-stack",  # ngfw_template_stack
+                "my-device-group",  # ngfw_device_group
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -811,6 +836,12 @@ class TestGetRangeFromDbNGFW:
 
             assert "ngfw_enabled" in result
             assert result["ngfw_enabled"] is True
+            # Also verify Panorama config fields
+            assert result["ngfw_panorama_server"] == "panorama.example.com"
+            assert result["ngfw_vm_auth_key"] == "vmauth123"
+            assert result["ngfw_panorama_server_2"] == "panorama2.example.com"
+            assert result["ngfw_template_stack"] == "my-template-stack"
+            assert result["ngfw_device_group"] == "my-device-group"
 
     def test_get_range_from_db_ngfw_disabled_by_default(self, mock_boto3_clients, mock_env_vars_minimal):
         """ngfw_enabled should be False when database returns False."""
@@ -825,6 +856,11 @@ class TestGetRangeFromDbNGFW:
                 None,   # agent_s3_key
                 None,   # agent_os_slug
                 False,  # ngfw_enabled
+                None,   # ngfw_panorama_server
+                None,   # ngfw_vm_auth_key
+                None,   # ngfw_panorama_server_2
+                None,   # ngfw_template_stack
+                None,   # ngfw_device_group
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -836,6 +872,9 @@ class TestGetRangeFromDbNGFW:
             result = get_range_from_db(42)
 
             assert result["ngfw_enabled"] is False
+            # Panorama fields should be empty strings when null
+            assert result["ngfw_panorama_server"] == ""
+            assert result["ngfw_vm_auth_key"] == ""
 
 
 class TestLoadConfigNGFW:

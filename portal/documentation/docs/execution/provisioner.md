@@ -58,7 +58,11 @@ Per range:
 - Subnet (/24 in Range VPC)
 - Kali EC2 (from pre-baked AMI)
 - Victim EC2 (from pre-baked AMI)
+- DC EC2 (optional, Windows Server with AD DS)
 - SSH keys in Secrets Manager (per instance)
+- SSM Parameter for DC config (when DC present)
+
+DC instances are created before victims. Domain member victims depend on DC completion.
 
 ## State Backend
 
@@ -76,6 +80,7 @@ Environment vars (set by Terraform in ECS task definition):
 | `RANGE_VPC_CIDR` | CIDR for subnet calculation |
 | `KALI_AMI_ID` | Pre-baked Kali AMI |
 | `VICTIM_AMI_ID` | Pre-baked victim AMI |
+| `WINDOWS_AMI_ID` | Windows Server AMI (victims and DC) |
 | `AGENT_S3_BUCKET` | Bucket for XDR agent installers |
 | `DB_HOST`, `DB_NAME`, `DB_USER` | RDS connection |
 | `PULUMI_BACKEND_URL` | S3 state backend |

@@ -294,6 +294,7 @@ class InstanceComponent(pulumi.ComponentResource):
             "TEMPLATES_DIR",
             str(Path(__file__).parent.parent / "templates"),
         )
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(
             loader=FileSystemLoader(templates_dir),
             autoescape=False,

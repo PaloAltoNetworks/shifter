@@ -22,6 +22,7 @@ class TestKaliTemplate:
     def kali_template(self):
         """Load the Kali template."""
         templates_dir = Path(__file__).parent.parent / "templates"
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return env.get_template("kali.sh.j2")
 
@@ -81,6 +82,7 @@ class TestVictimLinuxTemplate:
     def linux_template(self):
         """Load the Linux victim template."""
         templates_dir = Path(__file__).parent.parent / "templates"
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return env.get_template("victim_linux.sh.j2")
 
@@ -163,6 +165,7 @@ class TestVictimWindowsTemplate:
     def windows_template(self):
         """Load the Windows victim template."""
         templates_dir = Path(__file__).parent.parent / "templates"
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return env.get_template("victim_windows.ps1.j2")
 
@@ -223,6 +226,7 @@ class TestUserDataGeneration:
 
     def test_attacker_uses_kali_template(self, temp_templates_dir):
         """role='attacker' should use kali.sh.j2 template."""
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
 
         # For attackers, use kali template
@@ -238,6 +242,7 @@ class TestUserDataGeneration:
 
     def test_linux_victim_uses_linux_template(self, temp_templates_dir):
         """role='victim', os!='windows' should use victim_linux.sh.j2."""
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
 
         role = "victim"
@@ -259,6 +264,7 @@ class TestUserDataGeneration:
 
     def test_windows_victim_uses_windows_template(self, temp_templates_dir):
         """os='windows' should use victim_windows.ps1.j2."""
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
 
         os_type = "windows"
@@ -274,6 +280,7 @@ class TestUserDataGeneration:
 
     def test_user_data_base64_encoded(self, temp_templates_dir):
         """User data output should be base64 encodable."""
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
         template = env.get_template("kali.sh.j2")
 
@@ -288,6 +295,7 @@ class TestUserDataGeneration:
 
     def test_user_data_decodes_correctly(self, temp_templates_dir):
         """Base64 encoded user data should decode back to original."""
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
         template = env.get_template("kali.sh.j2")
 
@@ -321,6 +329,7 @@ class TestTemplateContentSafety:
     def all_templates(self):
         """Load all templates."""
         templates_dir = Path(__file__).parent.parent / "templates"
+        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return {
             "kali": env.get_template("kali.sh.j2"),

@@ -487,3 +487,111 @@ class TestSubnetIndexAllocation:
 
         assert response.status_code == 503
         assert "No capacity available" in response.json()["error"]
+
+
+@pytest.mark.django_db
+class TestLaunchRangeNGFW:
+    """Tests for NGFW support in range launch."""
+
+    def test_launch_range_ngfw_disabled_by_default(self, client, test_agent, settings):
+        """Launching without ngfw_enabled should default to False in both response and DB."""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
+        client.force_login(test_agent.user)
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={"agent_id": test_agent.id},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        # Verify response includes ngfw_enabled=False
+        assert data["range"]["ngfw_enabled"] is False
+        # Verify DB was updated correctly
+        range_obj = Range.objects.get(id=data["range"]["id"])
+        assert range_obj.ngfw_enabled is False
+
+    def test_launch_range_with_ngfw_enabled(self, client, test_agent, settings):
+        """Launching with ngfw_enabled=True should set it on the Range and return it in response."""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
+        client.force_login(test_agent.user)
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={"agent_id": test_agent.id, "ngfw_enabled": True},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        # Verify response includes ngfw_enabled
+        assert data["range"]["ngfw_enabled"] is True
+        # Verify DB was updated
+        range_obj = Range.objects.get(id=data["range"]["id"])
+        assert range_obj.ngfw_enabled is True
+
+    def test_launch_range_with_ngfw_disabled_explicit(self, client, test_agent, settings):
+        """Launching with ngfw_enabled=False should set it to False in both response and DB."""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
+        client.force_login(test_agent.user)
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={"agent_id": test_agent.id, "ngfw_enabled": False},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        # Verify response includes ngfw_enabled=False
+        assert data["range"]["ngfw_enabled"] is False
+        # Verify DB was updated correctly
+        range_obj = Range.objects.get(id=data["range"]["id"])
+        assert range_obj.ngfw_enabled is False
+
+
+@pytest.mark.django_db
+class TestRangeStatusNGFW:
+    """Tests for NGFW fields in range status response."""
+
+    def test_range_status_includes_ngfw_when_disabled(self, client, test_agent):
+        """Status response should include ngfw_enabled=False when disabled."""
+        client.force_login(test_agent.user)
+
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.READY,
+            ngfw_enabled=False,
+        )
+
+        response = client.get(reverse("mission_control:range_status"))
+        assert response.status_code == 200
+        data = response.json()
+        assert data["range"]["ngfw_enabled"] is False
+        assert data["range"]["ngfw_instance_id"] == ""
+        assert data["range"]["ngfw_untrust_ip"] is None
+        assert data["range"]["ngfw_trust_ip"] is None
+
+    def test_range_status_includes_ngfw_when_enabled(self, client, test_agent):
+        """Status response should include NGFW details when enabled."""
+        client.force_login(test_agent.user)
+
+        Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.READY,
+            ngfw_enabled=True,
+            ngfw_instance_id="i-ngfw12345",
+            ngfw_untrust_ip="10.1.5.10",
+            ngfw_trust_ip="10.1.5.11",
+        )
+
+        response = client.get(reverse("mission_control:range_status"))
+        assert response.status_code == 200
+        data = response.json()
+        assert data["range"]["ngfw_enabled"] is True
+        assert data["range"]["ngfw_instance_id"] == "i-ngfw12345"
+        assert data["range"]["ngfw_untrust_ip"] == "10.1.5.10"
+        assert data["range"]["ngfw_trust_ip"] == "10.1.5.11"

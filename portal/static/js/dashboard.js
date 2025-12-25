@@ -35,6 +35,8 @@ class DashboardManager {
         this.agentDropdown = document.getElementById('agent-dropdown');
         this.agentSelect = document.getElementById('agent-select-value');
         this.agentItems = document.getElementById('agent-items');
+        this.scenarioDropdown = document.getElementById('scenario-dropdown');
+        this.scenarioSelect = document.getElementById('scenario-select-value');
         this.launchBtn = document.getElementById('launch-btn');
         this.cancelBtn = document.getElementById('cancel-btn');
         this.pauseBtn = document.getElementById('pause-btn');
@@ -123,11 +125,21 @@ class DashboardManager {
     }
 
     async init() {
+        // Initialize scenario dropdown
+        this._initScenarioDropdown();
+
         // Load agents and current status in parallel
         await Promise.all([
             this.loadAgents(),
             this.loadStatus(),
         ]);
+    }
+
+    _initScenarioDropdown() {
+        // Initialize the scenario dropdown with XdrDropdown if available
+        if (this.scenarioDropdown && window.XdrDropdown) {
+            new window.XdrDropdown(this.scenarioDropdown);
+        }
     }
 
     async loadAgents() {
@@ -333,6 +345,8 @@ class DashboardManager {
         const agentId = this.agentSelect?.value;
         if (!agentId) return;
 
+        const scenario = this.scenarioSelect?.value || 'basic';
+
         this.launchBtn.disabled = true;
         this.launchBtn.textContent = 'Launching...';
 
@@ -343,7 +357,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
-                body: JSON.stringify({ agent_id: parseInt(agentId) }),
+                body: JSON.stringify({ agent_id: parseInt(agentId), scenario: scenario }),
             });
 
             const data = await response.json();

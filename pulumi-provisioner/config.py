@@ -203,7 +203,7 @@ def load_config() -> RangeConfig:
             instances.append(
                 InstanceConfig(
                     role=inst.get("role", "victim"),
-                    os_type=inst.get("os", "ubuntu"),
+                    os_type=inst.get("os_type") or inst.get("os", "ubuntu"),
                     instance_type=inst["instance_type"],
                     agent_id=inst.get("agent_id"),
                     agent_s3_key=agent_s3_key,
@@ -232,4 +232,5 @@ def load_config() -> RangeConfig:
         agent_s3_bucket=config.get("agentS3Bucket") or "",
         availability_zone=config.require("availabilityZone"),
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
+        dc_security_group_id=config.get("dcSecurityGroupId") or "",
     )

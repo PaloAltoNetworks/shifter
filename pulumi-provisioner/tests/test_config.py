@@ -943,3 +943,84 @@ class TestOsTypeKeySupport:
         result = load_config()
 
         assert result.dc_security_group_id == "sg-dc-test"
+
+
+class TestInstanceTypeDefaults:
+    """Tests for instance type defaults from catalog when not specified."""
+
+    def test_attacker_uses_kali_instance_type_default(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """Attacker role should use KALI_INSTANCE_TYPE from environment."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "attacker", "os_type": "kali"},  # No instance_type
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].instance_type == os.environ["KALI_INSTANCE_TYPE"]
+
+    def test_victim_uses_victim_instance_type_default(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """Victim role should use VICTIM_INSTANCE_TYPE from environment."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os_type": "ubuntu"},  # No instance_type
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].instance_type == os.environ["VICTIM_INSTANCE_TYPE"]
+
+    def test_dc_uses_dc_instance_type_default(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """DC role should use DC_INSTANCE_TYPE default (t3.large)."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "dc", "os_type": "windows"},  # No instance_type
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        # DC_INSTANCE_TYPE defaults to t3.large if not set
+        assert result.instances[0].instance_type == "t3.large"
+
+    def test_explicit_instance_type_overrides_default(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """Explicitly provided instance_type should override default."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "attacker", "os_type": "kali", "instance_type": "t3.xlarge"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].instance_type == "t3.xlarge"

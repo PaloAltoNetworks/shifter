@@ -141,6 +141,10 @@ class InstanceComponent(pulumi.ComponentResource):
         """
         super().__init__("shifter:range:InstanceComponent", name, None, opts)
 
+        # Store role and os_type for output building (avoids closure issues)
+        self.role = role
+        self.os_type = os_type
+
         # Common tags for all resources
         common_tags = {
             "shifter:range_id": str(range_id),

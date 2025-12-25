@@ -112,6 +112,8 @@ class InstanceComponent(pulumi.ComponentResource):
         agent_s3_key: str = "",
         agent_presigned_url: str = "",
         dc_config: Optional[dict] = None,
+        join_domain: bool = False,
+        dc_config_param_name: Optional[str] = None,
         opts: Optional[pulumi.ResourceOptions] = None,
     ):
         """Create an EC2 instance for a range.
@@ -133,6 +135,8 @@ class InstanceComponent(pulumi.ComponentResource):
             agent_s3_key: S3 key for agent installer (for victims).
             agent_presigned_url: Pre-generated presigned URL for agent (for victims).
             dc_config: DC configuration dict with domain_name and netbios_name (for DC role).
+            join_domain: Whether this instance should join a domain (for domain members).
+            dc_config_param_name: SSM parameter path for DC config (for domain members).
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:InstanceComponent", name, None, opts)
@@ -206,6 +210,8 @@ class InstanceComponent(pulumi.ComponentResource):
             agent_s3_key=agent_s3_key,
             agent_presigned_url=agent_presigned_url,
             dc_config=dc_config,
+            join_domain=join_domain,
+            member_dc_config_param_name=dc_config_param_name,
         )
 
         instance_name = f"shifter-{role}-{range_id}"
@@ -262,6 +268,8 @@ class InstanceComponent(pulumi.ComponentResource):
         agent_s3_key: str = "",
         agent_presigned_url: str = "",
         dc_config: Optional[dict] = None,
+        join_domain: bool = False,
+        member_dc_config_param_name: Optional[str] = None,
     ) -> str:
         """Generate user data script for the instance.
 
@@ -274,6 +282,8 @@ class InstanceComponent(pulumi.ComponentResource):
             agent_s3_key: S3 key for agent installer (for logging).
             agent_presigned_url: Pre-generated presigned URL for agent installer.
             dc_config: DC configuration dict for DC role.
+            join_domain: Whether this instance should join a domain.
+            member_dc_config_param_name: SSM parameter path for DC config (for domain members).
 
         Returns:
             Base64-encoded user data script.
@@ -288,6 +298,10 @@ class InstanceComponent(pulumi.ComponentResource):
             loader=FileSystemLoader(templates_dir),
             autoescape=False,
         )
+
+        # Validate S3 key if provided (for all victim types)
+        if agent_s3_key and not validate_s3_path(agent_s3_key):
+            raise ValueError(f"Invalid S3 key (potential shell injection): {agent_s3_key}")
 
         # Select template based on role and OS
         if role == "attacker":
@@ -306,12 +320,18 @@ class InstanceComponent(pulumi.ComponentResource):
                 "dc_config_param_name": self.dc_config_param_name,
                 "dsrm_password": self.dsrm_password,
             }
+        elif os_type == "windows" and join_domain and member_dc_config_param_name:
+            # Domain member - Windows instance joining a domain
+            template = env.get_template("domain_member_windows.ps1.j2")
+            context = {
+                "hostname": f"shifter-victim-{range_id}-{index}",
+                "public_key": public_key,
+                "dc_config_param_name": member_dc_config_param_name,
+                "presigned_url": agent_presigned_url,
+                "agent_s3_key": agent_s3_key,
+            }
         elif os_type == "windows":
             template = env.get_template("victim_windows.ps1.j2")
-            # Validate S3 key if provided (for logging/reference)
-            if agent_s3_key and not validate_s3_path(agent_s3_key):
-                raise ValueError(f"Invalid S3 key (potential shell injection): {agent_s3_key}")
-
             context = {
                 "hostname": f"shifter-victim-{range_id}-{index}",
                 "public_key": public_key,
@@ -320,10 +340,6 @@ class InstanceComponent(pulumi.ComponentResource):
             }
         else:
             template = env.get_template("victim_linux.sh.j2")
-            # Validate S3 key if provided (for logging/reference)
-            if agent_s3_key and not validate_s3_path(agent_s3_key):
-                raise ValueError(f"Invalid S3 key (potential shell injection): {agent_s3_key}")
-
             context = {
                 "hostname": f"shifter-victim-{range_id}-{index}",
                 "public_key": public_key,

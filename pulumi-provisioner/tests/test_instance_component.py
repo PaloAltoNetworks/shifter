@@ -314,6 +314,150 @@ class TestInstanceComponentWithPulumiMocks:
             assert "ssh_key_secret_arn" in output_dict
 
 
+class TestDCInstanceComponent:
+    """Tests for DC (Domain Controller) instance component functionality."""
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pytest.fixture
+    def temp_templates(self, temp_templates_dir):
+        """Provide temp templates directory."""
+        return temp_templates_dir
+
+    @pulumi.runtime.test
+    def test_dc_instance_creates_config_parameter(self, temp_templates):
+        """DC instance should create an SSM Parameter for DC config."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-dc",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="dc",
+                os_type="windows",
+                instance_type="t3.large",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
+            )
+
+            # Verify SSM Parameter was created
+            assert hasattr(component, "dc_config_param")
+            assert component.dc_config_param is not None
+
+    @pulumi.runtime.test
+    def test_dc_instance_parameter_path_scoped_to_range(self, temp_templates):
+        """DC config parameter should be scoped to the specific range."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-dc",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="dc",
+                os_type="windows",
+                instance_type="t3.large",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
+            )
+
+            # Parameter name should follow pattern: /shifter/{env}/range/{range_id}/dc-config
+            assert component.dc_config_param_name == "/shifter/dev/range/42/dc-config"
+
+    @pulumi.runtime.test
+    def test_dc_instance_generates_dsrm_password(self, temp_templates):
+        """DC instance should generate DSRM password."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-dc",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="dc",
+                os_type="windows",
+                instance_type="t3.large",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
+            )
+
+            # DSRM password should be generated
+            assert hasattr(component, "dsrm_password")
+            assert component.dsrm_password is not None
+            assert len(component.dsrm_password) >= 16
+
+    @pulumi.runtime.test
+    def test_dc_instance_user_data_includes_dc_params(self, temp_templates):
+        """DC user data should include domain configuration."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-dc",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="dc",
+                os_type="windows",
+                instance_type="t3.large",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
+            )
+
+            def check_user_data(user_data_b64):
+                import base64
+
+                user_data = base64.b64decode(user_data_b64).decode()
+                assert "internal.shifter" in user_data
+                assert "SHIFTER" in user_data
+                assert "/shifter/dev/range/42/dc-config" in user_data
+
+            component.instance.user_data_base64.apply(check_user_data)
+
+    @pulumi.runtime.test
+    def test_victim_instance_unchanged(self, temp_templates):
+        """Existing victim instance behavior should be unchanged."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            victim = InstanceComponent(
+                name="test-victim",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="ubuntu",
+                instance_type="t3.small",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+            )
+
+            # Victim should NOT have DC config parameter
+            assert not hasattr(victim, "dc_config_param") or victim.dc_config_param is None
+            assert not hasattr(victim, "dsrm_password") or victim.dsrm_password is None
+
+
 class TestUserDataGeneration:
     """Tests for user data generation - verify templates are rendered correctly."""
 

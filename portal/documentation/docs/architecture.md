@@ -22,6 +22,7 @@ flowchart TB
         subgraph SUBNET["User Subnet (/24)"]
             KALI[Kali EC2]
             VICTIM[Victim EC2]
+            DC[DC EC2]
         end
     end
 
@@ -35,6 +36,8 @@ flowchart TB
     PROV -->|Create| SUBNET
     VICTIM -->|Telemetry| XDR[XDR/XSIAM]
 ```
+
+DC is optional. Enables AD attack scenarios with domain-joined victims.
 
 ## Components
 
@@ -79,6 +82,7 @@ ECS Fargate task that provisions/destroys range infrastructure.
 - `ubuntu-22.04-victim` - Ubuntu 22.04 victim
 - `ubuntu-24.04-victim` - Ubuntu 24.04 victim
 - `windows-server-2022-victim` - Windows Server 2022 victim
+- `windows-server-2022-dc` - Windows Server 2022 Domain Controller
 - `amazon-linux-2023-victim` - Amazon Linux 2023 victim
 
 ### Terraform (`terraform/`)

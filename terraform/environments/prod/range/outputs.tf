@@ -41,6 +41,25 @@ output "kali_security_group_id" {
   value       = module.vpc.kali_security_group_id
 }
 
+# ------------------------------------------------------------------------------
+# VM-Series NGFW
+# ------------------------------------------------------------------------------
+
+output "ngfw_security_group_id" {
+  description = "ID of the security group for VM-Series NGFW instances (null if disabled)"
+  value       = module.vpc.ngfw_security_group_id
+}
+
+output "vm_series_ami_id" {
+  description = "VM-Series AMI ID (empty string if NGFW disabled)"
+  value       = module.vpc.vm_series_ami_id
+}
+
+output "vm_series_instance_type" {
+  description = "VM-Series instance type"
+  value       = module.vpc.vm_series_instance_type
+}
+
 output "nat_gateway_id" {
   description = "ID of the NAT Gateway"
   value       = module.vpc.nat_gateway_id

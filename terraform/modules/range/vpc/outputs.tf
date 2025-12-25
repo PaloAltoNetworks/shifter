@@ -49,6 +49,21 @@ output "kali_security_group_id" {
   value       = aws_security_group.kali.id
 }
 
+output "ngfw_security_group_id" {
+  description = "ID of the security group for VM-Series NGFW instances (null if NGFW disabled)"
+  value       = var.vm_series_ami_id != "" ? aws_security_group.ngfw[0].id : null
+}
+
+output "vm_series_ami_id" {
+  description = "VM-Series AMI ID (empty string if NGFW disabled)"
+  value       = var.vm_series_ami_id
+}
+
+output "vm_series_instance_type" {
+  description = "VM-Series instance type"
+  value       = var.vm_series_instance_type
+}
+
 # ------------------------------------------------------------------------------
 # Network Firewall
 # ------------------------------------------------------------------------------

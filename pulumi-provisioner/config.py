@@ -44,12 +44,15 @@ def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str
 class InstanceConfig:
     """Configuration for an instance to be provisioned."""
 
-    role: str  # "attacker" or "victim"
+    role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
     agent_id: Optional[int] = None  # Agent config ID for victim instances
     agent_s3_key: Optional[str] = None  # S3 key for agent installer
     agent_presigned_url: Optional[str] = None  # Presigned URL for agent download
+    dc_config: Optional[dict] = None  # {"domain_name": "...", "netbios_name": "..."}
+    join_domain: bool = False  # Whether this instance should join a domain
+    dc_config_secret_arn: Optional[str] = None  # ARN for domain members to read DC config
 
 
 @dataclass
@@ -204,6 +207,8 @@ def load_config() -> RangeConfig:
                     agent_id=inst.get("agent_id"),
                     agent_s3_key=agent_s3_key,
                     agent_presigned_url=get_presigned_url(agent_s3_key),
+                    dc_config=inst.get("dc_config"),
+                    join_domain=inst.get("join_domain", False),
                 )
             )
 

@@ -66,7 +66,15 @@ class TestBootstrapPlanSteps:
         plan = BootstrapPlan()
         for step in plan.steps:
             assert step.timeout_seconds > 0, f"Step {step.name} must have positive timeout"
+            # Bootstrap steps need longer timeouts for SSM agent initialization after boot/reboot
             assert step.timeout_seconds <= 300, f"Step {step.name} timeout seems too long for bootstrap"
+
+    def test_first_step_has_adequate_timeout(self):
+        """First step needs longer timeout for SSM agent initialization."""
+        plan = BootstrapPlan()
+        first_step = plan.steps[0]
+        # SSM agent needs time to initialize after boot
+        assert first_step.timeout_seconds >= 120, "First step needs adequate timeout for SSM init"
 
 
 class TestBootstrapPlanVerification:

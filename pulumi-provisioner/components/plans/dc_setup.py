@@ -119,13 +119,13 @@ class DCSetupPlan:
         SetupStep(
             name="install_ad_feature",
             script=INSTALL_AD_FEATURE_SCRIPT,
-            timeout_seconds=600,  # 10 minutes for feature install
+            timeout_seconds=420,  # 7 min (typically 2-4 min + buffer)
             requires_reboot=True,
         ),
         SetupStep(
             name="promote_to_dc",
             script=PROMOTE_DC_SCRIPT,
-            timeout_seconds=900,  # 15 minutes for DC promotion
+            timeout_seconds=480,  # 8 min (typically 3-5 min + buffer)
             requires_reboot=True,  # DC restarts after promotion
         ),
     ]
@@ -133,7 +133,7 @@ class DCSetupPlan:
     verify_step: SetupStep = SetupStep(
         name="verify_ad_running",
         script=VERIFY_AD_SCRIPT,
-        timeout_seconds=120,
+        timeout_seconds=180,  # 3 min (runs after reboot, needs SSM init time)
         is_verification=True,
     )
 

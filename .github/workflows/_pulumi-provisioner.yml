@@ -64,3 +64,44 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache-pulumi
           mv /tmp/.buildx-cache-pulumi-new /tmp/.buildx-cache-pulumi || true
+
+  deploy:
+    name: Deploy (${{ inputs.environment }})
+    runs-on: self-hosted
+    needs: build
+    if: github.event_name != 'pull_request' || inputs.is_dev
+    env:
+      TASK_FAMILY: ${{ inputs.is_dev && 'dev-portal-pulumi-provisioner' || 'prod-portal-pulumi-provisioner' }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update ECS task definition
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          ECR_REPOSITORY: ${{ inputs.is_dev && 'shifter-dev-pulumi-provisioner' || 'shifter-prod-pulumi-provisioner' }}
+        run: |
+          # Get AWS account ID
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          NEW_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+
+          # Get current task definition
+          TASK_DEF=$(aws ecs describe-task-definition --task-definition "${TASK_FAMILY}" --query 'taskDefinition')
+
+          # Update the image in container definitions
+          NEW_CONTAINER_DEFS=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '.containerDefinitions[0].image = $IMAGE | .containerDefinitions')
+
+          # Register new task definition revision
+          aws ecs register-task-definition \
+            --family "${TASK_FAMILY}" \
+            --task-role-arn "$(echo "$TASK_DEF" | jq -r '.taskRoleArn')" \
+            --execution-role-arn "$(echo "$TASK_DEF" | jq -r '.executionRoleArn')" \
+            --network-mode "$(echo "$TASK_DEF" | jq -r '.networkMode')" \
+            --container-definitions "$NEW_CONTAINER_DEFS" \
+            --requires-compatibilities FARGATE \
+            --cpu "$(echo "$TASK_DEF" | jq -r '.cpu')" \
+            --memory "$(echo "$TASK_DEF" | jq -r '.memory')"
+
+          echo "Registered new task definition with image: ${NEW_IMAGE}"

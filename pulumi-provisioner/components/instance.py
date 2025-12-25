@@ -92,7 +92,7 @@ class InstanceComponent(pulumi.ComponentResource):
     # DC-specific attributes (None for non-DC instances)
     dc_config_param: Optional[aws.ssm.Parameter]
     dc_config_param_name: Optional[str]
-    dsrm_password: Optional[str]
+    dsrm_password: Optional[str]  # nosec B105 - generated at runtime, not hardcoded
 
     def __init__(
         self,
@@ -350,7 +350,7 @@ class InstanceComponent(pulumi.ComponentResource):
         script = template.render(**context)
         return base64.b64encode(script.encode()).decode()
 
-    def _generate_secure_password(self, length: int = 24) -> str:
+    def _generate_secure_password(self, length: int = 24) -> str:  # nosec B105
         """Generate a cryptographically secure random password for DSRM.
 
         Args:

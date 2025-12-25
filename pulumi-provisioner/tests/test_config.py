@@ -950,3 +950,118 @@ class TestConfigValidation:
         )
 
         assert config.instances == []
+
+
+class TestOsTypeKeySupport:
+    """Tests for os_type key support in instance_config JSON.
+
+    The Portal sends 'os_type' but we also support legacy 'os' key.
+    """
+
+    @pytest.fixture
+    def mock_pulumi_config(self, mocker):
+        """Mock Pulumi Config object with required values."""
+        mock_config = MagicMock()
+
+        mock_config.require.side_effect = lambda key: {
+            "environment": "dev",
+            "rangeVpcId": "vpc-test123",
+            "rangeVpcCidr": "10.1.0.0/16",
+            "rangeRouteTableId": "rtb-test123",
+            "kaliSecurityGroupId": "sg-kali-test",
+            "victimSecurityGroupId": "sg-victim-test",
+            "kaliAmiId": "ami-kali-test",
+            "victimAmiId": "ami-victim-test",
+            "availabilityZone": "us-east-2a",
+        }.get(key, f"mock-{key}")
+
+        mock_config.require_int.side_effect = lambda key: {
+            "rangeId": 42,
+        }.get(key, 0)
+
+        mock_config.get.side_effect = lambda key: {
+            "agentS3Bucket": "test-agents-bucket",
+            "windowsAmiId": "ami-windows-test",
+            "dcSecurityGroupId": "sg-dc-test",
+            "rangeInstanceProfileName": "test-profile",
+            "portalVpcCidr": "10.0.0.0/16",
+        }.get(key)
+
+        mocker.patch("pulumi.Config", return_value=mock_config)
+        return mock_config
+
+    def test_load_config_supports_os_type_key(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should parse os_type key from instance_config JSON (Portal format)."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "attacker", "os_type": "kali", "instance_type": "t3.medium"},
+            {"role": "victim", "os_type": "windows", "instance_type": "t3.medium"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 2
+        assert result.instances[0].os_type == "kali"
+        assert result.instances[1].os_type == "windows"
+
+    def test_load_config_supports_legacy_os_key(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should still support legacy 'os' key for backwards compatibility."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os": "ubuntu", "instance_type": "t3.medium"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].os_type == "ubuntu"
+
+    def test_load_config_os_type_takes_precedence_over_os(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """os_type key should take precedence over legacy os key if both present."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os_type": "windows", "os": "ubuntu", "instance_type": "t3.medium"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].os_type == "windows"
+
+    def test_load_config_dc_security_group_id_loaded(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should load dc_security_group_id from Pulumi config."""
+        from config import load_config
+
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": [],
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.dc_security_group_id == "sg-dc-test"

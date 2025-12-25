@@ -61,7 +61,7 @@ repos:
       - id: checkov
         files: ^terraform/
         args:
-          [--quiet, --compact, --download-external-modules, "true", --soft-fail]
+          [--quiet, --compact, --directory, terraform/, --soft-fail]
 
   # Shell scripts
   - repo: https://github.com/shellcheck-py/shellcheck-py

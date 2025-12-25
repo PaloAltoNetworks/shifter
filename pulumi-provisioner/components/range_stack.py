@@ -124,6 +124,9 @@ class RangeStack(pulumi.ComponentResource):
                 ),
             )
 
+            # Run DC setup via SSM orchestration (AD DS install, reboot, promote)
+            dc_instance.run_dc_setup()
+
             dc_components.append(dc_instance)
             self.instances.append(dc_instance)
 

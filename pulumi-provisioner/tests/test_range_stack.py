@@ -33,6 +33,18 @@ def mock_cleanup_orphaned_subnet():
         yield
 
 
+@pytest.fixture
+def mock_dc_setup():
+    """Mock DC setup for RangeStack tests.
+
+    DC setup uses SSM Run Command which requires AWS credentials and region.
+    We mock it to return a successful Output without making real API calls.
+    """
+    with patch("components.instance.InstanceComponent.run_dc_setup") as mock:
+        mock.return_value = pulumi.Output.from_input(True)
+        yield mock
+
+
 class TestRangeStackComposition:
     """Tests for RangeStack component composition."""
 
@@ -618,7 +630,7 @@ class TestRangeStackDCDependencyOrdering:
     """
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_dc_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 

@@ -77,6 +77,9 @@ Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Inte
 |----|---------|--------|---------|
 | Kali | SSH from Portal+Range VPC, ALL from Victim SG | VPC CIDR, DNS | Attack box |
 | Victim | SSH from Portal+Range VPC, ALL from Kali SG | HTTPS, DNS | Target with XDR agent |
+| DC | SSH from Portal+Range VPC, ALL from Kali SG, AD ports from Victim SG | HTTPS, DNS | Domain controller |
+
+DC security group allows AD traffic (LDAP, Kerberos, DNS, SMB) from domain members.
 
 **Design Decisions:**
 

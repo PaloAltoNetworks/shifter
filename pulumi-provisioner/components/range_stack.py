@@ -3,6 +3,7 @@
 This is the main composition component that brings together:
 - Network (subnet)
 - Instances (Kali, victims)
+- NGFW (VM-Series, optional)
 """
 
 from typing import Optional
@@ -12,6 +13,7 @@ import pulumi
 from config import RangeConfig
 from components.instance import InstanceComponent
 from components.network import NetworkComponent
+from components.ngfw import NGFWComponent
 
 
 class RangeStack(pulumi.ComponentResource):
@@ -20,16 +22,19 @@ class RangeStack(pulumi.ComponentResource):
     This is the main entry point for provisioning a range. It composes:
     - NetworkComponent for subnet creation
     - InstanceComponent(s) for each configured instance
+    - NGFWComponent for VM-Series firewall (optional)
 
     Attributes:
         network: The network component.
         instances: List of instance components.
+        ngfw: The NGFW component (None if disabled).
         subnet_id: The subnet ID.
         subnet_cidr: The subnet CIDR.
     """
 
     network: NetworkComponent
     instances: list[InstanceComponent]
+    ngfw: Optional[NGFWComponent]
     subnet_id: pulumi.Output[str]
     subnet_cidr: pulumi.Output[str]
 
@@ -68,6 +73,28 @@ class RangeStack(pulumi.ComponentResource):
 
         self.subnet_id = self.network.subnet_id
         self.subnet_cidr = self.network.subnet_cidr
+
+        # Create NGFW if enabled
+        self.ngfw = None
+        if config.ngfw_enabled:
+            self.ngfw = NGFWComponent(
+                f"{name}-ngfw",
+                range_id=config.range_id,
+                user_id=config.user_id,
+                subnet_id=self.network.subnet_id,
+                security_group_id=config.ngfw_security_group_id,
+                ami_id=config.ngfw_ami_id,
+                instance_type=config.ngfw_instance_type,
+                bootstrap_bucket=config.agent_s3_bucket,  # Reuse agent bucket
+                cidr_prefix=cidr_prefix,
+                subnet_index=config.subnet_index,
+                environment=config.environment,
+                instance_profile_name=config.instance_profile_name,
+                opts=pulumi.ResourceOptions(
+                    parent=self,
+                    depends_on=[self.network],
+                ),
+            )
 
         # Create instances
         self.instances = []
@@ -141,7 +168,7 @@ class RangeStack(pulumi.ComponentResource):
         Returns:
             Dictionary with all range outputs.
         """
-        return {
+        outputs = {
             "subnet_id": self.subnet_id,
             "subnet_cidr": self.subnet_cidr,
             "instances": [
@@ -155,4 +182,6 @@ class RangeStack(pulumi.ComponentResource):
                 }
                 for i, inst in enumerate(self.instances)
             ],
+            "ngfw": self.ngfw.to_output_dict() if self.ngfw else None,
         }
+        return outputs

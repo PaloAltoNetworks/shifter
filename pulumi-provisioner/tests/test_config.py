@@ -65,6 +65,7 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 "agents/xdr.tar.gz",  # agent_s3_key
                 "linux-debian",  # agent_os_slug
+                False,  # ngfw_enabled
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -94,6 +95,7 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 "agents/xdr.msi",  # agent_s3_key
                 "windows",  # agent_os_slug - from OperatingSystem.slug
+                False,  # ngfw_enabled
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -133,6 +135,7 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 None,  # agent_s3_key (no agent)
                 None,  # agent_os_slug (no agent)
+                False,  # ngfw_enabled
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -165,6 +168,7 @@ class TestGetRangeFromDb:
                 custom_config,  # instance_config
                 None,  # agent_s3_key
                 None,  # agent_os_slug
+                False,  # ngfw_enabled
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -709,6 +713,220 @@ class TestAgentOsToVictimOsMapping:
         victim = result.instances[1]
         assert victim.role == "victim"
         assert victim.os_type == "ubuntu", f"Expected 'ubuntu' but got '{victim.os_type}'"
+
+
+class TestRangeConfigNGFWFields:
+    """Tests for NGFW configuration fields in RangeConfig.
+
+    TDD: These tests verify NGFW fields are properly handled.
+    """
+
+    def test_range_config_ngfw_defaults(self):
+        """NGFW fields should have proper defaults."""
+        config = RangeConfig(
+            range_id=42,
+            user_id=1,
+            subnet_index=5,
+            environment="dev",
+            instances=[],
+            vpc_id="vpc-123",
+            vpc_cidr="10.1.0.0/16",
+            route_table_id="rtb-123",
+            kali_security_group_id="sg-kali",
+            victim_security_group_id="sg-victim",
+            instance_profile_name="profile",
+            kali_ami_id="ami-kali",
+            victim_ami_id="ami-victim",
+            windows_ami_id="ami-windows",
+            agent_s3_bucket="bucket",
+            availability_zone="us-east-2a",
+        )
+
+        # NGFW should be disabled by default
+        assert config.ngfw_enabled is False
+        assert config.ngfw_ami_id == ""
+        assert config.ngfw_instance_type == "m5.xlarge"
+        assert config.ngfw_security_group_id == ""
+
+    def test_range_config_ngfw_enabled(self):
+        """NGFW fields can be set explicitly."""
+        config = RangeConfig(
+            range_id=42,
+            user_id=1,
+            subnet_index=5,
+            environment="dev",
+            instances=[],
+            vpc_id="vpc-123",
+            vpc_cidr="10.1.0.0/16",
+            route_table_id="rtb-123",
+            kali_security_group_id="sg-kali",
+            victim_security_group_id="sg-victim",
+            instance_profile_name="profile",
+            kali_ami_id="ami-kali",
+            victim_ami_id="ami-victim",
+            windows_ami_id="ami-windows",
+            agent_s3_bucket="bucket",
+            availability_zone="us-east-2a",
+            ngfw_enabled=True,
+            ngfw_ami_id="ami-vmseries",
+            ngfw_instance_type="m5.2xlarge",
+            ngfw_security_group_id="sg-ngfw",
+        )
+
+        assert config.ngfw_enabled is True
+        assert config.ngfw_ami_id == "ami-vmseries"
+        assert config.ngfw_instance_type == "m5.2xlarge"
+        assert config.ngfw_security_group_id == "sg-ngfw"
+
+
+class TestGetRangeFromDbNGFW:
+    """Tests for NGFW field loading from database.
+
+    TDD: These tests are written BEFORE implementation.
+    They must FAIL initially, then PASS after implementation.
+    """
+
+    def test_get_range_from_db_returns_ngfw_enabled(self, mock_boto3_clients, mock_env_vars_minimal):
+        """get_range_from_db should return ngfw_enabled field."""
+        with patch("psycopg.connect") as mock_connect:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (
+                42,     # id
+                1,      # user_id
+                5,      # subnet_index
+                None,   # agent_id
+                None,   # instance_config
+                None,   # agent_s3_key
+                None,   # agent_os_slug
+                True,   # ngfw_enabled
+            )
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_connect.return_value = mock_conn
+
+            result = get_range_from_db(42)
+
+            assert "ngfw_enabled" in result
+            assert result["ngfw_enabled"] is True
+
+    def test_get_range_from_db_ngfw_disabled_by_default(self, mock_boto3_clients, mock_env_vars_minimal):
+        """ngfw_enabled should be False when database returns False."""
+        with patch("psycopg.connect") as mock_connect:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (
+                42,     # id
+                1,      # user_id
+                5,      # subnet_index
+                None,   # agent_id
+                None,   # instance_config
+                None,   # agent_s3_key
+                None,   # agent_os_slug
+                False,  # ngfw_enabled
+            )
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_connect.return_value = mock_conn
+
+            result = get_range_from_db(42)
+
+            assert result["ngfw_enabled"] is False
+
+
+class TestLoadConfigNGFW:
+    """Tests for NGFW config loading from environment variables.
+
+    TDD: These tests are written BEFORE implementation.
+    They must FAIL initially, then PASS after implementation.
+    """
+
+    @pytest.fixture
+    def mock_pulumi_config_with_ngfw(self, mocker):
+        """Mock Pulumi Config with NGFW settings."""
+        mock_config = MagicMock()
+
+        mock_config.require.side_effect = lambda key: {
+            "environment": "dev",
+            "rangeVpcId": "vpc-test123",
+            "rangeVpcCidr": "10.1.0.0/16",
+            "rangeRouteTableId": "rtb-test123",
+            "kaliSecurityGroupId": "sg-kali-test",
+            "victimSecurityGroupId": "sg-victim-test",
+            "kaliAmiId": "ami-kali-test",
+            "victimAmiId": "ami-victim-test",
+            "availabilityZone": "us-east-2a",
+        }.get(key, f"mock-{key}")
+
+        mock_config.require_int.side_effect = lambda key: {
+            "rangeId": 42,
+        }.get(key, 0)
+
+        mock_config.get.side_effect = lambda key: {
+            "agentS3Bucket": "test-agents-bucket",
+            "windowsAmiId": "ami-windows-test",
+            "rangeInstanceProfileName": "test-profile",
+            "portalVpcCidr": "10.0.0.0/16",
+        }.get(key)
+
+        mocker.patch("pulumi.Config", return_value=mock_config)
+        return mock_config
+
+    def test_load_config_loads_ngfw_from_env(
+        self, mock_pulumi_config_with_ngfw, mocker, mock_boto3_clients
+    ):
+        """load_config should load NGFW settings from environment variables."""
+        from config import load_config
+
+        # Mock database with ngfw_enabled=True
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42,
+            "user_id": 1,
+            "subnet_index": 5,
+            "agent_id": None,
+            "instance_config": None,
+            "agent_s3_key": None,
+            "agent_os_slug": None,
+            "ngfw_enabled": True,
+        })
+
+        # Set NGFW environment variables
+        with patch.dict(os.environ, {
+            "NGFW_AMI_ID": "ami-vmseries-env",
+            "NGFW_INSTANCE_TYPE": "m5.xlarge",
+            "NGFW_SECURITY_GROUP_ID": "sg-ngfw-env",
+        }):
+            result = load_config()
+
+        assert result.ngfw_enabled is True
+        assert result.ngfw_ami_id == "ami-vmseries-env"
+        assert result.ngfw_instance_type == "m5.xlarge"
+        assert result.ngfw_security_group_id == "sg-ngfw-env"
+
+    def test_load_config_ngfw_disabled_when_db_false(
+        self, mock_pulumi_config_with_ngfw, mocker, mock_boto3_clients
+    ):
+        """NGFW should be disabled when database returns ngfw_enabled=False."""
+        from config import load_config
+
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42,
+            "user_id": 1,
+            "subnet_index": 5,
+            "agent_id": None,
+            "instance_config": None,
+            "agent_s3_key": None,
+            "agent_os_slug": None,
+            "ngfw_enabled": False,
+        })
+
+        result = load_config()
+
+        assert result.ngfw_enabled is False
 
 
 class TestConfigValidation:

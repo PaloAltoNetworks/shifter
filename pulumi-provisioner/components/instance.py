@@ -11,6 +11,8 @@ All AWS resources are created via Pulumi to ensure proper lifecycle management.
 import base64
 import os
 import re
+import secrets
+import string
 from pathlib import Path
 from typing import Optional
 
@@ -77,6 +79,9 @@ class InstanceComponent(pulumi.ComponentResource):
         private_ip: The private IP address.
         ssh_key_secret: The Secrets Manager secret resource.
         ssh_key_secret_arn: ARN of the SSH key in Secrets Manager.
+        dc_config_param: SSM Parameter for DC config (DC role only, None otherwise).
+        dc_config_param_name: SSM Parameter path (DC role only, None otherwise).
+        dsrm_password: DSRM password (DC role only, not exported).
     """
 
     instance: aws.ec2.Instance
@@ -84,6 +89,10 @@ class InstanceComponent(pulumi.ComponentResource):
     private_ip: pulumi.Output[str]
     ssh_key_secret: aws.secretsmanager.Secret
     ssh_key_secret_arn: pulumi.Output[str]
+    # DC-specific attributes (None for non-DC instances)
+    dc_config_param: Optional[aws.ssm.Parameter]
+    dc_config_param_name: Optional[str]
+    dsrm_password: Optional[str]
 
     def __init__(
         self,
@@ -102,6 +111,7 @@ class InstanceComponent(pulumi.ComponentResource):
         agent_s3_bucket: str = "",
         agent_s3_key: str = "",
         agent_presigned_url: str = "",
+        dc_config: Optional[dict] = None,
         opts: Optional[pulumi.ResourceOptions] = None,
     ):
         """Create an EC2 instance for a range.
@@ -111,7 +121,7 @@ class InstanceComponent(pulumi.ComponentResource):
             range_id: The range ID.
             user_id: The user ID.
             index: Instance index (for multiple instances of same role).
-            role: Instance role (attacker/victim).
+            role: Instance role (attacker/victim/dc).
             os_type: OS type (kali/ubuntu/windows).
             instance_type: EC2 instance type.
             subnet_id: Subnet ID to launch in.
@@ -122,6 +132,7 @@ class InstanceComponent(pulumi.ComponentResource):
             agent_s3_bucket: S3 bucket for agent installer (for victims).
             agent_s3_key: S3 key for agent installer (for victims).
             agent_presigned_url: Pre-generated presigned URL for agent (for victims).
+            dc_config: DC configuration dict with domain_name and netbios_name (for DC role).
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:InstanceComponent", name, None, opts)
@@ -163,6 +174,28 @@ class InstanceComponent(pulumi.ComponentResource):
 
         self.ssh_key_secret_arn = self.ssh_key_secret.arn
 
+        # Initialize DC-specific attributes
+        self.dc_config_param = None
+        self.dc_config_param_name = None
+        self.dsrm_password = None
+
+        # For DC role, create SSM Parameter and generate DSRM password
+        if role == "dc":
+            # Generate DSRM password
+            self.dsrm_password = self._generate_secure_password()
+
+            # Create SSM Parameter for DC config (initially empty, DC will populate)
+            self.dc_config_param_name = f"/shifter/{environment}/range/{range_id}/dc-config"
+            self.dc_config_param = aws.ssm.Parameter(
+                f"{name}-dc-config",
+                name=self.dc_config_param_name,
+                type="SecureString",
+                value="{}",  # Empty JSON, DC will populate after promotion
+                description=f"Domain controller configuration for range {range_id}",
+                tags=common_tags,
+                opts=pulumi.ResourceOptions(parent=self),
+            )
+
         # Generate user data script based on role
         user_data = self._generate_user_data(
             role=role,
@@ -172,6 +205,7 @@ class InstanceComponent(pulumi.ComponentResource):
             index=index,
             agent_s3_key=agent_s3_key,
             agent_presigned_url=agent_presigned_url,
+            dc_config=dc_config,
         )
 
         instance_name = f"shifter-{role}-{range_id}"
@@ -227,6 +261,7 @@ class InstanceComponent(pulumi.ComponentResource):
         index: int,
         agent_s3_key: str = "",
         agent_presigned_url: str = "",
+        dc_config: Optional[dict] = None,
     ) -> str:
         """Generate user data script for the instance.
 
@@ -238,6 +273,7 @@ class InstanceComponent(pulumi.ComponentResource):
             index: Instance index.
             agent_s3_key: S3 key for agent installer (for logging).
             agent_presigned_url: Pre-generated presigned URL for agent installer.
+            dc_config: DC configuration dict for DC role.
 
         Returns:
             Base64-encoded user data script.
@@ -259,6 +295,16 @@ class InstanceComponent(pulumi.ComponentResource):
             context = {
                 "hostname": f"shifter-kali-{range_id}",
                 "public_key": public_key,
+            }
+        elif role == "dc":
+            template = env.get_template("dc_windows.ps1.j2")
+            context = {
+                "hostname": f"shifter-dc-{range_id}",
+                "public_key": public_key,
+                "domain_name": dc_config.get("domain_name", "internal.shifter") if dc_config else "internal.shifter",
+                "netbios_name": dc_config.get("netbios_name", "SHIFTER") if dc_config else "SHIFTER",
+                "dc_config_param_name": self.dc_config_param_name,
+                "dsrm_password": self.dsrm_password,
             }
         elif os_type == "windows":
             template = env.get_template("victim_windows.ps1.j2")
@@ -287,6 +333,25 @@ class InstanceComponent(pulumi.ComponentResource):
 
         script = template.render(**context)
         return base64.b64encode(script.encode()).decode()
+
+    def _generate_secure_password(self, length: int = 24) -> str:
+        """Generate a cryptographically secure random password for DSRM.
+
+        Args:
+            length: Password length (default 24 characters).
+
+        Returns:
+            Secure random password meeting Windows complexity requirements.
+        """
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        # Generate base password
+        password = "".join(secrets.choice(alphabet) for _ in range(length - 4))
+        # Ensure complexity: add at least one of each required type
+        password += secrets.choice(string.ascii_uppercase)
+        password += secrets.choice(string.ascii_lowercase)
+        password += secrets.choice(string.digits)
+        password += secrets.choice("!@#$%^&*")
+        return password
 
     def to_output_dict(self) -> dict:
         """Return instance info as a dictionary for export.

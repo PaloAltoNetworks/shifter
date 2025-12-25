@@ -132,6 +132,7 @@ class SSMExecutor:
                 TimeoutSeconds=min(timeout_seconds, 3600),  # SSM max is 1 hour
             )
             command_id = response["Command"]["CommandId"]
+            logger.info(f"Sent SSM command {command_id} to {instance_id}")
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code == "InvalidInstanceId":
@@ -153,11 +154,16 @@ class SSMExecutor:
                     InstanceId=instance_id,
                 )
             except ClientError as e:
-                # Command may not be ready yet
+                error_code = e.response.get("Error", {}).get("Code", "")
+                logger.warning(
+                    f"get_command_invocation failed: {error_code} - {e} "
+                    f"(command={command_id}, instance={instance_id}, elapsed={elapsed:.1f}s)"
+                )
                 time.sleep(self._poll_interval)
                 continue
 
             status = result.get("Status", "")
+            logger.info(f"Command {command_id} status: {status} (elapsed={elapsed:.1f}s)")
 
             if status in self.TERMINAL_STATUSES:
                 exit_code = result.get("ResponseCode", -1)

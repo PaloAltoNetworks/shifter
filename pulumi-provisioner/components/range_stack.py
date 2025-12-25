@@ -90,6 +90,12 @@ class RangeStack(pulumi.ComponentResource):
                 subnet_index=config.subnet_index,
                 environment=config.environment,
                 instance_profile_name=config.instance_profile_name,
+                # Panorama configuration from NGFWConfig model
+                panorama_server=config.ngfw_panorama_server,
+                vm_auth_key=config.ngfw_vm_auth_key,
+                panorama_server_2=config.ngfw_panorama_server_2,
+                template_stack=config.ngfw_template_stack,
+                device_group=config.ngfw_device_group,
                 opts=pulumi.ResourceOptions(
                     parent=self,
                     depends_on=[self.network],

@@ -1,0 +1,216 @@
+<powershell>
+# Windows Domain Controller setup script
+# This runs during instance boot via EC2 user data
+#
+# Template variables:
+#   hostname           - Computer name for the DC
+#   public_key         - SSH public key for Administrator access
+#   domain_name        - FQDN for the AD domain (e.g., internal.shifter)
+#   netbios_name       - NetBIOS name for the domain (e.g., SHIFTER)
+#   dc_config_secret_arn - Secrets Manager ARN to write DC config to
+#   dsrm_password      - Directory Services Restore Mode password
+
+$ErrorActionPreference = "Stop"
+$LogFile = "C:\Windows\Temp\dc-setup.log"
+
+function Log-Message {
+    param([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $Message" | Out-File -FilePath $LogFile -Append
+    Write-Host $Message
+}
+
+function Generate-SecurePassword {
+    # Generate a cryptographically secure random password
+    # Uses .NET cryptographic random number generator
+    param([int]$Length = 24)
+
+    $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+    $bytes = New-Object byte[] $Length
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($bytes)
+
+    $password = ""
+    foreach ($byte in $bytes) {
+        $password += $chars[$byte % $chars.Length]
+    }
+
+    # Ensure complexity requirements: at least one of each type
+    $password = $password.Substring(0, $Length - 4)
+    $password += "Aa1!"
+
+    return $password
+}
+
+try {
+    Log-Message "Starting Windows Domain Controller setup..."
+
+    # --------------------------------------------------------------------------
+    # 1. Set hostname for AD visibility
+    # --------------------------------------------------------------------------
+    Log-Message "Setting hostname to {{ hostname }}..."
+    Rename-Computer -NewName "{{ hostname }}" -Force
+    Log-Message "Hostname set (reboot will apply after DC promotion)"
+
+    # --------------------------------------------------------------------------
+    # 2. Configure OpenSSH Server for Terminal UI access
+    # --------------------------------------------------------------------------
+    Log-Message "Configuring OpenSSH Server..."
+    Start-Service sshd
+    Set-Service -Name sshd -StartupType Automatic
+
+    # Set up SSH key authentication for Administrator
+    {% if public_key %}
+    Log-Message "Setting up SSH key authentication..."
+    $sshDir = "C:\ProgramData\ssh"
+    if (!(Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir -Force }
+    "{{ public_key }}" | Out-File -Encoding ascii "$sshDir\administrators_authorized_keys"
+    icacls "$sshDir\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+    Log-Message "SSH key authentication configured"
+    {% endif %}
+
+    # --------------------------------------------------------------------------
+    # 3. Install AD DS Role
+    # --------------------------------------------------------------------------
+    Log-Message "Installing Active Directory Domain Services role..."
+    Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
+    Log-Message "AD DS role installed"
+
+    # --------------------------------------------------------------------------
+    # 4. Generate domain admin password
+    # --------------------------------------------------------------------------
+    Log-Message "Generating domain admin password..."
+    $DomainAdminPassword = Generate-SecurePassword -Length 24
+    # Note: Password is NOT logged for security
+
+    # --------------------------------------------------------------------------
+    # 5. Promote to Domain Controller
+    # --------------------------------------------------------------------------
+    Log-Message "Promoting server to Domain Controller..."
+    Log-Message "Domain: {{ domain_name }}"
+    Log-Message "NetBIOS: {{ netbios_name }}"
+
+    $DsrmSecurePassword = ConvertTo-SecureString "{{ dsrm_password }}" -AsPlainText -Force
+
+    # Install-ADDSForest will reboot the server automatically
+    # We need to schedule a post-reboot script to complete setup
+    $PostRebootScript = @"
+
+`$ErrorActionPreference = "Stop"
+`$LogFile = "C:\Windows\Temp\dc-setup.log"
+
+function Log-Message {
+    param([string]`$Message)
+    `$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "`$timestamp - `$Message" | Out-File -FilePath `$LogFile -Append
+    Write-Host `$Message
+}
+
+try {
+    Log-Message "Post-reboot DC configuration starting..."
+
+    # Wait for AD DS to be fully operational
+    Log-Message "Waiting for AD DS to be ready..."
+    `$maxAttempts = 30
+    `$attempt = 0
+    while (`$attempt -lt `$maxAttempts) {
+        try {
+            Get-ADDomain -ErrorAction Stop | Out-Null
+            Log-Message "AD DS is ready"
+            break
+        } catch {
+            `$attempt++
+            Log-Message "AD DS not ready yet (attempt `$attempt/`$maxAttempts)..."
+            Start-Sleep -Seconds 10
+        }
+    }
+
+    if (`$attempt -eq `$maxAttempts) {
+        throw "AD DS did not become ready within timeout"
+    }
+
+    # Get DC IP address
+    `$DcIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+        `$_.InterfaceAlias -notlike "*Loopback*" -and
+        `$_.IPAddress -notlike "169.254.*"
+    } | Select-Object -First 1).IPAddress
+
+    Log-Message "DC IP Address: `$DcIp"
+
+    # Configure DNS forwarder to AWS VPC DNS
+    Log-Message "Configuring DNS forwarder..."
+    Add-DnsServerForwarder -IPAddress "169.254.169.253" -ErrorAction SilentlyContinue
+    Log-Message "DNS forwarder configured for AWS VPC"
+
+    # Read the domain admin password from the temp file
+    `$DomainAdminPassword = Get-Content "C:\Windows\Temp\domain_admin_pw.txt" -ErrorAction Stop
+
+    # Build DC config JSON
+    `$DcConfig = @{
+        domain_name = "{{ domain_name }}"
+        netbios_name = "{{ netbios_name }}"
+        dc_ip = `$DcIp
+        dc_hostname = "{{ hostname }}"
+        domain_admin_username = "Administrator"
+        domain_admin_password = `$DomainAdminPassword
+        dns_servers = @(`$DcIp, "169.254.169.253")
+        forest_functional_level = "WinThreshold"
+        domain_functional_level = "WinThreshold"
+    } | ConvertTo-Json -Compress
+
+    # Write config to Secrets Manager
+    Log-Message "Writing DC config to Secrets Manager..."
+    aws secretsmanager put-secret-value ``
+        --secret-id "{{ dc_config_secret_arn }}" ``
+        --secret-string `$DcConfig ``
+        --region (Invoke-RestMethod -Uri http://169.254.169.254/latest/meta-data/placement/region)
+
+    Log-Message "DC config written to Secrets Manager"
+
+    # Clean up sensitive temp file
+    Remove-Item "C:\Windows\Temp\domain_admin_pw.txt" -Force -ErrorAction SilentlyContinue
+
+    # Remove the scheduled task
+    Unregister-ScheduledTask -TaskName "DC-PostRebootConfig" -Confirm:`$false -ErrorAction SilentlyContinue
+
+    Log-Message "Domain Controller setup complete!"
+
+} catch {
+    Log-Message "ERROR in post-reboot script: `$_"
+    throw
+}
+"@
+
+    # Save post-reboot script
+    $PostRebootScript | Out-File -FilePath "C:\Windows\Temp\dc-post-reboot.ps1" -Encoding UTF8
+
+    # Save domain admin password temporarily (will be deleted after use)
+    $DomainAdminPassword | Out-File -FilePath "C:\Windows\Temp\domain_admin_pw.txt" -Encoding UTF8
+    icacls "C:\Windows\Temp\domain_admin_pw.txt" /inheritance:r /grant "SYSTEM:F" /grant "Administrators:F"
+
+    # Create scheduled task to run post-reboot script
+    Log-Message "Creating post-reboot scheduled task..."
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\Windows\Temp\dc-post-reboot.ps1"
+    $Trigger = New-ScheduledTaskTrigger -AtStartup
+    $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    Register-ScheduledTask -TaskName "DC-PostRebootConfig" -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force
+
+    Log-Message "Starting AD DS Forest installation..."
+
+    # This will trigger an automatic reboot
+    Install-ADDSForest `
+        -DomainName "{{ domain_name }}" `
+        -DomainNetbiosName "{{ netbios_name }}" `
+        -SafeModeAdministratorPassword $DsrmSecurePassword `
+        -InstallDns `
+        -NoRebootOnCompletion:$false `
+        -Force
+
+    # Note: Server will reboot here, post-reboot script will complete setup
+
+} catch {
+    Log-Message "ERROR: $_"
+    throw
+}
+</powershell>

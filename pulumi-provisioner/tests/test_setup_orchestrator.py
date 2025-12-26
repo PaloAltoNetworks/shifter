@@ -92,7 +92,7 @@ class TestOrchestrateHappyPath:
 
         assert result.success is True
         # Should have called reboot_and_wait after first step
-        mock_executor.reboot_and_wait.assert_called_once_with("i-12345", timeout=300)
+        mock_executor.reboot_and_wait.assert_called_once_with("i-12345", timeout_seconds=300)
 
     def test_orchestrate_multiple_reboot_steps(self):
         """Multiple steps require reboots, all handled correctly."""
@@ -420,5 +420,5 @@ class TestRebootTimeout:
 
         # Reboot timeout should be at least as long as step timeout
         reboot_call = mock_executor.reboot_and_wait.call_args
-        reboot_timeout = reboot_call[1].get("timeout") or reboot_call[0][1]
+        reboot_timeout = reboot_call[1].get("timeout_seconds") or reboot_call[0][1]
         assert reboot_timeout >= 300  # At least 5 minutes for reboot

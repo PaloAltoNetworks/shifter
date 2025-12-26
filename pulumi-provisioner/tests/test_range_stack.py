@@ -85,6 +85,7 @@ class TestRangeStackComposition:
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -178,6 +179,7 @@ class TestRangeStackSecurityGroupAssignment:
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -219,6 +221,7 @@ class TestRangeStackSecurityGroupAssignment:
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -269,6 +272,7 @@ class TestRangeStackAmiSelection:
             kali_ami_id="ami-kali-specific",
             victim_ami_id="ami-ubuntu-specific",
             windows_ami_id="ami-windows-specific",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -309,6 +313,7 @@ class TestRangeStackAmiSelection:
             kali_ami_id="ami-kali-specific",
             victim_ami_id="ami-ubuntu-specific",
             windows_ami_id="ami-windows-specific",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -349,6 +354,7 @@ class TestRangeStackAmiSelection:
             kali_ami_id="ami-kali-specific",
             victim_ami_id="ami-ubuntu-specific",
             windows_ami_id="ami-windows-specific",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -401,6 +407,7 @@ class TestRangeStackMultipleInstances:
             kali_ami_id="ami-kali",
             victim_ami_id="ami-ubuntu",
             windows_ami_id="ami-windows",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -434,6 +441,7 @@ class TestRangeStackMultipleInstances:
             kali_ami_id="ami-kali",
             victim_ami_id="ami-ubuntu",
             windows_ami_id="ami-windows",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -469,6 +477,7 @@ class TestRangeStackMultipleInstances:
             kali_ami_id="ami-kali",
             victim_ami_id="ami-ubuntu",
             windows_ami_id="ami-windows",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -498,6 +507,7 @@ class TestRangeStackMultipleInstances:
             kali_ami_id="ami-kali",
             victim_ami_id="ami-ubuntu",
             windows_ami_id="ami-windows",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -542,6 +552,7 @@ class TestRangeStackCidrPrefixExtraction:
             kali_ami_id="ami-kali",
             victim_ami_id="ami-ubuntu",
             windows_ami_id="ami-windows",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -574,6 +585,7 @@ class TestRangeStackCidrPrefixExtraction:
             kali_ami_id="ami-kali",
             victim_ami_id="ami-ubuntu",
             windows_ami_id="ami-windows",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -606,6 +618,7 @@ class TestRangeStackCidrPrefixExtraction:
             kali_ami_id="ami-kali",
             victim_ami_id="ami-ubuntu",
             windows_ami_id="ami-windows",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -676,6 +689,7 @@ class TestRangeStackDCDependencyOrdering:
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -763,6 +777,7 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -815,6 +830,7 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -870,6 +886,7 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -942,6 +959,7 @@ class TestDCInstanceOrdering(TestRangeStackDCDependencyOrdering):
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -1066,6 +1084,7 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -1211,6 +1230,7 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )
@@ -1268,6 +1288,7 @@ class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
             windows_ami_id="ami-windows123",
+            dc_ami_id="ami-dc-test",
             agent_s3_bucket="shifter-agents",
             availability_zone="us-east-2a",
         )

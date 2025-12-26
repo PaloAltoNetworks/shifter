@@ -97,7 +97,9 @@ class RangeStack(pulumi.ComponentResource):
             index = dc_count
             dc_count += 1
             security_group_id = config.dc_security_group_id or config.victim_security_group_id
-            ami_id = config.windows_ami_id
+            if not config.dc_ami_id:
+                raise ValueError("dc_ami_id is required for DC instances")
+            ami_id = config.dc_ami_id
 
             instance_name = f"{name}-dc-{index}"
 

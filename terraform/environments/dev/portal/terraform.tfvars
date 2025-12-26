@@ -121,8 +121,8 @@ pulumi_container_tag = "latest"
 # Windows Server 2022 victim with XAMPP, Claude Code (system path), Python, Git, IIS, FTP, OpenSSH - Sysprepped v3
 windows_ami_id = "ami-01e661807e835b29b"
 
-# Windows Server 2022 DC - Fully promoted with internal.shifter domain, hostname DC01, OpenSSH
-dc_ami_id      = "ami-0d8c2f70266eb3dd1"
+# Windows Server 2022 DC - internal.shifter domain, DC01, DNS forwarder to 169.254.169.253, OpenSSH
+dc_ami_id      = "ami-00825da8e55454661"
 dc_domain_name = "internal.shifter"
 # nosec B105 - Ephemeral isolated range, not a production credential
 dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret

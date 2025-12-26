@@ -396,8 +396,9 @@ class InstanceComponent(pulumi.ComponentResource):
 
             try:
                 # Wait for SSM agent to come online (proves DC booted with AD DS ready)
+                # Windows DC with AD DS can take longer to fully boot - use generous timeout
                 pulumi.log.info(f"Waiting for SSM agent on DC {instance_id}...")
-                executor.wait_for_agent(instance_id, timeout_seconds=300)
+                executor.wait_for_agent(instance_id, timeout_seconds=600)
                 pulumi.log.info(f"DC {instance_id} is ready (SSM agent online)")
 
                 # Join domain members IN PARALLEL

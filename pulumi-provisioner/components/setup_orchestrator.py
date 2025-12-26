@@ -97,7 +97,7 @@ class SetupOrchestrator:
                 if step.requires_reboot:
                     reboot_timeout = max(step.timeout_seconds, self.DEFAULT_REBOOT_TIMEOUT)
                     try:
-                        self.executor.reboot_and_wait(instance_id, timeout=reboot_timeout)
+                        self.executor.reboot_and_wait(instance_id, timeout_seconds=reboot_timeout)
                     except (TimeoutError, SSMExecutorError) as e:
                         raise SetupError(
                             f"Reboot failed after step '{step.name}': {e}",

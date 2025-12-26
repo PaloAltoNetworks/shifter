@@ -36,6 +36,8 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "VICTIM_AMI_ID", value = var.victim_ami_id },
       { name = "WINDOWS_AMI_ID", value = var.windows_ami_id },
       { name = "DC_AMI_ID", value = var.dc_ami_id },
+      { name = "DC_DOMAIN_NAME", value = var.dc_domain_name },
+      { name = "DC_DOMAIN_PASSWORD", value = var.dc_domain_password },
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
       { name = "KALI_INSTANCE_TYPE", value = var.kali_instance_type },
       { name = "VICTIM_INSTANCE_TYPE", value = var.victim_instance_type },

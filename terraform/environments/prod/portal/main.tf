@@ -344,6 +344,10 @@ module "pulumi_provisioner" {
   windows_ami_id = var.windows_ami_id
   dc_ami_id      = var.dc_ami_id
 
+  # Prebaked DC configuration
+  dc_domain_name     = var.dc_domain_name
+  dc_domain_password = var.dc_domain_password
+
   # Instance types
   kali_instance_type   = var.kali_instance_type
   victim_instance_type = var.victim_instance_type

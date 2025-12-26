@@ -40,20 +40,70 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Joining domain..."
 
-try {
-    $domain = "{{ domain_name }}"
-    $adminUser = "{{ domain_admin_user }}"
-    $adminPass = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
-    $cred = New-Object System.Management.Automation.PSCredential("$domain\\$adminUser", $adminPass)
+$domain = "{{ domain_name }}"
+$adminUser = "{{ domain_admin_user }}"
+$adminPass = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential("$domain\\$adminUser", $adminPass)
 
-    Write-Host "Attempting to join domain: $domain"
-    Add-Computer -DomainName $domain -Credential $cred -Force -ErrorAction Stop
+# Wait for DC DNS to be ready (up to 1 minute - prebaked DC should be fast)
+Write-Host "Waiting for domain controller DNS to be ready..."
+$maxAttempts = 6
+$attempt = 0
+$dnsReady = $false
 
-    Write-Host "Domain join initiated successfully"
-    Write-Host "Machine will restart to complete domain join"
+while ($attempt -lt $maxAttempts -and -not $dnsReady) {
+    $attempt++
+    Write-Host "DNS check attempt $attempt of $maxAttempts..."
+
+    try {
+        # Try to resolve the domain
+        $resolved = Resolve-DnsName -Name $domain -ErrorAction Stop
+        if ($resolved) {
+            Write-Host "Domain DNS resolved successfully"
+            $dnsReady = $true
+        }
+    } catch {
+        Write-Host "DNS not ready yet: $_"
+        if ($attempt -lt $maxAttempts) {
+            Write-Host "Waiting 10 seconds before retry..."
+            Start-Sleep -Seconds 10
+        }
+    }
+}
+
+if (-not $dnsReady) {
+    Write-Host "ERROR: Domain DNS not resolvable after $maxAttempts attempts"
+    exit 1
+}
+
+# Now attempt domain join with retries
+$joinAttempts = 3
+$joinAttempt = 0
+$joined = $false
+
+while ($joinAttempt -lt $joinAttempts -and -not $joined) {
+    $joinAttempt++
+    Write-Host "Domain join attempt $joinAttempt of $joinAttempts..."
+
+    try {
+        Write-Host "Attempting to join domain: $domain"
+        Add-Computer -DomainName $domain -Credential $cred -Force -ErrorAction Stop
+        Write-Host "Domain join initiated successfully"
+        Write-Host "Machine will restart to complete domain join"
+        $joined = $true
+    } catch {
+        Write-Host "Join attempt failed: $_"
+        if ($joinAttempt -lt $joinAttempts) {
+            Write-Host "Waiting 15 seconds before retry..."
+            Start-Sleep -Seconds 15
+        }
+    }
+}
+
+if ($joined) {
     exit 0
-} catch {
-    Write-Host "Error joining domain: $_"
+} else {
+    Write-Host "ERROR: Domain join failed after $joinAttempts attempts"
     exit 1
 }
 '''
@@ -111,7 +161,7 @@ class DomainJoinPlan:
         SetupStep(
             name="join_domain",
             script=JOIN_DOMAIN_SCRIPT,
-            timeout_seconds=300,  # 5 min for domain join
+            timeout_seconds=300,  # 5 min: DNS wait (1 min) + join retries (up to 1 min) + buffer
             requires_reboot=True,
         ),
     ]

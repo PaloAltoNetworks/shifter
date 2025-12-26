@@ -121,8 +121,10 @@ pulumi_container_tag = "latest"
 # Windows Server 2022 victim with XAMPP, Claude Code (system path), Python, Git, IIS, FTP, OpenSSH - Sysprepped v3
 windows_ami_id = "ami-01e661807e835b29b"
 
-# Windows Server 2022 DC base with AD DS feature and OpenSSH pre-installed
-dc_ami_id = "ami-068e2d95446fba212"
+# Windows Server 2022 DC - Fully promoted with internal.shifter domain, hostname DC01, OpenSSH
+dc_ami_id          = "ami-0d8c2f70266eb3dd1"
+dc_domain_name     = "internal.shifter"
+dc_domain_password = "Sh1fterDC2024!"
 
 # ------------------------------------------------------------------------------
 # CI Testing (not used by Terraform, extracted by quality.yml workflow)

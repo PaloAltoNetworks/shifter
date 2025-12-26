@@ -187,23 +187,21 @@ class TestDCSetupPlanIntegration:
             netbios_name: str = "TEST"
             dsrm_password: str = "Pass123!"
             domain_admin_password: str = "Admin456!"
-            hostname: str = "dc-1"
-            private_ip: str = "10.0.0.1"
 
         context = plan.get_context(MockInstance())
         result = orchestrator.orchestrate("i-12345", plan, context)
 
         assert result.success is True
-        # Should have run install + promote + verify
-        assert mock_executor.run_command.call_count >= 3
-        # Should have called reboot at least twice
-        assert mock_executor.reboot_and_wait.call_count >= 2
+        # With prebaked AMI: promote + verify = 2 run_command calls
+        assert mock_executor.run_command.call_count >= 2
+        # Only promote step requires reboot (AD DS feature is prebaked)
+        assert mock_executor.reboot_and_wait.call_count >= 1
 
-    def test_dc_plan_install_failure_stops_everything(self):
-        """If AD feature install fails, promotion never runs."""
+    def test_dc_plan_promote_failure_stops_everything(self):
+        """If AD promotion fails, verification never runs."""
         mock_executor = MagicMock(spec=SSMExecutor)
         mock_executor.run_command.side_effect = CommandError(
-            "Install failed", exit_code=1, stderr="Feature not found"
+            "Promote failed", exit_code=1, stderr="AD DS promotion error"
         )
 
         plan = DCSetupPlan()
@@ -215,17 +213,15 @@ class TestDCSetupPlanIntegration:
             netbios_name: str = "TEST"
             dsrm_password: str = "Pass123!"
             domain_admin_password: str = "Admin456!"
-            hostname: str = "dc-1"
-            private_ip: str = "10.0.0.1"
 
         context = plan.get_context(MockInstance())
 
         with pytest.raises((SetupError, CommandError)):
             orchestrator.orchestrate("i-12345", plan, context)
 
-        # Should only have called run_command once (for install step)
+        # Should only have called run_command once (for promote step)
         assert mock_executor.run_command.call_count == 1
-        # Should never have called reboot
+        # Should never have called reboot (failed before reboot)
         assert mock_executor.reboot_and_wait.call_count == 0
 
     def test_dc_plan_reboot_failure_stops_everything(self):

@@ -281,6 +281,12 @@ variable "windows_ami_id" {
   default     = ""
 }
 
+variable "dc_ami_id" {
+  description = "AMI ID for Domain Controller instances (Windows Server with AD DS pre-installed)"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # CI Testing
 # ------------------------------------------------------------------------------

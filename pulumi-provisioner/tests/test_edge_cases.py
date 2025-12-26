@@ -37,6 +37,7 @@ class TestLoadConfigEdgeCases:
         mock_config.get.side_effect = lambda key: {
             "agentS3Bucket": "test-agents-bucket",
             "windowsAmiId": "ami-windows-test",
+            "dcAmiId": "ami-dc-test",
             "rangeInstanceProfileName": "test-profile",
             "portalVpcCidr": "10.0.0.0/16",
         }.get(key)

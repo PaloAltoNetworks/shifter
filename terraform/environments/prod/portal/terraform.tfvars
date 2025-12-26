@@ -121,9 +121,10 @@ pulumi_container_tag = "latest"
 windows_ami_id = "ami-02138efa7887f3218"
 
 # Windows Server 2022 DC - Fully promoted with internal.shifter domain, hostname DC01, OpenSSH
-dc_ami_id          = "ami-00f96ae1829616c43"
-dc_domain_name     = "internal.shifter"
-dc_domain_password = "Sh1fterDC2024!"
+dc_ami_id      = "ami-00f96ae1829616c43"
+dc_domain_name = "internal.shifter"
+# nosec B105 - Ephemeral isolated range, not a production credential
+dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
 
 # ------------------------------------------------------------------------------
 # CI Testing (not used by Terraform, extracted by quality.yml workflow)

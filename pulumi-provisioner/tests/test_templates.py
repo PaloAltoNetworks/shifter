@@ -306,14 +306,12 @@ class TestDCSetupScriptsJsonStructure:
     """
 
     def test_dc_setup_scripts_exist(self):
-        """Verify DCSetupPlan scripts are defined."""
+        """Verify DCSetupPlan scripts are defined (AD DS feature is prebaked in AMI)."""
         from components.plans.dc_setup import (
-            INSTALL_AD_FEATURE_SCRIPT,
             PROMOTE_DC_SCRIPT,
             VERIFY_AD_SCRIPT,
         )
 
-        assert INSTALL_AD_FEATURE_SCRIPT, "Install AD feature script should exist"
         assert PROMOTE_DC_SCRIPT, "Promote DC script should exist"
         assert VERIFY_AD_SCRIPT, "Verify AD script should exist"
 

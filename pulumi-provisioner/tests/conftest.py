@@ -284,6 +284,7 @@ def sample_range_config(sample_instance_config_attacker, sample_instance_config_
         kali_ami_id="ami-kali123",
         victim_ami_id="ami-ubuntu123",
         windows_ami_id="ami-windows123",
+        dc_ami_id="ami-dc-test",
         agent_s3_bucket="shifter-agents",
         availability_zone="us-east-2a",
     )
@@ -326,6 +327,7 @@ def sample_range_config_multi_instance():
         kali_ami_id="ami-kali-prod",
         victim_ami_id="ami-ubuntu-prod",
         windows_ami_id="ami-windows-prod",
+        dc_ami_id="ami-dc-prod",
         agent_s3_bucket="shifter-agents-prod",
         availability_zone="us-east-2b",
     )
@@ -488,6 +490,7 @@ def mock_env_vars(mocker):
         "KALI_AMI_ID": "ami-kali-test",
         "VICTIM_AMI_ID": "ami-victim-test",
         "WINDOWS_AMI_ID": "ami-windows-test",
+        "DC_AMI_ID": "ami-dc-test",
         "AGENT_S3_BUCKET": "test-agents-bucket",
         "RANGE_ID": "42",
         "KALI_INSTANCE_TYPE": "t3.medium",
@@ -597,6 +600,7 @@ def mock_pulumi_config(mocker):
     mock_config.get.side_effect = lambda key: {
         "agentS3Bucket": "test-agents-bucket",
         "windowsAmiId": "ami-windows-test",
+        "dcAmiId": "ami-dc-test",
         "dcSecurityGroupId": "sg-dc-test",
         "rangeInstanceProfileName": "test-profile",
         "portalVpcCidr": "10.0.0.0/16",

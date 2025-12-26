@@ -82,6 +82,7 @@ class RangeConfig:
     windows_ami_id: str
     agent_s3_bucket: str
     availability_zone: str
+    dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
     dc_security_group_id: str = ""  # Security group for Domain Controller instances
     portal_vpc_cidr: str = ""
 
@@ -249,6 +250,7 @@ def load_config() -> RangeConfig:
         windows_ami_id=config.get("windowsAmiId") or "",
         agent_s3_bucket=config.get("agentS3Bucket") or "",
         availability_zone=config.require("availabilityZone"),
+        dc_ami_id=config.get("dcAmiId") or "",
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
         dc_security_group_id=config.get("dcSecurityGroupId") or "",
     )

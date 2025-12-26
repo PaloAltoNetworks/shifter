@@ -401,6 +401,47 @@ class InstanceComponent(pulumi.ComponentResource):
                 executor.wait_for_agent(instance_id, timeout_seconds=600)
                 pulumi.log.info(f"DC {instance_id} is ready (SSM agent online)")
 
+                # Clean stale DNS records from prebaked AMI
+                # The AMI contains A records from the build environment that must be removed
+                pulumi.log.info(f"Cleaning stale DNS records on DC {instance_id}...")
+                dns_cleanup_script = f'''
+$ErrorActionPreference = "Stop"
+$currentIP = "{private_ip}"
+$zone = "{dc_domain_name}"
+
+# Remove stale A records (any IP that isn't the current DC IP)
+$staleRecords = Get-DnsServerResourceRecord -ZoneName $zone -RRType A -ErrorAction SilentlyContinue |
+    Where-Object {{ $_.HostName -eq "@" -and $_.RecordData.IPv4Address.IPAddressToString -ne $currentIP }}
+
+foreach ($record in $staleRecords) {{
+    $oldIP = $record.RecordData.IPv4Address.IPAddressToString
+    Write-Host "Removing stale A record: $oldIP"
+    Remove-DnsServerResourceRecord -ZoneName $zone -InputObject $record -Force
+}}
+
+# Also clean DomainDnsZones and ForestDnsZones
+foreach ($subzone in @("DomainDnsZones", "ForestDnsZones")) {{
+    $stale = Get-DnsServerResourceRecord -ZoneName $zone -Name $subzone -RRType A -ErrorAction SilentlyContinue |
+        Where-Object {{ $_.RecordData.IPv4Address.IPAddressToString -ne $currentIP }}
+    foreach ($r in $stale) {{
+        Write-Host "Removing stale $subzone A record"
+        Remove-DnsServerResourceRecord -ZoneName $zone -InputObject $r -Force -ErrorAction SilentlyContinue
+    }}
+}}
+
+Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
+'''
+                result = executor.run_command(
+                    instance_id=instance_id,
+                    script=dns_cleanup_script,
+                    timeout_seconds=60,
+                    document_name="AWS-RunPowerShellScript",
+                )
+                if not result.success:
+                    pulumi.log.warn(f"DNS cleanup returned non-zero: {result.stderr}")
+                else:
+                    pulumi.log.info("DNS cleanup complete")
+
                 # Join domain members IN PARALLEL
                 if domain_members:
                     pulumi.log.info(

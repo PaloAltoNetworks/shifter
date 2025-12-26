@@ -92,7 +92,7 @@ class RangeStack(pulumi.ComponentResource):
         # Initialize dc_config_param_name (will be set if DC exists)
         self.dc_config_param_name = None
 
-        # Create DC instances first
+        # Create DC instances first (but don't run setup yet - need victim IDs first)
         for inst_config in dc_configs:
             index = dc_count
             dc_count += 1
@@ -126,9 +126,7 @@ class RangeStack(pulumi.ComponentResource):
                 ),
             )
 
-            # Run DC setup via SSM orchestration (AD DS install, reboot, promote)
-            dc_instance.run_dc_setup()
-
+            # Don't run DC setup yet - need to create victims first to get their IDs
             dc_components.append(dc_instance)
             self.instances.append(dc_instance)
 
@@ -136,7 +134,10 @@ class RangeStack(pulumi.ComponentResource):
         if dc_components:
             self.dc_config_param_name = dc_components[0].dc_config_param_name
 
-        # Create other instances (attackers, victims) with DC dependency if applicable
+        # Create other instances (attackers, victims)
+        # Collect domain member instance IDs for DC-triggered domain join
+        domain_member_ids: list[pulumi.Output[str]] = []
+
         for inst_config in other_configs:
             # Determine index for naming
             if inst_config.role == "attacker":
@@ -156,15 +157,9 @@ class RangeStack(pulumi.ComponentResource):
 
             instance_name = f"{name}-{inst_config.role}-{index}"
 
-            # Determine dependencies - domain members depend on DC
+            # All instances depend on network; no longer depend on DC
+            # (domain join is now triggered by DC after its setup completes)
             depends_on = [self.network]
-            if inst_config.join_domain and dc_components:
-                depends_on.extend(dc_components)
-
-            # Determine dc_config_param_name for domain members
-            member_dc_config_param_name = None
-            if inst_config.join_domain and dc_components:
-                member_dc_config_param_name = self.dc_config_param_name
 
             instance = InstanceComponent(
                 instance_name,
@@ -183,7 +178,7 @@ class RangeStack(pulumi.ComponentResource):
                 agent_s3_key=inst_config.agent_s3_key or "",
                 agent_presigned_url=inst_config.agent_presigned_url or "",
                 join_domain=inst_config.join_domain,
-                dc_config_param_name=member_dc_config_param_name,
+                dc_config_param_name=None,  # No longer used - DC triggers domain join
                 opts=pulumi.ResourceOptions(
                     parent=self,
                     depends_on=depends_on,
@@ -191,6 +186,22 @@ class RangeStack(pulumi.ComponentResource):
             )
 
             self.instances.append(instance)
+
+            # Collect instance IDs for domain members
+            if inst_config.join_domain and dc_components:
+                domain_member_ids.append(instance.instance_id)
+
+        # Now run DC setup with domain member IDs
+        # DC setup will: bootstrap -> promote -> join domain members IN PARALLEL
+        for dc_instance in dc_components:
+            if domain_member_ids:
+                # Use Output.all to resolve all member IDs, then pass to run_dc_setup
+                pulumi.Output.all(*domain_member_ids).apply(
+                    lambda ids, dc=dc_instance: dc.run_dc_setup(domain_members=list(ids))
+                )
+            else:
+                # No domain members, just run DC setup
+                dc_instance.run_dc_setup()
 
         # Build instance output list using stored role/os_type to avoid closure issues
         # (using .apply() in a loop would capture loop variable by reference)

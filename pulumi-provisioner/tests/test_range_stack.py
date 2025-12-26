@@ -1010,15 +1010,17 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
         assert dc_creation is not None, "DC should be created"
         assert victim_creation is not None, "Victim should be created"
 
-        # Victim (join_domain=True) should have DC in depends_on
+        # In the new architecture, victims don't depend on DC directly.
+        # DC triggers domain join via SSM after its setup completes.
+        # Victim only depends on network (1 dependency)
         victim_opts = victim_creation["opts"]
         assert victim_opts is not None, "Victim should have opts"
         assert victim_opts.depends_on is not None, "Victim should have depends_on"
 
-        # depends_on should contain more than just network (should include DC)
+        # Victim only depends on network now (DC triggers domain join via SSM)
         depends_on_count = len(victim_opts.depends_on)
-        assert depends_on_count >= 2, \
-            f"Victim should depend on network AND DC, got {depends_on_count} dependencies"
+        assert depends_on_count == 1, \
+            f"Victim should only depend on network (DC triggers join via SSM), got {depends_on_count} dependencies"
 
     @pulumi.runtime.test
     def test_non_domain_member_does_not_depend_on_dc(self, temp_templates, dc_range_config):
@@ -1140,8 +1142,10 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
         victim_creation = next((c for c in created_instances if c["role"] == "victim"), None)
 
         assert victim_creation is not None, "Victim should be created"
-        assert victim_creation["dc_config_param_name"] == "/shifter/dev/range/42/dc-config", \
-            f"Domain member should receive dc_config_param_name, got {victim_creation['dc_config_param_name']}"
+        # In the new architecture, dc_config_param_name is None for all victims.
+        # DC triggers domain join via SSM, so victims don't need this param.
+        assert victim_creation["dc_config_param_name"] is None, \
+            f"Domain member should NOT receive dc_config_param_name (DC triggers join via SSM), got {victim_creation['dc_config_param_name']}"
 
     @pulumi.runtime.test
     def test_non_domain_member_does_not_receive_dc_config_param_name(self, temp_templates, dc_range_config):

@@ -14,9 +14,10 @@ import os
 import re
 import secrets
 import string
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import pulumi
 import pulumi_aws as aws
@@ -28,6 +29,7 @@ from .ssm_executor import SSMExecutor
 from .setup_orchestrator import SetupOrchestrator, SetupError
 from .plans.bootstrap import BootstrapPlan
 from .plans.dc_setup import DCSetupPlan
+from .plans.domain_join import DomainJoinPlan
 
 
 @dataclass
@@ -95,6 +97,68 @@ def generate_ssh_keypair() -> tuple[str, str]:
     )
 
     return private_key_pem, public_key_openssh
+
+
+def _join_domain_members_parallel(
+    executor: "SSMExecutor",
+    orchestrator: "SetupOrchestrator",
+    dc_ip: str,
+    domain_name: str,
+    domain_admin_password: str,
+    member_instance_ids: List[str],
+) -> None:
+    """Join domain members to the domain IN PARALLEL.
+
+    This function runs domain join on all member instances concurrently using
+    ThreadPoolExecutor. Each member goes through:
+    1. Wait for SSM agent
+    2. Set DNS to point to DC
+    3. Join domain (requires reboot)
+    4. Verify domain membership
+
+    Args:
+        executor: SSMExecutor for running commands
+        orchestrator: SetupOrchestrator for running plans
+        dc_ip: IP address of the domain controller
+        domain_name: Domain name to join
+        domain_admin_password: Domain admin password
+        member_instance_ids: List of instance IDs to join
+
+    Raises:
+        SetupError: If any domain join fails
+    """
+    domain_join_plan = DomainJoinPlan()
+    dc_config = {
+        "dc_ip": dc_ip,
+        "domain_name": domain_name,
+        "domain_admin_password": domain_admin_password,
+    }
+    context = domain_join_plan.get_context(dc_config)
+
+    def join_member(member_id: str) -> str:
+        """Join a single member to the domain."""
+        pulumi.log.info(f"Waiting for SSM agent on {member_id}...")
+        executor.wait_for_agent(member_id, timeout_seconds=300)
+        pulumi.log.info(f"SSM agent online on {member_id}, joining domain...")
+
+        result = orchestrator.orchestrate(member_id, domain_join_plan, context)
+        if not result.success:
+            raise SetupError(f"Domain join failed for {member_id}")
+
+        pulumi.log.info(f"Domain join completed for {member_id}")
+        return member_id
+
+    # Run all domain joins in parallel
+    with ThreadPoolExecutor(max_workers=len(member_instance_ids)) as pool:
+        futures = {
+            pool.submit(join_member, mid): mid for mid in member_instance_ids
+        }
+        for future in as_completed(futures):
+            member_id = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                raise SetupError(f"Domain join failed for {member_id}: {e}")
 
 
 class InstanceComponent(pulumi.ComponentResource):
@@ -312,17 +376,23 @@ class InstanceComponent(pulumi.ComponentResource):
             }
         )
 
-    def run_dc_setup(self, region: Optional[str] = None) -> pulumi.Output[bool]:
+    def run_dc_setup(
+        self,
+        region: Optional[str] = None,
+        domain_members: Optional[List[str]] = None,
+    ) -> pulumi.Output[bool]:
         """Run DC setup orchestration via SSM Run Command.
 
         This method should be called after the instance is created to set up
-        Active Directory Domain Services. It runs two plans in sequence:
+        Active Directory Domain Services. It runs plans in sequence:
 
         1. BootstrapPlan: Sets hostname, configures SSH, reboots
-        2. DCSetupPlan: Installs AD DS, promotes to DC, verifies
+        2. DCSetupPlan: Promotes to DC, verifies AD DS running
+        3. DomainJoinPlan: Joins domain members IN PARALLEL (if provided)
 
         Args:
             region: AWS region (uses default if not provided)
+            domain_members: List of instance IDs to join to domain after DC setup
 
         Returns:
             pulumi.Output[bool] that resolves to True on success
@@ -347,8 +417,13 @@ class InstanceComponent(pulumi.ComponentResource):
             hostname=self.hostname,
         )
 
-        def do_setup(instance_id: str) -> bool:
+        # Store domain config for domain join (captured in closure)
+        dc_domain_name = self.domain_name
+        dc_admin_password = self.domain_admin_password
+
+        def do_setup(args: tuple) -> bool:
             """Run the DC setup synchronously (called within apply)."""
+            instance_id, private_ip = args
             pulumi.log.info(f"Starting DC setup for instance {instance_id}")
 
             # Create executor and orchestrator
@@ -370,7 +445,7 @@ class InstanceComponent(pulumi.ComponentResource):
                     raise SetupError(f"Bootstrap failed on {instance_id}")
                 pulumi.log.info(f"Bootstrap completed on {instance_id}")
 
-                # Phase 2: DC setup (AD DS install + promote)
+                # Phase 2: DC setup (promote to DC)
                 pulumi.log.info(f"Running DCSetupPlan on {instance_id}...")
                 dc_plan = DCSetupPlan()
                 dc_ctx = dc_plan.get_context(dc_context)
@@ -379,14 +454,32 @@ class InstanceComponent(pulumi.ComponentResource):
                     raise SetupError(f"DC setup failed on {instance_id}")
 
                 pulumi.log.info(f"DC setup completed successfully on {instance_id}")
+
+                # Phase 3: Join domain members IN PARALLEL
+                if domain_members:
+                    pulumi.log.info(
+                        f"Joining {len(domain_members)} members to domain..."
+                    )
+                    _join_domain_members_parallel(
+                        executor=executor,
+                        orchestrator=orchestrator,
+                        dc_ip=private_ip,
+                        domain_name=dc_domain_name,
+                        domain_admin_password=dc_admin_password,
+                        member_instance_ids=domain_members,
+                    )
+                    pulumi.log.info("All domain members joined successfully")
+
                 return True
 
             except Exception as e:
                 pulumi.log.error(f"DC setup failed on {instance_id}: {e}")
                 raise
 
-        # Use apply to run the setup when instance_id is resolved
-        self.setup_result = self.instance_id.apply(do_setup)
+        # Use apply to run the setup when instance_id and private_ip are resolved
+        self.setup_result = pulumi.Output.all(
+            self.instance_id, self.private_ip
+        ).apply(do_setup)
         return self.setup_result
 
     def _generate_user_data(
@@ -446,17 +539,8 @@ class InstanceComponent(pulumi.ComponentResource):
             # DC user_data is minimal - all setup via SSM (BootstrapPlan + DCSetupPlan)
             template = env.get_template("dc_windows.ps1.j2")
             context = {}  # No variables needed - template just logs SSM will handle setup
-        elif os_type == "windows" and join_domain and member_dc_config_param_name:
-            # Domain member - Windows instance joining a domain
-            template = env.get_template("domain_member_windows.ps1.j2")
-            context = {
-                "hostname": f"shifter-victim-{range_id}-{index}",
-                "public_key": public_key,
-                "dc_config_param_name": member_dc_config_param_name,
-                "presigned_url": agent_presigned_url,
-                "agent_s3_key": agent_s3_key,
-            }
         elif os_type == "windows":
+            # Windows victim - domain join is handled by DC via SSM, not user_data
             template = env.get_template("victim_windows.ps1.j2")
             context = {
                 "hostname": f"shifter-victim-{range_id}-{index}",

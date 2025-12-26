@@ -647,6 +647,16 @@ class TestRangeStackDCDependencyOrdering:
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
+    @pytest.fixture(autouse=True)
+    def setup_dc_env_vars(self, temp_templates_dir):
+        """Set up DC environment variables for all DC tests."""
+        with patch.dict(os.environ, {
+            "TEMPLATES_DIR": str(temp_templates_dir),
+            "DC_DOMAIN_NAME": "internal.shifter",
+            "DC_DOMAIN_PASSWORD": "TestPassword123!",  # nosec B105 - test credential
+        }):
+            yield
+
     @pytest.fixture
     def temp_templates(self, temp_templates_dir):
         """Provide temp templates directory."""

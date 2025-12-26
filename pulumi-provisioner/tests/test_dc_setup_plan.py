@@ -1,6 +1,7 @@
-"""Tests for DCSetupPlan - TDD: Write tests first, all must fail initially.
+"""Tests for DCSetupPlan.
 
-DCSetupPlan defines the specific steps to set up a Windows Domain Controller.
+DCSetupPlan defines the specific steps to promote a Windows Server
+(with AD DS feature prebaked in AMI) to a Domain Controller.
 """
 
 from unittest.mock import MagicMock
@@ -8,7 +9,6 @@ from dataclasses import dataclass
 
 import pytest
 
-# These imports will fail initially - that's expected for TDD
 from components.plans.dc_setup import DCSetupPlan
 from components.setup_plan import SetupStep
 
@@ -20,33 +20,27 @@ class MockDCInstance:
     netbios_name: str = "SHIFTER"
     dsrm_password: str = "DsrmPass123!"
     domain_admin_password: str = "AdminPass456!"
-    hostname: str = "shifter-dc-1"
-    private_ip: str = "10.1.3.100"
 
 
 class TestDCSetupPlanSteps:
     """Test DC setup plan step definitions."""
 
-    def test_steps_in_correct_order(self):
-        """install_ad_feature must come before promote_to_dc."""
+    def test_has_promote_step(self):
+        """Plan has promote_to_dc step."""
         plan = DCSetupPlan()
 
         step_names = [step.name for step in plan.steps]
+        assert "promote_to_dc" in step_names
 
-        # install must come before promote
-        install_idx = step_names.index("install_ad_feature")
-        promote_idx = step_names.index("promote_to_dc")
-        assert install_idx < promote_idx, "install_ad_feature must come before promote_to_dc"
-
-    def test_install_step_requires_reboot(self):
-        """Install AD feature step requires reboot."""
+    def test_promote_step_requires_reboot(self):
+        """Promote step requires reboot."""
         plan = DCSetupPlan()
 
-        install_step = next(s for s in plan.steps if s.name == "install_ad_feature")
-        assert install_step.requires_reboot is True
+        promote_step = next(s for s in plan.steps if s.name == "promote_to_dc")
+        assert promote_step.requires_reboot is True
 
     def test_all_steps_have_timeouts(self):
-        """All steps must have positive timeouts - fail hard if missing."""
+        """All steps must have positive timeouts."""
         plan = DCSetupPlan()
         for step in plan.steps:
             assert step.timeout_seconds is not None, f"Step {step.name} missing timeout"
@@ -69,8 +63,8 @@ class TestDCSetupPlanSteps:
             assert step.script is not None
             assert len(step.script) > 0
 
-    def test_all_steps_have_timeouts(self):
-        """All steps have reasonable timeouts."""
+    def test_timeouts_are_reasonable(self):
+        """All steps have reasonable timeouts (max 1 hour)."""
         plan = DCSetupPlan()
 
         for step in plan.steps:
@@ -133,26 +127,6 @@ class TestDCSetupPlanContext:
         assert context["dsrm_password"] == "DsrmPass123!"
         assert context["domain_admin_password"] == "AdminPass456!"
 
-    def test_get_context_includes_hostname(self):
-        """get_context includes hostname if available."""
-        plan = DCSetupPlan()
-        instance = MockDCInstance()
-
-        context = plan.get_context(instance)
-
-        # Hostname should be included for AD configuration
-        assert "hostname" in context or "dc_hostname" in context
-
-    def test_get_context_includes_ip(self):
-        """get_context includes DC IP address."""
-        plan = DCSetupPlan()
-        instance = MockDCInstance()
-
-        context = plan.get_context(instance)
-
-        # IP should be included for DNS configuration
-        assert "private_ip" in context or "dc_ip" in context
-
     def test_get_context_missing_attr_raises(self):
         """Instance missing required attribute raises clear error."""
         plan = DCSetupPlan()
@@ -164,24 +138,12 @@ class TestDCSetupPlanContext:
         incomplete_instance.dsrm_password = "pass"
         incomplete_instance.domain_admin_password = "pass"
 
-        with pytest.raises((AttributeError, ValueError, KeyError)) as exc_info:
+        with pytest.raises((AttributeError, ValueError, KeyError)):
             plan.get_context(incomplete_instance)
-
-        # Should have clear error message
 
 
 class TestDCSetupPlanScripts:
     """Test that scripts are valid PowerShell."""
-
-    def test_install_script_uses_install_windowsfeature(self):
-        """Install script uses Install-WindowsFeature cmdlet."""
-        plan = DCSetupPlan()
-
-        install_step = next(s for s in plan.steps if s.name == "install_ad_feature")
-        script = install_step.script
-
-        assert "Install-WindowsFeature" in script
-        assert "AD-Domain-Services" in script
 
     def test_promote_script_uses_install_addsforest(self):
         """Promote script uses Install-ADDSForest cmdlet."""
@@ -298,11 +260,12 @@ class TestDCSetupPlanRebootHandling:
         # AD promotion causes automatic reboot
         assert promote_step.requires_reboot is True
 
-    def test_at_least_two_reboots(self):
-        """DC setup requires at least 2 reboots (feature install + promote)."""
+    def test_single_reboot_with_prebaked_ami(self):
+        """With prebaked AMI, DC setup only needs 1 reboot (promote only)."""
         plan = DCSetupPlan()
 
         reboot_steps = [s for s in plan.steps if s.requires_reboot]
 
-        # Should have at least 2 reboots
-        assert len(reboot_steps) >= 2
+        # AD DS feature is prebaked, so only promote step needs reboot
+        assert len(reboot_steps) == 1
+        assert reboot_steps[0].name == "promote_to_dc"

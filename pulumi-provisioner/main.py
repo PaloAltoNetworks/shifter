@@ -190,6 +190,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "kaliAmiId": os.environ.get("KALI_AMI_ID", ""),
         "victimAmiId": os.environ.get("VICTIM_AMI_ID", ""),
         "windowsAmiId": os.environ.get("WINDOWS_AMI_ID", ""),
+        "dcAmiId": os.environ.get("DC_AMI_ID", ""),
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
     }
 

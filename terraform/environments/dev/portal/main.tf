@@ -342,6 +342,7 @@ module "pulumi_provisioner" {
   kali_ami_id    = var.kali_ami_id
   victim_ami_id  = var.victim_ami_id
   windows_ami_id = var.windows_ami_id
+  dc_ami_id      = var.dc_ami_id
 
   # Instance types
   kali_instance_type   = var.kali_instance_type

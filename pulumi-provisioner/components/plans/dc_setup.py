@@ -1,38 +1,13 @@
 """DC (Domain Controller) setup plan.
 
-Defines the steps to configure a Windows Server as an Active Directory
-Domain Controller.
+Defines the steps to promote a Windows Server (with AD DS feature prebaked)
+to an Active Directory Domain Controller.
 """
 
 from typing import Any, Dict, List
 
 from ..setup_plan import SetupStep
 
-
-# PowerShell script to install AD DS feature
-INSTALL_AD_FEATURE_SCRIPT = '''
-$ErrorActionPreference = "Stop"
-
-Write-Host "Installing AD Domain Services feature..."
-
-try {
-    $result = Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools -ErrorAction Stop
-
-    if ($result.Success) {
-        Write-Host "AD Domain Services feature installed successfully"
-        if ($result.RestartNeeded -eq "Yes") {
-            Write-Host "Restart required after feature installation"
-        }
-        exit 0
-    } else {
-        Write-Host "Feature installation failed"
-        exit 1
-    }
-} catch {
-    Write-Host "Error installing AD DS feature: $_"
-    exit 1
-}
-'''
 
 # PowerShell script to promote server to Domain Controller
 PROMOTE_DC_SCRIPT = '''
@@ -104,11 +79,11 @@ class DCSetupPlan:
     """Setup plan for Windows Domain Controller.
 
     This plan runs AFTER BootstrapPlan completes (hostname set, SSH configured,
-    instance rebooted). The instance is in a clean state ready for AD DS.
+    instance rebooted). The AMI has AD DS feature prebaked, so we only need
+    to promote to DC.
 
     Steps:
-    1. Install AD DS feature (requires reboot)
-    2. Promote to Domain Controller (requires reboot)
+    1. Promote to Domain Controller (requires reboot)
 
     Verification:
     - Check NTDS service is running
@@ -116,12 +91,6 @@ class DCSetupPlan:
     """
 
     steps: List[SetupStep] = [
-        SetupStep(
-            name="install_ad_feature",
-            script=INSTALL_AD_FEATURE_SCRIPT,
-            timeout_seconds=900,  # 15 min - generous, will tune after data
-            requires_reboot=True,
-        ),
         SetupStep(
             name="promote_to_dc",
             script=PROMOTE_DC_SCRIPT,
@@ -164,15 +133,5 @@ class DCSetupPlan:
                     f"Instance missing required attribute '{attr}' for DC setup"
                 )
             context[attr] = value
-
-        # Optional attributes
-        if hasattr(instance, "hostname") and instance.hostname:
-            context["hostname"] = instance.hostname
-        if hasattr(instance, "dc_hostname") and instance.dc_hostname:
-            context["dc_hostname"] = instance.dc_hostname
-        if hasattr(instance, "private_ip") and instance.private_ip:
-            context["private_ip"] = instance.private_ip
-        if hasattr(instance, "dc_ip") and instance.dc_ip:
-            context["dc_ip"] = instance.dc_ip
 
         return context

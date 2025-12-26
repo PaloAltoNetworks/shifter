@@ -332,24 +332,28 @@ resource "aws_iam_role_policy" "ssm_run_command" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SSMRunCommand"
+        Sid    = "SSMSendCommand"
         Effect = "Allow"
         Action = [
-          "ssm:SendCommand",
-          "ssm:GetCommandInvocation",
-          "ssm:ListCommandInvocations"
+          "ssm:SendCommand"
         ]
         Resource = [
-          # Allow running commands on any instance in the account
-          # (Pulumi creates instances dynamically)
           "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
-          # Allow using AWS-RunPowerShellScript document
           "arn:aws:ssm:${local.region}::document/AWS-RunPowerShellScript",
           "arn:aws:ssm:${local.region}::document/AWS-RunShellScript"
         ]
       },
       {
-        Sid    = "SSMDescribeInstanceInformation"
+        Sid    = "SSMGetCommandInvocation"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "SSMDescribeInstances"
         Effect = "Allow"
         Action = [
           "ssm:DescribeInstanceInformation"
@@ -357,7 +361,6 @@ resource "aws_iam_role_policy" "ssm_run_command" {
         Resource = "*"
       },
       {
-        # EC2 reboot is needed for DC setup (feature install, promotion)
         Sid    = "EC2RebootInstances"
         Effect = "Allow"
         Action = [

@@ -429,6 +429,19 @@ foreach ($subzone in @("DomainDnsZones", "ForestDnsZones")) {{
     }}
 }}
 
+# Ensure current IP is registered as zone root A record
+$existingRecord = Get-DnsServerResourceRecord -ZoneName $zone -RRType A -ErrorAction SilentlyContinue |
+    Where-Object {{ $_.HostName -eq "@" -and $_.RecordData.IPv4Address.IPAddressToString -eq $currentIP }}
+
+if (-not $existingRecord) {{
+    Write-Host "Adding A record for current IP: $currentIP"
+    Add-DnsServerResourceRecordA -ZoneName $zone -Name "@" -IPv4Address $currentIP -TimeToLive 00:10:00
+}}
+
+# Force re-registration
+Register-DnsClient
+ipconfig /registerdns | Out-Null
+
 Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
 '''
                 result = executor.run_command(

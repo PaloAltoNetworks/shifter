@@ -327,12 +327,21 @@ class TestDCInstanceComponent:
         """Provide temp templates directory."""
         return temp_templates_dir
 
+    @pytest.fixture
+    def dc_env_vars(self, temp_templates):
+        """Environment variables required for DC instances (prebaked AMI config)."""
+        return {
+            "TEMPLATES_DIR": str(temp_templates),
+            "DC_DOMAIN_NAME": "internal.shifter",
+            "DC_DOMAIN_PASSWORD": "TestPassword123!",  # nosec B105 - test credential
+        }
+
     @pulumi.runtime.test
-    def test_dc_instance_creates_config_parameter(self, temp_templates):
+    def test_dc_instance_creates_config_parameter(self, dc_env_vars):
         """DC instance should create an SSM Parameter for DC config."""
         from components.instance import InstanceComponent
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+        with patch.dict(os.environ, dc_env_vars):
             component = InstanceComponent(
                 name="test-dc",
                 range_id=42,
@@ -353,11 +362,11 @@ class TestDCInstanceComponent:
             assert component.dc_config_param is not None
 
     @pulumi.runtime.test
-    def test_dc_instance_parameter_path_scoped_to_range(self, temp_templates):
+    def test_dc_instance_parameter_path_scoped_to_range(self, dc_env_vars):
         """DC config parameter should be scoped to the specific range."""
         from components.instance import InstanceComponent
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+        with patch.dict(os.environ, dc_env_vars):
             component = InstanceComponent(
                 name="test-dc",
                 range_id=42,
@@ -377,11 +386,11 @@ class TestDCInstanceComponent:
             assert component.dc_config_param_name == "/shifter/dev/range/42/dc-config"
 
     @pulumi.runtime.test
-    def test_dc_instance_generates_dsrm_password(self, temp_templates):
-        """DC instance should generate DSRM password."""
+    def test_dc_instance_reads_password_from_env(self, dc_env_vars):
+        """DC instance should read domain password from environment variable."""
         from components.instance import InstanceComponent
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+        with patch.dict(os.environ, dc_env_vars):
             component = InstanceComponent(
                 name="test-dc",
                 range_id=42,
@@ -397,21 +406,20 @@ class TestDCInstanceComponent:
                 dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
             )
 
-            # DSRM password should be generated
-            assert hasattr(component, "dsrm_password")
-            assert component.dsrm_password is not None
-            assert len(component.dsrm_password) >= 16
+            # Password should come from env var, DSRM not used with prebaked AMI
+            assert component.domain_admin_password == "TestPassword123!"
+            assert component.dsrm_password is None  # Not used with prebaked AMI
 
     @pulumi.runtime.test
-    def test_dc_instance_stores_config_for_orchestration(self, temp_templates):
-        """DC instance should store config for SSM orchestration.
+    def test_dc_instance_stores_config_for_orchestration(self, dc_env_vars):
+        """DC instance should store config for domain join orchestration.
 
-        NOTE: DC user data is now a minimal bootstrap script.
-        AD DS setup (domain_name, netbios_name) is handled via SSM.
+        NOTE: DC uses prebaked AMI with AD DS already promoted.
+        Only domain join is handled at runtime via SSM.
         """
         from components.instance import InstanceComponent
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+        with patch.dict(os.environ, dc_env_vars):
             component = InstanceComponent(
                 name="test-dc",
                 range_id=42,
@@ -427,24 +435,20 @@ class TestDCInstanceComponent:
                 dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
             )
 
-            # DC config should be stored on component for SSM orchestration
+            # DC config should be stored on component for domain join
             assert component.domain_name == "internal.shifter"
             assert component.netbios_name == "SHIFTER"
-            assert component.dsrm_password is not None
             assert component.domain_admin_password is not None
-            assert component.hostname == "shifter-dc-42"
-            assert component.public_key is not None  # Stored for BootstrapPlan
+            assert component.hostname == "DC01"  # Fixed in prebaked AMI
+            assert component.public_key is not None
 
-            # User data should be minimal - all setup via SSM
+            # User data should be minimal - prebaked AMI is ready to go
             def check_user_data(user_data_b64):
                 import base64
 
                 user_data = base64.b64decode(user_data_b64).decode()
-                # Minimal template just logs that SSM will handle setup
-                assert "SSM" in user_data
                 # Should NOT have any setup logic (hostname, SSH, AD DS)
                 assert "Rename-Computer" not in user_data
-                assert "Start-Service sshd" not in user_data
                 assert "Install-WindowsFeature" not in user_data
                 assert "Install-ADDSForest" not in user_data
 

@@ -202,6 +202,9 @@ def load_config() -> RangeConfig:
     else:
         # Parse custom instance configs - use catalog defaults if instance_type not specified
         instances = []
+        # Get global agent config from range for DC instances (they inherit victim's agent)
+        range_agent_s3_key = range_data.get("agent_s3_key")
+
         for inst in db_instance_config:
             role = inst.get("role", "victim")
             os_type = inst.get("os_type") or inst.get("os", "ubuntu")
@@ -218,13 +221,18 @@ def load_config() -> RangeConfig:
                 else:
                     instance_type = _get_victim_instance_type()
 
+            # Get agent key: use instance-specific if set, otherwise inherit from range
+            # DC instances inherit range agent since they need XDR like victims
             agent_s3_key = inst.get("agent_s3_key")
+            if not agent_s3_key and role in ("victim", "dc"):
+                agent_s3_key = range_agent_s3_key
+
             instances.append(
                 InstanceConfig(
                     role=role,
                     os_type=os_type,
                     instance_type=instance_type,
-                    agent_id=inst.get("agent_id"),
+                    agent_id=inst.get("agent_id") or range_data.get("agent_id"),
                     agent_s3_key=agent_s3_key,
                     agent_presigned_url=get_presigned_url(agent_s3_key),
                     dc_config=inst.get("dc_config"),

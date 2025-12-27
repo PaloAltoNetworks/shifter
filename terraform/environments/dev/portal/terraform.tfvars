@@ -122,7 +122,8 @@ pulumi_container_tag = "latest"
 windows_ami_id = "ami-01e661807e835b29b"
 
 # Windows Server 2022 DC - internal.shifter domain, DC01, DNS forwarder to 169.254.169.253, OpenSSH
-dc_ami_id      = "ami-00825da8e55454661"
+# Admin password: Sh1fterDC2024! (set before domain promotion, matches dc_domain_password)
+dc_ami_id      = "ami-05ac9c21a6c0f8767"
 dc_domain_name = "internal.shifter"
 # nosec B105 - Ephemeral isolated range, not a production credential
 dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret

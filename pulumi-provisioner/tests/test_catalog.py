@@ -17,6 +17,7 @@ from catalog.instances import (
     InstanceType,
     get_attacker_types,
     get_available_instance_types,
+    get_dc_types,
     get_instance_type,
     get_victim_types,
 )
@@ -201,14 +202,16 @@ class TestLookupFunctions:
         overlap = attackers & victims
         assert len(overlap) == 0, f"Found overlapping types: {overlap}"
 
-    def test_all_types_covered(self):
-        """Attacker + victim types should equal all available types."""
-        all_types = set(get_available_instance_types())
+    def test_attacker_and_victim_are_original_types(self):
+        """Original types (before DC) were attacker and victim only."""
+        # Note: This test is now superseded by TestAllRolesCoverage.test_all_types_covered_by_role_helpers
+        # which includes dc role. Keeping for historical reference.
         attackers = set(get_attacker_types())
         victims = set(get_victim_types())
+        dcs = set(get_dc_types())
 
-        combined = attackers | victims
-        assert combined == all_types, "Some instance types are neither attacker nor victim"
+        # Original types should be disjoint
+        assert len(attackers & victims) == 0
 
 
 class TestInstanceTypeDataclass:
@@ -311,3 +314,80 @@ class TestCatalogConsistency:
         kali = get_instance_type("kali-2024")
         assert kali is not None
         assert kali.user_data_template == "kali.sh.j2"
+
+
+class TestDCInstanceType:
+    """Tests for Domain Controller instance type."""
+
+    def test_dc_instance_type_exists(self):
+        """DC instance type should be in catalog."""
+        assert "windows-server-2022-dc" in INSTANCE_CATALOG
+
+    def test_dc_instance_type_has_dc_role(self):
+        """DC should have 'dc' role, not 'victim' or 'attacker'."""
+        dc = get_instance_type("windows-server-2022-dc")
+        assert dc is not None
+        assert dc.role == "dc"
+
+    def test_dc_does_not_require_agent(self):
+        """DC is infrastructure, should not require XDR agent."""
+        dc = get_instance_type("windows-server-2022-dc")
+        assert dc is not None
+        assert dc.requires_agent is False
+
+    def test_dc_uses_correct_template(self):
+        """DC should use dc_windows.ps1.j2 template."""
+        dc = get_instance_type("windows-server-2022-dc")
+        assert dc is not None
+        assert dc.user_data_template == "dc_windows.ps1.j2"
+
+    def test_dc_has_correct_ssh_user(self):
+        """DC should use Administrator as SSH user."""
+        dc = get_instance_type("windows-server-2022-dc")
+        assert dc is not None
+        assert dc.ssh_user == "Administrator"
+
+    def test_dc_has_ami_lookup(self):
+        """DC should have AMI lookup configuration."""
+        dc = get_instance_type("windows-server-2022-dc")
+        assert dc is not None
+        assert dc.ami_lookup is not None
+        assert "name" in dc.ami_lookup
+        assert "Windows" in dc.ami_lookup.get("name", "")
+
+    def test_get_dc_types_returns_dc(self):
+        """get_dc_types() helper should return DC types."""
+        dc_types = get_dc_types()
+        assert "windows-server-2022-dc" in dc_types
+
+    def test_get_dc_types_only_dc_role(self):
+        """get_dc_types() should only return instances with role='dc'."""
+        dc_types = get_dc_types()
+        for name in dc_types:
+            instance_type = get_instance_type(name)
+            assert instance_type is not None
+            assert instance_type.role == "dc", f"{name} should have role='dc'"
+
+
+class TestAllRolesCoverage:
+    """Tests to ensure all roles are properly covered."""
+
+    def test_all_types_covered_by_role_helpers(self):
+        """Attacker + victim + dc types should equal all available types."""
+        all_types = set(get_available_instance_types())
+        attackers = set(get_attacker_types())
+        victims = set(get_victim_types())
+        dcs = set(get_dc_types())
+
+        combined = attackers | victims | dcs
+        assert combined == all_types, "Some instance types are not covered by role helpers"
+
+    def test_roles_are_disjoint(self):
+        """No instance should belong to multiple role categories."""
+        attackers = set(get_attacker_types())
+        victims = set(get_victim_types())
+        dcs = set(get_dc_types())
+
+        assert len(attackers & victims) == 0, "Found overlap between attacker and victim"
+        assert len(attackers & dcs) == 0, "Found overlap between attacker and dc"
+        assert len(victims & dcs) == 0, "Found overlap between victim and dc"

@@ -14,6 +14,11 @@ def windows_os(db):
 
 
 @pytest.fixture
+def linux_os(db):
+    return OperatingSystem.objects.get(slug="linux-debian")
+
+
+@pytest.fixture
 def test_agent(db, django_user_model, windows_os):
     user = django_user_model.objects.create_user(
         username="rangetest", email="rangetest@example.com", password="testpass"
@@ -186,6 +191,83 @@ class TestLaunchRange:
         assert response.status_code == 409
         assert "already have an active range" in response.json()["error"]
 
+    def test_ad_scenario_rejects_linux_agent(self, client, test_agent, linux_os, settings):
+        """AD scenario requires Windows agent (used for both DC and victim)."""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
+        client.force_login(test_agent.user)
+
+        # Create a Linux agent (invalid for AD scenario)
+        linux_agent = AgentConfig.objects.create(
+            user=test_agent.user,
+            os=linux_os,
+            name="Linux Agent",
+            s3_key="agents/test/fake.deb",
+            original_filename="agent.deb",
+            file_size_bytes=25000000,
+            sha256_hash="def456",
+        )
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={
+                "agent_id": linux_agent.id,
+                "scenario": "ad_attack_lab",
+            },
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert "Windows" in response.json()["error"]
+
+    def test_ad_scenario_success_with_windows_agent(self, client, test_agent, settings):
+        """AD scenario succeeds with Windows agent (used for both DC and victim)."""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
+        client.force_login(test_agent.user)
+
+        # test_agent uses windows_os fixture
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={
+                "agent_id": test_agent.id,
+                "scenario": "ad_attack_lab",
+            },
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["range"]["status"] == "provisioning"
+        # dc_agent should be same as agent for AD scenario
+        assert data["range"]["dc_agent_id"] == test_agent.id
+
+    def test_basic_scenario_allows_any_agent(self, client, test_agent, linux_os, settings):
+        """Basic scenario works with any agent OS."""
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
+        client.force_login(test_agent.user)
+
+        # Create a Linux agent
+        linux_agent = AgentConfig.objects.create(
+            user=test_agent.user,
+            os=linux_os,
+            name="Linux Agent",
+            s3_key="agents/test/fake.deb",
+            original_filename="agent.deb",
+            file_size_bytes=25000000,
+            sha256_hash="def456",
+        )
+
+        response = client.post(
+            reverse("mission_control:launch_range"),
+            data={"agent_id": linux_agent.id, "scenario": "basic"},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["range"]["dc_agent_id"] is None
+
 
 @pytest.mark.django_db
 class TestCancelRange:
@@ -331,6 +413,17 @@ class TestListAgents:
         assert len(data["agents"]) == 1
         assert data["agents"][0]["id"] == test_agent.id
         assert data["agents"][0]["name"] == "Test XDR Agent"
+
+    def test_includes_os_slug_for_filtering(self, client, test_agent):
+        """Agent list should include os_slug for frontend filtering."""
+        client.force_login(test_agent.user)
+        response = client.get(reverse("mission_control:list_agents"))
+
+        assert response.status_code == 200
+        data = response.json()
+        agent = data["agents"][0]
+        assert "os_slug" in agent
+        assert agent["os_slug"] == "windows"  # test_agent uses windows_os fixture
 
 
 @pytest.mark.django_db

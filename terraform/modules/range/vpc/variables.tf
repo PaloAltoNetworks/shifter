@@ -70,3 +70,13 @@ variable "agent_s3_bucket" {
   description = "S3 bucket name for agent installers (for range instance S3 read access)"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# Domain Controller Security Group
+# ------------------------------------------------------------------------------
+
+variable "enable_dc_security_group" {
+  description = "Enable security group for Domain Controller instances"
+  type        = bool
+  default     = true
+}

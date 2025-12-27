@@ -15,7 +15,6 @@ import re
 import secrets
 import string
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
@@ -28,6 +27,7 @@ from jinja2 import Environment, FileSystemLoader
 from .ssm_executor import SSMExecutor
 from .setup_orchestrator import SetupOrchestrator, SetupError
 from .plans.domain_join import DomainJoinPlan
+from .plans.xdr_agent_install import XDRAgentInstallPlan
 
 
 def validate_s3_path(value: str) -> bool:
@@ -167,6 +167,7 @@ class InstanceComponent(pulumi.ComponentResource):
     netbios_name: Optional[str]
     hostname: Optional[str]
     public_key: Optional[str]  # Stored for SSM orchestration
+    agent_presigned_url: Optional[str]  # For XDR agent installation on DC
     setup_result: Optional[pulumi.Output[bool]]  # Result of DC setup orchestration
 
     def __init__(
@@ -266,6 +267,7 @@ class InstanceComponent(pulumi.ComponentResource):
         self.netbios_name = None
         self.hostname = None
         self.public_key = None
+        self.agent_presigned_url = None
         self.setup_result = None
 
         # For DC role, read config from environment variables (prebaked AMI)
@@ -282,6 +284,8 @@ class InstanceComponent(pulumi.ComponentResource):
             self.netbios_name = dc_config.get("netbios_name", "INTSHIFTER") if dc_config else "INTSHIFTER"
             self.hostname = "DC01"  # Fixed in prebaked AMI
             self.public_key = public_key
+            # Store agent URL for XDR installation (if provided)
+            self.agent_presigned_url = agent_presigned_url if agent_presigned_url else None
 
             # Create SSM Parameter for DC config (for domain members to reference)
             self.dc_config_param_name = f"/shifter/{environment}/range/{range_id}/dc-config"
@@ -384,6 +388,7 @@ class InstanceComponent(pulumi.ComponentResource):
         # Store domain config for domain join (captured in closure)
         dc_domain_name = self.domain_name
         dc_admin_password = self.domain_admin_password
+        dc_agent_presigned_url = self.agent_presigned_url
 
         def do_setup(args: tuple) -> bool:
             """Run the domain join synchronously (called within apply)."""
@@ -455,8 +460,36 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                 else:
                     pulumi.log.info("DNS cleanup complete")
 
-                # Join domain members IN PARALLEL
-                if domain_members:
+                # Run XDR install and domain joins IN PARALLEL
+                # Both are independent operations that can proceed concurrently
+                def install_xdr_agent() -> None:
+                    """Install XDR agent on DC using plan."""
+                    if not dc_agent_presigned_url:
+                        raise SetupError("XDR agent URL is required for DC instances but was not provided")
+
+                    pulumi.log.info(f"Installing XDR agent on DC {instance_id}...")
+
+                    # Create a simple object to hold the presigned URL for get_context
+                    class AgentConfig:
+                        def __init__(self, url: str):
+                            self.agent_presigned_url = url
+
+                    xdr_plan = XDRAgentInstallPlan()
+                    agent_config = AgentConfig(dc_agent_presigned_url)
+                    context = xdr_plan.get_context(agent_config)
+
+                    xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, context)
+                    if not xdr_result.success:
+                        raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
+
+                    pulumi.log.info(f"XDR agent installed successfully on DC {instance_id}")
+
+                def join_domain_members_task() -> None:
+                    """Join domain members to domain."""
+                    if not domain_members:
+                        pulumi.log.info("No domain members to join")
+                        return
+
                     pulumi.log.info(
                         f"Joining {len(domain_members)} members to domain {dc_domain_name}..."
                     )
@@ -469,8 +502,16 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                         member_instance_ids=domain_members,
                     )
                     pulumi.log.info("All domain members joined successfully")
-                else:
-                    pulumi.log.info("No domain members to join")
+
+                # Execute both tasks in parallel
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = [
+                        pool.submit(install_xdr_agent),
+                        pool.submit(join_domain_members_task),
+                    ]
+                    for future in as_completed(futures):
+                        # Re-raise any exceptions from the tasks
+                        future.result()
 
                 return True
 

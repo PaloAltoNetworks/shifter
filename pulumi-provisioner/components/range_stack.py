@@ -119,8 +119,8 @@ class RangeStack(pulumi.ComponentResource):
                 environment=config.environment,
                 instance_profile_name=config.instance_profile_name,
                 agent_s3_bucket=config.agent_s3_bucket,
-                agent_s3_key="",
-                agent_presigned_url="",
+                agent_s3_key=inst_config.agent_s3_key or "",
+                agent_presigned_url=inst_config.agent_presigned_url or "",
                 dc_config=inst_config.dc_config,
                 opts=pulumi.ResourceOptions(
                     parent=self,

@@ -1,0 +1,12 @@
+<powershell>
+# Windows DC user_data - intentionally minimal
+# All setup is handled via SSM Run Command orchestration:
+#   1. BootstrapPlan: hostname + SSH configuration + reboot
+#   2. DCSetupPlan: AD DS install + DC promotion + verification
+#
+# This script just logs that the instance started and waits for SSM.
+
+$LogFile = "C:\Windows\Temp\dc-userdata.log"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+"$timestamp - DC instance started. Setup will be orchestrated via SSM." | Out-File -FilePath $LogFile
+</powershell>

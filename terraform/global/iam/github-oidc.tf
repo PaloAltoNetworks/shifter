@@ -694,7 +694,7 @@ resource "aws_iam_policy" "ssm_cognito" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SSM"
+        Sid    = "SSMRunCommand"
         Effect = "Allow"
         Action = [
           "ssm:SendCommand",
@@ -703,6 +703,22 @@ resource "aws_iam_policy" "ssm_cognito" {
           "ssm:DescribeInstanceInformation"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "SSMParameterStore"
+        Effect = "Allow"
+        Action = [
+          "ssm:PutParameter",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:DeleteParameter",
+          "ssm:DescribeParameters",
+          "ssm:AddTagsToResource",
+          "ssm:RemoveTagsFromResource",
+          "ssm:ListTagsForResource"
+        ]
+        # Scoped to shifter range parameters for DC config
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/*/range/*"
       },
       {
         Sid      = "Cognito"

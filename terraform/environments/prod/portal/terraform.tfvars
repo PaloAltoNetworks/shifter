@@ -120,6 +120,13 @@ pulumi_container_tag = "latest"
 # Windows Server 2022 victim with XAMPP, Claude Code (system path), Python, Git, IIS, FTP, OpenSSH - Sysprepped v3
 windows_ami_id = "ami-02138efa7887f3218"
 
+# Windows Server 2022 DC - internal.shifter domain, DC01, DNS forwarder to 169.254.169.253, OpenSSH
+# Admin password: Sh1fterDC2024! (set before domain promotion, matches dc_domain_password)
+dc_ami_id      = "ami-00b60259bc2f34052"
+dc_domain_name = "internal.shifter"
+# nosec B105 - Ephemeral isolated range, not a production credential
+dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
+
 # ------------------------------------------------------------------------------
 # CI Testing (not used by Terraform, extracted by quality.yml workflow)
 # ------------------------------------------------------------------------------

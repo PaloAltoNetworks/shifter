@@ -86,3 +86,13 @@ variable "vm_series_instance_type" {
   type        = string
   default     = "m5.xlarge"
 }
+
+# ------------------------------------------------------------------------------
+# Domain Controller Security Group
+# ------------------------------------------------------------------------------
+
+variable "enable_dc_security_group" {
+  description = "Enable security group for Domain Controller instances"
+  type        = bool
+  default     = true
+}

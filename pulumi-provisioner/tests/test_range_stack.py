@@ -760,8 +760,8 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
                     inst.instance.vpc_security_group_ids.apply(check_not_dc_sg)
 
     @pulumi.runtime.test
-    def test_dc_fallback_to_victim_sg_when_dc_sg_not_set(self, temp_templates):
-        """DC should fall back to victim SG if dc_security_group_id is empty."""
+    def test_dc_raises_error_when_dc_sg_not_set(self, temp_templates):
+        """DC should raise ValueError if dc_security_group_id is empty."""
         from components.range_stack import RangeStack
 
         config = RangeConfig(
@@ -781,8 +781,8 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
             vpc_cidr="10.1.0.0/16",
             route_table_id="rtb-12345",
             kali_security_group_id="sg-kali",
-            victim_security_group_id="sg-victim-fallback",
-            dc_security_group_id="",  # Empty - should fall back
+            victim_security_group_id="sg-victim",
+            dc_security_group_id="",  # Empty - should raise error
             instance_profile_name="range-profile",
             kali_ami_id="ami-kali123",
             victim_ami_id="ami-ubuntu123",
@@ -793,12 +793,8 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
         )
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            stack = RangeStack("test-range", config=config)
-
-            def check_fallback_sg(sgs):
-                assert "sg-victim-fallback" in sgs, f"DC should fall back to victim SG, got {sgs}"
-
-            stack.instances[0].instance.vpc_security_group_ids.apply(check_fallback_sg)
+            with pytest.raises(ValueError, match="dc_security_group_id is required"):
+                RangeStack("test-range", config=config)
 
 
 class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):

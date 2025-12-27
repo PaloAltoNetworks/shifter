@@ -163,6 +163,12 @@ variable "kali_security_group_id" {
   type        = string
 }
 
+variable "dc_security_group_id" {
+  description = "Security group ID for Domain Controller instances"
+  type        = string
+  default     = ""
+}
+
 variable "range_instance_profile_arn" {
   description = "IAM instance profile ARN for range instances"
   type        = string

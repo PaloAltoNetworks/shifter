@@ -173,6 +173,18 @@ resource "aws_security_group_rule" "victim_dns_tcp" {
   description       = "DNS TCP"
 }
 
+resource "aws_security_group_rule" "victim_to_dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.dc[0].id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic to DC (domain join, AD services)"
+}
+
 # ------------------------------------------------------------------------------
 # Kali Security Group Rules
 # ------------------------------------------------------------------------------
@@ -235,6 +247,18 @@ resource "aws_security_group_rule" "kali_dns_tcp" {
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.kali.id
   description       = "DNS TCP"
+}
+
+resource "aws_security_group_rule" "kali_to_dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.dc[0].id
+  security_group_id        = aws_security_group.kali.id
+  description              = "All traffic to DC (AD attacks)"
 }
 
 # ------------------------------------------------------------------------------
@@ -452,6 +476,18 @@ resource "aws_security_group_rule" "dc_from_kali" {
   source_security_group_id = aws_security_group.kali.id
   security_group_id        = aws_security_group.dc[0].id
   description              = "All traffic from Kali (for AD attack scenarios)"
+}
+
+resource "aws_security_group_rule" "dc_from_victim" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.victim.id
+  security_group_id        = aws_security_group.dc[0].id
+  description              = "All traffic from Victim (domain join, lateral movement)"
 }
 
 # ------------------------------------------------------------------------------

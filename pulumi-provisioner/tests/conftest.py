@@ -486,6 +486,7 @@ def mock_env_vars(mocker):
         "RANGE_AVAILABILITY_ZONE": "us-east-2a",
         "KALI_SECURITY_GROUP_ID": "sg-kali-test",
         "VICTIM_SECURITY_GROUP_ID": "sg-victim-test",
+        "DC_SECURITY_GROUP_ID": "sg-dc-test",
         "RANGE_INSTANCE_PROFILE_NAME": "test-profile",
         "KALI_AMI_ID": "ami-kali-test",
         "VICTIM_AMI_ID": "ami-victim-test",

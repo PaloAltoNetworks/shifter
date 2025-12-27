@@ -65,6 +65,8 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 "agents/xdr.tar.gz",  # agent_s3_key
                 "linux-debian",  # agent_os_slug
+                None,  # dc_agent_id
+                None,  # dc_agent_s3_key
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -81,6 +83,8 @@ class TestGetRangeFromDb:
             assert result["agent_id"] == 1
             assert result["agent_s3_key"] == "agents/xdr.tar.gz"
             assert result["agent_os_slug"] == "linux-debian"
+            assert result["dc_agent_id"] is None
+            assert result["dc_agent_s3_key"] is None
 
     def test_get_range_from_db_returns_agent_os_slug(self, mock_boto3_clients, mock_env_vars_minimal):
         """Range data should include agent's OS slug from OperatingSystem table."""
@@ -94,6 +98,8 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 "agents/xdr.msi",  # agent_s3_key
                 "windows",  # agent_os_slug - from OperatingSystem.slug
+                None,  # dc_agent_id
+                None,  # dc_agent_s3_key
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -133,6 +139,8 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 None,  # agent_s3_key (no agent)
                 None,  # agent_os_slug (no agent)
+                None,  # dc_agent_id
+                None,  # dc_agent_s3_key
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -165,6 +173,8 @@ class TestGetRangeFromDb:
                 custom_config,  # instance_config
                 None,  # agent_s3_key
                 None,  # agent_os_slug
+                None,  # dc_agent_id
+                None,  # dc_agent_s3_key
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -319,46 +329,14 @@ class TestLoadConfigIntegration:
     """Integration tests for load_config function.
 
     These tests actually call load_config() with mocked dependencies.
+    Uses mock_pulumi_config fixture from conftest.py.
     """
-
-    @pytest.fixture
-    def mock_pulumi_config(self, mocker):
-        """Mock Pulumi Config object with required values."""
-        mock_config = MagicMock()
-
-        # Required string configs
-        mock_config.require.side_effect = lambda key: {
-            "environment": "dev",
-            "rangeVpcId": "vpc-test123",
-            "rangeVpcCidr": "10.1.0.0/16",
-            "rangeRouteTableId": "rtb-test123",
-            "kaliSecurityGroupId": "sg-kali-test",
-            "victimSecurityGroupId": "sg-victim-test",
-            "kaliAmiId": "ami-kali-test",
-            "victimAmiId": "ami-victim-test",
-            "availabilityZone": "us-east-2a",
-        }.get(key, f"mock-{key}")
-
-        # Required int configs
-        mock_config.require_int.side_effect = lambda key: {
-            "rangeId": 42,
-        }.get(key, 0)
-
-        # Optional configs
-        mock_config.get.side_effect = lambda key: {
-            "agentS3Bucket": "test-agents-bucket",
-            "windowsAmiId": "ami-windows-test",
-            "rangeInstanceProfileName": "test-profile",
-            "portalVpcCidr": "10.0.0.0/16",
-        }.get(key)
-
-        mocker.patch("pulumi.Config", return_value=mock_config)
-        return mock_config
 
     @pytest.fixture
     def mock_db_range_data(self, mocker):
         """Mock get_range_from_db to return test data."""
-        def _mock_db(range_id, instance_config=None, agent_id=None, agent_s3_key=None, agent_os_slug=None):
+        def _mock_db(range_id, instance_config=None, agent_id=None, agent_s3_key=None,
+                     agent_os_slug=None, dc_agent_id=None, dc_agent_s3_key=None):
             mock_data = {
                 "id": range_id,
                 "user_id": 1,
@@ -367,6 +345,8 @@ class TestLoadConfigIntegration:
                 "instance_config": instance_config,
                 "agent_s3_key": agent_s3_key,
                 "agent_os_slug": agent_os_slug,
+                "dc_agent_id": dc_agent_id,
+                "dc_agent_s3_key": dc_agent_s3_key,
             }
             mocker.patch("config.get_range_from_db", return_value=mock_data)
             return mock_data
@@ -499,6 +479,7 @@ class TestLoadConfigIntegration:
         mocker.patch("config.get_range_from_db", return_value={
             "id": 42, "user_id": 1, "subnet_index": 5,
             "agent_id": None, "instance_config": None, "agent_s3_key": None,
+            "agent_os_slug": None, "dc_agent_id": None, "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -518,6 +499,7 @@ class TestLoadConfigIntegration:
         mock_get_range = mocker.patch("config.get_range_from_db", return_value={
             "id": 42, "user_id": 1, "subnet_index": 5,
             "agent_id": None, "instance_config": None, "agent_s3_key": None,
+            "agent_os_slug": None, "dc_agent_id": None, "dc_agent_s3_key": None,
         })
 
         load_config()
@@ -558,38 +540,9 @@ class TestAgentOsToVictimOsMapping:
     When a user uploads a Windows agent (.msi), the victim instance should
     be Windows. When they upload a Linux agent (.deb, .rpm), the victim
     should be Ubuntu (Linux).
+
+    Uses mock_pulumi_config fixture from conftest.py.
     """
-
-    @pytest.fixture
-    def mock_pulumi_config(self, mocker):
-        """Mock Pulumi Config object with required values."""
-        mock_config = MagicMock()
-
-        mock_config.require.side_effect = lambda key: {
-            "environment": "dev",
-            "rangeVpcId": "vpc-test123",
-            "rangeVpcCidr": "10.1.0.0/16",
-            "rangeRouteTableId": "rtb-test123",
-            "kaliSecurityGroupId": "sg-kali-test",
-            "victimSecurityGroupId": "sg-victim-test",
-            "kaliAmiId": "ami-kali-test",
-            "victimAmiId": "ami-victim-test",
-            "availabilityZone": "us-east-2a",
-        }.get(key, f"mock-{key}")
-
-        mock_config.require_int.side_effect = lambda key: {
-            "rangeId": 42,
-        }.get(key, 0)
-
-        mock_config.get.side_effect = lambda key: {
-            "agentS3Bucket": "test-agents-bucket",
-            "windowsAmiId": "ami-windows-test",
-            "rangeInstanceProfileName": "test-profile",
-            "portalVpcCidr": "10.0.0.0/16",
-        }.get(key)
-
-        mocker.patch("pulumi.Config", return_value=mock_config)
-        return mock_config
 
     def test_windows_agent_creates_windows_victim(
         self, mock_pulumi_config, mocker, mock_boto3_clients
@@ -606,6 +559,8 @@ class TestAgentOsToVictimOsMapping:
             "instance_config": None,  # Use default config
             "agent_s3_key": "agents/xdr-installer.msi",
             "agent_os_slug": "windows",  # Windows agent!
+            "dc_agent_id": None,
+            "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -630,6 +585,8 @@ class TestAgentOsToVictimOsMapping:
             "instance_config": None,
             "agent_s3_key": "agents/xdr-installer.deb",
             "agent_os_slug": "linux-debian",
+            "dc_agent_id": None,
+            "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -654,6 +611,8 @@ class TestAgentOsToVictimOsMapping:
             "instance_config": None,
             "agent_s3_key": "agents/xdr-installer.rpm",
             "agent_os_slug": "linux-rhel",
+            "dc_agent_id": None,
+            "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -678,6 +637,8 @@ class TestAgentOsToVictimOsMapping:
             "instance_config": None,
             "agent_s3_key": None,
             "agent_os_slug": None,  # No OS info
+            "dc_agent_id": None,
+            "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -709,6 +670,215 @@ class TestAgentOsToVictimOsMapping:
         victim = result.instances[1]
         assert victim.role == "victim"
         assert victim.os_type == "ubuntu", f"Expected 'ubuntu' but got '{victim.os_type}'"
+
+
+class TestDCConfiguration:
+    """Tests for Domain Controller configuration support."""
+
+    def test_instance_config_supports_dc_config(self):
+        """InstanceConfig should accept dc_config dict."""
+        config = InstanceConfig(
+            role="dc",
+            os_type="windows",
+            instance_type="t3.large",
+            dc_config={
+                "domain_name": "internal.shifter",
+                "netbios_name": "SHIFTER",
+            }
+        )
+        assert config.dc_config is not None
+        assert config.dc_config["domain_name"] == "internal.shifter"
+        assert config.dc_config["netbios_name"] == "SHIFTER"
+
+    def test_instance_config_dc_config_optional(self):
+        """dc_config should be optional (None by default)."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="ubuntu",
+            instance_type="t3.small",
+        )
+        assert config.dc_config is None
+
+    def test_instance_config_supports_join_domain(self):
+        """InstanceConfig should support join_domain flag."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="windows",
+            instance_type="t3.medium",
+            join_domain=True,
+        )
+        assert config.join_domain is True
+
+    def test_instance_config_join_domain_default_false(self):
+        """join_domain should default to False."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="windows",
+            instance_type="t3.medium",
+        )
+        assert config.join_domain is False
+
+    def test_instance_config_supports_dc_config_param_name(self):
+        """InstanceConfig should support dc_config_param_name for domain members."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="windows",
+            instance_type="t3.medium",
+            join_domain=True,
+            dc_config_param_name="/shifter/dev/range/42/dc-config",
+        )
+        assert config.dc_config_param_name == "/shifter/dev/range/42/dc-config"
+
+    def test_instance_config_dc_config_param_name_optional(self):
+        """dc_config_param_name should be optional (None by default)."""
+        config = InstanceConfig(
+            role="victim",
+            os_type="windows",
+            instance_type="t3.medium",
+        )
+        assert config.dc_config_param_name is None
+
+
+class TestLoadConfigDCSupport:
+    """Tests for load_config parsing DC configuration from database.
+
+    Uses mock_pulumi_config fixture from conftest.py.
+    """
+
+    def test_load_config_parses_dc_config_from_db(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should parse dc_config from instance_config JSON."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "dc", "os": "windows", "instance_type": "t3.large",
+             "dc_config": {"domain_name": "test.local", "netbios_name": "TEST"}},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 1
+        dc_instance = result.instances[0]
+        assert dc_instance.role == "dc"
+        assert dc_instance.dc_config is not None
+        assert dc_instance.dc_config["domain_name"] == "test.local"
+        assert dc_instance.dc_config["netbios_name"] == "TEST"
+
+    def test_load_config_parses_join_domain_from_db(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should parse join_domain flag from instance_config JSON."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os": "windows", "instance_type": "t3.medium",
+             "join_domain": True},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 1
+        victim_instance = result.instances[0]
+        assert victim_instance.join_domain is True
+
+    def test_load_config_join_domain_defaults_false(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should default join_domain to False when not specified."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os": "windows", "instance_type": "t3.medium"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].join_domain is False
+
+    def test_load_config_dc_uses_dc_agent(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """DC instance should use dc_agent config, not range's victim agent."""
+        from config import load_config
+
+        # AD scenario with DC and victim - DC uses separate dc_agent
+        custom_config = [
+            {"role": "attacker", "os_type": "kali"},
+            {"role": "dc", "os_type": "windows",
+             "dc_config": {"domain_name": "test.local", "netbios_name": "TEST"}},
+            {"role": "victim", "os_type": "windows", "join_domain": True},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": 1, "instance_config": custom_config,
+            "agent_s3_key": "agents/victim_xdr.msi",  # Range-level agent (for victim)
+            "agent_os_slug": "windows",
+            "dc_agent_id": 2,
+            "dc_agent_s3_key": "agents/dc_xdr.msi",  # Separate DC agent
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 3
+        # DC should use dc_agent, NOT range's victim agent
+        dc_instance = next(i for i in result.instances if i.role == "dc")
+        assert dc_instance.agent_s3_key == "agents/dc_xdr.msi"
+        assert dc_instance.agent_presigned_url == "https://s3.example.com/presigned-url"
+
+        # Victim should use range's victim agent
+        victim_instance = next(i for i in result.instances if i.role == "victim")
+        assert victim_instance.agent_s3_key == "agents/victim_xdr.msi"
+        assert victim_instance.agent_presigned_url == "https://s3.example.com/presigned-url"
+
+        # Attacker should NOT have agent config
+        attacker_instance = next(i for i in result.instances if i.role == "attacker")
+        assert attacker_instance.agent_s3_key is None
+        assert attacker_instance.agent_presigned_url is None
+
+    def test_load_config_dc_without_dc_agent_configured(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """DC instance with no dc_agent configured should have None for agent fields."""
+        from config import load_config
+
+        # AD scenario but no dc_agent configured (edge case - incomplete setup)
+        custom_config = [
+            {"role": "dc", "os_type": "windows",
+             "dc_config": {"domain_name": "test.local", "netbios_name": "TEST"}},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None,
+            "agent_os_slug": None,
+            "dc_agent_id": None,  # No DC agent configured
+            "dc_agent_s3_key": None,
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 1
+        dc_instance = result.instances[0]
+        assert dc_instance.role == "dc"
+        # DC should have None for agent fields when no dc_agent configured
+        assert dc_instance.agent_s3_key is None
+        assert dc_instance.agent_presigned_url is None
 
 
 class TestConfigValidation:
@@ -781,3 +951,168 @@ class TestConfigValidation:
         )
 
         assert config.instances == []
+
+
+class TestOsTypeKeySupport:
+    """Tests for os_type key support in instance_config JSON.
+
+    The Portal sends 'os_type' but we also support legacy 'os' key.
+    Uses mock_pulumi_config fixture from conftest.py.
+    """
+
+    def test_load_config_supports_os_type_key(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should parse os_type key from instance_config JSON (Portal format)."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "attacker", "os_type": "kali", "instance_type": "t3.medium"},
+            {"role": "victim", "os_type": "windows", "instance_type": "t3.medium"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 2
+        assert result.instances[0].os_type == "kali"
+        assert result.instances[1].os_type == "windows"
+
+    def test_load_config_supports_legacy_os_key(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should still support legacy 'os' key for backwards compatibility."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os": "ubuntu", "instance_type": "t3.medium"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].os_type == "ubuntu"
+
+    def test_load_config_os_type_takes_precedence_over_os(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """os_type key should take precedence over legacy os key if both present."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os_type": "windows", "os": "ubuntu", "instance_type": "t3.medium"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].os_type == "windows"
+
+    def test_load_config_dc_security_group_id_loaded(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """load_config should load dc_security_group_id from Pulumi config."""
+        from config import load_config
+
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": [],
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.dc_security_group_id == "sg-dc-test"
+
+
+class TestInstanceTypeDefaults:
+    """Tests for instance type defaults from catalog when not specified."""
+
+    def test_attacker_uses_kali_instance_type_default(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """Attacker role should use KALI_INSTANCE_TYPE from environment."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "attacker", "os_type": "kali"},  # No instance_type
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].instance_type == os.environ["KALI_INSTANCE_TYPE"]
+
+    def test_victim_uses_victim_instance_type_default(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """Victim role should use VICTIM_INSTANCE_TYPE from environment."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "victim", "os_type": "ubuntu"},  # No instance_type
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].instance_type == os.environ["VICTIM_INSTANCE_TYPE"]
+
+    def test_dc_uses_dc_instance_type_default(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """DC role should use DC_INSTANCE_TYPE default (t3.large)."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "dc", "os_type": "windows"},  # No instance_type
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        # DC_INSTANCE_TYPE defaults to t3.large if not set
+        assert result.instances[0].instance_type == "t3.large"
+
+    def test_explicit_instance_type_overrides_default(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """Explicitly provided instance_type should override default."""
+        from config import load_config
+
+        custom_config = [
+            {"role": "attacker", "os_type": "kali", "instance_type": "t3.xlarge"},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None, "agent_os_slug": None,
+        })
+
+        result = load_config()
+
+        assert result.instances[0].instance_type == "t3.xlarge"

@@ -23,13 +23,17 @@ flowchart LR
         SUBNET[User Subnet /24]
         KALI[Kali EC2]
         VICTIM[Victim EC2]
+        DC[DC EC2]
         SUBNET --- KALI
         SUBNET --- VICTIM
+        SUBNET --- DC
     end
 
     PORTAL -->|run_task| ECS
     ECS -->|pulumi up| SUBNET
 ```
+
+DC is optional. When present, victim instances can join the AD domain.
 
 ## Range Lifecycle
 
@@ -47,8 +51,12 @@ flowchart LR
 Each range creates:
 - /24 subnet in Range VPC
 - Kali EC2 instance
-- Victim EC2 instance
+- Victim EC2 instance(s)
+- DC EC2 instance (optional, for AD scenarios)
 - SSH key per instance (Secrets Manager)
+- SSM Parameter for DC config (when DC present)
+
+DC instances use a prebaked AMI with AD DS already promoted. Post-boot SSM orchestration handles DNS cleanup and XDR agent installation. Victims use user data for initial setup; domain members are joined via SSM after DC is ready.
 
 ## Terraform Modules
 

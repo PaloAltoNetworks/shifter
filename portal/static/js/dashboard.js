@@ -24,6 +24,7 @@ class DashboardManager {
         this.pollIntervalMs = 2000; // Poll every 2 seconds
         this.pollErrorCount = 0;
         this.maxPollErrors = 5; // Force refresh after 5 consecutive errors
+        this.agents = []; // Cached agent list with os_slug
 
         // UI Elements
         this.noRangeState = document.getElementById('no-range-state');
@@ -35,6 +36,12 @@ class DashboardManager {
         this.agentDropdown = document.getElementById('agent-dropdown');
         this.agentSelect = document.getElementById('agent-select-value');
         this.agentItems = document.getElementById('agent-items');
+        this.scenarioDropdown = document.getElementById('scenario-dropdown');
+        this.scenarioSelect = document.getElementById('scenario-select-value');
+        this.dcAgentSection = document.getElementById('dc-agent-section');
+        this.dcAgentDropdown = document.getElementById('dc-agent-dropdown');
+        this.dcAgentSelect = document.getElementById('dc-agent-select-value');
+        this.dcAgentItems = document.getElementById('dc-agent-items');
         this.ngfwCheckbox = document.getElementById('ngfw-enabled');
         this.ngfwConfigGroup = document.getElementById('ngfw-config-group');
         this.ngfwConfigDropdown = document.getElementById('ngfw-config-dropdown');
@@ -99,7 +106,14 @@ class DashboardManager {
     _bindEvents() {
         // Agent dropdown change
         if (this.agentDropdown) {
-            this.agentDropdown.addEventListener('change', (e) => {
+            this.agentDropdown.addEventListener('change', () => {
+                this._updateLaunchButtonState();
+            });
+        }
+
+        // DC Agent dropdown change
+        if (this.dcAgentDropdown) {
+            this.dcAgentDropdown.addEventListener('change', () => {
                 this._updateLaunchButtonState();
             });
         }
@@ -115,6 +129,13 @@ class DashboardManager {
         if (this.ngfwConfigDropdown) {
             this.ngfwConfigDropdown.addEventListener('change', () => {
                 this._updateLaunchButtonState();
+            });
+        }
+
+        // Scenario dropdown change
+        if (this.scenarioDropdown) {
+            this.scenarioDropdown.addEventListener('change', (e) => {
+                this._onScenarioChange(e.detail.value);
             });
         }
 
@@ -142,13 +163,69 @@ class DashboardManager {
         }
     }
 
+    /**
+     * Handle scenario dropdown change.
+     * AD scenario uses same agent for DC and victim (no separate DC agent needed).
+     */
+    _onScenarioChange(scenario) {
+        // DC agent section is not needed - same agent used for DC and victim
+        // Keep it hidden for all scenarios
+        if (this.dcAgentSection) {
+            this.dcAgentSection.style.display = 'none';
+        }
+        if (this.dcAgentSelect) {
+            this.dcAgentSelect.value = '';
+        }
+        this._updateLaunchButtonState();
+    }
+
+    /**
+     * Reset DC agent dropdown to placeholder state.
+     */
+    _resetDcAgentDropdown() {
+        if (this.dcAgentDropdown) {
+            const trigger = this.dcAgentDropdown.querySelector('.xdr-dropdown-value');
+            if (trigger) {
+                trigger.textContent = '-- Select a Windows agent --';
+                trigger.classList.add('placeholder');
+            }
+            // Clear selected state
+            const items = this.dcAgentDropdown.querySelectorAll('.xdr-dropdown-item');
+            items.forEach(item => item.classList.remove('selected'));
+        }
+    }
+
+    /**
+     * Update launch button enabled/disabled state based on form validity.
+     * All scenarios just require an agent to be selected.
+     * (AD scenario validates Windows agent on backend)
+     */
+    _updateLaunchButtonState() {
+        const agentSelected = this.agentSelect?.value;
+        const canLaunch = Boolean(agentSelected);
+
+        if (this.launchBtn) {
+            this.launchBtn.disabled = !canLaunch;
+        }
+    }
+
     async init() {
+        // Initialize scenario dropdown
+        this._initScenarioDropdown();
+
         // Load agents, NGFW configs, and current status in parallel
         await Promise.all([
             this.loadAgents(),
             this.loadNgfwConfigs(),
             this.loadStatus(),
         ]);
+    }
+
+    _initScenarioDropdown() {
+        // Initialize the scenario dropdown with XdrDropdown if available
+        if (this.scenarioDropdown && window.XdrDropdown) {
+            void new window.XdrDropdown(this.scenarioDropdown);
+        }
     }
 
     _toggleNgfwConfigSection() {
@@ -224,12 +301,13 @@ class DashboardManager {
             }
 
             const data = await response.json();
+            // Cache agents for later reference
+            this.agents = data.agents;
 
-            // Clear existing items
+            // Populate victim agent dropdown (all agents)
             if (this.agentItems) {
                 this.agentItems.innerHTML = '';
 
-                // Add agent items
                 for (const agent of data.agents) {
                     const li = document.createElement('li');
                     li.className = 'xdr-dropdown-item';
@@ -240,7 +318,35 @@ class DashboardManager {
 
                 // Reinitialize dropdown after adding items
                 if (this.agentDropdown && window.XdrDropdown) {
-                    new window.XdrDropdown(this.agentDropdown);
+                    void new window.XdrDropdown(this.agentDropdown);
+                }
+            }
+
+            // Populate DC agent dropdown (Windows agents only)
+            if (this.dcAgentItems) {
+                this.dcAgentItems.innerHTML = '';
+
+                const windowsAgents = data.agents.filter(a => a.os_slug === 'windows');
+
+                if (windowsAgents.length === 0) {
+                    // No Windows agents - show helpful message
+                    const li = document.createElement('li');
+                    li.className = 'xdr-dropdown-item disabled';
+                    li.textContent = 'No Windows agents uploaded';
+                    this.dcAgentItems.appendChild(li);
+                } else {
+                    for (const agent of windowsAgents) {
+                        const li = document.createElement('li');
+                        li.className = 'xdr-dropdown-item';
+                        li.dataset.value = agent.id;
+                        li.textContent = `${agent.name} (${agent.os_name})`;
+                        this.dcAgentItems.appendChild(li);
+                    }
+                }
+
+                // Reinitialize dropdown after adding items
+                if (this.dcAgentDropdown && window.XdrDropdown) {
+                    void new window.XdrDropdown(this.dcAgentDropdown);
                 }
             }
         } catch (error) {
@@ -437,6 +543,8 @@ class DashboardManager {
         const agentId = this.agentSelect?.value;
         if (!agentId) return;
 
+        const scenario = this.scenarioSelect?.value || 'basic';
+
         const ngfwEnabled = this.ngfwCheckbox?.checked ?? false;
         const ngfwConfigId = this.ngfwConfigSelect?.value;
 
@@ -449,13 +557,15 @@ class DashboardManager {
         this.launchBtn.disabled = true;
         this.launchBtn.textContent = 'Launching...';
 
-        const requestBody = {
+        // Build request body - backend handles dc_agent for AD scenarios
+        const body = {
             agent_id: parseInt(agentId),
+            scenario: scenario,
             ngfw_enabled: ngfwEnabled,
         };
 
         if (ngfwEnabled && ngfwConfigId) {
-            requestBody.ngfw_config_id = parseInt(ngfwConfigId);
+            body.ngfw_config_id = parseInt(ngfwConfigId);
         }
 
         try {
@@ -465,7 +575,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
-                body: JSON.stringify(requestBody),
+                body: JSON.stringify(body),
             });
 
             const data = await response.json();

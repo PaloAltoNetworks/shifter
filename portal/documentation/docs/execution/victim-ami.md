@@ -55,6 +55,18 @@ Windows uses OpenSSH Server. User data must:
 
 Django consumer uses `Administrator` as SSH username for Windows.
 
+## Domain Member Mode
+
+Windows victims can join an AD domain when a DC is present in the range.
+
+**Behavior:**
+- Reads DC config from SSM Parameter Store (retries until DC ready)
+- Sets DNS to DC IP
+- Joins domain with domain admin credentials
+- Reboots, then installs XDR agent
+
+Domain members use a separate user data template. Standalone Windows victims use the standard template.
+
 ## Why Pre-Bake
 
 XDR/XSIAM needs real services to detect attacks against. Pre-baking ensures consistent victim environments across all ranges. Claude Code enables agentic attack and defense workflows from both Kali and victim.

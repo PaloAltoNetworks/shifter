@@ -78,7 +78,13 @@ variable "ecs_cluster_arn" {
 }
 
 variable "ecs_task_definition_arn" {
-  description = "ARN of the ECS task definition for Pulumi provisioner"
+  description = "ARN of the ECS task definition for Pulumi provisioner (deprecated, use ecs_task_definition_family)"
+  type        = string
+  default     = ""
+}
+
+variable "ecs_task_definition_family" {
+  description = "Family name of the ECS task definition for Pulumi provisioner (allows all revisions)"
   type        = string
 }
 

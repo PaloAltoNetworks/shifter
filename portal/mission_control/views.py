@@ -546,6 +546,8 @@ def _range_to_json(range_obj):
         "status": range_obj.status,
         "agent_id": range_obj.agent_id,
         "agent_name": range_obj.agent.name if range_obj.agent else None,
+        "dc_agent_id": range_obj.dc_agent_id,
+        "dc_agent_name": range_obj.dc_agent.name if range_obj.dc_agent else None,
         "chat_url": range_obj.chat_url,
         "error_message": range_obj.error_message,
         "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
@@ -582,6 +584,45 @@ def get_range_status(request):
     )
 
 
+def _get_scenario_instance_config(scenario: str, agent_os: str) -> list:
+    """
+    Get instance configuration for a scenario.
+
+    Args:
+        scenario: Scenario identifier (basic, ad_attack_lab)
+        agent_os: Operating system from agent (linux, windows)
+
+    Returns:
+        List of instance configuration dicts for the provisioner
+    """
+    # Map agent OS names to provisioner os_type
+    os_type = "windows" if agent_os.lower() == "windows" else "ubuntu"
+
+    # Instance types are not specified here - the provisioner uses
+    # its catalog defaults from environment variables
+    scenarios = {
+        "basic": [
+            {"role": "attacker", "os_type": "kali"},
+            {"role": "victim", "os_type": os_type},
+        ],
+        "ad_attack_lab": [
+            {"role": "attacker", "os_type": "kali"},
+            {
+                "role": "dc",
+                "os_type": "windows",
+                "dc_config": {"domain_name": "shifter.local", "netbios_name": "SHIFTER"},
+            },
+            {
+                "role": "victim",
+                "os_type": "windows",
+                "join_domain": True,
+            },
+        ],
+    }
+
+    return scenarios.get(scenario, scenarios["basic"])
+
+
 @login_required
 @require_POST
 def launch_range(request):
@@ -589,7 +630,9 @@ def launch_range(request):
     Launch a new cyber range.
 
     Request body (JSON):
-        - agent_id: ID of agent to use
+        - agent_id: ID of agent to use for victim instances
+        - scenario: Scenario type (basic, ad_attack_lab). Defaults to basic.
+        - dc_agent_id: ID of Windows agent for DC (required for ad_attack_lab)
 
     Response (JSON):
         - success: true
@@ -612,14 +655,31 @@ def launch_range(request):
     if not agent_id:
         return JsonResponse({"error": "agent_id is required"}, status=400)
 
+    scenario = data.get("scenario", "basic")
+    if scenario not in ("basic", "ad_attack_lab"):
+        return JsonResponse({"error": "Invalid scenario"}, status=400)
+
     # Get NGFW options
     ngfw_enabled = data.get("ngfw_enabled", False)
     ngfw_config_id = data.get("ngfw_config_id")
 
     # Verify agent belongs to user and is not deleted
-    agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).first()
+    agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).select_related("os").first()
     if not agent:
         return JsonResponse({"error": "Agent not found"}, status=404)
+
+    # Handle agent validation for AD scenarios
+    dc_agent = None
+
+    if scenario == "ad_attack_lab":
+        # AD scenario requires Windows agent (used for both DC and victim)
+        if agent.os.slug != "windows":
+            return JsonResponse(
+                {"error": "AD Attack Lab requires a Windows (MSI) agent. Both DC and victim are Windows."},
+                status=400,
+            )
+        # Use same agent for DC and victim
+        dc_agent = agent
 
     # Validate NGFW config if NGFW is enabled
     ngfw_config = None
@@ -643,12 +703,17 @@ def launch_range(request):
             status=503,
         )
 
-    # Create range record with allocated subnet index
+    # Get instance configuration for scenario
+    instance_config = _get_scenario_instance_config(scenario, agent.os.name)
+
+    # Create range record with allocated subnet index and instance config
     range_obj = Range.objects.create(
         user=request.user,
         agent=agent,
+        dc_agent=dc_agent,
         status=Range.Status.PROVISIONING,
         subnet_index=subnet_index,
+        instance_config=instance_config,
         ngfw_enabled=ngfw_enabled,
         ngfw_config=ngfw_config,
     )
@@ -659,6 +724,9 @@ def launch_range(request):
         "agent_id": agent.id,
         "agent_name": agent.name,
         "ngfw_enabled": ngfw_enabled,
+        "dc_agent_id": dc_agent.id if dc_agent else None,
+        "dc_agent_name": dc_agent.name if dc_agent else None,
+        "scenario": scenario,
     }
     if ngfw_config:
         log_metadata["ngfw_config_id"] = ngfw_config.id
@@ -666,10 +734,12 @@ def launch_range(request):
     ActivityLog.log("range_launched", user=request.user, **log_metadata)
 
     logger.info(
-        "Range launched: user=%s range_id=%s agent=%s",
+        "Range launched: user=%s range_id=%s agent=%s dc_agent=%s scenario=%s",
         request.user.email,
         range_obj.id,
         agent.name,
+        dc_agent.name if dc_agent else "N/A",
+        scenario,
     )
 
     # Trigger provisioning via ECS Fargate
@@ -780,7 +850,10 @@ def list_agents_for_launch(request):
     Get user's agents for the launch dropdown.
 
     Response (JSON):
-        - agents: List of {id, name, os_name, file_size_mb}
+        - agents: List of {id, name, os_name, os_slug, file_size_mb}
+
+    The os_slug field allows frontend to filter agents by OS type
+    (e.g., 'windows' for DC agent dropdown in AD scenarios).
     """
     agents = AgentConfig.active_for_user(request.user).select_related("os")
     agent_list = [
@@ -788,6 +861,7 @@ def list_agents_for_launch(request):
             "id": agent.id,
             "name": agent.name,
             "os_name": agent.os.name,
+            "os_slug": agent.os.slug,
             "file_size_mb": agent.file_size_mb,
         }
         for agent in agents

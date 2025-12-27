@@ -136,12 +136,10 @@ class TestOutputBuildingWithMalformedInstances:
         """Empty instances list should produce empty output."""
         instances = []
 
-        instances_output = []
-        for inst in instances:
-            instances_output.append({
-                "role": inst.role,
-                "os": inst.os_type,
-            })
+        instances_output = [
+            {"role": inst.role, "os": inst.os_type}
+            for inst in instances
+        ]
 
         assert instances_output == []
 

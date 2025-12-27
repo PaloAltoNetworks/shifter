@@ -199,6 +199,18 @@ resource "aws_security_group_rule" "victim_dns_tcp" {
   description       = "DNS TCP"
 }
 
+resource "aws_security_group_rule" "victim_to_dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.dc[0].id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic to DC (domain join, AD services)"
+}
+
 # ------------------------------------------------------------------------------
 # NGFW Security Group (shared by all VM-Series NGFW instances)
 # ------------------------------------------------------------------------------
@@ -404,6 +416,327 @@ resource "aws_security_group_rule" "kali_dns_tcp" {
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.kali.id
   description       = "DNS TCP"
+}
+
+resource "aws_security_group_rule" "kali_to_dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.dc[0].id
+  security_group_id        = aws_security_group.kali.id
+  description              = "All traffic to DC (AD attacks)"
+}
+
+# ------------------------------------------------------------------------------
+# Domain Controller Security Group (for AD/DC instances)
+# ------------------------------------------------------------------------------
+
+# checkov:skip=CKV2_AWS_5:SG used by dynamically provisioned DC instances
+resource "aws_security_group" "dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  name        = "${var.name_prefix}-dc"
+  description = "Security group for Domain Controller EC2 instances"
+  vpc_id      = aws_vpc.this.id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-dc-sg"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ------------------------------------------------------------------------------
+# DC Security Group Rules - Ingress (AD Services from VPC)
+# ------------------------------------------------------------------------------
+
+resource "aws_security_group_rule" "dc_ssh_from_portal" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.portal_vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "SSH from Portal VPC (browser terminal)"
+}
+
+resource "aws_security_group_rule" "dc_rdp_from_range" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 3389
+  to_port           = 3389
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "RDP from Range VPC"
+}
+
+resource "aws_security_group_rule" "dc_ldap_tcp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 389
+  to_port           = 389
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "LDAP TCP from VPC"
+}
+
+resource "aws_security_group_rule" "dc_ldap_udp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 389
+  to_port           = 389
+  protocol          = "udp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "LDAP UDP from VPC"
+}
+
+resource "aws_security_group_rule" "dc_ldaps" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 636
+  to_port           = 636
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "LDAPS from VPC"
+}
+
+resource "aws_security_group_rule" "dc_dns_tcp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "DNS TCP from VPC"
+}
+
+resource "aws_security_group_rule" "dc_dns_udp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "DNS UDP from VPC"
+}
+
+resource "aws_security_group_rule" "dc_kerberos_tcp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 88
+  to_port           = 88
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "Kerberos TCP from VPC"
+}
+
+resource "aws_security_group_rule" "dc_kerberos_udp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 88
+  to_port           = 88
+  protocol          = "udp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "Kerberos UDP from VPC"
+}
+
+resource "aws_security_group_rule" "dc_smb" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 445
+  to_port           = 445
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "SMB from VPC"
+}
+
+resource "aws_security_group_rule" "dc_global_catalog" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 3268
+  to_port           = 3268
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "Global Catalog from VPC"
+}
+
+resource "aws_security_group_rule" "dc_global_catalog_ssl" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 3269
+  to_port           = 3269
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "Global Catalog SSL from VPC"
+}
+
+resource "aws_security_group_rule" "dc_rpc_endpoint_mapper" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 135
+  to_port           = 135
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "RPC Endpoint Mapper from VPC"
+}
+
+resource "aws_security_group_rule" "dc_rpc_dynamic" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 49152
+  to_port           = 65535
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "Dynamic RPC from VPC (required for AD replication and management)"
+}
+
+resource "aws_security_group_rule" "dc_ntp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 123
+  to_port           = 123
+  protocol          = "udp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "NTP from VPC"
+}
+
+resource "aws_security_group_rule" "dc_from_kali" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.kali.id
+  security_group_id        = aws_security_group.dc[0].id
+  description              = "All traffic from Kali (for AD attack scenarios)"
+}
+
+resource "aws_security_group_rule" "dc_from_victim" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.victim.id
+  security_group_id        = aws_security_group.dc[0].id
+  description              = "All traffic from Victim (domain join, lateral movement)"
+}
+
+# ------------------------------------------------------------------------------
+# DC Security Group Rules - Egress
+# ------------------------------------------------------------------------------
+
+resource "aws_security_group_rule" "dc_to_vpc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "All traffic to VPC (AD services to domain members)"
+}
+
+resource "aws_security_group_rule" "dc_dns_egress_udp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "DNS UDP for forwarders (AWS DNS at 169.254.169.253)"
+}
+
+resource "aws_security_group_rule" "dc_dns_egress_tcp" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "DNS TCP for forwarders"
+}
+
+resource "aws_security_group_rule" "dc_https_egress" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type              = "egress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.dc[0].id
+  description       = "HTTPS for Windows Update and AWS APIs"
+}
+
+# ------------------------------------------------------------------------------
+# Kali/Victim Ingress from DC (for reverse shells and lateral movement)
+# ------------------------------------------------------------------------------
+
+resource "aws_security_group_rule" "kali_all_from_dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.dc[0].id
+  security_group_id        = aws_security_group.kali.id
+  description              = "All traffic from DC (reverse shells, lateral movement)"
+}
+
+resource "aws_security_group_rule" "victim_all_from_dc" {
+  count = var.enable_dc_security_group ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.dc[0].id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic from DC (lateral movement scenarios)"
 }
 
 # ------------------------------------------------------------------------------

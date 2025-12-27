@@ -91,6 +91,13 @@ class PulumiMocks:
             outputs["subnetId"] = inputs.get("subnetId", "subnet-mock")
             outputs["routeTableId"] = inputs.get("routeTableId", "rtb-mock")
 
+        elif resource_type == "aws:ssm/parameter:Parameter":
+            param_name = inputs.get("name", f"/mock/param/{name}")
+            outputs["arn"] = f"arn:aws:ssm:us-east-2:123456789012:parameter{param_name}"
+            outputs["name"] = param_name
+            outputs["type"] = inputs.get("type", "String")
+            outputs["value"] = inputs.get("value", "{}")
+
         return resource_id, outputs
 
     def call(self, args: Any) -> dict:
@@ -277,6 +284,7 @@ def sample_range_config(sample_instance_config_attacker, sample_instance_config_
         kali_ami_id="ami-kali123",
         victim_ami_id="ami-ubuntu123",
         windows_ami_id="ami-windows123",
+        dc_ami_id="ami-dc-test",
         agent_s3_bucket="shifter-agents",
         availability_zone="us-east-2a",
     )
@@ -319,6 +327,7 @@ def sample_range_config_multi_instance():
         kali_ami_id="ami-kali-prod",
         victim_ami_id="ami-ubuntu-prod",
         windows_ami_id="ami-windows-prod",
+        dc_ami_id="ami-dc-prod",
         agent_s3_bucket="shifter-agents-prod",
         availability_zone="us-east-2b",
     )
@@ -385,6 +394,63 @@ Write-Host "Windows setup complete"
 """
         )
 
+        # DC user_data is minimal - all setup via SSM (BootstrapPlan + DCSetupPlan)
+        dc_template = templates_path / "dc_windows.ps1.j2"
+        dc_template.write_text(
+            """<powershell>
+# Windows DC user_data - intentionally minimal
+# All setup is handled via SSM Run Command orchestration:
+#   1. BootstrapPlan: hostname + SSH configuration + reboot
+#   2. DCSetupPlan: AD DS install + DC promotion + verification
+
+$LogFile = "C:\\Windows\\Temp\\dc-userdata.log"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+"$timestamp - DC instance started. Setup will be orchestrated via SSM." | Out-File -FilePath $LogFile
+</powershell>
+"""
+        )
+
+        # Domain member template for Windows instances joining a domain (Phase 7)
+        domain_member_template = templates_path / "domain_member_windows.ps1.j2"
+        domain_member_template.write_text(
+            """<powershell>
+$ErrorActionPreference = "Stop"
+$LogFile = "C:\\Windows\\Temp\\domain-member-setup.log"
+function Log-Message {
+    param([string]$Message)
+    Write-Host $Message
+}
+try {
+    Log-Message "Setting hostname to {{ hostname }}..."
+    Rename-Computer -NewName "{{ hostname }}" -Force
+    Start-Service sshd
+    Set-Service -Name sshd -StartupType Automatic
+    {% if public_key %}
+    $sshDir = "C:\\ProgramData\\ssh"
+    "{{ public_key }}" | Out-File "$sshDir/administrators_authorized_keys"
+    {% endif %}
+    # Read DC config with retry
+    $maxAttempts = 30
+    $attempt = 0
+    while ($attempt -lt $maxAttempts) {
+        aws ssm get-parameter --name "{{ dc_config_param_name }}" --with-decryption
+        $attempt++
+    }
+    Set-DnsClientServerAddress -InterfaceIndex 1 -ServerAddresses @($DcIp)
+    {% if presigned_url %}
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe"
+    Register-ScheduledTask -TaskName "DomainMember-PostRebootAgent" -Action $Action
+    Invoke-WebRequest -Uri '{{ presigned_url }}' -OutFile $InstallerPath
+    {% endif %}
+    Add-Computer -DomainName $domain -Credential $cred -Restart -Force
+} catch {
+    Log-Message "ERROR: $_"
+    throw
+}
+</powershell>
+"""
+        )
+
         yield templates_path
 
 
@@ -420,10 +486,12 @@ def mock_env_vars(mocker):
         "RANGE_AVAILABILITY_ZONE": "us-east-2a",
         "KALI_SECURITY_GROUP_ID": "sg-kali-test",
         "VICTIM_SECURITY_GROUP_ID": "sg-victim-test",
+        "DC_SECURITY_GROUP_ID": "sg-dc-test",
         "RANGE_INSTANCE_PROFILE_NAME": "test-profile",
         "KALI_AMI_ID": "ami-kali-test",
         "VICTIM_AMI_ID": "ami-victim-test",
         "WINDOWS_AMI_ID": "ami-windows-test",
+        "DC_AMI_ID": "ami-dc-test",
         "AGENT_S3_BUCKET": "test-agents-bucket",
         "RANGE_ID": "42",
         "KALI_INSTANCE_TYPE": "t3.medium",
@@ -507,3 +575,37 @@ def sample_db_range_row_custom_config():
         ],
         None,  # agent_s3_key (per-instance)
     )
+
+
+@pytest.fixture
+def mock_pulumi_config(mocker):
+    """Mock Pulumi Config object with required values for load_config tests."""
+    mock_config = MagicMock()
+
+    mock_config.require.side_effect = lambda key: {
+        "environment": "dev",
+        "rangeVpcId": "vpc-test123",
+        "rangeVpcCidr": "10.1.0.0/16",
+        "rangeRouteTableId": "rtb-test123",
+        "kaliSecurityGroupId": "sg-kali-test",
+        "victimSecurityGroupId": "sg-victim-test",
+        "kaliAmiId": "ami-kali-test",
+        "victimAmiId": "ami-victim-test",
+        "availabilityZone": "us-east-2a",
+    }.get(key, f"mock-{key}")
+
+    mock_config.require_int.side_effect = lambda key: {
+        "rangeId": 42,
+    }.get(key, 0)
+
+    mock_config.get.side_effect = lambda key: {
+        "agentS3Bucket": "test-agents-bucket",
+        "windowsAmiId": "ami-windows-test",
+        "dcAmiId": "ami-dc-test",
+        "dcSecurityGroupId": "sg-dc-test",
+        "rangeInstanceProfileName": "test-profile",
+        "portalVpcCidr": "10.0.0.0/16",
+    }.get(key)
+
+    mocker.patch("pulumi.Config", return_value=mock_config)
+    return mock_config

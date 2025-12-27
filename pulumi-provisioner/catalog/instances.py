@@ -7,6 +7,7 @@ Instance types (EC2 sizes like t3.medium) are configured via environment variabl
 - KALI_INSTANCE_TYPE: Default instance type for Kali attacker instances
 - VICTIM_INSTANCE_TYPE: Default instance type for victim instances
 - WINDOWS_INSTANCE_TYPE: Default instance type for Windows instances (optional)
+- DC_INSTANCE_TYPE: Default instance type for Domain Controller (optional, defaults to t3.large)
 """
 
 import os
@@ -36,12 +37,18 @@ def _get_windows_instance_type() -> str:
     return os.environ.get("WINDOWS_INSTANCE_TYPE") or _get_victim_instance_type()
 
 
+def _get_dc_instance_type() -> str:
+    """Get default instance type for Domain Controller from environment."""
+    # DC defaults to t3.large if not specified (needs more resources than typical victim)
+    return os.environ.get("DC_INSTANCE_TYPE") or "t3.large"
+
+
 @dataclass
 class InstanceType:
     """Configuration for an instance type."""
 
     name: str
-    role: str  # "attacker" or "victim"
+    role: str  # "attacker", "victim", or "dc"
     user_data_template: str
     description: str
     _instance_type_getter: callable  # Function to get default instance type
@@ -119,6 +126,19 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
         requires_agent=True,
         ssh_user="ec2-user",
     ),
+    "windows-server-2022-dc": InstanceType(
+        name="windows-server-2022-dc",
+        role="dc",
+        _instance_type_getter=_get_dc_instance_type,
+        user_data_template="dc_windows.ps1.j2",
+        description="Windows Server 2022 Domain Controller",
+        ami_lookup={
+            "name": "Windows_Server-2022-English-Full-Base-*",
+            "owner": "amazon",
+        },
+        requires_agent=False,
+        ssh_user="Administrator",
+    ),
 }
 
 
@@ -159,3 +179,12 @@ def get_victim_types() -> list[str]:
         List of victim instance type names.
     """
     return [name for name, cfg in INSTANCE_CATALOG.items() if cfg.role == "victim"]
+
+
+def get_dc_types() -> list[str]:
+    """Get list of available Domain Controller instance type names.
+
+    Returns:
+        List of DC instance type names.
+    """
+    return [name for name, cfg in INSTANCE_CATALOG.items() if cfg.role == "dc"]

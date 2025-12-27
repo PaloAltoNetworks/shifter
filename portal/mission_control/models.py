@@ -151,6 +151,15 @@ class Range(models.Model):
         null=True,
         blank=True,
         related_name="ranges",
+        help_text="Agent for victim instances",
+    )
+    dc_agent = models.ForeignKey(
+        AgentConfig,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dc_ranges",
+        help_text="Agent for DC instances (Windows only, required for AD scenarios)",
     )
     status = models.CharField(
         max_length=20,

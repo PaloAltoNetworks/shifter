@@ -27,7 +27,7 @@ Django web application. Auth, agent management, range lifecycle, terminal access
 | Route | Method | Purpose |
 |-------|--------|---------|
 | `/mission-control/api/range/status/` | GET | Current range status |
-| `/mission-control/api/range/launch/` | POST | Launch new range |
+| `/mission-control/api/range/launch/` | POST | Launch new range (accepts `agent_id` and `scenario`) |
 | `/mission-control/api/range/destroy/` | POST | Destroy range |
 | `/mission-control/api/agents/` | GET | List agents for launch dropdown |
 | `/mission-control/api/upload/initiate/` | POST | Get presigned S3 URL |
@@ -40,6 +40,17 @@ Cognito OIDC via `mozilla-django-oidc`.
 - Email as username
 - MFA required (TOTP)
 - Domain restricted to `@paloaltonetworks.com`
+
+## Scenarios
+
+Dashboard provides scenario dropdown for range configuration:
+
+| Scenario | Instances | Use Case |
+|----------|-----------|----------|
+| Basic Range | Kali + Victim | Standard attack scenarios |
+| AD Attack Lab | Kali + DC + domain-joined Victim | AD attacks, lateral movement |
+
+Scenario selection maps to `instance_config` JSON stored in Range model.
 
 ## Terminal
 

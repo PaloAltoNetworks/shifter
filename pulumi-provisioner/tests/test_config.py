@@ -788,6 +788,45 @@ class TestLoadConfigDCSupport:
 
         assert result.instances[0].join_domain is False
 
+    def test_load_config_dc_inherits_range_agent(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """DC instance should inherit agent config from range when not specified."""
+        from config import load_config
+
+        # AD scenario with DC and victim - DC doesn't have agent_s3_key in its config
+        custom_config = [
+            {"role": "attacker", "os_type": "kali"},
+            {"role": "dc", "os_type": "windows",
+             "dc_config": {"domain_name": "test.local", "netbios_name": "TEST"}},
+            {"role": "victim", "os_type": "windows", "join_domain": True},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": 1, "instance_config": custom_config,
+            "agent_s3_key": "agents/xdr.msi",  # Range-level agent
+            "agent_os_slug": "windows",
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 3
+        # DC should inherit range's agent config
+        dc_instance = next(i for i in result.instances if i.role == "dc")
+        assert dc_instance.agent_s3_key == "agents/xdr.msi"
+        assert dc_instance.agent_presigned_url == "https://s3.example.com/presigned-url"
+        assert dc_instance.agent_id == 1
+
+        # Victim should also have agent config
+        victim_instance = next(i for i in result.instances if i.role == "victim")
+        assert victim_instance.agent_s3_key == "agents/xdr.msi"
+        assert victim_instance.agent_presigned_url == "https://s3.example.com/presigned-url"
+
+        # Attacker should NOT have agent config
+        attacker_instance = next(i for i in result.instances if i.role == "attacker")
+        assert attacker_instance.agent_s3_key is None
+        assert attacker_instance.agent_presigned_url is None
+
 
 class TestConfigValidation:
     """Tests for configuration validation edge cases."""

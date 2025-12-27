@@ -56,7 +56,7 @@ Each range creates:
 - SSH key per instance (Secrets Manager)
 - SSM Parameter for DC config (when DC present)
 
-DC instances require post-creation setup via SSM Run Command (AD DS install, reboot, promotion). Non-DC instances use user data only.
+DC instances use a prebaked AMI with AD DS already promoted. Post-boot SSM orchestration handles DNS cleanup and XDR agent installation. Victims use user data for initial setup; domain members are joined via SSM after DC is ready.
 
 ## Terraform Modules
 

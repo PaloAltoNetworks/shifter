@@ -77,7 +77,7 @@ ECS Fargate task that provisions/destroys range infrastructure.
 | `components/instance.py` | EC2 creation, SSH keys, DC orchestration |
 | `components/ssm_executor.py` | Generic SSM Run Command execution |
 | `components/setup_orchestrator.py` | Runs setup plans step-by-step |
-| `components/plans/dc_setup.py` | AD DS installation steps |
+| `components/plans/` | Setup plans (bootstrap, dc_setup, domain_join, xdr_agent_install) |
 | `templates/` | Bootstrap user data (Jinja2) |
 
 **Instance catalog:**
@@ -124,13 +124,18 @@ sequenceDiagram
     Pulumi->>RDS: status=provisioning
     Pulumi->>AWS: Create subnet, EC2s
     opt DC in scenario
-        Pulumi->>SSM: Orchestrate AD DS setup
+        Pulumi->>SSM: Wait for DC, clean DNS
+        par Parallel
+            Pulumi->>SSM: Install XDR on DC
+        and
+            Pulumi->>SSM: Join victims to domain
+        end
     end
     Pulumi->>RDS: status=ready, IPs, ARNs
     Portal->>User: Range ready
 ```
 
-DC setup uses SSM Run Command for multi-step AD DS installation. See [Provisioner docs](execution/provisioner.md#dc-setup-via-ssm) for details.
+DC uses a prebaked AMI with AD DS ready. SSM orchestrates DNS cleanup, XDR installation, and domain joins. See [Provisioner docs](execution/provisioner.md#dc-setup-via-ssm) for details.
 
 ### Terminal Access
 

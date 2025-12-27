@@ -546,6 +546,8 @@ def _range_to_json(range_obj):
         "status": range_obj.status,
         "agent_id": range_obj.agent_id,
         "agent_name": range_obj.agent.name if range_obj.agent else None,
+        "dc_agent_id": range_obj.dc_agent_id,
+        "dc_agent_name": range_obj.dc_agent.name if range_obj.dc_agent else None,
         "chat_url": range_obj.chat_url,
         "error_message": range_obj.error_message,
         "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
@@ -623,8 +625,9 @@ def launch_range(request):
     Launch a new cyber range.
 
     Request body (JSON):
-        - agent_id: ID of agent to use
+        - agent_id: ID of agent to use for victim instances
         - scenario: Scenario type (basic, ad_attack_lab). Defaults to basic.
+        - dc_agent_id: ID of Windows agent for DC (required for ad_attack_lab)
 
     Response (JSON):
         - success: true
@@ -652,9 +655,33 @@ def launch_range(request):
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
     # Verify agent belongs to user and is not deleted
-    agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).first()
+    agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).select_related("os").first()
     if not agent:
         return JsonResponse({"error": "Agent not found"}, status=404)
+
+    # Handle DC agent for AD scenarios
+    dc_agent = None
+    dc_agent_id = data.get("dc_agent_id")
+
+    if scenario == "ad_attack_lab":
+        # DC agent is required for AD scenarios
+        if not dc_agent_id:
+            return JsonResponse(
+                {"error": "DC agent is required for AD Attack Lab scenario"},
+                status=400,
+            )
+
+        # Verify DC agent belongs to user and is not deleted
+        dc_agent = AgentConfig.active_for_user(request.user).filter(id=dc_agent_id).select_related("os").first()
+        if not dc_agent:
+            return JsonResponse({"error": "DC agent not found"}, status=404)
+
+        # Verify DC agent is Windows (DC is always Windows)
+        if dc_agent.os.slug != "windows":
+            return JsonResponse(
+                {"error": "DC agent must be a Windows (MSI) installer"},
+                status=400,
+            )
 
     # Allocate subnet index for this range
     try:
@@ -673,6 +700,7 @@ def launch_range(request):
     range_obj = Range.objects.create(
         user=request.user,
         agent=agent,
+        dc_agent=dc_agent,
         status=Range.Status.PROVISIONING,
         subnet_index=subnet_index,
         instance_config=instance_config,
@@ -685,14 +713,17 @@ def launch_range(request):
         range_id=range_obj.id,
         agent_id=agent.id,
         agent_name=agent.name,
+        dc_agent_id=dc_agent.id if dc_agent else None,
+        dc_agent_name=dc_agent.name if dc_agent else None,
         scenario=scenario,
     )
 
     logger.info(
-        "Range launched: user=%s range_id=%s agent=%s scenario=%s",
+        "Range launched: user=%s range_id=%s agent=%s dc_agent=%s scenario=%s",
         request.user.email,
         range_obj.id,
         agent.name,
+        dc_agent.name if dc_agent else "N/A",
         scenario,
     )
 
@@ -804,7 +835,10 @@ def list_agents_for_launch(request):
     Get user's agents for the launch dropdown.
 
     Response (JSON):
-        - agents: List of {id, name, os_name, file_size_mb}
+        - agents: List of {id, name, os_name, os_slug, file_size_mb}
+
+    The os_slug field allows frontend to filter agents by OS type
+    (e.g., 'windows' for DC agent dropdown in AD scenarios).
     """
     agents = AgentConfig.active_for_user(request.user).select_related("os")
     agent_list = [
@@ -812,6 +846,7 @@ def list_agents_for_launch(request):
             "id": agent.id,
             "name": agent.name,
             "os_name": agent.os.name,
+            "os_slug": agent.os.slug,
             "file_size_mb": agent.file_size_mb,
         }
         for agent in agents

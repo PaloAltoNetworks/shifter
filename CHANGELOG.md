@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.20]
+
+### Added
+- Domain controller AMI
+- Basic AD scenario option with AD join by Windows
+- Re-factor Shifter Engine scenario generation for extensibility
+
+### Changed
+- SonarQube ignores test files
+
 ## [0.7.19] - 2025-12-24
 - Add TDD planning Claude Code skill
 

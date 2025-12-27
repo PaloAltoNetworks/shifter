@@ -186,10 +186,12 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "availabilityZone": os.environ.get("RANGE_AVAILABILITY_ZONE", ""),
         "kaliSecurityGroupId": os.environ.get("KALI_SECURITY_GROUP_ID", ""),
         "victimSecurityGroupId": os.environ.get("VICTIM_SECURITY_GROUP_ID", ""),
+        "dcSecurityGroupId": os.environ.get("DC_SECURITY_GROUP_ID", ""),
         "rangeInstanceProfileName": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
         "kaliAmiId": os.environ.get("KALI_AMI_ID", ""),
         "victimAmiId": os.environ.get("VICTIM_AMI_ID", ""),
         "windowsAmiId": os.environ.get("WINDOWS_AMI_ID", ""),
+        "dcAmiId": os.environ.get("DC_AMI_ID", ""),
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
     }
 

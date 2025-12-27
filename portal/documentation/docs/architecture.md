@@ -22,6 +22,7 @@ flowchart TB
         subgraph SUBNET["User Subnet (/24)"]
             KALI[Kali EC2]
             VICTIM[Victim EC2]
+            DC[DC EC2]
         end
     end
 
@@ -35,6 +36,8 @@ flowchart TB
     PROV -->|Create| SUBNET
     VICTIM -->|Telemetry| XDR[XDR/XSIAM]
 ```
+
+DC is optional. Enables AD attack scenarios with domain-joined victims.
 
 ## Components
 
@@ -71,14 +74,18 @@ ECS Fargate task that provisions/destroys range infrastructure.
 | `main.py` | Entrypoint, DB connection, Pulumi orchestration |
 | `config.py` | Stack configuration from env/DB |
 | `catalog/instances.py` | Instance type definitions |
-| `components/` | Reusable Pulumi components |
-| `templates/` | Cloud-init user data (Jinja2) |
+| `components/instance.py` | EC2 creation, SSH keys, DC orchestration |
+| `components/ssm_executor.py` | Generic SSM Run Command execution |
+| `components/setup_orchestrator.py` | Runs setup plans step-by-step |
+| `components/plans/` | Setup plans (bootstrap, dc_setup, domain_join, xdr_agent_install) |
+| `templates/` | Bootstrap user data (Jinja2) |
 
 **Instance catalog:**
 - `kali-2024` - Kali Linux attacker
 - `ubuntu-22.04-victim` - Ubuntu 22.04 victim
 - `ubuntu-24.04-victim` - Ubuntu 24.04 victim
 - `windows-server-2022-victim` - Windows Server 2022 victim
+- `windows-server-2022-dc` - Windows Server 2022 Domain Controller
 - `amazon-linux-2023-victim` - Amazon Linux 2023 victim
 
 ### Terraform (`terraform/`)
@@ -108,6 +115,7 @@ sequenceDiagram
     participant Pulumi
     participant RDS
     participant AWS
+    participant SSM
 
     User->>Portal: Launch Range
     Portal->>RDS: Insert Range(status=pending)
@@ -115,9 +123,19 @@ sequenceDiagram
     ECS->>Pulumi: Run 'up'
     Pulumi->>RDS: status=provisioning
     Pulumi->>AWS: Create subnet, EC2s
+    opt DC in scenario
+        Pulumi->>SSM: Wait for DC, clean DNS
+        par Parallel
+            Pulumi->>SSM: Install XDR on DC
+        and
+            Pulumi->>SSM: Join victims to domain
+        end
+    end
     Pulumi->>RDS: status=ready, IPs, ARNs
     Portal->>User: Range ready
 ```
+
+DC uses a prebaked AMI with AD DS ready. SSM orchestrates DNS cleanup, XDR installation, and domain joins. See [Provisioner docs](execution/provisioner.md#dc-setup-via-ssm) for details.
 
 ### Terminal Access
 

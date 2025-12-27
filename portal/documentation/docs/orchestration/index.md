@@ -21,13 +21,13 @@ stateDiagram-v2
 | Status | Meaning |
 |--------|---------|
 | `pending` | Range record created, provisioner not yet started |
-| `provisioning` | Provisioner running `pulumi up` |
+| `provisioning` | Provisioner running `pulumi up` (includes DC setup for AD scenarios) |
 | `ready` | Infrastructure created, terminal access available |
 | `failed` | Provisioning error (can be destroyed) |
 | `destroying` | Provisioner running `pulumi destroy` |
 | `destroyed` | Infrastructure torn down |
 
-Note: `paused` and `resuming` exist in the model but are not currently used.
+Note: `paused` and `resuming` exist in the model but are not currently used. For AD scenarios, the `provisioning` state includes SSM-based DC setup after EC2 creation.
 
 ## Launch Flow
 

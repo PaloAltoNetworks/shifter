@@ -31,6 +31,7 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "RANGE_AVAILABILITY_ZONE", value = var.range_availability_zone },
       { name = "KALI_SECURITY_GROUP_ID", value = var.kali_security_group_id },
       { name = "VICTIM_SECURITY_GROUP_ID", value = var.victim_security_group_id },
+      { name = "DC_SECURITY_GROUP_ID", value = var.dc_security_group_id },
       { name = "RANGE_INSTANCE_PROFILE_NAME", value = var.range_instance_profile_name },
       { name = "KALI_AMI_ID", value = var.kali_ami_id },
       { name = "VICTIM_AMI_ID", value = var.victim_ami_id },

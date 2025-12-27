@@ -334,6 +334,7 @@ module "pulumi_provisioner" {
   range_availability_zone     = data.terraform_remote_state.range.outputs.availability_zone
   victim_security_group_id    = data.terraform_remote_state.range.outputs.victim_security_group_id
   kali_security_group_id      = data.terraform_remote_state.range.outputs.kali_security_group_id
+  dc_security_group_id        = data.terraform_remote_state.range.outputs.dc_security_group_id
   range_instance_profile_arn  = data.terraform_remote_state.range.outputs.range_instance_profile_arn
   range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
   range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn

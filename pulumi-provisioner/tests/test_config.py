@@ -65,6 +65,8 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 "agents/xdr.tar.gz",  # agent_s3_key
                 "linux-debian",  # agent_os_slug
+                None,  # dc_agent_id
+                None,  # dc_agent_s3_key
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -81,6 +83,8 @@ class TestGetRangeFromDb:
             assert result["agent_id"] == 1
             assert result["agent_s3_key"] == "agents/xdr.tar.gz"
             assert result["agent_os_slug"] == "linux-debian"
+            assert result["dc_agent_id"] is None
+            assert result["dc_agent_s3_key"] is None
 
     def test_get_range_from_db_returns_agent_os_slug(self, mock_boto3_clients, mock_env_vars_minimal):
         """Range data should include agent's OS slug from OperatingSystem table."""
@@ -94,6 +98,8 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 "agents/xdr.msi",  # agent_s3_key
                 "windows",  # agent_os_slug - from OperatingSystem.slug
+                None,  # dc_agent_id
+                None,  # dc_agent_s3_key
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -133,6 +139,8 @@ class TestGetRangeFromDb:
                 None,  # instance_config
                 None,  # agent_s3_key (no agent)
                 None,  # agent_os_slug (no agent)
+                None,  # dc_agent_id
+                None,  # dc_agent_s3_key
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -165,6 +173,8 @@ class TestGetRangeFromDb:
                 custom_config,  # instance_config
                 None,  # agent_s3_key
                 None,  # agent_os_slug
+                None,  # dc_agent_id
+                None,  # dc_agent_s3_key
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -325,7 +335,8 @@ class TestLoadConfigIntegration:
     @pytest.fixture
     def mock_db_range_data(self, mocker):
         """Mock get_range_from_db to return test data."""
-        def _mock_db(range_id, instance_config=None, agent_id=None, agent_s3_key=None, agent_os_slug=None):
+        def _mock_db(range_id, instance_config=None, agent_id=None, agent_s3_key=None,
+                     agent_os_slug=None, dc_agent_id=None, dc_agent_s3_key=None):
             mock_data = {
                 "id": range_id,
                 "user_id": 1,
@@ -334,6 +345,8 @@ class TestLoadConfigIntegration:
                 "instance_config": instance_config,
                 "agent_s3_key": agent_s3_key,
                 "agent_os_slug": agent_os_slug,
+                "dc_agent_id": dc_agent_id,
+                "dc_agent_s3_key": dc_agent_s3_key,
             }
             mocker.patch("config.get_range_from_db", return_value=mock_data)
             return mock_data
@@ -466,6 +479,7 @@ class TestLoadConfigIntegration:
         mocker.patch("config.get_range_from_db", return_value={
             "id": 42, "user_id": 1, "subnet_index": 5,
             "agent_id": None, "instance_config": None, "agent_s3_key": None,
+            "agent_os_slug": None, "dc_agent_id": None, "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -485,6 +499,7 @@ class TestLoadConfigIntegration:
         mock_get_range = mocker.patch("config.get_range_from_db", return_value={
             "id": 42, "user_id": 1, "subnet_index": 5,
             "agent_id": None, "instance_config": None, "agent_s3_key": None,
+            "agent_os_slug": None, "dc_agent_id": None, "dc_agent_s3_key": None,
         })
 
         load_config()
@@ -544,6 +559,8 @@ class TestAgentOsToVictimOsMapping:
             "instance_config": None,  # Use default config
             "agent_s3_key": "agents/xdr-installer.msi",
             "agent_os_slug": "windows",  # Windows agent!
+            "dc_agent_id": None,
+            "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -568,6 +585,8 @@ class TestAgentOsToVictimOsMapping:
             "instance_config": None,
             "agent_s3_key": "agents/xdr-installer.deb",
             "agent_os_slug": "linux-debian",
+            "dc_agent_id": None,
+            "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -592,6 +611,8 @@ class TestAgentOsToVictimOsMapping:
             "instance_config": None,
             "agent_s3_key": "agents/xdr-installer.rpm",
             "agent_os_slug": "linux-rhel",
+            "dc_agent_id": None,
+            "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -616,6 +637,8 @@ class TestAgentOsToVictimOsMapping:
             "instance_config": None,
             "agent_s3_key": None,
             "agent_os_slug": None,  # No OS info
+            "dc_agent_id": None,
+            "dc_agent_s3_key": None,
         })
 
         result = load_config()
@@ -788,13 +811,13 @@ class TestLoadConfigDCSupport:
 
         assert result.instances[0].join_domain is False
 
-    def test_load_config_dc_inherits_range_agent(
+    def test_load_config_dc_uses_dc_agent(
         self, mock_pulumi_config, mocker, mock_boto3_clients
     ):
-        """DC instance should inherit agent config from range when not specified."""
+        """DC instance should use dc_agent config, not range's victim agent."""
         from config import load_config
 
-        # AD scenario with DC and victim - DC doesn't have agent_s3_key in its config
+        # AD scenario with DC and victim - DC uses separate dc_agent
         custom_config = [
             {"role": "attacker", "os_type": "kali"},
             {"role": "dc", "os_type": "windows",
@@ -804,28 +827,58 @@ class TestLoadConfigDCSupport:
         mocker.patch("config.get_range_from_db", return_value={
             "id": 42, "user_id": 1, "subnet_index": 5,
             "agent_id": 1, "instance_config": custom_config,
-            "agent_s3_key": "agents/xdr.msi",  # Range-level agent
+            "agent_s3_key": "agents/victim_xdr.msi",  # Range-level agent (for victim)
             "agent_os_slug": "windows",
+            "dc_agent_id": 2,
+            "dc_agent_s3_key": "agents/dc_xdr.msi",  # Separate DC agent
         })
 
         result = load_config()
 
         assert len(result.instances) == 3
-        # DC should inherit range's agent config
+        # DC should use dc_agent, NOT range's victim agent
         dc_instance = next(i for i in result.instances if i.role == "dc")
-        assert dc_instance.agent_s3_key == "agents/xdr.msi"
+        assert dc_instance.agent_s3_key == "agents/dc_xdr.msi"
         assert dc_instance.agent_presigned_url == "https://s3.example.com/presigned-url"
-        assert dc_instance.agent_id == 1
 
-        # Victim should also have agent config
+        # Victim should use range's victim agent
         victim_instance = next(i for i in result.instances if i.role == "victim")
-        assert victim_instance.agent_s3_key == "agents/xdr.msi"
+        assert victim_instance.agent_s3_key == "agents/victim_xdr.msi"
         assert victim_instance.agent_presigned_url == "https://s3.example.com/presigned-url"
 
         # Attacker should NOT have agent config
         attacker_instance = next(i for i in result.instances if i.role == "attacker")
         assert attacker_instance.agent_s3_key is None
         assert attacker_instance.agent_presigned_url is None
+
+    def test_load_config_dc_without_dc_agent_configured(
+        self, mock_pulumi_config, mocker, mock_boto3_clients
+    ):
+        """DC instance with no dc_agent configured should have None for agent fields."""
+        from config import load_config
+
+        # AD scenario but no dc_agent configured (edge case - incomplete setup)
+        custom_config = [
+            {"role": "dc", "os_type": "windows",
+             "dc_config": {"domain_name": "test.local", "netbios_name": "TEST"}},
+        ]
+        mocker.patch("config.get_range_from_db", return_value={
+            "id": 42, "user_id": 1, "subnet_index": 5,
+            "agent_id": None, "instance_config": custom_config,
+            "agent_s3_key": None,
+            "agent_os_slug": None,
+            "dc_agent_id": None,  # No DC agent configured
+            "dc_agent_s3_key": None,
+        })
+
+        result = load_config()
+
+        assert len(result.instances) == 1
+        dc_instance = result.instances[0]
+        assert dc_instance.role == "dc"
+        # DC should have None for agent fields when no dc_agent configured
+        assert dc_instance.agent_s3_key is None
+        assert dc_instance.agent_presigned_url is None
 
 
 class TestConfigValidation:

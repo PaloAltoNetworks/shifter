@@ -97,11 +97,9 @@ AI-driven attack capabilities already exist in the wild. Defenders need realisti
 
 This software is provided "as is" without warranty of any kind. The authors disclaim all liability for any damages or legal consequences arising from its use or misuse. You are solely responsible for ensuring your use complies with applicable laws and regulations.
 
-Do not f*** around and find out.
-
 ## License
 
-MIT
+(c) 2025 Palo Alto Networks. All rights reserved. 
 
 ---
 

@@ -145,25 +145,16 @@ class DashboardManager {
 
     /**
      * Handle scenario dropdown change.
-     * Shows/hides DC agent section based on selected scenario.
+     * AD scenario uses same agent for DC and victim (no separate DC agent needed).
      */
     _onScenarioChange(scenario) {
-        if (scenario === 'ad_attack_lab') {
-            // Show DC agent dropdown for AD scenarios
-            if (this.dcAgentSection) {
-                this.dcAgentSection.style.display = 'block';
-            }
-        } else {
-            // Hide DC agent dropdown for basic scenarios
-            if (this.dcAgentSection) {
-                this.dcAgentSection.style.display = 'none';
-            }
-            // Clear DC agent selection when hiding
-            if (this.dcAgentSelect) {
-                this.dcAgentSelect.value = '';
-            }
-            // Reset DC dropdown display text
-            this._resetDcAgentDropdown();
+        // DC agent section is not needed - same agent used for DC and victim
+        // Keep it hidden for all scenarios
+        if (this.dcAgentSection) {
+            this.dcAgentSection.style.display = 'none';
+        }
+        if (this.dcAgentSelect) {
+            this.dcAgentSelect.value = '';
         }
         this._updateLaunchButtonState();
     }
@@ -186,20 +177,12 @@ class DashboardManager {
 
     /**
      * Update launch button enabled/disabled state based on form validity.
-     * - Basic scenario: requires agent only
-     * - AD scenario: requires both agent AND dc_agent
+     * All scenarios just require an agent to be selected.
+     * (AD scenario validates Windows agent on backend)
      */
     _updateLaunchButtonState() {
         const agentSelected = this.agentSelect?.value;
-        const scenario = this.scenarioSelect?.value || 'basic';
-        const dcAgentSelected = this.dcAgentSelect?.value;
-
-        let canLaunch = Boolean(agentSelected);
-
-        // AD scenario requires DC agent too
-        if (scenario === 'ad_attack_lab') {
-            canLaunch = canLaunch && Boolean(dcAgentSelected);
-        }
+        const canLaunch = Boolean(agentSelected);
 
         if (this.launchBtn) {
             this.launchBtn.disabled = !canLaunch;
@@ -457,18 +440,12 @@ class DashboardManager {
         if (!agentId) return;
 
         const scenario = this.scenarioSelect?.value || 'basic';
-        const dcAgentId = this.dcAgentSelect?.value;
 
-        // Build request body
+        // Build request body - backend handles dc_agent for AD scenarios
         const body = {
             agent_id: parseInt(agentId),
             scenario: scenario,
         };
-
-        // Include DC agent for AD scenarios
-        if (scenario === 'ad_attack_lab' && dcAgentId) {
-            body.dc_agent_id = parseInt(dcAgentId);
-        }
 
         this.launchBtn.disabled = true;
         this.launchBtn.textContent = 'Launching...';

@@ -659,29 +659,18 @@ def launch_range(request):
     if not agent:
         return JsonResponse({"error": "Agent not found"}, status=404)
 
-    # Handle DC agent for AD scenarios
+    # Handle agent validation for AD scenarios
     dc_agent = None
-    dc_agent_id = data.get("dc_agent_id")
 
     if scenario == "ad_attack_lab":
-        # DC agent is required for AD scenarios
-        if not dc_agent_id:
+        # AD scenario requires Windows agent (used for both DC and victim)
+        if agent.os.slug != "windows":
             return JsonResponse(
-                {"error": "DC agent is required for AD Attack Lab scenario"},
+                {"error": "AD Attack Lab requires a Windows (MSI) agent. Both DC and victim are Windows."},
                 status=400,
             )
-
-        # Verify DC agent belongs to user and is not deleted
-        dc_agent = AgentConfig.active_for_user(request.user).filter(id=dc_agent_id).select_related("os").first()
-        if not dc_agent:
-            return JsonResponse({"error": "DC agent not found"}, status=404)
-
-        # Verify DC agent is Windows (DC is always Windows)
-        if dc_agent.os.slug != "windows":
-            return JsonResponse(
-                {"error": "DC agent must be a Windows (MSI) installer"},
-                status=400,
-            )
+        # Use same agent for DC and victim
+        dc_agent = agent
 
     # Allocate subnet index for this range
     try:

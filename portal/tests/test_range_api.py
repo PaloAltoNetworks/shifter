@@ -191,44 +191,12 @@ class TestLaunchRange:
         assert response.status_code == 409
         assert "already have an active range" in response.json()["error"]
 
-    def test_ad_scenario_requires_dc_agent(self, client, test_agent, settings):
-        """AD Attack Lab scenario requires dc_agent_id."""
+    def test_ad_scenario_rejects_linux_agent(self, client, test_agent, linux_os, settings):
+        """AD scenario requires Windows agent (used for both DC and victim)."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={"agent_id": test_agent.id, "scenario": "ad_attack_lab"},
-            content_type="application/json",
-        )
-
-        assert response.status_code == 400
-        assert "DC agent is required" in response.json()["error"]
-
-    def test_ad_scenario_rejects_nonexistent_dc_agent(self, client, test_agent, settings):
-        """AD scenario with nonexistent dc_agent_id returns 404."""
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={
-                "agent_id": test_agent.id,
-                "scenario": "ad_attack_lab",
-                "dc_agent_id": 99999,
-            },
-            content_type="application/json",
-        )
-
-        assert response.status_code == 404
-        assert "DC agent not found" in response.json()["error"]
-
-    def test_ad_scenario_rejects_linux_dc_agent(self, client, test_agent, linux_os, settings):
-        """AD scenario rejects non-Windows DC agent."""
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        # Create a Linux agent (invalid for DC)
+        # Create a Linux agent (invalid for AD scenario)
         linux_agent = AgentConfig.objects.create(
             user=test_agent.user,
             os=linux_os,
@@ -242,9 +210,8 @@ class TestLaunchRange:
         response = client.post(
             reverse("mission_control:launch_range"),
             data={
-                "agent_id": test_agent.id,
+                "agent_id": linux_agent.id,
                 "scenario": "ad_attack_lab",
-                "dc_agent_id": linux_agent.id,
             },
             content_type="application/json",
         )
@@ -252,28 +219,17 @@ class TestLaunchRange:
         assert response.status_code == 400
         assert "Windows" in response.json()["error"]
 
-    def test_ad_scenario_success_with_windows_dc_agent(self, client, test_agent, windows_os, settings):
-        """AD scenario succeeds with valid Windows DC agent."""
+    def test_ad_scenario_success_with_windows_agent(self, client, test_agent, settings):
+        """AD scenario succeeds with Windows agent (used for both DC and victim)."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
-        # Create a second Windows agent for DC
-        dc_agent = AgentConfig.objects.create(
-            user=test_agent.user,
-            os=windows_os,
-            name="DC Windows Agent",
-            s3_key="agents/test/dc.msi",
-            original_filename="dc_agent.msi",
-            file_size_bytes=60000000,
-            sha256_hash="ghi789",
-        )
-
+        # test_agent uses windows_os fixture
         response = client.post(
             reverse("mission_control:launch_range"),
             data={
                 "agent_id": test_agent.id,
                 "scenario": "ad_attack_lab",
-                "dc_agent_id": dc_agent.id,
             },
             content_type="application/json",
         )
@@ -282,16 +238,28 @@ class TestLaunchRange:
         data = response.json()
         assert data["success"] is True
         assert data["range"]["status"] == "provisioning"
-        assert data["range"]["dc_agent_id"] == dc_agent.id
+        # dc_agent should be same as agent for AD scenario
+        assert data["range"]["dc_agent_id"] == test_agent.id
 
-    def test_basic_scenario_does_not_require_dc_agent(self, client, test_agent, settings):
-        """Basic scenario works without dc_agent_id."""
+    def test_basic_scenario_allows_any_agent(self, client, test_agent, linux_os, settings):
+        """Basic scenario works with any agent OS."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
+        # Create a Linux agent
+        linux_agent = AgentConfig.objects.create(
+            user=test_agent.user,
+            os=linux_os,
+            name="Linux Agent",
+            s3_key="agents/test/fake.deb",
+            original_filename="agent.deb",
+            file_size_bytes=25000000,
+            sha256_hash="def456",
+        )
+
         response = client.post(
             reverse("mission_control:launch_range"),
-            data={"agent_id": test_agent.id, "scenario": "basic"},
+            data={"agent_id": linux_agent.id, "scenario": "basic"},
             content_type="application/json",
         )
 

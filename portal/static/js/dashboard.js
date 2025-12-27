@@ -24,6 +24,7 @@ class DashboardManager {
         this.pollIntervalMs = 2000; // Poll every 2 seconds
         this.pollErrorCount = 0;
         this.maxPollErrors = 5; // Force refresh after 5 consecutive errors
+        this.agents = []; // Cached agent list with os_slug
 
         // UI Elements
         this.noRangeState = document.getElementById('no-range-state');
@@ -37,6 +38,10 @@ class DashboardManager {
         this.agentItems = document.getElementById('agent-items');
         this.scenarioDropdown = document.getElementById('scenario-dropdown');
         this.scenarioSelect = document.getElementById('scenario-select-value');
+        this.dcAgentSection = document.getElementById('dc-agent-section');
+        this.dcAgentDropdown = document.getElementById('dc-agent-dropdown');
+        this.dcAgentSelect = document.getElementById('dc-agent-select-value');
+        this.dcAgentItems = document.getElementById('dc-agent-items');
         this.launchBtn = document.getElementById('launch-btn');
         this.cancelBtn = document.getElementById('cancel-btn');
         this.pauseBtn = document.getElementById('pause-btn');
@@ -95,8 +100,22 @@ class DashboardManager {
     _bindEvents() {
         // Agent dropdown change
         if (this.agentDropdown) {
-            this.agentDropdown.addEventListener('change', (e) => {
-                this.launchBtn.disabled = !e.detail.value;
+            this.agentDropdown.addEventListener('change', () => {
+                this._updateLaunchButtonState();
+            });
+        }
+
+        // DC Agent dropdown change
+        if (this.dcAgentDropdown) {
+            this.dcAgentDropdown.addEventListener('change', () => {
+                this._updateLaunchButtonState();
+            });
+        }
+
+        // Scenario dropdown change
+        if (this.scenarioDropdown) {
+            this.scenarioDropdown.addEventListener('change', (e) => {
+                this._onScenarioChange(e.detail.value);
             });
         }
 
@@ -121,6 +140,69 @@ class DashboardManager {
         // Dismiss error button
         if (this.dismissErrorBtn) {
             this.dismissErrorBtn.addEventListener('click', () => this.dismissError());
+        }
+    }
+
+    /**
+     * Handle scenario dropdown change.
+     * Shows/hides DC agent section based on selected scenario.
+     */
+    _onScenarioChange(scenario) {
+        if (scenario === 'ad_attack_lab') {
+            // Show DC agent dropdown for AD scenarios
+            if (this.dcAgentSection) {
+                this.dcAgentSection.style.display = 'block';
+            }
+        } else {
+            // Hide DC agent dropdown for basic scenarios
+            if (this.dcAgentSection) {
+                this.dcAgentSection.style.display = 'none';
+            }
+            // Clear DC agent selection when hiding
+            if (this.dcAgentSelect) {
+                this.dcAgentSelect.value = '';
+            }
+            // Reset DC dropdown display text
+            this._resetDcAgentDropdown();
+        }
+        this._updateLaunchButtonState();
+    }
+
+    /**
+     * Reset DC agent dropdown to placeholder state.
+     */
+    _resetDcAgentDropdown() {
+        if (this.dcAgentDropdown) {
+            const trigger = this.dcAgentDropdown.querySelector('.xdr-dropdown-value');
+            if (trigger) {
+                trigger.textContent = '-- Select a Windows agent --';
+                trigger.classList.add('placeholder');
+            }
+            // Clear selected state
+            const items = this.dcAgentDropdown.querySelectorAll('.xdr-dropdown-item');
+            items.forEach(item => item.classList.remove('selected'));
+        }
+    }
+
+    /**
+     * Update launch button enabled/disabled state based on form validity.
+     * - Basic scenario: requires agent only
+     * - AD scenario: requires both agent AND dc_agent
+     */
+    _updateLaunchButtonState() {
+        const agentSelected = this.agentSelect?.value;
+        const scenario = this.scenarioSelect?.value || 'basic';
+        const dcAgentSelected = this.dcAgentSelect?.value;
+
+        let canLaunch = Boolean(agentSelected);
+
+        // AD scenario requires DC agent too
+        if (scenario === 'ad_attack_lab') {
+            canLaunch = canLaunch && Boolean(dcAgentSelected);
+        }
+
+        if (this.launchBtn) {
+            this.launchBtn.disabled = !canLaunch;
         }
     }
 
@@ -154,12 +236,13 @@ class DashboardManager {
             }
 
             const data = await response.json();
+            // Cache agents for later reference
+            this.agents = data.agents;
 
-            // Clear existing items
+            // Populate victim agent dropdown (all agents)
             if (this.agentItems) {
                 this.agentItems.innerHTML = '';
 
-                // Add agent items
                 for (const agent of data.agents) {
                     const li = document.createElement('li');
                     li.className = 'xdr-dropdown-item';
@@ -171,6 +254,34 @@ class DashboardManager {
                 // Reinitialize dropdown after adding items
                 if (this.agentDropdown && window.XdrDropdown) {
                     void new window.XdrDropdown(this.agentDropdown);
+                }
+            }
+
+            // Populate DC agent dropdown (Windows agents only)
+            if (this.dcAgentItems) {
+                this.dcAgentItems.innerHTML = '';
+
+                const windowsAgents = data.agents.filter(a => a.os_slug === 'windows');
+
+                if (windowsAgents.length === 0) {
+                    // No Windows agents - show helpful message
+                    const li = document.createElement('li');
+                    li.className = 'xdr-dropdown-item disabled';
+                    li.textContent = 'No Windows agents uploaded';
+                    this.dcAgentItems.appendChild(li);
+                } else {
+                    for (const agent of windowsAgents) {
+                        const li = document.createElement('li');
+                        li.className = 'xdr-dropdown-item';
+                        li.dataset.value = agent.id;
+                        li.textContent = `${agent.name} (${agent.os_name})`;
+                        this.dcAgentItems.appendChild(li);
+                    }
+                }
+
+                // Reinitialize dropdown after adding items
+                if (this.dcAgentDropdown && window.XdrDropdown) {
+                    void new window.XdrDropdown(this.dcAgentDropdown);
                 }
             }
         } catch (error) {
@@ -337,7 +448,7 @@ class DashboardManager {
     _resetLaunchButton() {
         if (this.launchBtn) {
             this.launchBtn.textContent = 'Launch Range';
-            this.launchBtn.disabled = !this.agentSelect?.value;
+            this._updateLaunchButtonState();
         }
     }
 
@@ -346,6 +457,18 @@ class DashboardManager {
         if (!agentId) return;
 
         const scenario = this.scenarioSelect?.value || 'basic';
+        const dcAgentId = this.dcAgentSelect?.value;
+
+        // Build request body
+        const body = {
+            agent_id: parseInt(agentId),
+            scenario: scenario,
+        };
+
+        // Include DC agent for AD scenarios
+        if (scenario === 'ad_attack_lab' && dcAgentId) {
+            body.dc_agent_id = parseInt(dcAgentId);
+        }
 
         this.launchBtn.disabled = true;
         this.launchBtn.textContent = 'Launching...';
@@ -357,7 +480,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
-                body: JSON.stringify({ agent_id: parseInt(agentId), scenario: scenario }),
+                body: JSON.stringify(body),
             });
 
             const data = await response.json();

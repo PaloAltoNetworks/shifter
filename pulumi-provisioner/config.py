@@ -119,10 +119,13 @@ def get_range_from_db(range_id: int) -> dict:
                     r.agent_id,
                     r.instance_config,
                     a.s3_key as agent_s3_key,
-                    os.slug as agent_os_slug
+                    os.slug as agent_os_slug,
+                    r.dc_agent_id,
+                    dc_a.s3_key as dc_agent_s3_key
                 FROM mission_control_range r
                 LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
                 LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
+                LEFT JOIN mission_control_agentconfig dc_a ON r.dc_agent_id = dc_a.id
                 WHERE r.id = %s
                 """,
                 (range_id,),
@@ -139,6 +142,8 @@ def get_range_from_db(range_id: int) -> dict:
                 "instance_config": row[4],
                 "agent_s3_key": row[5],
                 "agent_os_slug": row[6],
+                "dc_agent_id": row[7],
+                "dc_agent_s3_key": row[8],
             }
 
 
@@ -202,8 +207,10 @@ def load_config() -> RangeConfig:
     else:
         # Parse custom instance configs - use catalog defaults if instance_type not specified
         instances = []
-        # Get global agent config from range for DC instances (they inherit victim's agent)
+        # Get victim agent config from range
         range_agent_s3_key = range_data.get("agent_s3_key")
+        # Get DC agent config from range (separate agent for DC instances)
+        dc_agent_s3_key = range_data.get("dc_agent_s3_key")
 
         for inst in db_instance_config:
             role = inst.get("role", "victim")
@@ -221,11 +228,18 @@ def load_config() -> RangeConfig:
                 else:
                     instance_type = _get_victim_instance_type()
 
-            # Get agent key: use instance-specific if set, otherwise inherit from range
-            # DC instances inherit range agent since they need XDR like victims
+            # Get agent key based on role:
+            # - DC instances use dc_agent (separate Windows agent)
+            # - Victim instances use range agent
+            # - Instance-specific config overrides both
             agent_s3_key = inst.get("agent_s3_key")
-            if not agent_s3_key and role in ("victim", "dc"):
-                agent_s3_key = range_agent_s3_key
+            if not agent_s3_key:
+                if role == "dc":
+                    # DC uses dedicated dc_agent (must be Windows/MSI)
+                    agent_s3_key = dc_agent_s3_key
+                elif role == "victim":
+                    # Victim uses range's victim agent
+                    agent_s3_key = range_agent_s3_key
 
             instances.append(
                 InstanceConfig(

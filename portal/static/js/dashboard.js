@@ -275,7 +275,7 @@ class DashboardManager {
                     const li = document.createElement('li');
                     li.className = 'xdr-dropdown-item';
                     li.dataset.value = config.id;
-                    li.textContent = `${config.name} (${config.panorama_server})`;
+                    li.textContent = `${config.name} (${config.scm_folder_name})`;
                     this.ngfwConfigItems.appendChild(li);
                 }
             }

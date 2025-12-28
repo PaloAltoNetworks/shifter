@@ -1,4 +1,4 @@
-"""Instance component tests for Pulumi provisioner.
+"""Instance component tests for Shifter Engine.
 
 These tests use Pulumi's mocking framework to exercise InstanceComponent
 without making AWS API calls. Tests verify SSH keys, Secrets Manager resources,

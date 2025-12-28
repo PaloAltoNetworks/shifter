@@ -1,4 +1,4 @@
-# Pulumi Provisioner
+# Shifter Engine
 
 ECS Fargate task that provisions and destroys range infrastructure using Pulumi.
 
@@ -32,7 +32,7 @@ sequenceDiagram
 ## Container Structure
 
 ```
-pulumi-provisioner/
+shifter-engine/
 ├── main.py              # Container entrypoint
 ├── __main__.py          # Pulumi program entry
 ├── config.py            # Config from env + DB
@@ -53,7 +53,7 @@ pulumi-provisioner/
 
 ## Plans Architecture
 
-The provisioner uses a composable **Plans** architecture for instance configuration:
+The Shifter Engine uses a composable **Plans** architecture for instance configuration:
 
 | Component | Purpose |
 |-----------|---------|
@@ -105,7 +105,7 @@ Per range:
 DC instances use a **prebaked AMI** with AD DS already promoted. Post-boot orchestration via SSM:
 
 1. **Instance Creation** - EC2 created from prebaked DC AMI (AD DS already running)
-2. **Agent Wait** - Provisioner polls until SSM agent reports online
+2. **Agent Wait** - Shifter Engine polls until SSM agent reports online
 3. **DNS Cleanup** - Remove stale A records from AMI build environment
 4. **Parallel Operations**:
    - **XDR Install** - Download and install Cortex XDR agent
@@ -190,7 +190,7 @@ Environment vars (set by Terraform in ECS task definition):
 
 ## Database Access
 
-Provisioner connects to RDS using IAM Database Authentication:
+Shifter Engine connects to RDS using IAM Database Authentication:
 - No static credentials
 - Uses `provisioner_lambda` DB user
 - Generates auth token via `rds.generate_db_auth_token()`

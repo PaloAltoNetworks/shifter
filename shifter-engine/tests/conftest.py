@@ -1,4 +1,4 @@
-"""Shared test fixtures for Pulumi provisioner tests.
+"""Shared test fixtures for Shifter Engine tests.
 
 This module provides:
 - Pulumi runtime mocks for component tests

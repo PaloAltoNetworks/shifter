@@ -743,7 +743,7 @@ def launch_range(request):
     )
 
     # Trigger provisioning via ECS Fargate
-    from .services.provisioner import start_provisioning
+    from .services.engine import start_provisioning
 
     task_arn = start_provisioning(range_obj.id)
 
@@ -830,7 +830,7 @@ def destroy_range(request):
 
     # Trigger async resource cleanup via ECS Fargate
     # This runs in background - user doesn't wait for it
-    from .services.provisioner import start_teardown
+    from .services.engine import start_teardown
 
     task_arn = start_teardown(range_to_destroy.id)
 

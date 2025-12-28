@@ -44,7 +44,7 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^pulumi-provisioner/tests/  # Tests check key format strings
+        exclude: ^shifter-engine/tests/  # Tests check key format strings
 
   # CSS - Stylelint
   - repo: local

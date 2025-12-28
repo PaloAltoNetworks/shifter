@@ -9,6 +9,8 @@ Note: Presigned URL generation happens here (before Pulumi runs) because:
 3. The signed URL is passed as data to EC2 user data scripts
 """
 
+import base64
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -16,6 +18,9 @@ from typing import Optional
 import boto3
 import psycopg
 import pulumi
+from cryptography.fernet import Fernet
+
+logger = logging.getLogger(__name__)
 
 from catalog.instances import (
     _get_dc_instance_type,
@@ -23,6 +28,39 @@ from catalog.instances import (
     _get_victim_instance_type,
     _get_windows_instance_type,
 )
+
+
+def decrypt_field(encrypted_value: str) -> str:
+    """Decrypt a Fernet-encrypted field value.
+
+    Used for sensitive fields like StrataConfig.scm_pin_value that are
+    encrypted at rest in the Django database.
+
+    Args:
+        encrypted_value: Base64-encoded Fernet ciphertext from database
+
+    Returns:
+        Decrypted plaintext string
+
+    Raises:
+        ValueError: If FIELD_ENCRYPTION_KEY not set or decryption fails
+    """
+    if not encrypted_value:
+        return ""
+
+    key = os.environ.get("FIELD_ENCRYPTION_KEY")
+    if not key:
+        logger.warning("FIELD_ENCRYPTION_KEY not set, returning value as-is")
+        return encrypted_value
+
+    try:
+        fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        encrypted_bytes = base64.urlsafe_b64decode(encrypted_value.encode("ascii"))
+        return fernet.decrypt(encrypted_bytes).decode("utf-8")
+    except Exception as e:
+        # If decryption fails, log and return as-is (for backward compatibility)
+        logger.warning(f"Failed to decrypt field: {e}")
+        return encrypted_value
 
 
 def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:
@@ -162,7 +200,8 @@ def get_range_from_db(range_id: int) -> dict:
                 "ngfw_enabled": row[9],
                 "strata_folder_name": row[10] or "",
                 "strata_pin_id": row[11] or "",
-                "strata_pin_value": row[12] or "",
+                # PIN value is encrypted at rest - decrypt it
+                "strata_pin_value": decrypt_field(row[12]) if row[12] else "",
             }
 
 

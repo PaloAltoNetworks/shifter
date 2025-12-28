@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import InstanceConfig, RangeConfig, generate_presigned_url, get_range_from_db
+from config import InstanceConfig, RangeConfig, decrypt_field, generate_presigned_url, get_range_from_db
 
 
 class TestGeneratePresignedUrl:
@@ -1531,3 +1531,78 @@ class TestStrataConfigFields:
         assert result.strata_folder_name == "TestFolder"
         assert result.strata_pin_id == "test-pin-id"
         assert result.strata_pin_value == "test-pin-secret"
+
+
+class TestDecryptField:
+    """Tests for decrypt_field function used for encrypted database fields.
+
+    The scm_pin_value field in StrataConfig is encrypted at rest using Fernet.
+    The Pulumi provisioner needs to decrypt it when loading from the database.
+    """
+
+    # Same test key as Django settings (for testing only)
+    # pragma: allowlist secret
+    TEST_ENCRYPTION_KEY = "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE="  # nosec B105
+
+    def test_decrypt_field_empty_value_returns_empty(self):
+        """Empty string input should return empty string."""
+        assert decrypt_field("") == ""
+
+    def test_decrypt_field_none_returns_empty(self):
+        """None input (via or empty check) should return empty string."""
+        # This tests the `if not encrypted_value:` branch
+        assert decrypt_field("") == ""
+
+    def test_decrypt_field_no_key_returns_as_is(self, mocker):
+        """Without FIELD_ENCRYPTION_KEY, value is returned as-is."""
+        mocker.patch.dict(os.environ, {}, clear=True)
+        # Remove key if present
+        if "FIELD_ENCRYPTION_KEY" in os.environ:
+            del os.environ["FIELD_ENCRYPTION_KEY"]
+
+        result = decrypt_field("some-value")
+        assert result == "some-value"
+
+    def test_decrypt_field_valid_encrypted_value(self, mocker):
+        """Valid Fernet-encrypted value should be decrypted."""
+        import base64
+        from cryptography.fernet import Fernet
+
+        # Set the encryption key
+        mocker.patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": self.TEST_ENCRYPTION_KEY})
+
+        # Encrypt a test value (same way EncryptedCharField does it)
+        fernet = Fernet(self.TEST_ENCRYPTION_KEY.encode())
+        plaintext = "my-secret-pin-value"
+        encrypted_bytes = fernet.encrypt(plaintext.encode("utf-8"))
+        encrypted_value = base64.urlsafe_b64encode(encrypted_bytes).decode("ascii")
+
+        # Decrypt it
+        result = decrypt_field(encrypted_value)
+        assert result == plaintext
+
+    def test_decrypt_field_invalid_value_returns_as_is(self, mocker):
+        """Invalid encrypted value should return as-is (backward compatibility)."""
+        mocker.patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": self.TEST_ENCRYPTION_KEY})
+
+        # Not a valid Fernet token
+        result = decrypt_field("not-encrypted-just-plaintext")
+        assert result == "not-encrypted-just-plaintext"
+
+    def test_decrypt_field_roundtrip_with_django_encryption(self, mocker):
+        """Value encrypted like Django EncryptedCharField should decrypt correctly."""
+        import base64
+        from cryptography.fernet import Fernet
+
+        mocker.patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": self.TEST_ENCRYPTION_KEY})
+
+        # Simulate what Django EncryptedCharField.get_prep_value() does
+        fernet = Fernet(self.TEST_ENCRYPTION_KEY.encode())
+        plaintext = "super-secret-scm-pin"
+        encrypted_bytes = fernet.encrypt(plaintext.encode("utf-8"))
+        # Django stores this in the DB
+        db_value = base64.urlsafe_b64encode(encrypted_bytes).decode("ascii")
+
+        # Pulumi provisioner reads from DB and decrypts
+        result = decrypt_field(db_value)
+        assert result == plaintext

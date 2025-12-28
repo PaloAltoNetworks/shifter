@@ -1,1 +1,0 @@
-"""Pulumi provisioner test suite."""

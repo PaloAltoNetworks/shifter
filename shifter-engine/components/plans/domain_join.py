@@ -109,30 +109,55 @@ if ($joined) {
 '''
 
 # PowerShell script to verify domain membership
+# Includes retry logic to handle WMI not being ready immediately after reboot
 VERIFY_DOMAIN_JOINED_SCRIPT = '''
 $ErrorActionPreference = "Stop"
 
 Write-Host "Verifying domain membership..."
 
-try {
-    $computerSystem = Get-WmiObject Win32_ComputerSystem
-    $currentDomain = $computerSystem.Domain
-    $expectedDomain = "{{ domain_name }}"
+$expectedDomain = "{{ domain_name }}"
+$maxAttempts = 12
+$retryDelaySeconds = 10
+$attempt = 0
+$verified = $false
 
-    Write-Host "Current domain: $currentDomain"
-    Write-Host "Expected domain: $expectedDomain"
+while ($attempt -lt $maxAttempts -and -not $verified) {
+    $attempt++
+    Write-Host "Verification attempt $attempt of $maxAttempts..."
 
-    if ($currentDomain -eq $expectedDomain) {
-        Write-Host "Successfully joined domain: $currentDomain"
-        exit 0
-    } else {
-        Write-Host "Domain join verification failed"
-        Write-Host "Machine is in domain: $currentDomain"
-        Write-Host "Expected to be in: $expectedDomain"
-        exit 1
+    try {
+        # WMI may not be ready immediately after domain join reboot
+        $computerSystem = Get-WmiObject Win32_ComputerSystem -ErrorAction Stop
+        $currentDomain = $computerSystem.Domain
+
+        Write-Host "Current domain: $currentDomain"
+        Write-Host "Expected domain: $expectedDomain"
+
+        if ($currentDomain -eq $expectedDomain) {
+            Write-Host "Successfully joined domain: $currentDomain"
+            $verified = $true
+        } else {
+            Write-Host "Domain mismatch - machine is in: $currentDomain"
+            if ($attempt -lt $maxAttempts) {
+                Write-Host "Domain membership may still be applying, retrying in $retryDelaySeconds seconds..."
+                Start-Sleep -Seconds $retryDelaySeconds
+            }
+        }
+    } catch {
+        Write-Host "WMI query failed: $_"
+        if ($attempt -lt $maxAttempts) {
+            Write-Host "WMI service may still be initializing, retrying in $retryDelaySeconds seconds..."
+            Start-Sleep -Seconds $retryDelaySeconds
+        }
     }
-} catch {
-    Write-Host "Error verifying domain membership: $_"
+}
+
+if ($verified) {
+    Write-Host "Domain join verification successful"
+    exit 0
+} else {
+    Write-Host "ERROR: Domain join verification failed after $maxAttempts attempts"
+    Write-Host "Expected domain: $expectedDomain"
     exit 1
 }
 '''
@@ -169,7 +194,7 @@ class DomainJoinPlan:
     verify_step: SetupStep = SetupStep(
         name="verify_domain_joined",
         script=VERIFY_DOMAIN_JOINED_SCRIPT,
-        timeout_seconds=120,  # 2 min for verification
+        timeout_seconds=180,  # 3 min: up to 12 retries with 10s delays
         is_verification=True,
     )
 

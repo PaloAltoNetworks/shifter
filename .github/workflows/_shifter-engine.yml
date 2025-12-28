@@ -1,4 +1,4 @@
-name: Pulumi Provisioner
+name: Shifter Engine
 
 on:
   workflow_call:
@@ -52,7 +52,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: ./pulumi-provisioner
+          context: ./shifter-engine
           push: true
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest

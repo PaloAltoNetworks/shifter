@@ -9,7 +9,7 @@ All CI/CD runs through GitHub Actions. The main orchestrator is `deploy.yml`, wh
 1. **Quality** - Linting, tests, security scanning
 2. **Core** - ECR repositories (foundation)
 3. **Range** - Range VPC infrastructure
-4. **Pulumi Provisioner** - Container build
+4. **Shifter Engine** - Container build
 5. **Portal** - Infrastructure, container, deployment
 
 ## Trigger Rules
@@ -30,7 +30,7 @@ PRs get Terraform plan comments. Merges trigger actual deployments.
 ├── _quality.yml            # Linting, tests, Checkov
 ├── _core.yml               # ECR repositories
 ├── _range.yml              # Range VPC
-├── _pulumi-provisioner.yml # Provisioner container
+├── _shifter-engine.yml     # Shifter Engine container
 └── _portal.yml             # Portal infra + deploy
 ```
 
@@ -46,7 +46,7 @@ Quality (must pass first)
     │
     ├──────────────┬─────────────────┐
     ▼              ▼                 ▼
-  Range    Pulumi Provisioner    Portal Plan
+  Range    Shifter Engine    Portal Plan
                    │                 │
                    └────────┬────────┘
                             ▼
@@ -61,7 +61,7 @@ The orchestrator uses path filters to run only relevant jobs:
 |--------|--------------|
 | `core` | ECR module, environment root, deploy workflow |
 | `range` | Range Terraform, pulumi-state module |
-| `pulumi_provisioner` | Pulumi code, ECR module |
+| `shifter_engine` | Shifter Engine code, ECR module |
 | `portal` | Portal Django code, portal Terraform |
 
 ## Quality Gate
@@ -71,7 +71,7 @@ Runs on every PR and push:
 - **Python linting**: `ruff check`, `ruff format --check`
 - **Tests**: `pytest` with PostgreSQL service container
 - **IaC scanning**: Checkov (soft fail - warnings only)
-- **Coverage**: Pulumi provisioner requires 80% minimum
+- **Coverage**: Shifter Engine requires 80% minimum
 
 ## Terraform Flow
 

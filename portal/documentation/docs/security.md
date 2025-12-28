@@ -191,7 +191,7 @@ Log aggregation requires `enable_log_aggregation = true` to activate:
 |----------|-------------|--------|
 | Application logs | CloudWatch → Firehose → S3 | Implemented |
 | Cognito logs | CloudWatch → Firehose → S3 | Implemented |
-| Pulumi Provisioner logs | CloudWatch → Firehose → S3 | Implemented |
+| Shifter Engine logs | CloudWatch → Firehose → S3 | Implemented |
 | VPC Flow Logs | CloudWatch → Firehose → S3 | Implemented |
 | RDS PostgreSQL logs | CloudWatch → Firehose → S3 | Implemented |
 | ALB access logs | Direct to S3 | Implemented |

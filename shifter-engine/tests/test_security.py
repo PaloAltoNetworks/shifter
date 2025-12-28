@@ -1,4 +1,4 @@
-"""Security validation tests for Pulumi provisioner.
+"""Security validation tests for Shifter Engine.
 
 Tests critical security functions:
 - S3 path validation to prevent shell injection

@@ -1349,7 +1349,7 @@ class TestRangeStackNGFWIntegration:
     """
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 

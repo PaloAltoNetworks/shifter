@@ -37,10 +37,10 @@ def test_agent(db, django_user_model, windows_os):
 
 @pytest.fixture
 def mock_provisioner():
-    """Mock the provisioner service to avoid AWS calls."""
+    """Mock the engine service to avoid AWS calls."""
     with (
-        patch("mission_control.services.provisioner.start_provisioning") as mock_provision,
-        patch("mission_control.services.provisioner.start_teardown") as mock_teardown,
+        patch("mission_control.services.engine.start_provisioning") as mock_provision,
+        patch("mission_control.services.engine.start_teardown") as mock_teardown,
     ):
         mock_provision.return_value = None  # No ARN in test mode
         mock_teardown.return_value = None
@@ -128,7 +128,7 @@ class TestLaunchRange:
 
     def test_successful_launch_with_ecs(self, client, test_agent):
         """Test launch with mocked ECS."""
-        mock_path = "mission_control.services.provisioner._get_ecs_client"
+        mock_path = "mission_control.services.engine._get_ecs_client"
         with patch(mock_path) as mock_client:
             task_arn = "arn:aws:ecs:us-east-2:123:task/test/abc123"
             mock_client.return_value.run_task.return_value = {

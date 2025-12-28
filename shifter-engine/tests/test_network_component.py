@@ -1,4 +1,4 @@
-"""Network component tests for Pulumi provisioner.
+"""Network component tests for Shifter Engine.
 
 These tests use Pulumi's mocking framework to test the actual NetworkComponent
 without making real AWS API calls. Tests verify that the component:

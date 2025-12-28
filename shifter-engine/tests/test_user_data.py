@@ -1,4 +1,4 @@
-"""User data template tests for Pulumi provisioner.
+"""User data template tests for Shifter Engine.
 
 Tests template rendering for EC2 instance user data scripts.
 """

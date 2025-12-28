@@ -1,4 +1,4 @@
-"""Configuration module for Pulumi provisioner.
+"""Configuration module for Shifter Engine.
 
 This module handles loading configuration from Pulumi stack config
 and environment variables.

@@ -1,4 +1,4 @@
-"""Configuration tests for Pulumi provisioner.
+"""Configuration tests for Shifter Engine.
 
 Tests config loading from Pulumi config and database.
 """

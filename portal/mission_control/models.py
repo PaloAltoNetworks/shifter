@@ -4,6 +4,62 @@ from django.conf import settings
 from django.db import models, transaction
 
 
+class Asset(models.Model):
+    """Abstract base class for user-owned assets.
+
+    Provides common fields for all assets:
+    - name: User-friendly identifier
+    - created_at/deleted_at: Timestamps for lifecycle
+    - is_deleted: Property for soft delete status
+    - active_for_user(): Classmethod to filter active assets
+
+    Note: user FK is defined in concrete classes to allow
+    different related_name values per model type.
+    """
+
+    name = models.CharField(max_length=255, help_text="User-friendly name")
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+        ordering = ["-created_at"]
+
+    @property
+    def is_deleted(self):
+        """Return True if this asset has been soft-deleted."""
+        return self.deleted_at is not None
+
+    @classmethod
+    def active_for_user(cls, user):
+        """Return non-deleted assets for a user."""
+        return cls.objects.filter(user=user, deleted_at__isnull=True)
+
+
+class FileAsset(Asset):
+    """Abstract base class for file-backed assets stored in S3.
+
+    Extends Asset with fields for S3 storage:
+    - s3_key: Full S3 object key
+    - original_filename: Original uploaded filename
+    - file_size_bytes: File size for quota tracking
+    - sha256_hash: Content hash for integrity/deduplication
+    """
+
+    s3_key = models.CharField(max_length=500, help_text="S3 object key")
+    original_filename = models.CharField(max_length=255)
+    file_size_bytes = models.PositiveBigIntegerField()
+    sha256_hash = models.CharField(max_length=64)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def file_size_mb(self):
+        """Return file size in megabytes, rounded to 1 decimal."""
+        return round(self.file_size_bytes / (1024 * 1024), 1)
+
+
 class OperatingSystem(models.Model):
     """Reference table for supported operating systems."""
 
@@ -58,18 +114,28 @@ class UserProfile(models.Model):
         return self.deleted_at is not None
 
 
-class AgentConfig(models.Model):
-    """XDR/XSIAM agent installer uploaded by a user."""
+class AgentConfig(FileAsset):
+    """XDR/XSIAM agent installer uploaded by a user.
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agents")
-    os = models.ForeignKey(OperatingSystem, on_delete=models.PROTECT, related_name="agents")
-    name = models.CharField(max_length=100, help_text="User-friendly name for this agent")
-    s3_key = models.CharField(max_length=500, help_text="S3 object key for the installer")
-    original_filename = models.CharField(max_length=255)
-    file_size_bytes = models.PositiveBigIntegerField()
-    sha256_hash = models.CharField(max_length=64)
-    created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
+    Inherits from FileAsset:
+    - name, created_at, deleted_at, is_deleted from Asset
+    - s3_key, original_filename, file_size_bytes, sha256_hash, file_size_mb from FileAsset
+
+    AgentConfig-specific:
+    - user: Owner of this agent (with related_name="agents")
+    - os: Operating system this agent is for
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agents",
+    )
+    os = models.ForeignKey(
+        OperatingSystem,
+        on_delete=models.PROTECT,
+        related_name="agents",
+    )
 
     class Meta:
         ordering = ["-created_at"]
@@ -78,20 +144,6 @@ class AgentConfig(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.os.name})"
-
-    @property
-    def is_deleted(self):
-        return self.deleted_at is not None
-
-    @property
-    def file_size_mb(self):
-        """Return file size in megabytes, rounded to 1 decimal."""
-        return round(self.file_size_bytes / (1024 * 1024), 1)
-
-    @classmethod
-    def active_for_user(cls, user):
-        """Return non-deleted agents for a user."""
-        return cls.objects.filter(user=user, deleted_at__isnull=True)
 
 
 class NGFWConfig(models.Model):
@@ -129,6 +181,87 @@ class NGFWConfig(models.Model):
     def active_for_user(cls, user):
         """Return non-deleted NGFW configs for a user."""
         return cls.objects.filter(user=user, deleted_at__isnull=True)
+
+
+class StrataConfig(models.Model):
+    """Strata Cloud Manager configuration for NGFW instances.
+
+    Stores SCM registration credentials for VM-Series bootstrap.
+    Used to generate init-cfg.txt with PIN-based authentication.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="strata_configs",
+    )
+    name = models.CharField(
+        max_length=255,
+        help_text="User-friendly name for this config",
+    )
+
+    # SCM Registration fields
+    scm_folder_name = models.CharField(
+        max_length=255,
+        help_text="SCM folder name (Configuration > Folders in SCM)",
+    )
+    scm_pin_id = models.CharField(
+        max_length=255,
+        help_text="Auto-registration PIN ID (Assets > Device Certificates in SCM)",
+    )
+    scm_pin_value = models.CharField(
+        max_length=255,
+        help_text="Auto-registration PIN value",
+    )
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Strata Config"
+        verbose_name_plural = "Strata Configs"
+
+    def __str__(self):
+        return f"{self.name} ({self.scm_folder_name})"
+
+    @property
+    def is_deleted(self):
+        """Return True if this config has been soft-deleted."""
+        return self.deleted_at is not None
+
+    @classmethod
+    def active_for_user(cls, user):
+        """Return non-deleted Strata configs for a user."""
+        return cls.objects.filter(user=user, deleted_at__isnull=True)
+
+    def get_init_cfg_context(self) -> dict:
+        """Get context dict for init-cfg.txt template rendering.
+
+        Returns:
+            Dict with pin_id, pin_value, folder_name keys for template.
+        """
+        return {
+            "pin_id": self.scm_pin_id,
+            "pin_value": self.scm_pin_value,
+            "folder_name": self.scm_folder_name,
+        }
+
+    def clean(self):
+        """Validate that required fields are not empty strings."""
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+        if not self.scm_folder_name or not self.scm_folder_name.strip():
+            errors["scm_folder_name"] = "SCM folder name cannot be empty."
+        if not self.scm_pin_id or not self.scm_pin_id.strip():
+            errors["scm_pin_id"] = "SCM PIN ID cannot be empty."
+        if not self.scm_pin_value or not self.scm_pin_value.strip():
+            errors["scm_pin_value"] = "SCM PIN value cannot be empty."
+
+        if errors:
+            raise ValidationError(errors)
 
 
 class Range(models.Model):
@@ -223,7 +356,15 @@ class Range(models.Model):
         null=True,
         blank=True,
         related_name="ranges",
-        help_text="NGFW config to use for VM-Series bootstrap",
+        help_text="DEPRECATED: Use strata_config instead. Panorama-based NGFW config.",
+    )
+    strata_config = models.ForeignKey(
+        StrataConfig,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ranges",
+        help_text="SCM config for NGFW bootstrap (PIN-based registration)",
     )
     ngfw_instance_id = models.CharField(max_length=50, blank=True, default="", help_text="NGFW EC2 instance ID")
     ngfw_untrust_ip = models.GenericIPAddressField(

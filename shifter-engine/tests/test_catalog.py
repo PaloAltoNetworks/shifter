@@ -1,4 +1,4 @@
-"""Instance catalog tests for Pulumi provisioner.
+"""Instance catalog tests for Shifter Engine.
 
 Tests the instance type catalog which defines available instance configurations.
 These are pure Python tests with no external dependencies.

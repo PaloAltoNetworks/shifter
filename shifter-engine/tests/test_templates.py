@@ -1,4 +1,4 @@
-"""DC user data template tests for Pulumi provisioner.
+"""DC user data template tests for Shifter Engine.
 
 Tests for the Domain Controller PowerShell template (dc_windows.ps1.j2).
 

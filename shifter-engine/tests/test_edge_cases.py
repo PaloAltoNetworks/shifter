@@ -1,4 +1,4 @@
-"""Edge case tests for Pulumi provisioner.
+"""Edge case tests for Shifter Engine.
 
 These tests exercise real code paths with mocked dependencies.
 """

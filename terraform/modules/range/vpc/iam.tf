@@ -1,14 +1,18 @@
 # Range Instance IAM Configuration
 #
-# Creates IAM resources for range EC2 instances (Victim and Kali):
+# Creates IAM resources for range EC2 instances (Victim, Kali, DC):
 # - IAM role with EC2 assume role trust
 # - SSM managed instance core policy for Systems Manager access
 # - S3 read access for agent installers
 # - Bedrock access for Claude Code on range instances
+# - SSM Parameter Store access for DC config (DC writes, domain members read)
 # - Instance profile to attach role to EC2 instances
 
+# Data sources for constructing ARNs
+data "aws_caller_identity" "current" {}
+
 # ------------------------------------------------------------------------------
-# Range Instance IAM Role (for Victim and Kali EC2s)
+# Range Instance IAM Role (for Victim, Kali, and DC EC2s)
 # ------------------------------------------------------------------------------
 
 resource "aws_iam_role" "range_instance" {
@@ -76,6 +80,47 @@ resource "aws_iam_role_policy" "range_instance_bedrock" {
           "arn:aws:bedrock:*:*:inference-profile/*",
           "arn:aws:bedrock:*:*:foundation-model/*"
         ]
+      }
+    ]
+  })
+}
+
+# SSM Parameter Store access for DC configuration
+# DC instances write config after promotion, domain members read to join
+resource "aws_iam_role_policy" "range_instance_ssm_params" {
+  name = "ssm-dc-config"
+  role = aws_iam_role.range_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "SSMParameterAccess"
+        Effect = "Allow"
+        Action = [
+          "ssm:PutParameter",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:DeleteParameter"
+        ]
+        # Scoped to /shifter/*/range/* to cover all environments and ranges
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/shifter/*/range/*"
+      },
+      {
+        Sid    = "KMSAccessForSSMSecureString"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey"
+        ]
+        # AWS managed key for SSM - scoped via condition
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${data.aws_region.current.name}.amazonaws.com"
+          }
+        }
       }
     ]
   })

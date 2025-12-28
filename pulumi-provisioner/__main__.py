@@ -25,14 +25,14 @@ def main() -> None:
     pulumi.export("subnet_id", range_stack.subnet_id)
     pulumi.export("subnet_cidr", range_stack.subnet_cidr)
 
-    # Export instance details
+    # Export instance details using stored role/os_type from each instance
+    # (not index-based lookup - instance order may differ from config order)
     instances_output = []
-    for i, inst in enumerate(range_stack.instances):
-        inst_config = config.instances[i]
+    for inst in range_stack.instances:
         instances_output.append(
             {
-                "role": inst_config.role,
-                "os": inst_config.os_type,
+                "role": inst.role,
+                "os": inst.os_type,
                 "instance_id": inst.instance_id,
                 "private_ip": inst.private_ip,
                 "ssh_key_secret_arn": inst.ssh_key_secret_arn,

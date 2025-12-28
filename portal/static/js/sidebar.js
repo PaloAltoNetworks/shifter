@@ -59,4 +59,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial state - start with mouse leave
     document.body.classList.add('nav-mouse-leave');
+
+    // Dropdown toggle functionality
+    const dropdownToggles = document.querySelectorAll('.nav-dropdown-toggle');
+    dropdownToggles.forEach(toggle => {
+        toggle.addEventListener('click', function(e) {
+            e.preventDefault();
+
+            const dropdownId = this.getAttribute('data-dropdown-id');
+            const submenu = document.getElementById(dropdownId);
+            const isExpanded = this.getAttribute('aria-expanded') === 'true';
+
+            if (submenu) {
+                if (isExpanded) {
+                    submenu.classList.remove('show');
+                    this.setAttribute('aria-expanded', 'false');
+                } else {
+                    submenu.classList.add('show');
+                    this.setAttribute('aria-expanded', 'true');
+                }
+            }
+        });
+    });
 });

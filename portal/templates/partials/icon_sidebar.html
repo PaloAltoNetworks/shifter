@@ -61,34 +61,48 @@
                 </a>
             </div>
 
-            {# Agents #}
-            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' %}active-top-item{% endif %}">
-                <a href="{% url 'mission_control:agents' %}"
-                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'agents' %}active-link{% endif %}">
+            {# Assets dropdown - XDR Agents and Strata (NGFW) configs #}
+            <div class="tw-mx-3 tw-mb-2 nav-dropdown {% if active_nav == 'agents' or active_nav == 'ngfw' %}active-top-item{% endif %}">
+                <button type="button"
+                        class="nav-menu-item nav-menu-item-level-0 nav-dropdown-toggle {% if active_nav == 'agents' or active_nav == 'ngfw' %}active-link{% endif %}"
+                        aria-expanded="{% if active_nav == 'agents' or active_nav == 'ngfw' %}true{% else %}false{% endif %}"
+                        data-dropdown-id="assets-submenu">
                     <span class="nav-icon">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path fill="currentColor" d="M11.7156 11.5H5.28442C5.12686 11.5 5 11.6224 5 11.7744V17.2256C5 17.3776 5.12686 17.5 5.28442 17.5H11.7156C11.8731 17.5 12 17.3776 12 17.2256V11.7744C12 11.6224 11.8731 11.5 11.7156 11.5Z"></path>
-                            <path fill="currentColor" d="M11.7968 6.5H7.20316C7.09062 6.5 7 6.58161 7 6.68295V10.317C7 10.4184 7.09062 10.5 7.20316 10.5H11.7968C11.9094 10.5 12 10.4184 12 10.317V6.68295C12 6.58161 11.9094 6.5 11.7968 6.5Z"></path>
-                            <path fill="currentColor" d="M16.8375 14.5H13.1625C13.0725 14.5 13 14.5612 13 14.6372V17.3628C13 17.4388 13.0725 17.5 13.1625 17.5H16.8375C16.9275 17.5 17 17.4388 17 17.3628V14.6372C17 14.5612 16.9275 14.5 16.8375 14.5Z"></path>
-                            <path fill="currentColor" d="M18.7562 8.5H13.2438C13.1087 8.5 13 8.60201 13 8.72869V13.2713C13 13.398 13.1087 13.5 13.2438 13.5H18.7562C18.8913 13.5 19 13.398 19 13.2713V8.72869C19 8.60201 18.8913 8.5 18.7562 8.5Z"></path>
+                            <path fill="currentColor" d="M20 6H12L10 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6ZM20 18H4V6H9.17L11.17 8H20V18Z"/>
+                            <path fill="currentColor" d="M12 10V12H8V14H12V16L16 13L12 10Z"/>
                         </svg>
                     </span>
-                    <span class="hide-when-minimized nav-menu-item-content">Agents</span>
-                </a>
-            </div>
-
-            {# NGFW - VM-Series Panorama configuration #}
-            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'ngfw' %}active-top-item{% endif %}">
-                <a href="{% url 'mission_control:ngfw_configs' %}"
-                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'ngfw' %}active-link{% endif %}">
-                    <span class="nav-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path fill="currentColor" d="M12 3L4 7V11C4 15.4183 7.58172 19 12 19C16.4183 19 20 15.4183 20 11V7L12 3ZM18 11C18 14.3137 15.3137 17 12 17C8.68629 17 6 14.3137 6 11V8.21L12 5.21L18 8.21V11Z"/>
-                            <path fill="currentColor" d="M12 7C9.79086 7 8 8.79086 8 11C8 13.2091 9.79086 15 12 15C14.2091 15 16 13.2091 16 11C16 8.79086 14.2091 7 12 7ZM12 13C10.8954 13 10 12.1046 10 11C10 9.89543 10.8954 9 12 9C13.1046 9 14 9.89543 14 11C14 12.1046 13.1046 13 12 13Z"/>
+                    <span class="hide-when-minimized nav-menu-item-content">Assets</span>
+                    <span class="hide-when-minimized nav-dropdown-chevron">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M7 10L12 15L17 10H7Z"/>
                         </svg>
                     </span>
-                    <span class="hide-when-minimized nav-menu-item-content">NGFW</span>
-                </a>
+                </button>
+                <div class="nav-submenu {% if active_nav == 'agents' or active_nav == 'ngfw' %}show{% endif %}" id="assets-submenu">
+                    {# XDR Agents #}
+                    <a href="{% url 'mission_control:agents' %}"
+                       class="nav-menu-item nav-menu-item-level-1 {% if active_nav == 'agents' %}active-link{% endif %}">
+                        <span class="nav-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path fill="currentColor" d="M12 1L3 5V11C3 16.55 6.84 21.74 12 23C17.16 21.74 21 16.55 21 11V5L12 1ZM12 11.99H19C18.47 16.11 15.72 19.78 12 20.93V12H5V6.3L12 3.19V11.99Z"/>
+                            </svg>
+                        </span>
+                        <span class="nav-menu-item-content">XDR Agents</span>
+                    </a>
+                    {# Strata (NGFW) #}
+                    <a href="{% url 'mission_control:ngfw_configs' %}"
+                       class="nav-menu-item nav-menu-item-level-1 {% if active_nav == 'ngfw' %}active-link{% endif %}">
+                        <span class="nav-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path fill="currentColor" d="M12 3L4 7V11C4 15.4183 7.58172 19 12 19C16.4183 19 20 15.4183 20 11V7L12 3ZM18 11C18 14.3137 15.3137 17 12 17C8.68629 17 6 14.3137 6 11V8.21L12 5.21L18 8.21V11Z"/>
+                                <path fill="currentColor" d="M12 7C9.79086 7 8 8.79086 8 11C8 13.2091 9.79086 15 12 15C14.2091 15 16 13.2091 16 11C16 8.79086 14.2091 7 12 7ZM12 13C10.8954 13 10 12.1046 10 11C10 9.89543 10.8954 9 12 9C13.1046 9 14 9.89543 14 11C14 12.1046 13.1046 13 12 13Z"/>
+                            </svg>
+                        </span>
+                        <span class="nav-menu-item-content">Strata (NGFW)</span>
+                    </a>
+                </div>
             </div>
 
             {# Terminal - always accessible, shows "no range" state if needed #}

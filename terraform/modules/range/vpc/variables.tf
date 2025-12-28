@@ -72,6 +72,22 @@ variable "agent_s3_bucket" {
 }
 
 # ------------------------------------------------------------------------------
+# VM-Series NGFW Configuration
+# ------------------------------------------------------------------------------
+
+variable "vm_series_ami_id" {
+  description = "VM-Series AMI ID. Empty string disables NGFW provisioning."
+  type        = string
+  default     = ""
+}
+
+variable "vm_series_instance_type" {
+  description = "EC2 instance type for VM-Series NGFW"
+  type        = string
+  default     = "m5.xlarge"
+}
+
+# ------------------------------------------------------------------------------
 # Domain Controller Security Group
 # ------------------------------------------------------------------------------
 

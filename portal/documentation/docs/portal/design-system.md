@@ -7,9 +7,10 @@ Cortex XDR theme. Dark UI matching PANW product family.
 | File | Purpose |
 |------|---------|
 | `xdr-theme.css` | Base theme, colors, typography, components |
-| `xdr-sidebar.css` | Left navigation |
+| `xdr-sidebar.css` | Left navigation with sliding panel submenus |
 | `xdr-dropdown.css` | Dropdown menus |
 | `terminal.css` | Terminal page layout |
+| `sidebar.js` | Sidebar expand/collapse, lock, submenu behavior |
 
 ## Colors
 
@@ -70,5 +71,26 @@ White pill style (Cortex XDR pattern):
 ## Layout
 
 - Min width: 1024px
-- Left nav: 56px (collapsed)
+- Left nav: 56px (collapsed), 270px (expanded)
 - Main content padding: 24px
+
+## Left Navigation
+
+Cortex XDR-style sidebar with sliding panel submenus.
+
+**Behavior:**
+- Collapsed by default (56px, icons only)
+- Expands on hover (270px)
+- Lock button pins expanded state
+- Submenu items slide in from right when parent clicked
+
+**States:**
+| State | Width | Content |
+|-------|-------|---------|
+| Minimized | 56px | Icons only |
+| Expanded | 270px | Icons + labels |
+| Submenu open | 270px | Icons (main) + submenu panel |
+
+**CSS files:**
+- `xdr-sidebar.css` - Sidebar structure and animations
+- `sidebar.js` - Expand/collapse, lock, submenu behavior

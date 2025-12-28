@@ -401,3 +401,79 @@ body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
   color: var(--nav-tooltip-color);
   box-shadow: var(--nav-tooltip-shadow);
 }
+
+/* =============================================================================
+   DROPDOWN SUBMENU STYLES
+   ============================================================================= */
+
+/* Dropdown toggle button */
+.nav-dropdown-toggle {
+  width: 100%;
+  text-align: left;
+}
+
+/* Chevron icon */
+.nav-dropdown-chevron {
+  margin-left: auto;
+  margin-right: 8px;
+  display: flex;
+  align-items: center;
+  transition: transform 0.2s ease;
+}
+
+.nav-dropdown-toggle[aria-expanded="true"] .nav-dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+/* Submenu container */
+.nav-submenu {
+  display: none;
+  overflow: hidden;
+  padding-left: 8px;
+  margin-top: 2px;
+}
+
+.nav-submenu.show {
+  display: block;
+}
+
+/* Hide submenu when sidebar is minimized */
+.left-nav.minimized .nav-submenu {
+  display: none !important;
+}
+
+/* Level 1 items (submenu) */
+.nav-menu-item.nav-menu-item-level-1 {
+  height: 28px;
+  max-width: 100%;
+  min-height: 28px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--nav-sub-item-text-color);
+}
+
+.nav-menu-item.nav-menu-item-level-1:hover {
+  background-color: var(--nav-item-hover-bg-color);
+  color: var(--nav-sub-item-text-active-color);
+}
+
+.nav-menu-item.nav-menu-item-level-1.active-link {
+  background-color: var(--nav-item-active-bg-color);
+  color: var(--nav-sub-item-text-active-color);
+  font-weight: 600;
+}
+
+.nav-menu-item.nav-menu-item-level-1.active-link .nav-icon {
+  color: var(--nav-item-active-icon-color);
+}
+
+.nav-menu-item.nav-menu-item-level-1 .nav-icon {
+  margin: 0 4px;
+}
+
+.nav-menu-item.nav-menu-item-level-1 .nav-icon svg {
+  width: 18px;
+  height: 18px;
+}

@@ -73,6 +73,6 @@ See [Architecture](../architecture.md) for model details.
 
 | Service | Purpose |
 |---------|---------|
-| `services/provisioner.py` | Trigger ECS tasks |
+| `services/engine.py` | Trigger ECS tasks |
 | `services/ssh.py` | SSH connection management |
 | `services/secrets.py` | Secrets Manager access |

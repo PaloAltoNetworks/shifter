@@ -23,7 +23,7 @@ variable "instance_type" {
 variable "github_org" {
   description = "GitHub organization or username"
   type        = string
-  default     = "paloaltonetworks"
+  default     = "Brad-Edwards"
 }
 
 variable "github_repo" {

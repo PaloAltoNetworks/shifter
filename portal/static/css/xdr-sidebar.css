@@ -60,6 +60,8 @@ body.nav-lock {
   flex-direction: column;
   height: 100vh;
   background-color: var(--nav-bg);
+  overflow: hidden; /* Clip submenu panel during slide animation */
+  position: relative;
 }
 
 /* Minimized state */
@@ -132,50 +134,57 @@ body.nav-lock .left-nav .left-nav-body,
   outline: 1px solid var(--xdr-border, #484848) !important;
 }
 
-/* Lock button */
+/* Lock button - main sidebar (hidden when submenu is open) */
 .lock-button {
   position: absolute;
-  right: 6px;
-  z-index: 1;
+  right: 12px;
   top: 10px;
+  z-index: 50;
   color: var(--nav-lock-button-color);
-  opacity: 0;
   background-color: transparent;
-  transition: opacity 0.3s, color 0.3s, background-color 0.3s;
   border: 0;
   cursor: pointer;
-  display: flex;
-  width: var(--spacing-8);
-  height: var(--spacing-8);
+  display: none;
+  width: 32px;
+  height: 32px;
   align-items: center;
   justify-content: center;
-  border-radius: var(--border-radius-xs);
+  border-radius: 4px;
   padding: 0;
 }
 
-/* Show lock button when sidebar is expanded */
-.left-nav:not(.minimized) .lock-button {
-  opacity: 1;
+/* Show main lock when expanded but NOT when submenu is open */
+.left-nav:not(.minimized, .submenu-open) .lock-button {
+  display: flex;
 }
 
-/* When locked, always show and use white color */
-body.nav-lock .lock-button {
-  opacity: 1;
-}
-
-.lock-button:hover {
+.lock-button:hover,
+.submenu-lock-button:hover {
   background-color: var(--nav-lock-button-bg-color-hover);
-  color: var(--nav-lock-button-color-hover);
+  color: #fff;
 }
 
-.lock-button.active {
-  color: var(--nav-lock-button-color-active);
+.lock-button.active,
+.submenu-lock-button.active {
+  color: #fff;
 }
 
-/* Hide lock button when mouse leaves nav (with delay) */
-body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
-  opacity: 0;
-  transition-delay: 0.3s;
+/* Lock button inside submenu panel */
+.submenu-lock-button {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  color: var(--nav-lock-button-color);
+  background-color: transparent;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 0;
 }
 
 /* Reset button base styles */
@@ -403,77 +412,124 @@ body.nav-mouse-leave .left-nav:not(.minimized) .lock-button {
 }
 
 /* =============================================================================
-   DROPDOWN SUBMENU STYLES
+   SLIDING SUBMENU PANEL STYLES
    ============================================================================= */
 
-/* Dropdown toggle button */
-.nav-dropdown-toggle {
-  width: 100%;
-  text-align: left;
+/* Header container */
+.nav-header {
+  position: relative;
 }
 
-/* Chevron icon */
-.nav-dropdown-chevron {
-  margin-left: auto;
-  margin-right: 8px;
+/* Submenu panel - slides in from right */
+.nav-submenu-panel {
+  position: absolute;
+  top: 0;
+  left: 56px;
+  width: 214px;
+  height: 100vh;
+  background-color: var(--nav-bg);
+  transform: translateX(100%);
+  opacity: 0;
+  transition: transform 0.35s ease-out, opacity 0.35s ease-out;
+  pointer-events: none;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Show submenu panel */
+.left-nav.submenu-open .nav-submenu-panel {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Hide submenu panel when minimized */
+.left-nav.minimized .nav-submenu-panel {
+  display: none;
+}
+
+/* Back button header - aligned with lock button */
+.nav-submenu-header {
+  padding: 10px 12px; /* Match lock button top: 10px */
+  height: 52px;
+  display: flex;
+  align-items: flex-start;
+}
+
+.nav-back-button {
   display: flex;
   align-items: center;
-  transition: transform 0.2s ease;
-}
-
-.nav-dropdown-toggle[aria-expanded="true"] .nav-dropdown-chevron {
-  transform: rotate(180deg);
-}
-
-/* Submenu container */
-.nav-submenu {
-  display: none;
-  overflow: hidden;
-  padding-left: 8px;
-  margin-top: 2px;
-}
-
-.nav-submenu.show {
-  display: block;
-}
-
-/* Hide submenu when sidebar is minimized */
-.left-nav.minimized .nav-submenu {
-  display: none !important;
-}
-
-/* Level 1 items (submenu) */
-.nav-menu-item.nav-menu-item-level-1 {
-  height: 28px;
-  max-width: 100%;
-  min-height: 28px;
-  width: 100%;
-  margin: 0;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--nav-item-text-color);
+  font-size: 12px;
+  cursor: pointer;
   padding: 0;
-  font-size: 13px;
+  border-radius: 4px;
+  height: 32px; /* Same height as lock button */
+}
+
+.nav-back-button:hover {
+  color: var(--nav-sub-item-text-active-color);
+}
+
+.nav-back-arrow {
+  font-size: 14px;
+}
+
+/* Submenu title */
+.nav-submenu-title {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--nav-sub-item-text-color);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Submenu items container */
+.nav-submenu-items {
+  padding: 0 12px;
+}
+
+/* Hide text labels when submenu is open (show only icons) */
+.left-nav.submenu-open .hide-when-submenu {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Level 1 items (submenu items - text only, no icons) */
+.nav-menu-item.nav-menu-item-level-1 {
+  height: 32px;
+  max-width: 100%;
+  min-height: 32px;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0 12px; /* Horizontal padding for text */
+  font-size: 14px;
+  color: var(--nav-item-text-color); /* White text for unselected items */
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  text-decoration: none;
 }
 
 .nav-menu-item.nav-menu-item-level-1:hover {
   background-color: var(--nav-item-hover-bg-color);
-  color: var(--nav-sub-item-text-active-color);
+  color: var(--nav-item-text-color);
+  text-decoration: none;
 }
 
 .nav-menu-item.nav-menu-item-level-1.active-link {
   background-color: var(--nav-item-active-bg-color);
-  color: var(--nav-sub-item-text-active-color);
+  color: var(--nav-item-active-icon-color); /* Green text for active item */
   font-weight: 600;
 }
 
-.nav-menu-item.nav-menu-item-level-1.active-link .nav-icon {
-  color: var(--nav-item-active-icon-color);
-}
-
-.nav-menu-item.nav-menu-item-level-1 .nav-icon {
-  margin: 0 4px;
-}
-
-.nav-menu-item.nav-menu-item-level-1 .nav-icon svg {
-  width: 18px;
-  height: 18px;
+/* Submenu trigger button */
+.nav-submenu-trigger {
+  width: 100%;
+  text-align: left;
 }

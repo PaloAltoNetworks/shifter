@@ -22,10 +22,12 @@ flowchart LR
     subgraph RANGE_VPC["Range VPC"]
         SUBNET[User Subnet /24]
         KALI[Kali EC2]
+        NGFW[VM-Series NGFW]
         VICTIM[Victim EC2]
         DC[DC EC2]
         SUBNET --- KALI
-        SUBNET --- VICTIM
+        KALI -.-> NGFW
+        NGFW -.-> VICTIM
         SUBNET --- DC
     end
 
@@ -33,7 +35,7 @@ flowchart LR
     ECS -->|pulumi up| SUBNET
 ```
 
-DC is optional. When present, victim instances can join the AD domain.
+DC and NGFW are optional. DC enables AD attack scenarios with domain-joined victims. NGFW (VM-Series) sits inline between Kali and Victim to generate network telemetry.
 
 ## Range Lifecycle
 
@@ -53,10 +55,14 @@ Each range creates:
 - Kali EC2 instance
 - Victim EC2 instance(s)
 - DC EC2 instance (optional, for AD scenarios)
+- NGFW EC2 instance (optional, for network telemetry)
 - SSH key per instance (Secrets Manager)
 - SSM Parameter for DC config (when DC present)
+- S3 bootstrap bucket for NGFW (when NGFW enabled)
 
 DC instances use a prebaked AMI with AD DS already promoted. Post-boot SSM orchestration handles DNS cleanup and XDR agent installation. Victims use user data for initial setup; domain members are joined via SSM after DC is ready.
+
+NGFW (VM-Series) uses bootstrap with init-cfg.txt containing SCM PIN credentials. Auto-registers with Strata Cloud Manager on first boot. Sits inline between Kali and Victim with untrust/trust interfaces.
 
 ## Terraform Modules
 

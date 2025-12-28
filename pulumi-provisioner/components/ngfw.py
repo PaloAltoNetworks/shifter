@@ -57,11 +57,9 @@ class NGFWComponent(pulumi.ComponentResource):
         subnet_index: int,
         environment: str,
         instance_profile_name: str = "",
-        panorama_server: str = "",
-        vm_auth_key: str = "",
-        panorama_server_2: str = "",
-        template_stack: str = "",
-        device_group: str = "",
+        strata_pin_id: str = "",
+        strata_pin_value: str = "",
+        strata_folder_name: str = "",
         opts: Optional[pulumi.ResourceOptions] = None,
     ):
         """Create a VM-Series NGFW for a range.
@@ -79,11 +77,9 @@ class NGFWComponent(pulumi.ComponentResource):
             subnet_index: The index for the third octet of the CIDR.
             environment: Environment name.
             instance_profile_name: IAM instance profile name (optional).
-            panorama_server: Primary Panorama IP/hostname.
-            vm_auth_key: VM auth key from Panorama.
-            panorama_server_2: Secondary Panorama (HA).
-            template_stack: Template stack name.
-            device_group: Device group name.
+            strata_pin_id: SCM auto-registration PIN ID.
+            strata_pin_value: SCM auto-registration PIN value.
+            strata_folder_name: SCM folder name for device group.
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NGFWComponent", name, None, opts)
@@ -136,11 +132,9 @@ class NGFWComponent(pulumi.ComponentResource):
         bootstrap_prefix = f"ngfw-bootstrap/{environment}/range-{range_id}"
         init_cfg_content = self._generate_init_cfg(
             hostname=f"shifter-ngfw-{range_id}",
-            panorama_server=panorama_server,
-            vm_auth_key=vm_auth_key,
-            panorama_server_2=panorama_server_2,
-            template_stack=template_stack,
-            device_group=device_group,
+            pin_id=strata_pin_id,
+            pin_value=strata_pin_value,
+            folder_name=strata_folder_name,
         )
 
         # Upload init-cfg.txt to S3
@@ -217,21 +211,17 @@ class NGFWComponent(pulumi.ComponentResource):
     def _generate_init_cfg(
         self,
         hostname: str,
-        panorama_server: str = "",
-        vm_auth_key: str = "",
-        panorama_server_2: str = "",
-        template_stack: str = "",
-        device_group: str = "",
+        pin_id: str = "",
+        pin_value: str = "",
+        folder_name: str = "",
     ) -> str:
-        """Generate VM-Series init-cfg.txt content.
+        """Generate VM-Series init-cfg.txt content for SCM registration.
 
         Args:
             hostname: Hostname for the NGFW.
-            panorama_server: Primary Panorama IP/hostname.
-            vm_auth_key: VM auth key from Panorama.
-            panorama_server_2: Secondary Panorama (HA).
-            template_stack: Template stack name.
-            device_group: Device group name.
+            pin_id: SCM auto-registration PIN ID.
+            pin_value: SCM auto-registration PIN value.
+            folder_name: SCM folder name (device group).
 
         Returns:
             init-cfg.txt content string.
@@ -249,11 +239,9 @@ class NGFWComponent(pulumi.ComponentResource):
         template = env.get_template("ngfw_init_cfg.txt.j2")
         return template.render(
             hostname=hostname,
-            panorama_server=panorama_server,
-            vm_auth_key=vm_auth_key,
-            panorama_server_2=panorama_server_2,
-            template_stack=template_stack,
-            device_group=device_group,
+            pin_id=pin_id,
+            pin_value=pin_value,
+            folder_name=folder_name,
         )
 
     def _generate_user_data(

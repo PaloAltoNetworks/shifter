@@ -18,7 +18,7 @@ Django web application. Auth, agent management, range lifecycle, terminal access
 | `/mission-control/` | `dashboard` | Launch/manage ranges |
 | `/mission-control/agents/` | `agents` | List uploaded agents |
 | `/mission-control/terminal/` | `terminal` | SSH access to range |
-| `/mission-control/history/` | `history` | Past ranges |
+| `/mission-control/ngfw/` | `ngfw_configs` | Strata (NGFW) config management |
 | `/mission-control/settings/` | `settings` | Account settings |
 | `/mission-control/help/` | `help_page` | Help docs |
 
@@ -27,11 +27,16 @@ Django web application. Auth, agent management, range lifecycle, terminal access
 | Route | Method | Purpose |
 |-------|--------|---------|
 | `/mission-control/api/range/status/` | GET | Current range status |
-| `/mission-control/api/range/launch/` | POST | Launch new range (accepts `agent_id` and `scenario`) |
+| `/mission-control/api/range/launch/` | POST | Launch new range (accepts `agent_id`, `scenario`, `ngfw_enabled`, `ngfw_config_id`) |
+| `/mission-control/api/range/cancel/` | POST | Cancel provisioning range |
 | `/mission-control/api/range/destroy/` | POST | Destroy range |
 | `/mission-control/api/agents/` | GET | List agents for launch dropdown |
 | `/mission-control/api/upload/initiate/` | POST | Get presigned S3 URL |
 | `/mission-control/api/upload/complete/` | POST | Finalize upload |
+| `/mission-control/api/upload/cancel/` | POST | Cancel upload |
+| `/mission-control/api/ngfw-configs/` | GET | List NGFW configs for dropdown |
+| `/mission-control/api/ngfw-configs/create/` | POST | Create new NGFW config |
+| `/mission-control/api/ngfw-configs/<id>/delete/` | DELETE | Delete NGFW config |
 
 ## Authentication
 

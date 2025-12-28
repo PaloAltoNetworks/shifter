@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from .models import ActivityLog, AgentConfig, OperatingSystem, Range, UserProfile
+from .models import ActivityLog, AgentConfig, OperatingSystem, Range, StrataConfig, UserProfile
 
 
 @admin.register(OperatingSystem)
@@ -36,12 +36,47 @@ class AgentConfigAdmin(admin.ModelAdmin):
     readonly_fields = ("s3_key", "sha256_hash", "file_size_bytes", "created_at")
 
 
+@admin.register(StrataConfig)
+class StrataConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "user",
+        "scm_folder_name",
+        "created_at",
+        "deleted_at",
+    )
+    list_filter = ("deleted_at", "created_at")
+    search_fields = ("name", "user__email", "scm_folder_name")
+    raw_id_fields = ("user",)
+    readonly_fields = ("created_at",)
+    fieldsets = (
+        (None, {"fields": ("user", "name")}),
+        (
+            "SCM Configuration",
+            {
+                "fields": (
+                    "scm_folder_name",
+                    "scm_pin_id",
+                    "scm_pin_value",
+                )
+            },
+        ),
+        ("Metadata", {"fields": ("created_at", "deleted_at")}),
+    )
+
+
 @admin.register(Range)
 class RangeAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "agent", "created_at")
-    list_filter = ("created_at",)
+    list_display = ("id", "user", "agent", "status", "ngfw_enabled", "created_at")
+    list_filter = ("status", "ngfw_enabled", "created_at")
     search_fields = ("user__email", "agent__name")
-    raw_id_fields = ("user", "agent")
+    raw_id_fields = ("user", "agent", "strata_config")
+    readonly_fields = ("ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")
+    fieldsets = (
+        (None, {"fields": ("user", "agent", "status")}),
+        ("NGFW", {"fields": ("ngfw_enabled", "strata_config", "ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")}),
+        ("Timestamps", {"fields": ("created_at", "ready_at", "destroyed_at")}),
+    )
 
 
 @admin.register(ActivityLog)

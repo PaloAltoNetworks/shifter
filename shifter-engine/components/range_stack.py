@@ -3,6 +3,7 @@
 This is the main composition component that brings together:
 - Network (subnet)
 - Instances (Kali, victims, DC)
+- NGFW (VM-Series, optional)
 
 DC instances are created first to ensure domain controllers are available
 before domain member instances that depend on them.
@@ -15,6 +16,7 @@ import pulumi
 from config import RangeConfig
 from components.instance import InstanceComponent
 from components.network import NetworkComponent
+from components.ngfw import NGFWComponent
 
 
 class RangeStack(pulumi.ComponentResource):
@@ -23,13 +25,15 @@ class RangeStack(pulumi.ComponentResource):
     This is the main entry point for provisioning a range. It composes:
     - NetworkComponent for subnet creation
     - InstanceComponent(s) for each configured instance
-
+    - NGFWComponent for VM-Series firewall (optional)
     DC instances are created first (dependency ordering) to ensure the domain
     controller is available before domain members attempt to join.
+
 
     Attributes:
         network: The network component.
         instances: List of instance components.
+        ngfw: The NGFW component (None if disabled).
         subnet_id: The subnet ID.
         subnet_cidr: The subnet CIDR.
         dc_config_param_name: SSM parameter path for DC config (None if no DC).
@@ -37,6 +41,7 @@ class RangeStack(pulumi.ComponentResource):
 
     network: NetworkComponent
     instances: list[InstanceComponent]
+    ngfw: Optional[NGFWComponent]
     subnet_id: pulumi.Output[str]
     subnet_cidr: pulumi.Output[str]
     dc_config_param_name: Optional[str]
@@ -81,6 +86,32 @@ class RangeStack(pulumi.ComponentResource):
         # DC instances must be created first so domain members can depend on them
         dc_configs = [inst for inst in config.instances if inst.role == "dc"]
         other_configs = [inst for inst in config.instances if inst.role != "dc"]
+
+        # Create NGFW if enabled
+        self.ngfw = None
+        if config.ngfw_enabled:
+            self.ngfw = NGFWComponent(
+                f"{name}-ngfw",
+                range_id=config.range_id,
+                user_id=config.user_id,
+                subnet_id=self.network.subnet_id,
+                security_group_id=config.ngfw_security_group_id,
+                ami_id=config.ngfw_ami_id,
+                instance_type=config.ngfw_instance_type,
+                bootstrap_bucket=config.agent_s3_bucket,  # Reuse agent bucket
+                cidr_prefix=cidr_prefix,
+                subnet_index=config.subnet_index,
+                environment=config.environment,
+                instance_profile_name=config.instance_profile_name,
+                # Strata Cloud Manager configuration from StrataConfig model
+                strata_pin_id=config.strata_pin_id,
+                strata_pin_value=config.strata_pin_value,
+                strata_folder_name=config.strata_folder_name,
+                opts=pulumi.ResourceOptions(
+                    parent=self,
+                    depends_on=[self.network],
+                ),
+            )
 
         # Create instances list and role counters
         self.instances = []
@@ -253,5 +284,6 @@ class RangeStack(pulumi.ComponentResource):
                 for inst in self.instances
             ],
             "dc_config_param_name": self.dc_config_param_name,
+            "ngfw": self.ngfw.to_output_dict() if self.ngfw else None,
         }
         return outputs

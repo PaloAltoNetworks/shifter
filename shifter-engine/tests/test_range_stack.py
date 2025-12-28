@@ -45,11 +45,23 @@ def mock_dc_setup():
         yield mock
 
 
+@pytest.fixture
+def mock_setup():
+    """Mock setup for RangeStack tests.
+
+    Instance setup uses SSM Run Command which requires AWS credentials and region.
+    We mock it to return a successful Output without making real API calls.
+    """
+    with patch("components.instance.InstanceComponent.run_setup") as mock:
+        mock.return_value = pulumi.Output.from_input(True)
+        yield mock
+
+
 class TestRangeStackComposition:
     """Tests for RangeStack component composition."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -148,7 +160,7 @@ class TestRangeStackSecurityGroupAssignment:
     """Tests for security group assignment logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -241,7 +253,7 @@ class TestRangeStackAmiSelection:
     """Tests for AMI selection logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -374,7 +386,7 @@ class TestRangeStackMultipleInstances:
     """Tests for multiple instance handling and indexing."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -523,7 +535,7 @@ class TestRangeStackCidrPrefixExtraction:
     """Tests for CIDR prefix extraction logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -643,7 +655,7 @@ class TestRangeStackDCDependencyOrdering:
     """
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_dc_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_dc_setup, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 

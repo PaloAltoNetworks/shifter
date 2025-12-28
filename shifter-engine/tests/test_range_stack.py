@@ -1,4 +1,4 @@
-"""Range stack component tests for Pulumi provisioner.
+"""Range stack component tests for Shifter Engine.
 
 These tests use Pulumi's mocking framework to test the actual RangeStack
 component which composes NetworkComponent and InstanceComponent(s).

@@ -1,12 +1,12 @@
 # Execution Plane
 
-Infrastructure that runs ranges: provisioner and range runtime.
+Infrastructure that runs ranges: Shifter Engine and range runtime.
 
 ## Components
 
 | Component | Purpose |
 |-----------|---------|
-| [Pulumi Provisioner](provisioner.md) | ECS task that creates/destroys range infrastructure |
+| [Shifter Engine](engine.md) | ECS task that creates/destroys range infrastructure |
 | [Kali AMI](kali-ami.md) | Pre-baked attacker instance |
 | [Victim AMI](victim-ami.md) | Pre-baked victim instance |
 
@@ -40,9 +40,9 @@ DC is optional. When present, victim instances can join the AD domain.
 | Status | Meaning |
 |--------|---------|
 | `pending` | Portal created Range record |
-| `provisioning` | Provisioner running `pulumi up` |
+| `provisioning` | Shifter Engine running `pulumi up` |
 | `ready` | Infrastructure created, IPs available |
-| `destroying` | Provisioner running `pulumi destroy` |
+| `destroying` | Shifter Engine running `pulumi destroy` |
 | `destroyed` | Infrastructure torn down |
 | `failed` | Error during provisioning |
 

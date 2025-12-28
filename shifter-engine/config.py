@@ -1,0 +1,345 @@
+"""Configuration module for Shifter Engine.
+
+This module handles loading configuration from Pulumi stack config
+and environment variables.
+
+Note: Presigned URL generation happens here (before Pulumi runs) because:
+1. It's a one-time operation per range, not per-resource
+2. It doesn't create AWS resources, just signs a URL
+3. The signed URL is passed as data to EC2 user data scripts
+"""
+
+import base64
+import logging
+import os
+from dataclasses import dataclass
+from typing import Optional
+
+import boto3
+import psycopg
+import pulumi
+from cryptography.fernet import Fernet
+
+logger = logging.getLogger(__name__)
+
+from catalog.instances import (
+    _get_dc_instance_type,
+    _get_kali_instance_type,
+    _get_victim_instance_type,
+    _get_windows_instance_type,
+)
+
+
+def decrypt_field(encrypted_value: str) -> str:
+    """Decrypt a Fernet-encrypted field value.
+
+    Used for sensitive fields like StrataConfig.scm_pin_value that are
+    encrypted at rest in the Django database.
+
+    Args:
+        encrypted_value: Base64-encoded Fernet ciphertext from database
+
+    Returns:
+        Decrypted plaintext string
+
+    Raises:
+        ValueError: If FIELD_ENCRYPTION_KEY not set or decryption fails
+    """
+    if not encrypted_value:
+        return ""
+
+    key = os.environ.get("FIELD_ENCRYPTION_KEY")
+    if not key:
+        logger.warning("FIELD_ENCRYPTION_KEY not set, returning value as-is")
+        return encrypted_value
+
+    try:
+        fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        encrypted_bytes = base64.urlsafe_b64decode(encrypted_value.encode("ascii"))
+        return fernet.decrypt(encrypted_bytes).decode("utf-8")
+    except Exception as e:
+        # If decryption fails, log and return as-is (for backward compatibility)
+        logger.warning(f"Failed to decrypt field: {e}")
+        return encrypted_value
+
+
+def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:
+    """Generate a presigned URL for an S3 object.
+
+    This is called during config loading (before Pulumi runs), not during
+    resource creation. It's safe because it doesn't create any AWS resources.
+
+    Args:
+        bucket: S3 bucket name.
+        key: S3 object key.
+        expires_in: URL expiration time in seconds.
+
+    Returns:
+        Presigned URL string.
+    """
+    s3_client = boto3.client("s3")
+    return s3_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=expires_in,
+    )
+
+
+@dataclass
+class InstanceConfig:
+    """Configuration for an instance to be provisioned."""
+
+    role: str  # "attacker", "victim", or "dc"
+    os_type: str  # "kali", "ubuntu", "windows"
+    instance_type: str
+    agent_id: Optional[int] = None  # Agent config ID for victim instances
+    agent_s3_key: Optional[str] = None  # S3 key for agent installer
+    agent_presigned_url: Optional[str] = None  # Presigned URL for agent download
+    dc_config: Optional[dict] = None  # {"domain_name": "...", "netbios_name": "..."}
+    join_domain: bool = False  # Whether this instance should join a domain
+    dc_config_param_name: Optional[str] = None  # SSM parameter path for DC config
+
+
+@dataclass
+class RangeConfig:
+    """Configuration for a complete range."""
+
+    range_id: int
+    user_id: int
+    subnet_index: int
+    environment: str
+    instances: list[InstanceConfig]
+    vpc_id: str
+    vpc_cidr: str
+    route_table_id: str
+    kali_security_group_id: str
+    victim_security_group_id: str
+    instance_profile_name: str
+    kali_ami_id: str
+    victim_ami_id: str
+    windows_ami_id: str
+    agent_s3_bucket: str
+    availability_zone: str
+    dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
+    dc_security_group_id: str = ""  # Security group for Domain Controller instances
+    portal_vpc_cidr: str = ""
+    # NGFW (VM-Series) configuration
+    ngfw_enabled: bool = False
+    ngfw_ami_id: str = ""
+    ngfw_instance_type: str = "m5.xlarge"
+    ngfw_security_group_id: str = ""
+    # Strata Cloud Manager config (from StrataConfig model)
+    # Replaces old Panorama config - uses PIN-based SCM registration
+    strata_folder_name: str = ""
+    strata_pin_id: str = ""
+    strata_pin_value: str = ""
+
+
+def get_db_connection() -> psycopg.Connection:
+    """Get database connection using RDS IAM auth."""
+    client = boto3.client("rds")
+    token = client.generate_db_auth_token(
+        DBHostname=os.environ["DB_HOST"],
+        Port=int(os.environ.get("DB_PORT", 5432)),
+        DBUsername=os.environ["DB_USER"],
+        Region=os.environ["AWS_REGION"],
+    )
+    return psycopg.connect(
+        host=os.environ["DB_HOST"],
+        port=int(os.environ.get("DB_PORT", 5432)),
+        dbname=os.environ["DB_NAME"],
+        user=os.environ["DB_USER"],
+        password=token,
+        sslmode="require",
+    )
+
+
+def get_range_from_db(range_id: int) -> dict:
+    """Load range configuration from database."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    r.id,
+                    r.user_id,
+                    r.subnet_index,
+                    r.agent_id,
+                    r.instance_config,
+                    a.s3_key as agent_s3_key,
+                    os.slug as agent_os_slug,
+                    r.dc_agent_id,
+                    dc_a.s3_key as dc_agent_s3_key,
+                    r.ngfw_enabled,
+                    sc.scm_folder_name as strata_folder_name,
+                    sc.scm_pin_id as strata_pin_id,
+                    sc.scm_pin_value as strata_pin_value
+                FROM mission_control_range r
+                LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
+                LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
+                LEFT JOIN mission_control_agentconfig dc_a ON r.dc_agent_id = dc_a.id
+                LEFT JOIN mission_control_strataconfig sc ON r.strata_config_id = sc.id
+                WHERE r.id = %s
+                """,
+                (range_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Range {range_id} not found")
+
+            return {
+                "id": row[0],
+                "user_id": row[1],
+                "subnet_index": row[2],
+                "agent_id": row[3],
+                "instance_config": row[4],
+                "agent_s3_key": row[5],
+                "agent_os_slug": row[6],
+                "dc_agent_id": row[7],
+                "dc_agent_s3_key": row[8],
+                "ngfw_enabled": row[9],
+                "strata_folder_name": row[10] or "",
+                "strata_pin_id": row[11] or "",
+                # PIN value is encrypted at rest - decrypt it
+                "strata_pin_value": decrypt_field(row[12]) if row[12] else "",
+            }
+
+
+def load_config() -> RangeConfig:
+    """Load range configuration from Pulumi config and database.
+
+    Returns:
+        RangeConfig: Complete configuration for provisioning.
+    """
+    config = pulumi.Config()
+
+    # Get range ID from config
+    range_id = config.require_int("rangeId")
+    environment = config.require("environment")
+
+    # Load range data from database
+    range_data = get_range_from_db(range_id)
+
+    # Parse instance_config from database or use defaults
+    db_instance_config = range_data.get("instance_config") or []
+
+    # Get agent bucket for presigned URL generation
+    agent_s3_bucket = config.get("agentS3Bucket") or ""
+
+    # Helper to generate presigned URL if we have bucket and key
+    def get_presigned_url(s3_key: Optional[str]) -> Optional[str]:
+        if agent_s3_bucket and s3_key:
+            return generate_presigned_url(agent_s3_bucket, s3_key)
+        return None
+
+    # Get instance types from environment (required - no defaults)
+    kali_instance_type = os.environ.get("KALI_INSTANCE_TYPE")
+    victim_instance_type = os.environ.get("VICTIM_INSTANCE_TYPE")
+
+    if not kali_instance_type or not victim_instance_type:
+        raise ValueError(
+            "KALI_INSTANCE_TYPE and VICTIM_INSTANCE_TYPE environment variables are required"
+        )
+
+    # If no custom config, use default (1 Kali + 1 Victim)
+    if not db_instance_config:
+        agent_s3_key = range_data.get("agent_s3_key")
+        # Map agent OS to victim OS type: Windows agent → Windows victim
+        agent_os_slug = range_data.get("agent_os_slug") or ""
+        victim_os_type = "windows" if agent_os_slug == "windows" else "ubuntu"
+        instances = [
+            InstanceConfig(
+                role="attacker",
+                os_type="kali",
+                instance_type=kali_instance_type,
+            ),
+            InstanceConfig(
+                role="victim",
+                os_type=victim_os_type,
+                instance_type=victim_instance_type,
+                agent_id=range_data.get("agent_id"),
+                agent_s3_key=agent_s3_key,
+                agent_presigned_url=get_presigned_url(agent_s3_key),
+            ),
+        ]
+    else:
+        # Parse custom instance configs - use catalog defaults if instance_type not specified
+        instances = []
+        # Get victim agent config from range
+        range_agent_s3_key = range_data.get("agent_s3_key")
+        # Get DC agent config from range (separate agent for DC instances)
+        dc_agent_s3_key = range_data.get("dc_agent_s3_key")
+
+        for inst in db_instance_config:
+            role = inst.get("role", "victim")
+            os_type = inst.get("os_type") or inst.get("os", "ubuntu")
+
+            # Get instance_type from config or use catalog default based on role/os
+            instance_type = inst.get("instance_type")
+            if not instance_type:
+                if role == "attacker":
+                    instance_type = _get_kali_instance_type()
+                elif role == "dc":
+                    instance_type = _get_dc_instance_type()
+                elif os_type == "windows":
+                    instance_type = _get_windows_instance_type()
+                else:
+                    instance_type = _get_victim_instance_type()
+
+            # Get agent key based on role:
+            # - DC instances use dc_agent (separate Windows agent)
+            # - Victim instances use range agent
+            # - Instance-specific config overrides both
+            agent_s3_key = inst.get("agent_s3_key")
+            if not agent_s3_key:
+                if role == "dc":
+                    # DC uses dedicated dc_agent (must be Windows/MSI)
+                    agent_s3_key = dc_agent_s3_key
+                elif role == "victim":
+                    # Victim uses range's victim agent
+                    agent_s3_key = range_agent_s3_key
+
+            instances.append(
+                InstanceConfig(
+                    role=role,
+                    os_type=os_type,
+                    instance_type=instance_type,
+                    agent_id=inst.get("agent_id") or range_data.get("agent_id"),
+                    agent_s3_key=agent_s3_key,
+                    agent_presigned_url=get_presigned_url(agent_s3_key),
+                    dc_config=inst.get("dc_config"),
+                    join_domain=inst.get("join_domain", False),
+                )
+            )
+
+    # Get VPC and network configuration from Pulumi config (set via environment)
+    return RangeConfig(
+        range_id=range_id,
+        user_id=range_data["user_id"],
+        subnet_index=range_data["subnet_index"],
+        environment=environment,
+        instances=instances,
+        vpc_id=config.require("rangeVpcId"),
+        vpc_cidr=config.require("rangeVpcCidr"),
+        route_table_id=config.require("rangeRouteTableId"),
+        kali_security_group_id=config.require("kaliSecurityGroupId"),
+        victim_security_group_id=config.require("victimSecurityGroupId"),
+        instance_profile_name=config.get("rangeInstanceProfileName") or "",
+        kali_ami_id=config.require("kaliAmiId"),
+        victim_ami_id=config.require("victimAmiId"),
+        windows_ami_id=config.get("windowsAmiId") or "",
+        agent_s3_bucket=config.get("agentS3Bucket") or "",
+        availability_zone=config.require("availabilityZone"),
+        dc_ami_id=config.get("dcAmiId") or "",
+        portal_vpc_cidr=config.get("portalVpcCidr") or "",
+        dc_security_group_id=config.get("dcSecurityGroupId") or "",
+        # NGFW (VM-Series) configuration - enabled from DB, config from env vars
+        ngfw_enabled=range_data.get("ngfw_enabled", False),
+        ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
+        ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
+        ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+        # Strata Cloud Manager config from database (via StrataConfig model)
+        strata_folder_name=range_data.get("strata_folder_name", ""),
+        strata_pin_id=range_data.get("strata_pin_id", ""),
+        strata_pin_value=range_data.get("strata_pin_value", ""),
+    )

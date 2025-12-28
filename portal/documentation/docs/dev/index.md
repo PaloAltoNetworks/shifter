@@ -39,7 +39,7 @@ shifter/
 │   ├── mission_control/    # Main app (ranges, agents, terminal)
 │   ├── documentation/      # In-app docs (you're reading this)
 │   └── config/             # Django settings
-├── pulumi-provisioner/     # Range provisioning (Pulumi + ECS)
+├── shifter-engine/         # Range provisioning (Pulumi + ECS)
 ├── terraform/
 │   ├── environments/       # dev/ and prod/ configs
 │   │   ├── dev/

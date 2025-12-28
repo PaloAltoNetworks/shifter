@@ -290,11 +290,11 @@ class Range(models.Model):
         max_length=500, blank=True, default="", help_text="Step Functions execution ARN"
     )
 
-    # Pulumi provisioner fields (v2)
+    # Shifter Engine fields (v2)
     instance_config = models.JSONField(
         null=True,
         blank=True,
-        help_text="JSON array of instance configurations for Pulumi provisioner",
+        help_text="JSON array of instance configurations for Shifter Engine",
     )
     provisioned_instances = models.JSONField(
         null=True,

@@ -15,7 +15,7 @@ flowchart TB
     end
 
     subgraph ECS["ECS"]
-        PROV[Pulumi Provisioner]
+        PROV[Shifter Engine]
     end
 
     subgraph RANGE_VPC["Range VPC (10.1.0.0/16)"]
@@ -70,7 +70,7 @@ Single Django codebase with two apps:
 - `services/secrets.py` - Secrets Manager retrieval
 - `consumers.py` - WebSocket SSH terminal consumer
 
-### Pulumi Provisioner (`pulumi-provisioner/`)
+### Shifter Engine (`shifter-engine/`)
 
 ECS Fargate task that provisions/destroys range infrastructure.
 
@@ -144,7 +144,7 @@ sequenceDiagram
     Portal->>User: Range ready
 ```
 
-DC uses a prebaked AMI with AD DS ready. SSM orchestrates DNS cleanup, XDR installation, and domain joins. See [Provisioner docs](execution/provisioner.md#dc-setup-via-ssm) for details.
+DC uses a prebaked AMI with AD DS ready. SSM orchestrates DNS cleanup, XDR installation, and domain joins. See [Shifter Engine docs](execution/engine.md#dc-setup-via-ssm) for details.
 
 NGFW (VM-Series) uses bootstrap with init-cfg.txt containing SCM PIN credentials. Auto-registers with Strata Cloud Manager on first boot.
 
@@ -223,6 +223,6 @@ GitHub Actions on merge:
 |---------|--------|
 | `terraform/**` → main | `terraform apply` |
 | `portal/**` → main | Build image → ECR → SSM restart EC2 |
-| `pulumi-provisioner/**` → main | Build image → ECR |
+| `shifter-engine/**` → main | Build image → ECR |
 
 IAM via OIDC federation. No static credentials.

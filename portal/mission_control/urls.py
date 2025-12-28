@@ -11,6 +11,7 @@ urlpatterns = [
     path("agents/", views.agents, name="agents"),
     path("agents/upload/", views.upload_agent, name="upload_agent"),
     path("agents/<int:agent_id>/delete/", views.delete_agent, name="delete_agent"),
+    path("ngfw/", views.ngfw_configs, name="ngfw_configs"),
     path("terminal/", views.terminal, name="terminal"),
     path("settings/", views.settings, name="settings"),
     path("help/", views.help_page, name="help"),
@@ -24,4 +25,8 @@ urlpatterns = [
     path("api/range/cancel/", views.cancel_range, name="cancel_range"),
     path("api/range/destroy/", views.destroy_range, name="destroy_range"),
     path("api/agents/", views.list_agents_for_launch, name="list_agents"),
+    # NGFW Config API
+    path("api/ngfw-configs/", views.list_ngfw_configs, name="list_ngfw_configs"),
+    path("api/ngfw-configs/create/", views.create_ngfw_config, name="create_ngfw_config"),
+    path("api/ngfw-configs/<int:config_id>/delete/", views.delete_ngfw_config, name="delete_ngfw_config"),
 ]

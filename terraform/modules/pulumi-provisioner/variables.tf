@@ -163,6 +163,12 @@ variable "kali_security_group_id" {
   type        = string
 }
 
+variable "dc_security_group_id" {
+  description = "Security group ID for Domain Controller instances"
+  type        = string
+  default     = ""
+}
+
 variable "range_instance_profile_arn" {
   description = "IAM instance profile ARN for range instances"
   type        = string
@@ -195,6 +201,25 @@ variable "victim_ami_id" {
 variable "windows_ami_id" {
   description = "AMI ID for Windows victim instances"
   type        = string
+  default     = ""
+}
+
+variable "dc_ami_id" {
+  description = "AMI ID for Domain Controller instances (prebaked with AD DS promoted)"
+  type        = string
+  default     = ""
+}
+
+variable "dc_domain_name" {
+  description = "Domain name for prebaked DC (e.g., internal.shifter)"
+  type        = string
+  default     = "internal.shifter"
+}
+
+variable "dc_domain_password" {
+  description = "Domain admin password for prebaked DC"
+  type        = string
+  sensitive   = true
   default     = ""
 }
 

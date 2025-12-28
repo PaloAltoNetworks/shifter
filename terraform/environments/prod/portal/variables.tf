@@ -281,6 +281,25 @@ variable "windows_ami_id" {
   default     = ""
 }
 
+variable "dc_ami_id" {
+  description = "AMI ID for Domain Controller instances (prebaked with AD DS promoted)"
+  type        = string
+  default     = ""
+}
+
+variable "dc_domain_name" {
+  description = "Domain name for prebaked DC (e.g., internal.shifter)"
+  type        = string
+  default     = "internal.shifter"
+}
+
+variable "dc_domain_password" {
+  description = "Domain admin password for prebaked DC"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # CI Testing
 # ------------------------------------------------------------------------------

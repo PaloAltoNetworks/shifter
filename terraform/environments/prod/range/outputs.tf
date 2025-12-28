@@ -41,6 +41,11 @@ output "kali_security_group_id" {
   value       = module.vpc.kali_security_group_id
 }
 
+output "dc_security_group_id" {
+  description = "ID of the security group for Domain Controller instances"
+  value       = module.vpc.dc_security_group_id
+}
+
 output "nat_gateway_id" {
   description = "ID of the NAT Gateway"
   value       = module.vpc.nat_gateway_id

@@ -17,6 +17,13 @@ import boto3
 import psycopg
 import pulumi
 
+from catalog.instances import (
+    _get_dc_instance_type,
+    _get_kali_instance_type,
+    _get_victim_instance_type,
+    _get_windows_instance_type,
+)
+
 
 def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:
     """Generate a presigned URL for an S3 object.
@@ -44,12 +51,15 @@ def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str
 class InstanceConfig:
     """Configuration for an instance to be provisioned."""
 
-    role: str  # "attacker" or "victim"
+    role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
     agent_id: Optional[int] = None  # Agent config ID for victim instances
     agent_s3_key: Optional[str] = None  # S3 key for agent installer
     agent_presigned_url: Optional[str] = None  # Presigned URL for agent download
+    dc_config: Optional[dict] = None  # {"domain_name": "...", "netbios_name": "..."}
+    join_domain: bool = False  # Whether this instance should join a domain
+    dc_config_param_name: Optional[str] = None  # SSM parameter path for DC config
 
 
 @dataclass
@@ -72,6 +82,8 @@ class RangeConfig:
     windows_ami_id: str
     agent_s3_bucket: str
     availability_zone: str
+    dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
+    dc_security_group_id: str = ""  # Security group for Domain Controller instances
     portal_vpc_cidr: str = ""
 
 
@@ -107,10 +119,13 @@ def get_range_from_db(range_id: int) -> dict:
                     r.agent_id,
                     r.instance_config,
                     a.s3_key as agent_s3_key,
-                    os.slug as agent_os_slug
+                    os.slug as agent_os_slug,
+                    r.dc_agent_id,
+                    dc_a.s3_key as dc_agent_s3_key
                 FROM mission_control_range r
                 LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
                 LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
+                LEFT JOIN mission_control_agentconfig dc_a ON r.dc_agent_id = dc_a.id
                 WHERE r.id = %s
                 """,
                 (range_id,),
@@ -127,6 +142,8 @@ def get_range_from_db(range_id: int) -> dict:
                 "instance_config": row[4],
                 "agent_s3_key": row[5],
                 "agent_os_slug": row[6],
+                "dc_agent_id": row[7],
+                "dc_agent_s3_key": row[8],
             }
 
 
@@ -188,22 +205,52 @@ def load_config() -> RangeConfig:
             ),
         ]
     else:
-        # Parse custom instance configs - instance_type is required in config
+        # Parse custom instance configs - use catalog defaults if instance_type not specified
         instances = []
+        # Get victim agent config from range
+        range_agent_s3_key = range_data.get("agent_s3_key")
+        # Get DC agent config from range (separate agent for DC instances)
+        dc_agent_s3_key = range_data.get("dc_agent_s3_key")
+
         for inst in db_instance_config:
-            if "instance_type" not in inst:
-                raise ValueError(
-                    f"instance_type is required in instance_config: {inst}"
-                )
+            role = inst.get("role", "victim")
+            os_type = inst.get("os_type") or inst.get("os", "ubuntu")
+
+            # Get instance_type from config or use catalog default based on role/os
+            instance_type = inst.get("instance_type")
+            if not instance_type:
+                if role == "attacker":
+                    instance_type = _get_kali_instance_type()
+                elif role == "dc":
+                    instance_type = _get_dc_instance_type()
+                elif os_type == "windows":
+                    instance_type = _get_windows_instance_type()
+                else:
+                    instance_type = _get_victim_instance_type()
+
+            # Get agent key based on role:
+            # - DC instances use dc_agent (separate Windows agent)
+            # - Victim instances use range agent
+            # - Instance-specific config overrides both
             agent_s3_key = inst.get("agent_s3_key")
+            if not agent_s3_key:
+                if role == "dc":
+                    # DC uses dedicated dc_agent (must be Windows/MSI)
+                    agent_s3_key = dc_agent_s3_key
+                elif role == "victim":
+                    # Victim uses range's victim agent
+                    agent_s3_key = range_agent_s3_key
+
             instances.append(
                 InstanceConfig(
-                    role=inst.get("role", "victim"),
-                    os_type=inst.get("os", "ubuntu"),
-                    instance_type=inst["instance_type"],
-                    agent_id=inst.get("agent_id"),
+                    role=role,
+                    os_type=os_type,
+                    instance_type=instance_type,
+                    agent_id=inst.get("agent_id") or range_data.get("agent_id"),
                     agent_s3_key=agent_s3_key,
                     agent_presigned_url=get_presigned_url(agent_s3_key),
+                    dc_config=inst.get("dc_config"),
+                    join_domain=inst.get("join_domain", False),
                 )
             )
 
@@ -225,5 +272,7 @@ def load_config() -> RangeConfig:
         windows_ami_id=config.get("windowsAmiId") or "",
         agent_s3_bucket=config.get("agentS3Bucket") or "",
         availability_zone=config.require("availabilityZone"),
+        dc_ami_id=config.get("dcAmiId") or "",
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
+        dc_security_group_id=config.get("dcSecurityGroupId") or "",
     )

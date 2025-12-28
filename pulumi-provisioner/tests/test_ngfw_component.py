@@ -265,3 +265,91 @@ dns-secondary=8.8.4.4
                 assert tags["shifter:role"] == "ngfw"
 
             component.instance.tags.apply(check_tags)
+
+
+class TestNGFWComponentSCMBootstrap:
+    """Tests for NGFWComponent SCM (Strata Cloud Manager) bootstrap.
+
+    SCM uses PIN-based authentication instead of Panorama vm-auth-key.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pytest.fixture
+    def scm_templates(self, temp_templates_dir):
+        """Provide temp templates directory with SCM-based NGFW templates."""
+        ngfw_userdata = temp_templates_dir / "ngfw_userdata.txt.j2"
+        ngfw_userdata.write_text(
+            "vmseries-bootstrap-aws-s3bucket={{ bootstrap_bucket }}/{{ bootstrap_prefix }}\n"
+        )
+
+        # SCM-based init-cfg template (uses PIN instead of vm-auth-key)
+        ngfw_init_cfg = temp_templates_dir / "ngfw_init_cfg.txt.j2"
+        ngfw_init_cfg.write_text(
+            """type=dhcp-client
+hostname={{ hostname }}
+dns-primary=8.8.8.8
+dns-secondary=8.8.4.4
+panorama-server=cloud
+vm-series-auto-registration-pin-id={{ pin_id }}
+vm-series-auto-registration-pin-value={{ pin_value }}
+dgname={{ folder_name }}
+"""
+        )
+
+        return temp_templates_dir
+
+    @pulumi.runtime.test
+    def test_ngfw_component_accepts_scm_params(self, scm_templates):
+        """NGFWComponent should accept strata_pin_id, strata_pin_value, strata_folder_name."""
+        from components.ngfw import NGFWComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(scm_templates)}):
+            # Should not raise when using SCM params
+            component = NGFWComponent(
+                name="test-ngfw",
+                range_id=42,
+                user_id=1,
+                subnet_id="subnet-12345",
+                security_group_id="sg-ngfw",
+                ami_id="ami-vmseries",
+                instance_type="m5.xlarge",
+                bootstrap_bucket="shifter-agents",
+                cidr_prefix="10.1",
+                subnet_index=5,
+                environment="dev",
+                strata_pin_id="pin-abc123",
+                strata_pin_value="secret-xyz789",
+                strata_folder_name="Edwards-Lab",
+            )
+
+            assert component.instance is not None
+
+    @pulumi.runtime.test
+    def test_ngfw_component_generates_scm_bootstrap_config(self, scm_templates):
+        """NGFWComponent should upload init-cfg with SCM params to S3."""
+        from components.ngfw import NGFWComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(scm_templates)}):
+            component = NGFWComponent(
+                name="test-ngfw",
+                range_id=42,
+                user_id=1,
+                subnet_id="subnet-12345",
+                security_group_id="sg-ngfw",
+                ami_id="ami-vmseries",
+                instance_type="m5.xlarge",
+                bootstrap_bucket="shifter-agents",
+                cidr_prefix="10.1",
+                subnet_index=5,
+                environment="dev",
+                strata_pin_id="pin-abc123",
+                strata_pin_value="secret-xyz789",
+                strata_folder_name="Edwards-Lab",
+            )
+
+            # Verify bootstrap config was created
+            assert component.bootstrap_config is not None

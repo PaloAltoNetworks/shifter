@@ -195,20 +195,6 @@ class DashboardManager {
         }
     }
 
-    /**
-     * Update launch button enabled/disabled state based on form validity.
-     * All scenarios just require an agent to be selected.
-     * (AD scenario validates Windows agent on backend)
-     */
-    _updateLaunchButtonState() {
-        const agentSelected = this.agentSelect?.value;
-        const canLaunch = Boolean(agentSelected);
-
-        if (this.launchBtn) {
-            this.launchBtn.disabled = !canLaunch;
-        }
-    }
-
     async init() {
         // Initialize scenario dropdown
         this._initScenarioDropdown();

@@ -353,3 +353,153 @@ dgname={{ folder_name }}
 
             # Verify bootstrap config was created
             assert component.bootstrap_config is not None
+
+
+class TestNGFWVerification:
+    """Tests for NGFW SCM registration verification.
+
+    Verification uses SSH to check if NGFW registered with SCM.
+    """
+
+    def test_verify_registration_success(self):
+        """verify_registration returns True when NGFW is registered."""
+        from unittest.mock import MagicMock, patch
+        from components.ngfw import verify_ngfw_registration
+
+        mock_executor = MagicMock()
+        mock_executor.wait_for_agent.return_value = True
+        mock_executor.run_command.return_value = MagicMock(
+            success=True,
+            stdout="Panorama Server 1 : cloud\n    Connected     : yes",
+            stderr="",
+        )
+
+        with patch("components.ngfw.SSHExecutor", return_value=mock_executor):
+            result = verify_ngfw_registration(
+                host="10.0.0.10",
+                private_key="fake-key",
+                timeout_seconds=60,
+            )
+
+        assert result is True
+        mock_executor.wait_for_agent.assert_called_once()
+        mock_executor.run_command.assert_called_once()
+
+    def test_verify_registration_fails_when_not_connected(self):
+        """verify_registration returns False when NGFW is not registered."""
+        from unittest.mock import MagicMock, patch
+        from components.ngfw import verify_ngfw_registration
+
+        mock_executor = MagicMock()
+        mock_executor.wait_for_agent.return_value = True
+        mock_executor.run_command.return_value = MagicMock(
+            success=True,
+            stdout="Panorama Server 1 : cloud\n    Connected     : no",
+            stderr="",
+        )
+
+        with patch("components.ngfw.SSHExecutor", return_value=mock_executor):
+            result = verify_ngfw_registration(
+                host="10.0.0.10",
+                private_key="fake-key",
+                timeout_seconds=60,
+            )
+
+        assert result is False
+
+    def test_verify_registration_waits_for_ssh(self):
+        """verify_registration waits for SSH to become available."""
+        from unittest.mock import MagicMock, patch
+        from components.ngfw import verify_ngfw_registration
+
+        mock_executor = MagicMock()
+        mock_executor.wait_for_agent.return_value = True
+        mock_executor.run_command.return_value = MagicMock(
+            success=True,
+            stdout="Connected     : yes",
+            stderr="",
+        )
+
+        with patch("components.ngfw.SSHExecutor", return_value=mock_executor):
+            verify_ngfw_registration(
+                host="10.0.0.10",
+                private_key="fake-key",
+                timeout_seconds=1800,
+            )
+
+        mock_executor.wait_for_agent.assert_called_once_with(
+            "10.0.0.10", timeout_seconds=1800
+        )
+
+    def test_verify_registration_uses_panorama_status_command(self):
+        """verify_registration runs 'show panorama-status' command."""
+        from unittest.mock import MagicMock, patch
+        from components.ngfw import verify_ngfw_registration
+
+        mock_executor = MagicMock()
+        mock_executor.wait_for_agent.return_value = True
+        mock_executor.run_command.return_value = MagicMock(
+            success=True,
+            stdout="Connected     : yes",
+            stderr="",
+        )
+
+        with patch("components.ngfw.SSHExecutor", return_value=mock_executor):
+            verify_ngfw_registration(
+                host="10.0.0.10",
+                private_key="fake-key",
+            )
+
+        # Check the command contains 'show panorama-status'
+        call_kwargs = mock_executor.run_command.call_args.kwargs
+        assert "show panorama-status" in call_kwargs["script"]
+
+    def test_verify_registration_with_retry(self):
+        """verify_registration retries on initial failure."""
+        from unittest.mock import MagicMock, patch, call
+        from components.ngfw import verify_ngfw_registration
+
+        mock_executor = MagicMock()
+        mock_executor.wait_for_agent.return_value = True
+        # First call returns not connected, second returns connected
+        mock_executor.run_command.side_effect = [
+            MagicMock(success=True, stdout="Connected     : no", stderr=""),
+            MagicMock(success=True, stdout="Connected     : yes", stderr=""),
+        ]
+
+        with patch("components.ngfw.SSHExecutor", return_value=mock_executor):
+            with patch("time.sleep"):  # Skip actual sleep
+                result = verify_ngfw_registration(
+                    host="10.0.0.10",
+                    private_key="fake-key",
+                    max_retries=1,
+                )
+
+        assert result is True
+        assert mock_executor.run_command.call_count == 2
+
+    def test_verify_registration_exhausts_retries(self):
+        """verify_registration returns False after exhausting retries."""
+        from unittest.mock import MagicMock, patch
+        from components.ngfw import verify_ngfw_registration
+
+        mock_executor = MagicMock()
+        mock_executor.wait_for_agent.return_value = True
+        # Always returns not connected
+        mock_executor.run_command.return_value = MagicMock(
+            success=True,
+            stdout="Connected     : no",
+            stderr="",
+        )
+
+        with patch("components.ngfw.SSHExecutor", return_value=mock_executor):
+            with patch("time.sleep"):
+                result = verify_ngfw_registration(
+                    host="10.0.0.10",
+                    private_key="fake-key",
+                    max_retries=1,
+                )
+
+        assert result is False
+        # Initial attempt + 1 retry = 2 calls
+        assert mock_executor.run_command.call_count == 2

@@ -10,13 +10,20 @@ that can be stitched with XDR endpoint telemetry in XSIAM.
 """
 
 import base64
+import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
 import pulumi
 import pulumi_aws as aws
 from jinja2 import Environment, FileSystemLoader
+
+from .plans.ngfw_verification import NGFWVerificationPlan
+from .ssh_executor import SSHExecutor
+
+logger = logging.getLogger(__name__)
 
 
 class NGFWComponent(pulumi.ComponentResource):
@@ -286,3 +293,60 @@ class NGFWComponent(pulumi.ComponentResource):
             "untrust_ip": self.untrust_ip,
             "trust_ip": self.trust_ip,
         }
+
+
+def verify_ngfw_registration(
+    host: str,
+    private_key: str,
+    timeout_seconds: int = 1800,
+    max_retries: int = 1,
+    retry_delay_seconds: int = 60,
+) -> bool:
+    """Verify NGFW has registered with Strata Cloud Manager.
+
+    Waits for SSH to become available, then checks SCM registration
+    status via 'show panorama-status' command.
+
+    Args:
+        host: NGFW management IP address
+        private_key: SSH private key for authentication
+        timeout_seconds: Max time to wait for SSH (default 30 min)
+        max_retries: Number of retry attempts if not registered (default 1)
+        retry_delay_seconds: Delay between retries (default 60s)
+
+    Returns:
+        True if NGFW is registered with SCM, False otherwise
+    """
+    plan = NGFWVerificationPlan()
+    executor = SSHExecutor(private_key=private_key)
+
+    # Wait for SSH to become available
+    logger.info(f"Waiting for SSH on {host} (timeout: {timeout_seconds}s)...")
+    executor.wait_for_agent(host, timeout_seconds=timeout_seconds)
+
+    # Check registration with retries
+    attempts = 0
+    max_attempts = 1 + max_retries
+
+    while attempts < max_attempts:
+        attempts += 1
+        logger.info(f"Checking SCM registration (attempt {attempts}/{max_attempts})...")
+
+        result = executor.run_command(
+            host=host,
+            script=plan.verify_step.script,
+            timeout_seconds=plan.verify_step.timeout_seconds,
+        )
+
+        if plan.is_registered(result.stdout):
+            logger.info(f"NGFW {host} successfully registered with SCM")
+            return True
+
+        if attempts < max_attempts:
+            logger.info(
+                f"Not registered yet, retrying in {retry_delay_seconds}s..."
+            )
+            time.sleep(retry_delay_seconds)
+
+    logger.warning(f"NGFW {host} failed to register with SCM after {max_attempts} attempts")
+    return False

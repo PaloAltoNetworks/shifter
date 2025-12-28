@@ -3,6 +3,8 @@
 from django.conf import settings
 from django.db import models, transaction
 
+from .fields import EncryptedCharField
+
 
 class Asset(models.Model):
     """Abstract base class for user-owned assets.
@@ -146,43 +148,6 @@ class AgentConfig(FileAsset):
         return f"{self.name} ({self.os.name})"
 
 
-class NGFWConfig(models.Model):
-    """User's NGFW/Panorama configuration for VM-Series bootstrap."""
-
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ngfw_configs")
-    name = models.CharField(max_length=100, help_text="User-friendly name for this config")
-
-    # Required Panorama fields
-    panorama_server = models.CharField(max_length=255, help_text="Primary Panorama IP or FQDN")
-    vm_auth_key = models.CharField(max_length=255, help_text="VM auth key from Panorama")
-
-    # Optional Panorama fields
-    panorama_server_2 = models.CharField(max_length=255, blank=True, default="", help_text="Secondary Panorama (HA)")
-    template_stack = models.CharField(max_length=100, blank=True, default="", help_text="Template stack name")
-    device_group = models.CharField(max_length=100, blank=True, default="", help_text="Device group name")
-
-    # Metadata
-    created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "NGFW Config"
-        verbose_name_plural = "NGFW Configs"
-
-    def __str__(self):
-        return f"{self.name} ({self.panorama_server})"
-
-    @property
-    def is_deleted(self):
-        return self.deleted_at is not None
-
-    @classmethod
-    def active_for_user(cls, user):
-        """Return non-deleted NGFW configs for a user."""
-        return cls.objects.filter(user=user, deleted_at__isnull=True)
-
-
 class StrataConfig(models.Model):
     """Strata Cloud Manager configuration for NGFW instances.
 
@@ -209,9 +174,9 @@ class StrataConfig(models.Model):
         max_length=255,
         help_text="Auto-registration PIN ID (Assets > Device Certificates in SCM)",
     )
-    scm_pin_value = models.CharField(
+    scm_pin_value = EncryptedCharField(
         max_length=255,
-        help_text="Auto-registration PIN value",
+        help_text="Auto-registration PIN value (encrypted at rest)",
     )
 
     # Metadata
@@ -350,14 +315,6 @@ class Range(models.Model):
 
     # NGFW (VM-Series) fields
     ngfw_enabled = models.BooleanField(default=False, help_text="Deploy VM-Series NGFW inline between Kali and Victim")
-    ngfw_config = models.ForeignKey(
-        NGFWConfig,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="ranges",
-        help_text="DEPRECATED: Use strata_config instead. Panorama-based NGFW config.",
-    )
     strata_config = models.ForeignKey(
         StrataConfig,
         on_delete=models.SET_NULL,

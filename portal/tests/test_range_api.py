@@ -8,7 +8,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from mission_control.models import AgentConfig, NGFWConfig, OperatingSystem, Range
+from mission_control.models import AgentConfig, OperatingSystem, Range, StrataConfig
 
 User = get_user_model()
 
@@ -615,12 +615,13 @@ class TestLaunchRangeNGFW:
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
-        # Create NGFW config (required when NGFW is enabled)
-        ngfw_config = NGFWConfig.objects.create(
+        # Create Strata config (required when NGFW is enabled)
+        strata_config = StrataConfig.objects.create(
             user=test_agent.user,
-            name="Test Panorama Config",
-            panorama_server="panorama.test.com",
-            vm_auth_key="test-auth-key",
+            name="Test SCM Config",
+            scm_folder_name="Test-Folder",
+            scm_pin_id="test-pin-id",
+            scm_pin_value="test-pin-value",
         )
 
         response = client.post(
@@ -628,7 +629,7 @@ class TestLaunchRangeNGFW:
             data={
                 "agent_id": test_agent.id,
                 "ngfw_enabled": True,
-                "ngfw_config_id": ngfw_config.id,
+                "ngfw_config_id": strata_config.id,
             },
             content_type="application/json",
         )
@@ -640,7 +641,7 @@ class TestLaunchRangeNGFW:
         # Verify DB was updated
         range_obj = Range.objects.get(id=data["range"]["id"])
         assert range_obj.ngfw_enabled is True
-        assert range_obj.ngfw_config_id == ngfw_config.id
+        assert range_obj.strata_config_id == strata_config.id
 
     def test_launch_range_with_ngfw_disabled_explicit(self, client, test_agent, settings):
         """Launching with ngfw_enabled=False should set it to False in both response and DB."""
@@ -708,12 +709,12 @@ class TestRangeStatusNGFW:
         assert data["range"]["ngfw_trust_ip"] == "10.1.5.11"
 
 
-# --- NGFW Config CRUD API ---
+# --- Strata Config CRUD API (for NGFW) ---
 
 
 @pytest.mark.django_db
-class TestNGFWConfigAPI:
-    """Tests for NGFW configuration CRUD API endpoints."""
+class TestStrataConfigAPI:
+    """Tests for Strata configuration CRUD API endpoints (for NGFW)."""
 
     @pytest.fixture
     def user(self):
@@ -730,49 +731,44 @@ class TestNGFWConfigAPI:
         return client
 
     @pytest.fixture
-    def ngfw_config(self, user):
-        from mission_control.models import NGFWConfig
-
-        return NGFWConfig.objects.create(
+    def strata_config(self, user):
+        return StrataConfig.objects.create(
             user=user,
             name="Test Config",
-            panorama_server="panorama.example.com",
-            vm_auth_key="secret_vm_auth_key_123",
-            panorama_server_2="panorama2.example.com",
-            template_stack="My-Stack",
-            device_group="My-DG",
+            scm_folder_name="Test-Folder",
+            scm_pin_id="test-pin-id",
+            scm_pin_value="test-pin-value-secret",
         )
 
     # --- List Configs ---
 
-    def test_list_configs_returns_user_configs(self, client, ngfw_config):
+    def test_list_configs_returns_user_configs(self, client, strata_config):
         """list_ngfw_configs returns configs belonging to the authenticated user."""
         response = client.get(reverse("mission_control:list_ngfw_configs"))
         assert response.status_code == 200
         data = response.json()
         assert len(data["configs"]) == 1
-        assert data["configs"][0]["id"] == ngfw_config.id
+        assert data["configs"][0]["id"] == strata_config.id
         assert data["configs"][0]["name"] == "Test Config"
 
-    def test_list_configs_does_not_expose_vm_auth_key(self, client, ngfw_config):
-        """list_ngfw_configs does NOT expose vm_auth_key in response."""
+    def test_list_configs_does_not_expose_pin_value(self, client, strata_config):
+        """list_ngfw_configs does NOT expose scm_pin_value in response."""
         response = client.get(reverse("mission_control:list_ngfw_configs"))
         assert response.status_code == 200
         data = response.json()
-        assert "vm_auth_key" not in data["configs"][0]
+        assert "scm_pin_value" not in data["configs"][0]
         # Verify the secret is really not there
-        assert "secret_vm_auth_key_123" not in str(data)
+        assert "test-pin-value-secret" not in str(data)
 
     def test_list_configs_excludes_other_users(self, client, user, other_user):
         """list_ngfw_configs does not return configs from other users."""
-        from mission_control.models import NGFWConfig
-
         # Create config for other user
-        NGFWConfig.objects.create(
+        StrataConfig.objects.create(
             user=other_user,
             name="Other User Config",
-            panorama_server="other.example.com",
-            vm_auth_key="otherkey",
+            scm_folder_name="Other-Folder",
+            scm_pin_id="other-pin",
+            scm_pin_value="othersecret",
         )
 
         response = client.get(reverse("mission_control:list_ngfw_configs"))
@@ -782,17 +778,20 @@ class TestNGFWConfigAPI:
 
     def test_list_configs_excludes_deleted(self, client, user):
         """list_ngfw_configs does not return soft-deleted configs."""
-        from mission_control.models import NGFWConfig
-
         # Create active and deleted configs
-        active = NGFWConfig.objects.create(
-            user=user, name="Active", panorama_server="p1.example.com", vm_auth_key="key1"
+        active = StrataConfig.objects.create(
+            user=user,
+            name="Active",
+            scm_folder_name="Active-Folder",
+            scm_pin_id="pin1",
+            scm_pin_value="secret1",
         )
-        NGFWConfig.objects.create(
+        StrataConfig.objects.create(
             user=user,
             name="Deleted",
-            panorama_server="p2.example.com",
-            vm_auth_key="key2",
+            scm_folder_name="Deleted-Folder",
+            scm_pin_id="pin2",
+            scm_pin_value="secret2",
             deleted_at=timezone.now(),
         )
 
@@ -802,22 +801,20 @@ class TestNGFWConfigAPI:
         assert len(data["configs"]) == 1
         assert data["configs"][0]["id"] == active.id
 
-    def test_list_configs_returns_minimal_display_fields(self, client, ngfw_config):
-        """list_ngfw_configs returns only essential fields for dropdown (id, name, panorama_server)."""
+    def test_list_configs_returns_display_fields(self, client, strata_config):
+        """list_ngfw_configs returns display fields for table and dropdown."""
         response = client.get(reverse("mission_control:list_ngfw_configs"))
         data = response.json()
         config = data["configs"][0]
 
-        # Should include only minimal fields for dropdown
+        # Should include fields needed for display (table and dropdown)
         assert "id" in config
         assert "name" in config
-        assert "panorama_server" in config
-        # Optional fields are NOT included in list API (minimal response)
-        assert "panorama_server_2" not in config
-        assert "template_stack" not in config
-        assert "device_group" not in config
-        # vm_auth_key should NEVER be exposed
-        assert "vm_auth_key" not in config
+        assert "scm_folder_name" in config
+        assert "scm_pin_id" in config  # PIN ID is an identifier (like username), safe to display
+        assert "created_at" in config
+        # PIN value is the actual secret - NEVER expose
+        assert "scm_pin_value" not in config
 
     # --- Create Config ---
 
@@ -827,8 +824,9 @@ class TestNGFWConfigAPI:
             reverse("mission_control:create_ngfw_config"),
             data={
                 "name": "New Config",
-                "panorama_server": "new-panorama.example.com",
-                "vm_auth_key": "new_auth_key_456",
+                "scm_folder_name": "New-Folder",
+                "scm_pin_id": "new-pin-id",
+                "scm_pin_value": "new-pin-value",
             },
             content_type="application/json",
         )
@@ -836,116 +834,102 @@ class TestNGFWConfigAPI:
         data = response.json()
         assert data["success"] is True
         assert data["config"]["name"] == "New Config"
-        assert data["config"]["panorama_server"] == "new-panorama.example.com"
-        # vm_auth_key should NOT be in response
-        assert "vm_auth_key" not in data["config"]
+        assert data["config"]["scm_folder_name"] == "New-Folder"
+        # PIN credentials should NOT be in response
+        assert "scm_pin_value" not in data["config"]
 
-    def test_create_config_with_all_fields(self, client, user):
-        """create_ngfw_config creates config with all fields including optional, stores them in DB."""
+    def test_create_config_stores_pin_value_in_db(self, client, user):
+        """create_ngfw_config stores scm_pin_value in database (encrypted)."""
         response = client.post(
             reverse("mission_control:create_ngfw_config"),
             data={
-                "name": "Full Config",
-                "panorama_server": "p1.example.com",
-                "vm_auth_key": "authkey",
-                "panorama_server_2": "p2.example.com",
-                "template_stack": "Stack-1",
-                "device_group": "DG-1",
-            },
-            content_type="application/json",
-        )
-        assert response.status_code == 201
-        data = response.json()
-        assert data["success"] is True
-        # Response returns minimal fields (id, name, panorama_server)
-        assert data["config"]["name"] == "Full Config"
-        assert data["config"]["panorama_server"] == "p1.example.com"
-
-        # Verify optional fields ARE stored in DB
-        config = NGFWConfig.objects.get(id=data["config"]["id"])
-        assert config.panorama_server_2 == "p2.example.com"
-        assert config.template_stack == "Stack-1"
-        assert config.device_group == "DG-1"
-
-    def test_create_config_stores_vm_auth_key_in_db(self, client, user):
-        """create_ngfw_config stores vm_auth_key in database."""
-        from mission_control.models import NGFWConfig
-
-        response = client.post(
-            reverse("mission_control:create_ngfw_config"),
-            data={
-                "name": "Config With Key",
-                "panorama_server": "p.example.com",
-                "vm_auth_key": "my_secret_key_789",
+                "name": "Config With PIN",
+                "scm_folder_name": "PIN-Folder",
+                "scm_pin_id": "pin123",
+                "scm_pin_value": "my_secret_pin_789",
             },
             content_type="application/json",
         )
         assert response.status_code == 201
 
-        config = NGFWConfig.objects.get(name="Config With Key")
-        assert config.vm_auth_key == "my_secret_key_789"
+        config = StrataConfig.objects.get(name="Config With PIN")
+        assert config.scm_pin_value == "my_secret_pin_789"
 
     def test_create_config_missing_name_fails(self, client):
         """create_ngfw_config fails when name is missing."""
         response = client.post(
             reverse("mission_control:create_ngfw_config"),
             data={
-                "panorama_server": "p.example.com",
-                "vm_auth_key": "key",
+                "scm_folder_name": "folder",
+                "scm_pin_id": "pin",
+                "scm_pin_value": "value",
             },
             content_type="application/json",
         )
         assert response.status_code == 400
         assert "name" in response.json()["error"].lower()
 
-    def test_create_config_missing_panorama_server_fails(self, client):
-        """create_ngfw_config fails when panorama_server is missing."""
+    def test_create_config_missing_folder_fails(self, client):
+        """create_ngfw_config fails when scm_folder_name is missing."""
         response = client.post(
             reverse("mission_control:create_ngfw_config"),
             data={
                 "name": "Config",
-                "vm_auth_key": "key",
+                "scm_pin_id": "pin",
+                "scm_pin_value": "value",
             },
             content_type="application/json",
         )
         assert response.status_code == 400
-        assert "panorama" in response.json()["error"].lower()
+        assert "folder" in response.json()["error"].lower()
 
-    def test_create_config_missing_vm_auth_key_fails(self, client):
-        """create_ngfw_config fails when vm_auth_key is missing."""
+    def test_create_config_missing_pin_id_fails(self, client):
+        """create_ngfw_config fails when scm_pin_id is missing."""
         response = client.post(
             reverse("mission_control:create_ngfw_config"),
             data={
                 "name": "Config",
-                "panorama_server": "p.example.com",
+                "scm_folder_name": "folder",
+                "scm_pin_value": "value",
             },
             content_type="application/json",
         )
         assert response.status_code == 400
-        # Error message is "VM auth key is required"
-        assert "auth key" in response.json()["error"].lower()
+        assert "pin id" in response.json()["error"].lower()
+
+    def test_create_config_missing_pin_value_fails(self, client):
+        """create_ngfw_config fails when scm_pin_value is missing."""
+        response = client.post(
+            reverse("mission_control:create_ngfw_config"),
+            data={
+                "name": "Config",
+                "scm_folder_name": "folder",
+                "scm_pin_id": "pin",
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        assert "pin value" in response.json()["error"].lower()
 
     # --- Delete Config ---
 
-    def test_delete_config_soft_deletes(self, client, ngfw_config):
+    def test_delete_config_soft_deletes(self, client, strata_config):
         """delete_ngfw_config soft-deletes the config."""
-        from mission_control.models import NGFWConfig
-
         response = client.post(
-            reverse("mission_control:delete_ngfw_config", args=[ngfw_config.id]),
+            reverse("mission_control:delete_ngfw_config", args=[strata_config.id]),
             content_type="application/json",
         )
         assert response.status_code == 200
         assert response.json()["success"] is True
 
         # Config still exists in DB but has deleted_at set
-        config = NGFWConfig.objects.get(pk=ngfw_config.id)
+        config = StrataConfig.objects.get(pk=strata_config.id)
         assert config.deleted_at is not None
 
-    def test_delete_config_not_in_list_after_delete(self, client, ngfw_config):
+    def test_delete_config_not_in_list_after_delete(self, client, strata_config):
         """Deleted config does not appear in list_ngfw_configs."""
         # Delete the config
-        client.post(reverse("mission_control:delete_ngfw_config", args=[ngfw_config.id]))
+        client.post(reverse("mission_control:delete_ngfw_config", args=[strata_config.id]))
 
         # List should be empty
         response = client.get(reverse("mission_control:list_ngfw_configs"))
@@ -954,13 +938,12 @@ class TestNGFWConfigAPI:
 
     def test_delete_other_users_config_fails(self, client, other_user):
         """Cannot delete another user's config."""
-        from mission_control.models import NGFWConfig
-
-        other_config = NGFWConfig.objects.create(
+        other_config = StrataConfig.objects.create(
             user=other_user,
             name="Other Config",
-            panorama_server="other.example.com",
-            vm_auth_key="otherkey",
+            scm_folder_name="Other-Folder",
+            scm_pin_id="other-pin",
+            scm_pin_value="othersecret",
         )
 
         response = client.post(reverse("mission_control:delete_ngfw_config", args=[other_config.id]))
@@ -977,8 +960,8 @@ class TestNGFWConfigAPI:
 
 
 @pytest.mark.django_db
-class TestLaunchRangeWithNGFWConfig:
-    """Tests for launching ranges with NGFW config selection."""
+class TestLaunchRangeWithStrataConfig:
+    """Tests for launching ranges with Strata config selection (NGFW)."""
 
     @pytest.fixture
     def user(self):
@@ -1009,25 +992,23 @@ class TestLaunchRangeWithNGFWConfig:
         )
 
     @pytest.fixture
-    def ngfw_config(self, user):
-        from mission_control.models import NGFWConfig
-
-        return NGFWConfig.objects.create(
+    def strata_config(self, user):
+        return StrataConfig.objects.create(
             user=user,
-            name="My Panorama",
-            panorama_server="panorama.example.com",
-            vm_auth_key="secret123",
+            name="My SCM Config",
+            scm_folder_name="My-Folder",
+            scm_pin_id="my-pin-id",
+            scm_pin_value="secret123",
         )
 
     @pytest.fixture
-    def other_ngfw_config(self, other_user):
-        from mission_control.models import NGFWConfig
-
-        return NGFWConfig.objects.create(
+    def other_strata_config(self, other_user):
+        return StrataConfig.objects.create(
             user=other_user,
-            name="Other Panorama",
-            panorama_server="other.example.com",
-            vm_auth_key="othersecret",
+            name="Other SCM Config",
+            scm_folder_name="Other-Folder",
+            scm_pin_id="other-pin-id",
+            scm_pin_value="othersecret",
         )
 
     @pytest.fixture
@@ -1048,8 +1029,8 @@ class TestLaunchRangeWithNGFWConfig:
         assert response.status_code == 400
         assert "config" in response.json()["error"].lower()
 
-    def test_launch_ngfw_enabled_with_valid_config(self, client, agent, ngfw_config, settings):
-        """Launching with ngfw_enabled=True and valid ngfw_config_id succeeds."""
+    def test_launch_ngfw_enabled_with_valid_config(self, client, agent, strata_config, settings):
+        """Launching with ngfw_enabled=True and valid strata_config_id succeeds."""
         settings.PROVISIONER_TYPE = "local"
 
         response = client.post(
@@ -1057,7 +1038,7 @@ class TestLaunchRangeWithNGFWConfig:
             data={
                 "agent_id": agent.id,
                 "ngfw_enabled": True,
-                "ngfw_config_id": ngfw_config.id,
+                "ngfw_config_id": strata_config.id,
             },
             content_type="application/json",
         )
@@ -1068,7 +1049,7 @@ class TestLaunchRangeWithNGFWConfig:
 
         # Verify the FK was set in DB
         range_obj = Range.objects.get(pk=data["range"]["id"])
-        assert range_obj.ngfw_config == ngfw_config
+        assert range_obj.strata_config == strata_config
 
     def test_launch_ngfw_enabled_with_invalid_config_id(self, client, agent, settings):
         """Launching with ngfw_enabled=True and nonexistent ngfw_config_id fails."""
@@ -1086,8 +1067,8 @@ class TestLaunchRangeWithNGFWConfig:
         assert response.status_code == 404
         assert "not found" in response.json()["error"].lower()
 
-    def test_launch_ngfw_enabled_with_other_users_config(self, client, agent, other_ngfw_config, settings):
-        """Cannot launch with another user's ngfw_config_id."""
+    def test_launch_ngfw_enabled_with_other_users_config(self, client, agent, other_strata_config, settings):
+        """Cannot launch with another user's strata_config_id."""
         settings.PROVISIONER_TYPE = "local"
 
         response = client.post(
@@ -1095,28 +1076,28 @@ class TestLaunchRangeWithNGFWConfig:
             data={
                 "agent_id": agent.id,
                 "ngfw_enabled": True,
-                "ngfw_config_id": other_ngfw_config.id,
+                "ngfw_config_id": other_strata_config.id,
             },
             content_type="application/json",
         )
         assert response.status_code == 404
         assert "not found" in response.json()["error"].lower()
 
-    def test_launch_ngfw_enabled_with_deleted_config(self, client, agent, ngfw_config, settings):
-        """Cannot launch with a soft-deleted ngfw_config."""
+    def test_launch_ngfw_enabled_with_deleted_config(self, client, agent, strata_config, settings):
+        """Cannot launch with a soft-deleted strata_config."""
 
         settings.PROVISIONER_TYPE = "local"
 
         # Soft-delete the config
-        ngfw_config.deleted_at = timezone.now()
-        ngfw_config.save()
+        strata_config.deleted_at = timezone.now()
+        strata_config.save()
 
         response = client.post(
             reverse("mission_control:launch_range"),
             data={
                 "agent_id": agent.id,
                 "ngfw_enabled": True,
-                "ngfw_config_id": ngfw_config.id,
+                "ngfw_config_id": strata_config.id,
             },
             content_type="application/json",
         )
@@ -1140,11 +1121,11 @@ class TestLaunchRangeWithNGFWConfig:
         assert data["success"] is True
         assert data["range"]["ngfw_enabled"] is False
 
-        # Verify ngfw_config is None in DB
+        # Verify strata_config is None in DB
         range_obj = Range.objects.get(pk=data["range"]["id"])
-        assert range_obj.ngfw_config is None
+        assert range_obj.strata_config is None
 
-    def test_launch_ngfw_disabled_ignores_config_id(self, client, agent, ngfw_config, settings):
+    def test_launch_ngfw_disabled_ignores_config_id(self, client, agent, strata_config, settings):
         """When ngfw_enabled=False, ngfw_config_id is ignored."""
         settings.PROVISIONER_TYPE = "local"
 
@@ -1153,12 +1134,12 @@ class TestLaunchRangeWithNGFWConfig:
             data={
                 "agent_id": agent.id,
                 "ngfw_enabled": False,
-                "ngfw_config_id": ngfw_config.id,  # Should be ignored
+                "ngfw_config_id": strata_config.id,  # Should be ignored
             },
             content_type="application/json",
         )
         assert response.status_code == 200
 
-        # ngfw_config should NOT be set since ngfw_enabled is False
+        # strata_config should NOT be set since ngfw_enabled is False
         range_obj = Range.objects.get(pk=response.json()["range"]["id"])
-        assert range_obj.ngfw_config is None
+        assert range_obj.strata_config is None

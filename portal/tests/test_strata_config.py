@@ -410,3 +410,122 @@ class TestStrataConfigEdgeCases:
             scm_pin_value="secret",
         )
         assert config.name == "Palo Alto Config"
+
+
+@pytest.mark.django_db
+class TestStrataConfigPinValueEncryption:
+    """Tests for scm_pin_value encryption at rest.
+
+    The PIN value is a sensitive credential that should be encrypted
+    in the database but transparently decrypted when accessed.
+    """
+
+    @pytest.fixture
+    def user(self):
+        return User.objects.create_user(username="test@example.com", email="test@example.com")
+
+    def test_pin_value_stored_encrypted(self, user):
+        """scm_pin_value should be stored encrypted in database."""
+        from django.db import connection
+
+        plaintext = "my-secret-pin-value-12345"
+        config = StrataConfig.objects.create(
+            user=user,
+            name="Test",
+            scm_folder_name="Folder",
+            scm_pin_id="pin123",
+            scm_pin_value=plaintext,
+        )
+
+        # Fetch raw value from database
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT scm_pin_value FROM mission_control_strataconfig WHERE id = %s",
+                [config.pk],
+            )
+            raw_value = cursor.fetchone()[0]
+
+        # Raw value in DB should NOT equal plaintext (it should be encrypted)
+        assert raw_value != plaintext
+
+    def test_pin_value_decrypted_on_access(self, user):
+        """scm_pin_value returns decrypted plaintext when accessed."""
+        plaintext = "my-secret-pin-value-12345"
+        config = StrataConfig.objects.create(
+            user=user,
+            name="Test",
+            scm_folder_name="Folder",
+            scm_pin_id="pin123",
+            scm_pin_value=plaintext,
+        )
+
+        # Reload from database
+        config.refresh_from_db()
+
+        # Accessing the attribute should return decrypted plaintext
+        assert config.scm_pin_value == plaintext
+
+    def test_pin_value_encryption_roundtrip(self, user):
+        """PIN value survives encrypt -> store -> load -> decrypt cycle."""
+        plaintext = "complex!@#$%^&*()_+-=[]{}|;':\",./<>?"
+        config = StrataConfig.objects.create(
+            user=user,
+            name="Test",
+            scm_folder_name="Folder",
+            scm_pin_id="pin123",
+            scm_pin_value=plaintext,
+        )
+
+        # Reload fresh instance from database
+        loaded_config = StrataConfig.objects.get(pk=config.pk)
+
+        assert loaded_config.scm_pin_value == plaintext
+
+    def test_get_init_cfg_context_returns_decrypted_value(self, user):
+        """get_init_cfg_context returns decrypted PIN value."""
+        plaintext = "secret-for-init-cfg"
+        config = StrataConfig.objects.create(
+            user=user,
+            name="Test",
+            scm_folder_name="Folder",
+            scm_pin_id="pin123",
+            scm_pin_value=plaintext,
+        )
+
+        config.refresh_from_db()
+        context = config.get_init_cfg_context()
+
+        assert context["pin_value"] == plaintext
+
+    def test_different_configs_have_different_encrypted_values(self, user):
+        """Same plaintext encrypts to different ciphertext (due to IV)."""
+        from django.db import connection
+
+        plaintext = "same-plaintext-value"
+
+        config1 = StrataConfig.objects.create(
+            user=user,
+            name="Test1",
+            scm_folder_name="Folder1",
+            scm_pin_id="pin1",
+            scm_pin_value=plaintext,
+        )
+        config2 = StrataConfig.objects.create(
+            user=user,
+            name="Test2",
+            scm_folder_name="Folder2",
+            scm_pin_id="pin2",
+            scm_pin_value=plaintext,
+        )
+
+        # Fetch raw values from database
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT scm_pin_value FROM mission_control_strataconfig WHERE id IN (%s, %s)",
+                [config1.pk, config2.pk],
+            )
+            rows = cursor.fetchall()
+            raw1, raw2 = rows[0][0], rows[1][0]
+
+        # Different encrypted values (due to random IV in Fernet)
+        assert raw1 != raw2

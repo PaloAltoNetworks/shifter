@@ -79,14 +79,14 @@ jobs:
           soft_fail: true
       # SonarCloud uses automatic analysis (configured in SonarCloud settings)
 
-  pulumi-provisioner-tests:
-    name: Pulumi Provisioner Tests
+  shifter-engine-tests:
+    name: Shifter Engine Tests
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        working-directory: pulumi-provisioner
+        working-directory: shifter-engine
         run: |
           python3.12 -m venv .venv
           source .venv/bin/activate
@@ -94,7 +94,7 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests with coverage
-        working-directory: pulumi-provisioner
+        working-directory: shifter-engine
         run: |
           source .venv/bin/activate
           pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=80
@@ -102,8 +102,8 @@ jobs:
       - name: Upload coverage
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
-          files: pulumi-provisioner/coverage.xml
-          flags: pulumi-provisioner
+          files: shifter-engine/coverage.xml
+          flags: shifter-engine
           fail_ci_if_error: false
 
   portal-js-tests:

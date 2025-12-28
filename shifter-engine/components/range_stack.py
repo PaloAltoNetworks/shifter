@@ -189,6 +189,11 @@ class RangeStack(pulumi.ComponentResource):
 
             self.instances.append(instance)
 
+            # Run setup for non-domain-joining instances
+            # Domain-joining instances get their setup (DNS, domain join) from DC
+            if not inst_config.join_domain:
+                instance.run_setup()
+
             # Collect instance IDs for domain members
             if inst_config.join_domain and dc_components:
                 domain_member_ids.append(instance.instance_id)

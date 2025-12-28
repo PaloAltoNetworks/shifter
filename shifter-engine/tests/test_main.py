@@ -1,4 +1,4 @@
-"""Orchestration tests for Pulumi provisioner main.py.
+"""Orchestration tests for Shifter Engine main.py.
 
 Tests the container entrypoint orchestration logic including:
 - Database connections

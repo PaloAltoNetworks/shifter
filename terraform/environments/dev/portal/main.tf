@@ -185,10 +185,10 @@ module "ec2" {
   root_volume_size = var.ec2_root_volume_size
 
   # ECS permissions for Pulumi provisioner
-  ecs_cluster_arn         = module.pulumi_provisioner.ecs_cluster_arn
-  ecs_task_definition_arn = module.pulumi_provisioner.task_definition_arn
-  ecs_task_role_arn       = module.pulumi_provisioner.ecs_task_role_arn
-  ecs_execution_role_arn  = module.pulumi_provisioner.ecs_execution_role_arn
+  ecs_cluster_arn            = module.pulumi_provisioner.ecs_cluster_arn
+  ecs_task_definition_family = module.pulumi_provisioner.task_definition_family
+  ecs_task_role_arn          = module.pulumi_provisioner.ecs_task_role_arn
+  ecs_execution_role_arn     = module.pulumi_provisioner.ecs_execution_role_arn
 
   # Autoscaling configuration
   enable_autoscaling   = var.enable_autoscaling
@@ -334,6 +334,7 @@ module "pulumi_provisioner" {
   range_availability_zone     = data.terraform_remote_state.range.outputs.availability_zone
   victim_security_group_id    = data.terraform_remote_state.range.outputs.victim_security_group_id
   kali_security_group_id      = data.terraform_remote_state.range.outputs.kali_security_group_id
+  dc_security_group_id        = data.terraform_remote_state.range.outputs.dc_security_group_id
   range_instance_profile_arn  = data.terraform_remote_state.range.outputs.range_instance_profile_arn
   range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
   range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
@@ -342,6 +343,11 @@ module "pulumi_provisioner" {
   kali_ami_id    = var.kali_ami_id
   victim_ami_id  = var.victim_ami_id
   windows_ami_id = var.windows_ami_id
+  dc_ami_id      = var.dc_ami_id
+
+  # Prebaked DC configuration
+  dc_domain_name     = var.dc_domain_name
+  dc_domain_password = var.dc_domain_password
 
   # Instance types
   kali_instance_type   = var.kali_instance_type

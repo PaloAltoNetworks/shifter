@@ -71,6 +71,7 @@ class SetupOrchestrator:
         instance_id: str,
         plan: SetupPlan,
         context: Dict[str, Any],
+        document_name: str = "AWS-RunPowerShellScript",
     ) -> SetupResult:
         """Execute a setup plan on an instance.
 
@@ -78,6 +79,8 @@ class SetupOrchestrator:
             instance_id: Target EC2 instance ID
             plan: SetupPlan defining steps to execute
             context: Template variables for rendering scripts
+            document_name: SSM document to use (AWS-RunShellScript for Linux,
+                AWS-RunPowerShellScript for Windows)
 
         Returns:
             SetupResult with success status and step outputs
@@ -90,7 +93,7 @@ class SetupOrchestrator:
         # Execute each step in order
         for step in plan.steps:
             try:
-                result = self._execute_step(instance_id, step, context)
+                result = self._execute_step(instance_id, step, context, document_name)
                 step_results.append(result)
 
                 # Handle reboot if required
@@ -116,7 +119,7 @@ class SetupOrchestrator:
         verify_result = None
         if plan.verify_step is not None:
             try:
-                verify_result = self._execute_step(instance_id, plan.verify_step, context)
+                verify_result = self._execute_step(instance_id, plan.verify_step, context, document_name)
             except (CommandError, TimeoutError, SSMExecutorError) as e:
                 raise SetupError(
                     f"Verification failed: {e}",
@@ -135,6 +138,7 @@ class SetupOrchestrator:
         instance_id: str,
         step: SetupStep,
         context: Dict[str, Any],
+        document_name: str,
     ) -> StepResult:
         """Execute a single step.
 
@@ -142,6 +146,7 @@ class SetupOrchestrator:
             instance_id: Target instance
             step: Step to execute
             context: Template variables
+            document_name: SSM document to use
 
         Returns:
             StepResult with step output
@@ -157,6 +162,7 @@ class SetupOrchestrator:
             instance_id=instance_id,
             script=rendered_script,
             timeout_seconds=step.timeout_seconds,
+            document_name=document_name,
         )
 
         return StepResult(

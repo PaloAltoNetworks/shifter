@@ -24,8 +24,8 @@ Self-service cyber range platform. Users provision isolated Kali + victim enviro
 
 ### Execution
 
-- [Overview](execution/index.md) - Provisioner and range runtime
-- [Provisioner](execution/provisioner.md) - Pulumi ECS task
+- [Overview](execution/index.md) - Shifter Engine and range runtime
+- [Shifter Engine](execution/engine.md) - Pulumi ECS task
 - [Kali AMI](execution/kali-ami.md) - Pre-baked attacker
 - [Victim AMI](execution/victim-ami.md) - Pre-baked victim
 

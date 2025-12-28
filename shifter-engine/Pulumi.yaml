@@ -1,0 +1,6 @@
+name: shifter-engine
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: Shifter Engine - range provisioning for Shifter cyber range

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Migrate all instances to Shifter Engine
+- Docs updated to reflect new architecture and naming conventions
 
 ## [0.8.0] - 2025-12-27
 

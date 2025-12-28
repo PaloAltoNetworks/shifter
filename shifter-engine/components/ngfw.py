@@ -238,9 +238,10 @@ class NGFWComponent(pulumi.ComponentResource):
             "TEMPLATES_DIR",
             str(Path(__file__).parent.parent / "templates"),
         )
+        # autoescape=False is safe: rendering plain text config files, not HTML
         env = Environment(
             loader=FileSystemLoader(templates_dir),
-            autoescape=False,
+            autoescape=False,  # nosec B701 - plain text config, not HTML
         )
 
         template = env.get_template("ngfw_init_cfg.txt.j2")
@@ -270,9 +271,10 @@ class NGFWComponent(pulumi.ComponentResource):
             "TEMPLATES_DIR",
             str(Path(__file__).parent.parent / "templates"),
         )
+        # autoescape=False is safe: rendering plain text config files, not HTML
         env = Environment(
             loader=FileSystemLoader(templates_dir),
-            autoescape=False,
+            autoescape=False,  # nosec B701 - plain text config, not HTML
         )
 
         template = env.get_template("ngfw_userdata.txt.j2")

@@ -1,7 +1,7 @@
-"""Range provisioner service using AWS ECS Fargate.
+"""Shifter Engine service using AWS ECS Fargate.
 
 This module triggers ECS tasks to provision and teardown range infrastructure.
-The Pulumi container writes directly to RDS, so no callback endpoint is needed.
+The Shifter Engine writes directly to RDS, so no callback endpoint is needed.
 """
 
 import logging

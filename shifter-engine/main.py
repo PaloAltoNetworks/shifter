@@ -1,6 +1,6 @@
-"""Container entrypoint for Pulumi provisioner.
+"""Container entrypoint for Shifter Engine.
 
-This module is the main entry point when running the Pulumi provisioner container.
+This module is the main entry point when running the Shifter Engine container.
 It handles:
 - Database connection via RDS IAM authentication
 - Range status updates in the Django database
@@ -308,7 +308,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Pulumi provisioner for Shifter cyber ranges"
+        description="Shifter Engine for provisioning cyber ranges"
     )
     parser.add_argument(
         "operation",

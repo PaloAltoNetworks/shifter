@@ -42,12 +42,12 @@ jobs:
               - 'terraform/modules/pulumi-state/**'
               - 'terraform/environments/*/range/**'
               - '.github/workflows/_range.yml'
-            pulumi_provisioner:
-              - 'pulumi-provisioner/**'
+            shifter_engine:
+              - 'shifter-engine/**'
               - 'terraform/modules/pulumi-provisioner/**'
               - 'terraform/modules/ecr/**'
               - 'terraform/environments/*/*.tf'
-              - '.github/workflows/_pulumi-provisioner.yml'
+              - '.github/workflows/_shifter-engine.yml'
               - '.github/workflows/deploy.yml'
             portal:
               - 'terraform/modules/portal/**'
@@ -114,15 +114,15 @@ jobs:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
 
-  pulumi-provisioner:
-    name: Pulumi Provisioner
+  shifter-engine:
+    name: Shifter Engine
     needs: [changes, quality, core]
     if: |
       always() &&
-      (needs.changes.outputs.pulumi_provisioner == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.changes.outputs.shifter_engine == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
       needs.quality.result == 'success'
-    uses: ./.github/workflows/_pulumi-provisioner.yml
+    uses: ./.github/workflows/_shifter-engine.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
       is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}
@@ -132,12 +132,12 @@ jobs:
 
   portal:
     name: Portal
-    needs: [changes, quality, range, pulumi-provisioner]
+    needs: [changes, quality, range, shifter-engine]
     if: |
       always() &&
       (needs.changes.outputs.portal == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&
-      (needs.pulumi-provisioner.result == 'success' || needs.pulumi-provisioner.result == 'skipped') &&
+      (needs.shifter-engine.result == 'success' || needs.shifter-engine.result == 'skipped') &&
       needs.quality.result == 'success'
     uses: ./.github/workflows/_portal.yml
     with:

@@ -156,7 +156,7 @@ resource "aws_spot_instance_request" "runner" {
 
     # Install dependencies
     dnf update -y
-    dnf install -y docker git jq tar
+    dnf install -y docker git jq tar unzip
 
     # Start Docker
     systemctl enable --now docker

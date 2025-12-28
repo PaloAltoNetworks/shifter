@@ -2,14 +2,17 @@
 
 Run the Shifter portal locally for development.
 
-## Clone the Repository
+## Quick Start
 
 ```bash
-git clone git@github.com:Brad-Edwards/shifter.git
-cd shifter
+cd portal
+source .venv/bin/activate
+TESTING=1 python manage.py runserver
 ```
 
-## Portal Setup
+Portal runs at `http://localhost:8000`
+
+## Full Setup (First Time)
 
 ### 1. Create Python Virtual Environment
 
@@ -25,74 +28,25 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Local Database
-
-The portal requires PostgreSQL. Use Docker:
+### 3. Run Development Server
 
 ```bash
-docker run -d \
-  --name shifter-postgres \
-  -e POSTGRES_USER=shifter \
-  -e POSTGRES_PASSWORD=shifter \
-  -e POSTGRES_DB=shifter \
-  -p 5432:5432 \
-  postgres:16
+TESTING=1 python manage.py runserver
 ```
 
-### 4. Environment Variables
-
-Create `.env` in the portal directory:
-
-```bash
-# Database
-DATABASE_URL=postgres://shifter:shifter@localhost:5432/shifter
-
-# Django
-DEBUG=True
-SECRET_KEY=local-dev-key-not-for-production
-ALLOWED_HOSTS=localhost,127.0.0.1
-
-# AWS (for S3, Secrets Manager access)
-AWS_REGION=us-east-2
-AWS_PROFILE=your-dev-profile  # or use PANW_SHIFTER_DEV_PROFILE
-
-# Cognito (optional for local - use Django admin auth instead)
-# COGNITO_DOMAIN=...
-# COGNITO_CLIENT_ID=...
-# COGNITO_CLIENT_SECRET=...
-```
-
-### 5. Run Migrations
-
-```bash
-python manage.py migrate
-```
-
-### 6. Create Superuser
-
-```bash
-python manage.py createsuperuser
-```
-
-### 7. Run Development Server
-
-```bash
-python manage.py runserver
-```
-
-Portal runs at `http://localhost:8000`
+The `TESTING=1` flag uses an in-memory SQLite database, so no database setup is required. Migrations run automatically.
 
 ## Running Tests
 
 ```bash
 # All tests
-pytest
+TESTING=1 python -m pytest
 
 # With coverage
-pytest --cov=mission_control --cov-report=html
+TESTING=1 python -m pytest --cov=mission_control --cov-report=html
 
 # Specific test file
-pytest tests/test_views.py -v
+TESTING=1 python -m pytest tests/test_views.py -v
 ```
 
 ## Code Quality
@@ -103,35 +57,20 @@ ruff check .
 
 # Formatting
 ruff format .
-
-# Type checking (if configured)
-mypy .
 ```
 
-## Frontend Assets
+## Notes
 
-The portal uses minimal JavaScript. For any frontend changes:
-
-```bash
-# From repo root
-npm install
-npm run build  # If applicable
-```
-
-## Dev Box
-
-The Windows dev-box in `terraform/global/dev-box/` is currently used by Brad Edwards for development. Not part of the standard dev workflow.
+- `TESTING=1` uses SQLite in-memory, so data doesn't persist between restarts
+- Authentication is bypassed in test mode - you can access pages directly
+- The `.env` file contains settings for connecting to deployed environments, not local dev
 
 ## Troubleshooting
-
-### Database Connection Failed
-- Ensure PostgreSQL container is running: `docker ps`
-- Check port 5432 isn't in use: `lsof -i :5432`
-
-### AWS Credentials
-- Verify profile exists: `aws sts get-caller-identity --profile $PANW_SHIFTER_DEV_PROFILE`
-- Refresh SSO if needed: `aws sso login --profile $PANW_SHIFTER_DEV_PROFILE`
 
 ### Missing Dependencies
 - Ensure virtual environment is activated: `which python` should show `.venv/bin/python`
 - Reinstall: `pip install -r requirements.txt`
+
+### Port Already in Use
+- Check what's using port 8000: `lsof -i :8000`
+- Use a different port: `TESTING=1 python manage.py runserver 8001`

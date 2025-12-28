@@ -169,6 +169,73 @@ body.xdr-dark-theme {
     border-color: #00d26a;
 }
 
+/* Checkbox */
+.form-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.form-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 2px 0 0;
+    accent-color: #00d26a;
+    cursor: pointer;
+}
+
+.form-checkbox-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--xdr-text);
+}
+
+.form-checkbox-help {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    margin-top: 2px;
+}
+
+/* Range Details */
+.range-details {
+    background: rgb(255, 255, 255, 0.03);
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    padding: 12px;
+}
+
+.range-details-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--xdr-text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.range-details-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.range-details-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.range-details-label {
+    font-size: 11px;
+    color: var(--xdr-text-secondary);
+}
+
+.range-details-value {
+    font-size: 13px;
+    color: var(--xdr-text);
+    font-family: monospace;
+}
+
 /* Status */
 .status-dot {
     display: inline-block;

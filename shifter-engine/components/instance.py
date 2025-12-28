@@ -28,6 +28,10 @@ from .ssm_executor import SSMExecutor
 from .setup_orchestrator import SetupOrchestrator, SetupError
 from .plans.domain_join import DomainJoinPlan
 from .plans.xdr_agent_install import XDRAgentInstallPlan
+from .plans.bootstrap import BootstrapPlan
+from .plans.kali_setup import KaliSetupPlan
+from .plans.linux_bootstrap import LinuxBootstrapPlan
+from .plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 
 
 def validate_s3_path(value: str) -> bool:
@@ -168,6 +172,7 @@ class InstanceComponent(pulumi.ComponentResource):
     hostname: Optional[str]
     public_key: Optional[str]  # Stored for SSM orchestration
     agent_presigned_url: Optional[str]  # For XDR agent installation on DC
+    ssh_user: Optional[str]  # SSH user for Linux instances (kali, ubuntu, ec2-user)
     setup_result: Optional[pulumi.Output[bool]]  # Result of DC setup orchestration
 
     def __init__(
@@ -268,7 +273,25 @@ class InstanceComponent(pulumi.ComponentResource):
         self.hostname = None
         self.public_key = None
         self.agent_presigned_url = None
+        self.ssh_user = None
         self.setup_result = None
+
+        # Store attributes for all instance types (needed for run_setup)
+        # Generate hostname based on role (same logic as _generate_user_data)
+        if role == "attacker":
+            self.hostname = f"shifter-kali-{range_id}"
+            self.public_key = public_key
+            self.ssh_user = "kali"
+        elif role == "victim":
+            self.hostname = f"shifter-victim-{range_id}-{index}"
+            self.public_key = public_key
+            self.agent_presigned_url = agent_presigned_url if agent_presigned_url else None
+            # Determine SSH user based on OS type
+            if os_type == "kali":
+                self.ssh_user = "kali"
+            elif os_type in ("ubuntu", "amazon-linux"):
+                self.ssh_user = "ubuntu" if os_type == "ubuntu" else "ec2-user"
+            # Windows doesn't use SSH user (uses WinRM/RDP)
 
         # For DC role, read config from environment variables (prebaked AMI)
         if role == "dc":
@@ -517,6 +540,141 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
 
             except Exception as e:
                 pulumi.log.error(f"Domain setup failed: {e}")
+                raise
+
+        # Use apply to run the setup when instance_id and private_ip are resolved
+        self.setup_result = pulumi.Output.all(
+            self.instance_id, self.private_ip
+        ).apply(do_setup)
+        return self.setup_result
+
+    def run_setup(self, region: Optional[str] = None) -> pulumi.Output[bool]:
+        """Run setup plan for non-DC instances via SSM Run Command.
+
+        This method handles setup for:
+        - Kali (attacker): KaliSetupPlan (hostname + SSH)
+        - Linux victims: LinuxBootstrapPlan + LinuxXDRAgentInstallPlan
+        - Windows victims: BootstrapPlan + XDRAgentInstallPlan
+
+        DC instances should use run_dc_setup() instead.
+
+        Args:
+            region: AWS region (uses default if not provided)
+
+        Returns:
+            pulumi.Output[bool] that resolves to True on success
+
+        Raises:
+            SetupError: If any step fails (propagates to Pulumi as stack failure)
+        """
+        # DC instances use run_dc_setup instead
+        if self.role == "dc":
+            return pulumi.Output.from_input(True)
+
+        # Capture instance attributes for closure
+        instance_role = self.role
+        instance_os_type = self.os_type
+        instance_hostname = self.hostname
+        instance_public_key = self.public_key
+        instance_agent_url = self.agent_presigned_url
+        instance_ssh_user = self.ssh_user
+
+        def do_setup(args: tuple) -> bool:
+            """Run the setup synchronously (called within apply)."""
+            instance_id, _ = args
+            pulumi.log.info(f"Starting setup for {instance_role} instance {instance_id}...")
+
+            # Create executor and orchestrator
+            executor = SSMExecutor(region=region)
+            orchestrator = SetupOrchestrator(executor=executor)
+
+            # Select SSM document based on OS type
+            if instance_os_type in ("kali", "ubuntu", "amazon-linux"):
+                document_name = "AWS-RunShellScript"
+            else:
+                document_name = "AWS-RunPowerShellScript"
+
+            try:
+                # Wait for SSM agent to come online
+                pulumi.log.info(f"Waiting for SSM agent on {instance_id}...")
+                executor.wait_for_agent(instance_id, timeout_seconds=300)
+                pulumi.log.info(f"Instance {instance_id} is ready (SSM agent online)")
+
+                # Create context object for plan get_context()
+                class InstanceContext:
+                    def __init__(self):
+                        self.hostname = instance_hostname
+                        self.public_key = instance_public_key
+                        self.agent_presigned_url = instance_agent_url
+                        self.ssh_user = instance_ssh_user
+
+                ctx = InstanceContext()
+
+                # Select and run plans based on role and OS type
+                if instance_role == "attacker":
+                    # Kali: Just hostname and SSH setup
+                    plan = KaliSetupPlan()
+                    context = plan.get_context(ctx)
+                    result = orchestrator.orchestrate(
+                        instance_id, plan, context, document_name=document_name
+                    )
+                    if not result.success:
+                        raise SetupError(f"Kali setup failed: {result.error}")
+                    pulumi.log.info(f"Kali setup complete for {instance_id}")
+
+                elif instance_role == "victim":
+                    if instance_os_type in ("kali", "ubuntu", "amazon-linux"):
+                        # Linux victim: Bootstrap + XDR
+                        bootstrap_plan = LinuxBootstrapPlan()
+                        bootstrap_ctx = bootstrap_plan.get_context(ctx)
+                        result = orchestrator.orchestrate(
+                            instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name
+                        )
+                        if not result.success:
+                            raise SetupError(f"Linux bootstrap failed: {result.error}")
+                        pulumi.log.info(f"Linux bootstrap complete for {instance_id}")
+
+                        # Install XDR agent
+                        if instance_agent_url:
+                            xdr_plan = LinuxXDRAgentInstallPlan()
+                            xdr_ctx = xdr_plan.get_context(ctx)
+                            result = orchestrator.orchestrate(
+                                instance_id, xdr_plan, xdr_ctx, document_name=document_name
+                            )
+                            if not result.success:
+                                raise SetupError(f"Linux XDR install failed: {result.error}")
+                            pulumi.log.info(f"Linux XDR agent installed on {instance_id}")
+                        else:
+                            pulumi.log.info(f"No XDR agent URL provided for {instance_id}")
+
+                    else:
+                        # Windows victim: Bootstrap + XDR
+                        bootstrap_plan = BootstrapPlan()
+                        bootstrap_ctx = bootstrap_plan.get_context(ctx)
+                        result = orchestrator.orchestrate(
+                            instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name
+                        )
+                        if not result.success:
+                            raise SetupError(f"Windows bootstrap failed: {result.error}")
+                        pulumi.log.info(f"Windows bootstrap complete for {instance_id}")
+
+                        # Install XDR agent
+                        if instance_agent_url:
+                            xdr_plan = XDRAgentInstallPlan()
+                            xdr_ctx = xdr_plan.get_context(ctx)
+                            result = orchestrator.orchestrate(
+                                instance_id, xdr_plan, xdr_ctx, document_name=document_name
+                            )
+                            if not result.success:
+                                raise SetupError(f"Windows XDR install failed: {result.error}")
+                            pulumi.log.info(f"Windows XDR agent installed on {instance_id}")
+                        else:
+                            pulumi.log.info(f"No XDR agent URL provided for {instance_id}")
+
+                return True
+
+            except Exception as e:
+                pulumi.log.error(f"Setup failed for {instance_id}: {e}")
                 raise
 
         # Use apply to run the setup when instance_id and private_ip are resolved

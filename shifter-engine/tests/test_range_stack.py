@@ -1277,6 +1277,145 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
             "Domain member without DC should get None for dc_config_param_name"
 
 
+class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
+    """Tests for victim self-orchestrated domain join (new architecture).
+
+    In the new architecture:
+    - Victims handle their own domain join in run_setup()
+    - DC only sets itself up (XDR install, no victim orchestration)
+    - DC's private_ip is passed to victims with join_domain=True
+    - Range only reports ready when ALL setup (including domain join) completes
+    """
+
+    @pulumi.runtime.test
+    def test_range_stack_passes_dc_private_ip_to_domain_joining_victims(
+        self, temp_templates, dc_range_config
+    ):
+        """Victims with join_domain=True should receive DC's private_ip in run_setup().
+
+        Domain-joining instances use Output.apply() to pass DC IP, so the call
+        happens asynchronously. We verify by checking the source code pattern.
+        """
+        from components.range_stack import RangeStack
+        import inspect
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            source = inspect.getsource(RangeStack.__init__)
+
+            # Verify the pattern: dc_components[0].private_ip.apply(
+            #     lambda ip, inst=instance: inst.run_setup(dc_ip=ip)
+            # )
+            assert "private_ip.apply" in source, \
+                "Domain-joining instances should use DC's private_ip.apply()"
+            assert "run_setup(dc_ip=" in source, \
+                "run_setup should be called with dc_ip parameter"
+
+    @pulumi.runtime.test
+    def test_range_stack_does_not_pass_dc_ip_to_non_domain_joining_victims(
+        self, temp_templates, dc_range_config
+    ):
+        """Victims with join_domain=False should NOT receive dc_ip in run_setup()."""
+        from components.range_stack import RangeStack
+        from components.instance import InstanceComponent
+
+        run_setup_calls = []
+        original_run_setup = InstanceComponent.run_setup
+
+        def capture_run_setup(self, region=None, dc_ip=None):
+            run_setup_calls.append({
+                "role": self.role,
+                "join_domain": getattr(self, "join_domain", None),
+                "dc_ip": dc_ip,
+            })
+            return original_run_setup(self, region=region, dc_ip=dc_ip)
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            with patch.object(InstanceComponent, "run_setup", capture_run_setup):
+                stack = RangeStack("test-range", config=dc_range_config)
+
+        # Find the attacker's run_setup call (join_domain=False by default)
+        attacker_call = next(
+            (c for c in run_setup_calls if c["role"] == "attacker"), None
+        )
+        assert attacker_call is not None, "Attacker run_setup should be called"
+        assert attacker_call["dc_ip"] is None, \
+            "Non-domain-joining instance should NOT receive dc_ip"
+
+    @pulumi.runtime.test
+    def test_dc_run_dc_setup_called_without_domain_members_param(
+        self, temp_templates, dc_range_config
+    ):
+        """DC's run_dc_setup() should be called without domain_members.
+
+        In the new architecture, range_stack should NOT pass domain_members to
+        run_dc_setup(). Domain join is handled by each victim's own run_setup().
+
+        This test verifies that:
+        1. The dc_instance.run_dc_setup() is called directly (not via Output.all)
+        2. domain_member_ids list is NOT collected/used
+        """
+        from components.range_stack import RangeStack
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            # Check the source code directly - in new architecture,
+            # there should be no domain_member_ids collection
+            import inspect
+            source = inspect.getsource(RangeStack.__init__)
+
+            # After implementation, these should NOT be in the code:
+            # 1. No collection of domain_member_ids for domain join
+            # 2. No Output.all(*domain_member_ids).apply(...)
+            # 3. No run_dc_setup(domain_members=...) call
+
+            # For now (TDD red phase), this FAILS because current code
+            # still collects domain_member_ids
+            assert "domain_member_ids.append" not in source, \
+                "New architecture should NOT collect domain_member_ids"
+            assert "run_dc_setup(domain_members=" not in source, \
+                "run_dc_setup should NOT receive domain_members param"
+
+    @pulumi.runtime.test
+    def test_all_non_dc_instances_get_run_setup_called(
+        self, temp_templates, dc_range_config
+    ):
+        """All non-DC instances should have run_setup() called.
+
+        Note: Domain-joining instances call run_setup via Output.apply(),
+        so they execute asynchronously. We verify direct calls for non-joining
+        instances and check source code for the apply pattern for joining ones.
+        """
+        from components.range_stack import RangeStack
+        from components.instance import InstanceComponent
+        import inspect
+
+        run_setup_calls = []
+        original_run_setup = InstanceComponent.run_setup
+
+        def capture_run_setup(self, region=None, dc_ip=None):
+            run_setup_calls.append({"role": self.role, "dc_ip": dc_ip})
+            return original_run_setup(self, region=region, dc_ip=dc_ip)
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            with patch.object(InstanceComponent, "run_setup", capture_run_setup):
+                stack = RangeStack("test-range", config=dc_range_config)
+
+            # Check source for proper handling of both types
+            source = inspect.getsource(RangeStack.__init__)
+
+        # Non-domain-joining instances (attacker) should be called directly
+        attacker_calls = [c for c in run_setup_calls if c["role"] == "attacker"]
+        assert len(attacker_calls) == 1, "Attacker should have run_setup called directly"
+        assert attacker_calls[0]["dc_ip"] is None, "Attacker should not receive dc_ip"
+
+        # Domain-joining instances use Output.apply (verified via source)
+        assert "inst.run_setup(dc_ip=ip)" in source, \
+            "Domain-joining instances should call run_setup with dc_ip via apply"
+
+        # DC should NOT have run_setup called
+        dc_calls = [c for c in run_setup_calls if c["role"] == "dc"]
+        assert len(dc_calls) == 0, "DC should NOT have run_setup called"
+
+
 class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
     """Tests ensuring existing functionality isn't broken."""
 

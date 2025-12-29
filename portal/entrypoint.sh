@@ -40,6 +40,12 @@ print(response['SecretString'])
     # Export Django secret key
     export DJANGO_SECRET_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['django_secret_key'])")
 
+    # Export field encryption key (for StrataConfig encrypted fields)
+    FIELD_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin).get('field_encryption_key', ''))")
+    if [ -n "$FIELD_KEY" ]; then
+        export FIELD_ENCRYPTION_KEY="$FIELD_KEY"
+    fi
+
     # Fetch Cognito secret if ARN provided
     if [ -n "${COGNITO_SECRET_ARN:-}" ]; then
         COGNITO_SECRET=$(python -c "

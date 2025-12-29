@@ -13,6 +13,12 @@ class XdrDropdown {
         this.filterInput = element.querySelector('.xdr-dropdown-filter input');
         this.hiddenInput = element.querySelector('input[type="hidden"]');
 
+        // Defensive: ensure required elements exist
+        if (!this.trigger || !this.itemsContainer) {
+            console.warn('XdrDropdown: Missing required elements, skipping init');
+            return;
+        }
+
         this.items = Array.from(this.itemsContainer.querySelectorAll('.xdr-dropdown-item'));
         this.boundItems = new WeakSet();
         this.highlightedIndex = -1;
@@ -23,6 +29,9 @@ class XdrDropdown {
     }
 
     init() {
+        // Defensive check
+        if (!this.trigger) return;
+
         // Toggle on trigger click
         this.trigger.addEventListener('click', (e) => {
             e.preventDefault();

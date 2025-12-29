@@ -6,6 +6,10 @@ This module handles the lifecycle operations for ranges:
 - destroy: Tear down an active or failed range
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.utils import timezone
 
 from mission_control.models import ActivityLog, Range
@@ -13,6 +17,9 @@ from mission_control.services.engine import start_provisioning, start_teardown
 
 from .allocation import allocate_subnet_index
 from .scenarios import get_scenario_config, validate_launch
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
 
 
 class OrchestrationError(Exception):
@@ -26,7 +33,7 @@ class OrchestrationError(Exception):
         self.status_code = status_code
 
 
-def launch(user, agent_id: int, scenario: str) -> Range:
+def launch(user: User, agent_id: int, scenario: str) -> Range:
     """Launch a new cyber range.
 
     Args:
@@ -94,7 +101,7 @@ def launch(user, agent_id: int, scenario: str) -> Range:
     return range_obj
 
 
-def cancel(user) -> None:
+def cancel(user: User) -> None:
     """Cancel a provisioning range.
 
     Only works for ranges in PENDING or PROVISIONING status.
@@ -109,7 +116,7 @@ def cancel(user) -> None:
     if not active_range:
         raise OrchestrationError("No active range", status_code=404)
 
-    if active_range.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
+    if active_range.status not in Range.CANCELLABLE_STATUSES:
         raise OrchestrationError(
             f"Cannot cancel range in {active_range.status} status",
             status_code=400,
@@ -126,7 +133,7 @@ def cancel(user) -> None:
     )
 
 
-def destroy(user) -> None:
+def destroy(user: User) -> None:
     """Destroy an active, paused, or failed range.
 
     Sets status to DESTROYING and triggers async resource cleanup.

@@ -6,6 +6,10 @@ This module handles agent (asset) management:
 - delete_agent: Soft delete an agent and remove from S3
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -13,14 +17,15 @@ from mission_control.models import ActivityLog, AgentConfig, OperatingSystem
 from mission_control.services.s3 import S3Error
 from mission_control.services.s3 import delete_agent as s3_delete
 
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
+
 
 class AssetError(Exception):
     """Error raised when an asset operation fails."""
 
-    pass
 
-
-def get_storage_used(user) -> int:
+def get_storage_used(user: User) -> int:
     """Get total bytes used by a user's active agents.
 
     Args:
@@ -34,7 +39,7 @@ def get_storage_used(user) -> int:
 
 
 def create_agent(
-    user,
+    user: User,
     name: str,
     s3_key: str,
     filename: str,

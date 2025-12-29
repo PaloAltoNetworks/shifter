@@ -211,8 +211,8 @@ class TestRangeToJson:
     def test_serializes_range_correctly(self, user):
         from django.utils import timezone
 
+        from engine.services.serialization import range_to_dict
         from mission_control.models import AgentConfig, OperatingSystem, Range
-        from mission_control.views import _range_to_json
 
         windows_os = OperatingSystem.objects.get(slug="windows")
         agent = AgentConfig.objects.create(
@@ -235,7 +235,7 @@ class TestRangeToJson:
             ready_at=now,
         )
 
-        result = _range_to_json(range_obj)
+        result = range_to_dict(range_obj)
 
         assert result["id"] == range_obj.id
         assert result["status"] == "ready"
@@ -246,8 +246,8 @@ class TestRangeToJson:
         assert "victim_ip" not in result  # Security: internal detail not exposed
 
     def test_handles_null_agent(self, user):
+        from engine.services.serialization import range_to_dict
         from mission_control.models import Range
-        from mission_control.views import _range_to_json
 
         range_obj = Range.objects.create(
             user=user,
@@ -255,7 +255,7 @@ class TestRangeToJson:
             status=Range.Status.PROVISIONING,
         )
 
-        result = _range_to_json(range_obj)
+        result = range_to_dict(range_obj)
 
         assert result["agent_id"] is None
         assert result["agent_name"] is None

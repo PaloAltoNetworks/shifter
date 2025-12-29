@@ -114,7 +114,7 @@ def delete_agent(agent: AgentConfig) -> None:
     try:
         s3_delete(agent.s3_key)
     except S3Error as e:
-        raise AssetError(f"Failed to delete agent from storage: {e}")
+        raise AssetError(f"Failed to delete agent from storage: {e}") from e
 
     # Soft delete the database record
     agent.deleted_at = timezone.now()

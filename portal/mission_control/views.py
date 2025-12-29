@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import ActivityLog, AgentConfig, OperatingSystem, Range
+from .models import ActivityLog, AgentConfig, OperatingSystem, Range, StrataConfig
 from .services.s3 import (
     S3Error,
     generate_presigned_upload_url,
@@ -553,6 +553,11 @@ def _range_to_json(range_obj):
         "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
         "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
         "paused_at": range_obj.paused_at.isoformat() if range_obj.paused_at else None,
+        # NGFW (VM-Series) fields
+        "ngfw_enabled": range_obj.ngfw_enabled,
+        "ngfw_instance_id": range_obj.ngfw_instance_id,
+        "ngfw_untrust_ip": range_obj.ngfw_untrust_ip,
+        "ngfw_trust_ip": range_obj.ngfw_trust_ip,
     }
 
 
@@ -654,6 +659,10 @@ def launch_range(request):
     if scenario not in ("basic", "ad_attack_lab"):
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
+    # Get NGFW options
+    ngfw_enabled = data.get("ngfw_enabled", False)
+    ngfw_config_id = data.get("ngfw_config_id")
+
     # Verify agent belongs to user and is not deleted
     agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).select_related("os").first()
     if not agent:
@@ -671,6 +680,18 @@ def launch_range(request):
             )
         # Use same agent for DC and victim
         dc_agent = agent
+
+    # Validate Strata config if NGFW is enabled
+    strata_config = None
+    if ngfw_enabled:
+        if not ngfw_config_id:
+            return JsonResponse(
+                {"error": "Strata config is required when NGFW is enabled"},
+                status=400,
+            )
+        strata_config = StrataConfig.active_for_user(request.user).filter(id=ngfw_config_id).first()
+        if not strata_config:
+            return JsonResponse({"error": "Strata config not found"}, status=404)
 
     # Allocate subnet index for this range
     try:
@@ -693,19 +714,24 @@ def launch_range(request):
         status=Range.Status.PROVISIONING,
         subnet_index=subnet_index,
         instance_config=instance_config,
+        ngfw_enabled=ngfw_enabled,
+        strata_config=strata_config,
     )
 
     # Log activity
-    ActivityLog.log(
-        "range_launched",
-        user=request.user,
-        range_id=range_obj.id,
-        agent_id=agent.id,
-        agent_name=agent.name,
-        dc_agent_id=dc_agent.id if dc_agent else None,
-        dc_agent_name=dc_agent.name if dc_agent else None,
-        scenario=scenario,
-    )
+    log_metadata = {
+        "range_id": range_obj.id,
+        "agent_id": agent.id,
+        "agent_name": agent.name,
+        "ngfw_enabled": ngfw_enabled,
+        "dc_agent_id": dc_agent.id if dc_agent else None,
+        "dc_agent_name": dc_agent.name if dc_agent else None,
+        "scenario": scenario,
+    }
+    if strata_config:
+        log_metadata["strata_config_id"] = strata_config.id
+        log_metadata["strata_config_name"] = strata_config.name
+    ActivityLog.log("range_launched", user=request.user, **log_metadata)
 
     logger.info(
         "Range launched: user=%s range_id=%s agent=%s dc_agent=%s scenario=%s",
@@ -841,3 +867,138 @@ def list_agents_for_launch(request):
         for agent in agents
     ]
     return JsonResponse({"agents": agent_list})
+
+
+# -----------------------------------------------------------------------------
+# Strata Config Views (SCM Configuration for NGFW)
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def ngfw_configs(request):
+    """Strata config management - create and manage SCM configurations for NGFW."""
+    user_configs = StrataConfig.active_for_user(request.user)
+
+    context = {
+        "page_title": "NGFW",
+        "active_nav": "ngfw",
+        "configs": user_configs,
+    }
+    return render(request, "mission_control/ngfw.html", context)
+
+
+@login_required
+@require_POST
+def create_ngfw_config(request):
+    """Create a new Strata config for NGFW."""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    name = data.get("name", "").strip()
+    scm_folder_name = data.get("scm_folder_name", "").strip()
+    scm_pin_id = data.get("scm_pin_id", "").strip()
+    scm_pin_value = data.get("scm_pin_value", "").strip()
+
+    # Validate required fields
+    if not name:
+        return JsonResponse({"error": "Name is required"}, status=400)
+    if not scm_folder_name:
+        return JsonResponse({"error": "SCM folder name is required"}, status=400)
+    if not scm_pin_id:
+        return JsonResponse({"error": "SCM PIN ID is required"}, status=400)
+    if not scm_pin_value:
+        return JsonResponse({"error": "SCM PIN value is required"}, status=400)
+
+    # Create config
+    config = StrataConfig.objects.create(
+        user=request.user,
+        name=name,
+        scm_folder_name=scm_folder_name,
+        scm_pin_id=scm_pin_id,
+        scm_pin_value=scm_pin_value,
+    )
+
+    ActivityLog.log(
+        "strata_config_created",
+        user=request.user,
+        config_id=config.id,
+        config_name=config.name,
+    )
+
+    logger.info(
+        "Strata config created: user=%s config_id=%s name=%s",
+        request.user.email,
+        config.id,
+        config.name,
+    )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "config": {
+                "id": config.id,
+                "name": config.name,
+                "scm_folder_name": config.scm_folder_name,
+            },
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_POST
+def delete_ngfw_config(request, config_id):
+    """Delete a Strata config (soft delete)."""
+    config = get_object_or_404(StrataConfig, id=config_id, user=request.user, deleted_at__isnull=True)
+
+    # Soft delete
+    config.deleted_at = timezone.now()
+    config.save(update_fields=["deleted_at"])
+
+    ActivityLog.log(
+        "strata_config_deleted",
+        user=request.user,
+        config_id=config.id,
+        config_name=config.name,
+    )
+
+    logger.info(
+        "Strata config deleted: user=%s config_id=%s name=%s",
+        request.user.email,
+        config.id,
+        config.name,
+    )
+
+    # Return JSON for API calls, redirect for HTML form submissions
+    if request.content_type == "application/json" or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"success": True})
+
+    messages.success(request, f"Strata config '{config.name}' deleted.")
+    return redirect("mission_control:ngfw_configs")
+
+
+@login_required
+@require_GET
+def list_ngfw_configs(request):
+    """
+    Get user's Strata configs for the launch dropdown.
+
+    Response (JSON):
+        - configs: List of {id, name, scm_folder_name}
+        Note: PIN credentials are NOT included for security
+    """
+    configs = StrataConfig.active_for_user(request.user)
+    config_list = [
+        {
+            "id": config.id,
+            "name": config.name,
+            "scm_folder_name": config.scm_folder_name,
+            "scm_pin_id": config.scm_pin_id,
+            "created_at": config.created_at.isoformat() if config.created_at else None,
+        }
+        for config in configs
+    ]
+    return JsonResponse({"configs": config_list})

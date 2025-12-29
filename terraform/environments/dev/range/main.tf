@@ -33,6 +33,10 @@ module "vpc" {
 
   # Range Instance IAM
   agent_s3_bucket = var.agent_s3_bucket
+
+  # VM-Series NGFW
+  vm_series_ami_id        = var.vm_series_ami_id
+  vm_series_instance_type = var.vm_series_instance_type
 }
 
 # ------------------------------------------------------------------------------

@@ -42,6 +42,12 @@ class DashboardManager {
         this.dcAgentDropdown = document.getElementById('dc-agent-dropdown');
         this.dcAgentSelect = document.getElementById('dc-agent-select-value');
         this.dcAgentItems = document.getElementById('dc-agent-items');
+        this.ngfwCheckbox = document.getElementById('ngfw-enabled');
+        this.ngfwConfigGroup = document.getElementById('ngfw-config-group');
+        this.ngfwConfigDropdown = document.getElementById('ngfw-config-dropdown');
+        this.ngfwConfigSelect = document.getElementById('ngfw-config-select-value');
+        this.ngfwConfigItems = document.getElementById('ngfw-config-items');
+        this.ngfwConfigsUrl = options.ngfwConfigsUrl;
         this.launchBtn = document.getElementById('launch-btn');
         this.cancelBtn = document.getElementById('cancel-btn');
         this.pauseBtn = document.getElementById('pause-btn');
@@ -112,6 +118,20 @@ class DashboardManager {
             });
         }
 
+        // NGFW checkbox toggle
+        if (this.ngfwCheckbox) {
+            this.ngfwCheckbox.addEventListener('change', () => {
+                this._toggleNgfwConfigSection();
+            });
+        }
+
+        // NGFW config dropdown change
+        if (this.ngfwConfigDropdown) {
+            this.ngfwConfigDropdown.addEventListener('change', () => {
+                this._updateLaunchButtonState();
+            });
+        }
+
         // Scenario dropdown change
         if (this.scenarioDropdown) {
             this.scenarioDropdown.addEventListener('change', (e) => {
@@ -175,27 +195,14 @@ class DashboardManager {
         }
     }
 
-    /**
-     * Update launch button enabled/disabled state based on form validity.
-     * All scenarios just require an agent to be selected.
-     * (AD scenario validates Windows agent on backend)
-     */
-    _updateLaunchButtonState() {
-        const agentSelected = this.agentSelect?.value;
-        const canLaunch = Boolean(agentSelected);
-
-        if (this.launchBtn) {
-            this.launchBtn.disabled = !canLaunch;
-        }
-    }
-
     async init() {
         // Initialize scenario dropdown
         this._initScenarioDropdown();
 
-        // Load agents and current status in parallel
+        // Load agents, NGFW configs, and current status in parallel
         await Promise.all([
             this.loadAgents(),
+            this.loadNgfwConfigs(),
             this.loadStatus(),
         ]);
     }
@@ -203,6 +210,67 @@ class DashboardManager {
     _initScenarioDropdown() {
         // Initialize the scenario dropdown with XdrDropdown if available
         this._initDropdown(this.scenarioDropdown);
+    }
+
+    _toggleNgfwConfigSection() {
+        if (this.ngfwConfigGroup) {
+            this.ngfwConfigGroup.style.display = this.ngfwCheckbox?.checked ? 'block' : 'none';
+        }
+        this._updateLaunchButtonState();
+    }
+
+    _updateLaunchButtonState() {
+        if (!this.launchBtn) return;
+
+        const hasAgent = Boolean(this.agentSelect?.value);
+        const ngfwEnabled = this.ngfwCheckbox?.checked ?? false;
+        const hasNgfwConfig = Boolean(this.ngfwConfigSelect?.value);
+
+        // Launch is enabled if: agent is selected AND (NGFW disabled OR NGFW config selected)
+        this.launchBtn.disabled = !hasAgent || (ngfwEnabled && !hasNgfwConfig);
+    }
+
+    async loadNgfwConfigs() {
+        if (!this.ngfwConfigsUrl || !this.ngfwConfigItems) return;
+
+        try {
+            const response = await fetch(this.ngfwConfigsUrl, {
+                headers: { 'Accept': 'application/json' },
+            });
+
+            if (!response.ok) {
+                console.error('Failed to load NGFW configs');
+                return;
+            }
+
+            const data = await response.json();
+
+            // Clear existing items
+            this.ngfwConfigItems.innerHTML = '';
+
+            if (!data.configs || data.configs.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'xdr-dropdown-item disabled';
+                li.textContent = 'No configs available';
+                this.ngfwConfigItems.appendChild(li);
+            } else {
+                // Add config items
+                for (const config of data.configs) {
+                    const li = document.createElement('li');
+                    li.className = 'xdr-dropdown-item';
+                    li.dataset.value = config.id;
+                    li.textContent = `${config.name} (${config.scm_folder_name})`;
+                    this.ngfwConfigItems.appendChild(li);
+                }
+            }
+
+            // Reinitialize dropdown after adding items
+            if (this.ngfwConfigDropdown && window.XdrDropdown) {
+                new window.XdrDropdown(this.ngfwConfigDropdown);
+            }
+        } catch (error) {
+            console.error('Error loading NGFW configs:', error);
+        }
     }
 
     async loadAgents() {
@@ -319,6 +387,28 @@ class DashboardManager {
             rangeAgent.textContent = this.currentRange.agent_name;
         }
 
+        // Update NGFW details
+        const ngfwDetails = document.getElementById('ngfw-details');
+        if (ngfwDetails) {
+            if (this.currentRange.ngfw_enabled) {
+                ngfwDetails.style.display = 'block';
+                const instanceId = document.getElementById('ngfw-instance-id');
+                const untrustIp = document.getElementById('ngfw-untrust-ip');
+                const trustIp = document.getElementById('ngfw-trust-ip');
+
+                if (instanceId) {
+                    instanceId.textContent = this.currentRange.ngfw_instance_id || '--';
+                }
+                if (untrustIp) {
+                    untrustIp.textContent = this.currentRange.ngfw_untrust_ip || '--';
+                }
+                if (trustIp) {
+                    trustIp.textContent = this.currentRange.ngfw_trust_ip || '--';
+                }
+            } else {
+                ngfwDetails.style.display = 'none';
+            }
+        }
     }
 
     _isValidHttpUrl(urlString) {
@@ -367,14 +457,28 @@ class DashboardManager {
 
         const scenario = this.scenarioSelect?.value || 'basic';
 
+        const ngfwEnabled = this.ngfwCheckbox?.checked ?? false;
+        const ngfwConfigId = this.ngfwConfigSelect?.value;
+
+        // Validate NGFW config selection
+        if (ngfwEnabled && !ngfwConfigId) {
+            alert('Please select an NGFW configuration when NGFW is enabled.');
+            return;
+        }
+
+        this.launchBtn.disabled = true;
+        this.launchBtn.textContent = 'Launching...';
+
         // Build request body - backend handles dc_agent for AD scenarios
         const body = {
             agent_id: parseInt(agentId),
             scenario: scenario,
+            ngfw_enabled: ngfwEnabled,
         };
 
-        this.launchBtn.disabled = true;
-        this.launchBtn.textContent = 'Launching...';
+        if (ngfwEnabled && ngfwConfigId) {
+            body.ngfw_config_id = parseInt(ngfwConfigId);
+        }
 
         try {
             const response = await fetch(this.launchUrl, {

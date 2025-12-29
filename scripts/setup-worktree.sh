@@ -45,4 +45,15 @@ if [ -d "$MAIN_REPO/shifter-engine/.venv" ]; then
     fi
 fi
 
+# Node modules (for stylelint, prettier, etc.)
+if [ -f "$WORKTREE_ROOT/package.json" ]; then
+    if [ -d "$WORKTREE_ROOT/node_modules" ]; then
+        echo "node_modules already exists"
+    else
+        echo "Installing node modules..."
+        (cd "$WORKTREE_ROOT" && npm install)
+        echo "Installed node modules"
+    fi
+fi
+
 echo "Done"

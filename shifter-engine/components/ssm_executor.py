@@ -272,23 +272,73 @@ class SSMExecutor:
 
             time.sleep(self._poll_interval)
 
+    def verify_agent_ready(
+        self,
+        instance_id: str,
+        timeout_seconds: int = 60,
+        max_attempts: int = 5,
+        document_name: str = "AWS-RunShellScript",
+    ) -> bool:
+        """Verify SSM agent is truly ready to execute commands.
+
+        PingStatus='Online' only means the agent responded to AWS heartbeat.
+        This method sends a trivial command to verify the document worker
+        IPC subsystem is fully initialized.
+
+        Args:
+            instance_id: Target EC2 instance ID
+            timeout_seconds: Timeout for each probe attempt
+            max_attempts: Number of probe attempts before giving up
+            document_name: SSM document to use (match the subsequent command type)
+
+        Returns:
+            True if agent executed command successfully
+
+        Raises:
+            SSMExecutorError: If agent fails all probe attempts
+        """
+        probe_script = "echo ready"  # Minimal command (works in both bash and PowerShell)
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = self.run_command(
+                    instance_id=instance_id,
+                    script=probe_script,
+                    timeout_seconds=timeout_seconds,
+                    document_name=document_name,
+                )
+                if result.exit_code == 0:
+                    return True
+            except (CommandError, TimeoutError, SSMExecutorError) as e:
+                if attempt < max_attempts:
+                    time.sleep(10)  # Wait before retry
+                    continue
+                raise SSMExecutorError(
+                    f"SSM agent on {instance_id} not ready after {max_attempts} attempts: {e}"
+                )
+
+        return False
+
     def reboot_and_wait(
         self,
         instance_id: str,
         timeout_seconds: int = 300,
+        document_name: str = "AWS-RunShellScript",
     ) -> bool:
         """Reboot an instance and wait for it to come back online.
 
         Args:
             instance_id: Target EC2 instance ID
             timeout_seconds: Maximum time to wait for instance to come back
+            document_name: SSM document to use for readiness probe
 
         Returns:
-            True if instance is back online
+            True if instance is back online and ready to execute commands
 
         Raises:
             TimeoutError: If instance doesn't come back in time
             InstanceTerminatedError: If instance is terminated
+            SSMExecutorError: If readiness probe fails
         """
         # Initiate reboot
         try:
@@ -339,13 +389,24 @@ class SSMExecutor:
                         ).get("Status", "")
 
                         if instance_check == "ok" and system_check == "ok":
-                            # Now wait for SSM agent
+                            # Now wait for SSM agent ping status
                             remaining_time = timeout_seconds - elapsed
                             if remaining_time > 0:
-                                return self.wait_for_agent(
+                                self.wait_for_agent(
                                     instance_id,
                                     timeout_seconds=int(remaining_time),
                                 )
+                                # Verify agent can actually execute commands
+                                # (PingStatus=Online doesn't mean document worker is ready)
+                                remaining_time = timeout_seconds - (time.time() - start_time)
+                                if remaining_time > 0:
+                                    return self.verify_agent_ready(
+                                        instance_id,
+                                        timeout_seconds=min(30, int(remaining_time)),
+                                        max_attempts=3,
+                                        document_name=document_name,
+                                    )
+                                return True  # No time left for probe, hope for the best
             except ClientError:
                 pass  # Instance might be transitioning
 

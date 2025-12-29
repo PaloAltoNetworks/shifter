@@ -360,36 +360,31 @@ echo "Kali setup complete"
 """
         )
 
+        # Linux victim - MINIMAL, all setup via SSM plans
         linux_victim_template = templates_path / "victim_linux.sh.j2"
         linux_victim_template.write_text(
             """#!/bin/bash
 set -euo pipefail
-echo "Setting hostname to {{ hostname }}..."
-hostnamectl set-hostname {{ hostname }}
-echo "{{ public_key }}" >> /home/ubuntu/.ssh/authorized_keys
-{% if presigned_url %}
-echo "Downloading agent from {{ agent_s3_key }}..."
-curl -sSf -o /tmp/agent '{{ presigned_url }}'
-{% else %}
-echo "No agent installer configured"
-{% endif %}
-echo "Victim setup complete"
+exec > >(tee /var/log/user-data.log) 2>&1
+echo "Victim Linux instance booting..."
+# All setup (hostname, SSH, XDR) is handled by SSM plans:
+#   - LinuxBootstrapPlan: hostname + SSH configuration
+#   - LinuxXDRAgentInstallPlan: XDR agent installation
+echo "user_data complete. SSM will handle remaining setup."
 """
         )
 
+        # Windows victim - MINIMAL, all setup via SSM plans
         windows_victim_template = templates_path / "victim_windows.ps1.j2"
         windows_victim_template.write_text(
             """<powershell>
 $ErrorActionPreference = "Stop"
-Write-Host "Setting hostname to {{ hostname }}..."
-Rename-Computer -NewName "{{ hostname }}" -Force
-{% if presigned_url %}
-Write-Host "Downloading agent from {{ agent_s3_key }}..."
-Invoke-WebRequest -Uri '{{ presigned_url }}' -OutFile C:\agent
-{% else %}
-Write-Host "No agent installer configured"
-{% endif %}
-Write-Host "Windows setup complete"
+$LogFile = "C:\\Windows\\Temp\\userdata.log"
+"Victim Windows instance booting..." | Out-File -FilePath $LogFile
+# All setup (hostname, SSH, XDR) is handled by SSM plans:
+#   - BootstrapPlan: hostname + SSH configuration
+#   - XDRAgentInstallPlan: XDR agent installation
+"user_data complete. SSM will handle remaining setup." | Out-File -Append -FilePath $LogFile
 </powershell>
 """
         )

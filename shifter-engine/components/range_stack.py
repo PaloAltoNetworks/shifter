@@ -168,9 +168,7 @@ class RangeStack(pulumi.ComponentResource):
             self.dc_config_param_name = dc_components[0].dc_config_param_name
 
         # Create other instances (attackers, victims)
-        # Collect domain member instance IDs for DC-triggered domain join
-        domain_member_ids: list[pulumi.Output[str]] = []
-
+        # Domain-joining instances handle their own domain join in run_setup()
         for inst_config in other_configs:
             # Determine index for naming
             if inst_config.role == "attacker":
@@ -220,26 +218,20 @@ class RangeStack(pulumi.ComponentResource):
 
             self.instances.append(instance)
 
-            # Run setup for non-domain-joining instances
-            # Domain-joining instances get their setup (DNS, domain join) from DC
-            if not inst_config.join_domain:
-                instance.run_setup()
+            # Run setup for all non-DC instances
+            # Domain-joining instances get DC's private_ip for domain join
+            if inst_config.role != "dc":
+                if inst_config.join_domain and dc_components:
+                    # Pass DC's private_ip for domain join
+                    dc_components[0].private_ip.apply(
+                        lambda ip, inst=instance: inst.run_setup(dc_ip=ip)
+                    )
+                else:
+                    instance.run_setup()
 
-            # Collect instance IDs for domain members
-            if inst_config.join_domain and dc_components:
-                domain_member_ids.append(instance.instance_id)
-
-        # Now run DC setup with domain member IDs
-        # DC setup will: bootstrap -> promote -> join domain members IN PARALLEL
+        # Run DC setup (no domain members - each victim handles its own join)
         for dc_instance in dc_components:
-            if domain_member_ids:
-                # Use Output.all to resolve all member IDs, then pass to run_dc_setup
-                pulumi.Output.all(*domain_member_ids).apply(
-                    lambda ids, dc=dc_instance: dc.run_dc_setup(domain_members=list(ids))
-                )
-            else:
-                # No domain members, just run DC setup
-                dc_instance.run_dc_setup()
+            dc_instance.run_dc_setup()
 
         # Build instance output list using stored role/os_type to avoid closure issues
         # (using .apply() in a loop would capture loop variable by reference)

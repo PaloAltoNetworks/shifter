@@ -53,3 +53,19 @@ class TestLinuxBootstrapPlanContext:
         instance = NoSshUser()
         context = plan.get_context(instance)
         assert context["ssh_user"] == "ubuntu"
+
+    def test_get_context_works_for_kali_user(self):
+        """LinuxBootstrapPlan works for Kali instances with ssh_user='kali'.
+
+        This replaced the now-deleted KaliSetupPlan.
+        """
+        plan = LinuxBootstrapPlan()
+        instance = MockLinuxInstance(
+            hostname="shifter-kali-1",
+            public_key="ssh-ed25519 AAAA...",
+            ssh_user="kali",
+        )
+        context = plan.get_context(instance)
+        assert context["ssh_user"] == "kali"
+        assert context["hostname"] == "shifter-kali-1"
+        assert context["public_key"] == "ssh-ed25519 AAAA..."

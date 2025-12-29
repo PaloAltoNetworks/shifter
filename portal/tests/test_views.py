@@ -114,13 +114,13 @@ class TestHelpView:
 @pytest.mark.django_db
 class TestGetUserStorageUsed:
     def test_returns_zero_for_no_agents(self, user):
-        from mission_control.views import _get_user_storage_used
+        from cms.assets.services import get_storage_used
 
-        assert _get_user_storage_used(user) == 0
+        assert get_storage_used(user) == 0
 
     def test_sums_active_agent_sizes(self, user):
+        from cms.assets.services import get_storage_used
         from mission_control.models import AgentConfig, OperatingSystem
-        from mission_control.views import _get_user_storage_used
 
         windows_os = OperatingSystem.objects.get(slug="windows")
 
@@ -144,13 +144,13 @@ class TestGetUserStorageUsed:
             sha256_hash="bbb",
         )
 
-        assert _get_user_storage_used(user) == 3000
+        assert get_storage_used(user) == 3000
 
     def test_excludes_deleted_agents(self, user):
         from django.utils import timezone
 
+        from cms.assets.services import get_storage_used
         from mission_control.models import AgentConfig, OperatingSystem
-        from mission_control.views import _get_user_storage_used
 
         windows_os = OperatingSystem.objects.get(slug="windows")
 
@@ -177,49 +177,33 @@ class TestGetUserStorageUsed:
         )
 
         # Should only count active agent
-        assert _get_user_storage_used(user) == 1000
+        assert get_storage_used(user) == 1000
 
 
 @pytest.mark.django_db
 class TestUploadLock:
     def test_check_upload_in_progress_false_by_default(self, user):
-        from mission_control.views import _check_upload_in_progress
+        from cms.assets.upload_session import check_upload_in_progress
 
         client = get_authenticated_client(user)
         # Access the request through a view to get session
         response = client.get(reverse("mission_control:dashboard"))
         assert response.status_code == 200
 
-        # Create a mock request with the session
-        from django.test import RequestFactory
-
-        factory = RequestFactory()
-        request = factory.get("/")
-        request.session = client.session
-
-        assert _check_upload_in_progress(request) is False
+        assert check_upload_in_progress(client.session) is False
 
     def test_upload_lock_expires(self, user, settings):
-        from mission_control.views import (
-            UPLOAD_LOCK_TIMEOUT,
-            _check_upload_in_progress,
-        )
+        from cms.assets.upload_session import UPLOAD_LOCK_TIMEOUT, check_upload_in_progress
 
         client = get_authenticated_client(user)
         client.get(reverse("mission_control:dashboard"))
 
-        from django.test import RequestFactory
-
-        factory = RequestFactory()
-        request = factory.get("/")
-        request.session = client.session
-
         # Set upload in progress with old timestamp
-        request.session["upload_lock"] = {"started_at": time.time() - UPLOAD_LOCK_TIMEOUT - 10}
-        request.session.save()
+        client.session["upload_lock"] = {"started_at": time.time() - UPLOAD_LOCK_TIMEOUT - 10}
+        client.session.save()
 
         # Should return False because lock is expired
-        assert _check_upload_in_progress(request) is False
+        assert check_upload_in_progress(client.session) is False
 
 
 @pytest.mark.django_db
@@ -227,8 +211,8 @@ class TestRangeToJson:
     def test_serializes_range_correctly(self, user):
         from django.utils import timezone
 
+        from engine.services.serialization import range_to_dict
         from mission_control.models import AgentConfig, OperatingSystem, Range
-        from mission_control.views import _range_to_json
 
         windows_os = OperatingSystem.objects.get(slug="windows")
         agent = AgentConfig.objects.create(
@@ -251,7 +235,7 @@ class TestRangeToJson:
             ready_at=now,
         )
 
-        result = _range_to_json(range_obj)
+        result = range_to_dict(range_obj)
 
         assert result["id"] == range_obj.id
         assert result["status"] == "ready"
@@ -262,8 +246,8 @@ class TestRangeToJson:
         assert "victim_ip" not in result  # Security: internal detail not exposed
 
     def test_handles_null_agent(self, user):
+        from engine.services.serialization import range_to_dict
         from mission_control.models import Range
-        from mission_control.views import _range_to_json
 
         range_obj = Range.objects.create(
             user=user,
@@ -271,7 +255,7 @@ class TestRangeToJson:
             status=Range.Status.PROVISIONING,
         )
 
-        result = _range_to_json(range_obj)
+        result = range_to_dict(range_obj)
 
         assert result["agent_id"] is None
         assert result["agent_name"] is None

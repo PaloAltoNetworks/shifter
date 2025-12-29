@@ -78,9 +78,9 @@ try {
 class DCSetupPlan:
     """Setup plan for Windows Domain Controller.
 
-    This plan runs AFTER BootstrapPlan completes (hostname set, SSH configured,
-    instance rebooted). The AMI has AD DS feature prebaked, so we only need
-    to promote to DC.
+    DC instances use a prebaked AMI with AD DS feature installed. Hostname
+    and SSH are configured via user_data at boot (not BootstrapPlan).
+    This plan only promotes to DC.
 
     Steps:
     1. Promote to Domain Controller (requires reboot)

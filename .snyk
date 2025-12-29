@@ -1,0 +1,13 @@
+# Snyk policy file
+# Exclude test files that contain mock credentials
+version: v1.25.0
+
+exclude:
+  global:
+    # Test directories contain mock credentials for unit tests
+    - "**/tests/**"
+    - "**/test_*.py"
+    - "**/conftest.py"
+    - "portal/tests/**"
+    - "shifter-engine/tests/**"
+    - "pulumi-provisioner/tests/**"

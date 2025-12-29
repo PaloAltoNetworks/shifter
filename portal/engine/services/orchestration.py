@@ -33,13 +33,22 @@ class OrchestrationError(Exception):
         self.status_code = status_code
 
 
-def launch(user: User, agent_id: int, scenario: str) -> Range:
+def launch(
+    user: User,
+    agent_id: int,
+    scenario: str,
+    *,
+    ngfw_enabled: bool = False,
+    strata_config=None,
+) -> Range:
     """Launch a new cyber range.
 
     Args:
         user: The user launching the range
         agent_id: ID of the agent to use for victim instances
         scenario: Scenario type (basic, ad_attack_lab)
+        ngfw_enabled: Whether to deploy VM-Series NGFW inline
+        strata_config: StrataConfig object for NGFW (required if ngfw_enabled)
 
     Returns:
         Range: The newly created range object
@@ -76,19 +85,24 @@ def launch(user: User, agent_id: int, scenario: str) -> Range:
         status=Range.Status.PROVISIONING,
         subnet_index=subnet_index,
         instance_config=instance_config,
+        ngfw_enabled=ngfw_enabled,
+        strata_config=strata_config,
     )
 
     # Log activity
-    ActivityLog.log(
-        "range_launched",
-        user=user,
-        range_id=range_obj.id,
-        agent_id=agent.id,
-        agent_name=agent.name,
-        dc_agent_id=dc_agent.id if dc_agent else None,
-        dc_agent_name=dc_agent.name if dc_agent else None,
-        scenario=scenario,
-    )
+    log_metadata = {
+        "range_id": range_obj.id,
+        "agent_id": agent.id,
+        "agent_name": agent.name,
+        "dc_agent_id": dc_agent.id if dc_agent else None,
+        "dc_agent_name": dc_agent.name if dc_agent else None,
+        "scenario": scenario,
+        "ngfw_enabled": ngfw_enabled,
+    }
+    if strata_config:
+        log_metadata["strata_config_id"] = strata_config.id
+        log_metadata["strata_config_name"] = strata_config.name
+    ActivityLog.log("range_launched", user=user, **log_metadata)
 
     # Trigger provisioning via ECS Fargate
     task_arn = start_provisioning(range_obj.id)

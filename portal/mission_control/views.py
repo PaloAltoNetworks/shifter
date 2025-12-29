@@ -33,6 +33,7 @@ from engine.services.scenarios import (
     get_scenario_config,
     validate_launch,
 )
+from engine.services.allocation import AllocationError, allocate_subnet_index
 from .services.upload_token import generate_upload_token, verify_upload_token
 from .services.validation import (
     ValidationError,
@@ -630,8 +631,8 @@ def launch_range(request):
 
     # Allocate subnet index for this range
     try:
-        subnet_index = Range.allocate_subnet_index()
-    except ValueError as e:
+        subnet_index = allocate_subnet_index()
+    except AllocationError as e:
         logger.error("Failed to allocate subnet index: %s", e)
         return JsonResponse(
             {"error": "No capacity available. Please try again later or destroy existing ranges."},

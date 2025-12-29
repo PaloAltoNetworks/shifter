@@ -127,9 +127,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
         from asgiref.sync import sync_to_async
 
         try:
-            range_obj = await sync_to_async(Range.objects.select_related("user").get)(
-                id=self.range_id
-            )
+            range_obj = await sync_to_async(Range.objects.select_related("user").get)(id=self.range_id)
         except Range.DoesNotExist:
             logger.warning("Range %s not found", self.range_id)
             await self.close(code=4004)
@@ -166,17 +164,13 @@ class SSHConsumer(AsyncWebsocketConsumer):
             Private key string if successful, None otherwise (closes with 4005).
         """
         try:
-            return await asyncio.get_event_loop().run_in_executor(
-                None, get_ssh_key, secret_arn
-            )
+            return await asyncio.get_event_loop().run_in_executor(None, get_ssh_key, secret_arn)
         except SecretsError:
             logger.exception("Failed to retrieve SSH key for range %s", self.range_id)
             await self.close(code=4005)
             return None
 
-    async def _establish_ssh_connection(
-        self, details: ConnectionDetails, private_key: str
-    ) -> bool:
+    async def _establish_ssh_connection(self, details: ConnectionDetails, private_key: str) -> bool:
         """Establish SSH connection to the instance.
 
         Args:

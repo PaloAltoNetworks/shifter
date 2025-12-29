@@ -69,9 +69,7 @@ def get_scenario_config(scenario: str, agent_os: str) -> list:
     return scenarios.get(scenario, scenarios["basic"])
 
 
-def validate_launch(
-    user: User, agent_id: int, scenario: str
-) -> tuple[AgentConfig, AgentConfig | None]:
+def validate_launch(user: User, agent_id: int, scenario: str) -> tuple[AgentConfig, AgentConfig | None]:
     """Validate a range launch request.
 
     Validates:
@@ -92,12 +90,7 @@ def validate_launch(
         ScenarioValidationError: If validation fails
     """
     # Verify agent belongs to user and is not deleted
-    agent = (
-        AgentConfig.active_for_user(user)
-        .filter(id=agent_id)
-        .select_related("os")
-        .first()
-    )
+    agent = AgentConfig.active_for_user(user).filter(id=agent_id).select_related("os").first()
 
     if not agent:
         raise ScenarioValidationError("Agent not found", status_code=404)

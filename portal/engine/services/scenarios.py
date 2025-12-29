@@ -5,7 +5,14 @@ This module handles:
 - Launch request validation (agent ownership, scenario constraints)
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from mission_control.models import AgentConfig
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
 
 
 class ScenarioValidationError(Exception):
@@ -31,7 +38,11 @@ def get_scenario_config(scenario: str, agent_os: str) -> list:
         List of instance configuration dicts for the provisioner
     """
     # Map agent OS names to provisioner os_type
-    os_type = "windows" if agent_os.lower() == "windows" else "ubuntu"
+    match agent_os.lower():
+        case "windows":
+            os_type = "windows"
+        case _:
+            os_type = "ubuntu"
 
     # Instance types are not specified here - the provisioner uses
     # its catalog defaults from environment variables
@@ -59,7 +70,7 @@ def get_scenario_config(scenario: str, agent_os: str) -> list:
 
 
 def validate_launch(
-    user, agent_id: int, scenario: str
+    user: User, agent_id: int, scenario: str
 ) -> tuple[AgentConfig, AgentConfig | None]:
     """Validate a range launch request.
 

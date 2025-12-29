@@ -1,6 +1,5 @@
 """Tests for engine.services.serialization module."""
 
-from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model

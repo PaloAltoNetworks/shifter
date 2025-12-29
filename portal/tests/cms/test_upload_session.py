@@ -2,8 +2,6 @@
 
 import time
 
-import pytest
-
 from cms.assets.upload_session import (
     UPLOAD_LOCK_TIMEOUT,
     check_upload_in_progress,

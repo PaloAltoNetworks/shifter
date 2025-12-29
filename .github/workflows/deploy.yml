@@ -60,6 +60,9 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             ENV="${{ github.base_ref == 'dev' && 'dev' || 'prod' }}"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual runs always target dev for safety
+            ENV="dev"
           elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
             ENV="dev"
           else

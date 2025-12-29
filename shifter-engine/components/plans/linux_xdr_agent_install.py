@@ -276,11 +276,11 @@ class LinuxXDRAgentInstallPlan:
         is_verification=True,
     )
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Get template variables for XDR install scripts.
 
         Args:
-            instance: Instance with agent_presigned_url attribute
+            config: Dict with agent_presigned_url
 
         Returns:
             Dict with agent_presigned_url
@@ -288,10 +288,10 @@ class LinuxXDRAgentInstallPlan:
         Raises:
             ValueError: If agent_presigned_url is missing or empty
         """
-        url = getattr(instance, "agent_presigned_url", None)
+        url = config.get("agent_presigned_url")
         if not url:
             raise ValueError(
-                "Instance missing required attribute 'agent_presigned_url' for XDR install"
+                "config missing required key 'agent_presigned_url' for XDR install"
             )
 
         return {"agent_presigned_url": url}

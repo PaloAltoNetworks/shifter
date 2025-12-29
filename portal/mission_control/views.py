@@ -12,23 +12,28 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import AgentConfig, Range
-from .services.s3 import (
-    S3Error,
-    delete_agent as s3_delete,
-    generate_presigned_upload_url,
-    tag_s3_object,
-    upload_agent as s3_upload,
-    verify_s3_object_exists,
-)
-from cms.assets.services import AssetError
+from cms.assets.services import AssetError, get_storage_used
 from cms.assets.services import create_agent as cms_create_agent
 from cms.assets.services import delete_agent as cms_delete_agent
-from cms.assets.services import get_storage_used
 from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
 from engine.services.allocation import AllocationError
 from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
 from engine.services.scenarios import ScenarioValidationError
+from engine.services.serialization import range_to_dict
+
+from .models import AgentConfig, Range
+from .services.s3 import (
+    S3Error,
+    generate_presigned_upload_url,
+    tag_s3_object,
+    verify_s3_object_exists,
+)
+from .services.s3 import (
+    delete_agent as s3_delete,
+)
+from .services.s3 import (
+    upload_agent as s3_upload,
+)
 from .services.upload_token import generate_upload_token, verify_upload_token
 from .services.validation import (
     ValidationError,
@@ -470,27 +475,6 @@ def cancel_upload(request):
 # -----------------------------------------------------------------------------
 
 
-def _range_to_json(range_obj):
-    """Serialize a Range object to JSON-compatible dict for client.
-
-    Note: victim_ip is intentionally excluded - it's internal infrastructure
-    detail stored in DB for provisioner use, not exposed to browser.
-    """
-    return {
-        "id": range_obj.id,
-        "status": range_obj.status,
-        "agent_id": range_obj.agent_id,
-        "agent_name": range_obj.agent.name if range_obj.agent else None,
-        "dc_agent_id": range_obj.dc_agent_id,
-        "dc_agent_name": range_obj.dc_agent.name if range_obj.dc_agent else None,
-        "chat_url": range_obj.chat_url,
-        "error_message": range_obj.error_message,
-        "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
-        "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
-        "paused_at": range_obj.paused_at.isoformat() if range_obj.paused_at else None,
-    }
-
-
 @login_required
 @require_GET
 def get_range_status(request):
@@ -509,7 +493,7 @@ def get_range_status(request):
     return JsonResponse(
         {
             "has_range": True,
-            "range": _range_to_json(active_range),
+            "range": range_to_dict(active_range),
         }
     )
 
@@ -568,7 +552,7 @@ def launch_range(request):
     return JsonResponse(
         {
             "success": True,
-            "range": _range_to_json(range_obj),
+            "range": range_to_dict(range_obj),
         }
     )
 

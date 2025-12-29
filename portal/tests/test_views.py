@@ -114,13 +114,13 @@ class TestHelpView:
 @pytest.mark.django_db
 class TestGetUserStorageUsed:
     def test_returns_zero_for_no_agents(self, user):
-        from mission_control.views import _get_user_storage_used
+        from cms.assets.services import get_storage_used
 
-        assert _get_user_storage_used(user) == 0
+        assert get_storage_used(user) == 0
 
     def test_sums_active_agent_sizes(self, user):
+        from cms.assets.services import get_storage_used
         from mission_control.models import AgentConfig, OperatingSystem
-        from mission_control.views import _get_user_storage_used
 
         windows_os = OperatingSystem.objects.get(slug="windows")
 
@@ -144,13 +144,13 @@ class TestGetUserStorageUsed:
             sha256_hash="bbb",
         )
 
-        assert _get_user_storage_used(user) == 3000
+        assert get_storage_used(user) == 3000
 
     def test_excludes_deleted_agents(self, user):
         from django.utils import timezone
 
+        from cms.assets.services import get_storage_used
         from mission_control.models import AgentConfig, OperatingSystem
-        from mission_control.views import _get_user_storage_used
 
         windows_os = OperatingSystem.objects.get(slug="windows")
 
@@ -177,7 +177,7 @@ class TestGetUserStorageUsed:
         )
 
         # Should only count active agent
-        assert _get_user_storage_used(user) == 1000
+        assert get_storage_used(user) == 1000
 
 
 @pytest.mark.django_db

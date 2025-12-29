@@ -8,26 +8,24 @@ import time
 from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import ActivityLog, AgentConfig, OperatingSystem, Range
+from .models import AgentConfig, Range
 from .services.s3 import (
     S3Error,
+    delete_agent as s3_delete,
     generate_presigned_upload_url,
     tag_s3_object,
+    upload_agent as s3_upload,
     verify_s3_object_exists,
 )
-from .services.s3 import (
-    delete_agent as s3_delete,
-)
-from .services.s3 import (
-    upload_agent as s3_upload,
-)
+from cms.assets.services import AssetError
+from cms.assets.services import create_agent as cms_create_agent
+from cms.assets.services import delete_agent as cms_delete_agent
+from cms.assets.services import get_storage_used
 from engine.services.allocation import AllocationError
 from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
 from engine.services.scenarios import ScenarioValidationError
@@ -91,35 +89,18 @@ def upload_agent(request):
         # Validate file (size, extension, magic bytes)
         file_format = validate_agent_file(uploaded_file, original_filename)
 
-        # Look up OS
-        os_obj = OperatingSystem.objects.filter(slug=file_format.os_slug).first()
-        if not os_obj:
-            messages.error(request, f"Operating system '{file_format.os_slug}' not found.")
-            return redirect("mission_control:agents")
-
         # Upload to S3
         s3_key, sha256_hash, file_size = s3_upload(uploaded_file, request.user.id, original_filename)
 
-        # Create database record
-        agent = AgentConfig.objects.create(
+        # Create agent record via CMS service
+        agent = cms_create_agent(
             user=request.user,
-            os=os_obj,
             name=name,
             s3_key=s3_key,
-            original_filename=original_filename,
-            file_size_bytes=file_size,
-            sha256_hash=sha256_hash,
-        )
-
-        # Log activity
-        ActivityLog.log(
-            "agent_uploaded",
-            user=request.user,
-            agent_id=agent.id,
-            agent_name=name,
             filename=original_filename,
-            os=file_format.os_slug,
+            os_slug=file_format.os_slug,
             file_size=file_size,
+            sha256=sha256_hash,
         )
 
         messages.success(request, f"Agent '{name}' uploaded successfully.")
@@ -134,6 +115,13 @@ def upload_agent(request):
         messages.error(request, str(e))
         logger.warning(
             "Agent upload validation failed: user=%s error=%s",
+            request.user.email,
+            str(e),
+        )
+    except AssetError as e:
+        messages.error(request, str(e))
+        logger.error(
+            "Agent creation failed: user=%s error=%s",
             request.user.email,
             str(e),
         )
@@ -155,20 +143,7 @@ def delete_agent(request, agent_id):
     agent = get_object_or_404(AgentConfig, id=agent_id, user=request.user, deleted_at__isnull=True)
 
     try:
-        # Delete from S3 first
-        s3_delete(agent.s3_key)
-
-        # Soft delete the database record
-        agent.deleted_at = timezone.now()
-        agent.save(update_fields=["deleted_at"])
-
-        # Log activity
-        ActivityLog.log(
-            "agent_deleted",
-            user=request.user,
-            agent_id=agent.id,
-            agent_name=agent.name,
-        )
+        cms_delete_agent(agent)
 
         messages.success(request, f"Agent '{agent.name}' deleted.")
         logger.info(
@@ -178,10 +153,10 @@ def delete_agent(request, agent_id):
             agent.name,
         )
 
-    except S3Error as e:
+    except AssetError as e:
         messages.error(request, "Failed to delete agent. Please try again.")
         logger.error(
-            "Agent delete S3 error: user=%s agent_id=%s error=%s",
+            "Agent delete error: user=%s agent_id=%s error=%s",
             request.user.email,
             agent.id,
             str(e),
@@ -236,12 +211,6 @@ def help_page(request):
 # -----------------------------------------------------------------------------
 # Presigned URL Upload API
 # -----------------------------------------------------------------------------
-
-
-def _get_user_storage_used(user) -> int:
-    """Get total bytes used by a user's active agents."""
-    result = AgentConfig.active_for_user(user).aggregate(total=Sum("file_size_bytes"))
-    return result["total"] or 0
 
 
 # Upload lock timeout in seconds (fallback for browser crash, network loss)
@@ -323,7 +292,7 @@ def initiate_upload(request):
         )
 
     # Check user storage quota
-    current_usage = _get_user_storage_used(request.user)
+    current_usage = get_storage_used(request.user)
     quota_bytes = django_settings.AGENT_USER_STORAGE_QUOTA_MB * 1024 * 1024
     if current_usage + file_size > quota_bytes:
         available_mb = (quota_bytes - current_usage) / 1024 / 1024
@@ -436,12 +405,6 @@ def complete_upload(request):
         logger.warning(f"Upload completion failed - file not found: {s3_key}")
         return JsonResponse({"error": "File not found in storage. Upload may have failed."}, status=400)
 
-    # Look up OS
-    os_obj = OperatingSystem.objects.filter(slug=os_slug).first()
-    if not os_obj:
-        _set_upload_in_progress(request, False)
-        return JsonResponse({"error": f"Operating system '{os_slug}' not found"}, status=400)
-
     # Tag object as completed (for lifecycle rule)
     try:
         tag_s3_object(s3_key, {"status": "completed", "user_id": str(request.user.id)})
@@ -449,28 +412,21 @@ def complete_upload(request):
         logger.warning(f"Failed to tag S3 object: {e}")
         # Non-fatal, continue
 
-    # Create database record
-    agent = AgentConfig.objects.create(
-        user=request.user,
-        os=os_obj,
-        name=name,
-        s3_key=s3_key,
-        original_filename=filename,
-        file_size_bytes=file_size,
-        sha256_hash=client_sha256 or etag,  # Use client hash or ETag as fallback
-    )
-
-    # Log activity
-    ActivityLog.log(
-        "agent_uploaded",
-        user=request.user,
-        agent_id=agent.id,
-        agent_name=name,
-        filename=filename,
-        os=os_slug,
-        file_size=file_size,
-        upload_method="presigned",
-    )
+    # Create agent record via CMS service
+    try:
+        agent = cms_create_agent(
+            user=request.user,
+            name=name,
+            s3_key=s3_key,
+            filename=filename,
+            os_slug=os_slug,
+            file_size=file_size,
+            sha256=client_sha256 or etag,  # Use client hash or ETag as fallback
+            upload_method="presigned",
+        )
+    except AssetError as e:
+        _set_upload_in_progress(request, False)
+        return JsonResponse({"error": str(e)}, status=400)
 
     # Clear upload in progress
     _set_upload_in_progress(request, False)

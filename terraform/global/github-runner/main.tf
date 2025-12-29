@@ -136,6 +136,7 @@ resource "aws_iam_role_policy" "ecr" {
 # ------------------------------------------------------------------------------
 
 resource "aws_spot_instance_request" "runner" {
+  count                = var.runner_count
   ami                  = data.aws_ami.al2023.id
   instance_type        = var.instance_type
   spot_type            = "persistent"
@@ -177,13 +178,14 @@ resource "aws_spot_instance_request" "runner" {
   )
 
   tags = {
-    Name = "shifter-github-runner"
+    Name = "shifter-github-runner-${count.index + 1}"
   }
 }
 
-# Tag the spot instance (spot requests don't propagate tags to instances)
+# Tag the spot instances (spot requests don't propagate tags to instances)
 resource "aws_ec2_tag" "runner_name" {
-  resource_id = aws_spot_instance_request.runner.spot_instance_id
+  count       = var.runner_count
+  resource_id = aws_spot_instance_request.runner[count.index].spot_instance_id
   key         = "Name"
-  value       = "shifter-github-runner"
+  value       = "shifter-github-runner-${count.index + 1}"
 }

@@ -156,7 +156,7 @@ resource "aws_spot_instance_request" "runner" {
 
     # Install dependencies
     dnf update -y
-    dnf install -y docker git jq tar unzip python3.12 python3.12-pip python3.12-devel
+    dnf install -y docker git jq tar unzip python3.12 python3.12-pip python3.12-devel nodejs npm
 
     # Start Docker
     systemctl enable --now docker

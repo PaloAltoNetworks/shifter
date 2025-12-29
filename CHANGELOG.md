@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2025-12-29
+
+### Changes
+- Refactor consumers.py for maintanability
+
 ## [0.8.2] - 2025-12-27
 
 ### Added

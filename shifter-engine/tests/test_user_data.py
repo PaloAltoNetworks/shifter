@@ -76,90 +76,52 @@ class TestKaliTemplate:
 
 
 class TestVictimLinuxTemplate:
-    """Tests for Linux victim user data template."""
+    """Tests for Linux victim user data template.
+
+    user_data should be MINIMAL - just enough to log boot.
+    All real setup (hostname, SSH, XDR) is handled by SSM plans.
+    """
 
     @pytest.fixture
     def linux_template(self):
         """Load the Linux victim template."""
         templates_dir = Path(__file__).parent.parent / "templates"
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
+        # NOSONAR: autoescape=False - shell templates, not HTML
+        env = Environment(
+            loader=FileSystemLoader(str(templates_dir)),
+            autoescape=False,
+        )
         return env.get_template("victim_linux.sh.j2")
 
-    def test_victim_linux_template_hostname(self, linux_template):
-        """hostname variable should be replaced."""
-        result = linux_template.render(
-            hostname="shifter-victim-42-0",
-            public_key="ssh-ed25519 AAAA...",
-            presigned_url="",
-            agent_s3_key="",
-        )
-        assert "shifter-victim-42-0" in result
-        assert "{{ hostname }}" not in result
-
-    def test_victim_linux_template_public_key(self, linux_template):
-        """public_key variable should be replaced."""
-        test_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost"
-        result = linux_template.render(
-            hostname="shifter-victim-42-0",
-            public_key=test_key,
-            presigned_url="",
-            agent_s3_key="",
-        )
-        assert test_key in result
-        assert "{{ public_key }}" not in result
-
-    def test_victim_linux_template_with_agent(self, linux_template):
-        """Agent download should be included when presigned_url is provided."""
-        result = linux_template.render(
-            hostname="shifter-victim-42-0",
-            public_key="ssh-ed25519 AAAA...",
-            presigned_url="https://s3.amazonaws.com/bucket/agent.tar.gz?signed",
-            agent_s3_key="agents/xdr-agent.tar.gz",
-        )
-        assert "curl" in result or "Downloading" in result
-        assert "https://s3.amazonaws.com/bucket/agent.tar.gz?signed" in result
-        assert "agents/xdr-agent.tar.gz" in result
-
-    def test_victim_linux_template_no_agent(self, linux_template):
-        """Agent section should be skipped when no presigned_url."""
-        result = linux_template.render(
-            hostname="shifter-victim-42-0",
-            public_key="ssh-ed25519 AAAA...",
-            presigned_url="",
-            agent_s3_key="",
-        )
-        # Should have skip message, not download
-        assert "No agent installer configured" in result
-        assert "curl -sSf -o" not in result
+    def test_victim_linux_template_is_minimal(self, linux_template):
+        """Template should be minimal - no hostname or SSH setup."""
+        result = linux_template.render()
+        # Should NOT set hostname (SSM does that)
+        assert "hostnamectl" not in result
+        # Should NOT configure SSH (SSM does that)
+        assert "authorized_keys" not in result
+        assert ".ssh" not in result
+        # Should NOT install XDR (SSM does that)
+        assert "curl" not in result
 
     def test_victim_linux_template_valid_bash(self, linux_template):
-        """Output should be a valid bash script with required sections."""
-        result = linux_template.render(
-            hostname="shifter-victim-42-0",
-            public_key="ssh-ed25519 AAAA...",
-            presigned_url="",
-            agent_s3_key="",
-        )
+        """Output should be a valid bash script."""
+        result = linux_template.render()
         assert result.strip().startswith("#!/bin/bash")
-        # Verify essential script components rather than arbitrary length
-        assert "hostnamectl set-hostname" in result  # Must set hostname
-        assert "authorized_keys" in result  # Must configure SSH
-        assert "echo" in result  # Must have logging/output
+        assert "set -euo pipefail" in result or "set -e" in result
 
-    def test_victim_linux_configures_ubuntu_ssh(self, linux_template):
-        """Template should configure SSH for ubuntu user."""
-        result = linux_template.render(
-            hostname="shifter-victim-42-0",
-            public_key="ssh-ed25519 AAAA...",
-            presigned_url="",
-            agent_s3_key="",
-        )
-        assert "/home/ubuntu/.ssh" in result
+    def test_victim_linux_template_explains_ssm(self, linux_template):
+        """Template should explain that SSM handles setup."""
+        result = linux_template.render()
+        assert "SSM" in result
 
 
 class TestVictimWindowsTemplate:
-    """Tests for Windows victim user data template."""
+    """Tests for Windows victim user data template.
+
+    user_data should be MINIMAL - just enough to log boot.
+    All real setup (hostname, SSH, XDR) is handled by SSM plans.
+    """
 
     @pytest.fixture
     def windows_template(self):
@@ -169,56 +131,27 @@ class TestVictimWindowsTemplate:
         env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
         return env.get_template("victim_windows.ps1.j2")
 
-    def test_victim_windows_template_hostname(self, windows_template):
-        """hostname variable should be replaced."""
-        result = windows_template.render(
-            hostname="shifter-victim-42-0",
-            presigned_url="",
-            agent_s3_key="",
-        )
-        assert "shifter-victim-42-0" in result
-        assert "{{ hostname }}" not in result
-
-    def test_victim_windows_template_with_agent(self, windows_template):
-        """Agent download should be included when presigned_url is provided."""
-        result = windows_template.render(
-            hostname="shifter-victim-42-0",
-            presigned_url="https://s3.amazonaws.com/bucket/agent.msi?signed",
-            agent_s3_key="agents/xdr-agent.msi",
-        )
-        assert "Invoke-WebRequest" in result
-        assert "https://s3.amazonaws.com/bucket/agent.msi?signed" in result
-
-    def test_victim_windows_template_no_agent(self, windows_template):
-        """Agent section should be skipped when no presigned_url."""
-        result = windows_template.render(
-            hostname="shifter-victim-42-0",
-            presigned_url="",
-            agent_s3_key="",
-        )
-        assert "No agent installer configured" in result
+    def test_victim_windows_template_is_minimal(self, windows_template):
+        """Template should be minimal - no hostname or SSH setup."""
+        result = windows_template.render()
+        # Should NOT set hostname (SSM does that)
+        assert "Rename-Computer" not in result
+        # Should NOT configure SSH (SSM does that)
+        assert "authorized_keys" not in result
+        assert "sshd" not in result
+        # Should NOT install XDR (SSM does that)
+        assert "Invoke-WebRequest" not in result
 
     def test_victim_windows_template_valid_powershell(self, windows_template):
-        """Output should be a valid PowerShell script with required sections."""
-        result = windows_template.render(
-            hostname="shifter-victim-42-0",
-            presigned_url="",
-            agent_s3_key="",
-        )
+        """Output should be a valid PowerShell script."""
+        result = windows_template.render()
         assert "<powershell>" in result
         assert "</powershell>" in result
-        # Verify essential script components rather than arbitrary length
-        assert "Rename-Computer" in result  # Must set hostname
-        assert "Log-Message" in result or "Write-Host" in result  # Must have logging
 
-    def test_victim_windows_renames_computer(self, windows_template):
-        """Template should rename computer."""
-        result = windows_template.render(
-            hostname="shifter-victim-42-0",
-            presigned_url="",
-            agent_s3_key="",
-        )
-        assert "Rename-Computer" in result
+    def test_victim_windows_template_explains_ssm(self, windows_template):
+        """Template should explain that SSM handles setup."""
+        result = windows_template.render()
+        assert "SSM" in result
 
 
 class TestUserDataGeneration:
@@ -242,41 +175,40 @@ class TestUserDataGeneration:
 
     def test_linux_victim_uses_linux_template(self, temp_templates_dir):
         """role='victim', os!='windows' should use victim_linux.sh.j2."""
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
+        # NOSONAR: autoescape=False - shell/PowerShell templates, not HTML
+        env = Environment(
+            loader=FileSystemLoader(str(temp_templates_dir)),
+            autoescape=False,
+        )
 
         role = "victim"
-        os_type = "ubuntu"
         template_name = (
             "kali.sh.j2"
             if role == "attacker"
-            else ("victim_windows.ps1.j2" if os_type == "windows" else "victim_linux.sh.j2")
+            else "victim_linux.sh.j2"
         )
         template = env.get_template(template_name)
 
-        result = template.render(
-            hostname="shifter-victim-42-0",
-            public_key="ssh-ed25519 AAAA...",
-            presigned_url="",
-            agent_s3_key="",
-        )
-        assert "shifter-victim-42-0" in result
+        # Victim templates are minimal - no variables needed
+        result = template.render()
+        # Minimal template just logs that SSM handles setup
+        assert "SSM" in result
 
     def test_windows_victim_uses_windows_template(self, temp_templates_dir):
         """os='windows' should use victim_windows.ps1.j2."""
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
+        # NOSONAR: autoescape=False - shell/PowerShell templates, not HTML
+        env = Environment(
+            loader=FileSystemLoader(str(temp_templates_dir)),
+            autoescape=False,
+        )
 
-        os_type = "windows"
         template_name = "victim_windows.ps1.j2"
         template = env.get_template(template_name)
 
-        result = template.render(
-            hostname="shifter-victim-42-0",
-            presigned_url="",
-            agent_s3_key="",
-        )
-        assert "shifter-victim-42-0" in result
+        # Victim templates are minimal - no variables needed
+        result = template.render()
+        # Minimal template just logs that SSM handles setup
+        assert "SSM" in result
 
     def test_user_data_base64_encoded(self, temp_templates_dir):
         """User data output should be base64 encodable."""
@@ -339,33 +271,31 @@ class TestTemplateContentSafety:
 
     def test_templates_use_strict_bash_mode(self, all_templates):
         """Linux templates should use set -euo pipefail."""
-        for name in ["kali", "linux"]:
-            template = all_templates[name]
-            result = template.render(
-                hostname="test",
-                public_key="test",
-                presigned_url="",
-                agent_s3_key="",
-            )
-            assert "set -euo pipefail" in result or "set -e" in result
+        # Kali needs hostname/public_key, victims are minimal
+        kali_result = all_templates["kali"].render(
+            hostname="test",
+            public_key="test",
+        )
+        linux_result = all_templates["linux"].render()
+        assert "set -euo pipefail" in kali_result or "set -e" in kali_result
+        assert "set -euo pipefail" in linux_result or "set -e" in linux_result
 
     def test_windows_uses_error_action_stop(self, all_templates):
         """Windows template should use ErrorActionPreference Stop."""
-        result = all_templates["windows"].render(
-            hostname="test",
-            presigned_url="",
-            agent_s3_key="",
-        )
+        result = all_templates["windows"].render()
         assert 'ErrorActionPreference' in result and 'Stop' in result
 
     def test_templates_log_output(self, all_templates):
         """Templates should log their output for debugging."""
-        for name, template in all_templates.items():
-            result = template.render(
-                hostname="test",
-                public_key="test" if name != "windows" else None,
-                presigned_url="",
-                agent_s3_key="",
-            )
-            # Should have some form of logging
-            assert "log" in result.lower() or "echo" in result.lower() or "Write-Host" in result
+        # Kali needs hostname/public_key
+        kali_result = all_templates["kali"].render(
+            hostname="test",
+            public_key="test",
+        )
+        assert "log" in kali_result.lower() or "echo" in kali_result.lower()
+
+        # Victim templates are minimal
+        linux_result = all_templates["linux"].render()
+        windows_result = all_templates["windows"].render()
+        assert "log" in linux_result.lower() or "echo" in linux_result.lower()
+        assert "log" in windows_result.lower() or "Write-Host" in windows_result

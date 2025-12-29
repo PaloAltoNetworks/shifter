@@ -250,3 +250,25 @@ variable "agent_s3_bucket_arn" {
   description = "S3 bucket ARN for XDR agent installers"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# NGFW (VM-Series) Configuration
+# ------------------------------------------------------------------------------
+
+variable "ngfw_security_group_id" {
+  description = "Security group ID for VM-Series NGFW instances (empty if NGFW disabled)"
+  type        = string
+  default     = ""
+}
+
+variable "ngfw_ami_id" {
+  description = "AMI ID for VM-Series NGFW instances (empty if NGFW disabled)"
+  type        = string
+  default     = ""
+}
+
+variable "ngfw_instance_type" {
+  description = "EC2 instance type for VM-Series NGFW instances"
+  type        = string
+  default     = "m5.xlarge"
+}

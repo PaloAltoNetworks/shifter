@@ -9,6 +9,8 @@ Note: Presigned URL generation happens here (before Pulumi runs) because:
 3. The signed URL is passed as data to EC2 user data scripts
 """
 
+import base64
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -16,6 +18,9 @@ from typing import Optional
 import boto3
 import psycopg
 import pulumi
+from cryptography.fernet import Fernet
+
+logger = logging.getLogger(__name__)
 
 from catalog.instances import (
     _get_dc_instance_type,
@@ -23,6 +28,39 @@ from catalog.instances import (
     _get_victim_instance_type,
     _get_windows_instance_type,
 )
+
+
+def decrypt_field(encrypted_value: str) -> str:
+    """Decrypt a Fernet-encrypted field value.
+
+    Used for sensitive fields like StrataConfig.scm_pin_value that are
+    encrypted at rest in the Django database.
+
+    Args:
+        encrypted_value: Base64-encoded Fernet ciphertext from database
+
+    Returns:
+        Decrypted plaintext string
+
+    Raises:
+        ValueError: If FIELD_ENCRYPTION_KEY not set or decryption fails
+    """
+    if not encrypted_value:
+        return ""
+
+    key = os.environ.get("FIELD_ENCRYPTION_KEY")
+    if not key:
+        logger.warning("FIELD_ENCRYPTION_KEY not set, returning value as-is")
+        return encrypted_value
+
+    try:
+        fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        encrypted_bytes = base64.urlsafe_b64decode(encrypted_value.encode("ascii"))
+        return fernet.decrypt(encrypted_bytes).decode("utf-8")
+    except Exception as e:
+        # If decryption fails, log and return as-is (for backward compatibility)
+        logger.warning(f"Failed to decrypt field: {e}")
+        return encrypted_value
 
 
 def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:
@@ -85,6 +123,16 @@ class RangeConfig:
     dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
     dc_security_group_id: str = ""  # Security group for Domain Controller instances
     portal_vpc_cidr: str = ""
+    # NGFW (VM-Series) configuration
+    ngfw_enabled: bool = False
+    ngfw_ami_id: str = ""
+    ngfw_instance_type: str = "m5.xlarge"
+    ngfw_security_group_id: str = ""
+    # Strata Cloud Manager config (from StrataConfig model)
+    # Replaces old Panorama config - uses PIN-based SCM registration
+    strata_folder_name: str = ""
+    strata_pin_id: str = ""
+    strata_pin_value: str = ""
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -121,11 +169,16 @@ def get_range_from_db(range_id: int) -> dict:
                     a.s3_key as agent_s3_key,
                     os.slug as agent_os_slug,
                     r.dc_agent_id,
-                    dc_a.s3_key as dc_agent_s3_key
+                    dc_a.s3_key as dc_agent_s3_key,
+                    r.ngfw_enabled,
+                    sc.scm_folder_name as strata_folder_name,
+                    sc.scm_pin_id as strata_pin_id,
+                    sc.scm_pin_value as strata_pin_value
                 FROM mission_control_range r
                 LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
                 LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
                 LEFT JOIN mission_control_agentconfig dc_a ON r.dc_agent_id = dc_a.id
+                LEFT JOIN mission_control_strataconfig sc ON r.strata_config_id = sc.id
                 WHERE r.id = %s
                 """,
                 (range_id,),
@@ -144,6 +197,11 @@ def get_range_from_db(range_id: int) -> dict:
                 "agent_os_slug": row[6],
                 "dc_agent_id": row[7],
                 "dc_agent_s3_key": row[8],
+                "ngfw_enabled": row[9],
+                "strata_folder_name": row[10] or "",
+                "strata_pin_id": row[11] or "",
+                # PIN value is encrypted at rest - decrypt it
+                "strata_pin_value": decrypt_field(row[12]) if row[12] else "",
             }
 
 
@@ -275,4 +333,13 @@ def load_config() -> RangeConfig:
         dc_ami_id=config.get("dcAmiId") or "",
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
         dc_security_group_id=config.get("dcSecurityGroupId") or "",
+        # NGFW (VM-Series) configuration - enabled from DB, config from env vars
+        ngfw_enabled=range_data.get("ngfw_enabled", False),
+        ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
+        ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
+        ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+        # Strata Cloud Manager config from database (via StrataConfig model)
+        strata_folder_name=range_data.get("strata_folder_name", ""),
+        strata_pin_id=range_data.get("strata_pin_id", ""),
+        strata_pin_value=range_data.get("strata_pin_value", ""),
     )

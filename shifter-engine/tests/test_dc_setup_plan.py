@@ -248,6 +248,21 @@ class TestDCSetupPlanDNS:
         assert "-InstallDns" in script or "DNS" in script
 
 
+class TestDCSetupPlanDocstring:
+    """Test DCSetupPlan docstring is accurate."""
+
+    def test_docstring_does_not_claim_bootstrap_runs_first(self):
+        """DCSetupPlan docstring should NOT claim BootstrapPlan runs first.
+
+        DC instances use prebaked AMI where hostname/SSH are configured via
+        user_data, NOT BootstrapPlan. The docstring must not mislead.
+        """
+        docstring = DCSetupPlan.__doc__ or ""
+        # Should NOT claim BootstrapPlan runs first (it doesn't for DC)
+        assert "AFTER BootstrapPlan" not in docstring
+        assert "after BootstrapPlan" not in docstring.lower()
+
+
 class TestDCSetupPlanRebootHandling:
     """Test reboot handling in DC setup plan."""
 

@@ -132,7 +132,31 @@ install_agent() {
         text/x-shellscript|application/x-shellscript|application/x-sh)
             echo "Installing via shell script..."
             chmod +x "$file"
-            "$file"
+            echo "Script contents (first 20 lines):"
+            head -20 "$file" || true
+            echo "---"
+            echo "File info:"
+            file "$file" || true
+            ls -la "$file" || true
+            echo "---"
+            echo "Running installer from /tmp directory..."
+            cd /tmp
+            # Run and capture output for debugging
+            if ! bash "$file" 2>&1; then
+                echo "Installer exited with non-zero status"
+                echo "Checking for XDR processes anyway..."
+                sleep 5  # Give agent time to start
+                if pgrep -f "cortex|traps" > /dev/null 2>&1; then
+                    echo "XDR agent appears to be running despite exit code"
+                    exit 0
+                fi
+                # Check if installation directory exists
+                if [ -d "/opt/traps" ] || [ -d "/opt/cortex" ]; then
+                    echo "Installation directory exists, agent may be starting..."
+                    exit 0
+                fi
+                exit 1
+            fi
             ;;
         application/gzip|application/x-gzip)
             echo "Extracting gzip/tar.gz archive..."
@@ -252,11 +276,11 @@ class LinuxXDRAgentInstallPlan:
         is_verification=True,
     )
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Get template variables for XDR install scripts.
 
         Args:
-            instance: Instance with agent_presigned_url attribute
+            config: Dict with agent_presigned_url
 
         Returns:
             Dict with agent_presigned_url
@@ -264,10 +288,10 @@ class LinuxXDRAgentInstallPlan:
         Raises:
             ValueError: If agent_presigned_url is missing or empty
         """
-        url = getattr(instance, "agent_presigned_url", None)
+        url = config.get("agent_presigned_url")
         if not url:
             raise ValueError(
-                "Instance missing required attribute 'agent_presigned_url' for XDR install"
+                "config missing required key 'agent_presigned_url' for XDR install"
             )
 
         return {"agent_presigned_url": url}

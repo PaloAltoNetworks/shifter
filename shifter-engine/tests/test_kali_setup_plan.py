@@ -1,47 +1,22 @@
-"""Tests for KaliSetupPlan - only meaningful tests."""
+"""Tests to verify KaliSetupPlan has been removed.
 
-from dataclasses import dataclass
-from typing import Optional
+KaliSetupPlan was removed because it duplicated LinuxBootstrapPlan.
+Kali instances now use LinuxBootstrapPlan with ssh_user="kali".
+"""
 
 import pytest
 
-from components.plans.kali_setup import KaliSetupPlan
 
+class TestKaliSetupPlanRemoved:
+    """Verify KaliSetupPlan no longer exists."""
 
-@dataclass
-class MockKaliInstance:
-    hostname: Optional[str] = None
-    public_key: str = ""
+    def test_kali_setup_plan_module_does_not_exist(self):
+        """kali_setup module should not exist."""
+        # ImportError raised when importing non-existent name from package
+        with pytest.raises(ImportError):
+            from components.plans import kali_setup  # noqa: F401
 
-
-class TestKaliSetupPlanContext:
-    """Test context generation and validation."""
-
-    def test_get_context_returns_required_fields(self):
-        """get_context returns hostname and public_key."""
-        plan = KaliSetupPlan()
-        instance = MockKaliInstance(hostname="shifter-kali-1", public_key="ssh-ed25519 AAAA...")
-        context = plan.get_context(instance)
-        assert context["hostname"] == "shifter-kali-1"
-        assert context["public_key"] == "ssh-ed25519 AAAA..."
-
-    def test_get_context_missing_hostname_raises(self):
-        """get_context raises ValueError if hostname is missing."""
-        plan = KaliSetupPlan()
-        instance = MockKaliInstance(hostname=None)
-        with pytest.raises(ValueError, match="hostname"):
-            plan.get_context(instance)
-
-    def test_get_context_empty_hostname_raises(self):
-        """get_context raises ValueError if hostname is empty."""
-        plan = KaliSetupPlan()
-        instance = MockKaliInstance(hostname="")
-        with pytest.raises(ValueError, match="hostname"):
-            plan.get_context(instance)
-
-    def test_get_context_empty_public_key_allowed(self):
-        """Empty public_key is allowed (SSH setup skipped)."""
-        plan = KaliSetupPlan()
-        instance = MockKaliInstance(hostname="shifter-kali-1", public_key="")
-        context = plan.get_context(instance)
-        assert context["public_key"] == ""
+    def test_kali_setup_plan_class_does_not_exist(self):
+        """KaliSetupPlan class should not exist in plans."""
+        from components import plans
+        assert not hasattr(plans, "KaliSetupPlan")

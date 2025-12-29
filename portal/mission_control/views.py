@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import time
 
 from django.conf import settings as django_settings
 from django.contrib import messages
@@ -26,6 +25,7 @@ from cms.assets.services import AssetError
 from cms.assets.services import create_agent as cms_create_agent
 from cms.assets.services import delete_agent as cms_delete_agent
 from cms.assets.services import get_storage_used
+from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
 from engine.services.allocation import AllocationError
 from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
 from engine.services.scenarios import ScenarioValidationError
@@ -213,30 +213,6 @@ def help_page(request):
 # -----------------------------------------------------------------------------
 
 
-# Upload lock timeout in seconds (fallback for browser crash, network loss)
-UPLOAD_LOCK_TIMEOUT = 30
-
-
-def _check_upload_in_progress(request) -> bool:
-    """Check if user has an upload in progress (stored in session)."""
-    lock_data = request.session.get("upload_lock")
-    if not lock_data:
-        return False
-    # Auto-expire stale locks
-    if time.time() - lock_data.get("started_at", 0) > UPLOAD_LOCK_TIMEOUT:
-        _set_upload_in_progress(request, False)
-        return False
-    return True
-
-
-def _set_upload_in_progress(request, in_progress: bool):
-    """Set upload in progress flag in session."""
-    if in_progress:
-        request.session["upload_lock"] = {"started_at": time.time()}
-    else:
-        request.session.pop("upload_lock", None)
-
-
 @login_required
 @require_POST
 def initiate_upload(request):
@@ -254,7 +230,7 @@ def initiate_upload(request):
         - upload_token: Signed token for completion verification
     """
     # Check for concurrent upload
-    if _check_upload_in_progress(request):
+    if check_upload_in_progress(request.session):
         return JsonResponse(
             {"error": "An upload is already in progress. Please wait for it to complete."},
             status=409,
@@ -331,7 +307,7 @@ def initiate_upload(request):
     )
 
     # Mark upload in progress
-    _set_upload_in_progress(request, True)
+    set_upload_in_progress(request.session, True)
 
     logger.info(
         "Upload initiated: user=%s filename=%s size=%d",
@@ -377,7 +353,7 @@ def complete_upload(request):
     try:
         token_data = verify_upload_token(upload_token, request.user.id)
     except ValueError as e:
-        _set_upload_in_progress(request, False)
+        set_upload_in_progress(request.session, False)
         return JsonResponse({"error": str(e)}, status=400)
 
     s3_key = token_data["s3_key"]
@@ -388,7 +364,7 @@ def complete_upload(request):
     # Validate S3 key belongs to this user (defense in depth)
     expected_prefix = f"agents/{request.user.id}/"
     if not s3_key.startswith(expected_prefix):
-        _set_upload_in_progress(request, False)
+        set_upload_in_progress(request.session, False)
         logger.warning(
             "S3 key prefix mismatch: user=%s expected=%s got=%s",
             request.user.id,
@@ -401,7 +377,7 @@ def complete_upload(request):
     try:
         file_size, etag = verify_s3_object_exists(s3_key)
     except S3Error:
-        _set_upload_in_progress(request, False)
+        set_upload_in_progress(request.session, False)
         logger.warning(f"Upload completion failed - file not found: {s3_key}")
         return JsonResponse({"error": "File not found in storage. Upload may have failed."}, status=400)
 
@@ -425,11 +401,11 @@ def complete_upload(request):
             upload_method="presigned",
         )
     except AssetError as e:
-        _set_upload_in_progress(request, False)
+        set_upload_in_progress(request.session, False)
         return JsonResponse({"error": str(e)}, status=400)
 
     # Clear upload in progress
-    _set_upload_in_progress(request, False)
+    set_upload_in_progress(request.session, False)
 
     logger.info(
         "Upload completed: user=%s agent_id=%s filename=%s size=%d",
@@ -484,7 +460,7 @@ def cancel_upload(request):
             pass  # Invalid token, ignore
 
     # Clear upload in progress
-    _set_upload_in_progress(request, False)
+    set_upload_in_progress(request.session, False)
 
     return JsonResponse({"success": True})
 

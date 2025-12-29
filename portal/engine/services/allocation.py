@@ -15,8 +15,6 @@ class AllocationError(Exception):
     Typically occurs when all 254 subnet indices are in use.
     """
 
-    pass
-
 
 def allocate_subnet_index() -> int:
     """Allocate the next available subnet index for a new range.
@@ -33,11 +31,10 @@ def allocate_subnet_index() -> int:
     with transaction.atomic():
         # Lock rows to prevent race conditions
         # Get all subnet_index values currently in use by active ranges
-        # Exclude terminal states (DESTROYED, FAILED) - those ranges don't have
-        # AWS resources or their resources are being cleaned up
+        # Exclude terminal states - those ranges don't have AWS resources
         used_indices = set(
             Range.objects.select_for_update()
-            .exclude(status__in=[Range.Status.DESTROYED, Range.Status.FAILED])
+            .exclude(status__in=Range.TERMINAL_STATUSES)
             .exclude(subnet_index__isnull=True)
             .values_list("subnet_index", flat=True)
         )

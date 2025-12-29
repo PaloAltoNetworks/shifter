@@ -5,12 +5,13 @@ concurrent uploads from the same user.
 """
 
 import time
+from typing import Any
 
 # Upload lock timeout in seconds (fallback for browser crash, network loss)
 UPLOAD_LOCK_TIMEOUT = 30
 
 
-def check_upload_in_progress(session) -> bool:
+def check_upload_in_progress(session: dict[str, Any]) -> bool:
     """Check if user has an upload in progress (stored in session).
 
     Args:
@@ -31,7 +32,7 @@ def check_upload_in_progress(session) -> bool:
     return True
 
 
-def set_upload_in_progress(session, in_progress: bool) -> None:
+def set_upload_in_progress(session: dict[str, Any], in_progress: bool) -> None:
     """Set upload in progress flag in session.
 
     Args:

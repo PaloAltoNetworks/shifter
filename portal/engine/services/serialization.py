@@ -3,10 +3,12 @@
 This module handles serialization of Range objects to JSON-compatible dicts.
 """
 
+from typing import Any
+
 from mission_control.models import Range
 
 
-def range_to_dict(range_obj: Range) -> dict:
+def range_to_dict(range_obj: Range) -> dict[str, Any]:
     """Serialize a Range object to JSON-compatible dict for client.
 
     Note: Sensitive fields are intentionally excluded:

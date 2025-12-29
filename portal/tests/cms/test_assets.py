@@ -1,7 +1,7 @@
 """Tests for cms.assets.services module."""
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -221,7 +221,7 @@ class TestCreateAgent:
 
     def test_logs_upload_method_when_provided(self, user):
         """Should include upload_method in log when provided."""
-        agent = create_agent(
+        create_agent(
             user=user,
             name="Presigned Agent",
             s3_key="agents/1/presigned.msi",

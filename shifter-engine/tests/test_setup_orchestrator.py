@@ -88,11 +88,20 @@ class TestOrchestrateHappyPath:
         )
 
         orchestrator = SetupOrchestrator(executor=mock_executor)
-        result = orchestrator.orchestrate("i-12345", plan, {})
+        result = orchestrator.orchestrate(
+            "i-12345",
+            plan,
+            {},
+            document_name="AWS-RunPowerShellScript",
+        )
 
         assert result.success is True
-        # Should have called reboot_and_wait after first step
-        mock_executor.reboot_and_wait.assert_called_once_with("i-12345", timeout_seconds=300)
+        # Should have called reboot_and_wait after first step with document_name
+        mock_executor.reboot_and_wait.assert_called_once_with(
+            "i-12345",
+            timeout_seconds=300,
+            document_name="AWS-RunPowerShellScript",
+        )
 
     def test_orchestrate_multiple_reboot_steps(self):
         """Multiple steps require reboots, all handled correctly."""
@@ -112,10 +121,18 @@ class TestOrchestrateHappyPath:
         )
 
         orchestrator = SetupOrchestrator(executor=mock_executor)
-        result = orchestrator.orchestrate("i-12345", plan, {})
+        result = orchestrator.orchestrate(
+            "i-12345",
+            plan,
+            {},
+            document_name="AWS-RunPowerShellScript",
+        )
 
         assert result.success is True
         assert mock_executor.reboot_and_wait.call_count == 2
+        # Both calls should pass document_name
+        for call_obj in mock_executor.reboot_and_wait.call_args_list:
+            assert call_obj.kwargs.get("document_name") == "AWS-RunPowerShellScript"
 
 
 class TestOrchestrateExpectedFailures:
@@ -416,9 +433,16 @@ class TestRebootTimeout:
         )
 
         orchestrator = SetupOrchestrator(executor=mock_executor)
-        orchestrator.orchestrate("i-12345", plan, {})
+        orchestrator.orchestrate(
+            "i-12345",
+            plan,
+            {},
+            document_name="AWS-RunPowerShellScript",
+        )
 
         # Reboot timeout should be at least as long as step timeout
         reboot_call = mock_executor.reboot_and_wait.call_args
-        reboot_timeout = reboot_call[1].get("timeout_seconds") or reboot_call[0][1]
+        reboot_timeout = reboot_call.kwargs.get("timeout_seconds") or reboot_call[1].get("timeout_seconds")
         assert reboot_timeout >= 300  # At least 5 minutes for reboot
+        # Should pass document_name
+        assert reboot_call.kwargs.get("document_name") == "AWS-RunPowerShellScript"

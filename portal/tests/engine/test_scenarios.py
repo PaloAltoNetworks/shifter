@@ -287,8 +287,8 @@ class TestValidateLaunch:
         The service uses select_related("os") so callers can access
         agent.os without triggering another database query.
         """
-        from django.test.utils import CaptureQueriesContext
         from django.db import connection
+        from django.test.utils import CaptureQueriesContext
 
         agent, _ = validate_launch(user, windows_agent.id, "basic")
 

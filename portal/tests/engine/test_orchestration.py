@@ -1,10 +1,9 @@
 """Tests for engine.services.orchestration module."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 from engine.services.orchestration import (
     OrchestrationError,

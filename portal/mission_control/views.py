@@ -28,12 +28,9 @@ from .services.s3 import (
 from .services.s3 import (
     upload_agent as s3_upload,
 )
-from engine.services.scenarios import (
-    ScenarioValidationError,
-    get_scenario_config,
-    validate_launch,
-)
-from engine.services.allocation import AllocationError, allocate_subnet_index
+from engine.services.allocation import AllocationError
+from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
+from engine.services.scenarios import ScenarioValidationError
 from .services.upload_token import generate_upload_token, verify_upload_token
 from .services.validation import (
     ValidationError,
@@ -602,14 +599,6 @@ def launch_range(request):
         - success: true
         - range: Range object
     """
-    # Check for existing active range
-    active_range = Range.get_active_for_user(request.user)
-    if active_range:
-        return JsonResponse(
-            {"error": "You already have an active range. Destroy it first."},
-            status=409,
-        )
-
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -623,15 +612,12 @@ def launch_range(request):
     if scenario not in ("basic", "ad_attack_lab"):
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
-    # Validate agent and scenario constraints
     try:
-        agent, dc_agent = validate_launch(request.user, agent_id, scenario)
+        range_obj = launch(request.user, agent_id, scenario)
+    except OrchestrationError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
     except ScenarioValidationError as e:
         return JsonResponse({"error": str(e)}, status=e.status_code)
-
-    # Allocate subnet index for this range
-    try:
-        subnet_index = allocate_subnet_index()
     except AllocationError as e:
         logger.error("Failed to allocate subnet index: %s", e)
         return JsonResponse(
@@ -639,49 +625,13 @@ def launch_range(request):
             status=503,
         )
 
-    # Get instance configuration for scenario
-    instance_config = get_scenario_config(scenario, agent.os.name)
-
-    # Create range record with allocated subnet index and instance config
-    range_obj = Range.objects.create(
-        user=request.user,
-        agent=agent,
-        dc_agent=dc_agent,
-        status=Range.Status.PROVISIONING,
-        subnet_index=subnet_index,
-        instance_config=instance_config,
-    )
-
-    # Log activity
-    ActivityLog.log(
-        "range_launched",
-        user=request.user,
-        range_id=range_obj.id,
-        agent_id=agent.id,
-        agent_name=agent.name,
-        dc_agent_id=dc_agent.id if dc_agent else None,
-        dc_agent_name=dc_agent.name if dc_agent else None,
-        scenario=scenario,
-    )
-
     logger.info(
-        "Range launched: user=%s range_id=%s agent=%s dc_agent=%s scenario=%s",
+        "Range launched: user=%s range_id=%s agent=%s scenario=%s",
         request.user.email,
         range_obj.id,
-        agent.name,
-        dc_agent.name if dc_agent else "N/A",
+        range_obj.agent.name,
         scenario,
     )
-
-    # Trigger provisioning via ECS Fargate
-    from .services.engine import start_provisioning
-
-    task_arn = start_provisioning(range_obj.id)
-
-    # Store task ARN if returned (None in local dev without ECS)
-    if task_arn:
-        range_obj.step_function_execution_arn = task_arn
-        range_obj.save(update_fields=["step_function_execution_arn"])
 
     return JsonResponse(
         {
@@ -699,31 +649,12 @@ def cancel_range(request):
 
     Only works for ranges in PENDING or PROVISIONING status.
     """
-    active_range = Range.get_active_for_user(request.user)
-    if not active_range:
-        return JsonResponse({"error": "No active range"}, status=404)
+    try:
+        cancel(request.user)
+    except OrchestrationError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
 
-    if active_range.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
-        return JsonResponse(
-            {"error": f"Cannot cancel range in {active_range.status} status"},
-            status=400,
-        )
-
-    active_range.status = Range.Status.DESTROYED
-    active_range.destroyed_at = timezone.now()
-    active_range.save(update_fields=["status", "destroyed_at"])
-
-    ActivityLog.log(
-        "range_cancelled",
-        user=request.user,
-        range_id=active_range.id,
-    )
-
-    logger.info(
-        "Range cancelled: user=%s range_id=%s",
-        request.user.email,
-        active_range.id,
-    )
+    logger.info("Range cancelled: user=%s", request.user.email)
 
     return JsonResponse({"success": True})
 
@@ -734,43 +665,15 @@ def destroy_range(request):
     """
     Destroy an active, paused, or failed range.
 
-    Sets status to DESTROYED immediately so UI updates instantly.
-    Resource cleanup happens async via Step Functions.
+    Sets status to DESTROYING and triggers async resource cleanup.
     """
-    # Use get_destroyable_for_user to include FAILED ranges
-    range_to_destroy = Range.get_destroyable_for_user(request.user)
-    if not range_to_destroy:
-        return JsonResponse({"error": "No range to destroy"}, status=404)
+    try:
+        destroy(request.user)
+    except OrchestrationError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
 
-    # Mark as DESTROYING - user sees it as gone, can launch new range
-    # Resource cleanup happens async, provisioner sets DESTROYED when done
-    range_to_destroy.status = Range.Status.DESTROYING
-    range_to_destroy.save(update_fields=["status"])
+    logger.info("Range destroyed: user=%s", request.user.email)
 
-    ActivityLog.log(
-        "range_destroyed",
-        user=request.user,
-        range_id=range_to_destroy.id,
-    )
-
-    logger.info(
-        "Range destroyed: user=%s range_id=%s",
-        request.user.email,
-        range_to_destroy.id,
-    )
-
-    # Trigger async resource cleanup via ECS Fargate
-    # This runs in background - user doesn't wait for it
-    from .services.engine import start_teardown
-
-    task_arn = start_teardown(range_to_destroy.id)
-
-    # Store task ARN if returned (None in local dev without ECS)
-    if task_arn:
-        range_to_destroy.step_function_execution_arn = task_arn
-        range_to_destroy.save(update_fields=["step_function_execution_arn"])
-
-    # Return success - no range data since it's now destroyed
     return JsonResponse({"success": True})
 
 

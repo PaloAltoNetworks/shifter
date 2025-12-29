@@ -535,7 +535,8 @@ class TestUserDataGeneration:
 
             def check_user_data(user_data_b64):
                 user_data = base64.b64decode(user_data_b64).decode()
-                assert "Victim setup complete" in user_data
+                # Minimal template just logs that SSM handles setup
+                assert "SSM" in user_data
                 assert "#!/bin/bash" in user_data
 
             component.instance.user_data_base64.apply(check_user_data)
@@ -562,14 +563,15 @@ class TestUserDataGeneration:
 
             def check_user_data(user_data_b64):
                 user_data = base64.b64decode(user_data_b64).decode()
-                assert "Windows setup complete" in user_data
+                # Minimal template just logs that SSM handles setup
+                assert "SSM" in user_data
                 assert "<powershell>" in user_data
 
             component.instance.user_data_base64.apply(check_user_data)
 
     @pulumi.runtime.test
-    def test_agent_presigned_url_in_user_data(self, temp_templates, pulumi_mocks):
-        """Agent presigned URL should appear in victim user data."""
+    def test_agent_presigned_url_stored_for_ssm(self, temp_templates, pulumi_mocks):
+        """Agent presigned URL should be stored on component for SSM plans."""
         from components.instance import InstanceComponent
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
@@ -589,9 +591,16 @@ class TestUserDataGeneration:
                 agent_s3_key="agents/xdr.tar.gz",
             )
 
+            # Agent URL is stored on component for SSM plans, not in user_data
+            assert component.agent_presigned_url == \
+                "https://s3.example.com/signed-agent-url"
+
             def check_user_data(user_data_b64):
                 user_data = base64.b64decode(user_data_b64).decode()
-                assert "https://s3.example.com/signed-agent-url" in user_data
+                # XDR install is handled by SSM, not user_data
+                assert "SSM plans" in user_data
+                # presigned URL should NOT be in user_data
+                assert "https://s3.example.com/signed-agent-url" not in user_data
 
             component.instance.user_data_base64.apply(check_user_data)
 
@@ -617,3 +626,12 @@ class TestUserDataGeneration:
                 )
 
             assert "shell injection" in str(exc_info.value).lower()
+
+
+class TestCleanupVerification:
+    """Tests to verify cleanup of orphaned code."""
+
+    def test_no_orphaned_generate_secure_password_method(self):
+        """_generate_secure_password should not exist - DC uses env password."""
+        from components.instance import InstanceComponent
+        assert not hasattr(InstanceComponent, '_generate_secure_password')

@@ -12,8 +12,6 @@ All AWS resources are created via Pulumi to ensure proper lifecycle management.
 import base64
 import os
 import re
-import secrets
-import string
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional
@@ -29,7 +27,6 @@ from .setup_orchestrator import SetupOrchestrator, SetupError
 from .plans.domain_join import DomainJoinPlan
 from .plans.xdr_agent_install import XDRAgentInstallPlan
 from .plans.bootstrap import BootstrapPlan
-from .plans.kali_setup import KaliSetupPlan
 from .plans.linux_bootstrap import LinuxBootstrapPlan
 from .plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 
@@ -552,7 +549,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         """Run setup plan for non-DC instances via SSM Run Command.
 
         This method handles setup for:
-        - Kali (attacker): KaliSetupPlan (hostname + SSH)
+        - Kali (attacker): LinuxBootstrapPlan (hostname + SSH with ssh_user='kali')
         - Linux victims: LinuxBootstrapPlan + LinuxXDRAgentInstallPlan
         - Windows victims: BootstrapPlan + XDRAgentInstallPlan
 
@@ -612,8 +609,8 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
 
                 # Select and run plans based on role and OS type
                 if instance_role == "attacker":
-                    # Kali: Just hostname and SSH setup
-                    plan = KaliSetupPlan()
+                    # Kali: hostname + SSH setup (uses LinuxBootstrapPlan with ssh_user='kali')
+                    plan = LinuxBootstrapPlan()
                     context = plan.get_context(ctx)
                     result = orchestrator.orchestrate(
                         instance_id, plan, context, document_name=document_name
@@ -741,44 +738,16 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
             template = env.get_template("dc_windows.ps1.j2")
             context = {}  # No variables needed - template just logs SSM will handle setup
         elif os_type == "windows":
-            # Windows victim - domain join is handled by DC via SSM, not user_data
+            # Windows victim - all setup via SSM (BootstrapPlan + XDRAgentInstallPlan)
             template = env.get_template("victim_windows.ps1.j2")
-            context = {
-                "hostname": f"shifter-victim-{range_id}-{index}",
-                "public_key": public_key,
-                "presigned_url": agent_presigned_url,
-                "agent_s3_key": agent_s3_key,
-            }
+            context = {}  # No variables needed - template just logs SSM will handle setup
         else:
+            # Linux victim - all setup via SSM (LinuxBootstrapPlan + LinuxXDRAgentInstallPlan)
             template = env.get_template("victim_linux.sh.j2")
-            context = {
-                "hostname": f"shifter-victim-{range_id}-{index}",
-                "public_key": public_key,
-                "presigned_url": agent_presigned_url,
-                "agent_s3_key": agent_s3_key,
-            }
+            context = {}  # No variables needed - template just logs SSM will handle setup
 
         script = template.render(**context)
         return base64.b64encode(script.encode()).decode()
-
-    def _generate_secure_password(self, length: int = 24) -> str:  # nosec B105
-        """Generate a cryptographically secure random password for DSRM.
-
-        Args:
-            length: Password length (default 24 characters).
-
-        Returns:
-            Secure random password meeting Windows complexity requirements.
-        """
-        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
-        # Generate base password
-        password = "".join(secrets.choice(alphabet) for _ in range(length - 4))
-        # Ensure complexity: add at least one of each required type
-        password += secrets.choice(string.ascii_uppercase)
-        password += secrets.choice(string.ascii_lowercase)
-        password += secrets.choice(string.digits)
-        password += secrets.choice("!@#$%^&*")
-        return password
 
     def to_output_dict(self) -> dict:
         """Return instance info as a dictionary for export.

@@ -202,108 +202,34 @@ class DashboardManager {
 
     _initScenarioDropdown() {
         // Initialize the scenario dropdown with XdrDropdown if available
-        if (this.scenarioDropdown && window.XdrDropdown) {
-            void new window.XdrDropdown(this.scenarioDropdown);
-        }
+        this._initDropdown(this.scenarioDropdown);
     }
 
     async loadAgents() {
-        try {
-            const response = await fetch(this.agentsUrl, {
-                headers: { 'Accept': 'application/json' },
-            });
-
-            if (!response.ok) {
-                console.error('Failed to load agents');
-                return;
-            }
-
-            const data = await response.json();
-            // Cache agents for later reference
-            this.agents = data.agents;
-
-            // Populate victim agent dropdown (all agents)
-            if (this.agentItems) {
-                this.agentItems.innerHTML = '';
-
-                for (const agent of data.agents) {
-                    const li = document.createElement('li');
-                    li.className = 'xdr-dropdown-item';
-                    li.dataset.value = agent.id;
-                    li.textContent = `${agent.name} (${agent.os_name})`;
-                    this.agentItems.appendChild(li);
-                }
-
-                // Reinitialize dropdown after adding items
-                if (this.agentDropdown && window.XdrDropdown) {
-                    void new window.XdrDropdown(this.agentDropdown);
-                }
-            }
-
-            // Populate DC agent dropdown (Windows agents only)
-            if (this.dcAgentItems) {
-                this.dcAgentItems.innerHTML = '';
-
-                const windowsAgents = data.agents.filter(a => a.os_slug === 'windows');
-
-                if (windowsAgents.length === 0) {
-                    // No Windows agents - show helpful message
-                    const li = document.createElement('li');
-                    li.className = 'xdr-dropdown-item disabled';
-                    li.textContent = 'No Windows agents uploaded';
-                    this.dcAgentItems.appendChild(li);
-                } else {
-                    for (const agent of windowsAgents) {
-                        const li = document.createElement('li');
-                        li.className = 'xdr-dropdown-item';
-                        li.dataset.value = agent.id;
-                        li.textContent = `${agent.name} (${agent.os_name})`;
-                        this.dcAgentItems.appendChild(li);
-                    }
-                }
-
-                // Reinitialize dropdown after adding items
-                if (this.dcAgentDropdown && window.XdrDropdown) {
-                    void new window.XdrDropdown(this.dcAgentDropdown);
-                }
-            }
-        } catch (error) {
-            console.error('Error loading agents:', error);
+        const data = await this._fetchJson(this.agentsUrl, 'Failed to load agents');
+        if (!data) {
+            return;
         }
+
+        // Cache agents for later reference
+        this.agents = data.agents || [];
+
+        this._populateAgentDropdown(this.agents);
+        this._populateDcAgentDropdown(this.agents);
     }
 
     async loadStatus() {
-        try {
-            const response = await fetch(this.statusUrl, {
-                headers: { 'Accept': 'application/json' },
-            });
+        const data = await this._fetchJson(this.statusUrl, 'Failed to load status');
+        if (!data) {
+            return;
+        }
 
-            if (this._isSessionExpired(response)) {
-                this._handleSessionExpired();
-                return;
-            }
+        this.currentRange = data.range;
+        this._updateUI();
 
-            if (!response.ok) {
-                console.error('Failed to load status');
-                return;
-            }
-
-            const data = await response.json();
-            this.currentRange = data.range;
-            this._updateUI();
-
-            // Start polling if in a transitional state
-            if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-                this._startPolling();
-            }
-        } catch (error) {
-            // Network errors during fetch can indicate CORS issues from auth redirects
-            if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-                console.warn('Fetch failed, likely session expired');
-                this._handleSessionExpired();
-                return;
-            }
-            console.error('Error loading status:', error);
+        // Start polling if in a transitional state
+        if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
+            this._startPolling();
         }
     }
 
@@ -545,63 +471,8 @@ class DashboardManager {
     _startPolling() {
         if (this.pollInterval) return;
 
-        this.pollInterval = setInterval(async () => {
-            try {
-                const response = await fetch(this.statusUrl, {
-                    headers: { 'Accept': 'application/json' },
-                });
-
-                // Check for session expiration first
-                if (this._isSessionExpired(response)) {
-                    this._handleSessionExpired();
-                    return;
-                }
-
-                if (!response.ok) {
-                    console.warn('Polling: response not ok', response.status);
-                    this.pollErrorCount++;
-                    if (this.pollErrorCount >= this.maxPollErrors) {
-                        console.error('Too many polling errors, reloading page');
-                        globalThis.location.reload();
-                    }
-                    return;
-                }
-
-                // Reset error count on success
-                this.pollErrorCount = 0;
-
-                const data = await response.json();
-                const oldStatus = this.currentRange?.status;
-                const newStatus = data.range?.status;
-                this.currentRange = data.range;
-                this._updateUI();
-
-                // Log state transitions for debugging
-                if (oldStatus !== newStatus) {
-                    console.log(`Range status: ${oldStatus} → ${newStatus ?? 'null (no range)'}`);
-                }
-
-                // Stop polling if we've reached a stable state
-                if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {
-                    this._stopPolling();
-
-                    // Show notification for state transitions
-                    if (oldStatus && this.currentRange) {
-                        if (oldStatus === 'provisioning' && this.currentRange.status === 'ready') {
-                            // Range is ready - could show a notification
-                            console.log('Range is ready!');
-                        }
-                    }
-                }
-            } catch (error) {
-                // Network errors during fetch can indicate CORS issues from auth redirects
-                if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-                    console.warn('Polling fetch failed, likely session expired');
-                    this._handleSessionExpired();
-                    return;
-                }
-                console.error('Polling error:', error);
-            }
+        this.pollInterval = setInterval(() => {
+            this._pollStatus();
         }, this.pollIntervalMs);
     }
 
@@ -609,6 +480,166 @@ class DashboardManager {
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
             this.pollInterval = null;
+        }
+    }
+
+    _initDropdown(dropdown) {
+        if (!dropdown || !window.XdrDropdown) {
+            return null;
+        }
+
+        if (typeof window.XdrDropdown.init === 'function') {
+            return window.XdrDropdown.init(dropdown);
+        }
+
+        return new window.XdrDropdown(dropdown);
+    }
+
+    _populateAgentDropdown(agents) {
+        if (!this.agentItems) {
+            return;
+        }
+
+        this._renderAgentItems(this.agentItems, agents);
+        this._initDropdown(this.agentDropdown);
+    }
+
+    _populateDcAgentDropdown(agents) {
+        if (!this.dcAgentItems) {
+            return;
+        }
+
+        const windowsAgents = agents.filter(agent => agent.os_slug === 'windows');
+        if (windowsAgents.length === 0) {
+            this._renderEmptyDropdown(this.dcAgentItems, 'No Windows agents uploaded');
+        } else {
+            this._renderAgentItems(this.dcAgentItems, windowsAgents);
+        }
+
+        this._initDropdown(this.dcAgentDropdown);
+    }
+
+    _renderAgentItems(container, agents) {
+        container.innerHTML = '';
+
+        for (const agent of agents) {
+            const li = document.createElement('li');
+            li.className = 'xdr-dropdown-item';
+            li.dataset.value = agent.id;
+            li.textContent = `${agent.name} (${agent.os_name})`;
+            container.appendChild(li);
+        }
+    }
+
+    _renderEmptyDropdown(container, message) {
+        container.innerHTML = '';
+        const li = document.createElement('li');
+        li.className = 'xdr-dropdown-item disabled';
+        li.textContent = message;
+        container.appendChild(li);
+    }
+
+    async _fetchJson(url, errorMessage) {
+        try {
+            const response = await fetch(url, {
+                headers: { 'Accept': 'application/json' },
+            });
+
+            if (this._isSessionExpired(response)) {
+                this._handleSessionExpired();
+                return null;
+            }
+
+            if (!response.ok) {
+                console.error(errorMessage);
+                return null;
+            }
+
+            return await response.json();
+        } catch (error) {
+            if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+                console.warn('Fetch failed, likely session expired');
+                this._handleSessionExpired();
+                return null;
+            }
+            console.error(errorMessage, error);
+            return null;
+        }
+    }
+
+    async _pollStatus() {
+        const response = await this._fetchStatusResponse();
+        if (!response) {
+            return;
+        }
+
+        if (!response.ok) {
+            this._handlePollError(response.status);
+            return;
+        }
+
+        this.pollErrorCount = 0;
+        const data = await response.json();
+        const oldStatus = this._applyRangeUpdate(data.range, true);
+        this._stopPollingIfStable(oldStatus);
+    }
+
+    async _fetchStatusResponse() {
+        try {
+            const response = await fetch(this.statusUrl, {
+                headers: { 'Accept': 'application/json' },
+            });
+
+            if (this._isSessionExpired(response)) {
+                this._handleSessionExpired();
+                return null;
+            }
+
+            return response;
+        } catch (error) {
+            if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+                console.warn('Polling fetch failed, likely session expired');
+                this._handleSessionExpired();
+                return null;
+            }
+            console.error('Polling error:', error);
+            return null;
+        }
+    }
+
+    _handlePollError(status) {
+        console.warn('Polling: response not ok', status);
+        this.pollErrorCount++;
+        if (this.pollErrorCount >= this.maxPollErrors) {
+            console.error('Too many polling errors, reloading page');
+            globalThis.location.reload();
+        }
+    }
+
+    _applyRangeUpdate(range, logTransition) {
+        const oldStatus = this.currentRange?.status;
+        const newStatus = range?.status;
+        this.currentRange = range;
+        this._updateUI();
+
+        if (logTransition && oldStatus !== newStatus) {
+            console.log(`Range status: ${oldStatus} → ${newStatus ?? 'null (no range)'}`);
+        }
+
+        return oldStatus;
+    }
+
+    _stopPollingIfStable(oldStatus) {
+        if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
+            return;
+        }
+
+        this._stopPolling();
+
+        if (oldStatus && this.currentRange) {
+            if (oldStatus === 'provisioning' && this.currentRange.status === 'ready') {
+                console.log('Range is ready!');
+            }
         }
     }
 }

@@ -183,43 +183,27 @@ class TestGetUserStorageUsed:
 @pytest.mark.django_db
 class TestUploadLock:
     def test_check_upload_in_progress_false_by_default(self, user):
-        from mission_control.views import _check_upload_in_progress
+        from cms.assets.upload_session import check_upload_in_progress
 
         client = get_authenticated_client(user)
         # Access the request through a view to get session
         response = client.get(reverse("mission_control:dashboard"))
         assert response.status_code == 200
 
-        # Create a mock request with the session
-        from django.test import RequestFactory
-
-        factory = RequestFactory()
-        request = factory.get("/")
-        request.session = client.session
-
-        assert _check_upload_in_progress(request) is False
+        assert check_upload_in_progress(client.session) is False
 
     def test_upload_lock_expires(self, user, settings):
-        from mission_control.views import (
-            UPLOAD_LOCK_TIMEOUT,
-            _check_upload_in_progress,
-        )
+        from cms.assets.upload_session import UPLOAD_LOCK_TIMEOUT, check_upload_in_progress
 
         client = get_authenticated_client(user)
         client.get(reverse("mission_control:dashboard"))
 
-        from django.test import RequestFactory
-
-        factory = RequestFactory()
-        request = factory.get("/")
-        request.session = client.session
-
         # Set upload in progress with old timestamp
-        request.session["upload_lock"] = {"started_at": time.time() - UPLOAD_LOCK_TIMEOUT - 10}
-        request.session.save()
+        client.session["upload_lock"] = {"started_at": time.time() - UPLOAD_LOCK_TIMEOUT - 10}
+        client.session.save()
 
         # Should return False because lock is expired
-        assert _check_upload_in_progress(request) is False
+        assert check_upload_in_progress(client.session) is False
 
 
 @pytest.mark.django_db

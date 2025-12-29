@@ -138,9 +138,8 @@ resource "aws_iam_role_policy" "range_ssh_keys" {
 }
 
 resource "aws_iam_role_policy" "s3_access" {
-  count = var.s3_bucket_arn != "" ? 1 : 0
-  name  = "s3-access"
-  role  = aws_iam_role.this.id
+  name = "s3-access"
+  role = aws_iam_role.this.id
 
   policy = jsonencode({
     Version = "2012-10-17"

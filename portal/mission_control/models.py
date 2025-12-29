@@ -475,29 +475,37 @@ class Range(models.Model):
 
 
 # Assign status groupings after class definition (can't reference Status inside class body)
-Range.ACTIVE_STATUSES = frozenset({
-    Range.Status.PENDING,
-    Range.Status.PROVISIONING,
-    Range.Status.READY,
-    Range.Status.PAUSED,
-    Range.Status.RESUMING,
-})
-Range.DESTROYABLE_STATUSES = frozenset({
-    Range.Status.PENDING,
-    Range.Status.PROVISIONING,
-    Range.Status.READY,
-    Range.Status.PAUSED,
-    Range.Status.RESUMING,
-    Range.Status.FAILED,
-})
-Range.TERMINAL_STATUSES = frozenset({
-    Range.Status.DESTROYED,
-    Range.Status.FAILED,
-})
-Range.CANCELLABLE_STATUSES = frozenset({
-    Range.Status.PENDING,
-    Range.Status.PROVISIONING,
-})
+Range.ACTIVE_STATUSES = frozenset(
+    {
+        Range.Status.PENDING,
+        Range.Status.PROVISIONING,
+        Range.Status.READY,
+        Range.Status.PAUSED,
+        Range.Status.RESUMING,
+    }
+)
+Range.DESTROYABLE_STATUSES = frozenset(
+    {
+        Range.Status.PENDING,
+        Range.Status.PROVISIONING,
+        Range.Status.READY,
+        Range.Status.PAUSED,
+        Range.Status.RESUMING,
+        Range.Status.FAILED,
+    }
+)
+Range.TERMINAL_STATUSES = frozenset(
+    {
+        Range.Status.DESTROYED,
+        Range.Status.FAILED,
+    }
+)
+Range.CANCELLABLE_STATUSES = frozenset(
+    {
+        Range.Status.PENDING,
+        Range.Status.PROVISIONING,
+    }
+)
 
 
 class ActivityLog(models.Model):

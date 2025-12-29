@@ -499,8 +499,6 @@ def get_range_status(request):
     )
 
 
-
-
 @login_required
 @require_POST
 def launch_range(request):

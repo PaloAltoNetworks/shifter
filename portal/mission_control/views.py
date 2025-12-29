@@ -28,6 +28,11 @@ from .services.s3 import (
 from .services.s3 import (
     upload_agent as s3_upload,
 )
+from engine.services.scenarios import (
+    ScenarioValidationError,
+    get_scenario_config,
+    validate_launch,
+)
 from .services.upload_token import generate_upload_token, verify_upload_token
 from .services.validation import (
     ValidationError,
@@ -579,43 +584,6 @@ def get_range_status(request):
     )
 
 
-def _get_scenario_instance_config(scenario: str, agent_os: str) -> list:
-    """
-    Get instance configuration for a scenario.
-
-    Args:
-        scenario: Scenario identifier (basic, ad_attack_lab)
-        agent_os: Operating system from agent (linux, windows)
-
-    Returns:
-        List of instance configuration dicts for the provisioner
-    """
-    # Map agent OS names to provisioner os_type
-    os_type = "windows" if agent_os.lower() == "windows" else "ubuntu"
-
-    # Instance types are not specified here - the provisioner uses
-    # its catalog defaults from environment variables
-    scenarios = {
-        "basic": [
-            {"role": "attacker", "os_type": "kali"},
-            {"role": "victim", "os_type": os_type},
-        ],
-        "ad_attack_lab": [
-            {"role": "attacker", "os_type": "kali"},
-            {
-                "role": "dc",
-                "os_type": "windows",
-                "dc_config": {"domain_name": "shifter.local", "netbios_name": "SHIFTER"},
-            },
-            {
-                "role": "victim",
-                "os_type": "windows",
-                "join_domain": True,
-            },
-        ],
-    }
-
-    return scenarios.get(scenario, scenarios["basic"])
 
 
 @login_required
@@ -654,23 +622,11 @@ def launch_range(request):
     if scenario not in ("basic", "ad_attack_lab"):
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
-    # Verify agent belongs to user and is not deleted
-    agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).select_related("os").first()
-    if not agent:
-        return JsonResponse({"error": "Agent not found"}, status=404)
-
-    # Handle agent validation for AD scenarios
-    dc_agent = None
-
-    if scenario == "ad_attack_lab":
-        # AD scenario requires Windows agent (used for both DC and victim)
-        if agent.os.slug != "windows":
-            return JsonResponse(
-                {"error": "AD Attack Lab requires a Windows (MSI) agent. Both DC and victim are Windows."},
-                status=400,
-            )
-        # Use same agent for DC and victim
-        dc_agent = agent
+    # Validate agent and scenario constraints
+    try:
+        agent, dc_agent = validate_launch(request.user, agent_id, scenario)
+    except ScenarioValidationError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
 
     # Allocate subnet index for this range
     try:
@@ -683,7 +639,7 @@ def launch_range(request):
         )
 
     # Get instance configuration for scenario
-    instance_config = _get_scenario_instance_config(scenario, agent.os.name)
+    instance_config = get_scenario_config(scenario, agent.os.name)
 
     # Create range record with allocated subnet index and instance config
     range_obj = Range.objects.create(

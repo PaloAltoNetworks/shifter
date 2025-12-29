@@ -220,9 +220,10 @@ class RangeStack(pulumi.ComponentResource):
 
             self.instances.append(instance)
 
-            # Run setup for non-domain-joining instances
-            # Domain-joining instances get their setup (DNS, domain join) from DC
-            if not inst_config.join_domain:
+            # Run setup for all non-DC instances (bootstrap + XDR)
+            # Domain-joining instances also need this - DC only handles domain join,
+            # not bootstrap (SSH setup) or XDR installation
+            if inst_config.role != "dc":
                 instance.run_setup()
 
             # Collect instance IDs for domain members

@@ -1,0 +1,70 @@
+name: Packer AMI Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ami_type:
+        description: 'AMI to build'
+        required: true
+        type: choice
+        options:
+          - kali
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.ami_type }} AMI
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: packer
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.environment == 'dev' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - name: Initialize Packer
+        run: packer init .
+
+      - name: Validate template
+        run: packer validate ${{ inputs.ami_type }}.pkr.hcl
+
+      - name: Build AMI
+        run: |
+          packer build -color=false ${{ inputs.ami_type }}.pkr.hcl
+
+          # Extract AMI ID from manifest
+          AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' ${{ inputs.ami_type }}-manifest.json)
+          echo "AMI_ID=$AMI_ID" >> $GITHUB_ENV
+          echo "## AMI Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** ${{ inputs.ami_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AMI ID:** \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region:** us-east-2" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.ami_type }}-manifest
+          path: packer/${{ inputs.ami_type }}-manifest.json

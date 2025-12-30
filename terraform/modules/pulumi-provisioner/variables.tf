@@ -272,3 +272,19 @@ variable "ngfw_instance_type" {
   type        = string
   default     = "m5.xlarge"
 }
+
+# ------------------------------------------------------------------------------
+# Alarms Configuration
+# ------------------------------------------------------------------------------
+
+variable "enable_alarms" {
+  description = "Enable CloudWatch alarms for range launch failures"
+  type        = bool
+  default     = false
+}
+
+variable "alarm_email" {
+  description = "Email address for alarm notifications (leave empty to skip)"
+  type        = string
+  default     = ""
+}

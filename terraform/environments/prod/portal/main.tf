@@ -387,6 +387,10 @@ module "pulumi_provisioner" {
   ngfw_security_group_id = data.terraform_remote_state.range.outputs.ngfw_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_security_group_id : ""
   ngfw_ami_id            = data.terraform_remote_state.range.outputs.vm_series_ami_id
   ngfw_instance_type     = data.terraform_remote_state.range.outputs.vm_series_instance_type
+
+  # Alarms
+  enable_alarms = true
+  alarm_email   = "bedwards@paloaltonetworks.com"
 }
 
 # ------------------------------------------------------------------------------

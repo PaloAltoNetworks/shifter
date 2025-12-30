@@ -20,9 +20,11 @@ class XdrDropdown {
         }
 
         this.items = Array.from(this.itemsContainer.querySelectorAll('.xdr-dropdown-item'));
+        this.boundItems = new WeakSet();
         this.highlightedIndex = -1;
         this.isOpen = false;
 
+        this.element._xdrDropdown = this;
         this.init();
     }
 
@@ -43,16 +45,7 @@ class XdrDropdown {
             }
         });
 
-        // Item selection
-        this.items.forEach((item, index) => {
-            item.addEventListener('click', () => {
-                this.selectItem(item);
-            });
-
-            item.addEventListener('mouseenter', () => {
-                this.highlightItem(index);
-            });
-        });
+        this._bindItems();
 
         // Filter input
         if (this.filterInput) {
@@ -71,11 +64,7 @@ class XdrDropdown {
         });
 
         // Set initial selected state
-        const selectedItem = this.items.find(item => item.classList.contains('selected'));
-        if (selectedItem) {
-            this.valueDisplay.textContent = selectedItem.textContent;
-            this.valueDisplay.classList.remove('placeholder');
-        }
+        this._syncSelectedState();
     }
 
     toggle() {
@@ -231,6 +220,55 @@ class XdrDropdown {
         }
     }
 
+    refreshItems() {
+        this.items = Array.from(this.itemsContainer.querySelectorAll('.xdr-dropdown-item'));
+        this._bindItems();
+        this._syncSelectedState();
+    }
+
+    _bindItems() {
+        this.items.forEach((item) => {
+            if (this.boundItems.has(item)) {
+                return;
+            }
+
+            item.addEventListener('click', () => {
+                this.selectItem(item);
+            });
+
+            item.addEventListener('mouseenter', () => {
+                const visibleItems = this.getVisibleItems();
+                const index = visibleItems.indexOf(item);
+                if (index >= 0) {
+                    this.highlightItem(index);
+                }
+            });
+
+            this.boundItems.add(item);
+        });
+    }
+
+    _syncSelectedState() {
+        const selectedItem = this.items.find(item => item.classList.contains('selected'));
+        if (selectedItem) {
+            this.valueDisplay.textContent = selectedItem.textContent;
+            this.valueDisplay.classList.remove('placeholder');
+        }
+    }
+
+    static init(element) {
+        if (!element) {
+            return null;
+        }
+
+        if (element._xdrDropdown) {
+            element._xdrDropdown.refreshItems();
+            return element._xdrDropdown;
+        }
+
+        return new XdrDropdown(element);
+    }
+
     // Public API
     getValue() {
         return this.hiddenInput ? this.hiddenInput.value : null;
@@ -253,13 +291,6 @@ class XdrDropdown {
         }
     }
 }
-
-// Auto-init: instances manage their own lifecycle via DOM event listeners
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.xdr-dropdown').forEach(el => {
-        new XdrDropdown(el);
-    });
-});
 
 // Export for manual initialization
 window.XdrDropdown = XdrDropdown;

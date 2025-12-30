@@ -93,16 +93,6 @@ resource "aws_security_group" "kali" {
 # Victim Security Group Rules
 # ------------------------------------------------------------------------------
 
-resource "aws_security_group_rule" "victim_ssh_from_range" {
-  type              = "ingress"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = [var.vpc_cidr]
-  security_group_id = aws_security_group.victim.id
-  description       = "SSH from Range VPC"
-}
-
 resource "aws_security_group_rule" "victim_ssh_from_portal" {
   type              = "ingress"
   from_port         = 22
@@ -344,16 +334,6 @@ resource "aws_security_group_rule" "ngfw_dns_tcp" {
 # ------------------------------------------------------------------------------
 # Kali Security Group Rules
 # ------------------------------------------------------------------------------
-
-resource "aws_security_group_rule" "kali_ssh_from_range" {
-  type              = "ingress"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = [var.vpc_cidr]
-  security_group_id = aws_security_group.kali.id
-  description       = "SSH from Range VPC"
-}
 
 resource "aws_security_group_rule" "kali_ssh_from_portal" {
   type              = "ingress"

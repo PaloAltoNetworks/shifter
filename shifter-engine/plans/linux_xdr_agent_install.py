@@ -14,7 +14,7 @@ Based on logic from victim_linux.sh.j2 template.
 
 from typing import Any, Dict, List
 
-from ..setup_plan import SetupStep
+from .base import SetupStep
 
 
 # Bash script to download XDR agent from presigned URL

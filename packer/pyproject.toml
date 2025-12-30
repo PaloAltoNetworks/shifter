@@ -1,0 +1,11 @@
+[project]
+name = "packer"
+version = "0.1.0"
+description = "Packer AMI build configuration"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

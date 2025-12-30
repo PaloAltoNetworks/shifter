@@ -11,6 +11,7 @@ urlpatterns = [
     path("agents/", views.agents, name="agents"),
     path("agents/upload/", views.upload_agent, name="upload_agent"),
     path("agents/<int:agent_id>/delete/", views.delete_agent, name="delete_agent"),
+    # NGFW page route will be added when SCMCredential/NGFWDeploymentProfile views are implemented
     path("terminal/", views.terminal, name="terminal"),
     path("settings/", views.settings, name="settings"),
     path("help/", views.help_page, name="help"),
@@ -24,4 +25,5 @@ urlpatterns = [
     path("api/range/cancel/", views.cancel_range, name="cancel_range"),
     path("api/range/destroy/", views.destroy_range, name="destroy_range"),
     path("api/agents/", views.list_agents_for_launch, name="list_agents"),
+    # NGFW Config API routes will be added when SCMCredential/NGFWDeploymentProfile views are implemented
 ]

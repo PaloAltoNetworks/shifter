@@ -36,3 +36,9 @@ Self-service cyber range platform. Users provision isolated Kali + victim enviro
 ### SCMS
 
 - [Overview](scms/index.md) - Scenario content (goal-state, not implemented)
+
+### Upcoming
+
+- [Overview](upcoming/index.md) - Planned attack execution capabilities
+- [Atomic Red Team](upcoming/atomic-red-team.md) - Case as Outcome design
+- [OpenBAS Integration](upcoming/openbas-integration.md) - Range as Outcome design

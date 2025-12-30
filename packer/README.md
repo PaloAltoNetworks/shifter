@@ -20,11 +20,11 @@ Reproducible AMI builds for Shifter range instances.
 # Initialize Packer plugins
 packer init .
 
-# Validate template
-packer validate kali.pkr.hcl
+# Validate template (requires var-file - no defaults)
+packer validate -var-file=dev.pkrvars.hcl .
 
 # Build AMI
-AWS_PROFILE=panw-shifter-dev-workstation packer build kali.pkr.hcl
+AWS_PROFILE=panw-shifter-dev-workstation packer build -var-file=dev.pkrvars.hcl .
 ```
 
 ## Build Output
@@ -62,17 +62,17 @@ Expect ~15-20 minutes for a full Kali build (kali-linux-headless is large).
 
 ### Variables
 
-Override defaults with `-var`:
+All variables are required (no defaults). Use a var-file:
+
+| File | Use |
+|------|-----|
+| `dev.pkrvars.hcl` | Dev environment builds |
+| `prod.pkrvars.hcl` | Production builds (create as needed) |
+
+Override specific variables with `-var`:
 
 ```bash
-packer build -var="instance_type=t3.large" kali.pkr.hcl
-```
-
-Or create a `*.auto.pkrvars.hcl` file:
-
-```hcl
-instance_type = "t3.large"
-ami_prefix    = "myproject"
+packer build -var-file=dev.pkrvars.hcl -var="instance_type=t3.xlarge" .
 ```
 
 ### Adding Packages

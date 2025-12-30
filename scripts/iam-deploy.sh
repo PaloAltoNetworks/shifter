@@ -109,4 +109,8 @@ case "$ACTION" in
         echo "Running terraform destroy..."
         AWS_PROFILE="$AWS_PROFILE" terraform destroy -var-file="${ENV}.tfvars"
         ;;
+    *)
+        echo "Error: Unknown action '$ACTION'"
+        exit 1
+        ;;
 esac

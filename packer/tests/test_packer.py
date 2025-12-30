@@ -134,9 +134,9 @@ class TestPackerTemplates:
         # Init first
         subprocess.run(["packer", "init", "."], capture_output=True)
 
-        # Validate kali template
+        # Validate with var-file (no defaults)
         result = subprocess.run(
-            ["packer", "validate", "kali.pkr.hcl"],
+            ["packer", "validate", "-var-file=dev.pkrvars.hcl", "."],
             capture_output=True,
             text=True,
         )

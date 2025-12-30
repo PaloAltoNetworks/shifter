@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 # These imports will fail initially - that's expected for TDD
-from components.ssm_executor import (
+from executors.ssm_executor import (
     SSMExecutor,
     SSMExecutorError,
     CommandResult,

@@ -10,7 +10,7 @@ Currently Windows-only. Linux support can be added later.
 
 from typing import Any, Dict, List
 
-from ..setup_plan import SetupStep
+from .base import SetupStep
 
 
 # PowerShell script to set hostname and reboot

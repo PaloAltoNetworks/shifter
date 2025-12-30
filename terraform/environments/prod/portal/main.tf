@@ -356,6 +356,10 @@ module "pulumi_provisioner" {
   # S3
   agent_s3_bucket     = module.s3.bucket_name
   agent_s3_bucket_arn = module.s3.bucket_arn
+
+  # Alarms
+  enable_alarms = true
+  alarm_email   = "bedwards@paloaltonetworks.com"
 }
 
 # ------------------------------------------------------------------------------

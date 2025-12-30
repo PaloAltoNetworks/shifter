@@ -1277,6 +1277,145 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
             "Domain member without DC should get None for dc_config_param_name"
 
 
+class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
+    """Tests for victim self-orchestrated domain join (new architecture).
+
+    In the new architecture:
+    - Victims handle their own domain join in run_setup()
+    - DC only sets itself up (XDR install, no victim orchestration)
+    - DC's private_ip is passed to victims with join_domain=True
+    - Range only reports ready when ALL setup (including domain join) completes
+    """
+
+    @pulumi.runtime.test
+    def test_range_stack_passes_dc_private_ip_to_domain_joining_victims(
+        self, temp_templates, dc_range_config
+    ):
+        """Victims with join_domain=True should receive DC's private_ip in run_setup().
+
+        Domain-joining instances use Output.apply() to pass DC IP, so the call
+        happens asynchronously. We verify by checking the source code pattern.
+        """
+        from components.range_stack import RangeStack
+        import inspect
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            source = inspect.getsource(RangeStack.__init__)
+
+            # Verify the pattern: dc_components[0].private_ip.apply(
+            #     lambda ip, inst=instance: inst.run_setup(dc_ip=ip)
+            # )
+            assert "private_ip.apply" in source, \
+                "Domain-joining instances should use DC's private_ip.apply()"
+            assert "run_setup(dc_ip=" in source, \
+                "run_setup should be called with dc_ip parameter"
+
+    @pulumi.runtime.test
+    def test_range_stack_does_not_pass_dc_ip_to_non_domain_joining_victims(
+        self, temp_templates, dc_range_config
+    ):
+        """Victims with join_domain=False should NOT receive dc_ip in run_setup()."""
+        from components.range_stack import RangeStack
+        from components.instance import InstanceComponent
+
+        run_setup_calls = []
+        original_run_setup = InstanceComponent.run_setup
+
+        def capture_run_setup(self, region=None, dc_ip=None):
+            run_setup_calls.append({
+                "role": self.role,
+                "join_domain": getattr(self, "join_domain", None),
+                "dc_ip": dc_ip,
+            })
+            return original_run_setup(self, region=region, dc_ip=dc_ip)
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            with patch.object(InstanceComponent, "run_setup", capture_run_setup):
+                stack = RangeStack("test-range", config=dc_range_config)
+
+        # Find the attacker's run_setup call (join_domain=False by default)
+        attacker_call = next(
+            (c for c in run_setup_calls if c["role"] == "attacker"), None
+        )
+        assert attacker_call is not None, "Attacker run_setup should be called"
+        assert attacker_call["dc_ip"] is None, \
+            "Non-domain-joining instance should NOT receive dc_ip"
+
+    @pulumi.runtime.test
+    def test_dc_run_dc_setup_called_without_domain_members_param(
+        self, temp_templates, dc_range_config
+    ):
+        """DC's run_dc_setup() should be called without domain_members.
+
+        In the new architecture, range_stack should NOT pass domain_members to
+        run_dc_setup(). Domain join is handled by each victim's own run_setup().
+
+        This test verifies that:
+        1. The dc_instance.run_dc_setup() is called directly (not via Output.all)
+        2. domain_member_ids list is NOT collected/used
+        """
+        from components.range_stack import RangeStack
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            # Check the source code directly - in new architecture,
+            # there should be no domain_member_ids collection
+            import inspect
+            source = inspect.getsource(RangeStack.__init__)
+
+            # After implementation, these should NOT be in the code:
+            # 1. No collection of domain_member_ids for domain join
+            # 2. No Output.all(*domain_member_ids).apply(...)
+            # 3. No run_dc_setup(domain_members=...) call
+
+            # For now (TDD red phase), this FAILS because current code
+            # still collects domain_member_ids
+            assert "domain_member_ids.append" not in source, \
+                "New architecture should NOT collect domain_member_ids"
+            assert "run_dc_setup(domain_members=" not in source, \
+                "run_dc_setup should NOT receive domain_members param"
+
+    @pulumi.runtime.test
+    def test_all_non_dc_instances_get_run_setup_called(
+        self, temp_templates, dc_range_config
+    ):
+        """All non-DC instances should have run_setup() called.
+
+        Note: Domain-joining instances call run_setup via Output.apply(),
+        so they execute asynchronously. We verify direct calls for non-joining
+        instances and check source code for the apply pattern for joining ones.
+        """
+        from components.range_stack import RangeStack
+        from components.instance import InstanceComponent
+        import inspect
+
+        run_setup_calls = []
+        original_run_setup = InstanceComponent.run_setup
+
+        def capture_run_setup(self, region=None, dc_ip=None):
+            run_setup_calls.append({"role": self.role, "dc_ip": dc_ip})
+            return original_run_setup(self, region=region, dc_ip=dc_ip)
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            with patch.object(InstanceComponent, "run_setup", capture_run_setup):
+                stack = RangeStack("test-range", config=dc_range_config)
+
+            # Check source for proper handling of both types
+            source = inspect.getsource(RangeStack.__init__)
+
+        # Non-domain-joining instances (attacker) should be called directly
+        attacker_calls = [c for c in run_setup_calls if c["role"] == "attacker"]
+        assert len(attacker_calls) == 1, "Attacker should have run_setup called directly"
+        assert attacker_calls[0]["dc_ip"] is None, "Attacker should not receive dc_ip"
+
+        # Domain-joining instances use Output.apply (verified via source)
+        assert "inst.run_setup(dc_ip=ip)" in source, \
+            "Domain-joining instances should call run_setup with dc_ip via apply"
+
+        # DC should NOT have run_setup called
+        dc_calls = [c for c in run_setup_calls if c["role"] == "dc"]
+        assert len(dc_calls) == 0, "DC should NOT have run_setup called"
+
+
 class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
     """Tests ensuring existing functionality isn't broken."""
 
@@ -1339,3 +1478,142 @@ class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
                             assert "sg-kali" in sgs, f"Attacker should use sg-kali, got {sgs}"
                         inst.instance.vpc_security_group_ids.apply(verify_kali_sg)
                 inst.instance.tags.apply(check_if_attacker)
+
+
+class TestRangeStackNGFWIntegration:
+    """Tests for NGFW integration in RangeStack.
+
+    TDD: These tests are written BEFORE implementation.
+    They must FAIL initially, then PASS after implementation.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pytest.fixture
+    def temp_templates(self, temp_templates_dir):
+        """Provide temp templates directory with NGFW templates."""
+        # Add NGFW templates to the temp directory
+        ngfw_userdata = temp_templates_dir / "ngfw_userdata.txt.j2"
+        ngfw_userdata.write_text(
+            "vmseries-bootstrap-aws-s3bucket={{ bootstrap_bucket }}/{{ bootstrap_prefix }}\n"
+        )
+
+        ngfw_init_cfg = temp_templates_dir / "ngfw_init_cfg.txt.j2"
+        ngfw_init_cfg.write_text(
+            """type=dhcp-client
+hostname={{ hostname }}
+dns-primary=8.8.8.8
+dns-secondary=8.8.4.4
+"""
+        )
+        return temp_templates_dir
+
+    @pytest.fixture
+    def ngfw_enabled_config(self):
+        """RangeConfig with NGFW enabled."""
+        return RangeConfig(
+            range_id=42,
+            user_id=1,
+            subnet_index=5,
+            environment="dev",
+            instances=[
+                InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
+                InstanceConfig(role="victim", os_type="ubuntu", instance_type="t3.micro"),
+            ],
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            route_table_id="rtb-12345",
+            kali_security_group_id="sg-kali",
+            victim_security_group_id="sg-victim",
+            instance_profile_name="range-profile",
+            kali_ami_id="ami-kali123",
+            victim_ami_id="ami-ubuntu123",
+            windows_ami_id="ami-windows123",
+            agent_s3_bucket="shifter-agents",
+            availability_zone="us-east-2a",
+            ngfw_enabled=True,
+            ngfw_ami_id="ami-vmseries",
+            ngfw_instance_type="m5.xlarge",
+            ngfw_security_group_id="sg-ngfw",
+        )
+
+    @pytest.fixture
+    def ngfw_disabled_config(self):
+        """RangeConfig with NGFW disabled (default)."""
+        return RangeConfig(
+            range_id=42,
+            user_id=1,
+            subnet_index=5,
+            environment="dev",
+            instances=[
+                InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
+                InstanceConfig(role="victim", os_type="ubuntu", instance_type="t3.micro"),
+            ],
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            route_table_id="rtb-12345",
+            kali_security_group_id="sg-kali",
+            victim_security_group_id="sg-victim",
+            instance_profile_name="range-profile",
+            kali_ami_id="ami-kali123",
+            victim_ami_id="ami-ubuntu123",
+            windows_ami_id="ami-windows123",
+            agent_s3_bucket="shifter-agents",
+            availability_zone="us-east-2a",
+            ngfw_enabled=False,
+        )
+
+    @pulumi.runtime.test
+    def test_range_stack_creates_ngfw_when_enabled(self, temp_templates, ngfw_enabled_config):
+        """RangeStack should create NGFWComponent when ngfw_enabled=True."""
+        from components.range_stack import RangeStack
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            stack = RangeStack("test-range", config=ngfw_enabled_config)
+
+            # Verify NGFW was created
+            assert stack.ngfw is not None
+            assert stack.ngfw.instance_id is not None
+
+    @pulumi.runtime.test
+    def test_range_stack_skips_ngfw_when_disabled(self, temp_templates, ngfw_disabled_config):
+        """RangeStack should not create NGFWComponent when ngfw_enabled=False."""
+        from components.range_stack import RangeStack
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            stack = RangeStack("test-range", config=ngfw_disabled_config)
+
+            # Verify NGFW was NOT created
+            assert stack.ngfw is None
+
+    @pulumi.runtime.test
+    def test_range_stack_outputs_include_ngfw(self, temp_templates, ngfw_enabled_config):
+        """get_outputs should include NGFW details when enabled."""
+        from components.range_stack import RangeStack
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            stack = RangeStack("test-range", config=ngfw_enabled_config)
+
+            outputs = stack.get_outputs()
+
+            assert "ngfw" in outputs
+            assert outputs["ngfw"] is not None
+            assert "instance_id" in outputs["ngfw"]
+            assert "untrust_ip" in outputs["ngfw"]
+            assert "trust_ip" in outputs["ngfw"]
+
+    @pulumi.runtime.test
+    def test_range_stack_outputs_no_ngfw_when_disabled(self, temp_templates, ngfw_disabled_config):
+        """get_outputs should not include NGFW when disabled."""
+        from components.range_stack import RangeStack
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            stack = RangeStack("test-range", config=ngfw_disabled_config)
+
+            outputs = stack.get_outputs()
+
+            # ngfw key should be None or not present
+            assert outputs.get("ngfw") is None

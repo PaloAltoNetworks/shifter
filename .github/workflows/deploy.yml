@@ -21,7 +21,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
       range: ${{ steps.filter.outputs.range }}
-      pulumi_provisioner: ${{ steps.filter.outputs.pulumi_provisioner }}
+      shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
       portal: ${{ steps.filter.outputs.portal }}
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
@@ -60,6 +60,9 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             ENV="${{ github.base_ref == 'dev' && 'dev' || 'prod' }}"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual runs always target dev for safety
+            ENV="dev"
           elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
             ENV="dev"
           else
@@ -79,7 +82,7 @@ jobs:
     if: |
       needs.changes.outputs.core == 'true' ||
       needs.changes.outputs.range == 'true' ||
-      needs.changes.outputs.pulumi_provisioner == 'true' ||
+      needs.changes.outputs.shifter_engine == 'true' ||
       needs.changes.outputs.portal == 'true' ||
       github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/_quality.yml

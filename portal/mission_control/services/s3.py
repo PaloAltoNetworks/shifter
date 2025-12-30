@@ -17,8 +17,20 @@ class S3Error(Exception):
 
 
 def get_s3_client():
-    """Get boto3 S3 client configured for the region."""
-    return boto3.client("s3", region_name=settings.AWS_S3_REGION)
+    """Get boto3 S3 client configured for the region with regional endpoint."""
+    from botocore.config import Config
+
+    # Use regional endpoint to avoid cross-region redirects that break CORS
+    config = Config(
+        s3={"addressing_style": "virtual"},
+        signature_version="s3v4",
+    )
+    return boto3.client(
+        "s3",
+        region_name=settings.AWS_S3_REGION,
+        endpoint_url=f"https://s3.{settings.AWS_S3_REGION}.amazonaws.com",
+        config=config,
+    )
 
 
 def sanitize_s3_filename(filename: str) -> str:

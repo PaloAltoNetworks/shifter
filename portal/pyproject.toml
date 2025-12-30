@@ -16,7 +16,7 @@ dependencies = [
     "gunicorn",
     "markdown",
     "mozilla-django-oidc",
-    "psycopg",
+    "psycopg[binary]",
     "python-dotenv",
     "whitenoise",
 ]

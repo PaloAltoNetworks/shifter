@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `gwlb_endpoint_id` for GWLB endpoint tracking
 - Django admin for new models (SCMCredential, NGFWDeploymentProfile, UserNGFW)
 - Database grants for provisioner_lambda user on new tables
+- NGFW infrastructure foundation for persistent per-user NGFW instances (#408)
+  - Dedicated /22 subnet (10.1.4.0/22) for ~500 NGFW capacity
+  - Management security group (SSH/HTTPS from Portal for management)
+  - Dataplane security group (all VPC traffic via GWLB)
+  - IAM role with S3 bootstrap read and CloudWatch Logs access
+  - CloudWatch alarm for NGFW capacity (>400 triggers SNS alert)
+  - Terraform outputs for Engine/Pulumi consumption
 
 ### Removed
 - `StrataConfig` model (superseded by `SCMCredential` and `NGFWDeploymentProfile`)

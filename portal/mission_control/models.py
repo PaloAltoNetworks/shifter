@@ -473,6 +473,17 @@ class Range(models.Model):
             return None
         return victims[0].get("private_ip")
 
+    @property
+    def standup_duration(self):
+        """Total time from creation to ready.
+
+        Returns:
+            timedelta if both created_at and ready_at are set, None otherwise
+        """
+        if self.ready_at and self.created_at:
+            return self.ready_at - self.created_at
+        return None
+
 
 # Assign status groupings after class definition (can't reference Status inside class body)
 Range.ACTIVE_STATUSES = frozenset(

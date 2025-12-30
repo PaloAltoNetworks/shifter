@@ -164,18 +164,8 @@ variable "user_storage_bucket" {
 # Provisioner
 # ------------------------------------------------------------------------------
 
-variable "victim_ami_id" {
-  description = "AMI ID for victim EC2 instances"
-  type        = string
-}
-
 variable "victim_instance_type" {
   description = "Instance type for victim EC2 instances"
-  type        = string
-}
-
-variable "kali_ami_id" {
-  description = "AMI ID for Kali EC2 instances (official AWS Marketplace Kali)"
   type        = string
 }
 
@@ -273,18 +263,6 @@ variable "pulumi_container_tag" {
   description = "Docker image tag for Pulumi provisioner container"
   type        = string
   default     = "latest"
-}
-
-variable "windows_ami_id" {
-  description = "AMI ID for Windows victim instances"
-  type        = string
-  default     = ""
-}
-
-variable "dc_ami_id" {
-  description = "AMI ID for Domain Controller instances (prebaked with AD DS promoted)"
-  type        = string
-  default     = ""
 }
 
 variable "dc_domain_name" {

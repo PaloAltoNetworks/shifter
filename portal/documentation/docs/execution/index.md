@@ -64,6 +64,42 @@ DC instances use a prebaked AMI with AD DS already promoted. Post-boot SSM orche
 
 NGFW (VM-Series) uses bootstrap with init-cfg.txt containing SCM PIN credentials. Auto-registers with Strata Cloud Manager on first boot. Sits inline between Kali and Victim with untrust/trust interfaces.
 
+## AMI Management
+
+AMI IDs are stored in SSM Parameter Store, not hardcoded in tfvars. Terraform reads them via data sources.
+
+| SSM Parameter | Purpose |
+|---------------|---------|
+| `/shifter/ami/kali` | Kali attacker instance |
+| `/shifter/ami/victim` | Linux victim instance |
+| `/shifter/ami/windows` | Windows victim instance |
+| `/shifter/ami/dc` | Domain Controller instance |
+
+### Build & Promote Workflow
+
+```
+┌─────────────┐    test    ┌─────────────┐
+│  Build Dev  │ ────────►  │ Promote Prod│
+│  (packer)   │            │   (copy)    │
+└─────────────┘            └─────────────┘
+      │                          │
+      ▼                          ▼
+ SSM /shifter/ami/*         SSM /shifter/ami/*
+    (dev account)             (prod account)
+```
+
+**Build in dev:**
+```bash
+./scripts/ami.sh -b kali
+```
+
+**Promote to prod (after testing):**
+```bash
+./scripts/ami.sh -p kali
+```
+
+See [Kali AMI](kali-ami.md) for details.
+
 ## Terraform Modules
 
 | Module | Purpose |

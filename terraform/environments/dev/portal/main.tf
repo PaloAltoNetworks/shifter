@@ -51,6 +51,26 @@ data "terraform_remote_state" "range" {
 }
 
 # ------------------------------------------------------------------------------
+# AMI IDs from SSM Parameter Store
+# ------------------------------------------------------------------------------
+
+data "aws_ssm_parameter" "kali_ami" {
+  name = "/shifter/ami/kali"
+}
+
+data "aws_ssm_parameter" "victim_ami" {
+  name = "/shifter/ami/victim"
+}
+
+data "aws_ssm_parameter" "windows_ami" {
+  name = "/shifter/ami/windows"
+}
+
+data "aws_ssm_parameter" "dc_ami" {
+  name = "/shifter/ami/dc"
+}
+
+# ------------------------------------------------------------------------------
 # VPC
 # ------------------------------------------------------------------------------
 
@@ -345,11 +365,11 @@ module "pulumi_provisioner" {
   range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
   range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
 
-  # AMIs
-  kali_ami_id    = var.kali_ami_id
-  victim_ami_id  = var.victim_ami_id
-  windows_ami_id = var.windows_ami_id
-  dc_ami_id      = var.dc_ami_id
+  # AMIs (from SSM Parameter Store)
+  kali_ami_id    = data.aws_ssm_parameter.kali_ami.value
+  victim_ami_id  = data.aws_ssm_parameter.victim_ami.value
+  windows_ami_id = data.aws_ssm_parameter.windows_ami.value
+  dc_ami_id      = data.aws_ssm_parameter.dc_ami.value
 
   # Prebaked DC configuration
   dc_domain_name     = var.dc_domain_name

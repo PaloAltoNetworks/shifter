@@ -11,7 +11,7 @@ dependencies = [
     "channels-redis",
     "daphne",
     "django",
-    "django-fernet-fields>=0.6",
+    "django-encrypted-model-fields>=0.6.5",
     "django-health-check",
     "djangorestframework",
     "gunicorn",

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2025-12-30
+
+### Added
+- NGFW database models for persistent per-user NGFW support (#412)
+  - `SCMCredential` model for Strata Cloud Manager PIN-based registration
+  - `NGFWDeploymentProfile` model for Software NGFW Credits authcodes
+  - `UserNGFW` model for persistent NGFW instances
+  - `Asset` and `Credential` abstract base classes with soft delete and expiration
+- Field-level encryption for sensitive credentials using `django-encrypted-model-fields`
+  - `scm_pin_value` and `authcode` fields encrypted at rest
+  - `FIELD_ENCRYPTION_KEY` environment variable required in production
+- Range model fields for NGFW integration
+  - `ngfw` FK to UserNGFW (SET_NULL on delete)
+  - `gwlb_endpoint_id` for GWLB endpoint tracking
+- Django admin for new models (SCMCredential, NGFWDeploymentProfile, UserNGFW)
+- Database grants for provisioner_lambda user on new tables
+
 ## [0.8.1] - 2025-12-27
 
 ### Changed

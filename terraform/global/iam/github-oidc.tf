@@ -469,7 +469,10 @@ resource "aws_iam_policy" "lambda_sfn" {
           "sns:Unsubscribe",
           "sns:GetSubscriptionAttributes"
         ]
-        Resource = "arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*-portal-*"
+        Resource = [
+          "arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*-portal-*",
+          "arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*-range-*"
+        ]
       },
       {
         Sid    = "EventBridge"
@@ -618,7 +621,11 @@ resource "aws_iam_policy" "secrets_kms" {
           "kms:GenerateDataKey",
           "kms:TagResource",
           "kms:UntagResource",
-          "kms:ScheduleKeyDeletion"
+          "kms:ScheduleKeyDeletion",
+          "kms:GetKeyPolicy",
+          "kms:PutKeyPolicy",
+          "kms:EnableKeyRotation",
+          "kms:GetKeyRotationStatus"
         ]
         Resource = "*"
       }

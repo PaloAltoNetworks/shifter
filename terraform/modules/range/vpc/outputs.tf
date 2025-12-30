@@ -124,3 +124,47 @@ output "range_instance_profile_name" {
   description = "Name of the IAM instance profile for range EC2 instances"
   value       = aws_iam_instance_profile.range_instance.name
 }
+
+# ------------------------------------------------------------------------------
+# Persistent NGFW Infrastructure
+# ------------------------------------------------------------------------------
+
+output "ngfw_subnet_id" {
+  description = "ID of the NGFW subnet (null if NGFW infrastructure disabled)"
+  value       = var.enable_ngfw_infrastructure ? aws_subnet.ngfw[0].id : null
+}
+
+output "ngfw_subnet_cidr" {
+  description = "CIDR block of the NGFW subnet (null if NGFW infrastructure disabled)"
+  value       = var.enable_ngfw_infrastructure ? aws_subnet.ngfw[0].cidr_block : null
+}
+
+output "ngfw_mgmt_security_group_id" {
+  description = "ID of the NGFW management security group (null if NGFW infrastructure disabled)"
+  value       = var.enable_ngfw_infrastructure ? aws_security_group.ngfw_mgmt[0].id : null
+}
+
+output "ngfw_data_security_group_id" {
+  description = "ID of the NGFW dataplane security group (null if NGFW infrastructure disabled)"
+  value       = var.enable_ngfw_infrastructure ? aws_security_group.ngfw_data[0].id : null
+}
+
+output "ngfw_instance_role_arn" {
+  description = "ARN of the IAM role for NGFW instances (null if NGFW infrastructure disabled)"
+  value       = var.enable_ngfw_infrastructure ? aws_iam_role.ngfw_instance[0].arn : null
+}
+
+output "ngfw_instance_profile_arn" {
+  description = "ARN of the IAM instance profile for NGFW instances (null if NGFW infrastructure disabled)"
+  value       = var.enable_ngfw_infrastructure ? aws_iam_instance_profile.ngfw_instance[0].arn : null
+}
+
+output "ngfw_instance_profile_name" {
+  description = "Name of the IAM instance profile for NGFW instances (null if NGFW infrastructure disabled)"
+  value       = var.enable_ngfw_infrastructure ? aws_iam_instance_profile.ngfw_instance[0].name : null
+}
+
+output "ngfw_capacity_sns_topic_arn" {
+  description = "ARN of the SNS topic for NGFW capacity alerts (null if NGFW infrastructure disabled)"
+  value       = var.enable_ngfw_infrastructure ? aws_sns_topic.ngfw_capacity[0].arn : null
+}

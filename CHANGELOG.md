@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.0] - 2025-12-30
 
 ### Added
+- NGFW database models for persistent per-user NGFW support (#412)
+  - `SCMCredential` model for Strata Cloud Manager PIN-based registration
+  - `NGFWDeploymentProfile` model for Software NGFW Credits authcodes
+  - `UserNGFW` model for persistent NGFW instances
+  - `Asset` and `Credential` abstract base classes with soft delete and expiration
+- Field-level encryption for sensitive credentials using `django-encrypted-model-fields`
+  - `scm_pin_value` and `authcode` fields encrypted at rest
+  - `FIELD_ENCRYPTION_KEY` environment variable required in production
+- Range model fields for NGFW integration
+  - `ngfw` FK to UserNGFW (SET_NULL on delete)
+  - `gwlb_endpoint_id` for GWLB endpoint tracking
+- Django admin for new models (SCMCredential, NGFWDeploymentProfile, UserNGFW)
+- Database grants for provisioner_lambda user on new tables
 - NGFW infrastructure foundation for persistent per-user NGFW instances (#408)
   - Dedicated /22 subnet (10.1.4.0/22) for ~500 NGFW capacity
   - Management security group (SSH/HTTPS from Portal for management)
@@ -17,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - IAM role with S3 bootstrap read and CloudWatch Logs access
   - CloudWatch alarm for NGFW capacity (>400 triggers SNS alert)
   - Terraform outputs for Engine/Pulumi consumption
+
+### Removed
+- `StrataConfig` model (superseded by `SCMCredential` and `NGFWDeploymentProfile`)
+- Range fields: `ngfw_enabled`, `strata_config`, `ngfw_instance_id`, `ngfw_untrust_ip`, `ngfw_trust_ip`
 
 ## [0.8.9] - 2025-12-29
 
@@ -39,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Remove Step Functions permissions from GitHub OIDC role (cleanup after v1 provisioner removal)
+
 ## [0.8.5] - 2025-12-29
 
 ### Fixed

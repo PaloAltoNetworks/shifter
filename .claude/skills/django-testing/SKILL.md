@@ -56,3 +56,4 @@ TESTING=1 python -m pytest --cov=mission_control --cov-report=term-missing
 - Use `-v` for verbose output
 - Use `-x` to stop on first failure
 - Use `--tb=short` for shorter tracebacks
+- If the venv does not exist in your worktree create it with uv

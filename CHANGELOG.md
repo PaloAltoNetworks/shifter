@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2025-12-30
+
+### Added
+- NGFW infrastructure foundation for persistent per-user NGFW instances (#408)
+  - Dedicated /22 subnet (10.1.4.0/22) for ~500 NGFW capacity
+  - Management security group (SSH/HTTPS from Portal for management)
+  - Dataplane security group (all VPC traffic via GWLB)
+  - IAM role with S3 bootstrap read and CloudWatch Logs access
+  - CloudWatch alarm for NGFW capacity (>400 triggers SNS alert)
+  - Terraform outputs for Engine/Pulumi consumption
+
 ## [0.8.9] - 2025-12-29
 
 ### Added

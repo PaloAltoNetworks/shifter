@@ -12,6 +12,7 @@ import pytest
 # These imports will fail initially - that's expected for TDD
 from components.ssm_executor import (
     SSMExecutor,
+    SSMExecutorError,
     CommandResult,
     CommandError,
     TimeoutError,
@@ -270,7 +271,7 @@ class TestRebootAndWaitHappyPath:
     """Test successful reboot scenarios."""
 
     def test_reboot_and_wait_success(self):
-        """Reboot instance and wait for it to come back."""
+        """Reboot waits for status checks, SSM agent, and readiness probe."""
         mock_ssm = MagicMock()
         mock_ec2 = MagicMock()
 
@@ -298,12 +299,65 @@ class TestRebootAndWaitHappyPath:
             ]},
         ]
 
+        # Readiness probe succeeds
+        mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
+        mock_ssm.get_command_invocation.return_value = {
+            "Status": "Success",
+            "ResponseCode": 0,
+            "StandardOutputContent": "ready",
+            "StandardErrorContent": "",
+        }
+
         with patch("time.sleep"):  # Skip actual sleeping in tests
             executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2, poll_interval_seconds=0)
-            result = executor.reboot_and_wait("i-12345", timeout_seconds=120)
+            result = executor.reboot_and_wait(
+                "i-12345",
+                timeout_seconds=120,
+                document_name="AWS-RunPowerShellScript",
+            )
 
         assert result is True
         mock_ec2.reboot_instances.assert_called_once_with(InstanceIds=["i-12345"])
+        # Verify readiness probe was called with correct document
+        mock_ssm.send_command.assert_called()
+        call_kwargs = mock_ssm.send_command.call_args[1]
+        assert call_kwargs["DocumentName"] == "AWS-RunPowerShellScript"
+
+    def test_reboot_and_wait_uses_default_document(self):
+        """Reboot uses default document type for readiness probe."""
+        mock_ssm = MagicMock()
+        mock_ec2 = MagicMock()
+
+        mock_ec2.reboot_instances.return_value = {}
+        mock_ec2.describe_instance_status.return_value = {
+            "InstanceStatuses": [
+                {"InstanceId": "i-12345", "InstanceState": {"Name": "running"},
+                 "InstanceStatus": {"Status": "ok"},
+                 "SystemStatus": {"Status": "ok"}}
+            ]
+        }
+        mock_ssm.describe_instance_information.return_value = {
+            "InstanceInformationList": [
+                {"InstanceId": "i-12345", "PingStatus": "Online"}
+            ]
+        }
+        mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
+        mock_ssm.get_command_invocation.return_value = {
+            "Status": "Success",
+            "ResponseCode": 0,
+            "StandardOutputContent": "ready",
+            "StandardErrorContent": "",
+        }
+
+        with patch("time.sleep"):
+            executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2, poll_interval_seconds=0)
+            # Don't pass document_name - use default
+            result = executor.reboot_and_wait("i-12345", timeout_seconds=120)
+
+        assert result is True
+        # Should use default document type
+        call_kwargs = mock_ssm.send_command.call_args[1]
+        assert call_kwargs["DocumentName"] == "AWS-RunShellScript"
 
 
 class TestRebootAndWaitExpectedFailures:
@@ -416,3 +470,151 @@ class TestPollingBehavior:
 
             # Should have slept at least once
             assert mock_sleep.call_count >= 1
+
+
+class TestVerifyAgentReadyHappyPath:
+    """Test successful agent readiness verification."""
+
+    def test_verify_agent_ready_success_first_attempt(self):
+        """Agent ready on first probe attempt."""
+        mock_ssm = MagicMock()
+        mock_ec2 = MagicMock()
+
+        # Mock successful command execution
+        mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
+        mock_ssm.get_command_invocation.return_value = {
+            "Status": "Success",
+            "ResponseCode": 0,
+            "StandardOutputContent": "ready",
+            "StandardErrorContent": "",
+        }
+
+        executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
+        result = executor.verify_agent_ready(
+            "i-12345", document_name="AWS-RunPowerShellScript"
+        )
+
+        assert result is True
+        mock_ssm.send_command.assert_called_once()
+        # Verify it used the correct document type
+        call_kwargs = mock_ssm.send_command.call_args[1]
+        assert call_kwargs["DocumentName"] == "AWS-RunPowerShellScript"
+
+    def test_verify_agent_ready_success_after_retries(self):
+        """Agent ready after initial IPC failures."""
+        mock_ssm = MagicMock()
+        mock_ec2 = MagicMock()
+
+        # First two attempts fail with IPC error, third succeeds
+        mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
+        mock_ssm.get_command_invocation.side_effect = [
+            {
+                "Status": "Failed",
+                "ResponseCode": 1,
+                "StandardOutputContent": "ipc timeout",
+                "StandardErrorContent": "",
+            },
+            {
+                "Status": "Failed",
+                "ResponseCode": 1,
+                "StandardOutputContent": "ipc timeout",
+                "StandardErrorContent": "",
+            },
+            {
+                "Status": "Success",
+                "ResponseCode": 0,
+                "StandardOutputContent": "ready",
+                "StandardErrorContent": "",
+            },
+        ]
+
+        executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
+
+        with patch("time.sleep"):  # Don't actually sleep
+            result = executor.verify_agent_ready("i-12345", max_attempts=3)
+
+        assert result is True
+        assert mock_ssm.send_command.call_count == 3
+
+    def test_verify_agent_ready_uses_default_document(self):
+        """Default document is AWS-RunShellScript."""
+        mock_ssm = MagicMock()
+        mock_ec2 = MagicMock()
+
+        mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
+        mock_ssm.get_command_invocation.return_value = {
+            "Status": "Success",
+            "ResponseCode": 0,
+            "StandardOutputContent": "ready",
+            "StandardErrorContent": "",
+        }
+
+        executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
+        executor.verify_agent_ready("i-12345")
+
+        call_kwargs = mock_ssm.send_command.call_args[1]
+        assert call_kwargs["DocumentName"] == "AWS-RunShellScript"
+
+
+class TestVerifyAgentReadyExpectedFailures:
+    """Test expected failure scenarios for agent readiness verification."""
+
+    def test_verify_agent_ready_all_attempts_fail(self):
+        """Raises SSMExecutorError after all attempts exhausted."""
+        mock_ssm = MagicMock()
+        mock_ec2 = MagicMock()
+
+        # All attempts fail
+        mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
+        mock_ssm.get_command_invocation.return_value = {
+            "Status": "Failed",
+            "ResponseCode": 1,
+            "StandardOutputContent": "ipc timeout",
+            "StandardErrorContent": "",
+        }
+
+        executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
+
+        with patch("time.sleep"):
+            with pytest.raises(SSMExecutorError) as exc_info:
+                executor.verify_agent_ready("i-12345", max_attempts=3)
+
+        assert "not ready after 3 attempts" in str(exc_info.value)
+
+    def test_verify_agent_ready_respects_retry_delay(self):
+        """Sleeps between retry attempts."""
+        mock_ssm = MagicMock()
+        mock_ec2 = MagicMock()
+
+        # Fail first two, succeed third
+        mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
+        mock_ssm.get_command_invocation.side_effect = [
+            {
+                "Status": "Failed",
+                "ResponseCode": 1,
+                "StandardOutputContent": "",
+                "StandardErrorContent": "",
+            },
+            {
+                "Status": "Failed",
+                "ResponseCode": 1,
+                "StandardOutputContent": "",
+                "StandardErrorContent": "",
+            },
+            {
+                "Status": "Success",
+                "ResponseCode": 0,
+                "StandardOutputContent": "ready",
+                "StandardErrorContent": "",
+            },
+        ]
+
+        executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
+
+        with patch("time.sleep") as mock_sleep:
+            executor.verify_agent_ready("i-12345", max_attempts=3)
+
+        # Should have slept twice (after first and second failures)
+        assert mock_sleep.call_count == 2
+        # Each sleep should be 10 seconds
+        mock_sleep.assert_called_with(10)

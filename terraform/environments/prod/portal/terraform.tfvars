@@ -68,13 +68,11 @@ user_storage_bucket = "shifter-user-storage-7a3f9c2e"
 # Provisioner
 # ------------------------------------------------------------------------------
 
-# Ubuntu 22.04 victim with Claude Code configured for Bedrock, Apache, MySQL, Docker, PHP, Samba, FTP
-victim_ami_id        = "ami-0bf29d084387fdafa"
-victim_instance_type = "t3.medium"
+# AMI IDs are now managed via SSM Parameter Store (/shifter/ami/*)
+# See packer/ for AMI build configuration
 
-# Kali Linux 2025.3.0 with SSM, kali-linux-headless, Claude Code configured for Bedrock
-kali_ami_id        = "ami-0a88afb7ba55dc486"
-kali_instance_type = "t3.medium"
+victim_instance_type = "t3.medium"
+kali_instance_type   = "t3.medium"
 
 # ------------------------------------------------------------------------------
 # Autoscaling
@@ -117,12 +115,8 @@ enable_waf_logging     = true
 
 pulumi_container_tag = "latest"
 
-# Windows Server 2022 victim with XAMPP, Claude Code (system path), Python, Git, IIS, FTP, OpenSSH - Sysprepped v3
-windows_ami_id = "ami-02138efa7887f3218"
+# Windows/DC AMIs also managed via SSM Parameter Store
 
-# Windows Server 2022 DC - internal.shifter domain, DC01, DNS forwarder to 169.254.169.253, OpenSSH
-# Admin password: Sh1fterDC2024! (set before domain promotion, matches dc_domain_password)
-dc_ami_id      = "ami-00b60259bc2f34052"
 dc_domain_name = "internal.shifter"
 # nosec B105 - Ephemeral isolated range, not a production credential
 dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret

@@ -72,23 +72,30 @@ data "aws_ami" "windows" {
   }
 }
 
-# Use default VPC for simplicity
+# Use default VPC for simplicity, or portal VPC for direct DB access
 data "aws_vpc" "default" {
+  count   = var.use_portal_vpc ? 0 : 1
   default = true
 }
 
 data "aws_subnets" "default" {
+  count = var.use_portal_vpc ? 0 : 1
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.default.id]
   }
 }
 
+locals {
+  vpc_id    = var.use_portal_vpc ? var.portal_vpc_id : data.aws_vpc.default[0].id
+  subnet_id = var.use_portal_vpc ? var.portal_subnet_id : data.aws_subnets.default[0].ids[0]
+}
+
 # Security group for dev box
 resource "aws_security_group" "dev_box" {
   name        = "shifter-dev-box"
   description = "Security group for dev box - RDP and SSM"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = local.vpc_id
 
   # RDP access (optional - can use SSM Fleet Manager instead)
   ingress {
@@ -193,7 +200,7 @@ resource "aws_iam_instance_profile" "dev_box" {
 resource "aws_spot_instance_request" "dev_box" {
   ami                    = data.aws_ami.windows.id
   instance_type          = var.instance_type
-  subnet_id              = data.aws_subnets.default.ids[0]
+  subnet_id              = local.subnet_id
   vpc_security_group_ids = [aws_security_group.dev_box.id]
   iam_instance_profile   = aws_iam_instance_profile.dev_box.name
 
@@ -258,6 +265,23 @@ resource "aws_ec2_tag" "dev_box_project" {
   resource_id = aws_spot_instance_request.dev_box.spot_instance_id
   key         = "Project"
   value       = "shifter"
+}
+
+# =============================================================================
+# Portal VPC: Allow dev-box to access RDS
+# =============================================================================
+
+# Add ingress rule to RDS security group to allow dev-box access
+resource "aws_security_group_rule" "rds_from_dev_box" {
+  count = var.portal_db_security_group_id != "" ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.dev_box.id
+  security_group_id        = var.portal_db_security_group_id
+  description              = "PostgreSQL from dev-box"
 }
 
 # =============================================================================

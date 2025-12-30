@@ -7,10 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.2] - 2025-12-29
+## [0.8.6] - 2025-12-29
 
 ### Changed
 - Remove Step Functions permissions from GitHub OIDC role (cleanup after v1 provisioner removal)
+## [0.8.5] - 2025-12-29
+
+### Fixed
+- Dashboard dropdown behavior and portal test stability
+
+## [0.8.4] - 2025-12-29
+
+### Changed
+- Extract service layer from views.py (engine, cms apps)
+- Centralize Range status groupings as frozenset constants
+
+## [0.8.3] - 2025-12-29
+
+### Changes
+- Refactor consumers.py for maintanability
+
+## [0.8.2] - 2025-12-27
+
+### Added
+- NGFW (VM-Series) support
+- Strata Cloud Manager support
+- Cortex XDR sidebar submenu styling
+- Asset Menu
+
+### Changes
+- GitGuardian and Snyk ignore tests
 
 ## [0.8.1] - 2025-12-27
 

@@ -274,7 +274,7 @@ class TestDeleteAgent:
         response = client.get(reverse("mission_control:delete_agent", args=[agent.id]))
         assert response.status_code == 405
 
-    @patch("mission_control.views.s3_delete")
+    @patch("cms.assets.services.s3_delete")
     def test_successful_delete(self, mock_delete, user, agent):
         client = get_authenticated_client(user)
         response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))
@@ -310,7 +310,7 @@ class TestDeleteAgent:
         response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))
         assert response.status_code == 404
 
-    @patch("mission_control.views.s3_delete")
+    @patch("cms.assets.services.s3_delete")
     def test_s3_error_prevents_delete(self, mock_delete, user, agent):
         from mission_control.services.s3 import S3Error
 

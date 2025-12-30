@@ -36,3 +36,9 @@ agent_s3_bucket = "shifter-dev-user-storage-e3462f0c"
 
 vm_series_ami_id        = "ami-065e27477b191614c" # PAN-OS 11.2.8
 vm_series_instance_type = "m5.xlarge"
+
+# ------------------------------------------------------------------------------
+# Persistent NGFW Infrastructure
+# ------------------------------------------------------------------------------
+
+enable_ngfw_infrastructure = true

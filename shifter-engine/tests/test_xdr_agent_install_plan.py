@@ -77,44 +77,30 @@ class TestXDRAgentInstallPlanContext:
 
     def test_get_context_returns_presigned_url(self):
         """get_context should return agent_presigned_url."""
-
-        class MockInstance:
-            agent_presigned_url = "https://example.com/agent.msi"
-
         plan = XDRAgentInstallPlan()
-        context = plan.get_context(MockInstance())
+        context = plan.get_context({
+            "agent_presigned_url": "https://example.com/agent.msi"
+        })
         assert "agent_presigned_url" in context
         assert context["agent_presigned_url"] == "https://example.com/agent.msi"
 
     def test_get_context_missing_url_raises(self):
         """get_context should raise ValueError if URL is missing."""
-
-        class MockInstance:
-            pass
-
         plan = XDRAgentInstallPlan()
         with pytest.raises(ValueError, match="agent_presigned_url"):
-            plan.get_context(MockInstance())
+            plan.get_context({})
 
     def test_get_context_empty_url_raises(self):
         """get_context should raise ValueError if URL is empty."""
-
-        class MockInstance:
-            agent_presigned_url = ""
-
         plan = XDRAgentInstallPlan()
         with pytest.raises(ValueError, match="agent_presigned_url"):
-            plan.get_context(MockInstance())
+            plan.get_context({"agent_presigned_url": ""})
 
     def test_get_context_none_url_raises(self):
         """get_context should raise ValueError if URL is None."""
-
-        class MockInstance:
-            agent_presigned_url = None
-
         plan = XDRAgentInstallPlan()
         with pytest.raises(ValueError, match="agent_presigned_url"):
-            plan.get_context(MockInstance())
+            plan.get_context({"agent_presigned_url": None})
 
 
 class TestXDRAgentInstallPlanScripts:

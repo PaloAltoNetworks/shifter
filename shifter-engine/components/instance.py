@@ -12,8 +12,6 @@ All AWS resources are created via Pulumi to ensure proper lifecycle management.
 import base64
 import os
 import re
-import secrets
-import string
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional
@@ -29,7 +27,6 @@ from .setup_orchestrator import SetupOrchestrator, SetupError
 from .plans.domain_join import DomainJoinPlan
 from .plans.xdr_agent_install import XDRAgentInstallPlan
 from .plans.bootstrap import BootstrapPlan
-from .plans.kali_setup import KaliSetupPlan
 from .plans.linux_bootstrap import LinuxBootstrapPlan
 from .plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 
@@ -75,68 +72,6 @@ def generate_ssh_keypair() -> tuple[str, str]:
     )
 
     return private_key_pem, public_key_openssh
-
-
-def _join_domain_members_parallel(
-    executor: "SSMExecutor",
-    orchestrator: "SetupOrchestrator",
-    dc_ip: str,
-    domain_name: str,
-    domain_admin_password: str,
-    member_instance_ids: List[str],
-) -> None:
-    """Join domain members to the domain IN PARALLEL.
-
-    This function runs domain join on all member instances concurrently using
-    ThreadPoolExecutor. Each member goes through:
-    1. Wait for SSM agent
-    2. Set DNS to point to DC
-    3. Join domain (requires reboot)
-    4. Verify domain membership
-
-    Args:
-        executor: SSMExecutor for running commands
-        orchestrator: SetupOrchestrator for running plans
-        dc_ip: IP address of the domain controller
-        domain_name: Domain name to join
-        domain_admin_password: Domain admin password
-        member_instance_ids: List of instance IDs to join
-
-    Raises:
-        SetupError: If any domain join fails
-    """
-    domain_join_plan = DomainJoinPlan()
-    dc_config = {
-        "dc_ip": dc_ip,
-        "domain_name": domain_name,
-        "domain_admin_password": domain_admin_password,
-    }
-    context = domain_join_plan.get_context(dc_config)
-
-    def join_member(member_id: str) -> str:
-        """Join a single member to the domain."""
-        pulumi.log.info(f"Waiting for SSM agent on {member_id}...")
-        executor.wait_for_agent(member_id, timeout_seconds=300)
-        pulumi.log.info(f"SSM agent online on {member_id}, joining domain...")
-
-        result = orchestrator.orchestrate(member_id, domain_join_plan, context)
-        if not result.success:
-            raise SetupError(f"Domain join failed for {member_id}")
-
-        pulumi.log.info(f"Domain join completed for {member_id}")
-        return member_id
-
-    # Run all domain joins in parallel
-    with ThreadPoolExecutor(max_workers=len(member_instance_ids)) as pool:
-        futures = {
-            pool.submit(join_member, mid): mid for mid in member_instance_ids
-        }
-        for future in as_completed(futures):
-            member_id = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                raise SetupError(f"Domain join failed for {member_id}: {e}")
 
 
 class InstanceComponent(pulumi.ComponentResource):
@@ -275,6 +210,7 @@ class InstanceComponent(pulumi.ComponentResource):
         self.agent_presigned_url = None
         self.ssh_user = None
         self.setup_result = None
+        self.join_domain = join_domain  # Store for run_setup() domain join logic
 
         # Store attributes for all instance types (needed for run_setup)
         # Generate hostname based on role (same logic as _generate_user_data)
@@ -383,20 +319,18 @@ class InstanceComponent(pulumi.ComponentResource):
     def run_dc_setup(
         self,
         region: Optional[str] = None,
-        domain_members: Optional[List[str]] = None,
     ) -> pulumi.Output[bool]:
-        """Run domain join orchestration via SSM Run Command.
+        """Run DC setup via SSM Run Command.
 
         With prebaked DC AMI, this method only needs to:
         1. Wait for DC's SSM agent to come online (proves DC booted with AD DS ready)
-        2. Join domain members IN PARALLEL
+        2. Clean stale DNS records from prebaked AMI
+        3. Install XDR agent on DC
 
-        The DC AMI is fully promoted with AD DS running, so no Bootstrap or
-        DCSetup phases are needed.
+        Domain members handle their own domain join in run_setup().
 
         Args:
             region: AWS region (uses default if not provided)
-            domain_members: List of instance IDs to join to domain
 
         Returns:
             pulumi.Output[bool] that resolves to True on success
@@ -483,58 +417,24 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                 else:
                     pulumi.log.info("DNS cleanup complete")
 
-                # Run XDR install and domain joins IN PARALLEL
-                # Both are independent operations that can proceed concurrently
-                def install_xdr_agent() -> None:
-                    """Install XDR agent on DC using plan."""
-                    if not dc_agent_presigned_url:
-                        raise SetupError("XDR agent URL is required for DC instances but was not provided")
-
-                    pulumi.log.info(f"Installing XDR agent on DC {instance_id}...")
-
-                    # Create a simple object to hold the presigned URL for get_context
-                    class AgentConfig:
-                        def __init__(self, url: str):
-                            self.agent_presigned_url = url
-
-                    xdr_plan = XDRAgentInstallPlan()
-                    agent_config = AgentConfig(dc_agent_presigned_url)
-                    context = xdr_plan.get_context(agent_config)
-
-                    xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, context)
-                    if not xdr_result.success:
-                        raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
-
-                    pulumi.log.info(f"XDR agent installed successfully on DC {instance_id}")
-
-                def join_domain_members_task() -> None:
-                    """Join domain members to domain."""
-                    if not domain_members:
-                        pulumi.log.info("No domain members to join")
-                        return
-
-                    pulumi.log.info(
-                        f"Joining {len(domain_members)} members to domain {dc_domain_name}..."
+                # Install XDR agent on DC
+                if not dc_agent_presigned_url:
+                    raise SetupError(
+                        "XDR agent URL is required for DC instances but was not provided"
                     )
-                    _join_domain_members_parallel(
-                        executor=executor,
-                        orchestrator=orchestrator,
-                        dc_ip=private_ip,
-                        domain_name=dc_domain_name,
-                        domain_admin_password=dc_admin_password,
-                        member_instance_ids=domain_members,
-                    )
-                    pulumi.log.info("All domain members joined successfully")
 
-                # Execute both tasks in parallel
-                with ThreadPoolExecutor(max_workers=2) as pool:
-                    futures = [
-                        pool.submit(install_xdr_agent),
-                        pool.submit(join_domain_members_task),
-                    ]
-                    for future in as_completed(futures):
-                        # Re-raise any exceptions from the tasks
-                        future.result()
+                pulumi.log.info(f"Installing XDR agent on DC {instance_id}...")
+
+                xdr_plan = XDRAgentInstallPlan()
+                context = xdr_plan.get_context({
+                    "agent_presigned_url": dc_agent_presigned_url
+                })
+
+                xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, context)
+                if not xdr_result.success:
+                    raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
+
+                pulumi.log.info(f"XDR agent installed successfully on DC {instance_id}")
 
                 return True
 
@@ -548,18 +448,24 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         ).apply(do_setup)
         return self.setup_result
 
-    def run_setup(self, region: Optional[str] = None) -> pulumi.Output[bool]:
+    def run_setup(
+        self,
+        region: Optional[str] = None,
+        dc_ip: Optional[str] = None,
+    ) -> pulumi.Output[bool]:
         """Run setup plan for non-DC instances via SSM Run Command.
 
         This method handles setup for:
-        - Kali (attacker): KaliSetupPlan (hostname + SSH)
+        - Kali (attacker): LinuxBootstrapPlan (hostname + SSH with ssh_user='kali')
         - Linux victims: LinuxBootstrapPlan + LinuxXDRAgentInstallPlan
-        - Windows victims: BootstrapPlan + XDRAgentInstallPlan
+        - Windows victims: BootstrapPlan + XDRAgentInstallPlan + DomainJoinPlan
+          (DomainJoinPlan only runs if join_domain=True and dc_ip is provided)
 
         DC instances should use run_dc_setup() instead.
 
         Args:
             region: AWS region (uses default if not provided)
+            dc_ip: DC private IP for domain join (only used if join_domain=True)
 
         Returns:
             pulumi.Output[bool] that resolves to True on success
@@ -578,6 +484,8 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         instance_public_key = self.public_key
         instance_agent_url = self.agent_presigned_url
         instance_ssh_user = self.ssh_user
+        instance_join_domain = self.join_domain
+        instance_dc_ip = dc_ip
 
         def do_setup(args: tuple) -> bool:
             """Run the setup synchronously (called within apply)."""
@@ -612,8 +520,8 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
 
                 # Select and run plans based on role and OS type
                 if instance_role == "attacker":
-                    # Kali: Just hostname and SSH setup
-                    plan = KaliSetupPlan()
+                    # Kali: hostname + SSH setup (uses LinuxBootstrapPlan with ssh_user='kali')
+                    plan = LinuxBootstrapPlan()
                     context = plan.get_context(ctx)
                     result = orchestrator.orchestrate(
                         instance_id, plan, context, document_name=document_name
@@ -637,7 +545,9 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                         # Install XDR agent
                         if instance_agent_url:
                             xdr_plan = LinuxXDRAgentInstallPlan()
-                            xdr_ctx = xdr_plan.get_context(ctx)
+                            xdr_ctx = xdr_plan.get_context({
+                                "agent_presigned_url": instance_agent_url
+                            })
                             result = orchestrator.orchestrate(
                                 instance_id, xdr_plan, xdr_ctx, document_name=document_name
                             )
@@ -661,7 +571,9 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                         # Install XDR agent
                         if instance_agent_url:
                             xdr_plan = XDRAgentInstallPlan()
-                            xdr_ctx = xdr_plan.get_context(ctx)
+                            xdr_ctx = xdr_plan.get_context({
+                                "agent_presigned_url": instance_agent_url
+                            })
                             result = orchestrator.orchestrate(
                                 instance_id, xdr_plan, xdr_ctx, document_name=document_name
                             )
@@ -670,6 +582,47 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                             pulumi.log.info(f"Windows XDR agent installed on {instance_id}")
                         else:
                             pulumi.log.info(f"No XDR agent URL provided for {instance_id}")
+
+                        # Domain join (only for Windows victims with join_domain=True)
+                        if instance_join_domain and instance_dc_ip:
+                            domain_name = os.environ.get(
+                                "DC_DOMAIN_NAME", "internal.shifter"
+                            )
+                            domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+
+                            if domain_password:
+                                pulumi.log.info(
+                                    f"Joining domain {domain_name} for {instance_id}..."
+                                )
+                                domain_join_plan = DomainJoinPlan()
+                                dj_context = domain_join_plan.get_context({
+                                    "dc_ip": instance_dc_ip,
+                                    "domain_name": domain_name,
+                                    "domain_admin_password": domain_password,
+                                })
+                                result = orchestrator.orchestrate(
+                                    instance_id,
+                                    domain_join_plan,
+                                    dj_context,
+                                    document_name=document_name,
+                                )
+                                if not result.success:
+                                    raise SetupError(
+                                        f"Domain join failed for {instance_id}"
+                                    )
+                                pulumi.log.info(
+                                    f"Domain join complete for {instance_id}"
+                                )
+                            else:
+                                pulumi.log.warn(
+                                    f"DC_DOMAIN_PASSWORD not set, skipping domain "
+                                    f"join for {instance_id}"
+                                )
+                        elif instance_join_domain:
+                            pulumi.log.info(
+                                f"join_domain=True but no dc_ip provided, "
+                                f"skipping domain join for {instance_id}"
+                            )
 
                 return True
 
@@ -741,44 +694,16 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
             template = env.get_template("dc_windows.ps1.j2")
             context = {}  # No variables needed - template just logs SSM will handle setup
         elif os_type == "windows":
-            # Windows victim - domain join is handled by DC via SSM, not user_data
+            # Windows victim - all setup via SSM (BootstrapPlan + XDRAgentInstallPlan)
             template = env.get_template("victim_windows.ps1.j2")
-            context = {
-                "hostname": f"shifter-victim-{range_id}-{index}",
-                "public_key": public_key,
-                "presigned_url": agent_presigned_url,
-                "agent_s3_key": agent_s3_key,
-            }
+            context = {}  # No variables needed - template just logs SSM will handle setup
         else:
+            # Linux victim - all setup via SSM (LinuxBootstrapPlan + LinuxXDRAgentInstallPlan)
             template = env.get_template("victim_linux.sh.j2")
-            context = {
-                "hostname": f"shifter-victim-{range_id}-{index}",
-                "public_key": public_key,
-                "presigned_url": agent_presigned_url,
-                "agent_s3_key": agent_s3_key,
-            }
+            context = {}  # No variables needed - template just logs SSM will handle setup
 
         script = template.render(**context)
         return base64.b64encode(script.encode()).decode()
-
-    def _generate_secure_password(self, length: int = 24) -> str:  # nosec B105
-        """Generate a cryptographically secure random password for DSRM.
-
-        Args:
-            length: Password length (default 24 characters).
-
-        Returns:
-            Secure random password meeting Windows complexity requirements.
-        """
-        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
-        # Generate base password
-        password = "".join(secrets.choice(alphabet) for _ in range(length - 4))
-        # Ensure complexity: add at least one of each required type
-        password += secrets.choice(string.ascii_uppercase)
-        password += secrets.choice(string.ascii_lowercase)
-        password += secrets.choice(string.digits)
-        password += secrets.choice("!@#$%^&*")
-        return password
 
     def to_output_dict(self) -> dict:
         """Return instance info as a dictionary for export.

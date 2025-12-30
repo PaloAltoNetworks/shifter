@@ -238,6 +238,12 @@ resource "random_password" "django_secret_key" {
   special = true
 }
 
+# Fernet encryption key for django-encrypted-model-fields
+# Must be 32 bytes, URL-safe base64-encoded
+resource "random_bytes" "field_encryption_key" {
+  length = 32
+}
+
 # checkov:skip=CKV_AWS_149:Deferred for MVP. AWS-managed keys sufficient for low-usage internal MVP. See #213
 resource "aws_secretsmanager_secret" "app" {
   name                    = "shifter-${local.name_prefix}-app"
@@ -252,7 +258,8 @@ resource "aws_secretsmanager_secret" "app" {
 resource "aws_secretsmanager_secret_version" "app" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
-    django_secret_key = random_password.django_secret_key.result
+    django_secret_key    = random_password.django_secret_key.result
+    field_encryption_key = random_bytes.field_encryption_key.base64
   })
 }
 

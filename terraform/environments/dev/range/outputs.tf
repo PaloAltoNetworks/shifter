@@ -127,3 +127,47 @@ output "range_instance_profile_name" {
   description = "Name of the IAM instance profile for range EC2 instances"
   value       = module.vpc.range_instance_profile_name
 }
+
+# ------------------------------------------------------------------------------
+# Persistent NGFW Infrastructure
+# ------------------------------------------------------------------------------
+
+output "ngfw_subnet_id" {
+  description = "ID of the NGFW subnet (null if NGFW infrastructure disabled)"
+  value       = module.vpc.ngfw_subnet_id
+}
+
+output "ngfw_subnet_cidr" {
+  description = "CIDR block of the NGFW subnet (null if NGFW infrastructure disabled)"
+  value       = module.vpc.ngfw_subnet_cidr
+}
+
+output "ngfw_mgmt_security_group_id" {
+  description = "ID of the NGFW management security group (null if NGFW infrastructure disabled)"
+  value       = module.vpc.ngfw_mgmt_security_group_id
+}
+
+output "ngfw_data_security_group_id" {
+  description = "ID of the NGFW dataplane security group (null if NGFW infrastructure disabled)"
+  value       = module.vpc.ngfw_data_security_group_id
+}
+
+output "ngfw_instance_role_arn" {
+  description = "ARN of the IAM role for NGFW instances (null if NGFW infrastructure disabled)"
+  value       = module.vpc.ngfw_instance_role_arn
+}
+
+output "ngfw_instance_profile_arn" {
+  description = "ARN of the IAM instance profile for NGFW instances (null if NGFW infrastructure disabled)"
+  value       = module.vpc.ngfw_instance_profile_arn
+}
+
+output "ngfw_instance_profile_name" {
+  description = "Name of the IAM instance profile for NGFW instances (null if NGFW infrastructure disabled)"
+  value       = module.vpc.ngfw_instance_profile_name
+}
+
+output "ngfw_capacity_sns_topic_arn" {
+  description = "ARN of the SNS topic for NGFW capacity alerts (null if NGFW infrastructure disabled)"
+  value       = module.vpc.ngfw_capacity_sns_topic_arn
+}

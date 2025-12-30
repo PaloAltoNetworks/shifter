@@ -20,8 +20,8 @@ import pulumi
 import pulumi_aws as aws
 from jinja2 import Environment, FileSystemLoader
 
-from .plans.ngfw_verification import NGFWVerificationPlan
-from .ssh_executor import SSHExecutor
+from plans.ngfw_verification import NGFWVerificationPlan
+from executors.ssh_executor import SSHExecutor
 
 logger = logging.getLogger(__name__)
 

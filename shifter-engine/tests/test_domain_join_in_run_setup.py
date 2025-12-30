@@ -13,13 +13,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from components.ssm_executor import SSMExecutor, CommandResult
-from components.setup_orchestrator import (
+from executors.ssm_executor import SSMExecutor, CommandResult
+from orchestrators.setup_orchestrator import (
     SetupOrchestrator,
     SetupError,
     SetupResult,
 )
-from components.plans.domain_join import DomainJoinPlan
+from plans.domain_join import DomainJoinPlan
 
 
 class TestRunSetupWithDomainJoin:
@@ -102,7 +102,7 @@ class TestRunSetupWithDomainJoin:
         self, mock_env_vars
     ):
         """When domain join fails, SetupError is raised."""
-        from components.ssm_executor import CommandError
+        from executors.ssm_executor import CommandError
 
         mock_executor = MagicMock(spec=SSMExecutor)
         mock_executor.wait_for_agent.return_value = None
@@ -179,7 +179,7 @@ class TestDomainJoinPlanRetries:
 
     def test_dns_polling_has_7_max_attempts(self):
         """DNS polling should have 7 max attempts (~70s total)."""
-        from components.plans.domain_join import JOIN_DOMAIN_SCRIPT
+        from plans.domain_join import JOIN_DOMAIN_SCRIPT
 
         # Check the script contains maxAttempts = 7
         assert "$maxAttempts = 7" in JOIN_DOMAIN_SCRIPT

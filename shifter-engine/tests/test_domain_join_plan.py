@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from components.plans.domain_join import DomainJoinPlan
-from components.setup_plan import SetupStep
+from plans.domain_join import DomainJoinPlan
+from plans.base import SetupStep
 
 
 class TestDomainJoinPlanSteps:

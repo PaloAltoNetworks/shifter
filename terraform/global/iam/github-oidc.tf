@@ -663,8 +663,12 @@ resource "aws_iam_policy" "ssm_cognito" {
           "ssm:RemoveTagsFromResource",
           "ssm:ListTagsForResource"
         ]
-        # Scoped to shifter range parameters for DC config
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/*/range/*"
+        Resource = [
+          # Range parameters for DC config
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/*/range/*",
+          # AMI IDs for Kali, victim, windows, dc
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/ami/*"
+        ]
       },
       {
         Sid      = "Cognito"

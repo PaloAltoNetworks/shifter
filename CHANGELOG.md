@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.8] - 2025-12-29
+
+### Changed
+- Remove redundant SSH security group rules (#290)
+
 ## [0.8.7] - 2025-12-29
 
 ### Added

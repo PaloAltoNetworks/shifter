@@ -2,7 +2,16 @@
 
 from django.contrib import admin
 
-from .models import ActivityLog, AgentConfig, OperatingSystem, Range, StrataConfig, UserProfile
+from .models import (
+    ActivityLog,
+    AgentConfig,
+    NGFWDeploymentProfile,
+    OperatingSystem,
+    Range,
+    SCMCredential,
+    UserNGFW,
+    UserProfile,
+)
 
 
 @admin.register(OperatingSystem)
@@ -36,47 +45,39 @@ class AgentConfigAdmin(admin.ModelAdmin):
     readonly_fields = ("s3_key", "sha256_hash", "file_size_bytes", "created_at")
 
 
-@admin.register(StrataConfig)
-class StrataConfigAdmin(admin.ModelAdmin):
-    list_display = (
-        "name",
-        "user",
-        "scm_folder_name",
-        "created_at",
-        "deleted_at",
-    )
-    list_filter = ("deleted_at", "created_at")
+@admin.register(SCMCredential)
+class SCMCredentialAdmin(admin.ModelAdmin):
+    list_display = ("name", "user", "scm_folder_name", "sls_region", "expires_at", "deleted_at")
+    list_filter = ("sls_region", "deleted_at", "created_at")
     search_fields = ("name", "user__email", "scm_folder_name")
     raw_id_fields = ("user",)
     readonly_fields = ("created_at",)
-    fieldsets = (
-        (None, {"fields": ("user", "name")}),
-        (
-            "SCM Configuration",
-            {
-                "fields": (
-                    "scm_folder_name",
-                    "scm_pin_id",
-                    "scm_pin_value",
-                )
-            },
-        ),
-        ("Metadata", {"fields": ("created_at", "deleted_at")}),
-    )
+
+
+@admin.register(NGFWDeploymentProfile)
+class NGFWDeploymentProfileAdmin(admin.ModelAdmin):
+    list_display = ("name", "user", "expires_at", "last_used_at", "deleted_at")
+    list_filter = ("deleted_at", "created_at")
+    search_fields = ("name", "user__email")
+    raw_id_fields = ("user",)
+    readonly_fields = ("created_at",)
+
+
+@admin.register(UserNGFW)
+class UserNGFWAdmin(admin.ModelAdmin):
+    list_display = ("name", "user", "status", "serial_number", "created_at", "deleted_at")
+    list_filter = ("status", "deleted_at", "created_at")
+    search_fields = ("name", "user__email", "serial_number", "instance_id")
+    raw_id_fields = ("user", "scm_credential", "deployment_profile")
+    readonly_fields = ("created_at",)
 
 
 @admin.register(Range)
 class RangeAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "agent", "status", "ngfw_enabled", "created_at")
-    list_filter = ("status", "ngfw_enabled", "created_at")
+    list_display = ("id", "user", "agent", "ngfw", "status", "created_at")
+    list_filter = ("status", "created_at")
     search_fields = ("user__email", "agent__name")
-    raw_id_fields = ("user", "agent", "strata_config")
-    readonly_fields = ("ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")
-    fieldsets = (
-        (None, {"fields": ("user", "agent", "status")}),
-        ("NGFW", {"fields": ("ngfw_enabled", "strata_config", "ngfw_instance_id", "ngfw_untrust_ip", "ngfw_trust_ip")}),
-        ("Timestamps", {"fields": ("created_at", "ready_at", "destroyed_at")}),
-    )
+    raw_id_fields = ("user", "agent", "dc_agent", "ngfw")
 
 
 @admin.register(ActivityLog)

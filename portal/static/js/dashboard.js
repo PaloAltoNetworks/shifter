@@ -387,23 +387,20 @@ class DashboardManager {
             rangeAgent.textContent = this.currentRange.agent_name;
         }
 
-        // Update NGFW details
+        // Update NGFW details - uses new UserNGFW model (issue #412)
+        // Range.ngfw_id is FK to UserNGFW, gwlb_endpoint_id is the endpoint
         const ngfwDetails = document.getElementById('ngfw-details');
         if (ngfwDetails) {
-            if (this.currentRange.ngfw_enabled) {
+            if (this.currentRange.ngfw_id) {
                 ngfwDetails.style.display = 'block';
-                const instanceId = document.getElementById('ngfw-instance-id');
-                const untrustIp = document.getElementById('ngfw-untrust-ip');
-                const trustIp = document.getElementById('ngfw-trust-ip');
+                const ngfwId = document.getElementById('ngfw-id');
+                const gwlbEndpoint = document.getElementById('ngfw-gwlb-endpoint');
 
-                if (instanceId) {
-                    instanceId.textContent = this.currentRange.ngfw_instance_id || '--';
+                if (ngfwId) {
+                    ngfwId.textContent = this.currentRange.ngfw_id || '--';
                 }
-                if (untrustIp) {
-                    untrustIp.textContent = this.currentRange.ngfw_untrust_ip || '--';
-                }
-                if (trustIp) {
-                    trustIp.textContent = this.currentRange.ngfw_trust_ip || '--';
+                if (gwlbEndpoint) {
+                    gwlbEndpoint.textContent = this.currentRange.gwlb_endpoint_id || '--';
                 }
             } else {
                 ngfwDetails.style.display = 'none';
@@ -457,14 +454,8 @@ class DashboardManager {
 
         const scenario = this.scenarioSelect?.value || 'basic';
 
-        const ngfwEnabled = this.ngfwCheckbox?.checked ?? false;
-        const ngfwConfigId = this.ngfwConfigSelect?.value;
-
-        // Validate NGFW config selection
-        if (ngfwEnabled && !ngfwConfigId) {
-            alert('Please select an NGFW configuration when NGFW is enabled.');
-            return;
-        }
+        // NGFW selection disabled pending UserNGFW views (issue #412)
+        // ngfw_enabled and ngfw_config_id are no longer sent
 
         this.launchBtn.disabled = true;
         this.launchBtn.textContent = 'Launching...';
@@ -473,12 +464,7 @@ class DashboardManager {
         const body = {
             agent_id: parseInt(agentId),
             scenario: scenario,
-            ngfw_enabled: ngfwEnabled,
         };
-
-        if (ngfwEnabled && ngfwConfigId) {
-            body.ngfw_config_id = parseInt(ngfwConfigId);
-        }
 
         try {
             const response = await fetch(this.launchUrl, {

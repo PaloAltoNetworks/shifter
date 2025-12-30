@@ -258,7 +258,7 @@ resource "random_password" "django_secret_key" {
   special = true
 }
 
-# Fernet encryption key for StrataConfig.scm_pin_value (32 bytes, base64-encoded)
+# Fernet encryption key for django-encrypted-model-fields (32 bytes, base64-encoded)
 resource "random_id" "field_encryption_key" {
   byte_length = 32
 }

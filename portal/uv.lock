@@ -503,6 +503,19 @@ wheels = [
 ]
 
 [[package]]
+name = "django-encrypted-model-fields"
+version = "0.6.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/35/44/e4273d48f406b23604cf946912421583a659044d5e521799d1cfd74222c5/django-encrypted-model-fields-0.6.5.tar.gz", hash = "sha256:8bd21c5565c0d64ec4dbd375ad34fea68b4da2db871dec3fa71fe7b5e4221c99", size = 7259 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e4/36/1b86079a489f181e33bd83600127e7b3b73c66cd609ac672e58de93ed9a9/django_encrypted_model_fields-0.6.5-py3-none-any.whl", hash = "sha256:b21bbdd8ae2e1a0ea37a5049b3ba46e6e63bf287ad241219a058fac1070796cc", size = 8934 },
+]
+
+[[package]]
 name = "django-health-check"
 version = "3.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1100,6 +1113,7 @@ dependencies = [
     { name = "channels-redis" },
     { name = "daphne" },
     { name = "django" },
+    { name = "django-encrypted-model-fields" },
     { name = "django-health-check" },
     { name = "djangorestframework" },
     { name = "gunicorn" },
@@ -1130,6 +1144,7 @@ requires-dist = [
     { name = "channels-redis" },
     { name = "daphne" },
     { name = "django" },
+    { name = "django-encrypted-model-fields", specifier = ">=0.6.5" },
     { name = "django-health-check" },
     { name = "djangorestframework" },
     { name = "gunicorn" },

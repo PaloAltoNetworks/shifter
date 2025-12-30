@@ -9,13 +9,13 @@
 
 # Shifter
 
-Self-service enterprise cyber range platform. Users provision isolated attack environments with to run purple, red, and blue team scenarios with telemetry from targets to showcase XDR/XSIAM capabilities.
+Self-service enterprise cyber range platform. Users provision isolated attack environments to run purple, red, and blue team scenarios with telemetry from targets to showcase XDR/XSIAM capabilities.
 
-*Shifter IS NOT a product*. It is an internal tool to showcase XDR/XSIAM capabilities to customers. Cortex UX is intended to make the platform more user friendly and accessible to customers.
+*Shifter IS NOT a product*. It is an internal tool to showcase XDR/XSIAM capabilities to customers. Cortex UX is intended to make the platform more user-friendly for technical sellers and visually appropriate during customer demos.
 
 *Shifter IS NOT intended for product/stress testing any PANW products or services. Speak to Product Engineering for any such requests*.
 
-Shifter is a compliment to existing demo environments and tools. It is not intended to replace them.
+Shifter complements existing demo environments and tools. It is not intended to replace them. BYOS, shared demo tenants, and other enablement resources are the official and primary demo tooling for technical sellers.
 
 ## Quick Links
 

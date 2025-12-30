@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2025-12-29
+
+### Fixed
+- Dashboard dropdown behavior and portal test stability
+
 ## [0.8.4] - 2025-12-29
 
 ### Changed

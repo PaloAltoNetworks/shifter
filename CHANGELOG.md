@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2025-12-29
+
+### Added
+- `standup_duration` property on Range model for tracking provisioning time
+
 ## [0.8.6] - 2025-12-29
 
 ### Changed

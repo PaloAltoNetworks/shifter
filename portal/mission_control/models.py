@@ -56,6 +56,30 @@ class Asset(models.Model):
         return cls.objects.filter(user=user, deleted_at__isnull=True)
 
 
+class FileAsset(Asset):
+    """Abstract base class for file-backed assets stored in S3.
+
+    Extends Asset with fields for S3 storage:
+    - s3_key: Full S3 object key
+    - original_filename: Original uploaded filename
+    - file_size_bytes: File size for quota tracking
+    - sha256_hash: Content hash for integrity/deduplication
+    """
+
+    s3_key = models.CharField(max_length=500, help_text="S3 object key")
+    original_filename = models.CharField(max_length=255)
+    file_size_bytes = models.PositiveBigIntegerField()
+    sha256_hash = models.CharField(max_length=64)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def file_size_mb(self):
+        """Return file size in megabytes, rounded to 1 decimal."""
+        return round(self.file_size_bytes / (1024 * 1024), 1)
+
+
 class Credential(Asset):
     """Abstract base for credential assets with expiration tracking."""
 
@@ -235,18 +259,28 @@ class UserProfile(models.Model):
         return self.deleted_at is not None
 
 
-class AgentConfig(models.Model):
-    """XDR/XSIAM agent installer uploaded by a user."""
+class AgentConfig(FileAsset):
+    """XDR/XSIAM agent installer uploaded by a user.
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agents")
-    os = models.ForeignKey(OperatingSystem, on_delete=models.PROTECT, related_name="agents")
-    name = models.CharField(max_length=100, help_text="User-friendly name for this agent")
-    s3_key = models.CharField(max_length=500, help_text="S3 object key for the installer")
-    original_filename = models.CharField(max_length=255)
-    file_size_bytes = models.PositiveBigIntegerField()
-    sha256_hash = models.CharField(max_length=64)
-    created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
+    Inherits from FileAsset:
+    - name, created_at, deleted_at, is_deleted from Asset
+    - s3_key, original_filename, file_size_bytes, sha256_hash, file_size_mb from FileAsset
+
+    AgentConfig-specific:
+    - user: Owner of this agent (with related_name="agents")
+    - os: Operating system this agent is for
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agents",
+    )
+    os = models.ForeignKey(
+        OperatingSystem,
+        on_delete=models.PROTECT,
+        related_name="agents",
+    )
 
     class Meta:
         ordering = ["-created_at"]
@@ -255,20 +289,6 @@ class AgentConfig(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.os.name})"
-
-    @property
-    def is_deleted(self):
-        return self.deleted_at is not None
-
-    @property
-    def file_size_mb(self):
-        """Return file size in megabytes, rounded to 1 decimal."""
-        return round(self.file_size_bytes / (1024 * 1024), 1)
-
-    @classmethod
-    def active_for_user(cls, user):
-        """Return non-deleted agents for a user."""
-        return cls.objects.filter(user=user, deleted_at__isnull=True)
 
 
 class Range(models.Model):
@@ -283,6 +303,10 @@ class Range(models.Model):
         DESTROYING = "destroying", "Destroying"
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
+
+    # Status groupings for lifecycle queries
+    TERMINAL_STATUSES: frozenset[str]  # Range has reached end of lifecycle
+    CANCELLABLE_STATUSES: frozenset[str]  # Range can be cancelled (early lifecycle only)
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
     agent = models.ForeignKey(
@@ -393,6 +417,17 @@ class Range(models.Model):
     def is_terminal(self):
         """Return True if range has reached a final state."""
         return self.status in (self.Status.DESTROYED, self.Status.FAILED)
+
+    @property
+    def standup_duration(self):
+        """Total time from creation to ready.
+
+        Returns:
+            timedelta if both created_at and ready_at are set, None otherwise
+        """
+        if self.ready_at and self.created_at:
+            return self.ready_at - self.created_at
+        return None
 
     @classmethod
     def get_active_for_user(cls, user):
@@ -553,3 +588,18 @@ class ActivityLog(models.Model):
     def log(cls, action: str, user=None, **metadata):
         """Convenience method to log an activity."""
         return cls.objects.create(user=user, action=action, metadata=metadata)
+
+
+# Define Range status groupings (after class definition to reference Status enum)
+Range.TERMINAL_STATUSES = frozenset(
+    {
+        Range.Status.DESTROYED,
+        Range.Status.FAILED,
+    }
+)
+Range.CANCELLABLE_STATUSES = frozenset(
+    {
+        Range.Status.PENDING,
+        Range.Status.PROVISIONING,
+    }
+)

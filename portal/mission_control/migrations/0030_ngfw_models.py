@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("mission_control", "0019_range_dc_agent"),
+        ("mission_control", "0029_drop_strata_config"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

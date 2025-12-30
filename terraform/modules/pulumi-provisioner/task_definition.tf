@@ -42,6 +42,10 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
       { name = "KALI_INSTANCE_TYPE", value = var.kali_instance_type },
       { name = "VICTIM_INSTANCE_TYPE", value = var.victim_instance_type },
+      # NGFW (VM-Series) configuration
+      { name = "NGFW_AMI_ID", value = var.ngfw_ami_id },
+      { name = "NGFW_INSTANCE_TYPE", value = var.ngfw_instance_type },
+      { name = "NGFW_SECURITY_GROUP_ID", value = var.ngfw_security_group_id },
     ]
 
     logConfiguration = {

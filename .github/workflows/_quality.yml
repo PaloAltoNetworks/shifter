@@ -42,6 +42,7 @@ jobs:
       - name: Test portal with coverage
         working-directory: portal
         env:
+          TESTING: "1"
           DJANGO_DEBUG: "true"
           DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
           DB_HOST: localhost
@@ -133,3 +134,4 @@ jobs:
           files: portal/coverage/lcov.info
           flags: portal-javascript
           fail_ci_if_error: false
+

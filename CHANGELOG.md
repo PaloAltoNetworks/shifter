@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.9] - 2025-12-29
+
+### Added
+- Packer infrastructure for reproducible AMI builds (#273)
+- sshpass in Kali AMI for non-interactive SSH (#273)
+- GitHub Actions workflow for AMI builds
+
+## [0.8.8] - 2025-12-29
+
+### Changed
+- Remove redundant SSH security group rules (#290)
+
+## [0.8.7] - 2025-12-29
+
+### Added
+- `standup_duration` property on Range model for tracking provisioning time
+
+## [0.8.6] - 2025-12-29
+
+### Changed
+- Remove Step Functions permissions from GitHub OIDC role (cleanup after v1 provisioner removal)
+## [0.8.5] - 2025-12-29
+
+### Fixed
+- Dashboard dropdown behavior and portal test stability
+
+## [0.8.4] - 2025-12-29
+
+### Changed
+- Extract service layer from views.py (engine, cms apps)
+- Centralize Range status groupings as frozenset constants
+
+## [0.8.3] - 2025-12-29
+
+### Changes
+- Refactor consumers.py for maintanability
+
+## [0.8.2] - 2025-12-27
+
+### Added
+- NGFW (VM-Series) support
+- Strata Cloud Manager support
+- Cortex XDR sidebar submenu styling
+- Asset Menu
+
+### Changes
+- GitGuardian and Snyk ignore tests
+
 ## [0.8.1] - 2025-12-27
 
 ### Changed

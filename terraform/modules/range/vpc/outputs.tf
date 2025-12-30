@@ -54,6 +54,21 @@ output "dc_security_group_id" {
   value       = var.enable_dc_security_group ? aws_security_group.dc[0].id : null
 }
 
+output "ngfw_security_group_id" {
+  description = "ID of the security group for VM-Series NGFW instances (null if NGFW disabled)"
+  value       = var.vm_series_ami_id != "" ? aws_security_group.ngfw[0].id : null
+}
+
+output "vm_series_ami_id" {
+  description = "VM-Series AMI ID (empty string if NGFW disabled)"
+  value       = var.vm_series_ami_id
+}
+
+output "vm_series_instance_type" {
+  description = "VM-Series instance type"
+  value       = var.vm_series_instance_type
+}
+
 # ------------------------------------------------------------------------------
 # Network Firewall
 # ------------------------------------------------------------------------------

@@ -51,6 +51,26 @@ data "terraform_remote_state" "range" {
 }
 
 # ------------------------------------------------------------------------------
+# AMI IDs from SSM Parameter Store
+# ------------------------------------------------------------------------------
+
+data "aws_ssm_parameter" "kali_ami" {
+  name = "/shifter/ami/kali"
+}
+
+data "aws_ssm_parameter" "victim_ami" {
+  name = "/shifter/ami/victim"
+}
+
+data "aws_ssm_parameter" "windows_ami" {
+  name = "/shifter/ami/windows"
+}
+
+data "aws_ssm_parameter" "dc_ami" {
+  name = "/shifter/ami/dc"
+}
+
+# ------------------------------------------------------------------------------
 # VPC
 # ------------------------------------------------------------------------------
 
@@ -238,6 +258,11 @@ resource "random_password" "django_secret_key" {
   special = true
 }
 
+# Fernet encryption key for StrataConfig.scm_pin_value (32 bytes, base64-encoded)
+resource "random_id" "field_encryption_key" {
+  byte_length = 32
+}
+
 # checkov:skip=CKV_AWS_149:Deferred for MVP. AWS-managed keys sufficient for low-usage internal MVP. See #213
 resource "aws_secretsmanager_secret" "app" {
   name                    = "shifter-${local.name_prefix}-app"
@@ -252,7 +277,8 @@ resource "aws_secretsmanager_secret" "app" {
 resource "aws_secretsmanager_secret_version" "app" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
-    django_secret_key = random_password.django_secret_key.result
+    django_secret_key    = random_password.django_secret_key.result
+    field_encryption_key = random_id.field_encryption_key.b64_url
   })
 }
 
@@ -339,11 +365,11 @@ module "pulumi_provisioner" {
   range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
   range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
 
-  # AMIs
-  kali_ami_id    = var.kali_ami_id
-  victim_ami_id  = var.victim_ami_id
-  windows_ami_id = var.windows_ami_id
-  dc_ami_id      = var.dc_ami_id
+  # AMIs (from SSM Parameter Store)
+  kali_ami_id    = data.aws_ssm_parameter.kali_ami.value
+  victim_ami_id  = data.aws_ssm_parameter.victim_ami.value
+  windows_ami_id = data.aws_ssm_parameter.windows_ami.value
+  dc_ami_id      = data.aws_ssm_parameter.dc_ami.value
 
   # Prebaked DC configuration
   dc_domain_name     = var.dc_domain_name
@@ -356,6 +382,11 @@ module "pulumi_provisioner" {
   # S3
   agent_s3_bucket     = module.s3.bucket_name
   agent_s3_bucket_arn = module.s3.bucket_arn
+
+  # NGFW (VM-Series) - from Range VPC outputs
+  ngfw_security_group_id = data.terraform_remote_state.range.outputs.ngfw_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_security_group_id : ""
+  ngfw_ami_id            = data.terraform_remote_state.range.outputs.vm_series_ami_id
+  ngfw_instance_type     = data.terraform_remote_state.range.outputs.vm_series_instance_type
 
   # Alarms
   enable_alarms = true

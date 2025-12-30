@@ -3,19 +3,26 @@
 import json
 import logging
 import os
-import time
 
 from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import ActivityLog, AgentConfig, OperatingSystem, Range
+from cms.assets.services import AssetError, get_storage_used
+from cms.assets.services import create_agent as cms_create_agent
+from cms.assets.services import delete_agent as cms_delete_agent
+from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
+from engine.services.allocation import AllocationError
+from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
+from engine.services.scenarios import ScenarioValidationError
+from engine.services.serialization import range_to_dict
+
+from .models import ActivityLog, AgentConfig, Range, StrataConfig
 from .services.s3 import (
     S3Error,
     generate_presigned_upload_url,
@@ -88,35 +95,18 @@ def upload_agent(request):
         # Validate file (size, extension, magic bytes)
         file_format = validate_agent_file(uploaded_file, original_filename)
 
-        # Look up OS
-        os_obj = OperatingSystem.objects.filter(slug=file_format.os_slug).first()
-        if not os_obj:
-            messages.error(request, f"Operating system '{file_format.os_slug}' not found.")
-            return redirect("mission_control:agents")
-
         # Upload to S3
         s3_key, sha256_hash, file_size = s3_upload(uploaded_file, request.user.id, original_filename)
 
-        # Create database record
-        agent = AgentConfig.objects.create(
+        # Create agent record via CMS service
+        agent = cms_create_agent(
             user=request.user,
-            os=os_obj,
             name=name,
             s3_key=s3_key,
-            original_filename=original_filename,
-            file_size_bytes=file_size,
-            sha256_hash=sha256_hash,
-        )
-
-        # Log activity
-        ActivityLog.log(
-            "agent_uploaded",
-            user=request.user,
-            agent_id=agent.id,
-            agent_name=name,
             filename=original_filename,
-            os=file_format.os_slug,
+            os_slug=file_format.os_slug,
             file_size=file_size,
+            sha256=sha256_hash,
         )
 
         messages.success(request, f"Agent '{name}' uploaded successfully.")
@@ -131,6 +121,13 @@ def upload_agent(request):
         messages.error(request, str(e))
         logger.warning(
             "Agent upload validation failed: user=%s error=%s",
+            request.user.email,
+            str(e),
+        )
+    except AssetError as e:
+        messages.error(request, str(e))
+        logger.error(
+            "Agent creation failed: user=%s error=%s",
             request.user.email,
             str(e),
         )
@@ -152,20 +149,7 @@ def delete_agent(request, agent_id):
     agent = get_object_or_404(AgentConfig, id=agent_id, user=request.user, deleted_at__isnull=True)
 
     try:
-        # Delete from S3 first
-        s3_delete(agent.s3_key)
-
-        # Soft delete the database record
-        agent.deleted_at = timezone.now()
-        agent.save(update_fields=["deleted_at"])
-
-        # Log activity
-        ActivityLog.log(
-            "agent_deleted",
-            user=request.user,
-            agent_id=agent.id,
-            agent_name=agent.name,
-        )
+        cms_delete_agent(agent)
 
         messages.success(request, f"Agent '{agent.name}' deleted.")
         logger.info(
@@ -175,10 +159,10 @@ def delete_agent(request, agent_id):
             agent.name,
         )
 
-    except S3Error as e:
+    except AssetError as e:
         messages.error(request, "Failed to delete agent. Please try again.")
         logger.error(
-            "Agent delete S3 error: user=%s agent_id=%s error=%s",
+            "Agent delete error: user=%s agent_id=%s error=%s",
             request.user.email,
             agent.id,
             str(e),
@@ -235,36 +219,6 @@ def help_page(request):
 # -----------------------------------------------------------------------------
 
 
-def _get_user_storage_used(user) -> int:
-    """Get total bytes used by a user's active agents."""
-    result = AgentConfig.active_for_user(user).aggregate(total=Sum("file_size_bytes"))
-    return result["total"] or 0
-
-
-# Upload lock timeout in seconds (fallback for browser crash, network loss)
-UPLOAD_LOCK_TIMEOUT = 30
-
-
-def _check_upload_in_progress(request) -> bool:
-    """Check if user has an upload in progress (stored in session)."""
-    lock_data = request.session.get("upload_lock")
-    if not lock_data:
-        return False
-    # Auto-expire stale locks
-    if time.time() - lock_data.get("started_at", 0) > UPLOAD_LOCK_TIMEOUT:
-        _set_upload_in_progress(request, False)
-        return False
-    return True
-
-
-def _set_upload_in_progress(request, in_progress: bool):
-    """Set upload in progress flag in session."""
-    if in_progress:
-        request.session["upload_lock"] = {"started_at": time.time()}
-    else:
-        request.session.pop("upload_lock", None)
-
-
 @login_required
 @require_POST
 def initiate_upload(request):
@@ -282,7 +236,7 @@ def initiate_upload(request):
         - upload_token: Signed token for completion verification
     """
     # Check for concurrent upload
-    if _check_upload_in_progress(request):
+    if check_upload_in_progress(request.session):
         return JsonResponse(
             {"error": "An upload is already in progress. Please wait for it to complete."},
             status=409,
@@ -320,7 +274,7 @@ def initiate_upload(request):
         )
 
     # Check user storage quota
-    current_usage = _get_user_storage_used(request.user)
+    current_usage = get_storage_used(request.user)
     quota_bytes = django_settings.AGENT_USER_STORAGE_QUOTA_MB * 1024 * 1024
     if current_usage + file_size > quota_bytes:
         available_mb = (quota_bytes - current_usage) / 1024 / 1024
@@ -359,7 +313,7 @@ def initiate_upload(request):
     )
 
     # Mark upload in progress
-    _set_upload_in_progress(request, True)
+    set_upload_in_progress(request.session, True)
 
     logger.info(
         "Upload initiated: user=%s filename=%s size=%d",
@@ -405,7 +359,7 @@ def complete_upload(request):
     try:
         token_data = verify_upload_token(upload_token, request.user.id)
     except ValueError as e:
-        _set_upload_in_progress(request, False)
+        set_upload_in_progress(request.session, False)
         return JsonResponse({"error": str(e)}, status=400)
 
     s3_key = token_data["s3_key"]
@@ -416,7 +370,7 @@ def complete_upload(request):
     # Validate S3 key belongs to this user (defense in depth)
     expected_prefix = f"agents/{request.user.id}/"
     if not s3_key.startswith(expected_prefix):
-        _set_upload_in_progress(request, False)
+        set_upload_in_progress(request.session, False)
         logger.warning(
             "S3 key prefix mismatch: user=%s expected=%s got=%s",
             request.user.id,
@@ -429,15 +383,9 @@ def complete_upload(request):
     try:
         file_size, etag = verify_s3_object_exists(s3_key)
     except S3Error:
-        _set_upload_in_progress(request, False)
+        set_upload_in_progress(request.session, False)
         logger.warning(f"Upload completion failed - file not found: {s3_key}")
         return JsonResponse({"error": "File not found in storage. Upload may have failed."}, status=400)
-
-    # Look up OS
-    os_obj = OperatingSystem.objects.filter(slug=os_slug).first()
-    if not os_obj:
-        _set_upload_in_progress(request, False)
-        return JsonResponse({"error": f"Operating system '{os_slug}' not found"}, status=400)
 
     # Tag object as completed (for lifecycle rule)
     try:
@@ -446,31 +394,24 @@ def complete_upload(request):
         logger.warning(f"Failed to tag S3 object: {e}")
         # Non-fatal, continue
 
-    # Create database record
-    agent = AgentConfig.objects.create(
-        user=request.user,
-        os=os_obj,
-        name=name,
-        s3_key=s3_key,
-        original_filename=filename,
-        file_size_bytes=file_size,
-        sha256_hash=client_sha256 or etag,  # Use client hash or ETag as fallback
-    )
-
-    # Log activity
-    ActivityLog.log(
-        "agent_uploaded",
-        user=request.user,
-        agent_id=agent.id,
-        agent_name=name,
-        filename=filename,
-        os=os_slug,
-        file_size=file_size,
-        upload_method="presigned",
-    )
+    # Create agent record via CMS service
+    try:
+        agent = cms_create_agent(
+            user=request.user,
+            name=name,
+            s3_key=s3_key,
+            filename=filename,
+            os_slug=os_slug,
+            file_size=file_size,
+            sha256=client_sha256 or etag,  # Use client hash or ETag as fallback
+            upload_method="presigned",
+        )
+    except AssetError as e:
+        set_upload_in_progress(request.session, False)
+        return JsonResponse({"error": str(e)}, status=400)
 
     # Clear upload in progress
-    _set_upload_in_progress(request, False)
+    set_upload_in_progress(request.session, False)
 
     logger.info(
         "Upload completed: user=%s agent_id=%s filename=%s size=%d",
@@ -525,7 +466,7 @@ def cancel_upload(request):
             pass  # Invalid token, ignore
 
     # Clear upload in progress
-    _set_upload_in_progress(request, False)
+    set_upload_in_progress(request.session, False)
 
     return JsonResponse({"success": True})
 
@@ -533,27 +474,6 @@ def cancel_upload(request):
 # -----------------------------------------------------------------------------
 # Range API
 # -----------------------------------------------------------------------------
-
-
-def _range_to_json(range_obj):
-    """Serialize a Range object to JSON-compatible dict for client.
-
-    Note: victim_ip is intentionally excluded - it's internal infrastructure
-    detail stored in DB for provisioner use, not exposed to browser.
-    """
-    return {
-        "id": range_obj.id,
-        "status": range_obj.status,
-        "agent_id": range_obj.agent_id,
-        "agent_name": range_obj.agent.name if range_obj.agent else None,
-        "dc_agent_id": range_obj.dc_agent_id,
-        "dc_agent_name": range_obj.dc_agent.name if range_obj.dc_agent else None,
-        "chat_url": range_obj.chat_url,
-        "error_message": range_obj.error_message,
-        "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
-        "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
-        "paused_at": range_obj.paused_at.isoformat() if range_obj.paused_at else None,
-    }
 
 
 @login_required
@@ -574,48 +494,9 @@ def get_range_status(request):
     return JsonResponse(
         {
             "has_range": True,
-            "range": _range_to_json(active_range),
+            "range": range_to_dict(active_range),
         }
     )
-
-
-def _get_scenario_instance_config(scenario: str, agent_os: str) -> list:
-    """
-    Get instance configuration for a scenario.
-
-    Args:
-        scenario: Scenario identifier (basic, ad_attack_lab)
-        agent_os: Operating system from agent (linux, windows)
-
-    Returns:
-        List of instance configuration dicts for the provisioner
-    """
-    # Map agent OS names to provisioner os_type
-    os_type = "windows" if agent_os.lower() == "windows" else "ubuntu"
-
-    # Instance types are not specified here - the provisioner uses
-    # its catalog defaults from environment variables
-    scenarios = {
-        "basic": [
-            {"role": "attacker", "os_type": "kali"},
-            {"role": "victim", "os_type": os_type},
-        ],
-        "ad_attack_lab": [
-            {"role": "attacker", "os_type": "kali"},
-            {
-                "role": "dc",
-                "os_type": "windows",
-                "dc_config": {"domain_name": "shifter.local", "netbios_name": "SHIFTER"},
-            },
-            {
-                "role": "victim",
-                "os_type": "windows",
-                "join_domain": True,
-            },
-        ],
-    }
-
-    return scenarios.get(scenario, scenarios["basic"])
 
 
 @login_required
@@ -633,14 +514,6 @@ def launch_range(request):
         - success: true
         - range: Range object
     """
-    # Check for existing active range
-    active_range = Range.get_active_for_user(request.user)
-    if active_range:
-        return JsonResponse(
-            {"error": "You already have an active range. Destroy it first."},
-            status=409,
-        )
-
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -654,82 +527,53 @@ def launch_range(request):
     if scenario not in ("basic", "ad_attack_lab"):
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
-    # Verify agent belongs to user and is not deleted
-    agent = AgentConfig.active_for_user(request.user).filter(id=agent_id).select_related("os").first()
-    if not agent:
-        return JsonResponse({"error": "Agent not found"}, status=404)
+    # Get NGFW options
+    ngfw_enabled = data.get("ngfw_enabled", False)
+    ngfw_config_id = data.get("ngfw_config_id")
 
-    # Handle agent validation for AD scenarios
-    dc_agent = None
-
-    if scenario == "ad_attack_lab":
-        # AD scenario requires Windows agent (used for both DC and victim)
-        if agent.os.slug != "windows":
+    # Validate Strata config if NGFW is enabled
+    strata_config = None
+    if ngfw_enabled:
+        if not ngfw_config_id:
             return JsonResponse(
-                {"error": "AD Attack Lab requires a Windows (MSI) agent. Both DC and victim are Windows."},
+                {"error": "Strata config is required when NGFW is enabled"},
                 status=400,
             )
-        # Use same agent for DC and victim
-        dc_agent = agent
+        strata_config = StrataConfig.active_for_user(request.user).filter(id=ngfw_config_id).first()
+        if not strata_config:
+            return JsonResponse({"error": "Strata config not found"}, status=404)
 
-    # Allocate subnet index for this range
     try:
-        subnet_index = Range.allocate_subnet_index()
-    except ValueError as e:
+        range_obj = launch(
+            request.user,
+            agent_id,
+            scenario,
+            ngfw_enabled=ngfw_enabled,
+            strata_config=strata_config,
+        )
+    except OrchestrationError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
+    except ScenarioValidationError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
+    except AllocationError as e:
         logger.error("Failed to allocate subnet index: %s", e)
         return JsonResponse(
             {"error": "No capacity available. Please try again later or destroy existing ranges."},
             status=503,
         )
 
-    # Get instance configuration for scenario
-    instance_config = _get_scenario_instance_config(scenario, agent.os.name)
-
-    # Create range record with allocated subnet index and instance config
-    range_obj = Range.objects.create(
-        user=request.user,
-        agent=agent,
-        dc_agent=dc_agent,
-        status=Range.Status.PROVISIONING,
-        subnet_index=subnet_index,
-        instance_config=instance_config,
-    )
-
-    # Log activity
-    ActivityLog.log(
-        "range_launched",
-        user=request.user,
-        range_id=range_obj.id,
-        agent_id=agent.id,
-        agent_name=agent.name,
-        dc_agent_id=dc_agent.id if dc_agent else None,
-        dc_agent_name=dc_agent.name if dc_agent else None,
-        scenario=scenario,
-    )
-
     logger.info(
-        "Range launched: user=%s range_id=%s agent=%s dc_agent=%s scenario=%s",
+        "Range launched: user=%s range_id=%s agent=%s scenario=%s",
         request.user.email,
         range_obj.id,
-        agent.name,
-        dc_agent.name if dc_agent else "N/A",
+        range_obj.agent.name,
         scenario,
     )
-
-    # Trigger provisioning via ECS Fargate
-    from .services.engine import start_provisioning
-
-    task_arn = start_provisioning(range_obj.id)
-
-    # Store task ARN if returned (None in local dev without ECS)
-    if task_arn:
-        range_obj.step_function_execution_arn = task_arn
-        range_obj.save(update_fields=["step_function_execution_arn"])
 
     return JsonResponse(
         {
             "success": True,
-            "range": _range_to_json(range_obj),
+            "range": range_to_dict(range_obj),
         }
     )
 
@@ -742,31 +586,12 @@ def cancel_range(request):
 
     Only works for ranges in PENDING or PROVISIONING status.
     """
-    active_range = Range.get_active_for_user(request.user)
-    if not active_range:
-        return JsonResponse({"error": "No active range"}, status=404)
+    try:
+        cancel(request.user)
+    except OrchestrationError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
 
-    if active_range.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
-        return JsonResponse(
-            {"error": f"Cannot cancel range in {active_range.status} status"},
-            status=400,
-        )
-
-    active_range.status = Range.Status.DESTROYED
-    active_range.destroyed_at = timezone.now()
-    active_range.save(update_fields=["status", "destroyed_at"])
-
-    ActivityLog.log(
-        "range_cancelled",
-        user=request.user,
-        range_id=active_range.id,
-    )
-
-    logger.info(
-        "Range cancelled: user=%s range_id=%s",
-        request.user.email,
-        active_range.id,
-    )
+    logger.info("Range cancelled: user=%s", request.user.email)
 
     return JsonResponse({"success": True})
 
@@ -777,43 +602,15 @@ def destroy_range(request):
     """
     Destroy an active, paused, or failed range.
 
-    Sets status to DESTROYED immediately so UI updates instantly.
-    Resource cleanup happens async via Step Functions.
+    Sets status to DESTROYING and triggers async resource cleanup.
     """
-    # Use get_destroyable_for_user to include FAILED ranges
-    range_to_destroy = Range.get_destroyable_for_user(request.user)
-    if not range_to_destroy:
-        return JsonResponse({"error": "No range to destroy"}, status=404)
+    try:
+        destroy(request.user)
+    except OrchestrationError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
 
-    # Mark as DESTROYING - user sees it as gone, can launch new range
-    # Resource cleanup happens async, provisioner sets DESTROYED when done
-    range_to_destroy.status = Range.Status.DESTROYING
-    range_to_destroy.save(update_fields=["status"])
+    logger.info("Range destroyed: user=%s", request.user.email)
 
-    ActivityLog.log(
-        "range_destroyed",
-        user=request.user,
-        range_id=range_to_destroy.id,
-    )
-
-    logger.info(
-        "Range destroyed: user=%s range_id=%s",
-        request.user.email,
-        range_to_destroy.id,
-    )
-
-    # Trigger async resource cleanup via ECS Fargate
-    # This runs in background - user doesn't wait for it
-    from .services.engine import start_teardown
-
-    task_arn = start_teardown(range_to_destroy.id)
-
-    # Store task ARN if returned (None in local dev without ECS)
-    if task_arn:
-        range_to_destroy.step_function_execution_arn = task_arn
-        range_to_destroy.save(update_fields=["step_function_execution_arn"])
-
-    # Return success - no range data since it's now destroyed
     return JsonResponse({"success": True})
 
 
@@ -841,3 +638,138 @@ def list_agents_for_launch(request):
         for agent in agents
     ]
     return JsonResponse({"agents": agent_list})
+
+
+# -----------------------------------------------------------------------------
+# Strata Config Views (SCM Configuration for NGFW)
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def ngfw_configs(request):
+    """Strata config management - create and manage SCM configurations for NGFW."""
+    user_configs = StrataConfig.active_for_user(request.user)
+
+    context = {
+        "page_title": "NGFW",
+        "active_nav": "ngfw",
+        "configs": user_configs,
+    }
+    return render(request, "mission_control/ngfw.html", context)
+
+
+@login_required
+@require_POST
+def create_ngfw_config(request):
+    """Create a new Strata config for NGFW."""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    name = data.get("name", "").strip()
+    scm_folder_name = data.get("scm_folder_name", "").strip()
+    scm_pin_id = data.get("scm_pin_id", "").strip()
+    scm_pin_value = data.get("scm_pin_value", "").strip()
+
+    # Validate required fields
+    if not name:
+        return JsonResponse({"error": "Name is required"}, status=400)
+    if not scm_folder_name:
+        return JsonResponse({"error": "SCM folder name is required"}, status=400)
+    if not scm_pin_id:
+        return JsonResponse({"error": "SCM PIN ID is required"}, status=400)
+    if not scm_pin_value:
+        return JsonResponse({"error": "SCM PIN value is required"}, status=400)
+
+    # Create config
+    config = StrataConfig.objects.create(
+        user=request.user,
+        name=name,
+        scm_folder_name=scm_folder_name,
+        scm_pin_id=scm_pin_id,
+        scm_pin_value=scm_pin_value,
+    )
+
+    ActivityLog.log(
+        "strata_config_created",
+        user=request.user,
+        config_id=config.id,
+        config_name=config.name,
+    )
+
+    logger.info(
+        "Strata config created: user=%s config_id=%s name=%s",
+        request.user.email,
+        config.id,
+        config.name,
+    )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "config": {
+                "id": config.id,
+                "name": config.name,
+                "scm_folder_name": config.scm_folder_name,
+            },
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_POST
+def delete_ngfw_config(request, config_id):
+    """Delete a Strata config (soft delete)."""
+    config = get_object_or_404(StrataConfig, id=config_id, user=request.user, deleted_at__isnull=True)
+
+    # Soft delete
+    config.deleted_at = timezone.now()
+    config.save(update_fields=["deleted_at"])
+
+    ActivityLog.log(
+        "strata_config_deleted",
+        user=request.user,
+        config_id=config.id,
+        config_name=config.name,
+    )
+
+    logger.info(
+        "Strata config deleted: user=%s config_id=%s name=%s",
+        request.user.email,
+        config.id,
+        config.name,
+    )
+
+    # Return JSON for API calls, redirect for HTML form submissions
+    if request.content_type == "application/json" or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"success": True})
+
+    messages.success(request, f"Strata config '{config.name}' deleted.")
+    return redirect("mission_control:ngfw_configs")
+
+
+@login_required
+@require_GET
+def list_ngfw_configs(request):
+    """
+    Get user's Strata configs for the launch dropdown.
+
+    Response (JSON):
+        - configs: List of {id, name, scm_folder_name}
+        Note: PIN credentials are NOT included for security
+    """
+    configs = StrataConfig.active_for_user(request.user)
+    config_list = [
+        {
+            "id": config.id,
+            "name": config.name,
+            "scm_folder_name": config.scm_folder_name,
+            "scm_pin_id": config.scm_pin_id,
+            "created_at": config.created_at.isoformat() if config.created_at else None,
+        }
+        for config in configs
+    ]
+    return JsonResponse({"configs": config_list})

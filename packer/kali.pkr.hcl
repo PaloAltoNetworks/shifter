@@ -9,17 +9,18 @@ packer {
 
 source "amazon-ebs" "kali" {
   ami_name        = "${var.ami_prefix}-kali-{{timestamp}}"
-  ami_description = "Shifter Kali Linux with pentesting tools, sshpass, and Claude Code"
+  ami_description = "Kali Linux Rolling with SSM, kali-linux-headless, sshpass, Claude Code configured for Bedrock"
   instance_type   = var.instance_type
   region          = var.aws_region
 
-  # Use Kali Linux from AWS Marketplace
+  // Official Kali Linux from AWS Marketplace
+  // Requires free subscription: https://aws.amazon.com/marketplace/pp/prodview-fznsw3f7mq7to
+  // Product code: 7lgvy7mt78lgoi4lant0znp5h
   source_ami_filter {
     filters = {
-      name                = "kali-linux-*"
+      product-code        = "7lgvy7mt78lgoi4lant0znp5h"
       root-device-type    = "ebs"
       virtualization-type = "hvm"
-      architecture        = "x86_64"
     }
     most_recent = true
     owners      = ["aws-marketplace"]
@@ -27,18 +28,16 @@ source "amazon-ebs" "kali" {
 
   ssh_username = "kali"
 
-  # Optional: specify VPC/subnet if not using default
   vpc_id    = var.vpc_id != "" ? var.vpc_id : null
   subnet_id = var.subnet_id != "" ? var.subnet_id : null
 
-  # Ensure public IP for SSH access during build
   associate_public_ip_address = true
 
   tags = {
-    Name        = "${var.ami_prefix}-kali"
-    Project     = "shifter"
-    ManagedBy   = "packer"
-    BuildDate   = "{{timestamp}}"
+    Name      = "${var.ami_prefix}-kali"
+    Project   = "shifter"
+    ManagedBy = "packer"
+    BuildDate = "{{timestamp}}"
   }
 
   run_tags = {

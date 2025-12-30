@@ -45,9 +45,9 @@ $adminUser = "{{ domain_admin_user }}"
 $adminPass = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential("$domain\\$adminUser", $adminPass)
 
-# Wait for DC DNS to be ready (up to 1 minute - prebaked DC should be fast)
+# Wait for DC DNS to be ready (up to ~70s - prebaked DC should be fast)
 Write-Host "Waiting for domain controller DNS to be ready..."
-$maxAttempts = 6
+$maxAttempts = 7
 $attempt = 0
 $dnsReady = $false
 

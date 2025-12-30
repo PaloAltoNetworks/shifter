@@ -58,6 +58,16 @@ repos:
         files: ^portal/static/css/.*\.css$
         types: [css]
 
+  # Packer tests
+  - repo: local
+    hooks:
+      - id: pytest-packer
+        name: pytest (packer)
+        entry: bash -c 'cd packer && uv run pytest tests/ -q'
+        language: system
+        files: ^packer/
+        pass_filenames: false
+
   # Terraform
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.96.3

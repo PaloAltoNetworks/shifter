@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.9] - 2025-12-29
+
+### Added
+- Packer infrastructure for reproducible AMI builds (#273)
+- sshpass in Kali AMI for non-interactive SSH (#273)
+- GitHub Actions workflow for AMI builds
+
 ## [0.8.8] - 2025-12-29
 
 ### Changed

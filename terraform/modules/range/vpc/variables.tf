@@ -96,3 +96,13 @@ variable "enable_dc_security_group" {
   type        = bool
   default     = true
 }
+
+# ------------------------------------------------------------------------------
+# Persistent NGFW Infrastructure
+# ------------------------------------------------------------------------------
+
+variable "enable_ngfw_infrastructure" {
+  description = "Enable persistent NGFW infrastructure (subnet, security groups, IAM role)"
+  type        = bool
+  default     = false
+}

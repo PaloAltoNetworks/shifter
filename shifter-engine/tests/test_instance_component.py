@@ -535,7 +535,8 @@ class TestUserDataGeneration:
 
             def check_user_data(user_data_b64):
                 user_data = base64.b64decode(user_data_b64).decode()
-                assert "Victim setup complete" in user_data
+                # Minimal template just logs that SSM handles setup
+                assert "SSM" in user_data
                 assert "#!/bin/bash" in user_data
 
             component.instance.user_data_base64.apply(check_user_data)
@@ -562,14 +563,15 @@ class TestUserDataGeneration:
 
             def check_user_data(user_data_b64):
                 user_data = base64.b64decode(user_data_b64).decode()
-                assert "Windows setup complete" in user_data
+                # Minimal template just logs that SSM handles setup
+                assert "SSM" in user_data
                 assert "<powershell>" in user_data
 
             component.instance.user_data_base64.apply(check_user_data)
 
     @pulumi.runtime.test
-    def test_agent_presigned_url_in_user_data(self, temp_templates, pulumi_mocks):
-        """Agent presigned URL should appear in victim user data."""
+    def test_agent_presigned_url_stored_for_ssm(self, temp_templates, pulumi_mocks):
+        """Agent presigned URL should be stored on component for SSM plans."""
         from components.instance import InstanceComponent
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
@@ -589,9 +591,16 @@ class TestUserDataGeneration:
                 agent_s3_key="agents/xdr.tar.gz",
             )
 
+            # Agent URL is stored on component for SSM plans, not in user_data
+            assert component.agent_presigned_url == \
+                "https://s3.example.com/signed-agent-url"
+
             def check_user_data(user_data_b64):
                 user_data = base64.b64decode(user_data_b64).decode()
-                assert "https://s3.example.com/signed-agent-url" in user_data
+                # XDR install is handled by SSM, not user_data
+                assert "SSM plans" in user_data
+                # presigned URL should NOT be in user_data
+                assert "https://s3.example.com/signed-agent-url" not in user_data
 
             component.instance.user_data_base64.apply(check_user_data)
 
@@ -617,3 +626,247 @@ class TestUserDataGeneration:
                 )
 
             assert "shell injection" in str(exc_info.value).lower()
+
+
+class TestCleanupVerification:
+    """Tests to verify cleanup of orphaned code."""
+
+    def test_no_orphaned_generate_secure_password_method(self):
+        """_generate_secure_password should not exist - DC uses env password."""
+        from components.instance import InstanceComponent
+        assert not hasattr(InstanceComponent, '_generate_secure_password')
+
+
+class TestJoinDomainFlag:
+    """Tests for join_domain flag storage on InstanceComponent.
+
+    In the new architecture, victims handle their own domain join via run_setup().
+    The join_domain flag must be stored on the instance for run_setup() to use.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pytest.fixture
+    def temp_templates(self, temp_templates_dir):
+        """Provide temp templates directory."""
+        return temp_templates_dir
+
+    @pulumi.runtime.test
+    def test_instance_stores_join_domain_flag_true(self, temp_templates):
+        """Instance with join_domain=True stores the flag."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-victim",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                join_domain=True,
+            )
+
+            assert hasattr(component, "join_domain"), \
+                "Instance should have join_domain attribute"
+            assert component.join_domain is True, \
+                "join_domain should be True when passed as True"
+
+    @pulumi.runtime.test
+    def test_instance_stores_join_domain_flag_false(self, temp_templates):
+        """Instance with join_domain=False (default) stores the flag."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-victim",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                join_domain=False,
+            )
+
+            assert hasattr(component, "join_domain"), \
+                "Instance should have join_domain attribute"
+            assert component.join_domain is False, \
+                "join_domain should be False when passed as False"
+
+    @pulumi.runtime.test
+    def test_instance_join_domain_defaults_to_false(self, temp_templates):
+        """Instance without explicit join_domain defaults to False."""
+        from components.instance import InstanceComponent
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-victim",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                # No join_domain parameter - should default to False
+            )
+
+            assert hasattr(component, "join_domain"), \
+                "Instance should have join_domain attribute even when not passed"
+            assert component.join_domain is False, \
+                "join_domain should default to False"
+
+
+class TestRunSetupSignature:
+    """Tests for run_setup() method signature changes.
+
+    In the new architecture, run_setup() accepts an optional dc_ip parameter
+    for domain-joining instances.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pytest.fixture
+    def temp_templates(self, temp_templates_dir):
+        """Provide temp templates directory."""
+        return temp_templates_dir
+
+    @pulumi.runtime.test
+    def test_run_setup_accepts_dc_ip_parameter(self, temp_templates):
+        """run_setup() accepts optional dc_ip parameter."""
+        from components.instance import InstanceComponent
+        import inspect
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-victim",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="windows",
+                instance_type="t3.medium",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                join_domain=True,
+            )
+
+            # Check run_setup signature accepts dc_ip
+            sig = inspect.signature(component.run_setup)
+            assert "dc_ip" in sig.parameters, \
+                "run_setup should accept dc_ip parameter"
+            assert sig.parameters["dc_ip"].default is None, \
+                "dc_ip should default to None"
+
+    @pulumi.runtime.test
+    def test_run_setup_without_dc_ip_works_for_non_domain_instances(
+        self, temp_templates
+    ):
+        """run_setup() works without dc_ip for non-domain-joining instances.
+
+        We verify the method can be called without dc_ip (signature check).
+        Actual SSM execution is not tested here - that requires real AWS.
+        """
+        from components.instance import InstanceComponent
+        import inspect
+
+        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+            component = InstanceComponent(
+                name="test-victim",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="victim",
+                os_type="ubuntu",
+                instance_type="t3.micro",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                join_domain=False,
+            )
+
+            # Verify dc_ip is optional (has default value)
+            sig = inspect.signature(component.run_setup)
+            dc_ip_param = sig.parameters.get("dc_ip")
+            assert dc_ip_param is not None, "run_setup should have dc_ip parameter"
+            assert dc_ip_param.default is None, \
+                "dc_ip should default to None for non-domain instances"
+
+
+class TestRunDCSetupSignature:
+    """Tests for run_dc_setup() method signature changes.
+
+    In the new architecture, run_dc_setup() should NOT accept domain_members.
+    DC only sets itself up; domain join is handled by each victim.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pytest.fixture
+    def temp_templates(self, temp_templates_dir):
+        """Provide temp templates directory."""
+        return temp_templates_dir
+
+    @pytest.fixture
+    def dc_env_vars(self, temp_templates):
+        """Environment variables required for DC instances."""
+        return {
+            "TEMPLATES_DIR": str(temp_templates),
+            "DC_DOMAIN_NAME": "internal.shifter",
+            "DC_DOMAIN_PASSWORD": "TestPassword123!",  # nosec B105
+        }
+
+    @pulumi.runtime.test
+    def test_run_dc_setup_does_not_accept_domain_members(self, dc_env_vars):
+        """run_dc_setup() should NOT have domain_members parameter."""
+        from components.instance import InstanceComponent
+        import inspect
+
+        with patch.dict(os.environ, dc_env_vars):
+            component = InstanceComponent(
+                name="test-dc",
+                range_id=42,
+                user_id=1,
+                index=0,
+                role="dc",
+                os_type="windows",
+                instance_type="t3.large",
+                subnet_id="subnet-12345",
+                security_group_id="sg-12345",
+                ami_id="ami-12345",
+                environment="dev",
+                dc_config={
+                    "domain_name": "internal.shifter",
+                    "netbios_name": "SHIFTER"
+                },
+            )
+
+            # Check run_dc_setup signature does NOT have domain_members
+            sig = inspect.signature(component.run_dc_setup)
+            assert "domain_members" not in sig.parameters, \
+                "run_dc_setup should NOT accept domain_members parameter"

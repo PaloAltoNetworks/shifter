@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
     """Add dc_agent FK to Range for AD scenario agent selection."""
 
     dependencies = [
-        ("mission_control", "0018_grant_operatingsystem_to_provisioner"),
+        ("mission_control", "0023_grant_ngfwconfig_to_provisioner"),
     ]
 
     operations = [

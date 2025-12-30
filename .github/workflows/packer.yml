@@ -1,4 +1,4 @@
-name: Packer AMI Build
+name: Packer AMI Build (Dev)
 
 on:
   workflow_dispatch:
@@ -9,14 +9,6 @@ on:
         type: choice
         options:
           - kali
-      environment:
-        description: 'Target environment'
-        required: true
-        type: choice
-        default: dev
-        options:
-          - dev
-          - prod
 
 permissions:
   id-token: write
@@ -24,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ inputs.ami_type }} AMI
+    name: Build ${{ inputs.ami_type }} AMI in dev
     runs-on: self-hosted
     defaults:
       run:
@@ -39,29 +31,41 @@ jobs:
         with:
           version: latest
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (dev)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ inputs.environment == 'dev' && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
           aws-region: us-east-2
 
       - name: Initialize Packer
         run: packer init .
 
       - name: Validate template
-        run: packer validate ${{ inputs.ami_type }}.pkr.hcl
+        run: packer validate -var-file=dev.pkrvars.hcl ${{ inputs.ami_type }}.pkr.hcl
 
       - name: Build AMI
         run: |
-          packer build -color=false ${{ inputs.ami_type }}.pkr.hcl
+          packer build -color=false -var-file=dev.pkrvars.hcl ${{ inputs.ami_type }}.pkr.hcl
 
           # Extract AMI ID from manifest
           AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' ${{ inputs.ami_type }}-manifest.json)
           echo "AMI_ID=$AMI_ID" >> $GITHUB_ENV
-          echo "## AMI Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Dev AMI Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "- **Type:** ${{ inputs.ami_type }}" >> $GITHUB_STEP_SUMMARY
           echo "- **AMI ID:** \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Region:** us-east-2" >> $GITHUB_STEP_SUMMARY
+
+      - name: Update dev SSM Parameter
+        run: |
+          aws ssm put-parameter \
+            --name "/shifter/ami/${{ inputs.ami_type }}" \
+            --type String \
+            --value "$AMI_ID" \
+            --overwrite \
+            --description "Built by GitHub Actions run ${{ github.run_id }}"
+          echo "- **SSM Parameter:** \`/shifter/ami/${{ inputs.ami_type }}\` updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next step:** Test in dev, then run 'Packer AMI Promote to Prod' workflow" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload manifest
         uses: actions/upload-artifact@v4

@@ -69,3 +69,12 @@ output "private_subnet_ids" {
   description = "List of private subnet IDs for ECS tasks (pass-through)"
   value       = var.private_subnet_ids
 }
+
+# ------------------------------------------------------------------------------
+# Alarm Outputs
+# ------------------------------------------------------------------------------
+
+output "range_launch_failures_sns_topic_arn" {
+  description = "ARN of the SNS topic for range launch failure notifications"
+  value       = var.enable_alarms ? aws_sns_topic.range_launch_failures[0].arn : null
+}

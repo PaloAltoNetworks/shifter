@@ -503,6 +503,16 @@ wheels = [
 ]
 
 [[package]]
+name = "django-fernet-fields"
+version = "0.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/31/2a/012a6777a8d95ccb7033263a77cba098b123bece9d9dace8a258552a1014/django-fernet-fields-0.6.tar.gz", hash = "sha256:7f7e03c86d9473a42031ebade2b15be1484aad18ef5576ddab156c4667e04c4a", size = 6742 }
+
+[[package]]
 name = "django-health-check"
 version = "3.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1055,6 +1065,7 @@ dependencies = [
     { name = "channels-redis" },
     { name = "daphne" },
     { name = "django" },
+    { name = "django-fernet-fields" },
     { name = "django-health-check" },
     { name = "djangorestframework" },
     { name = "gunicorn" },
@@ -1085,6 +1096,7 @@ requires-dist = [
     { name = "channels-redis" },
     { name = "daphne" },
     { name = "django" },
+    { name = "django-fernet-fields", specifier = ">=0.6" },
     { name = "django-health-check" },
     { name = "djangorestframework" },
     { name = "gunicorn" },

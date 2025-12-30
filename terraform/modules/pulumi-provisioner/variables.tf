@@ -250,3 +250,19 @@ variable "agent_s3_bucket_arn" {
   description = "S3 bucket ARN for XDR agent installers"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# Alarms Configuration
+# ------------------------------------------------------------------------------
+
+variable "enable_alarms" {
+  description = "Enable CloudWatch alarms for range launch failures"
+  type        = bool
+  default     = false
+}
+
+variable "alarm_email" {
+  description = "Email address for alarm notifications (leave empty to skip)"
+  type        = string
+  default     = ""
+}

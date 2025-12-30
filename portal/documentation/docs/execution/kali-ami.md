@@ -4,8 +4,8 @@ Pre-baked Kali Linux with pentesting tools and Claude Code.
 
 ## What's In It
 
-- Kali Linux Rolling (2025.3)
-- Claude Code 2.x (configured for Bedrock)
+- Kali Linux Rolling
+- Claude Code (configured for Bedrock)
 - SSM Agent
 
 **Metapackages:**
@@ -13,25 +13,39 @@ Pre-baked Kali Linux with pentesting tools and Claude Code.
 
 | Category | Tools |
 |----------|-------|
-| Exploitation | Metasploit Framework 6.4 |
+| Exploitation | Metasploit Framework |
 | Scanning | Nmap, Nikto, dirb, gobuster, amass, dnsrecon |
 | Web Testing | Burp Suite, sqlmap, commix, davtest |
 | Password | John, Hashcat, Hydra, crunch, cewl |
 | Wireless | Aircrack-ng, bully |
 | AD/Windows | certipy-ad, enum4linux, chntpw |
 | Network | Wireshark libs, arp-scan, dns2tcp |
+| SSH | sshpass (non-interactive password auth) |
 
 **Development:**
-- Python 3.13, pip
-- Node.js 20.x, PHP 8.4
-- GCC, make, git, curl, wget
+- Python 3, pip, venv
+- Node.js, npm
+- build-essential, git, curl, wget
 
 ## Why Pre-Bake
 
 The marketplace Kali AMI is minimal. Pre-baking adds:
 - SSM agent (not in Kali repos by default)
 - Pentesting tools via kali-linux-headless
+- sshpass for Claude Code automated SSH workflows
 - Claude Code for agentic pentesting workflows
+
+## Building the AMI
+
+AMI is built with Packer. See [`packer/README.md`](/packer/README.md).
+
+```bash
+cd packer
+packer init .
+packer build kali.pkr.hcl
+```
+
+Or trigger via GitHub Actions: **Actions > Packer AMI Build > Run workflow**
 
 ## Provisioning Flow
 

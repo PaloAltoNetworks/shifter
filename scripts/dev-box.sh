@@ -197,16 +197,26 @@ case "${1:-status}" in
             --parameters "{\"portNumber\":[\"3389\"],\"localPortNumber\":[\"$local_port\"]}"
         ;;
 
+    password)
+        aws secretsmanager get-secret-value \
+            --profile "$AWS_PROFILE" \
+            --region "$REGION" \
+            --secret-id shifter-dev-box-admin-password \
+            --query SecretString \
+            --output text
+        ;;
+
     *)
-        echo "Usage: $0 {start|stop|status|connect|ssh|tunnel}"
+        echo "Usage: $0 {start|stop|status|connect|ssh|tunnel|password}"
         echo ""
         echo "Commands:"
-        echo "  start   - Start the dev box"
-        echo "  stop    - Stop the dev box (saves costs)"
-        echo "  status  - Show current status"
-        echo "  connect - Open Fleet Manager RDP in browser"
-        echo "  ssh     - Start SSM CLI session"
-        echo "  tunnel  - Start RDP tunnel (default: localhost:33389)"
+        echo "  start    - Start the dev box"
+        echo "  stop     - Stop the dev box (saves costs)"
+        echo "  status   - Show current status"
+        echo "  connect  - Open Fleet Manager RDP in browser"
+        echo "  ssh      - Start SSM CLI session"
+        echo "  tunnel   - Start RDP tunnel (default: localhost:33389)"
+        echo "  password - Get Windows Administrator password"
         exit 1
         ;;
 esac

@@ -18,16 +18,18 @@ Django web application. Auth, agent management, range lifecycle, terminal access
 | `/mission-control/` | `dashboard` | Launch/manage ranges |
 | `/mission-control/agents/` | `agents` | List uploaded agents |
 | `/mission-control/terminal/` | `terminal` | SSH access to range |
-| `/mission-control/ngfw/` | `ngfw_configs` | Strata (NGFW) config management |
 | `/mission-control/settings/` | `settings` | Account settings |
 | `/mission-control/help/` | `help_page` | Help docs |
+
+> **Note:** NGFW configuration views (`/mission-control/ngfw/`) are planned but not yet implemented.
+> See issue #412 for the new SCMCredential/NGFWDeploymentProfile/UserNGFW model design.
 
 ### API (`mission_control`)
 
 | Route | Method | Purpose |
 |-------|--------|---------|
 | `/mission-control/api/range/status/` | GET | Current range status |
-| `/mission-control/api/range/launch/` | POST | Launch new range (accepts `agent_id`, `scenario`, `ngfw_enabled`, `ngfw_config_id`) |
+| `/mission-control/api/range/launch/` | POST | Launch new range (accepts `agent_id`, `scenario`) |
 | `/mission-control/api/range/cancel/` | POST | Cancel provisioning range |
 | `/mission-control/api/range/destroy/` | POST | Destroy range |
 | `/mission-control/api/agents/` | GET | List agents for launch dropdown |

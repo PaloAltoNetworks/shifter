@@ -313,46 +313,18 @@ class TestRange:
         assert range_obj.victim_private_ip == "10.1.5.20"
 
     # --- NGFW fields tests ---
+    # Note: Old per-range NGFW fields (ngfw_enabled, ngfw_instance_id, ngfw_untrust_ip, ngfw_trust_ip)
+    # were removed in favor of the UserNGFW model with Range.ngfw FK (issue #412)
 
-    def test_ngfw_enabled_defaults_to_false(self, user):
-        """ngfw_enabled defaults to False."""
+    def test_ngfw_defaults_to_none(self, user):
+        """ngfw FK defaults to None."""
         range_obj = Range.objects.create(user=user)
-        assert range_obj.ngfw_enabled is False
+        assert range_obj.ngfw is None
 
-    def test_ngfw_enabled_can_be_set_true(self, user):
-        """ngfw_enabled can be set to True."""
-        range_obj = Range.objects.create(user=user, ngfw_enabled=True)
-        assert range_obj.ngfw_enabled is True
-
-    def test_ngfw_instance_id_defaults_to_empty(self, user):
-        """ngfw_instance_id defaults to empty string."""
+    def test_gwlb_endpoint_id_defaults_to_empty(self, user):
+        """gwlb_endpoint_id defaults to empty string."""
         range_obj = Range.objects.create(user=user)
-        assert range_obj.ngfw_instance_id == ""
-
-    def test_ngfw_instance_id_can_be_set(self, user):
-        """ngfw_instance_id can store an EC2 instance ID."""
-        range_obj = Range.objects.create(user=user, ngfw_instance_id="i-0abc123def456")
-        assert range_obj.ngfw_instance_id == "i-0abc123def456"
-
-    def test_ngfw_untrust_ip_defaults_to_none(self, user):
-        """ngfw_untrust_ip defaults to None."""
-        range_obj = Range.objects.create(user=user)
-        assert range_obj.ngfw_untrust_ip is None
-
-    def test_ngfw_untrust_ip_can_be_set(self, user):
-        """ngfw_untrust_ip can store an IP address."""
-        range_obj = Range.objects.create(user=user, ngfw_untrust_ip="10.1.5.10")
-        assert range_obj.ngfw_untrust_ip == "10.1.5.10"
-
-    def test_ngfw_trust_ip_defaults_to_none(self, user):
-        """ngfw_trust_ip defaults to None."""
-        range_obj = Range.objects.create(user=user)
-        assert range_obj.ngfw_trust_ip is None
-
-    def test_ngfw_trust_ip_can_be_set(self, user):
-        """ngfw_trust_ip can store an IP address."""
-        range_obj = Range.objects.create(user=user, ngfw_trust_ip="10.1.5.11")
-        assert range_obj.ngfw_trust_ip == "10.1.5.11"
+        assert range_obj.gwlb_endpoint_id == ""
 
     # --- standup_duration property tests ---
 
@@ -423,9 +395,6 @@ class TestRange:
         assert slow_range.pk in slow_ranges
         assert fast_range.pk not in slow_ranges
         assert pending_range.pk not in slow_ranges
-
-
-# --- StrataConfig tests are in test_strata_config.py ---
 
 
 # --- ActivityLog ---

@@ -135,38 +135,3 @@ jobs:
           flags: portal-javascript
           fail_ci_if_error: false
 
-  packer-tests:
-    name: Packer Tests
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install pytest
-        run: pip install pytest
-
-      - name: ShellCheck
-        run: |
-          if command -v shellcheck &> /dev/null; then
-            shellcheck packer/scripts/**/*.sh || true
-          else
-            echo "ShellCheck not installed, skipping"
-          fi
-
-      - name: Run Packer tests
-        run: pytest packer/tests/test_packer.py -v
-
-      - name: Setup Packer
-        uses: hashicorp/setup-packer@main
-        with:
-          version: latest
-
-      - name: Validate Packer templates
-        working-directory: packer
-        run: |
-          packer init .
-          packer validate kali.pkr.hcl

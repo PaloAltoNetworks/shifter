@@ -37,6 +37,9 @@ module "vpc" {
   # VM-Series NGFW
   vm_series_ami_id        = var.vm_series_ami_id
   vm_series_instance_type = var.vm_series_instance_type
+
+  # Persistent NGFW Infrastructure
+  enable_ngfw_infrastructure = var.enable_ngfw_infrastructure
 }
 
 # ------------------------------------------------------------------------------

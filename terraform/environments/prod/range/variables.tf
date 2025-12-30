@@ -64,3 +64,12 @@ variable "vm_series_instance_type" {
   type        = string
   default     = "m5.xlarge"
 }
+
+# ------------------------------------------------------------------------------
+# Persistent NGFW Infrastructure
+# ------------------------------------------------------------------------------
+
+variable "enable_ngfw_infrastructure" {
+  description = "Enable persistent NGFW infrastructure (subnet, security groups, IAM role)"
+  type        = bool
+}

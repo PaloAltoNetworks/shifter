@@ -93,16 +93,6 @@ resource "aws_security_group" "kali" {
 # Victim Security Group Rules
 # ------------------------------------------------------------------------------
 
-resource "aws_security_group_rule" "victim_ssh_from_range" {
-  type              = "ingress"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = [var.vpc_cidr]
-  security_group_id = aws_security_group.victim.id
-  description       = "SSH from Range VPC"
-}
-
 resource "aws_security_group_rule" "victim_ssh_from_portal" {
   type              = "ingress"
   from_port         = 22
@@ -123,6 +113,19 @@ resource "aws_security_group_rule" "victim_from_kali" {
   description              = "All traffic from Kali"
 }
 
+# When NGFW is enabled, traffic arrives at Victim from NGFW (not directly from Kali)
+resource "aws_security_group_rule" "victim_from_ngfw" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.ngfw[0].id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic from NGFW (forwarded attacks)"
+}
+
 resource "aws_security_group_rule" "victim_to_kali" {
   type                     = "egress"
   from_port                = 0
@@ -131,6 +134,19 @@ resource "aws_security_group_rule" "victim_to_kali" {
   source_security_group_id = aws_security_group.kali.id
   security_group_id        = aws_security_group.victim.id
   description              = "All traffic to Kali (reverse shells)"
+}
+
+# When NGFW is enabled, Victim sends return traffic to NGFW (not directly to Kali)
+resource "aws_security_group_rule" "victim_to_ngfw" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type                     = "egress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.ngfw[0].id
+  security_group_id        = aws_security_group.victim.id
+  description              = "All traffic to NGFW (return traffic)"
 }
 
 resource "aws_security_group_rule" "victim_https_to_vpc" {
@@ -186,18 +202,138 @@ resource "aws_security_group_rule" "victim_to_dc" {
 }
 
 # ------------------------------------------------------------------------------
-# Kali Security Group Rules
+# NGFW Security Group (shared by all VM-Series NGFW instances)
 # ------------------------------------------------------------------------------
 
-resource "aws_security_group_rule" "kali_ssh_from_range" {
+# checkov:skip=CKV2_AWS_5:SG used by dynamically provisioned NGFW instances
+# Note: All rules defined as standalone aws_security_group_rule resources below
+# to avoid conflicts between inline rules and standalone rules.
+resource "aws_security_group" "ngfw" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  name        = "${var.name_prefix}-ngfw"
+  description = "Security group for VM-Series NGFW instances"
+  vpc_id      = aws_vpc.this.id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-ngfw-sg"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ------------------------------------------------------------------------------
+# NGFW Security Group Rules
+# ------------------------------------------------------------------------------
+
+# All traffic from Kali (attack traffic entering NGFW)
+resource "aws_security_group_rule" "ngfw_from_kali" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.kali.id
+  security_group_id        = aws_security_group.ngfw[0].id
+  description              = "All traffic from Kali (attack traffic)"
+}
+
+# All traffic from Victim (return traffic)
+resource "aws_security_group_rule" "ngfw_from_victim" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.victim.id
+  security_group_id        = aws_security_group.ngfw[0].id
+  description              = "All traffic from Victim (return traffic)"
+}
+
+# SSH from Portal VPC (management access via browser terminal)
+resource "aws_security_group_rule" "ngfw_ssh_from_portal" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
   type              = "ingress"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
-  cidr_blocks       = [var.vpc_cidr]
-  security_group_id = aws_security_group.kali.id
-  description       = "SSH from Range VPC"
+  cidr_blocks       = [var.portal_vpc_cidr]
+  security_group_id = aws_security_group.ngfw[0].id
+  description       = "SSH from Portal VPC (management)"
 }
+
+# HTTPS from Portal VPC (management web UI)
+resource "aws_security_group_rule" "ngfw_https_from_portal" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = [var.portal_vpc_cidr]
+  security_group_id = aws_security_group.ngfw[0].id
+  description       = "HTTPS from Portal VPC (management web UI)"
+}
+
+# All traffic to VPC (forward to victim, return to kali)
+resource "aws_security_group_rule" "ngfw_to_vpc" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.ngfw[0].id
+  description       = "All traffic to VPC (forwarding)"
+}
+
+# HTTPS egress for telemetry to Panorama/Cloud
+resource "aws_security_group_rule" "ngfw_https_to_internet" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type              = "egress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.ngfw[0].id
+  description       = "HTTPS for telemetry (filtered by ANFW)"
+}
+
+# DNS for NGFW operations
+resource "aws_security_group_rule" "ngfw_dns_udp" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.ngfw[0].id
+  description       = "DNS UDP"
+}
+
+resource "aws_security_group_rule" "ngfw_dns_tcp" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.ngfw[0].id
+  description       = "DNS TCP"
+}
+
+# ------------------------------------------------------------------------------
+# Kali Security Group Rules
+# ------------------------------------------------------------------------------
 
 resource "aws_security_group_rule" "kali_ssh_from_portal" {
   type              = "ingress"
@@ -217,6 +353,19 @@ resource "aws_security_group_rule" "kali_from_victim" {
   source_security_group_id = aws_security_group.victim.id
   security_group_id        = aws_security_group.kali.id
   description              = "All traffic from victim (reverse shells)"
+}
+
+# When NGFW is enabled, return traffic arrives at Kali from NGFW (not directly from Victim)
+resource "aws_security_group_rule" "kali_from_ngfw" {
+  count = var.vm_series_ami_id != "" ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  source_security_group_id = aws_security_group.ngfw[0].id
+  security_group_id        = aws_security_group.kali.id
+  description              = "All traffic from NGFW (return traffic)"
 }
 
 resource "aws_security_group_rule" "kali_to_vpc" {

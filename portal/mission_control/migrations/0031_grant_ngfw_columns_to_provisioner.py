@@ -78,7 +78,7 @@ class Migration(migrations.Migration):
     """Grant NGFW-related permissions to provisioner_lambda."""
 
     dependencies = [
-        ("mission_control", "0020_ngfw_models"),
+        ("mission_control", "0030_ngfw_models"),
     ]
 
     operations = [

@@ -2,6 +2,8 @@
 
 from django.conf import settings
 from django.db import models, transaction
+from django.utils import timezone
+from encrypted_model_fields.fields import EncryptedCharField
 
 
 class OperatingSystem(models.Model):
@@ -29,6 +31,181 @@ class OperatingSystem(models.Model):
             if ext in os.extensions:
                 return os
         return None
+
+
+class Asset(models.Model):
+    """Abstract base for user-owned assets with soft delete."""
+
+    name = models.CharField(max_length=100, help_text="User-friendly name")
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def is_deleted(self):
+        return self.deleted_at is not None
+
+    @classmethod
+    def active_for_user(cls, user):
+        """Return non-deleted assets for a user."""
+        return cls.objects.filter(user=user, deleted_at__isnull=True)
+
+
+class Credential(Asset):
+    """Abstract base for credential assets with expiration tracking."""
+
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this credential expires (user sets at creation)",
+    )
+    last_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time credential was validated against external system",
+    )
+    last_used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time credential was used for provisioning",
+    )
+
+    class Meta:
+        abstract = True
+
+    @property
+    def is_expired(self):
+        if not self.expires_at:
+            return False
+        return timezone.now() > self.expires_at
+
+
+class SCMCredential(Credential):
+    """Strata Cloud Manager registration credentials (PIN-based)."""
+
+    class SLSRegion(models.TextChoices):
+        AMERICAS = "americas", "Americas"
+        EUROPE = "europe", "Europe"
+        JAPAN = "japan", "Japan"
+        ASIAPACIFIC = "asiapacific", "Asia Pacific"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="scm_credentials",
+    )
+
+    # SCM Registration
+    scm_folder_name = models.CharField(max_length=255)
+    scm_pin_id = models.CharField(max_length=255)
+    scm_pin_value = EncryptedCharField(max_length=255)
+
+    # Strata Logging Service
+    sls_region = models.CharField(
+        max_length=50,
+        choices=SLSRegion.choices,
+        default=SLSRegion.AMERICAS,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "SCM Credential"
+        verbose_name_plural = "SCM Credentials"
+
+
+class NGFWDeploymentProfile(Credential):
+    """Software NGFW Credits deployment profile."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ngfw_deployment_profiles",
+    )
+
+    # Licensing
+    authcode = EncryptedCharField(
+        max_length=100,
+        help_text="Authcode from CSP deployment profile (e.g., D9232090)",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "NGFW Deployment Profile"
+        verbose_name_plural = "NGFW Deployment Profiles"
+
+
+class UserNGFW(Asset):
+    """Persistent NGFW instance. Users can have multiple."""
+
+    class Status(models.TextChoices):
+        NOT_PROVISIONED = "not_provisioned", "Not Provisioned"
+        PROVISIONING = "provisioning", "Provisioning"
+        READY = "ready", "Ready"
+        STARTING = "starting", "Starting"
+        ACTIVE = "active", "Active"
+        STOPPING = "stopping", "Stopping"
+        STOPPED = "stopped", "Stopped"
+        DEPROVISIONING = "deprovisioning", "Deprovisioning"
+        FAILED = "failed", "Failed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ngfws",
+    )
+
+    # Credentials (SCMCredential nullable for OTP flow)
+    scm_credential = models.ForeignKey(
+        SCMCredential,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ngfws",
+    )
+    deployment_profile = models.ForeignKey(
+        NGFWDeploymentProfile,
+        on_delete=models.PROTECT,
+        related_name="ngfws",
+    )
+
+    # Lifecycle
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NOT_PROVISIONED,
+    )
+
+    # AWS Resources - NGFW
+    instance_id = models.CharField(max_length=32, blank=True)
+    mgmt_eni_id = models.CharField(max_length=32, blank=True)
+    data_eni_id = models.CharField(max_length=32, blank=True)
+    management_ip = models.GenericIPAddressField(null=True, blank=True)
+    dataplane_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    # AWS Resources - GWLB
+    gwlb_arn = models.CharField(max_length=256, blank=True)
+    target_group_arn = models.CharField(max_length=256, blank=True)
+    gwlb_service_name = models.CharField(max_length=256, blank=True)
+
+    # PAN-OS Info
+    serial_number = models.CharField(max_length=32, blank=True)
+    device_cert_status = models.CharField(max_length=32, blank=True)
+    xdr_configured = models.BooleanField(default=False)
+
+    # Timestamps (beyond Asset's created_at, deleted_at)
+    provisioned_at = models.DateTimeField(null=True, blank=True)
+    last_started_at = models.DateTimeField(null=True, blank=True)
+    last_stopped_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "User NGFW"
+        verbose_name_plural = "User NGFWs"
 
 
 class UserProfile(models.Model):
@@ -123,6 +300,20 @@ class Range(models.Model):
         blank=True,
         related_name="dc_ranges",
         help_text="Agent for DC instances (Windows only, required for AD scenarios)",
+    )
+    ngfw = models.ForeignKey(
+        "UserNGFW",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ranges",
+        help_text="Persistent NGFW instance for this range",
+    )
+    gwlb_endpoint_id = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="GWLB endpoint ID for this range's NGFW",
     )
     status = models.CharField(
         max_length=20,

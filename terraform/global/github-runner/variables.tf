@@ -4,6 +4,12 @@ variable "region" {
   default     = "us-east-2"
 }
 
+variable "runner_count" {
+  description = "Number of GitHub Actions runners to create"
+  type        = number
+  default     = 2
+}
+
 variable "vpc_id" {
   description = "VPC ID for the runner"
   type        = string
@@ -23,7 +29,7 @@ variable "instance_type" {
 variable "github_org" {
   description = "GitHub organization or username"
   type        = string
-  default     = "paloaltonetworks"
+  default     = "Brad-Edwards"
 }
 
 variable "github_repo" {

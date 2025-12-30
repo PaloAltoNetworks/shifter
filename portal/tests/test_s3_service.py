@@ -19,7 +19,12 @@ class TestGetS3Client:
     def test_creates_client_with_region(self, mock_boto3, settings):
         settings.AWS_S3_REGION = "us-west-2"
         get_s3_client()
-        mock_boto3.client.assert_called_once_with("s3", region_name="us-west-2")
+        # Verify client is created with regional endpoint
+        mock_boto3.client.assert_called_once()
+        call_kwargs = mock_boto3.client.call_args
+        assert call_kwargs[0][0] == "s3"
+        assert call_kwargs[1]["region_name"] == "us-west-2"
+        assert call_kwargs[1]["endpoint_url"] == "https://s3.us-west-2.amazonaws.com"
 
 
 class TestUploadAgent:

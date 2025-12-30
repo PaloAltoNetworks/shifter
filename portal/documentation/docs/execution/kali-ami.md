@@ -35,22 +35,52 @@ The marketplace Kali AMI is minimal. Pre-baking adds:
 - sshpass for Claude Code automated SSH workflows
 - Claude Code for agentic pentesting workflows
 
-## Building the AMI
+## AMI Management
 
-AMI is built with Packer. See [`packer/README.md`](/packer/README.md).
+AMI IDs are stored in SSM Parameter Store at `/shifter/ami/kali` in each AWS account. Terraform reads these values via data sources - no manual tfvars updates needed.
+
+### Build in Dev
+
+Build a new Kali AMI in the dev account:
+
+```bash
+./scripts/ami.sh -b kali
+```
+
+This triggers the `packer.yml` workflow which:
+1. Runs Packer build using `dev.pkrvars.hcl`
+2. Creates AMI in dev account (us-east-2)
+3. Updates `/shifter/ami/kali` SSM parameter in dev
+
+### Promote to Prod
+
+After testing in dev, promote to prod:
+
+```bash
+./scripts/ami.sh -p kali
+```
+
+This triggers the `packer-promote.yml` workflow which:
+1. Reads dev AMI ID from SSM
+2. Shares AMI with prod account
+3. Copies AMI to prod account
+4. Updates `/shifter/ami/kali` SSM parameter in prod
+
+### Manual Build
+
+For local testing or debugging:
 
 ```bash
 cd packer
 packer init .
-packer build kali.pkr.hcl
+packer validate -var-file=dev.pkrvars.hcl kali.pkr.hcl
+packer build -var-file=dev.pkrvars.hcl kali.pkr.hcl
 ```
-
-Or trigger via GitHub Actions: **Actions > Packer AMI Build > Run workflow**
 
 ## Provisioning Flow
 
 1. Portal triggers provisioner with range config
-2. Provisioner reads `KALI_AMI_ID` from env
+2. Terraform reads AMI ID from SSM Parameter Store
 3. EC2 launched from pre-baked AMI
 4. User data runs on boot:
    - Sets hostname
@@ -58,9 +88,10 @@ Or trigger via GitHub Actions: **Actions > Packer AMI Build > Run workflow**
 
 ## Config
 
-| Env Var | Value |
-|---------|-------|
-| `KALI_AMI_ID` | Set in terraform.tfvars per environment |
+| Parameter | Location |
+|-----------|----------|
+| AMI ID | SSM: `/shifter/ami/kali` |
+| Instance type | `terraform.tfvars` per environment |
 
 ## Marketplace Subscription
 

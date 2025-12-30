@@ -17,6 +17,9 @@ apt-get install -y \
   python3-venv \
   nodejs \
   npm \
-  build-essential
+  build-essential \
+  git \
+  curl \
+  wget
 
 echo "=== Tools setup complete ==="

@@ -2,20 +2,10 @@
 # Base packages and SSM agent for Kali AMI
 set -euo pipefail
 
-echo "=== Updating package lists ==="
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
 
-echo "=== Installing base packages ==="
-apt-get install -y \
-  curl \
-  wget \
-  git \
-  unzip \
-  jq \
-  htop \
-  tmux \
-  vim
+echo "=== Updating package lists ==="
+apt-get update
 
 echo "=== Installing SSM Agent ==="
 # SSM agent not in Kali repos - install from AWS

@@ -213,49 +213,11 @@ resource "aws_iam_policy" "ec2_instances" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # TODO: Scope down EC2 permissions - see GitHub issue for audit
       {
-        Sid    = "EC2"
-        Effect = "Allow"
-        Action = [
-          "ec2:RunInstances",
-          "ec2:TerminateInstances",
-          "ec2:StartInstances",
-          "ec2:StopInstances",
-          "ec2:RebootInstances",
-          "ec2:DescribeInstances",
-          "ec2:DescribeInstanceStatus",
-          "ec2:DescribeInstanceTypes",
-          "ec2:DescribeInstanceAttribute",
-          "ec2:ModifyInstanceAttribute",
-          "ec2:DescribeImages",
-          "ec2:DescribeVolumes",
-          "ec2:CreateVolume",
-          "ec2:DeleteVolume",
-          "ec2:AttachVolume",
-          "ec2:DetachVolume",
-          "ec2:ModifyVolume",
-          "ec2:DescribeVolumesModifications",
-          "ec2:DescribeInstanceCreditSpecifications",
-          "ec2:DescribeKeyPairs",
-          "ec2:CreateKeyPair",
-          "ec2:DeleteKeyPair",
-          "ec2:MonitorInstances",
-          "ec2:UnmonitorInstances"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "LaunchTemplate"
-        Effect = "Allow"
-        Action = [
-          "ec2:CreateLaunchTemplate",
-          "ec2:DeleteLaunchTemplate",
-          "ec2:DescribeLaunchTemplates",
-          "ec2:DescribeLaunchTemplateVersions",
-          "ec2:ModifyLaunchTemplate",
-          "ec2:CreateLaunchTemplateVersion",
-          "ec2:DeleteLaunchTemplateVersions"
-        ]
+        Sid      = "EC2"
+        Effect   = "Allow"
+        Action   = ["ec2:*"]
         Resource = "*"
       },
       {
@@ -532,22 +494,6 @@ resource "aws_iam_policy" "lambda_sfn" {
         Effect = "Allow"
         Action = [
           "ecs:*"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "StepFunctions"
-        Effect = "Allow"
-        Action = [
-          "states:CreateStateMachine",
-          "states:DeleteStateMachine",
-          "states:DescribeStateMachine",
-          "states:UpdateStateMachine",
-          "states:ListStateMachines",
-          "states:ListStateMachineVersions",
-          "states:TagResource",
-          "states:UntagResource",
-          "states:ListTagsForResource"
         ]
         Resource = "*"
       }

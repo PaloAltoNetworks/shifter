@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2025-12-29
+
+### Changed
+- Remove Step Functions permissions from GitHub OIDC role (cleanup after v1 provisioner removal)
+
 ## [0.8.1] - 2025-12-27
 
 ### Changed

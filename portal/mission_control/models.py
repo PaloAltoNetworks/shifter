@@ -2,34 +2,52 @@
 
 from django.conf import settings
 from django.db import models, transaction
+from django.utils import timezone
+from encrypted_model_fields.fields import EncryptedCharField
 
-from .fields import EncryptedCharField
+
+class OperatingSystem(models.Model):
+    """Reference table for supported operating systems."""
+
+    slug = models.SlugField(max_length=50, unique=True)
+    name = models.CharField(max_length=100)
+    extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Operating System"
+        verbose_name_plural = "Operating Systems"
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def get_for_extension(cls, extension: str):
+        """Find the OS that matches a given file extension."""
+        ext = extension.lower()
+        if not ext.startswith("."):
+            ext = f".{ext}"
+        for os in cls.objects.all():
+            if ext in os.extensions:
+                return os
+        return None
 
 
 class Asset(models.Model):
-    """Abstract base class for user-owned assets.
+    """Abstract base for user-owned assets with soft delete."""
 
-    Provides common fields for all assets:
-    - name: User-friendly identifier
-    - created_at/deleted_at: Timestamps for lifecycle
-    - is_deleted: Property for soft delete status
-    - active_for_user(): Classmethod to filter active assets
-
-    Note: user FK is defined in concrete classes to allow
-    different related_name values per model type.
-    """
-
-    name = models.CharField(max_length=255, help_text="User-friendly name")
+    name = models.CharField(max_length=100, help_text="User-friendly name")
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         abstract = True
-        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name
 
     @property
     def is_deleted(self):
-        """Return True if this asset has been soft-deleted."""
         return self.deleted_at is not None
 
     @classmethod
@@ -62,31 +80,156 @@ class FileAsset(Asset):
         return round(self.file_size_bytes / (1024 * 1024), 1)
 
 
-class OperatingSystem(models.Model):
-    """Reference table for supported operating systems."""
+class Credential(Asset):
+    """Abstract base for credential assets with expiration tracking."""
 
-    slug = models.SlugField(max_length=50, unique=True)
-    name = models.CharField(max_length=100)
-    extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this credential expires (user sets at creation)",
+    )
+    last_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time credential was validated against external system",
+    )
+    last_used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time credential was used for provisioning",
+    )
 
     class Meta:
-        ordering = ["name"]
-        verbose_name = "Operating System"
-        verbose_name_plural = "Operating Systems"
+        abstract = True
 
-    def __str__(self):
-        return self.name
+    @property
+    def is_expired(self):
+        if not self.expires_at:
+            return False
+        return timezone.now() > self.expires_at
 
-    @classmethod
-    def get_for_extension(cls, extension: str):
-        """Find the OS that matches a given file extension."""
-        ext = extension.lower()
-        if not ext.startswith("."):
-            ext = f".{ext}"
-        for os in cls.objects.all():
-            if ext in os.extensions:
-                return os
-        return None
+
+class SCMCredential(Credential):
+    """Strata Cloud Manager registration credentials (PIN-based)."""
+
+    class SLSRegion(models.TextChoices):
+        AMERICAS = "americas", "Americas"
+        EUROPE = "europe", "Europe"
+        JAPAN = "japan", "Japan"
+        ASIAPACIFIC = "asiapacific", "Asia Pacific"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="scm_credentials",
+    )
+
+    # SCM Registration
+    scm_folder_name = models.CharField(max_length=255)
+    scm_pin_id = models.CharField(max_length=255)
+    scm_pin_value = EncryptedCharField(max_length=255)
+
+    # Strata Logging Service
+    sls_region = models.CharField(
+        max_length=50,
+        choices=SLSRegion.choices,
+        default=SLSRegion.AMERICAS,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "SCM Credential"
+        verbose_name_plural = "SCM Credentials"
+
+
+class NGFWDeploymentProfile(Credential):
+    """Software NGFW Credits deployment profile."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ngfw_deployment_profiles",
+    )
+
+    # Licensing
+    authcode = EncryptedCharField(
+        max_length=100,
+        help_text="Authcode from CSP deployment profile (e.g., D9232090)",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "NGFW Deployment Profile"
+        verbose_name_plural = "NGFW Deployment Profiles"
+
+
+class UserNGFW(Asset):
+    """Persistent NGFW instance. Users can have multiple."""
+
+    class Status(models.TextChoices):
+        NOT_PROVISIONED = "not_provisioned", "Not Provisioned"
+        PROVISIONING = "provisioning", "Provisioning"
+        READY = "ready", "Ready"
+        STARTING = "starting", "Starting"
+        ACTIVE = "active", "Active"
+        STOPPING = "stopping", "Stopping"
+        STOPPED = "stopped", "Stopped"
+        DEPROVISIONING = "deprovisioning", "Deprovisioning"
+        FAILED = "failed", "Failed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ngfws",
+    )
+
+    # Credentials (SCMCredential nullable for OTP flow)
+    scm_credential = models.ForeignKey(
+        SCMCredential,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ngfws",
+    )
+    deployment_profile = models.ForeignKey(
+        NGFWDeploymentProfile,
+        on_delete=models.PROTECT,
+        related_name="ngfws",
+    )
+
+    # Lifecycle
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NOT_PROVISIONED,
+    )
+
+    # AWS Resources - NGFW
+    instance_id = models.CharField(max_length=32, blank=True)
+    mgmt_eni_id = models.CharField(max_length=32, blank=True)
+    data_eni_id = models.CharField(max_length=32, blank=True)
+    management_ip = models.GenericIPAddressField(null=True, blank=True)
+    dataplane_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    # AWS Resources - GWLB
+    gwlb_arn = models.CharField(max_length=256, blank=True)
+    target_group_arn = models.CharField(max_length=256, blank=True)
+    gwlb_service_name = models.CharField(max_length=256, blank=True)
+
+    # PAN-OS Info
+    serial_number = models.CharField(max_length=32, blank=True)
+    device_cert_status = models.CharField(max_length=32, blank=True)
+    xdr_configured = models.BooleanField(default=False)
+
+    # Timestamps (beyond Asset's created_at, deleted_at)
+    provisioned_at = models.DateTimeField(null=True, blank=True)
+    last_started_at = models.DateTimeField(null=True, blank=True)
+    last_stopped_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "User NGFW"
+        verbose_name_plural = "User NGFWs"
 
 
 class UserProfile(models.Model):
@@ -148,87 +291,6 @@ class AgentConfig(FileAsset):
         return f"{self.name} ({self.os.name})"
 
 
-class StrataConfig(models.Model):
-    """Strata Cloud Manager configuration for NGFW instances.
-
-    Stores SCM registration credentials for VM-Series bootstrap.
-    Used to generate init-cfg.txt with PIN-based authentication.
-    """
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="strata_configs",
-    )
-    name = models.CharField(
-        max_length=255,
-        help_text="User-friendly name for this config",
-    )
-
-    # SCM Registration fields
-    scm_folder_name = models.CharField(
-        max_length=255,
-        help_text="SCM folder name (Configuration > Folders in SCM)",
-    )
-    scm_pin_id = models.CharField(
-        max_length=255,
-        help_text="Auto-registration PIN ID (Assets > Device Certificates in SCM)",
-    )
-    scm_pin_value = EncryptedCharField(
-        max_length=255,
-        help_text="Auto-registration PIN value (encrypted at rest)",
-    )
-
-    # Metadata
-    created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "Strata Config"
-        verbose_name_plural = "Strata Configs"
-
-    def __str__(self):
-        return f"{self.name} ({self.scm_folder_name})"
-
-    @property
-    def is_deleted(self):
-        """Return True if this config has been soft-deleted."""
-        return self.deleted_at is not None
-
-    @classmethod
-    def active_for_user(cls, user):
-        """Return non-deleted Strata configs for a user."""
-        return cls.objects.filter(user=user, deleted_at__isnull=True)
-
-    def get_init_cfg_context(self) -> dict:
-        """Get context dict for init-cfg.txt template rendering.
-
-        Returns:
-            Dict with pin_id, pin_value, folder_name keys for template.
-        """
-        return {
-            "pin_id": self.scm_pin_id,
-            "pin_value": self.scm_pin_value,
-            "folder_name": self.scm_folder_name,
-        }
-
-    def clean(self):
-        """Validate that required fields are not empty strings."""
-        from django.core.exceptions import ValidationError
-
-        errors = {}
-        if not self.scm_folder_name or not self.scm_folder_name.strip():
-            errors["scm_folder_name"] = "SCM folder name cannot be empty."
-        if not self.scm_pin_id or not self.scm_pin_id.strip():
-            errors["scm_pin_id"] = "SCM PIN ID cannot be empty."
-        if not self.scm_pin_value or not self.scm_pin_value.strip():
-            errors["scm_pin_value"] = "SCM PIN value cannot be empty."
-
-        if errors:
-            raise ValidationError(errors)
-
-
 class Range(models.Model):
     """User's cyber range instance with lifecycle management."""
 
@@ -242,9 +304,7 @@ class Range(models.Model):
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
 
-    # Status groupings for lifecycle management (defined after Status for reference)
-    ACTIVE_STATUSES: frozenset[str]  # User has a "live" range, can't launch another
-    DESTROYABLE_STATUSES: frozenset[str]  # Range can be destroyed
+    # Status groupings for lifecycle queries
     TERMINAL_STATUSES: frozenset[str]  # Range has reached end of lifecycle
     CANCELLABLE_STATUSES: frozenset[str]  # Range can be cancelled (early lifecycle only)
 
@@ -264,6 +324,20 @@ class Range(models.Model):
         blank=True,
         related_name="dc_ranges",
         help_text="Agent for DC instances (Windows only, required for AD scenarios)",
+    )
+    ngfw = models.ForeignKey(
+        "UserNGFW",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ranges",
+        help_text="Persistent NGFW instance for this range",
+    )
+    gwlb_endpoint_id = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="GWLB endpoint ID for this range's NGFW",
     )
     status = models.CharField(
         max_length=20,
@@ -319,24 +393,6 @@ class Range(models.Model):
         help_text="Provisioner version: v1=Lambda, v2=Pulumi",
     )
 
-    # NGFW (VM-Series) fields
-    ngfw_enabled = models.BooleanField(default=False, help_text="Deploy VM-Series NGFW inline between Kali and Victim")
-    strata_config = models.ForeignKey(
-        StrataConfig,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="ranges",
-        help_text="SCM config for NGFW bootstrap (PIN-based registration)",
-    )
-    ngfw_instance_id = models.CharField(max_length=50, blank=True, default="", help_text="NGFW EC2 instance ID")
-    ngfw_untrust_ip = models.GenericIPAddressField(
-        null=True, blank=True, help_text="NGFW untrust interface IP (Kali-facing)"
-    )
-    ngfw_trust_ip = models.GenericIPAddressField(
-        null=True, blank=True, help_text="NGFW trust interface IP (Victim-facing)"
-    )
-
     # Status and timestamps
     error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -360,7 +416,18 @@ class Range(models.Model):
     @property
     def is_terminal(self):
         """Return True if range has reached a final state."""
-        return self.status in self.TERMINAL_STATUSES
+        return self.status in (self.Status.DESTROYED, self.Status.FAILED)
+
+    @property
+    def standup_duration(self):
+        """Total time from creation to ready.
+
+        Returns:
+            timedelta if both created_at and ready_at are set, None otherwise
+        """
+        if self.ready_at and self.created_at:
+            return self.ready_at - self.created_at
+        return None
 
     @classmethod
     def get_active_for_user(cls, user):
@@ -369,12 +436,31 @@ class Range(models.Model):
         DESTROYING ranges are excluded - user can launch a new range while
         the old one is being cleaned up (subnet allocation handles the race).
         """
-        return cls.objects.filter(user=user, status__in=cls.ACTIVE_STATUSES).first()
+        return cls.objects.filter(
+            user=user,
+            status__in=[
+                cls.Status.PENDING,
+                cls.Status.PROVISIONING,
+                cls.Status.READY,
+                cls.Status.PAUSED,
+                cls.Status.RESUMING,
+            ],
+        ).first()
 
     @classmethod
     def get_destroyable_for_user(cls, user):
         """Return a range that can be destroyed (active or failed), or None."""
-        return cls.objects.filter(user=user, status__in=cls.DESTROYABLE_STATUSES).first()
+        return cls.objects.filter(
+            user=user,
+            status__in=[
+                cls.Status.PENDING,
+                cls.Status.PROVISIONING,
+                cls.Status.READY,
+                cls.Status.PAUSED,
+                cls.Status.RESUMING,
+                cls.Status.FAILED,
+            ],
+        ).first()
 
     # Subnet index allocation constants
     # Range VPC uses 10.1.0.0/16, each range gets 10.1.{index}.0/24
@@ -399,10 +485,11 @@ class Range(models.Model):
         with transaction.atomic():
             # Lock rows to prevent race conditions
             # Get all subnet_index values currently in use by active ranges
-            # Exclude terminal states - those ranges don't have AWS resources
+            # Exclude terminal states (DESTROYED, FAILED) - those ranges don't have
+            # AWS resources or their resources are being cleaned up
             used_indices = set(
                 cls.objects.select_for_update()
-                .exclude(status__in=cls.TERMINAL_STATUSES)
+                .exclude(status__in=[cls.Status.DESTROYED, cls.Status.FAILED])
                 .exclude(subnet_index__isnull=True)
                 .values_list("subnet_index", flat=True)
             )
@@ -473,51 +560,6 @@ class Range(models.Model):
             return None
         return victims[0].get("private_ip")
 
-    @property
-    def standup_duration(self):
-        """Total time from creation to ready.
-
-        Returns:
-            timedelta if both created_at and ready_at are set, None otherwise
-        """
-        if self.ready_at and self.created_at:
-            return self.ready_at - self.created_at
-        return None
-
-
-# Assign status groupings after class definition (can't reference Status inside class body)
-Range.ACTIVE_STATUSES = frozenset(
-    {
-        Range.Status.PENDING,
-        Range.Status.PROVISIONING,
-        Range.Status.READY,
-        Range.Status.PAUSED,
-        Range.Status.RESUMING,
-    }
-)
-Range.DESTROYABLE_STATUSES = frozenset(
-    {
-        Range.Status.PENDING,
-        Range.Status.PROVISIONING,
-        Range.Status.READY,
-        Range.Status.PAUSED,
-        Range.Status.RESUMING,
-        Range.Status.FAILED,
-    }
-)
-Range.TERMINAL_STATUSES = frozenset(
-    {
-        Range.Status.DESTROYED,
-        Range.Status.FAILED,
-    }
-)
-Range.CANCELLABLE_STATUSES = frozenset(
-    {
-        Range.Status.PENDING,
-        Range.Status.PROVISIONING,
-    }
-)
-
 
 class ActivityLog(models.Model):
     """Generic activity/event log for analytics and auditing."""
@@ -546,3 +588,18 @@ class ActivityLog(models.Model):
     def log(cls, action: str, user=None, **metadata):
         """Convenience method to log an activity."""
         return cls.objects.create(user=user, action=action, metadata=metadata)
+
+
+# Define Range status groupings (after class definition to reference Status enum)
+Range.TERMINAL_STATUSES = frozenset(
+    {
+        Range.Status.DESTROYED,
+        Range.Status.FAILED,
+    }
+)
+Range.CANCELLABLE_STATUSES = frozenset(
+    {
+        Range.Status.PENDING,
+        Range.Status.PROVISIONING,
+    }
+)

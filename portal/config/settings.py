@@ -19,7 +19,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 
-# Field encryption key for sensitive model fields (e.g., StrataConfig.scm_pin_value)
+# Field encryption key for sensitive model fields (e.g., SCMCredential.scm_pin_value)
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 # For testing, use a deterministic key; in production, use FIELD_ENCRYPTION_KEY env var
 FIELD_ENCRYPTION_KEY = os.environ.get(
@@ -260,6 +260,21 @@ OIDC_EXEMPT_URLS = [
     "/health",  # Health check
     "/health/",  # Health check with trailing slash
 ]
+
+# ------------------------------------------------------------------------------
+# Field Encryption (django-encrypted-model-fields)
+# ------------------------------------------------------------------------------
+# Used for encrypting sensitive credential fields (SCM PINs, authcodes)
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# In production: stored in Secrets Manager alongside other portal secrets
+
+FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
+if not FIELD_ENCRYPTION_KEY:
+    if DEBUG or os.environ.get("TESTING") == "1":
+        # Dev/test: use a fixed key (not for production!)
+        FIELD_ENCRYPTION_KEY = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="  # nosec B105
+    else:
+        raise ValueError("FIELD_ENCRYPTION_KEY environment variable is required in production")
 
 # ------------------------------------------------------------------------------
 # Shifter Configuration

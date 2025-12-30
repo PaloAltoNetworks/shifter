@@ -8,14 +8,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 
-from .ssm_executor import (
+from executors.ssm_executor import (
     SSMExecutor,
     CommandResult,
     CommandError,
     TimeoutError,
     SSMExecutorError,
 )
-from .setup_plan import SetupPlan, SetupStep
+from plans.base import SetupPlan, SetupStep
 
 
 class SetupError(Exception):

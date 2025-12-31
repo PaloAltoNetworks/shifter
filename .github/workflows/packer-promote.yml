@@ -9,6 +9,8 @@ on:
         type: choice
         options:
           - kali
+          - ubuntu
+          - windows
 
 permissions:
   id-token: write

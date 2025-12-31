@@ -7,18 +7,18 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-        files: ^portal/
+        files: ^shifter/
       - id: ruff-format
-        files: ^portal/
+        files: ^shifter/
 
-  # Python - Tests (portal)
+  # Python - Tests (shifter)
   - repo: local
     hooks:
-      - id: pytest-portal
-        name: pytest (portal)
-        entry: bash -c 'cd portal && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q'
+      - id: pytest-shifter
+        name: pytest (shifter)
+        entry: bash -c 'cd shifter && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q'
         language: system
-        files: ^portal/
+        files: ^shifter/
         pass_filenames: false
         always_run: true
 
@@ -27,10 +27,10 @@ repos:
     rev: 1.9.2
     hooks:
       - id: bandit
-        args: [-c, portal/pyproject.toml, -r]
+        args: [-c, shifter/pyproject.toml, -r]
         additional_dependencies: ["bandit[toml]"]
-        files: ^portal/
-        exclude: ^portal/(tests|\.venv)/
+        files: ^shifter/
+        exclude: ^shifter/(tests|\.venv)/
 
   # General
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -55,7 +55,7 @@ repos:
         name: stylelint
         entry: npx stylelint --fix
         language: system
-        files: ^portal/static/css/.*\.css$
+        files: ^shifter/static/css/.*\.css$
         types: [css]
 
   # Packer tests

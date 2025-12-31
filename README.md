@@ -31,13 +31,13 @@ Shifter complements existing demo environments and tools. It is not intended to 
 ```
 shifter/
 ├── shifter/              # Django app (auth, UI, range management)
-├── shifter-engine/      # Pulumi-based range provisioner (ECS task)
-├── terraform/           # Infrastructure (VPCs, IAM, runners)
-│   ├── environments/    # dev/, prod/ configs
-│   ├── modules/         # Reusable modules
-│   └── global/          # IAM, OIDC, runners
-├── packer/              # AMI builds (Kali, victims)
-└── scripts/             # Dev utilities
+├── shifter-engine/       # Pulumi-based range provisioner (ECS task)
+├── platform/terraform/   # Infrastructure (VPCs, IAM, runners)
+│   ├── environments/     # dev/, prod/ configs
+│   ├── modules/          # Reusable modules
+│   └── global/           # IAM, OIDC, runners
+├── packer/               # AMI builds (Kali, victims)
+└── scripts/              # Dev utilities
 ```
 
 ## Key Commands
@@ -55,11 +55,11 @@ cd shifter-engine && pytest
 ./scripts/ami.sh -p kali    # Promote to prod
 
 # Terraform - environment infra (CI/CD managed)
-cd terraform/environments/dev/portal && terraform plan
+cd platform/terraform/environments/dev/portal && terraform plan
 
 # Terraform - global infra (manual, not in CI/CD)
 ./scripts/iam-deploy.sh dev   # IAM, OIDC roles
-cd terraform/global/github-runner && terraform apply -var-file=dev.tfvars
+cd platform/terraform/global/github-runner && terraform apply -var-file=dev.tfvars
 ```
 
 ## Git Workflow

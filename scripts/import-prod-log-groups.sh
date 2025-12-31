@@ -8,7 +8,7 @@ export AWS_REGION="us-east-2"
 export AWS_PROFILE="dev-workstation-user"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORTAL_DIR="${SCRIPT_DIR}/../terraform/environments/prod/portal"
+PORTAL_DIR="${SCRIPT_DIR}/../platform/terraform/environments/prod/portal"
 
 cd "$PORTAL_DIR"
 echo "Working directory: $(pwd)"

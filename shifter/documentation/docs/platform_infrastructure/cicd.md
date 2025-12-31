@@ -33,10 +33,10 @@ Jobs run only when relevant files change. `deploy.yml` detects changes and trigg
 
 | Job | Triggers On |
 |-----|-------------|
-| **core** | `terraform/modules/ecr/**`, `terraform/environments/*/*.tf` |
-| **range** | `terraform/modules/range/**`, `terraform/environments/*/range/**` |
-| **shifter_engine** | `shifter-engine/**`, `terraform/modules/pulumi-provisioner/**` |
-| **portal** | `terraform/modules/portal/**`, `shifter/**` |
+| **core** | `platform/terraform/modules/ecr/**`, `platform/terraform/environments/*/*.tf` |
+| **range** | `platform/terraform/modules/range/**`, `platform/terraform/environments/*/range/**` |
+| **shifter_engine** | `shifter-engine/**`, `platform/terraform/modules/pulumi-provisioner/**` |
+| **portal** | `platform/terraform/modules/portal/**`, `shifter/**` |
 
 ## Environment Targeting
 
@@ -55,4 +55,4 @@ OIDC federation with AWS. No long-lived credentials.
 | `AWS_ROLE_ARN` | Prod environment IAM role |
 | `AWS_ROLE_ARN_DEV` | Dev environment IAM role |
 
-Roles defined in `terraform/global/iam/github-oidc.tf`.
+Roles defined in `platform/terraform/global/iam/github-oidc.tf`.

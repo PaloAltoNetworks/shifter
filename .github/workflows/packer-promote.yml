@@ -10,6 +10,7 @@ on:
         options:
           - kali
           - ubuntu
+          - windows
 
 permissions:
   id-token: write

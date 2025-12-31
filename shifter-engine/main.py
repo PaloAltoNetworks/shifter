@@ -416,6 +416,8 @@ def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
 if __name__ == "__main__":
     import argparse
 
+    RANGE_ID_HELP = "Database ID of the range to operate on"
+
     parser = argparse.ArgumentParser(
         description="Shifter Engine for provisioning cyber ranges and NGFW operations"
     )
@@ -433,7 +435,7 @@ if __name__ == "__main__":
         "--range-id",
         type=int,
         required=True,
-        help="Database ID of the range to operate on",
+        help=RANGE_ID_HELP,
     )
 
     # Legacy support: allow 'provision' and 'destroy' as top-level subcommands
@@ -444,7 +446,7 @@ if __name__ == "__main__":
         "--range-id",
         type=int,
         required=True,
-        help="Database ID of the range to operate on",
+        help=RANGE_ID_HELP,
     )
 
     destroy_parser = subparsers.add_parser(
@@ -454,7 +456,7 @@ if __name__ == "__main__":
         "--range-id",
         type=int,
         required=True,
-        help="Database ID of the range to operate on",
+        help=RANGE_ID_HELP,
     )
 
     # NGFW operations

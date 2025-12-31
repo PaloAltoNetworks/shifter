@@ -9,6 +9,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -21,7 +22,7 @@ from engine.services.orchestration import OrchestrationError, cancel, destroy, l
 from engine.services.scenarios import ScenarioValidationError
 from engine.services.serialization import range_to_dict
 
-from .models import AgentConfig, Range
+from .models import AgentConfig, NGFWDeploymentProfile, Range, SCMCredential, UserNGFW
 from .services.s3 import (
     S3Error,
     generate_presigned_upload_url,
@@ -627,9 +628,398 @@ def list_agents_for_launch(request):
 
 
 # -----------------------------------------------------------------------------
-# NGFW Views (Placeholder - to be implemented with new SCMCredential/NGFWDeploymentProfile models)
+# NGFW Management Views
 # -----------------------------------------------------------------------------
-# TODO: Implement NGFW management views using the new models:
-# - SCMCredential for Strata Cloud Manager PIN-based registration
-# - NGFWDeploymentProfile for Software NGFW Credits authcodes
-# See issue #412 for details.
+
+
+@login_required
+@require_GET
+def ngfw_list(request):
+    """List user's NGFWs with status badges."""
+    ngfws = UserNGFW.active_for_user(request.user).select_related("deployment_profile", "scm_credential")
+
+    context = {
+        "page_title": "NGFWs",
+        "active_nav": "ngfw",
+        "ngfws": ngfws,
+    }
+    return render(request, "mission_control/assets/ngfw/list.html", context)
+
+
+@login_required
+@require_GET
+def ngfw_detail(request, ngfw_id):
+    """Display NGFW details including AWS resources and linked ranges."""
+    ngfw = get_object_or_404(
+        UserNGFW,
+        id=ngfw_id,
+        user=request.user,
+        deleted_at__isnull=True,
+    )
+
+    # Get ranges linked to this NGFW
+    linked_ranges = Range.objects.filter(
+        ngfw=ngfw,
+        status__in=[
+            Range.Status.PENDING,
+            Range.Status.PROVISIONING,
+            Range.Status.READY,
+            Range.Status.PAUSED,
+            Range.Status.RESUMING,
+        ],
+    )
+
+    context = {
+        "page_title": ngfw.name,
+        "active_nav": "ngfw",
+        "ngfw": ngfw,
+        "linked_ranges": linked_ranges,
+    }
+    return render(request, "mission_control/assets/ngfw/detail.html", context)
+
+
+@login_required
+@require_GET
+def ngfw_wizard(request):
+    """Setup wizard for provisioning a new NGFW."""
+    # Get user's non-expired SCM credentials
+    scm_credentials = SCMCredential.active_for_user(request.user).filter(
+        expires_at__isnull=True
+    ) | SCMCredential.active_for_user(request.user).filter(expires_at__gt=timezone.now())
+
+    # Get user's deployment profiles (non-expired)
+    deployment_profiles = NGFWDeploymentProfile.active_for_user(request.user).filter(
+        expires_at__isnull=True
+    ) | NGFWDeploymentProfile.active_for_user(request.user).filter(expires_at__gt=timezone.now())
+
+    context = {
+        "page_title": "Setup NGFW",
+        "active_nav": "ngfw",
+        "scm_credentials": scm_credentials,
+        "deployment_profiles": deployment_profiles,
+    }
+    return render(request, "mission_control/assets/ngfw/wizard.html", context)
+
+
+@login_required
+@require_GET
+def ngfw_deprovision(request, ngfw_id):
+    """Deprovision confirmation page with warnings."""
+    ngfw = get_object_or_404(
+        UserNGFW,
+        id=ngfw_id,
+        user=request.user,
+        deleted_at__isnull=True,
+    )
+
+    # Get ranges linked to this NGFW
+    linked_ranges = Range.objects.filter(
+        ngfw=ngfw,
+        status__in=[
+            Range.Status.PENDING,
+            Range.Status.PROVISIONING,
+            Range.Status.READY,
+            Range.Status.PAUSED,
+            Range.Status.RESUMING,
+        ],
+    )
+
+    context = {
+        "page_title": f"Deprovision {ngfw.name}",
+        "active_nav": "ngfw",
+        "ngfw": ngfw,
+        "linked_ranges": linked_ranges,
+    }
+    return render(request, "mission_control/assets/ngfw/deprovision.html", context)
+
+
+# -----------------------------------------------------------------------------
+# NGFW API Endpoints
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def api_ngfw_list(request):
+    """
+    List user's NGFWs as JSON.
+
+    Response (JSON):
+        - ngfws: List of NGFW objects with id, name, status
+    """
+    ngfws = UserNGFW.active_for_user(request.user)
+    return JsonResponse({"ngfws": [{"id": n.id, "name": n.name, "status": n.status} for n in ngfws]})
+
+
+@login_required
+@require_POST
+def api_ngfw_provision(request):
+    """
+    Start NGFW provisioning.
+
+    Request body (JSON):
+        - name: NGFW name (required)
+        - deployment_profile_id: ID of deployment profile (required)
+        - registration_method: 'pin' or 'otp' (required)
+        - scm_credential_id: ID of SCM credential (required for 'pin' method)
+        - otp_value: OTP value (required for 'otp' method)
+        - otp_folder: SCM folder name (required for 'otp' method)
+        - sls_region: SLS region (required for 'otp' method)
+
+    Response (JSON):
+        - id: Created NGFW ID
+        - name: NGFW name
+        - status: NGFW status
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Required fields
+    name = data.get("name", "").strip()
+    deployment_profile_id = data.get("deployment_profile_id")
+    registration_method = data.get("registration_method")
+
+    # Validate required fields
+    errors = []
+    if not name:
+        errors.append("name is required")
+    if not deployment_profile_id:
+        errors.append("deployment_profile_id is required")
+    if registration_method not in ("pin", "otp"):
+        errors.append("registration_method must be 'pin' or 'otp'")
+
+    if errors:
+        return JsonResponse({"error": ", ".join(errors)}, status=400)
+
+    # Validate deployment profile belongs to user
+    deployment_profile = NGFWDeploymentProfile.active_for_user(request.user).filter(id=deployment_profile_id).first()
+    if not deployment_profile:
+        return JsonResponse({"error": "Deployment profile not found"}, status=400)
+
+    # Handle registration method-specific validation
+    scm_credential = None
+    if registration_method == "pin":
+        scm_credential_id = data.get("scm_credential_id")
+        if not scm_credential_id:
+            return JsonResponse({"error": "scm_credential_id required for PIN method"}, status=400)
+        scm_credential = SCMCredential.active_for_user(request.user).filter(id=scm_credential_id).first()
+        if not scm_credential:
+            return JsonResponse({"error": "SCM credential not found"}, status=400)
+    else:  # otp
+        otp_value = data.get("otp_value", "").strip()
+        otp_folder = data.get("otp_folder", "").strip()
+        _sls_region = data.get("sls_region", "americas")
+        if not otp_value:
+            return JsonResponse({"error": "otp_value required for OTP method"}, status=400)
+        if not otp_folder:
+            return JsonResponse({"error": "otp_folder required for OTP method"}, status=400)
+
+    # Create NGFW record
+    ngfw = UserNGFW.objects.create(
+        user=request.user,
+        name=name,
+        deployment_profile=deployment_profile,
+        scm_credential=scm_credential,
+        status=UserNGFW.Status.PROVISIONING,
+    )
+
+    # Store OTP data if using OTP method (for provisioning task to use)
+    if registration_method == "otp":
+        # In a real implementation, this would be passed to the provisioning task
+        # For now, store in a way that can be retrieved by the provisioning backend
+        pass
+
+    logger.info(
+        "NGFW provisioning started: user=%s ngfw_id=%s name=%s method=%s",
+        request.user.email,
+        ngfw.id,
+        name,
+        registration_method,
+    )
+
+    # TODO: Trigger actual provisioning via engine service (Issue #414)
+    # For now, the NGFW is created with PROVISIONING status
+
+    return JsonResponse(
+        {
+            "id": ngfw.id,
+            "name": ngfw.name,
+            "status": ngfw.status,
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_GET
+def api_ngfw_status(request, ngfw_id):
+    """
+    Get NGFW status.
+
+    Response (JSON):
+        - id: NGFW ID
+        - name: NGFW name
+        - status: Current status
+        - serial_number: Serial number (if provisioned)
+    """
+    ngfw = UserNGFW.active_for_user(request.user).filter(id=ngfw_id).first()
+    if not ngfw:
+        return JsonResponse({"error": "NGFW not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "id": ngfw.id,
+            "name": ngfw.name,
+            "status": ngfw.status,
+            "serial_number": ngfw.serial_number,
+            "instance_id": ngfw.instance_id,
+        }
+    )
+
+
+@login_required
+@require_POST
+def api_ngfw_start(request, ngfw_id):
+    """
+    Start an NGFW (EC2 instance).
+
+    Only valid for NGFWs in 'ready' or 'stopped' status.
+
+    Response (JSON):
+        - id: NGFW ID
+        - status: New status (starting)
+    """
+    ngfw = UserNGFW.active_for_user(request.user).filter(id=ngfw_id).first()
+    if not ngfw:
+        return JsonResponse({"error": "NGFW not found"}, status=404)
+
+    # Validate current status
+    if ngfw.status not in (UserNGFW.Status.READY, UserNGFW.Status.STOPPED):
+        return JsonResponse(
+            {"error": f"Cannot start NGFW in '{ngfw.status}' status"},
+            status=400,
+        )
+
+    # Update status to starting
+    ngfw.status = UserNGFW.Status.STARTING
+    ngfw.save(update_fields=["status"])
+
+    # TODO: Trigger actual EC2 start via engine service (Issue #414)
+    # For now, simulate by setting to ACTIVE immediately
+    ngfw.status = UserNGFW.Status.ACTIVE
+    ngfw.last_started_at = timezone.now()
+    ngfw.save(update_fields=["status", "last_started_at"])
+
+    logger.info(
+        "NGFW started: user=%s ngfw_id=%s",
+        request.user.email,
+        ngfw.id,
+    )
+
+    return JsonResponse(
+        {
+            "id": ngfw.id,
+            "status": ngfw.status,
+        }
+    )
+
+
+@login_required
+@require_POST
+def api_ngfw_stop(request, ngfw_id):
+    """
+    Stop an NGFW (EC2 instance).
+
+    Only valid for NGFWs in 'active' status.
+
+    Response (JSON):
+        - id: NGFW ID
+        - status: New status (stopping/stopped)
+    """
+    ngfw = UserNGFW.active_for_user(request.user).filter(id=ngfw_id).first()
+    if not ngfw:
+        return JsonResponse({"error": "NGFW not found"}, status=404)
+
+    # Validate current status
+    if ngfw.status != UserNGFW.Status.ACTIVE:
+        return JsonResponse(
+            {"error": f"Cannot stop NGFW in '{ngfw.status}' status"},
+            status=400,
+        )
+
+    # Update status to stopping
+    ngfw.status = UserNGFW.Status.STOPPING
+    ngfw.save(update_fields=["status"])
+
+    # TODO: Trigger actual EC2 stop via engine service (Issue #414)
+    # For now, simulate by setting to STOPPED immediately
+    ngfw.status = UserNGFW.Status.STOPPED
+    ngfw.last_stopped_at = timezone.now()
+    ngfw.save(update_fields=["status", "last_stopped_at"])
+
+    logger.info(
+        "NGFW stopped: user=%s ngfw_id=%s",
+        request.user.email,
+        ngfw.id,
+    )
+
+    return JsonResponse(
+        {
+            "id": ngfw.id,
+            "status": ngfw.status,
+        }
+    )
+
+
+@login_required
+@require_POST
+def api_ngfw_deprovision(request, ngfw_id):
+    """
+    Deprovision an NGFW.
+
+    Request body (JSON):
+        - confirm_name: Must match NGFW name exactly
+
+    Response (JSON):
+        - id: NGFW ID
+        - status: New status (deprovisioning)
+    """
+    ngfw = UserNGFW.active_for_user(request.user).filter(id=ngfw_id).first()
+    if not ngfw:
+        return JsonResponse({"error": "NGFW not found"}, status=404)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    confirm_name = data.get("confirm_name", "")
+    if not confirm_name:
+        return JsonResponse({"error": "confirm_name is required"}, status=400)
+
+    if confirm_name != ngfw.name:
+        return JsonResponse(
+            {"error": "Name confirmation does not match"},
+            status=400,
+        )
+
+    # Update status to deprovisioning
+    ngfw.status = UserNGFW.Status.DEPROVISIONING
+    ngfw.save(update_fields=["status"])
+
+    # TODO: Trigger actual deprovisioning via engine service (Issue #414)
+
+    logger.info(
+        "NGFW deprovisioning started: user=%s ngfw_id=%s",
+        request.user.email,
+        ngfw.id,
+    )
+
+    return JsonResponse(
+        {
+            "id": ngfw.id,
+            "status": ngfw.status,
+        }
+    )

@@ -40,8 +40,14 @@ print(response['SecretString'])
     # Export Django secret key
     export DJANGO_SECRET_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['django_secret_key'])")
 
-    # Export field encryption key (for django-encrypted-model-fields)
-    export FIELD_ENCRYPTION_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['field_encryption_key'])")
+    # Export field encryption key with proper base64 padding (Fernet requires it)
+    export FIELD_ENCRYPTION_KEY=$(echo "$APP_SECRET" | python -c "
+import sys, json
+key = json.load(sys.stdin)['field_encryption_key']
+# Add padding if missing (base64 requires length % 4 == 0)
+padding = (4 - len(key) % 4) % 4
+print(key + '=' * padding)
+")
 
     # Fetch Cognito secret if ARN provided
     if [ -n "${COGNITO_SECRET_ARN:-}" ]; then

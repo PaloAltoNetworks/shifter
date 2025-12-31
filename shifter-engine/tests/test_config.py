@@ -67,12 +67,7 @@ class TestGetRangeFromDb:
                 "linux-debian",  # agent_os_slug
                 None,  # dc_agent_id
                 None,  # dc_agent_s3_key
-                False,  # ngfw_enabled
-                None,  # ngfw_panorama_server
-                None,  # ngfw_vm_auth_key
-                None,  # ngfw_panorama_server_2
-                None,  # ngfw_template_stack
-                None,  # ngfw_device_group
+                False,  # ngfw_enabled (ngfw_id IS NULL)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -106,12 +101,7 @@ class TestGetRangeFromDb:
                 "windows",  # agent_os_slug - from OperatingSystem.slug
                 None,  # dc_agent_id
                 None,  # dc_agent_s3_key
-                False,  # ngfw_enabled
-                None,  # ngfw_panorama_server
-                None,  # ngfw_vm_auth_key
-                None,  # ngfw_panorama_server_2
-                None,  # ngfw_template_stack
-                None,  # ngfw_device_group
+                False,  # ngfw_enabled (ngfw_id IS NULL)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -153,12 +143,7 @@ class TestGetRangeFromDb:
                 None,  # agent_os_slug (no agent)
                 None,  # dc_agent_id
                 None,  # dc_agent_s3_key
-                False,  # ngfw_enabled
-                None,  # ngfw_panorama_server
-                None,  # ngfw_vm_auth_key
-                None,  # ngfw_panorama_server_2
-                None,  # ngfw_template_stack
-                None,  # ngfw_device_group
+                False,  # ngfw_enabled (ngfw_id IS NULL)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -193,12 +178,7 @@ class TestGetRangeFromDb:
                 None,  # agent_os_slug
                 None,  # dc_agent_id
                 None,  # dc_agent_s3_key
-                False,  # ngfw_enabled
-                None,  # ngfw_panorama_server
-                None,  # ngfw_vm_auth_key
-                None,  # ngfw_panorama_server_2
-                None,  # ngfw_template_stack
-                None,  # ngfw_device_group
+                False,  # ngfw_enabled (ngfw_id IS NULL)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -977,7 +957,7 @@ class TestGetRangeFromDbNGFW:
     """
 
     def test_get_range_from_db_returns_ngfw_enabled(self, mock_boto3_clients, mock_env_vars_minimal):
-        """get_range_from_db should return ngfw_enabled field."""
+        """get_range_from_db should return ngfw_enabled from ngfw_id IS NOT NULL."""
         with patch("psycopg.connect") as mock_connect:
             mock_cursor = MagicMock()
             mock_cursor.fetchone.return_value = (
@@ -990,10 +970,7 @@ class TestGetRangeFromDbNGFW:
                 None,   # agent_os_slug
                 None,   # dc_agent_id
                 None,   # dc_agent_s3_key
-                True,   # ngfw_enabled
-                "MyFolder",  # strata_folder_name
-                "pin-123",  # strata_pin_id
-                "secret-456",  # strata_pin_value
+                True,   # ngfw_enabled (ngfw_id IS NOT NULL)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -1006,13 +983,13 @@ class TestGetRangeFromDbNGFW:
 
             assert "ngfw_enabled" in result
             assert result["ngfw_enabled"] is True
-            # Also verify Strata config fields (replaced Panorama)
-            assert result["strata_folder_name"] == "MyFolder"
-            assert result["strata_pin_id"] == "pin-123"
-            assert result["strata_pin_value"] == "secret-456"
+            # Strata fields are now hardcoded to empty (NGFW UI disabled)
+            assert result["strata_folder_name"] == ""
+            assert result["strata_pin_id"] == ""
+            assert result["strata_pin_value"] == ""
 
     def test_get_range_from_db_ngfw_disabled_by_default(self, mock_boto3_clients, mock_env_vars_minimal):
-        """ngfw_enabled should be False when database returns False."""
+        """ngfw_enabled should be False when ngfw_id IS NULL."""
         with patch("psycopg.connect") as mock_connect:
             mock_cursor = MagicMock()
             mock_cursor.fetchone.return_value = (
@@ -1025,10 +1002,7 @@ class TestGetRangeFromDbNGFW:
                 None,   # agent_os_slug
                 None,   # dc_agent_id
                 None,   # dc_agent_s3_key
-                False,  # ngfw_enabled
-                None,   # strata_folder_name
-                None,   # strata_pin_id
-                None,   # strata_pin_value
+                False,  # ngfw_enabled (ngfw_id IS NULL)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -1040,7 +1014,7 @@ class TestGetRangeFromDbNGFW:
             result = get_range_from_db(42)
 
             assert result["ngfw_enabled"] is False
-            # Strata fields should be empty strings when null
+            # Strata fields should be empty strings (hardcoded)
             assert result["strata_folder_name"] == ""
             assert result["strata_pin_id"] == ""
 
@@ -1376,16 +1350,17 @@ class TestInstanceTypeDefaults:
 class TestStrataConfigFields:
     """Tests for Strata Cloud Manager (SCM) configuration fields.
 
-    SCM replaces Panorama for NGFW registration using PIN-based auth.
-    These fields come from the StrataConfig model via strata_config FK.
+    Note: SCM/NGFW UI is currently disabled pending UserNGFW implementation.
+    Strata fields are hardcoded to empty strings in get_range_from_db().
     """
 
-    def test_get_range_from_db_returns_strata_config_fields(
+    def test_get_range_from_db_returns_ngfw_enabled_from_fk(
         self, mock_boto3_clients, mock_env_vars_minimal
     ):
-        """get_range_from_db should return strata_config fields for SCM bootstrap."""
+        """get_range_from_db should derive ngfw_enabled from ngfw_id IS NOT NULL."""
         with patch("psycopg.connect") as mock_connect:
             mock_cursor = MagicMock()
+            # New schema: 10 columns, ngfw_enabled derived from ngfw_id IS NOT NULL
             mock_cursor.fetchone.return_value = (
                 42,  # id
                 1,  # user_id
@@ -1396,10 +1371,7 @@ class TestStrataConfigFields:
                 "linux-debian",  # agent_os_slug
                 None,  # dc_agent_id
                 None,  # dc_agent_s3_key
-                True,  # ngfw_enabled
-                "Edwards-Lab",  # strata_folder_name
-                "pin-abc123",  # strata_pin_id
-                "secret-xyz789",  # strata_pin_value
+                True,  # ngfw_enabled (ngfw_id IS NOT NULL)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -1411,14 +1383,15 @@ class TestStrataConfigFields:
             result = get_range_from_db(42)
 
             assert result["ngfw_enabled"] is True
-            assert result["strata_folder_name"] == "Edwards-Lab"
-            assert result["strata_pin_id"] == "pin-abc123"
-            assert result["strata_pin_value"] == "secret-xyz789"
+            # Strata fields are hardcoded to empty (NGFW UI disabled)
+            assert result["strata_folder_name"] == ""
+            assert result["strata_pin_id"] == ""
+            assert result["strata_pin_value"] == ""
 
-    def test_get_range_from_db_strata_fields_default_empty(
+    def test_get_range_from_db_strata_fields_always_empty(
         self, mock_boto3_clients, mock_env_vars_minimal
     ):
-        """Strata fields should default to empty string when null in DB."""
+        """Strata fields should always be empty string (NGFW UI disabled)."""
         with patch("psycopg.connect") as mock_connect:
             mock_cursor = MagicMock()
             mock_cursor.fetchone.return_value = (
@@ -1431,10 +1404,7 @@ class TestStrataConfigFields:
                 None,  # agent_os_slug
                 None,  # dc_agent_id
                 None,  # dc_agent_s3_key
-                False,  # ngfw_enabled
-                None,  # strata_folder_name (null - no strata_config)
-                None,  # strata_pin_id
-                None,  # strata_pin_value
+                False,  # ngfw_enabled (ngfw_id IS NULL)
             )
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -1536,8 +1506,8 @@ class TestStrataConfigFields:
 class TestDecryptField:
     """Tests for decrypt_field function used for encrypted database fields.
 
-    The scm_pin_value field in StrataConfig is encrypted at rest using Fernet.
-    The Pulumi provisioner needs to decrypt it when loading from the database.
+    Encrypted fields use django-encrypted-model-fields with Fernet encryption.
+    The Pulumi provisioner needs to decrypt them when loading from the database.
     """
 
     # Same test key as Django settings (for testing only)

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2025-12-30
+
+### Added
+- S3 cost budget alerts for dev and prod environments
+  - Defense-in-depth monitoring for unusual S3 costs
+  - Alerts at 80% of $50/month threshold
+
 ## [0.9.3] - 2025-12-30
 
 ### Added

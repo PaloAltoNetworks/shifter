@@ -20,10 +20,10 @@ graph TB
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **Global** | `terraform/global/` | IAM roles, OIDC providers, cross-account resources. |
-| **Core** | `terraform/modules/ecr/`, `terraform/environments/` | ECR, base environment resources. |
-| **Range** | `terraform/modules/range/` | Range VPC, shared networking foundation. |
-| **Portal*** | `terraform/modules/portal/` | Shifter application infrastructure (ALB, ECS, RDS, S3). |
+| **Global** | `platform/terraform/global/` | IAM roles, OIDC providers, cross-account resources. |
+| **Core** | `platform/terraform/modules/ecr/`, `platform/terraform/environments/` | ECR, base environment resources. |
+| **Range** | `platform/terraform/modules/range/` | Range VPC, shared networking foundation. |
+| **Portal*** | `platform/terraform/modules/portal/` | Shifter application infrastructure (ALB, ECS, RDS, S3). |
 
 *Portal is a legacy name. This module deploys the Shifter Django application infrastructure.
 

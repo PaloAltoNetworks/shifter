@@ -13,7 +13,7 @@ Windows Server 2022 development instance for Shifter development work. Uses a sp
 This module is **manually managed** (not part of CI/CD):
 
 ```bash
-cd terraform/global/dev-box
+cd platform/terraform/global/dev-box
 AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform init
 AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform apply
 ```
@@ -103,7 +103,7 @@ For direct database access without port forwarding, deploy the dev-box in the po
 
 1. Get portal VPC outputs:
    ```bash
-   cd terraform/environments/dev/portal
+   cd platform/terraform/environments/dev/portal
    AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform output vpc_id
    AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform output private_subnet_ids
    AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform output db_security_group_id
@@ -119,7 +119,7 @@ For direct database access without port forwarding, deploy the dev-box in the po
 
 3. Apply the changes:
    ```bash
-   cd terraform/global/dev-box
+   cd platform/terraform/global/dev-box
    AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform apply
    ```
 

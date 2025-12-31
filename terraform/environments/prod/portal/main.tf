@@ -61,7 +61,7 @@ data "aws_ssm_parameter" "kali_ami" {
 }
 
 data "aws_ssm_parameter" "victim_ami" {
-  name = "/shifter/ami/victim"
+  name = "/shifter/ami/ubuntu"
 }
 
 data "aws_ssm_parameter" "windows_ami" {

@@ -103,7 +103,7 @@ class RangeStack(pulumi.ComponentResource):
                 subnet_index=config.subnet_index,
                 environment=config.environment,
                 instance_profile_name=config.instance_profile_name,
-                # Strata Cloud Manager configuration from StrataConfig model
+                # Strata Cloud Manager configuration (currently disabled)
                 strata_pin_id=config.strata_pin_id,
                 strata_pin_value=config.strata_pin_value,
                 strata_folder_name=config.strata_folder_name,

@@ -105,7 +105,7 @@ class TestRangeStackComposition:
     @pulumi.runtime.test
     def test_creates_network_component(self, temp_templates, basic_config):
         """RangeStack should create a NetworkComponent."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=basic_config)
@@ -117,7 +117,7 @@ class TestRangeStackComposition:
     @pulumi.runtime.test
     def test_creates_instance_components(self, temp_templates, basic_config):
         """RangeStack should create InstanceComponent for each config entry."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=basic_config)
@@ -128,7 +128,7 @@ class TestRangeStackComposition:
     @pulumi.runtime.test
     def test_cidr_prefix_extraction(self, temp_templates, basic_config):
         """CIDR prefix should be extracted correctly from VPC CIDR."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=basic_config)
@@ -143,7 +143,7 @@ class TestRangeStackComposition:
     @pulumi.runtime.test
     def test_get_outputs_returns_expected_keys(self, temp_templates, basic_config):
         """get_outputs should return dict with subnet_id, subnet_cidr, instances."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=basic_config)
@@ -172,7 +172,7 @@ class TestRangeStackSecurityGroupAssignment:
     @pulumi.runtime.test
     def test_attacker_uses_kali_security_group(self, temp_templates):
         """Attacker instances should use kali_security_group_id."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -210,7 +210,7 @@ class TestRangeStackSecurityGroupAssignment:
     @pulumi.runtime.test
     def test_victim_uses_victim_security_group(self, temp_templates):
         """Victim instances should use victim_security_group_id."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -265,7 +265,7 @@ class TestRangeStackAmiSelection:
     @pulumi.runtime.test
     def test_attacker_uses_kali_ami(self, temp_templates):
         """Attacker instances should use kali_ami_id."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -302,7 +302,7 @@ class TestRangeStackAmiSelection:
     @pulumi.runtime.test
     def test_linux_victim_uses_victim_ami(self, temp_templates):
         """Linux victim instances should use victim_ami_id."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -343,7 +343,7 @@ class TestRangeStackAmiSelection:
     @pulumi.runtime.test
     def test_windows_victim_uses_windows_ami(self, temp_templates):
         """Windows victim instances should use windows_ami_id."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -398,7 +398,7 @@ class TestRangeStackMultipleInstances:
     @pulumi.runtime.test
     def test_multiple_attackers_indexed_correctly(self, temp_templates):
         """Multiple attackers should have sequential indices 0, 1, 2..."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -432,7 +432,7 @@ class TestRangeStackMultipleInstances:
     @pulumi.runtime.test
     def test_multiple_victims_indexed_correctly(self, temp_templates):
         """Multiple victims should have sequential indices 0, 1, 2..."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -466,7 +466,7 @@ class TestRangeStackMultipleInstances:
     @pulumi.runtime.test
     def test_mixed_roles_indexed_independently(self, temp_templates):
         """Attackers and victims should maintain separate index counters."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -502,7 +502,7 @@ class TestRangeStackMultipleInstances:
     @pulumi.runtime.test
     def test_empty_instances_list(self, temp_templates):
         """Range with no instances should still create network."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -547,7 +547,7 @@ class TestRangeStackCidrPrefixExtraction:
     @pulumi.runtime.test
     def test_cidr_prefix_10_1(self, temp_templates):
         """VPC CIDR 10.1.0.0/16 should extract prefix 10.1."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -580,7 +580,7 @@ class TestRangeStackCidrPrefixExtraction:
     @pulumi.runtime.test
     def test_cidr_prefix_172_16(self, temp_templates):
         """VPC CIDR 172.16.0.0/16 should extract prefix 172.16."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -613,7 +613,7 @@ class TestRangeStackCidrPrefixExtraction:
     @pulumi.runtime.test
     def test_cidr_prefix_192_168(self, temp_templates):
         """VPC CIDR 192.168.0.0/16 should extract prefix 192.168."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -723,7 +723,7 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_dc_uses_dc_security_group(self, temp_templates, dc_range_config):
         """DC instance should use dc_security_group_id, not victim SG."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=dc_range_config)
@@ -746,7 +746,7 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_victim_uses_victim_security_group_not_dc(self, temp_templates, dc_range_config):
         """Victim instance should use victim_security_group_id, not DC SG."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=dc_range_config)
@@ -774,7 +774,7 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_dc_raises_error_when_dc_sg_not_set(self, temp_templates):
         """DC should raise ValueError if dc_security_group_id is empty."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -815,7 +815,7 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_dc_config_param_name_format(self, temp_templates, dc_range_config):
         """dc_config_param_name should follow /shifter/{env}/range/{id}/dc-config pattern."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=dc_range_config)
@@ -827,7 +827,7 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_dc_config_param_name_none_without_dc(self, temp_templates):
         """dc_config_param_name should be None when no DC in range."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -861,7 +861,7 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_dc_config_param_name_in_get_outputs(self, temp_templates, dc_range_config):
         """get_outputs should include dc_config_param_name."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=dc_range_config)
@@ -873,7 +873,7 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_multiple_dcs_uses_first_dc_param_name(self, temp_templates):
         """With multiple DCs, should use first DC's param name."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=99,
@@ -923,7 +923,7 @@ class TestDCInstanceOrdering(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_dc_is_first_in_instances_list(self, temp_templates, dc_range_config):
         """DC should be first in instances list even if listed later in config."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=dc_range_config)
@@ -935,7 +935,7 @@ class TestDCInstanceOrdering(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_instance_count_matches_config(self, temp_templates, dc_range_config):
         """All configured instances should be created."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=dc_range_config)
@@ -944,7 +944,7 @@ class TestDCInstanceOrdering(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_dc_instances_grouped_first(self, temp_templates):
         """All DC instances should come before non-DC instances."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -1003,7 +1003,7 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_domain_member_depends_on_dc(self, temp_templates, dc_range_config):
         """Domain member (join_domain=True) should have DC in depends_on."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
 
         created_instances = []
@@ -1043,7 +1043,7 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_non_domain_member_does_not_depend_on_dc(self, temp_templates, dc_range_config):
         """Non-domain member (join_domain=False) should NOT have DC in depends_on."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
 
         created_instances = []
@@ -1078,7 +1078,7 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_join_domain_true_but_no_dc_in_range(self, temp_templates):
         """join_domain=True without DC should not cause error (no DC to depend on)."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
 
         config = RangeConfig(
@@ -1137,7 +1137,7 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_domain_member_receives_dc_config_param_name(self, temp_templates, dc_range_config):
         """Domain member (join_domain=True) should receive dc_config_param_name."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
 
         created_instances = []
@@ -1168,7 +1168,7 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_non_domain_member_does_not_receive_dc_config_param_name(self, temp_templates, dc_range_config):
         """Non-domain member should NOT receive dc_config_param_name."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
 
         created_instances = []
@@ -1196,7 +1196,7 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_join_domain_flag_passed_to_instance(self, temp_templates, dc_range_config):
         """join_domain flag should be passed to InstanceComponent."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
 
         created_instances = []
@@ -1225,7 +1225,7 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_range_without_dc_domain_member_gets_none(self, temp_templates):
         """Domain member in range without DC should get None for dc_config_param_name."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
 
         config = RangeConfig(
@@ -1296,7 +1296,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         Domain-joining instances use Output.apply() to pass DC IP, so the call
         happens asynchronously. We verify by checking the source code pattern.
         """
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         import inspect
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
@@ -1315,7 +1315,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         self, temp_templates, dc_range_config
     ):
         """Victims with join_domain=False should NOT receive dc_ip in run_setup()."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
 
         run_setup_calls = []
@@ -1354,7 +1354,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         1. The dc_instance.run_dc_setup() is called directly (not via Output.all)
         2. domain_member_ids list is NOT collected/used
         """
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             # Check the source code directly - in new architecture,
@@ -1384,7 +1384,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         so they execute asynchronously. We verify direct calls for non-joining
         instances and check source code for the apply pattern for joining ones.
         """
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
         import inspect
 
@@ -1422,7 +1422,7 @@ class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_range_without_dc_works(self, temp_templates):
         """Range without DC should work exactly as before."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -1465,7 +1465,7 @@ class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_attacker_still_uses_kali_sg(self, temp_templates, dc_range_config):
         """Attacker should still use kali SG even when DC is present."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=dc_range_config)
@@ -1569,7 +1569,7 @@ dns-secondary=8.8.4.4
     @pulumi.runtime.test
     def test_range_stack_creates_ngfw_when_enabled(self, temp_templates, ngfw_enabled_config):
         """RangeStack should create NGFWComponent when ngfw_enabled=True."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=ngfw_enabled_config)
@@ -1581,7 +1581,7 @@ dns-secondary=8.8.4.4
     @pulumi.runtime.test
     def test_range_stack_skips_ngfw_when_disabled(self, temp_templates, ngfw_disabled_config):
         """RangeStack should not create NGFWComponent when ngfw_enabled=False."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=ngfw_disabled_config)
@@ -1592,7 +1592,7 @@ dns-secondary=8.8.4.4
     @pulumi.runtime.test
     def test_range_stack_outputs_include_ngfw(self, temp_templates, ngfw_enabled_config):
         """get_outputs should include NGFW details when enabled."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=ngfw_enabled_config)
@@ -1608,7 +1608,7 @@ dns-secondary=8.8.4.4
     @pulumi.runtime.test
     def test_range_stack_outputs_no_ngfw_when_disabled(self, temp_templates, ngfw_disabled_config):
         """get_outputs should not include NGFW when disabled."""
-        from components.range_stack import RangeStack
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=ngfw_disabled_config)

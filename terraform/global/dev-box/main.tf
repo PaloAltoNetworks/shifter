@@ -82,7 +82,7 @@ data "aws_subnets" "default" {
   count = var.use_portal_vpc ? 0 : 1
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+    values = [data.aws_vpc.default[0].id]
   }
 }
 

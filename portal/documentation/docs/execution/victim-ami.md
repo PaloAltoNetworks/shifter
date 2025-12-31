@@ -25,6 +25,16 @@ Pre-baked victim images with vulnerable services and Claude Code.
 - Node.js 20.x
 - Git, curl, nano, netcat
 
+### Building with Packer
+
+```bash
+cd packer
+packer init .
+packer build -var-file=dev.pkrvars.hcl ubuntu.pkr.hcl
+```
+
+Or use the GitHub Actions workflow "Packer AMI Build (Dev)" and select `ubuntu`.
+
 ## Windows Victim
 
 ### What's In It
@@ -88,7 +98,7 @@ The XDR agent is NOT in the AMI. Users upload their agent installer to S3 via th
 
 ## Config
 
-| Env Var | Value |
-|---------|-------|
-| `VICTIM_AMI_ID` | Ubuntu AMI, set in terraform.tfvars |
-| `WINDOWS_AMI_ID` | Windows AMI, set in terraform.tfvars |
+| Env Var | Source |
+|---------|--------|
+| `VICTIM_AMI_ID` | SSM Parameter `/shifter/ami/ubuntu` |
+| `WINDOWS_AMI_ID` | SSM Parameter `/shifter/ami/windows` |

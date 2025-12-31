@@ -72,7 +72,7 @@ jobs:
       - name: Checkov IaC Security
         uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
         with:
-          directory: terraform/
+          directory: platform/terraform/
           framework: terraform
           download_external_modules: true
           quiet: true

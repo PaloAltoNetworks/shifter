@@ -73,43 +73,6 @@
         </p>
     </div>
 
-    {% comment %}
-    NGFW UI temporarily disabled - requires UserNGFW model views (issue #412)
-    The old StrataConfig model was removed. New NGFW UI will be built for UserNGFW
-
-    <div class="form-group">
-        <label class="form-checkbox">
-            <input type="checkbox" id="ngfw-enabled">
-            <div>
-                <div class="form-checkbox-label">Enable VM-Series NGFW</div>
-                <div class="form-checkbox-help">
-                    Deploy a Palo Alto Networks VM-Series firewall inline between Kali and Victim
-                    to generate network telemetry for XSIAM stitching.
-                </div>
-            </div>
-        </label>
-    </div>
-
-    <div class="form-group" id="ngfw-config-group" style="display: none;">
-        <label class="form-label" for="ngfw-config-select">Strata Cloud Manager Configuration</label>
-        <div class="xdr-dropdown full-width" id="ngfw-config-dropdown">
-            <input type="hidden" name="ngfw_config_id" id="ngfw-config-select">
-            <button type="button" class="xdr-dropdown-trigger" id="ngfw-config-btn">
-                <span class="xdr-dropdown-value placeholder" id="selected-ngfw-config">-- Select a config --</span>
-                <span class="xdr-dropdown-chevron"></span>
-            </button>
-            <div class="xdr-dropdown-panel">
-                <ul class="xdr-dropdown-items" id="ngfw-config-items">
-                </ul>
-            </div>
-        </div>
-        <p class="text-small text-muted mt-sm">
-            Select the SCM configuration for VM-Series auto-registration.
-            <a href="" class="link">Create a config</a> if you haven't yet.
-        </p>
-    </div>
-    {% endcomment %}
-
     <button class="btn btn-primary" id="launch-btn" disabled>
         Launch Range
     </button>
@@ -150,21 +113,15 @@
         </div>
     </div>
 
-    <!-- NGFW Details (shown when enabled) -->
+    <!-- NGFW Details (shown when range has linked NGFW) -->
     <div id="ngfw-details" class="range-details mt-md" style="display: none;">
         <div class="range-details-header">VM-Series NGFW</div>
         <div class="range-details-grid">
             <div class="range-details-item">
-                <span class="range-details-label">Instance</span>
-                <span class="range-details-value" id="ngfw-instance-id">--</span>
-            </div>
-            <div class="range-details-item">
-                <span class="range-details-label">Untrust IP</span>
-                <span class="range-details-value" id="ngfw-untrust-ip">--</span>
-            </div>
-            <div class="range-details-item">
-                <span class="range-details-label">Trust IP</span>
-                <span class="range-details-value" id="ngfw-trust-ip">--</span>
+                <span class="range-details-label">Linked NGFW</span>
+                <span class="range-details-value">
+                    <a href="#" id="ngfw-detail-link" class="link">View Details</a>
+                </span>
             </div>
         </div>
     </div>

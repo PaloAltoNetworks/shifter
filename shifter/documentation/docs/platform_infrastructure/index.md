@@ -1,6 +1,6 @@
 # Platform Infrastructure
 
-AWS infrastructure and CI/CD for Shifter.
+AWS infrastructure and CI/CD for Shifter. 
 
 ## Directory Structure
 
@@ -25,6 +25,15 @@ platform/
     ├── dev/                  # Cortex XDR connector templates (dev)
     └── prod/                 # Cortex XDR connector templates (prod)
 ```
+
+## AWS
+
+All resources are in `us-east-2`.
+
+dev account id: `878848911818`
+dev account profile: `panw-shifter-dev-workstation`
+prod account id:
+prod account profile: `dev-workstation-user`
 
 ## Components
 

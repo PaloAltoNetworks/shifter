@@ -115,6 +115,16 @@ class PulumiMocks:
             outputs["serviceName"] = f"com.amazonaws.vpce.us-east-2.vpce-svc-{name[:8]}"
             outputs["acceptanceRequired"] = inputs.get("acceptanceRequired", True)
 
+        elif resource_type == "aws:ec2/networkInterface:NetworkInterface":
+            outputs["privateIp"] = inputs.get("privateIps", ["10.1.1.50"])[0] if inputs.get("privateIps") else "10.1.1.50"
+            outputs["subnetId"] = inputs.get("subnetId", "subnet-mock")
+            outputs["sourceDestCheck"] = inputs.get("sourceDestCheck", True)
+
+        elif resource_type == "aws:s3/bucketObject:BucketObject":
+            outputs["bucket"] = inputs.get("bucket", "mock-bucket")
+            outputs["key"] = inputs.get("key", "mock-key")
+            outputs["etag"] = "mock-etag-123"
+
         return resource_id, outputs
 
     def call(self, args: Any) -> dict:

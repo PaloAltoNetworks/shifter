@@ -33,14 +33,14 @@ jobs:
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Lint Python
-        working-directory: portal
+        working-directory: shifter/shifter_platform
         run: |
           uv sync --group dev
           uv run ruff check .
           uv run ruff format --check .
 
-      - name: Test portal with coverage
-        working-directory: portal
+      - name: Test shifter_platform with coverage
+        working-directory: shifter/shifter_platform
         env:
           TESTING: "1"
           DJANGO_DEBUG: "true"
@@ -54,11 +54,11 @@ jobs:
           uv run python manage.py collectstatic --noinput
           uv run pytest --cov=. --cov-report=xml --cov-report=term-missing
 
-      - name: Upload portal coverage
+      - name: Upload shifter_platform coverage
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
-          files: shifter/coverage.xml
-          flags: portal
+          files: shifter/shifter_platform/coverage.xml
+          flags: shifter_platform
           fail_ci_if_error: false
 
       - name: Cache Checkov
@@ -107,8 +107,8 @@ jobs:
           flags: shifter-engine
           fail_ci_if_error: false
 
-  portal-js-tests:
-    name: Portal JavaScript Tests
+  shifter-js-tests:
+    name: Shifter JavaScript Tests
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -118,19 +118,19 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: shifter/package-lock.json
+          cache-dependency-path: shifter/shifter_platform/package-lock.json
 
       - name: Install dependencies
-        working-directory: shifter
+        working-directory: shifter/shifter_platform
         run: npm ci
 
       - name: Run JavaScript tests
-        working-directory: shifter
+        working-directory: shifter/shifter_platform
         run: npm test -- --coverage
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
-          files: shifter/coverage/lcov.info
-          flags: portal-javascript
+          files: shifter/shifter_platform/coverage/lcov.info
+          flags: shifter-javascript
           fail_ci_if_error: false

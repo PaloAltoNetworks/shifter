@@ -30,6 +30,18 @@ elif [ -d "$WORKTREE_ROOT/portal" ]; then
     echo "Created portal/.venv symlink"
 fi
 
+# Portal .env file (for Django settings like DJANGO_SECRET_KEY)
+if [ -f "$MAIN_REPO/portal/.env" ]; then
+    if [ -L "$WORKTREE_ROOT/portal/.env" ]; then
+        echo "portal/.env symlink already exists"
+    elif [ -f "$WORKTREE_ROOT/portal/.env" ]; then
+        echo "portal/.env already exists (not overwriting)"
+    elif [ -d "$WORKTREE_ROOT/portal" ]; then
+        ln -s "$MAIN_REPO/portal/.env" "$WORKTREE_ROOT/portal/.env"
+        echo "Created portal/.env symlink"
+    fi
+fi
+
 # Shifter-engine venv (if it exists in main repo)
 if [ -d "$MAIN_REPO/shifter-engine/.venv" ]; then
     if [ -L "$WORKTREE_ROOT/shifter-engine/.venv" ]; then

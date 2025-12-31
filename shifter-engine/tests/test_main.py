@@ -394,10 +394,10 @@ class TestRunProvision:
             parsed = json.loads(instances_json)
             assert len(parsed) == 2
 
-    def test_run_provision_saves_ngfw_outputs(
+    def test_run_provision_ignores_ngfw_outputs(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients
     ):
-        """NGFW outputs should be saved when NGFW is enabled."""
+        """NGFW outputs should be ignored (stored in UserNGFW model, not Range)."""
         mock_run, mock_result = mock_subprocess
 
         outputs = {
@@ -430,50 +430,11 @@ class TestRunProvision:
             env = os.environ.copy()
             _run_provision(42, "range-42", env)
 
-            # Check NGFW fields were passed
+            # NGFW fields should NOT be passed (moved to UserNGFW model in issue 412)
             ready_call = mock_update.call_args_list[1]
-            assert ready_call[1].get("ngfw_instance_id") == "i-ngfw12345"
-            assert ready_call[1].get("ngfw_untrust_ip") == "10.1.6.10"
-            assert ready_call[1].get("ngfw_trust_ip") == "10.1.6.11"
-
-    def test_run_provision_ngfw_empty_when_disabled(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients
-    ):
-        """NGFW fields should be empty when NGFW not in outputs."""
-        mock_run, mock_result = mock_subprocess
-
-        outputs = {
-            "subnet_id": "subnet-12345",
-            "subnet_cidr": "10.1.6.0/24",
-            "instances": [{"role": "attacker", "instance_id": "i-kali"}],
-            # No ngfw key
-        }
-
-        def side_effect(*args, **kwargs):
-            cmd = args[0]
-            result = MagicMock()
-            result.returncode = 0
-            if "output" in cmd and "--json" in cmd:
-                result.stdout = json.dumps(outputs)
-            else:
-                result.stdout = ""
-            result.stderr = ""
-            return result
-
-        mock_run.side_effect = side_effect
-
-        with patch("main.update_range_status") as mock_update:
-            from main import _run_provision
-
-            env = os.environ.copy()
-            _run_provision(42, "range-42", env)
-
-            # Check NGFW fields are empty/None
-            ready_call = mock_update.call_args_list[1]
-            assert ready_call[1].get("ngfw_instance_id") == ""
-            assert ready_call[1].get("ngfw_untrust_ip") is None
-            assert ready_call[1].get("ngfw_trust_ip") is None
-
+            assert "ngfw_instance_id" not in ready_call[1]
+            assert "ngfw_untrust_ip" not in ready_call[1]
+            assert "ngfw_trust_ip" not in ready_call[1]
 
 class TestRunDestroy:
     """Tests for destroy flow."""

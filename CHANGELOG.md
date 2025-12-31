@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2025-12-30
+
+### Security
+- Hardened GitHub Actions OIDC IAM permissions to limit blast radius (#430)
+  - Restricted `iam:CreateRole`, `iam:AttachRolePolicy`, `iam:PutRolePolicy` to specific role name patterns
+  - Restricted `iam:CreateInstanceProfile` to matching instance profile patterns
+  - Restricted `iam:PassRole` to same role patterns
+  - Allowed patterns: `dev-portal-*`, `prod-portal-*`, `dev-range-*`, `prod-range-*`, `shifter-*`, `github-actions-shifter-*`
+  - Prevents attacker from creating arbitrary roles with `AdministratorAccess` if GHA is compromised
+
 ## [0.9.3] - 2025-12-30
 
 ### Added

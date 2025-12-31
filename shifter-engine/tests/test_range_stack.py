@@ -1300,7 +1300,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         import inspect
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            source = inspect.getsource(RangeStack.__init__)
+            source = inspect.getsource(RangeStack._run_all_setup)
 
             # Verify the pattern: dc_components[0].private_ip.apply(
             #     lambda ip, inst=instance: inst.run_setup(dc_ip=ip)
@@ -1400,7 +1400,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
                 stack = RangeStack("test-range", config=dc_range_config)
 
             # Check source for proper handling of both types
-            source = inspect.getsource(RangeStack.__init__)
+            source = inspect.getsource(RangeStack._run_all_setup)
 
         # Non-domain-joining instances (attacker) should be called directly
         attacker_calls = [c for c in run_setup_calls if c["role"] == "attacker"]

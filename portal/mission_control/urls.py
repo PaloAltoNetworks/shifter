@@ -11,7 +11,18 @@ urlpatterns = [
     path("agents/", views.agents, name="agents"),
     path("agents/upload/", views.upload_agent, name="upload_agent"),
     path("agents/<int:agent_id>/delete/", views.delete_agent, name="delete_agent"),
-    # NGFW page route will be added when SCMCredential/NGFWDeploymentProfile views are implemented
+    # NGFW Management (page views)
+    path("assets/ngfw/", views.ngfw_list, name="ngfw_list"),
+    path("assets/ngfw/setup/", views.ngfw_wizard, name="ngfw_wizard"),
+    path("assets/ngfw/<int:ngfw_id>/", views.ngfw_detail, name="ngfw_detail"),
+    path("assets/ngfw/<int:ngfw_id>/deprovision/", views.ngfw_deprovision, name="ngfw_deprovision"),
+    # NGFW API
+    path("api/ngfw/list/", views.api_ngfw_list, name="api_ngfw_list"),
+    path("api/ngfw/", views.api_ngfw_provision, name="api_ngfw_provision"),
+    path("api/ngfw/<int:ngfw_id>/status/", views.api_ngfw_status, name="api_ngfw_status"),
+    path("api/ngfw/<int:ngfw_id>/start/", views.api_ngfw_start, name="api_ngfw_start"),
+    path("api/ngfw/<int:ngfw_id>/stop/", views.api_ngfw_stop, name="api_ngfw_stop"),
+    path("api/ngfw/<int:ngfw_id>/deprovision/", views.api_ngfw_deprovision, name="api_ngfw_deprovision"),
     path("terminal/", views.terminal, name="terminal"),
     path("settings/", views.settings, name="settings"),
     path("help/", views.help_page, name="help"),

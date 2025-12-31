@@ -42,12 +42,6 @@ class DashboardManager {
         this.dcAgentDropdown = document.getElementById('dc-agent-dropdown');
         this.dcAgentSelect = document.getElementById('dc-agent-select-value');
         this.dcAgentItems = document.getElementById('dc-agent-items');
-        this.ngfwCheckbox = document.getElementById('ngfw-enabled');
-        this.ngfwConfigGroup = document.getElementById('ngfw-config-group');
-        this.ngfwConfigDropdown = document.getElementById('ngfw-config-dropdown');
-        this.ngfwConfigSelect = document.getElementById('ngfw-config-select-value');
-        this.ngfwConfigItems = document.getElementById('ngfw-config-items');
-        this.ngfwConfigsUrl = options.ngfwConfigsUrl;
         this.launchBtn = document.getElementById('launch-btn');
         this.cancelBtn = document.getElementById('cancel-btn');
         this.pauseBtn = document.getElementById('pause-btn');
@@ -114,20 +108,6 @@ class DashboardManager {
         // DC Agent dropdown change
         if (this.dcAgentDropdown) {
             this.dcAgentDropdown.addEventListener('change', () => {
-                this._updateLaunchButtonState();
-            });
-        }
-
-        // NGFW checkbox toggle
-        if (this.ngfwCheckbox) {
-            this.ngfwCheckbox.addEventListener('change', () => {
-                this._toggleNgfwConfigSection();
-            });
-        }
-
-        // NGFW config dropdown change
-        if (this.ngfwConfigDropdown) {
-            this.ngfwConfigDropdown.addEventListener('change', () => {
                 this._updateLaunchButtonState();
             });
         }
@@ -199,10 +179,9 @@ class DashboardManager {
         // Initialize scenario dropdown
         this._initScenarioDropdown();
 
-        // Load agents, NGFW configs, and current status in parallel
+        // Load agents and current status in parallel
         await Promise.all([
             this.loadAgents(),
-            this.loadNgfwConfigs(),
             this.loadStatus(),
         ]);
     }
@@ -212,65 +191,12 @@ class DashboardManager {
         this._initDropdown(this.scenarioDropdown);
     }
 
-    _toggleNgfwConfigSection() {
-        if (this.ngfwConfigGroup) {
-            this.ngfwConfigGroup.style.display = this.ngfwCheckbox?.checked ? 'block' : 'none';
-        }
-        this._updateLaunchButtonState();
-    }
-
     _updateLaunchButtonState() {
         if (!this.launchBtn) return;
 
         const hasAgent = Boolean(this.agentSelect?.value);
-        const ngfwEnabled = this.ngfwCheckbox?.checked ?? false;
-        const hasNgfwConfig = Boolean(this.ngfwConfigSelect?.value);
-
-        // Launch is enabled if: agent is selected AND (NGFW disabled OR NGFW config selected)
-        this.launchBtn.disabled = !hasAgent || (ngfwEnabled && !hasNgfwConfig);
-    }
-
-    async loadNgfwConfigs() {
-        if (!this.ngfwConfigsUrl || !this.ngfwConfigItems) return;
-
-        try {
-            const response = await fetch(this.ngfwConfigsUrl, {
-                headers: { 'Accept': 'application/json' },
-            });
-
-            if (!response.ok) {
-                console.error('Failed to load NGFW configs');
-                return;
-            }
-
-            const data = await response.json();
-
-            // Clear existing items
-            this.ngfwConfigItems.innerHTML = '';
-
-            if (!data.configs || data.configs.length === 0) {
-                const li = document.createElement('li');
-                li.className = 'xdr-dropdown-item disabled';
-                li.textContent = 'No configs available';
-                this.ngfwConfigItems.appendChild(li);
-            } else {
-                // Add config items
-                for (const config of data.configs) {
-                    const li = document.createElement('li');
-                    li.className = 'xdr-dropdown-item';
-                    li.dataset.value = config.id;
-                    li.textContent = `${config.name} (${config.scm_folder_name})`;
-                    this.ngfwConfigItems.appendChild(li);
-                }
-            }
-
-            // Reinitialize dropdown after adding items
-            if (this.ngfwConfigDropdown && window.XdrDropdown) {
-                new window.XdrDropdown(this.ngfwConfigDropdown);
-            }
-        } catch (error) {
-            console.error('Error loading NGFW configs:', error);
-        }
+        // Launch is enabled if agent is selected
+        this.launchBtn.disabled = !hasAgent;
     }
 
     async loadAgents() {
@@ -387,20 +313,14 @@ class DashboardManager {
             rangeAgent.textContent = this.currentRange.agent_name;
         }
 
-        // Update NGFW details - uses new UserNGFW model (issue #412)
-        // Range.ngfw_id is FK to UserNGFW, gwlb_endpoint_id is the endpoint
+        // Update NGFW details - show link to NGFW detail page if range has linked NGFW
         const ngfwDetails = document.getElementById('ngfw-details');
         if (ngfwDetails) {
             if (this.currentRange.ngfw_id) {
                 ngfwDetails.style.display = 'block';
-                const ngfwId = document.getElementById('ngfw-id');
-                const gwlbEndpoint = document.getElementById('ngfw-gwlb-endpoint');
-
-                if (ngfwId) {
-                    ngfwId.textContent = this.currentRange.ngfw_id || '--';
-                }
-                if (gwlbEndpoint) {
-                    gwlbEndpoint.textContent = this.currentRange.gwlb_endpoint_id || '--';
+                const ngfwLink = document.getElementById('ngfw-detail-link');
+                if (ngfwLink) {
+                    ngfwLink.href = `/mission-control/assets/ngfw/${this.currentRange.ngfw_id}/`;
                 }
             } else {
                 ngfwDetails.style.display = 'none';
@@ -453,9 +373,6 @@ class DashboardManager {
         if (!agentId) return;
 
         const scenario = this.scenarioSelect?.value || 'basic';
-
-        // NGFW selection disabled pending UserNGFW views (issue #412)
-        // ngfw_enabled and ngfw_config_id are no longer sent
 
         this.launchBtn.disabled = true;
         this.launchBtn.textContent = 'Launching...';

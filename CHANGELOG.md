@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.4] - 2025-12-30
+## [0.9.8] - 2025-12-31
 
 ### Added
 - Portal NGFW Management UI (#416)
@@ -34,6 +34,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Note
 - NGFW API endpoints are stubbed pending Issue #414 (UserNGFWStack)
 - UI is complete and functional with simulated provisioning flow
+
+## [0.9.7] - 2025-12-30
+
+### Security
+- Hardened GitHub Actions OIDC IAM permissions to limit blast radius (#430)
+  - Restricted `iam:CreateRole`, `iam:AttachRolePolicy`, `iam:PutRolePolicy` to specific role name patterns
+  - Restricted `iam:CreateInstanceProfile` to matching instance profile patterns
+  - Restricted `iam:PassRole` to same role patterns
+  - Allowed patterns: `dev-portal-*`, `prod-portal-*`, `dev-range-*`, `prod-range-*`, `shifter-*`, `github-actions-shifter-*`
+  - Prevents attacker from creating arbitrary roles with `AdministratorAccess` if GHA is compromised
+
+## [0.9.6] - 2025-12-30
+
+### Added
+- S3 cost budget alerts for dev and prod environments
+  - Defense-in-depth monitoring for unusual S3 costs
+  - Alerts at 80% of $50/month threshold
 
 ## [0.9.3] - 2025-12-30
 

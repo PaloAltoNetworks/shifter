@@ -45,6 +45,7 @@ Phase 1: Test Setup
 - [ ] Define test cases covering happy path
 - [ ] Define test cases covering edge cases
 - [ ] Define test cases covering error conditions
+- [ ] Review tests are substantial tests of the feature, not only surface/trivial
 - [ ] Run tests - VERIFY ALL FAIL (red)
 
 Phase 2: Core Implementation

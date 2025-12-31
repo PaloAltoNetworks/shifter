@@ -7,7 +7,7 @@ that needs to be domain-joined.
 
 from typing import Any, Dict, List
 
-from ..setup_plan import SetupStep
+from .base import SetupStep
 
 
 # PowerShell script to set DNS to point to DC

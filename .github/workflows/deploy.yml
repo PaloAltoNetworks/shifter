@@ -53,6 +53,7 @@ jobs:
               - 'terraform/modules/portal/**'
               - 'terraform/environments/*/portal/**'
               - 'portal/**'
+              - 'shifter-engine/**'
               - '.github/workflows/_portal.yml'
 
       - name: Set environment

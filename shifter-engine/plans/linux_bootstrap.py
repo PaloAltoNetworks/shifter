@@ -10,7 +10,7 @@ SSH user (ubuntu, ec2-user, etc.).
 
 from typing import Any, Dict, List
 
-from ..setup_plan import SetupStep
+from .base import SetupStep
 
 
 # Bash script to set hostname

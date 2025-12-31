@@ -134,4 +134,3 @@ jobs:
           files: portal/coverage/lcov.info
           flags: portal-javascript
           fail_ci_if_error: false
-

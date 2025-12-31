@@ -22,13 +22,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from jinja2 import Environment, FileSystemLoader
 
-from .ssm_executor import SSMExecutor
-from .setup_orchestrator import SetupOrchestrator, SetupError
-from .plans.domain_join import DomainJoinPlan
-from .plans.xdr_agent_install import XDRAgentInstallPlan
-from .plans.bootstrap import BootstrapPlan
-from .plans.linux_bootstrap import LinuxBootstrapPlan
-from .plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
+from executors.ssm_executor import SSMExecutor
+from orchestrators.setup_orchestrator import SetupOrchestrator, SetupError
+from plans.domain_join import DomainJoinPlan
+from plans.xdr_agent_install import XDRAgentInstallPlan
+from plans.bootstrap import BootstrapPlan
+from plans.linux_bootstrap import LinuxBootstrapPlan
+from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 
 
 def validate_s3_path(value: str) -> bool:

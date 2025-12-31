@@ -2,7 +2,7 @@
 
 import pytest
 
-from components.plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
+from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 
 
 class TestLinuxXDRAgentInstallPlanContext:

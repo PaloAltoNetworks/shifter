@@ -6,7 +6,7 @@ to an Active Directory Domain Controller.
 
 from typing import Any, Dict, List
 
-from ..setup_plan import SetupStep
+from .base import SetupStep
 
 
 # PowerShell script to promote server to Domain Controller

@@ -33,8 +33,8 @@ from catalog.instances import (
 def decrypt_field(encrypted_value: str) -> str:
     """Decrypt a Fernet-encrypted field value.
 
-    Used for sensitive fields like StrataConfig.scm_pin_value that are
-    encrypted at rest in the Django database.
+    Used for sensitive fields that are encrypted at rest in the Django
+    database using django-encrypted-model-fields.
 
     Args:
         encrypted_value: Base64-encoded Fernet ciphertext from database
@@ -128,8 +128,7 @@ class RangeConfig:
     ngfw_ami_id: str = ""
     ngfw_instance_type: str = "m5.xlarge"
     ngfw_security_group_id: str = ""
-    # Strata Cloud Manager config (from StrataConfig model)
-    # Replaces old Panorama config - uses PIN-based SCM registration
+    # Strata Cloud Manager config (currently disabled - NGFW UI pending UserNGFW implementation)
     strata_folder_name: str = ""
     strata_pin_id: str = ""
     strata_pin_value: str = ""
@@ -170,15 +169,11 @@ def get_range_from_db(range_id: int) -> dict:
                     os.slug as agent_os_slug,
                     r.dc_agent_id,
                     dc_a.s3_key as dc_agent_s3_key,
-                    r.ngfw_enabled,
-                    sc.scm_folder_name as strata_folder_name,
-                    sc.scm_pin_id as strata_pin_id,
-                    sc.scm_pin_value as strata_pin_value
+                    r.ngfw_id IS NOT NULL as ngfw_enabled
                 FROM mission_control_range r
                 LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
                 LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
                 LEFT JOIN mission_control_agentconfig dc_a ON r.dc_agent_id = dc_a.id
-                LEFT JOIN mission_control_strataconfig sc ON r.strata_config_id = sc.id
                 WHERE r.id = %s
                 """,
                 (range_id,),
@@ -198,10 +193,10 @@ def get_range_from_db(range_id: int) -> dict:
                 "dc_agent_id": row[7],
                 "dc_agent_s3_key": row[8],
                 "ngfw_enabled": row[9],
-                "strata_folder_name": row[10] or "",
-                "strata_pin_id": row[11] or "",
-                # PIN value is encrypted at rest - decrypt it
-                "strata_pin_value": decrypt_field(row[12]) if row[12] else "",
+                # Strata fields removed - NGFW UI disabled pending UserNGFW implementation
+                "strata_folder_name": "",
+                "strata_pin_id": "",
+                "strata_pin_value": "",
             }
 
 
@@ -338,7 +333,7 @@ def load_config() -> RangeConfig:
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
         ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
-        # Strata Cloud Manager config from database (via StrataConfig model)
+        # Strata Cloud Manager config (currently disabled - NGFW UI pending UserNGFW implementation)
         strata_folder_name=range_data.get("strata_folder_name", ""),
         strata_pin_id=range_data.get("strata_pin_id", ""),
         strata_pin_value=range_data.get("strata_pin_value", ""),

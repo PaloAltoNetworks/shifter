@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated packer README with Windows AMI documentation
 - Updated victim-ami.md with Packer build instructions
 
+## [0.9.1] - 2025-12-30
+
+### Changed
+- Engine architecture refactor (#413)
+  - Executors moved to `executors/` (ssm_executor, ssh_executor)
+  - Orchestrators moved to `orchestrators/` (setup_orchestrator)
+  - Plans moved to `plans/` (setup_plan.py → base.py)
+  - RangeStack moved to `stacks/`
+  - New: `AWSExecutor`, `OpsOrchestrator` stubs
+  - New: Base protocols for executors and orchestrators
+
 ## [0.9.0] - 2025-12-30
 
 ### Added

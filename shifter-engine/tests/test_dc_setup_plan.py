@@ -9,8 +9,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from components.plans.dc_setup import DCSetupPlan
-from components.setup_plan import SetupStep
+from plans.dc_setup import DCSetupPlan
+from plans.base import SetupStep
 
 
 @dataclass

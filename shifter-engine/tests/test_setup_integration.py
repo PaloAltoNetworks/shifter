@@ -10,16 +10,16 @@ from dataclasses import dataclass
 import pytest
 
 # These imports will fail initially - that's expected for TDD
-from components.ssm_executor import (
+from executors.ssm_executor import (
     SSMExecutor,
     CommandResult,
     CommandError,
     TimeoutError,
     InstanceNotFoundError,
 )
-from components.setup_orchestrator import SetupOrchestrator, SetupError
-from components.setup_plan import SetupStep
-from components.plans.dc_setup import DCSetupPlan
+from orchestrators.setup_orchestrator import SetupOrchestrator, SetupError
+from plans.base import SetupStep
+from plans.dc_setup import DCSetupPlan
 
 
 @dataclass

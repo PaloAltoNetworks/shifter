@@ -669,6 +669,158 @@ class TestRunPulumi:
             assert "error_message" in failed_calls[0][1]
 
 
+class TestUpdateNgfwStatus:
+    """Tests for NGFW status update function."""
+
+    def test_update_ngfw_status_basic(self, mock_boto3_clients, mock_env_vars_minimal):
+        """Updates status field only."""
+        with patch("main.get_db_connection") as mock_get_conn:
+            mock_cursor = MagicMock()
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_get_conn.return_value = mock_conn
+
+            from main import update_ngfw_status
+
+            update_ngfw_status(123, "starting")
+
+            # Verify SQL was executed on mission_control_userngfw table
+            mock_cursor.execute.assert_called_once()
+            sql_call = mock_cursor.execute.call_args
+            assert "mission_control_userngfw" in sql_call[0][0]
+            assert "status = %s" in sql_call[0][0]
+            assert sql_call[0][1][0] == "starting"
+            assert sql_call[0][1][-1] == 123  # user_ngfw_id
+
+    def test_update_ngfw_status_with_kwargs(self, mock_boto3_clients, mock_env_vars_minimal):
+        """Updates status + additional fields."""
+        with patch("main.get_db_connection") as mock_get_conn:
+            mock_cursor = MagicMock()
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_get_conn.return_value = mock_conn
+
+            from main import update_ngfw_status
+
+            update_ngfw_status(123, "active", last_started_at="NOW()")
+
+            sql_call = mock_cursor.execute.call_args
+            assert "last_started_at = NOW()" in sql_call[0][0]
+
+    def test_update_ngfw_status_commit_called(self, mock_boto3_clients, mock_env_vars_minimal):
+        """Transaction commit should be called."""
+        with patch("main.get_db_connection") as mock_get_conn:
+            mock_cursor = MagicMock()
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_get_conn.return_value = mock_conn
+
+            from main import update_ngfw_status
+
+            update_ngfw_status(123, "stopped")
+
+            mock_conn.commit.assert_called_once()
+
+
+class TestNgfwOperations:
+    """Tests for NGFW operations in main.py."""
+
+    def test_run_ngfw_start_updates_status(self, mock_boto3_clients, mock_env_vars_minimal, mocker):
+        """NGFW start should update status to starting then active."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+        mock_executor = MagicMock()
+        mock_executor.start_instance.return_value = MagicMock(success=True)
+        mock_executor.wait_for_running.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_executor)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.OpsOrchestrator", return_value=mock_orchestrator)
+
+        from main import run_ngfw_operation
+
+        run_ngfw_operation("start", 123, instance_id="i-12345")
+
+        # Verify status transitions
+        calls = mock_update.call_args_list
+        assert calls[0][0] == (123, "starting")
+        assert calls[1][0][1] == "active"
+
+    def test_run_ngfw_stop_updates_status(self, mock_boto3_clients, mock_env_vars_minimal, mocker):
+        """NGFW stop should update status to stopping then stopped."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+        mock_executor = MagicMock()
+        mocker.patch("main.AWSExecutor", return_value=mock_executor)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.OpsOrchestrator", return_value=mock_orchestrator)
+
+        from main import run_ngfw_operation
+
+        run_ngfw_operation("stop", 123, instance_id="i-12345")
+
+        calls = mock_update.call_args_list
+        assert calls[0][0] == (123, "stopping")
+        assert calls[1][0][1] == "stopped"
+
+    def test_run_ngfw_operation_failure_sets_failed_status(
+        self, mock_boto3_clients, mock_env_vars_minimal, mocker
+    ):
+        """Failed operation should set status to failed with error message."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+        mock_executor = MagicMock()
+        mocker.patch("main.AWSExecutor", return_value=mock_executor)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=False)
+        mocker.patch("main.OpsOrchestrator", return_value=mock_orchestrator)
+
+        from main import run_ngfw_operation
+
+        with pytest.raises(Exception):
+            run_ngfw_operation("start", 123, instance_id="i-12345")
+
+        # Verify failed status was set
+        failed_calls = [c for c in mock_update.call_args_list if c[0][1] == "failed"]
+        assert len(failed_calls) == 1
+
+    def test_run_ngfw_add_route_creates_endpoint(
+        self, mock_boto3_clients, mock_env_vars_minimal, mocker
+    ):
+        """Add-route should use GWLBAddRoutePlan."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+        mock_executor = MagicMock()
+        mocker.patch("main.AWSExecutor", return_value=mock_executor)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.OpsOrchestrator", return_value=mock_orchestrator)
+
+        from main import run_ngfw_operation
+
+        run_ngfw_operation(
+            "add-route",
+            123,
+            subnet_id="subnet-abc",
+            service_name="com.amazonaws.vpce.svc-123",
+            vpc_id="vpc-123",
+            route_table_id="rtb-123",
+        )
+
+        # Verify orchestrator was called
+        mock_orchestrator.orchestrate.assert_called_once()
+
+
 class TestMainEntryPoint:
     """Tests for __main__ entry point logic.
 

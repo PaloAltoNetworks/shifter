@@ -46,4 +46,4 @@ description: Direction for how to write all documentation in this repository. Al
 
 ## Examples
 
-shifter/documentation/docs/architecture.md
+shifter/shifter_platform/documentation/docs/architecture.md

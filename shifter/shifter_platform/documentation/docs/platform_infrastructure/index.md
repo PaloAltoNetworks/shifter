@@ -1,6 +1,6 @@
 # Platform Infrastructure
 
-AWS infrastructure and CI/CD for Shifter. 
+AWS infrastructure and CI/CD for Shifter.
 
 ## Directory Structure
 

@@ -2,13 +2,20 @@
 
 AWSExecutor provides a consistent interface for AWS service interactions,
 wrapping boto3 clients with error handling and result formatting.
+
+This executor provides specific methods for NGFW lifecycle operations:
+- EC2: start_instance, stop_instance, wait_for_running, wait_for_stopped, describe_instance
+- GWLB: register_target, deregister_target
+- VPC Endpoints: create_endpoint, delete_endpoint, describe_endpoint, wait_for_endpoint_available
+- Route Table: create_route, delete_route
 """
 
 import json
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, WaiterError
 
 from executors.base import CommandResult
 
@@ -102,3 +109,477 @@ class AWSExecutor:
                 stdout="",
                 stderr=str(e),
             )
+
+    # =========================================================================
+    # EC2 Operations
+    # =========================================================================
+
+    def start_instance(self, instance_id: str) -> CommandResult:
+        """Start an EC2 instance.
+
+        Args:
+            instance_id: The EC2 instance ID to start.
+
+        Returns:
+            CommandResult with success status and response.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.start_instances(InstanceIds=[instance_id])
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def stop_instance(self, instance_id: str) -> CommandResult:
+        """Stop an EC2 instance.
+
+        Args:
+            instance_id: The EC2 instance ID to stop.
+
+        Returns:
+            CommandResult with success status and response.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.stop_instances(InstanceIds=[instance_id])
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def wait_for_running(self, instance_id: str, timeout: int = 300) -> CommandResult:
+        """Wait for an EC2 instance to reach the 'running' state.
+
+        Args:
+            instance_id: The EC2 instance ID to wait for.
+            timeout: Maximum time to wait in seconds (default 300).
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("ec2")
+            waiter = client.get_waiter("instance_running")
+            # Convert timeout to waiter config (max attempts with 15s delay)
+            max_attempts = max(1, timeout // 15)
+            waiter.wait(
+                InstanceIds=[instance_id],
+                WaiterConfig={"Delay": 15, "MaxAttempts": max_attempts},
+            )
+            return CommandResult(
+                success=True,
+                stdout=f"Instance {instance_id} is now running",
+                stderr="",
+            )
+        except WaiterError as e:
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"Waiter timeout: {str(e)}",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def wait_for_stopped(self, instance_id: str, timeout: int = 300) -> CommandResult:
+        """Wait for an EC2 instance to reach the 'stopped' state.
+
+        Args:
+            instance_id: The EC2 instance ID to wait for.
+            timeout: Maximum time to wait in seconds (default 300).
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("ec2")
+            waiter = client.get_waiter("instance_stopped")
+            max_attempts = max(1, timeout // 15)
+            waiter.wait(
+                InstanceIds=[instance_id],
+                WaiterConfig={"Delay": 15, "MaxAttempts": max_attempts},
+            )
+            return CommandResult(
+                success=True,
+                stdout=f"Instance {instance_id} is now stopped",
+                stderr="",
+            )
+        except WaiterError as e:
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"Waiter timeout: {str(e)}",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def describe_instance(self, instance_id: str) -> CommandResult:
+        """Describe an EC2 instance.
+
+        Args:
+            instance_id: The EC2 instance ID to describe.
+
+        Returns:
+            CommandResult with instance details in stdout.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.describe_instances(InstanceIds=[instance_id])
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    # =========================================================================
+    # GWLB Operations
+    # =========================================================================
+
+    def register_target(self, target_group_arn: str, target_id: str) -> CommandResult:
+        """Register a target with a GWLB target group.
+
+        Args:
+            target_group_arn: The ARN of the target group.
+            target_id: The target ID (ENI ID for GWLB).
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("elbv2")
+            response = client.register_targets(
+                TargetGroupArn=target_group_arn,
+                Targets=[{"Id": target_id}],
+            )
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def deregister_target(self, target_group_arn: str, target_id: str) -> CommandResult:
+        """Deregister a target from a GWLB target group.
+
+        Args:
+            target_group_arn: The ARN of the target group.
+            target_id: The target ID (ENI ID for GWLB).
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("elbv2")
+            response = client.deregister_targets(
+                TargetGroupArn=target_group_arn,
+                Targets=[{"Id": target_id}],
+            )
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    # =========================================================================
+    # VPC Endpoint Operations
+    # =========================================================================
+
+    def create_endpoint(
+        self,
+        vpc_id: str,
+        service_name: str,
+        subnet_ids: List[str],
+    ) -> CommandResult:
+        """Create a VPC endpoint for GWLB.
+
+        Args:
+            vpc_id: The VPC ID where the endpoint will be created.
+            service_name: The GWLB endpoint service name.
+            subnet_ids: List of subnet IDs for the endpoint.
+
+        Returns:
+            CommandResult with endpoint details in stdout.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.create_vpc_endpoint(
+                VpcEndpointType="GatewayLoadBalancer",
+                VpcId=vpc_id,
+                ServiceName=service_name,
+                SubnetIds=subnet_ids,
+            )
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def delete_endpoint(self, endpoint_id: str) -> CommandResult:
+        """Delete a VPC endpoint.
+
+        Args:
+            endpoint_id: The VPC endpoint ID to delete.
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.delete_vpc_endpoints(VpcEndpointIds=[endpoint_id])
+            # Check for unsuccessful deletions
+            unsuccessful = response.get("Unsuccessful", [])
+            if unsuccessful:
+                return CommandResult(
+                    success=False,
+                    stdout="",
+                    stderr=f"Failed to delete endpoint: {unsuccessful}",
+                )
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def describe_endpoint(self, endpoint_id: str) -> CommandResult:
+        """Describe a VPC endpoint.
+
+        Args:
+            endpoint_id: The VPC endpoint ID to describe.
+
+        Returns:
+            CommandResult with endpoint details in stdout.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.describe_vpc_endpoints(VpcEndpointIds=[endpoint_id])
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def wait_for_endpoint_available(
+        self,
+        endpoint_id: str,
+        timeout: int = 300,
+    ) -> CommandResult:
+        """Wait for a VPC endpoint to become available.
+
+        Args:
+            endpoint_id: The VPC endpoint ID to wait for.
+            timeout: Maximum time to wait in seconds (default 300).
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("ec2")
+            start_time = time.time()
+            poll_interval = 10  # seconds
+
+            while time.time() - start_time < timeout:
+                response = client.describe_vpc_endpoints(VpcEndpointIds=[endpoint_id])
+                endpoints = response.get("VpcEndpoints", [])
+                if endpoints:
+                    state = endpoints[0].get("State", "")
+                    if state == "available":
+                        return CommandResult(
+                            success=True,
+                            stdout=f"Endpoint {endpoint_id} is now available",
+                            stderr="",
+                        )
+                    elif state in ("failed", "deleted", "rejected"):
+                        return CommandResult(
+                            success=False,
+                            stdout="",
+                            stderr=f"Endpoint reached terminal state: {state}",
+                        )
+                time.sleep(poll_interval)
+
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"Timeout waiting for endpoint {endpoint_id} to become available",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    # =========================================================================
+    # Route Table Operations
+    # =========================================================================
+
+    def create_route(
+        self,
+        route_table_id: str,
+        destination: str,
+        endpoint_id: str,
+    ) -> CommandResult:
+        """Create a route in a route table pointing to a VPC endpoint.
+
+        Args:
+            route_table_id: The route table ID.
+            destination: The destination CIDR block (e.g., '0.0.0.0/0').
+            endpoint_id: The VPC endpoint ID to route to.
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.create_route(
+                RouteTableId=route_table_id,
+                DestinationCidrBlock=destination,
+                VpcEndpointId=endpoint_id,
+            )
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def delete_route(self, route_table_id: str, destination: str) -> CommandResult:
+        """Delete a route from a route table.
+
+        Args:
+            route_table_id: The route table ID.
+            destination: The destination CIDR block to remove.
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.delete_route(
+                RouteTableId=route_table_id,
+                DestinationCidrBlock=destination,
+            )
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))

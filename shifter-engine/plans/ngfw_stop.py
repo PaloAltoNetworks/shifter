@@ -1,88 +1,29 @@
 """NGFW Stop Plan for stopping a running NGFW instance.
 
 This plan runs to stop a running NGFW:
-- Stop EC2 instance
-- Wait for stopped state
+- Stop EC2 instance via AWSExecutor.stop_instance()
+- Wait for stopped state via AWSExecutor.wait_for_stopped()
 
-Uses AWS CLI commands executed locally (not on NGFW).
+Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
 
+from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
-from .base import SetupStep
 
+@dataclass
+class NGFWStopStep:
+    """A step in the NGFW stop plan that uses AWSExecutor.
 
-# Stop EC2 instance script
-STOP_INSTANCE_SCRIPT = '''
-#!/bin/bash
-set -e
+    Attributes:
+        name: Unique identifier for this step.
+        action: AWSExecutor method name to call.
+        params: List of context keys to pass as method parameters.
+    """
 
-INSTANCE_ID="{{ instance_id }}"
-
-echo "Stopping NGFW instance $INSTANCE_ID..."
-
-# Stop the EC2 instance
-aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
-
-echo "Stop command sent successfully"
-'''
-
-# Wait for instance to be stopped
-WAIT_STOPPED_SCRIPT = '''
-#!/bin/bash
-set -e
-
-INSTANCE_ID="{{ instance_id }}"
-MAX_ATTEMPTS=30  # 5 minutes (10 second intervals)
-ATTEMPT=0
-
-echo "Waiting for instance $INSTANCE_ID to be stopped..."
-
-while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-    STATE=$(aws ec2 describe-instances \
-        --instance-ids "$INSTANCE_ID" \
-        --query 'Reservations[0].Instances[0].State.Name' \
-        --output text 2>/dev/null || echo "unknown")
-
-    echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS - State: $STATE"
-
-    if [ "$STATE" = "stopped" ]; then
-        echo "Instance is stopped"
-        exit 0
-    fi
-
-    ATTEMPT=$((ATTEMPT + 1))
-    sleep 10
-done
-
-echo "ERROR: Instance did not reach stopped state within 5 minutes"
-exit 1
-'''
-
-# Verification script
-VERIFY_STOPPED_SCRIPT = '''
-#!/bin/bash
-set -e
-
-INSTANCE_ID="{{ instance_id }}"
-
-echo "Verifying NGFW instance $INSTANCE_ID is stopped..."
-
-# Check EC2 state
-STATE=$(aws ec2 describe-instances \
-    --instance-ids "$INSTANCE_ID" \
-    --query 'Reservations[0].Instances[0].State.Name' \
-    --output text 2>/dev/null || echo "unknown")
-
-if [ "$STATE" != "stopped" ]; then
-    echo "ERROR: Instance state is $STATE, expected stopped"
-    exit 1
-fi
-
-echo "EC2 state: stopped"
-echo "Verification complete"
-exit 0
-'''
+    name: str
+    action: str
+    params: List[str] = field(default_factory=list)
 
 
 class NGFWStopPlan:
@@ -92,40 +33,32 @@ class NGFWStopPlan:
     1. Stop EC2 instance
     2. Wait for stopped state
 
-    Uses AWS CLI commands (not SSH to NGFW).
+    Uses AWSExecutor methods for AWS API calls.
     """
 
-    steps: List[SetupStep] = [
-        SetupStep(
+    name: str = "ngfw_stop"
+
+    steps: List[NGFWStopStep] = [
+        NGFWStopStep(
             name="stop_instance",
-            script=STOP_INSTANCE_SCRIPT,
-            timeout_seconds=120,  # 2 min
-            requires_reboot=False,
+            action="stop_instance",
+            params=["instance_id"],
         ),
-        SetupStep(
-            name="wait_stopped",
-            script=WAIT_STOPPED_SCRIPT,
-            timeout_seconds=300,  # 5 min
-            requires_reboot=False,
+        NGFWStopStep(
+            name="wait_for_stopped",
+            action="wait_for_stopped",
+            params=["instance_id"],
         ),
     ]
 
-    verify_step: SetupStep = SetupStep(
-        name="verify_stopped",
-        script=VERIFY_STOPPED_SCRIPT,
-        timeout_seconds=120,  # 2 min
-        requires_reboot=False,
-        is_verification=True,
-    )
-
     def get_context(self, instance: Any) -> Dict[str, Any]:
-        """Get template variables for stop scripts.
+        """Get context variables for NGFW stop.
 
         Args:
-            instance: Instance with instance_id
+            instance: Instance with instance_id attribute
 
         Returns:
-            Dict with template variables
+            Dict with context variables for AWSExecutor methods
 
         Raises:
             ValueError: If required attributes are missing

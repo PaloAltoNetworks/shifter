@@ -73,9 +73,10 @@
         </p>
     </div>
 
-    {# NGFW UI temporarily disabled - requires UserNGFW model views (issue #412) #}
-    {# The old StrataConfig model was removed. New NGFW UI will be built for UserNGFW #}
-    {#
+    {% comment %}
+    NGFW UI temporarily disabled - requires UserNGFW model views (issue #412)
+    The old StrataConfig model was removed. New NGFW UI will be built for UserNGFW
+
     <div class="form-group">
         <label class="form-checkbox">
             <input type="checkbox" id="ngfw-enabled">
@@ -107,7 +108,7 @@
             <a href="" class="link">Create a config</a> if you haven't yet.
         </p>
     </div>
-    #}
+    {% endcomment %}
 
     <button class="btn btn-primary" id="launch-btn" disabled>
         Launch Range

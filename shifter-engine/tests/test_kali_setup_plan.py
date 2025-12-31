@@ -14,9 +14,9 @@ class TestKaliSetupPlanRemoved:
         """kali_setup module should not exist."""
         # ImportError raised when importing non-existent name from package
         with pytest.raises(ImportError):
-            from components.plans import kali_setup  # noqa: F401
+            from plans import kali_setup  # noqa: F401
 
     def test_kali_setup_plan_class_does_not_exist(self):
         """KaliSetupPlan class should not exist in plans."""
-        from components import plans
+        import plans
         assert not hasattr(plans, "KaliSetupPlan")

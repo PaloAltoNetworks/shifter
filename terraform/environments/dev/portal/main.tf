@@ -22,6 +22,8 @@ provider "aws" {
 
 locals {
   name_prefix = "${var.environment}-portal"
+  # Add padding to field_encryption_key (b64_url doesn't include padding, but Fernet requires it)
+  field_encryption_key_padded = "${random_id.field_encryption_key.b64_url}="
 }
 
 # ------------------------------------------------------------------------------
@@ -278,7 +280,7 @@ resource "aws_secretsmanager_secret_version" "app" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
     django_secret_key    = random_password.django_secret_key.result
-    field_encryption_key = random_id.field_encryption_key.b64_url
+    field_encryption_key = local.field_encryption_key_padded
   })
 }
 

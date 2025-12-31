@@ -80,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Development tools: build-essential, Python 3, Node.js 20.x, Git
   - Claude Code configured for AWS Bedrock
 - GitHub Actions workflow support for Ubuntu AMI builds
-- Ubuntu test classes in packer/tests/test_packer.py
+- Ubuntu test classes in shifter/packer/tests/test_packer.py
 
 ### Changed
 - SSM parameter for victim AMI renamed from `/shifter/ami/victim` to `/shifter/ami/ubuntu`

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Test suite for Packer shell scripts
-# Run with: ./packer/tests/test_scripts.sh
+# Run with: ./shifter/packer/tests/test_scripts.sh
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -7,18 +7,18 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-        files: ^shifter/
+        files: ^shifter/shifter_platform/
       - id: ruff-format
-        files: ^shifter/
+        files: ^shifter/shifter_platform/
 
-  # Python - Tests (shifter)
+  # Python - Tests (shifter_platform)
   - repo: local
     hooks:
       - id: pytest-shifter
-        name: pytest (shifter)
-        entry: bash -c 'cd shifter && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q'
+        name: pytest (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q'
         language: system
-        files: ^shifter/
+        files: ^shifter/shifter_platform/
         pass_filenames: false
         always_run: true
 
@@ -27,10 +27,10 @@ repos:
     rev: 1.9.2
     hooks:
       - id: bandit
-        args: [-c, shifter/pyproject.toml, -r]
+        args: [-c, shifter/shifter_platform/pyproject.toml, -r]
         additional_dependencies: ["bandit[toml]"]
-        files: ^shifter/
-        exclude: ^shifter/(tests|\.venv)/
+        files: ^shifter/shifter_platform/
+        exclude: ^shifter/shifter_platform/(tests|\.venv)/
 
   # General
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -55,7 +55,7 @@ repos:
         name: stylelint
         entry: npx stylelint --fix
         language: system
-        files: ^shifter/static/css/.*\.css$
+        files: ^shifter/shifter_platform/static/css/.*\.css$
         types: [css]
 
   # Packer tests
@@ -63,9 +63,9 @@ repos:
     hooks:
       - id: pytest-packer
         name: pytest (packer)
-        entry: bash -c 'cd packer && uv run pytest tests/ -q'
+        entry: bash -c 'cd shifter/packer && uv run pytest tests/ -q'
         language: system
-        files: ^packer/
+        files: ^shifter/packer/
         pass_filenames: false
 
   # Terraform

@@ -21,33 +21,33 @@ Shifter complements existing demo environments and tools. It is not intended to 
 
 | Doc | Purpose |
 |-----|---------|
-| [Local Setup](shifter/documentation/docs/dev/local-setup.md) | Get the portal running locally |
-| [Architecture](shifter/documentation/docs/architecture.md) | System design and components |
-| [Portal](shifter/documentation/docs/portal/index.md) | Django app structure |
-| [Execution Plane](shifter/documentation/docs/execution/index.md) | AMIs, ranges, provisioning |
+| [Local Setup](shifter/shifter_platform/documentation/docs/dev/local-setup.md) | Get the platform running locally |
+| [Architecture](shifter/shifter_platform/documentation/docs/architecture.md) | System design and components |
+| [Portal](shifter/shifter_platform/documentation/docs/portal/index.md) | Django app structure |
+| [Execution Plane](shifter/shifter_platform/documentation/docs/execution/index.md) | AMIs, ranges, provisioning |
 
 ## Repo Structure
 
 ```
-shifter/
-├── shifter/              # Django app (auth, UI, range management)
+├── shifter/
+│   ├── shifter_platform/ # Django app (auth, UI, range management)
+│   └── packer/           # AMI builds (Kali, victims)
 ├── shifter-engine/       # Pulumi-based range provisioner (ECS task)
 ├── platform/terraform/   # Infrastructure (VPCs, IAM, runners)
 │   ├── environments/     # dev/, prod/ configs
 │   ├── modules/          # Reusable modules
 │   └── global/           # IAM, OIDC, runners
-├── packer/               # AMI builds (Kali, victims)
 └── scripts/              # Dev utilities
 ```
 
 ## Key Commands
 
 ```bash
-# Portal
-cd portal && uv run python manage.py runserver
+# Shifter Platform (Django)
+cd shifter/shifter_platform && uv run python manage.py runserver
 
 # Tests
-cd portal && uv run pytest
+cd shifter/shifter_platform && uv run pytest
 cd shifter-engine && pytest
 
 # AMI build (triggers GitHub workflow)
@@ -72,7 +72,7 @@ cd platform/terraform/global/github-runner && terraform apply -var-file=dev.tfva
 
 ## Ethics
 
-AI-driven attack capabilities exist in the wild. Defenders need realistic exposure. [Read more](shifter/documentation/docs/ops/ethics.md).
+AI-driven attack capabilities exist in the wild. Defenders need realistic exposure. [Read more](shifter/shifter_platform/documentation/docs/ops/ethics.md).
 
 ## Safety
 

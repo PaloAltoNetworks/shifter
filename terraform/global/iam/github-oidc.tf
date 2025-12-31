@@ -76,7 +76,7 @@ resource "aws_iam_role" "github_actions" {
 # Managed IAM Policies (split to avoid size limits)
 # ------------------------------------------------------------------------------
 
-# Core Infrastructure: ECR, S3 state, DynamoDB locking
+# Core Infrastructure: ECR, S3 state, DynamoDB locking, Budgets
 resource "aws_iam_policy" "core_infrastructure" {
   name = "shifter-${var.environment}-core-infrastructure"
 
@@ -156,6 +156,19 @@ resource "aws_iam_policy" "core_infrastructure" {
           "dynamodb:UpdateContinuousBackups"
         ]
         Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*-range-pulumi-locks"
+      },
+      {
+        Sid    = "Budgets"
+        Effect = "Allow"
+        Action = [
+          "budgets:CreateBudgetAction",
+          "budgets:DeleteBudgetAction",
+          "budgets:DescribeBudgetAction",
+          "budgets:UpdateBudgetAction",
+          "budgets:ViewBudget",
+          "budgets:ModifyBudget"
+        ]
+        Resource = "arn:aws:budgets::${data.aws_caller_identity.current.account_id}:budget/shifter-*"
       }
     ]
   })
@@ -759,30 +772,6 @@ resource "aws_iam_policy" "network_firewall" {
   })
 }
 
-# AWS Budgets for cost monitoring
-resource "aws_iam_policy" "budgets" {
-  name = "shifter-${var.environment}-budgets"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "Budgets"
-        Effect = "Allow"
-        Action = [
-          "budgets:CreateBudgetAction",
-          "budgets:DeleteBudgetAction",
-          "budgets:DescribeBudgetAction",
-          "budgets:UpdateBudgetAction",
-          "budgets:ViewBudget",
-          "budgets:ModifyBudget"
-        ]
-        Resource = "arn:aws:budgets::${data.aws_caller_identity.current.account_id}:budget/shifter-*"
-      }
-    ]
-  })
-}
-
 # ------------------------------------------------------------------------------
 # Policy Attachments
 # ------------------------------------------------------------------------------
@@ -835,11 +824,6 @@ resource "aws_iam_role_policy_attachment" "ssm_cognito" {
 resource "aws_iam_role_policy_attachment" "network_firewall" {
   role       = aws_iam_role.github_actions.name
   policy_arn = aws_iam_policy.network_firewall.arn
-}
-
-resource "aws_iam_role_policy_attachment" "budgets" {
-  role       = aws_iam_role.github_actions.name
-  policy_arn = aws_iam_policy.budgets.arn
 }
 
 # ------------------------------------------------------------------------------

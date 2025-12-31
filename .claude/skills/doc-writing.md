@@ -15,6 +15,14 @@
 - Use bullet lists for configurations or short enumerations.
 - Subsections only when there's a clear category break.
 
+## Accuracy
+
+- Read the code before writing about it. Never describe expected behavior.
+- If you haven't verified a value in code (CIDR, count, name), don't include it.
+- Stay at the abstraction level of the code you're documenting.
+- Platform infra describes infrastructure. What runs on it belongs elsewhere.
+- Don't invent groupings or categories that don't exist in code.
+
 ## Content
 
 - Document what exists, not what might exist.

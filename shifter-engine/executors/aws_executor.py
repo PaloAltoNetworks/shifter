@@ -347,6 +347,65 @@ class AWSExecutor:
         except Exception as e:
             return CommandResult(success=False, stdout="", stderr=str(e))
 
+    def wait_for_target_healthy(
+        self,
+        target_group_arn: str,
+        target_id: str,
+        timeout: int = 300,
+    ) -> CommandResult:
+        """Wait for a target to become healthy in a target group.
+
+        Args:
+            target_group_arn: The ARN of the target group.
+            target_id: The target ID (ENI ID for GWLB).
+            timeout: Maximum time to wait in seconds (default 300).
+
+        Returns:
+            CommandResult with success status.
+        """
+        try:
+            client = self.get_client("elbv2")
+            start_time = time.time()
+            poll_interval = 10  # seconds
+
+            while time.time() - start_time < timeout:
+                response = client.describe_target_health(
+                    TargetGroupArn=target_group_arn,
+                    Targets=[{"Id": target_id}],
+                )
+                health_descriptions = response.get("TargetHealthDescriptions", [])
+                if health_descriptions:
+                    state = health_descriptions[0].get("TargetHealth", {}).get("State", "")
+                    if state == "healthy":
+                        return CommandResult(
+                            success=True,
+                            stdout=f"Target {target_id} is now healthy",
+                            stderr="",
+                        )
+                    elif state in ("draining", "unavailable"):
+                        return CommandResult(
+                            success=False,
+                            stdout="",
+                            stderr=f"Target reached terminal state: {state}",
+                        )
+                time.sleep(poll_interval)
+
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"Timeout waiting for target {target_id} to become healthy",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
     # =========================================================================
     # VPC Endpoint Operations
     # =========================================================================

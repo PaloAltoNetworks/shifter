@@ -304,6 +304,8 @@ resource "aws_iam_policy" "elb_acm" {
 }
 
 # IAM Scoped (roles and instance profiles)
+# Restricted to specific naming patterns to limit blast radius if GitHub Actions is compromised.
+# See issue #430 for planned migration to consistent shifter-* naming.
 resource "aws_iam_policy" "iam_scoped" {
   name = "shifter-${var.environment}-iam-scoped"
 
@@ -329,7 +331,14 @@ resource "aws_iam_policy" "iam_scoped" {
           "iam:AttachRolePolicy",
           "iam:DetachRolePolicy"
         ]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/dev-portal-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prod-portal-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/dev-range-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prod-range-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/github-actions-shifter-*"
+        ]
       },
       {
         Sid    = "IAMInstanceProfiles"
@@ -343,13 +352,27 @@ resource "aws_iam_policy" "iam_scoped" {
           "iam:TagInstanceProfile",
           "iam:UntagInstanceProfile"
         ]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/*"
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/dev-portal-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/prod-portal-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/dev-range-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/prod-range-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/shifter-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/github-actions-shifter-*"
+        ]
       },
       {
-        Sid      = "IAMPassRole"
-        Effect   = "Allow"
-        Action   = ["iam:PassRole"]
-        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
+        Sid    = "IAMPassRole"
+        Effect = "Allow"
+        Action = ["iam:PassRole"]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/dev-portal-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prod-portal-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/dev-range-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/prod-range-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/github-actions-shifter-*"
+        ]
       },
       {
         Sid      = "IAMServiceLinkedRoles"
@@ -736,6 +759,30 @@ resource "aws_iam_policy" "network_firewall" {
   })
 }
 
+# AWS Budgets for cost monitoring
+resource "aws_iam_policy" "budgets" {
+  name = "shifter-${var.environment}-budgets"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Budgets"
+        Effect = "Allow"
+        Action = [
+          "budgets:CreateBudgetAction",
+          "budgets:DeleteBudgetAction",
+          "budgets:DescribeBudgetAction",
+          "budgets:UpdateBudgetAction",
+          "budgets:ViewBudget",
+          "budgets:ModifyBudget"
+        ]
+        Resource = "arn:aws:budgets::${data.aws_caller_identity.current.account_id}:budget/shifter-*"
+      }
+    ]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # Policy Attachments
 # ------------------------------------------------------------------------------
@@ -788,6 +835,11 @@ resource "aws_iam_role_policy_attachment" "ssm_cognito" {
 resource "aws_iam_role_policy_attachment" "network_firewall" {
   role       = aws_iam_role.github_actions.name
   policy_arn = aws_iam_policy.network_firewall.arn
+}
+
+resource "aws_iam_role_policy_attachment" "budgets" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.budgets.arn
 }
 
 # ------------------------------------------------------------------------------

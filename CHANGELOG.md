@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2025-12-30
+
+### Added
+- Windows victim AMI Packer build (#410)
+  - `windows.pkr.hcl` Packer template with WinRM communicator
+  - PowerShell provisioning scripts: base, services, tools, claude-code, sysprep
+  - XAMPP, IIS, FTP Server, OpenSSH Server
+  - Python 3.12, Node.js 20.x, Git
+  - Claude Code configured for Bedrock (system PATH at `C:\Program Files\nodejs`)
+  - WinRM enabled for remote management
+  - Windows Defender disabled via GPO for XDR compatibility
+  - EC2Launch v2 sysprep for AMI finalization
+- GitHub Actions workflow support for Windows AMI builds
+
+### Changed
+- Updated packer README with Windows AMI documentation
+- Updated victim-ami.md with Packer build instructions
+
 ## [0.9.0] - 2025-12-30
 
 ### Added

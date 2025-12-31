@@ -37,7 +37,16 @@ Pre-baked victim images with vulnerable services and Claude Code.
 
 ### Baking Process
 
-Windows AMIs require sysprep to reset for first boot. Key considerations:
+Windows AMIs are built using Packer. See `packer/windows.pkr.hcl`.
+
+**Build:**
+```bash
+cd packer
+packer init .
+packer build -var-file=dev.pkrvars.hcl windows.pkr.hcl
+```
+
+**Key considerations:**
 
 1. **Claude Code must be in a system path** - npm global prefix set to `C:\Program Files\nodejs` before install
 2. **Env vars at Machine level** - `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION=us-east-2`
@@ -45,6 +54,13 @@ Windows AMIs require sysprep to reset for first boot. Key considerations:
    - Print Spooler, Remote Registry, Edge Update, Themes
    - Windows Defender (via Group Policy registry keys)
 4. **Run EC2Launch sysprep with shutdown** - `& "C:\Program Files\Amazon\EC2Launch\EC2Launch.exe" sysprep --shutdown`
+
+**Provisioning scripts** (in order):
+- `scripts/windows/base.ps1` - SSM Agent, firewall, WinRM
+- `scripts/windows/services.ps1` - XAMPP, IIS, FTP, OpenSSH
+- `scripts/windows/tools.ps1` - Python, Node.js, Git
+- `scripts/windows/claude-code.ps1` - Claude Code for Bedrock
+- `scripts/windows/sysprep.ps1` - Cleanup and sysprep (runs last)
 
 ### SSH for Terminal UI
 
@@ -88,7 +104,12 @@ The XDR agent is NOT in the AMI. Users upload their agent installer to S3 via th
 
 ## Config
 
-| Env Var | Value |
-|---------|-------|
-| `VICTIM_AMI_ID` | Ubuntu AMI, set in terraform.tfvars |
-| `WINDOWS_AMI_ID` | Windows AMI, set in terraform.tfvars |
+AMI IDs are managed via SSM Parameter Store:
+
+| SSM Parameter | Description |
+|---------------|-------------|
+| `/shifter/ami/victim` | Ubuntu victim AMI |
+| `/shifter/ami/windows` | Windows victim AMI |
+| `/shifter/ami/kali` | Kali attack AMI |
+
+GitHub Actions workflows update these parameters after successful builds.

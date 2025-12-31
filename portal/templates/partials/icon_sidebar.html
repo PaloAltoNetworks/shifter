@@ -200,6 +200,9 @@
            class="nav-menu-item nav-menu-item-level-1 {% if active_nav == 'agents' %}active-link{% endif %}">
             Agents
         </a>
-        {# Strata (NGFW) link disabled - views not yet implemented (issue #412) #}
+        <a href="{% url 'mission_control:ngfw_list' %}"
+           class="nav-menu-item nav-menu-item-level-1 {% if active_nav == 'ngfw' %}active-link{% endif %}">
+            NGFWs
+        </a>
     </template>
 </nav>

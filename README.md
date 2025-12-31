@@ -21,16 +21,16 @@ Shifter complements existing demo environments and tools. It is not intended to 
 
 | Doc | Purpose |
 |-----|---------|
-| [Local Setup](portal/documentation/docs/dev/local-setup.md) | Get the portal running locally |
-| [Architecture](portal/documentation/docs/architecture.md) | System design and components |
-| [Portal](portal/documentation/docs/portal/index.md) | Django app structure |
-| [Execution Plane](portal/documentation/docs/execution/index.md) | AMIs, ranges, provisioning |
+| [Local Setup](shifter/documentation/docs/dev/local-setup.md) | Get the portal running locally |
+| [Architecture](shifter/documentation/docs/architecture.md) | System design and components |
+| [Portal](shifter/documentation/docs/portal/index.md) | Django app structure |
+| [Execution Plane](shifter/documentation/docs/execution/index.md) | AMIs, ranges, provisioning |
 
 ## Repo Structure
 
 ```
 shifter/
-├── portal/              # Django app (auth, UI, range management)
+├── shifter/              # Django app (auth, UI, range management)
 ├── shifter-engine/      # Pulumi-based range provisioner (ECS task)
 ├── terraform/           # Infrastructure (VPCs, IAM, runners)
 │   ├── environments/    # dev/, prod/ configs
@@ -72,7 +72,7 @@ cd terraform/global/github-runner && terraform apply -var-file=dev.tfvars
 
 ## Ethics
 
-AI-driven attack capabilities exist in the wild. Defenders need realistic exposure. [Read more](portal/documentation/docs/ops/ethics.md).
+AI-driven attack capabilities exist in the wild. Defenders need realistic exposure. [Read more](shifter/documentation/docs/ops/ethics.md).
 
 ## Safety
 

@@ -6,7 +6,7 @@ Current system architecture. Documents what exists, not what is planned.
 
 ```mermaid
 flowchart TB
-    subgraph PORTAL_VPC["Portal VPC (10.0.0.0/16)"]
+    subgraph SHIFTER_VPC["Shifter VPC (10.0.0.0/16)"]
         ALB[ALB]
         EC2[Django EC2]
         RDS[(PostgreSQL)]
@@ -15,7 +15,7 @@ flowchart TB
     end
 
     subgraph ECS["ECS"]
-        PROV[Shifter Engine]
+        WORKER[Engine Worker]
     end
 
     subgraph RANGE_VPC["Range VPC (10.1.0.0/16)"]
@@ -32,9 +32,9 @@ flowchart TB
     COGNITO <-->|OIDC| EC2
     EC2 -->|WebSocket SSH| KALI
     EC2 -->|WebSocket SSH| VICTIM
-    EC2 -->|Start Task| PROV
-    PROV -->|IAM Auth| RDS
-    PROV -->|Create| SUBNET
+    EC2 -->|Start Task| WORKER
+    WORKER -->|IAM Auth| RDS
+    WORKER -->|Create| SUBNET
     KALI -.->|Traffic| NGFW
     NGFW -.->|Traffic| VICTIM
     NGFW -->|Telemetry| XDR[XDR/XSIAM]
@@ -45,46 +45,27 @@ DC and NGFW are optional. DC enables AD attack scenarios with domain-joined vict
 
 ## Components
 
-### Portal (`portal/`)
-
-Single Django codebase with two apps:
+### Django Project (`shifter/`)
 
 | App | Purpose |
 |-----|---------|
-| `mission_control` | Auth, agent config, range lifecycle, terminal UI |
-| `risk_register` | Security risk tracking (admin-only) |
+| `engine` | Orchestration, business logic, lifecycle management |
+| `mission_control` | UI, views, templates |
+| `risk_register` | Security risk tracking |
+| `documentation` | Internal docs |
 
-**Models in `mission_control`:**
+### Engine Worker (`shifter-engine/`)
 
-| Model | Purpose |
-|-------|---------|
-| `UserProfile` | Cognito user metadata |
-| `AgentConfig` | XDR agent installer configs (S3 references) |
-| `SCMCredential` | Strata Cloud Manager API credentials |
-| `NGFWDeploymentProfile` | VM-Series deployment settings (folder, template stack) |
-| `UserNGFW` | Persistent NGFW instance with lifecycle management |
-| `OperatingSystem` | OS types available for ranges |
-| `Range` | Range instance state and resource IDs |
-| `ActivityLog` | Audit trail |
-
-**Key services:**
-- `services/ssh.py` - Async SSH connection management
-- `services/secrets.py` - Secrets Manager retrieval
-- `consumers.py` - WebSocket SSH terminal consumer
-
-### Shifter Engine (`shifter-engine/`)
-
-ECS Fargate task that provisions/destroys range infrastructure.
+ECS Fargate container that executes infrastructure operations (Pulumi, SSM).
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Entrypoint, DB connection, Pulumi orchestration |
+| `main.py` | Entrypoint, receives commands |
 | `config.py` | Stack configuration from env/DB |
+| `stacks/` | Pulumi stack definitions |
+| `components/` | Reusable Pulumi components |
+| `plans/` | Multi-step execution plans |
 | `catalog/instances.py` | Instance type definitions |
-| `components/instance.py` | EC2 creation, SSH keys, DC orchestration |
-| `components/ssm_executor.py` | Generic SSM Run Command execution |
-| `components/setup_orchestrator.py` | Runs setup plans step-by-step |
-| `components/plans/` | Setup plans (bootstrap, dc_setup, domain_join, xdr_agent_install) |
 | `templates/` | Bootstrap user data (Jinja2) |
 
 **Instance catalog:**
@@ -97,11 +78,9 @@ ECS Fargate task that provisions/destroys range infrastructure.
 
 ### Terraform (`terraform/`)
 
-Infrastructure as code.
-
 | Module | Purpose |
 |--------|---------|
-| `portal/` | Portal VPC, RDS, ALB, EC2, Cognito, S3 |
+| `portal/` | Shifter VPC, RDS, ALB, EC2, Cognito, S3 |
 | `range/` | Range VPC, subnets, security groups |
 | `pulumi-provisioner/` | ECS task definition, IAM roles |
 | `pulumi-state/` | S3 bucket + DynamoDB for Pulumi state |
@@ -117,17 +96,17 @@ Infrastructure as code.
 ```mermaid
 sequenceDiagram
     participant User
-    participant Portal
-    participant ECS
+    participant Django
+    participant Worker as Engine Worker
     participant Pulumi
     participant RDS
     participant AWS
     participant SSM
 
-    User->>Portal: Launch Range
-    Portal->>RDS: Insert Range(status=pending)
-    Portal->>ECS: Start provisioner task
-    ECS->>Pulumi: Run 'up'
+    User->>Django: Launch Range
+    Django->>RDS: Insert Range(status=pending)
+    Django->>Worker: Dispatch provision task
+    Worker->>Pulumi: Run 'up'
     Pulumi->>RDS: status=provisioning
     Pulumi->>AWS: Create subnet, EC2s
     opt NGFW enabled
@@ -143,10 +122,10 @@ sequenceDiagram
         end
     end
     Pulumi->>RDS: status=ready, IPs, ARNs
-    Portal->>User: Range ready
+    Django->>User: Range ready
 ```
 
-DC uses a prebaked AMI with AD DS ready. SSM orchestrates DNS cleanup, XDR installation, and domain joins. See [Shifter Engine docs](execution/engine.md#dc-setup-via-ssm) for details.
+DC uses a prebaked AMI with AD DS ready. SSM orchestrates DNS cleanup, XDR installation, and domain joins. See [Engine docs](execution/engine.md#dc-setup-via-ssm) for details.
 
 NGFW (VM-Series) uses bootstrap with init-cfg.txt containing SCM PIN credentials. Auto-registers with Strata Cloud Manager on first boot.
 
@@ -180,9 +159,9 @@ sequenceDiagram
     participant Cognito
 
     User->>Django: GET /protected
-    Django->>User: 302 → Cognito
+    Django->>User: 302 -> Cognito
     User->>Cognito: Login + MFA
-    Cognito->>User: 302 → /callback?code=xxx
+    Cognito->>User: 302 -> /callback?code=xxx
     User->>Django: GET /callback
     Django->>Cognito: Exchange code
     Cognito->>Django: JWT tokens
@@ -195,7 +174,7 @@ sequenceDiagram
 
 ## Network
 
-### Portal VPC
+### Shifter VPC
 
 | Subnet | Components |
 |--------|------------|
@@ -215,7 +194,7 @@ When NGFW is enabled, VM-Series has two interfaces:
 
 Route tables direct traffic through NGFW when enabled.
 
-VPC peering connects Portal to Range for SSH access (port 22 only).
+VPC peering connects Shifter to Range for SSH access (port 22 only).
 
 ## Deployment
 
@@ -223,8 +202,8 @@ GitHub Actions on merge:
 
 | Trigger | Action |
 |---------|--------|
-| `terraform/**` → main | `terraform apply` |
-| `portal/**` → main | Build image → ECR → SSM restart EC2 |
-| `shifter-engine/**` → main | Build image → ECR |
+| `terraform/**` -> main | `terraform apply` |
+| `shifter/**` -> main | Build image -> ECR -> SSM restart EC2 |
+| `shifter-engine/**` -> main | Build image -> ECR |
 
 IAM via OIDC federation. No static credentials.

@@ -336,6 +336,7 @@ def _run_destroy(range_id: int, stack_name: str, env: dict) -> None:
 # Import NGFW operation dependencies
 from executors.aws_executor import AWSExecutor
 from orchestrators.ops_orchestrator import OpsOrchestrator
+from orchestrators.setup_orchestrator import SetupOrchestrator
 
 
 def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
@@ -413,6 +414,230 @@ def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
         raise
 
 
+def run_ngfw_pulumi(operation: str, user_ngfw_id: int) -> None:
+    """Run NGFW Pulumi operation (provision or deprovision).
+
+    Args:
+        operation: Either 'up' (provision) or 'destroy' (deprovision).
+        user_ngfw_id: The ID of the UserNGFW record.
+
+    Raises:
+        ValueError: If unknown operation.
+        Exception: If the Pulumi operation fails.
+    """
+    stack_name = f"ngfw-{user_ngfw_id}"
+    env = os.environ.copy()
+    env["PULUMI_CONFIG_PASSPHRASE"] = ""  # We use AWS KMS for secrets
+
+    try:
+        # Select or create stack with proper secrets provider
+        _select_or_create_stack(stack_name, env)
+
+        # Set NGFW stack configuration from environment
+        _set_ngfw_stack_config(env, user_ngfw_id)
+
+        if operation == "up":
+            _run_ngfw_provision(user_ngfw_id, stack_name, env)
+        elif operation == "destroy":
+            _run_ngfw_deprovision(user_ngfw_id, stack_name, env)
+        else:
+            raise ValueError(f"Unknown operation: {operation}")
+
+    except Exception as e:
+        error_msg = str(e)[:1000]
+        print(f"NGFW operation failed: {error_msg}", file=sys.stderr)
+
+        if operation == "up":
+            # Auto-cleanup on failure to avoid orphaned resources
+            print("NGFW provision failed - attempting auto-cleanup...")
+            subprocess.run(
+                ["pulumi", "destroy", "--yes", "--non-interactive"],
+                cwd="/app",
+                env=env,
+                capture_output=True,
+            )
+
+        update_ngfw_status(user_ngfw_id, "failed", error_message=error_msg)
+        raise
+
+
+def _set_ngfw_stack_config(env: dict, user_ngfw_id: int) -> None:
+    """Set Pulumi stack configuration for NGFW from environment variables.
+
+    Args:
+        env: Environment dictionary for subprocess.
+        user_ngfw_id: The UserNGFW ID to configure.
+    """
+    config_values = {
+        "userNgfwId": str(user_ngfw_id),
+        "environment": os.environ.get("ENVIRONMENT", "dev"),
+        "ngfwVpcId": os.environ.get("NGFW_VPC_ID", ""),
+        "ngfwSubnetId": os.environ.get("NGFW_SUBNET_ID", ""),
+        "ngfwSecurityGroupId": os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+        "ngfwAmiId": os.environ.get("NGFW_AMI_ID", ""),
+        "bootstrapBucket": os.environ.get("NGFW_BOOTSTRAP_BUCKET", ""),
+        "ngfwInstanceType": os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
+        "ngfwInstanceProfileName": os.environ.get("NGFW_INSTANCE_PROFILE_NAME", ""),
+    }
+
+    for key, value in config_values.items():
+        if value:
+            subprocess.run(
+                ["pulumi", "config", "set", key, value],
+                cwd="/app",
+                env=env,
+                capture_output=True,
+            )
+        else:
+            subprocess.run(
+                ["pulumi", "config", "rm", key],
+                cwd="/app",
+                env=env,
+                capture_output=True,
+            )
+
+
+def _run_ngfw_provision(user_ngfw_id: int, stack_name: str, env: dict) -> None:
+    """Run Pulumi up to provision the NGFW, then run post-Pulumi configuration.
+
+    Args:
+        user_ngfw_id: The UserNGFW ID being provisioned.
+        stack_name: The Pulumi stack name.
+        env: Environment dictionary for subprocess.
+    """
+    update_ngfw_status(user_ngfw_id, "provisioning")
+    print("Running pulumi up for NGFW...")
+
+    result = subprocess.run(
+        ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],
+        cwd="/app",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    print(f"Pulumi stdout:\n{result.stdout}")
+    if result.stderr:
+        print(f"Pulumi stderr:\n{result.stderr}")
+
+    if result.returncode != 0:
+        raise Exception(f"NGFW Pulumi up failed: {result.stderr}")  # noqa: TRY002
+
+    # Get outputs
+    print("Retrieving NGFW stack outputs...")
+    outputs = subprocess.run(
+        ["pulumi", "stack", "output", "--json"],
+        cwd="/app",
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output_data = json.loads(outputs.stdout)
+    print(f"NGFW Stack outputs: {json.dumps(output_data, indent=2)}")
+
+    # Run post-Pulumi configuration (wait for SSH, configure XDR, etc.)
+    print("Running post-Pulumi NGFW configuration...")
+    executor = AWSExecutor()
+    orchestrator = SetupOrchestrator(executor)
+
+    # Create a context object with the stack outputs
+    class NGFWContext:
+        pass
+
+    context = NGFWContext()
+    context.instance_id = output_data.get("instance_id")
+    context.management_ip = output_data.get("management_ip")
+    context.dataplane_ip = output_data.get("dataplane_ip")
+    context.service_name = output_data.get("service_name")
+    context.gwlb_arn = output_data.get("gwlb_arn")
+    context.target_group_arn = output_data.get("target_group_arn")
+
+    # Import and run the NGFW provision plan
+    from plans.ngfw_provision import NGFWProvisionPlan
+
+    provision_plan = NGFWProvisionPlan()
+    provision_result = orchestrator.orchestrate(provision_plan, context)
+
+    if not provision_result.success:
+        raise Exception("NGFW post-Pulumi configuration failed")  # noqa: TRY002
+
+    # Update NGFW with provisioned resources
+    update_ngfw_status(
+        user_ngfw_id,
+        "ready",
+        instance_id=output_data.get("instance_id"),
+        management_ip=output_data.get("management_ip"),
+        dataplane_ip=output_data.get("dataplane_ip"),
+        service_name=output_data.get("service_name"),
+        gwlb_arn=output_data.get("gwlb_arn"),
+        pulumi_stack=stack_name,
+        ready_at="NOW()",
+    )
+
+
+def _run_ngfw_deprovision(user_ngfw_id: int, stack_name: str, env: dict) -> None:
+    """Run license deactivation then Pulumi destroy for NGFW.
+
+    Args:
+        user_ngfw_id: The UserNGFW ID being deprovisioned.
+        stack_name: The Pulumi stack name.
+        env: Environment dictionary for subprocess.
+    """
+    update_ngfw_status(user_ngfw_id, "deprovisioning")
+
+    # Run pre-destroy license deactivation
+    print("Running NGFW license deactivation...")
+    executor = AWSExecutor()
+    orchestrator = SetupOrchestrator(executor)
+
+    # Import and run the NGFW deprovision plan (license deactivation)
+    from plans.ngfw_deprovision import NGFWDeprovisionPlan
+
+    deprovision_plan = NGFWDeprovisionPlan()
+
+    # Create minimal context - the plan will look up the NGFW by ID
+    class NGFWContext:
+        pass
+
+    context = NGFWContext()
+    context.user_ngfw_id = user_ngfw_id
+
+    deprovision_result = orchestrator.orchestrate(deprovision_plan, context)
+    if not deprovision_result.success:
+        print("Warning: License deactivation failed, proceeding with destroy anyway")
+
+    # Run Pulumi destroy
+    print("Running pulumi destroy for NGFW...")
+
+    result = subprocess.run(
+        ["pulumi", "destroy", "--yes", "--non-interactive", "--skip-preview"],
+        cwd="/app",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    print(f"Pulumi stdout:\n{result.stdout}")
+    if result.stderr:
+        print(f"Pulumi stderr:\n{result.stderr}")
+
+    if result.returncode != 0:
+        raise Exception(f"NGFW Pulumi destroy failed: {result.stderr}")  # noqa: TRY002
+
+    # Remove stack
+    print(f"Removing NGFW stack: {stack_name}")
+    subprocess.run(
+        ["pulumi", "stack", "rm", stack_name, "--yes"],
+        cwd="/app",
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+    update_ngfw_status(user_ngfw_id, "deprovisioned", deprovisioned_at="NOW()")
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -463,7 +688,7 @@ if __name__ == "__main__":
     ngfw_parser = subparsers.add_parser("ngfw", help="NGFW runtime operations")
     ngfw_parser.add_argument(
         "operation",
-        choices=["start", "stop", "add-route", "remove-route"],
+        choices=["provision", "deprovision", "start", "stop", "add-route", "remove-route"],
         help="NGFW operation to perform",
     )
     ngfw_parser.add_argument(
@@ -510,21 +735,28 @@ if __name__ == "__main__":
         print(f"Starting NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
         print(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
-        kwargs = {}
-        if args.instance_id:
-            kwargs["instance_id"] = args.instance_id
-        if args.subnet_id:
-            kwargs["subnet_id"] = args.subnet_id
-        if args.service_name:
-            kwargs["service_name"] = args.service_name
-        if args.vpc_id:
-            kwargs["vpc_id"] = args.vpc_id
-        if args.route_table_id:
-            kwargs["route_table_id"] = args.route_table_id
-        if args.endpoint_id:
-            kwargs["endpoint_id"] = args.endpoint_id
+        # Pulumi operations vs runtime operations
+        if args.operation in ("provision", "deprovision"):
+            # Map to Pulumi operations
+            pulumi_op = "up" if args.operation == "provision" else "destroy"
+            run_ngfw_pulumi(pulumi_op, args.user_ngfw_id)
+        else:
+            # Runtime operations (start, stop, add-route, remove-route)
+            kwargs = {}
+            if args.instance_id:
+                kwargs["instance_id"] = args.instance_id
+            if args.subnet_id:
+                kwargs["subnet_id"] = args.subnet_id
+            if args.service_name:
+                kwargs["service_name"] = args.service_name
+            if args.vpc_id:
+                kwargs["vpc_id"] = args.vpc_id
+            if args.route_table_id:
+                kwargs["route_table_id"] = args.route_table_id
+            if args.endpoint_id:
+                kwargs["endpoint_id"] = args.endpoint_id
 
-        run_ngfw_operation(args.operation, args.user_ngfw_id, **kwargs)
+            run_ngfw_operation(args.operation, args.user_ngfw_id, **kwargs)
 
         print(f"Completed NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
 

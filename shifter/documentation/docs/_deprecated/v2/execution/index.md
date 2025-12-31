@@ -1,12 +1,20 @@
 # Execution Plane
 
-Infrastructure that runs ranges: Shifter Engine and range runtime.
+Infrastructure that runs ranges: the Engine Worker container and range runtime.
+
+## Terminology
+
+| Term | Meaning |
+|------|---------|
+| **Shifter Engine** | The `engine/` Django app - owns business logic, dispatches work |
+| **Engine Worker** | The `shifter-engine/` container - executes infrastructure operations |
+| **Mission Control** | The `mission_control/` Django app - presentation layer (UI) |
 
 ## Components
 
 | Component | Purpose |
 |-----------|---------|
-| [Shifter Engine](engine.md) | ECS task that creates/destroys range infrastructure |
+| [Engine Worker](engine.md) | ECS task that creates/destroys range infrastructure |
 | [Kali AMI](kali-ami.md) | Pre-baked attacker instance |
 | [Victim AMI](victim-ami.md) | Pre-baked victim instance |
 
@@ -14,8 +22,9 @@ Infrastructure that runs ranges: Shifter Engine and range runtime.
 
 ```mermaid
 flowchart LR
-    subgraph PORTAL_VPC["Portal VPC"]
-        PORTAL[Portal]
+    subgraph SHIFTER_VPC["Shifter VPC"]
+        DJANGO[Django]
+        ENGINE[engine/ app]
         ECS[ECS Fargate]
     end
 
@@ -31,7 +40,8 @@ flowchart LR
         SUBNET --- DC
     end
 
-    PORTAL -->|run_task| ECS
+    DJANGO --> ENGINE
+    ENGINE -->|dispatch| ECS
     ECS -->|pulumi up| SUBNET
 ```
 
@@ -41,10 +51,10 @@ DC and NGFW are optional. DC enables AD attack scenarios with domain-joined vict
 
 | Status | Meaning |
 |--------|---------|
-| `pending` | Portal created Range record |
-| `provisioning` | Shifter Engine running `pulumi up` |
+| `pending` | Engine created Range record |
+| `provisioning` | Engine Worker running `pulumi up` |
 | `ready` | Infrastructure created, IPs available |
-| `destroying` | Shifter Engine running `pulumi destroy` |
+| `destroying` | Engine Worker running `pulumi destroy` |
 | `destroyed` | Infrastructure torn down |
 | `failed` | Error during provisioning |
 

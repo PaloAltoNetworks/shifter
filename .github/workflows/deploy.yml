@@ -52,7 +52,7 @@ jobs:
             portal:
               - 'terraform/modules/portal/**'
               - 'terraform/environments/*/portal/**'
-              - 'portal/**'
+              - 'shifter/**'
               - 'shifter-engine/**'
               - '.github/workflows/_portal.yml'
 

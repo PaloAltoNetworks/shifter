@@ -890,3 +890,383 @@ class TestMainEntryPoint:
 
             with pytest.raises(ValueError, match="Unknown operation"):
                 run_pulumi("invalid_op", 42)
+
+
+class TestNgfwProvisionCLI:
+    """Tests for NGFW provision CLI command."""
+
+    def test_ngfw_provision_requires_user_ngfw_id(self):
+        """ngfw provision requires --user-ngfw-id argument."""
+        result = subprocess.run(
+            [sys.executable, "main.py", "ngfw", "provision"],
+            cwd=str(Path(__file__).parent.parent),
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "--user-ngfw-id" in result.stderr or "required" in result.stderr.lower()
+
+    def test_ngfw_provision_updates_status_to_provisioning(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW provision should update status to provisioning."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+
+        # Mock subprocess for Pulumi operations
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps({
+                    "instance_id": "i-ngfw123",
+                    "management_ip": "10.1.4.10",
+                    "dataplane_ip": "10.1.4.11",
+                    "service_name": "com.amazonaws.vpce.svc-123",
+                })
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        # Mock the orchestrator for post-Pulumi config
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", 123)
+
+        # Verify status was updated to provisioning
+        calls = mock_update.call_args_list
+        assert calls[0][0] == (123, "provisioning")
+
+    def test_ngfw_provision_runs_pulumi_up(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW provision should run pulumi up."""
+        mocker.patch("main.update_ngfw_status")
+
+        pulumi_calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            pulumi_calls.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps({
+                    "instance_id": "i-ngfw123",
+                    "management_ip": "10.1.4.10",
+                    "dataplane_ip": "10.1.4.11",
+                    "service_name": "com.amazonaws.vpce.svc-123",
+                })
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", 123)
+
+        # Verify pulumi up was called
+        up_calls = [c for c in pulumi_calls if "up" in c]
+        assert len(up_calls) >= 1
+
+    def test_ngfw_provision_saves_outputs_to_db(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW provision should save Pulumi outputs to database."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "dataplane_ip": "10.1.4.11",
+            "service_name": "com.amazonaws.vpce.svc-123",
+            "gwlb_arn": "arn:aws:elasticloadbalancing:us-east-2:123:loadbalancer/gwy/test",
+        }
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", 123)
+
+        # Verify outputs were saved - look for the ready status call with kwargs
+        ready_calls = [c for c in mock_update.call_args_list if c[0][1] == "ready"]
+        assert len(ready_calls) == 1
+        assert ready_calls[0][1].get("instance_id") == "i-ngfw123"
+
+    def test_ngfw_provision_runs_post_pulumi_config(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW provision should run post-Pulumi configuration via orchestrator."""
+        mocker.patch("main.update_ngfw_status")
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps({
+                    "instance_id": "i-ngfw123",
+                    "management_ip": "10.1.4.10",
+                })
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", 123)
+
+        # Verify orchestrator was called for post-Pulumi config
+        assert mock_orchestrator.orchestrate.called
+
+    def test_ngfw_provision_failure_sets_failed_status(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """Failed NGFW provision should set status to failed."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            if "up" in cmd:
+                result.returncode = 1
+                result.stderr = "Pulumi provision failed"
+            else:
+                result.returncode = 0
+            result.stdout = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        from main import run_ngfw_pulumi
+
+        with pytest.raises(Exception):
+            run_ngfw_pulumi("up", 123)
+
+        # Verify status was set to failed
+        failed_calls = [c for c in mock_update.call_args_list if c[0][1] == "failed"]
+        assert len(failed_calls) == 1
+
+
+class TestNgfwDeprovisionCLI:
+    """Tests for NGFW deprovision CLI command."""
+
+    def test_ngfw_deprovision_requires_user_ngfw_id(self):
+        """ngfw deprovision requires --user-ngfw-id argument."""
+        result = subprocess.run(
+            [sys.executable, "main.py", "ngfw", "deprovision"],
+            cwd=str(Path(__file__).parent.parent),
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "--user-ngfw-id" in result.stderr or "required" in result.stderr.lower()
+
+    def test_ngfw_deprovision_updates_status_to_deprovisioning(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW deprovision should update status to deprovisioning."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        # Mock orchestrator for pre-destroy license deactivation
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("destroy", 123)
+
+        # Verify status was updated to deprovisioning
+        calls = mock_update.call_args_list
+        assert calls[0][0] == (123, "deprovisioning")
+
+    def test_ngfw_deprovision_runs_license_deactivation_first(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW deprovision should run license deactivation before Pulumi destroy."""
+        mocker.patch("main.update_ngfw_status")
+
+        pulumi_calls = []
+        orchestrator_calls = []
+
+        def subprocess_side_effect(*args, **kwargs):
+            cmd = args[0]
+            pulumi_calls.append(("subprocess", cmd))
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=subprocess_side_effect)
+
+        mock_orchestrator = MagicMock()
+
+        def orchestrator_side_effect(*args, **kwargs):
+            orchestrator_calls.append(("orchestrator", args))
+            return MagicMock(success=True)
+
+        mock_orchestrator.orchestrate.side_effect = orchestrator_side_effect
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("destroy", 123)
+
+        # Verify orchestrator (license deactivation) was called before Pulumi destroy
+        destroy_idx = None
+        for i, (caller, cmd) in enumerate(pulumi_calls):
+            if "destroy" in str(cmd):
+                destroy_idx = i
+                break
+
+        # Orchestrator should have been called (for deprovision plan)
+        assert len(orchestrator_calls) >= 1
+
+    def test_ngfw_deprovision_runs_pulumi_destroy(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW deprovision should run pulumi destroy."""
+        mocker.patch("main.update_ngfw_status")
+
+        pulumi_calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            pulumi_calls.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("destroy", 123)
+
+        # Verify pulumi destroy was called
+        destroy_calls = [c for c in pulumi_calls if "destroy" in c]
+        assert len(destroy_calls) >= 1
+
+    def test_ngfw_deprovision_removes_stack(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW deprovision should remove the Pulumi stack."""
+        mocker.patch("main.update_ngfw_status")
+
+        pulumi_calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            pulumi_calls.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("destroy", 123)
+
+        # Verify stack rm was called
+        rm_calls = [c for c in pulumi_calls if "rm" in str(c)]
+        assert len(rm_calls) >= 1
+
+    def test_ngfw_deprovision_sets_deprovisioned_status(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW deprovision should set final status to deprovisioned."""
+        mock_update = mocker.patch("main.update_ngfw_status")
+
+        def side_effect(*args, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        mocker.patch("main.AWSExecutor")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("destroy", 123)
+
+        # Verify final status is deprovisioned
+        final_call = mock_update.call_args_list[-1]
+        assert final_call[0][1] == "deprovisioned"

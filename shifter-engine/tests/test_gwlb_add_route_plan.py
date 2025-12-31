@@ -1,12 +1,15 @@
 """Tests for GWLBAddRoutePlan - TDD: Write tests first, all must fail initially.
 
-GWLBAddRoutePlan handles adding GWLB routing for a new range:
-- Create VPC endpoint in range subnet
-- Update route table to send 0.0.0.0/0 through endpoint
+GWLBAddRoutePlan handles adding GWLB routing for a new range using AWSExecutor:
+- Create VPC endpoint via AWSExecutor.create_endpoint()
+- Wait for endpoint via AWSExecutor.wait_for_endpoint_available()
+- Create route via AWSExecutor.create_route()
+
+This plan uses AWSExecutor for AWS API calls, not bash scripts.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -29,7 +32,7 @@ class TestGWLBAddRoutePlanSteps:
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
-        assert len(plan.steps) >= 2
+        assert len(plan.steps) >= 3  # create_endpoint, wait, create_route
 
     def test_has_create_endpoint_step(self):
         """Plan should include VPC endpoint creation step."""
@@ -37,10 +40,18 @@ class TestGWLBAddRoutePlanSteps:
 
         plan = GWLBAddRoutePlan()
         step_names = [s.name for s in plan.steps]
-        assert any("endpoint" in name.lower() for name in step_names)
+        assert any("endpoint" in name.lower() and "create" in name.lower() for name in step_names)
 
-    def test_has_add_route_step(self):
-        """Plan should include route table update step."""
+    def test_has_wait_endpoint_step(self):
+        """Plan should include wait for endpoint step."""
+        from plans.gwlb_add_route import GWLBAddRoutePlan
+
+        plan = GWLBAddRoutePlan()
+        step_names = [s.name for s in plan.steps]
+        assert any("wait" in name.lower() or "available" in name.lower() for name in step_names)
+
+    def test_has_create_route_step(self):
+        """Plan should include route creation step."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
@@ -48,14 +59,14 @@ class TestGWLBAddRoutePlanSteps:
         assert any("route" in name.lower() for name in step_names)
 
     def test_endpoint_before_route(self):
-        """Endpoint creation must come before route update."""
+        """Endpoint creation must come before route creation."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
         step_names = [s.name for s in plan.steps]
 
-        endpoint_idx = next(i for i, n in enumerate(step_names) if "endpoint" in n.lower())
-        route_idx = next(i for i, n in enumerate(step_names) if "route" in n.lower() and "endpoint" not in n.lower())
+        endpoint_idx = next(i for i, n in enumerate(step_names) if "endpoint" in n.lower() and "create" in n.lower())
+        route_idx = next(i for i, n in enumerate(step_names) if "route" in n.lower())
         assert endpoint_idx < route_idx
 
     def test_all_steps_have_names(self):
@@ -66,72 +77,75 @@ class TestGWLBAddRoutePlanSteps:
         for step in plan.steps:
             assert step.name, "Step must have a name"
 
-    def test_all_steps_have_scripts(self):
-        """All steps must have script content."""
+    def test_all_steps_have_action(self):
+        """All steps must have action attribute (AWSExecutor method name)."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
         for step in plan.steps:
-            assert step.script, f"Step {step.name} must have a script"
+            assert hasattr(step, "action"), f"Step {step.name} must have action attribute"
+            assert step.action, f"Step {step.name} must have non-empty action"
 
-    def test_all_steps_have_timeouts(self):
-        """All steps must have positive timeouts."""
+    def test_all_steps_have_params(self):
+        """All steps must have params attribute (context keys to pass)."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
         for step in plan.steps:
-            assert step.timeout_seconds > 0
+            assert hasattr(step, "params"), f"Step {step.name} must have params attribute"
 
 
-class TestGWLBAddRoutePlanScripts:
-    """Test GWLBAddRoutePlan script content."""
+class TestGWLBAddRoutePlanAWSExecutorActions:
+    """Test GWLBAddRoutePlan uses AWSExecutor method names."""
 
-    def test_endpoint_script_uses_aws_cli(self):
-        """Endpoint script should use AWS CLI for VPC endpoint creation."""
+    def test_create_endpoint_step_uses_create_endpoint_action(self):
+        """Create endpoint step should use AWSExecutor.create_endpoint action."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
-        endpoint_step = next(s for s in plan.steps if "endpoint" in s.name.lower())
+        endpoint_step = next(s for s in plan.steps if "endpoint" in s.name.lower() and "create" in s.name.lower())
 
-        assert "aws" in endpoint_step.script.lower()
-        assert "create-vpc-endpoint" in endpoint_step.script.lower()
+        assert endpoint_step.action == "create_endpoint"
 
-    def test_endpoint_script_uses_gateway_load_balancer_type(self):
-        """Endpoint should be GatewayLoadBalancer type."""
+    def test_create_endpoint_params_include_required_fields(self):
+        """Create endpoint params should include vpc_id, service_name, subnet_ids."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
-        endpoint_step = next(s for s in plan.steps if "endpoint" in s.name.lower())
+        endpoint_step = next(s for s in plan.steps if "endpoint" in s.name.lower() and "create" in s.name.lower())
 
-        assert "GatewayLoadBalancer" in endpoint_step.script
+        assert "vpc_id" in endpoint_step.params
+        assert "service_name" in endpoint_step.params
+        assert "subnet_ids" in endpoint_step.params
 
-    def test_endpoint_script_references_service_name(self):
-        """Endpoint script should reference service name."""
+    def test_wait_endpoint_step_uses_wait_action(self):
+        """Wait step should use AWSExecutor.wait_for_endpoint_available action."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
-        endpoint_step = next(s for s in plan.steps if "endpoint" in s.name.lower())
+        wait_step = next(s for s in plan.steps if "wait" in s.name.lower() or "available" in s.name.lower())
 
-        assert "service_name" in endpoint_step.script or "SERVICE_NAME" in endpoint_step.script
+        assert wait_step.action == "wait_for_endpoint_available"
 
-    def test_route_script_uses_aws_cli(self):
-        """Route script should use AWS CLI for route creation."""
+    def test_create_route_step_uses_create_route_action(self):
+        """Create route step should use AWSExecutor.create_route action."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
-        route_step = next(s for s in plan.steps if "route" in s.name.lower() and "endpoint" not in s.name.lower())
+        route_step = next(s for s in plan.steps if "route" in s.name.lower())
 
-        assert "aws" in route_step.script.lower()
-        assert "create-route" in route_step.script.lower()
+        assert route_step.action == "create_route"
 
-    def test_route_script_targets_default_route(self):
-        """Route should target 0.0.0.0/0."""
+    def test_create_route_params_include_required_fields(self):
+        """Create route params should include route_table_id, destination, endpoint_id."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
-        route_step = next(s for s in plan.steps if "route" in s.name.lower() and "endpoint" not in s.name.lower())
+        route_step = next(s for s in plan.steps if "route" in s.name.lower())
 
-        assert "0.0.0.0/0" in route_step.script
+        assert "route_table_id" in route_step.params
+        assert "destination" in route_step.params
+        assert "endpoint_id" in route_step.params
 
 
 class TestGWLBAddRoutePlanContext:
@@ -148,16 +162,16 @@ class TestGWLBAddRoutePlanContext:
         assert "service_name" in context
         assert context["service_name"] == "com.amazonaws.vpce.test"
 
-    def test_get_context_returns_subnet_id(self):
-        """get_context should return subnet_id."""
+    def test_get_context_returns_subnet_ids(self):
+        """get_context should return subnet_ids as list."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
         instance = MockRouteInstance(subnet_id="subnet-99999")
         context = plan.get_context(instance)
 
-        assert "subnet_id" in context
-        assert context["subnet_id"] == "subnet-99999"
+        assert "subnet_ids" in context
+        assert context["subnet_ids"] == ["subnet-99999"]
 
     def test_get_context_returns_route_table_id(self):
         """get_context should return route_table_id."""
@@ -169,6 +183,28 @@ class TestGWLBAddRoutePlanContext:
 
         assert "route_table_id" in context
         assert context["route_table_id"] == "rtb-99999"
+
+    def test_get_context_returns_vpc_id(self):
+        """get_context should return vpc_id."""
+        from plans.gwlb_add_route import GWLBAddRoutePlan
+
+        plan = GWLBAddRoutePlan()
+        instance = MockRouteInstance(vpc_id="vpc-99999")
+        context = plan.get_context(instance)
+
+        assert "vpc_id" in context
+        assert context["vpc_id"] == "vpc-99999"
+
+    def test_get_context_returns_default_destination(self):
+        """get_context should return destination as 0.0.0.0/0."""
+        from plans.gwlb_add_route import GWLBAddRoutePlan
+
+        plan = GWLBAddRoutePlan()
+        instance = MockRouteInstance()
+        context = plan.get_context(instance)
+
+        assert "destination" in context
+        assert context["destination"] == "0.0.0.0/0"
 
     def test_get_context_missing_service_name_raises(self):
         """get_context should raise if service_name is missing."""
@@ -192,6 +228,17 @@ class TestGWLBAddRoutePlanContext:
         with pytest.raises(ValueError, match="subnet_id"):
             plan.get_context(instance)
 
+    def test_get_context_missing_vpc_id_raises(self):
+        """get_context should raise if vpc_id is missing."""
+        from plans.gwlb_add_route import GWLBAddRoutePlan
+
+        plan = GWLBAddRoutePlan()
+        instance = MockRouteInstance()
+        instance.vpc_id = None
+
+        with pytest.raises(ValueError, match="vpc_id"):
+            plan.get_context(instance)
+
 
 class TestGWLBAddRoutePlanInterface:
     """Test GWLBAddRoutePlan interface compliance."""
@@ -204,12 +251,13 @@ class TestGWLBAddRoutePlanInterface:
         assert hasattr(plan, "steps")
         assert isinstance(plan.steps, list)
 
-    def test_has_verify_step_attribute(self):
-        """GWLBAddRoutePlan should have verify_step attribute."""
+    def test_has_name_attribute(self):
+        """GWLBAddRoutePlan should have name attribute."""
         from plans.gwlb_add_route import GWLBAddRoutePlan
 
         plan = GWLBAddRoutePlan()
-        assert hasattr(plan, "verify_step")
+        assert hasattr(plan, "name")
+        assert plan.name == "gwlb_add_route"
 
     def test_has_get_context_method(self):
         """GWLBAddRoutePlan should have get_context method."""
@@ -218,3 +266,65 @@ class TestGWLBAddRoutePlanInterface:
         plan = GWLBAddRoutePlan()
         assert hasattr(plan, "get_context")
         assert callable(plan.get_context)
+
+
+class TestGWLBAddRoutePlanExecution:
+    """Test GWLBAddRoutePlan can be executed with AWSExecutor."""
+
+    def test_execute_create_endpoint_step_calls_aws_executor(self):
+        """Execute create endpoint step should call AWSExecutor.create_endpoint."""
+        from plans.gwlb_add_route import GWLBAddRoutePlan
+
+        plan = GWLBAddRoutePlan()
+        endpoint_step = next(s for s in plan.steps if "endpoint" in s.name.lower() and "create" in s.name.lower())
+
+        # Mock AWSExecutor
+        mock_executor = MagicMock()
+        mock_executor.create_endpoint.return_value = MagicMock(
+            success=True, stdout='{"VpcEndpointId": "vpce-12345"}', stderr=""
+        )
+
+        # Build params from context
+        context = {
+            "vpc_id": "vpc-12345",
+            "service_name": "com.amazonaws.vpce.test",
+            "subnet_ids": ["subnet-12345"],
+        }
+        params = {k: context[k] for k in endpoint_step.params}
+
+        # Call the executor method
+        method = getattr(mock_executor, endpoint_step.action)
+        result = method(**params)
+
+        mock_executor.create_endpoint.assert_called_once()
+        assert result.success is True
+
+    def test_execute_create_route_step_calls_aws_executor(self):
+        """Execute create route step should call AWSExecutor.create_route."""
+        from plans.gwlb_add_route import GWLBAddRoutePlan
+
+        plan = GWLBAddRoutePlan()
+        route_step = next(s for s in plan.steps if "route" in s.name.lower())
+
+        # Mock AWSExecutor
+        mock_executor = MagicMock()
+        mock_executor.create_route.return_value = MagicMock(success=True, stdout="{}", stderr="")
+
+        # Build params from context
+        context = {
+            "route_table_id": "rtb-12345",
+            "destination": "0.0.0.0/0",
+            "endpoint_id": "vpce-12345",
+        }
+        params = {k: context[k] for k in route_step.params}
+
+        # Call the executor method
+        method = getattr(mock_executor, route_step.action)
+        result = method(**params)
+
+        mock_executor.create_route.assert_called_once_with(
+            route_table_id="rtb-12345",
+            destination="0.0.0.0/0",
+            endpoint_id="vpce-12345",
+        )
+        assert result.success is True

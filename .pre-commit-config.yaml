@@ -73,18 +73,18 @@ repos:
     rev: v1.96.3
     hooks:
       - id: terraform_fmt
-        files: ^terraform/
+        files: ^platform/terraform/
       - id: terraform_validate
-        files: ^terraform/
+        files: ^platform/terraform/
 
   # IaC Security (Terraform, Dockerfile)
   - repo: https://github.com/bridgecrewio/checkov
     rev: 3.2.346
     hooks:
       - id: checkov
-        files: ^terraform/
+        files: ^platform/terraform/
         args:
-          [--quiet, --compact, --directory, terraform/, --soft-fail]
+          [--quiet, --compact, --directory, platform/terraform/, --soft-fail]
 
   # Shell scripts
   - repo: https://github.com/shellcheck-py/shellcheck-py

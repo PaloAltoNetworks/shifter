@@ -53,7 +53,7 @@ Components:
 - **RDS** - Subnet group spans all private subnets (Multi-AZ capable).
 - **Redis** - Subnet group spans all private subnets.
 
-Defined in `terraform/modules/portal/vpc/` and `terraform/modules/portal/alb/`.
+Defined in `platform/terraform/modules/portal/vpc/` and `platform/terraform/modules/portal/alb/`.
 
 ## Range VPC
 
@@ -67,7 +67,7 @@ Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Inte
 
 Network Firewall applies domain-based egress filtering. User subnets created at runtime by Pulumi, not Terraform.
 
-Defined in `terraform/modules/range/vpc/`.
+Defined in `platform/terraform/modules/range/vpc/`.
 
 ## VPC Peering
 
@@ -78,7 +78,7 @@ Bidirectional peering between Portal and Range VPCs. Enables SSH from Portal to 
 | Portal → Range | Portal private subnets route `10.1.0.0/16` via peering |
 | Range → Portal | Range private route table routes `10.0.0.0/16` via peering |
 
-Peering connection created in `terraform/environments/{env}/portal/main.tf`.
+Peering connection created in `platform/terraform/environments/{env}/portal/main.tf`.
 
 ## Security Groups
 

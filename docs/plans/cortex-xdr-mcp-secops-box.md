@@ -141,7 +141,7 @@ Users need to provide their XSIAM API credentials to connect the MCP server. Opt
 1. Add `XSIAMConfig` model to store encrypted API credentials:
 
 ```python
-# portal/mission_control/models.py
+# shifter/shifter_platform/mission_control/models.py
 class XSIAMConfig(models.Model):
     """User's XSIAM tenant configuration for MCP server."""
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -170,7 +170,7 @@ class XSIAMConfig(models.Model):
 
 **Add new scenario: `secops_demo`**
 
-Update `portal/mission_control/views.py`:
+Update `shifter/shifter_platform/mission_control/views.py`:
 
 ```python
 def _get_scenario_instance_config(scenario: str, agent_os: str) -> list:
@@ -325,7 +325,7 @@ class SecOpsSetupPlan(SetupPlan):
 ### New Models
 
 ```python
-# portal/mission_control/models.py
+# shifter/shifter_platform/mission_control/models.py
 
 class XSIAMConfig(models.Model):
     """User's XSIAM tenant configuration."""

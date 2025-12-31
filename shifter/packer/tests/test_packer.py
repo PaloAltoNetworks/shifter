@@ -1,7 +1,7 @@
 """
 Tests for Packer AMI build configuration.
 
-Run with: pytest packer/tests/test_packer.py -v
+Run with: pytest shifter/packer/tests/test_packer.py -v
 """
 
 import os
@@ -99,12 +99,15 @@ class TestScriptContent:
                 if pattern.lower() in content:
                     # Check if it's just a variable reference, not a value assignment
                     lines = [
-                        l
-                        for l in content.split("\n")
-                        if pattern.lower() in l and "=$" not in l and '=""' not in l
+                        line
+                        for line in content.split("\n")
+                        if pattern.lower() in line
+                        and "=$" not in line
+                        and '=""' not in line
                     ]
                     assert not any(
-                        "=" in l and not l.strip().startswith("#") for l in lines
+                        "=" in line and not line.strip().startswith("#")
+                        for line in lines
                     ), f"{script.name} may contain hardcoded secret: {pattern}"
 
     def test_noninteractive_apt(self, all_scripts):

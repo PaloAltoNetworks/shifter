@@ -9,8 +9,8 @@ paths-ignore:
   - "**/tests/**"
   - "**/test_*.py"
   - "**/conftest.py"
-  # Portal test directory
-  - "portal/tests/**"
+  # Shifter Platform test directory
+  - "shifter/shifter_platform/tests/**"
   # Shifter Engine test directory
   - "shifter-engine/tests/**"
   # Legacy path (may appear in git history)

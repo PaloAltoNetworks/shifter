@@ -17,28 +17,28 @@ fi
 
 echo "Setting up worktree: $WORKTREE_ROOT"
 
-# Shifter venv
-if [ -L "$WORKTREE_ROOT/shifter/.venv" ]; then
-    echo "shifter/.venv symlink already exists"
-elif [ -d "$WORKTREE_ROOT/shifter/.venv" ]; then
-    echo "Removing empty shifter/.venv directory..."
-    rm -rf "$WORKTREE_ROOT/shifter/.venv"
-    ln -s "$MAIN_REPO/portal/.venv" "$WORKTREE_ROOT/shifter/.venv"
-    echo "Created shifter/.venv symlink"
-elif [ -d "$WORKTREE_ROOT/shifter" ]; then
-    ln -s "$MAIN_REPO/portal/.venv" "$WORKTREE_ROOT/shifter/.venv"
-    echo "Created shifter/.venv symlink"
+# Shifter platform venv
+if [ -L "$WORKTREE_ROOT/shifter/shifter_platform/.venv" ]; then
+    echo "shifter/shifter_platform/.venv symlink already exists"
+elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform/.venv" ]; then
+    echo "Removing empty shifter/shifter_platform/.venv directory..."
+    rm -rf "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
+    ln -s "$MAIN_REPO/shifter/shifter_platform/.venv" "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
+    echo "Created shifter/shifter_platform/.venv symlink"
+elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform" ]; then
+    ln -s "$MAIN_REPO/shifter/shifter_platform/.venv" "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
+    echo "Created shifter/shifter_platform/.venv symlink"
 fi
 
-# Shifter .env file (for Django settings like DJANGO_SECRET_KEY)
-if [ -f "$MAIN_REPO/portal/.env" ]; then
-    if [ -L "$WORKTREE_ROOT/shifter/.env" ]; then
-        echo "shifter/.env symlink already exists"
-    elif [ -f "$WORKTREE_ROOT/shifter/.env" ]; then
-        echo "shifter/.env already exists (not overwriting)"
-    elif [ -d "$WORKTREE_ROOT/shifter" ]; then
-        ln -s "$MAIN_REPO/portal/.env" "$WORKTREE_ROOT/shifter/.env"
-        echo "Created shifter/.env symlink"
+# Shifter platform .env file (for Django settings like DJANGO_SECRET_KEY)
+if [ -f "$MAIN_REPO/shifter/shifter_platform/.env" ]; then
+    if [ -L "$WORKTREE_ROOT/shifter/shifter_platform/.env" ]; then
+        echo "shifter/shifter_platform/.env symlink already exists"
+    elif [ -f "$WORKTREE_ROOT/shifter/shifter_platform/.env" ]; then
+        echo "shifter/shifter_platform/.env already exists (not overwriting)"
+    elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform" ]; then
+        ln -s "$MAIN_REPO/shifter/shifter_platform/.env" "$WORKTREE_ROOT/shifter/shifter_platform/.env"
+        echo "Created shifter/shifter_platform/.env symlink"
     fi
 fi
 

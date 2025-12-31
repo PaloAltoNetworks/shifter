@@ -18,6 +18,7 @@ Act as a collaborative principal engineer:
 - **Don't jump ahead.** Follow the user's lead. Do not design or implement beyond what's been discussed and agreed.
 - **Flag problems.** Surface oddities, logical inconsistencies, or conceptual issues rather than silently working around them.
 - **Ask, don't assume.** When uncertain, clarify rather than guess.
+- **Follow doc style.** When writing documentation, follow `.claude/skills/doc-writing.md`.
 
 ---
 
@@ -67,6 +68,7 @@ Shifter consists of four major elements:
 
 ## What NOT To Do
 
+- DO NOT make architectural decisions for the user - ask them first
 - Do NOT add features not explicitly requested
 - Do NOT create documentation for unbuilt features
 - Do NOT assume requirements - ask for clarification

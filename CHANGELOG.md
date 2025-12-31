@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2025-12-30
+
+### Added
+- Ubuntu victim AMI Packer configuration (#409)
+  - `ubuntu.pkr.hcl` template following Kali pattern
+  - Provisioning scripts: base.sh, services.sh, tools.sh, claude-code.sh
+  - Services: Apache 2.4 with mod_php, MySQL 8.0, Docker, OpenSSH, vsftpd, Samba
+  - Development tools: build-essential, Python 3, Node.js 20.x, Git
+  - Claude Code configured for AWS Bedrock
+- GitHub Actions workflow support for Ubuntu AMI builds
+- Ubuntu test classes in packer/tests/test_packer.py
+
+### Changed
+- SSM parameter for victim AMI renamed from `/shifter/ami/victim` to `/shifter/ami/ubuntu`
+- Terraform data sources updated for new SSM parameter name
+
 ## [0.9.0] - 2025-12-30
 
 ### Added

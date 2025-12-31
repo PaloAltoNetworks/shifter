@@ -158,16 +158,9 @@ resource "aws_iam_policy" "core_infrastructure" {
         Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*-range-pulumi-locks"
       },
       {
-        Sid    = "Budgets"
-        Effect = "Allow"
-        Action = [
-          "budgets:CreateBudgetAction",
-          "budgets:DeleteBudgetAction",
-          "budgets:DescribeBudgetAction",
-          "budgets:UpdateBudgetAction",
-          "budgets:ViewBudget",
-          "budgets:ModifyBudget"
-        ]
+        Sid      = "Budgets"
+        Effect   = "Allow"
+        Action   = ["budgets:*"]
         Resource = "arn:aws:budgets::${data.aws_caller_identity.current.account_id}:budget/shifter-*"
       }
     ]

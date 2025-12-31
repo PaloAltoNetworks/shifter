@@ -60,7 +60,9 @@ Single Django codebase with two apps:
 |-------|---------|
 | `UserProfile` | Cognito user metadata |
 | `AgentConfig` | XDR agent installer configs (S3 references) |
-| `StrataConfig` | SCM credentials for VM-Series auto-registration (PIN ID/value) |
+| `SCMCredential` | Strata Cloud Manager API credentials |
+| `NGFWDeploymentProfile` | VM-Series deployment settings (folder, template stack) |
+| `UserNGFW` | Persistent NGFW instance with lifecycle management |
 | `OperatingSystem` | OS types available for ranges |
 | `Range` | Range instance state and resource IDs |
 | `ActivityLog` | Audit trail |

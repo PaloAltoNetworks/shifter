@@ -6,7 +6,7 @@ It loads configuration and creates a complete range using the RangeStack compone
 
 import pulumi
 
-from components import RangeStack
+from stacks import RangeStack
 from config import load_config
 
 

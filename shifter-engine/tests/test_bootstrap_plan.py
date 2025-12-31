@@ -13,7 +13,7 @@ from typing import Optional
 
 import pytest
 
-from components.plans.bootstrap import BootstrapPlan, SET_HOSTNAME_SCRIPT, CONFIGURE_SSH_SCRIPT
+from plans.bootstrap import BootstrapPlan, SET_HOSTNAME_SCRIPT, CONFIGURE_SSH_SCRIPT
 
 
 @dataclass

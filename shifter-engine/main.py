@@ -70,6 +70,34 @@ def update_range_status(range_id: int, status: str, **kwargs) -> None:
         conn.commit()
 
 
+def update_ngfw_status(user_ngfw_id: int, status: str, **kwargs) -> None:
+    """Update UserNGFW status in database.
+
+    Args:
+        user_ngfw_id: The ID of the UserNGFW record to update.
+        status: New status value (e.g., 'starting', 'active', 'stopped', 'failed').
+        **kwargs: Additional fields to update (e.g., last_started_at, error_message).
+    """
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            updates = ["status = %s", "updated_at = NOW()"]
+            values: list = [status]
+
+            for key, value in kwargs.items():
+                if value is not None:
+                    # Handle special SQL expressions
+                    if value == "NOW()":
+                        updates.append(f"{key} = NOW()")
+                    else:
+                        updates.append(f"{key} = %s")
+                        values.append(value)
+
+            values.append(user_ngfw_id)
+            sql = f"UPDATE mission_control_userngfw SET {', '.join(updates)} WHERE id = %s"
+            cur.execute(sql, values)
+        conn.commit()
+
+
 def run_pulumi(operation: str, range_id: int) -> None:
     """Run Pulumi operation.
 
@@ -305,34 +333,218 @@ def _run_destroy(range_id: int, stack_name: str, env: dict) -> None:
     update_range_status(range_id, "destroyed", destroyed_at="NOW()")
 
 
+# Import NGFW operation dependencies
+from executors.aws_executor import AWSExecutor
+from orchestrators.ops_orchestrator import OpsOrchestrator
+
+
+def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
+    """Run NGFW runtime operation.
+
+    Args:
+        operation: Operation name (start, stop, add-route, remove-route).
+        user_ngfw_id: The ID of the UserNGFW record.
+        **kwargs: Operation-specific parameters (instance_id, subnet_id, etc.).
+
+    Raises:
+        ValueError: If unknown operation.
+        Exception: If operation fails.
+    """
+    # Status transitions for each operation
+    status_map = {
+        "start": ("starting", "active"),
+        "stop": ("stopping", "stopped"),
+        "add-route": ("configuring", "active"),
+        "remove-route": ("configuring", "active"),
+    }
+
+    if operation not in status_map:
+        raise ValueError(f"Unknown operation: {operation}")
+
+    in_progress_status, success_status = status_map[operation]
+    update_ngfw_status(user_ngfw_id, in_progress_status)
+
+    try:
+        # Create executor and orchestrator
+        executor = AWSExecutor()
+        orchestrator = OpsOrchestrator(executor)
+
+        # Load the appropriate plan
+        plan_map = {
+            "start": "plans.ngfw_start.NGFWStartPlan",
+            "stop": "plans.ngfw_stop.NGFWStopPlan",
+            "add-route": "plans.gwlb_add_route.GWLBAddRoutePlan",
+            "remove-route": "plans.gwlb_remove_route.GWLBRemoveRoutePlan",
+        }
+
+        plan_path = plan_map[operation]
+        module_path, class_name = plan_path.rsplit(".", 1)
+
+        import importlib
+        module = importlib.import_module(module_path)
+        plan_class = getattr(module, class_name)
+        plan = plan_class()
+
+        # Create context object with kwargs as attributes
+        class Context:
+            pass
+        context = Context()
+        for key, value in kwargs.items():
+            setattr(context, key, value)
+
+        # Execute the plan
+        result = orchestrator.orchestrate(plan, context)
+
+        if not result.success:
+            raise Exception(f"Operation {operation} failed")  # noqa: TRY002
+
+        # Update success status with timestamp if applicable
+        extra_kwargs = {}
+        if operation == "start":
+            extra_kwargs["last_started_at"] = "NOW()"
+        elif operation == "stop":
+            extra_kwargs["last_stopped_at"] = "NOW()"
+
+        update_ngfw_status(user_ngfw_id, success_status, **extra_kwargs)
+
+    except Exception as e:
+        error_msg = str(e)[:1000]
+        update_ngfw_status(user_ngfw_id, "failed", error_message=error_msg)
+        raise
+
+
 if __name__ == "__main__":
     import argparse
 
+    RANGE_ID_HELP = "Database ID of the range to operate on"
+
     parser = argparse.ArgumentParser(
-        description="Shifter Engine for provisioning cyber ranges"
+        description="Shifter Engine for provisioning cyber ranges and NGFW operations"
     )
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="resource", required=True, help="Resource type")
+
+    # Range operations - backward compatible with: provision --range-id 42
+    # Also supports: range provision --range-id 42
+    range_parser = subparsers.add_parser("range", help="Range lifecycle operations")
+    range_parser.add_argument(
         "operation",
         choices=["provision", "destroy"],
         help="Operation to perform: provision (create) or destroy (teardown)",
     )
-    parser.add_argument(
+    range_parser.add_argument(
         "--range-id",
         type=int,
         required=True,
-        help="Database ID of the range to operate on",
+        help=RANGE_ID_HELP,
+    )
+
+    # Legacy support: allow 'provision' and 'destroy' as top-level subcommands
+    provision_parser = subparsers.add_parser(
+        "provision", help="(Legacy) Provision a range"
+    )
+    provision_parser.add_argument(
+        "--range-id",
+        type=int,
+        required=True,
+        help=RANGE_ID_HELP,
+    )
+
+    destroy_parser = subparsers.add_parser(
+        "destroy", help="(Legacy) Destroy a range"
+    )
+    destroy_parser.add_argument(
+        "--range-id",
+        type=int,
+        required=True,
+        help=RANGE_ID_HELP,
+    )
+
+    # NGFW operations
+    ngfw_parser = subparsers.add_parser("ngfw", help="NGFW runtime operations")
+    ngfw_parser.add_argument(
+        "operation",
+        choices=["start", "stop", "add-route", "remove-route"],
+        help="NGFW operation to perform",
+    )
+    ngfw_parser.add_argument(
+        "--user-ngfw-id",
+        type=int,
+        required=True,
+        help="Database ID of the UserNGFW record",
+    )
+    ngfw_parser.add_argument(
+        "--instance-id",
+        type=str,
+        help="EC2 instance ID (for start/stop)",
+    )
+    ngfw_parser.add_argument(
+        "--subnet-id",
+        type=str,
+        help="Subnet ID (for add-route)",
+    )
+    ngfw_parser.add_argument(
+        "--service-name",
+        type=str,
+        help="VPC Endpoint Service name (for add-route)",
+    )
+    ngfw_parser.add_argument(
+        "--vpc-id",
+        type=str,
+        help="VPC ID (for add-route)",
+    )
+    ngfw_parser.add_argument(
+        "--route-table-id",
+        type=str,
+        help="Route table ID (for add-route)",
+    )
+    ngfw_parser.add_argument(
+        "--endpoint-id",
+        type=str,
+        help="VPC Endpoint ID (for remove-route)",
     )
 
     args = parser.parse_args()
 
-    # Map Django command names to Pulumi operations
-    operation_map = {"provision": "up", "destroy": "destroy"}
-    operation = operation_map[args.operation]
-    range_id = args.range_id
+    # Handle resource-based dispatch
+    if args.resource == "ngfw":
+        print(f"Starting NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
+        print(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
-    print(f"Starting {operation} for range {range_id}")
-    print(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
+        kwargs = {}
+        if args.instance_id:
+            kwargs["instance_id"] = args.instance_id
+        if args.subnet_id:
+            kwargs["subnet_id"] = args.subnet_id
+        if args.service_name:
+            kwargs["service_name"] = args.service_name
+        if args.vpc_id:
+            kwargs["vpc_id"] = args.vpc_id
+        if args.route_table_id:
+            kwargs["route_table_id"] = args.route_table_id
+        if args.endpoint_id:
+            kwargs["endpoint_id"] = args.endpoint_id
 
-    run_pulumi(operation, range_id)
+        run_ngfw_operation(args.operation, args.user_ngfw_id, **kwargs)
 
-    print(f"Completed {operation} for range {range_id}")
+        print(f"Completed NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
+
+    elif args.resource in ("range", "provision", "destroy"):
+        # Handle range operations
+        if args.resource == "range":
+            operation = args.operation
+        else:
+            # Legacy: 'provision' or 'destroy' as direct subcommand
+            operation = args.resource
+
+        range_id = args.range_id
+
+        # Map Django command names to Pulumi operations
+        operation_map = {"provision": "up", "destroy": "destroy"}
+        pulumi_op = operation_map[operation]
+
+        print(f"Starting {pulumi_op} for range {range_id}")
+        print(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
+
+        run_pulumi(pulumi_op, range_id)
+
+        print(f"Completed {pulumi_op} for range {range_id}")

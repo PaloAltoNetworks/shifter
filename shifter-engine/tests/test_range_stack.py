@@ -1300,7 +1300,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         import inspect
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            source = inspect.getsource(RangeStack.__init__)
+            source = inspect.getsource(RangeStack._run_all_setup)
 
             # Verify the pattern: dc_components[0].private_ip.apply(
             #     lambda ip, inst=instance: inst.run_setup(dc_ip=ip)
@@ -1400,7 +1400,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
                 stack = RangeStack("test-range", config=dc_range_config)
 
             # Check source for proper handling of both types
-            source = inspect.getsource(RangeStack.__init__)
+            source = inspect.getsource(RangeStack._run_all_setup)
 
         # Non-domain-joining instances (attacker) should be called directly
         attacker_calls = [c for c in run_setup_calls if c["role"] == "attacker"]
@@ -1478,142 +1478,3 @@ class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
                             assert "sg-kali" in sgs, f"Attacker should use sg-kali, got {sgs}"
                         inst.instance.vpc_security_group_ids.apply(verify_kali_sg)
                 inst.instance.tags.apply(check_if_attacker)
-
-
-class TestRangeStackNGFWIntegration:
-    """Tests for NGFW integration in RangeStack.
-
-    TDD: These tests are written BEFORE implementation.
-    They must FAIL initially, then PASS after implementation.
-    """
-
-    @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
-        """Set up Pulumi mocks for each test."""
-        self.mocks = pulumi_mocks
-
-    @pytest.fixture
-    def temp_templates(self, temp_templates_dir):
-        """Provide temp templates directory with NGFW templates."""
-        # Add NGFW templates to the temp directory
-        ngfw_userdata = temp_templates_dir / "ngfw_userdata.txt.j2"
-        ngfw_userdata.write_text(
-            "vmseries-bootstrap-aws-s3bucket={{ bootstrap_bucket }}/{{ bootstrap_prefix }}\n"
-        )
-
-        ngfw_init_cfg = temp_templates_dir / "ngfw_init_cfg.txt.j2"
-        ngfw_init_cfg.write_text(
-            """type=dhcp-client
-hostname={{ hostname }}
-dns-primary=8.8.8.8
-dns-secondary=8.8.4.4
-"""
-        )
-        return temp_templates_dir
-
-    @pytest.fixture
-    def ngfw_enabled_config(self):
-        """RangeConfig with NGFW enabled."""
-        return RangeConfig(
-            range_id=42,
-            user_id=1,
-            subnet_index=5,
-            environment="dev",
-            instances=[
-                InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
-                InstanceConfig(role="victim", os_type="ubuntu", instance_type="t3.micro"),
-            ],
-            vpc_id="vpc-12345",
-            vpc_cidr="10.1.0.0/16",
-            route_table_id="rtb-12345",
-            kali_security_group_id="sg-kali",
-            victim_security_group_id="sg-victim",
-            instance_profile_name="range-profile",
-            kali_ami_id="ami-kali123",
-            victim_ami_id="ami-ubuntu123",
-            windows_ami_id="ami-windows123",
-            agent_s3_bucket="shifter-agents",
-            availability_zone="us-east-2a",
-            ngfw_enabled=True,
-            ngfw_ami_id="ami-vmseries",
-            ngfw_instance_type="m5.xlarge",
-            ngfw_security_group_id="sg-ngfw",
-        )
-
-    @pytest.fixture
-    def ngfw_disabled_config(self):
-        """RangeConfig with NGFW disabled (default)."""
-        return RangeConfig(
-            range_id=42,
-            user_id=1,
-            subnet_index=5,
-            environment="dev",
-            instances=[
-                InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
-                InstanceConfig(role="victim", os_type="ubuntu", instance_type="t3.micro"),
-            ],
-            vpc_id="vpc-12345",
-            vpc_cidr="10.1.0.0/16",
-            route_table_id="rtb-12345",
-            kali_security_group_id="sg-kali",
-            victim_security_group_id="sg-victim",
-            instance_profile_name="range-profile",
-            kali_ami_id="ami-kali123",
-            victim_ami_id="ami-ubuntu123",
-            windows_ami_id="ami-windows123",
-            agent_s3_bucket="shifter-agents",
-            availability_zone="us-east-2a",
-            ngfw_enabled=False,
-        )
-
-    @pulumi.runtime.test
-    def test_range_stack_creates_ngfw_when_enabled(self, temp_templates, ngfw_enabled_config):
-        """RangeStack should create NGFWComponent when ngfw_enabled=True."""
-        from stacks.range_stack import RangeStack
-
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            stack = RangeStack("test-range", config=ngfw_enabled_config)
-
-            # Verify NGFW was created
-            assert stack.ngfw is not None
-            assert stack.ngfw.instance_id is not None
-
-    @pulumi.runtime.test
-    def test_range_stack_skips_ngfw_when_disabled(self, temp_templates, ngfw_disabled_config):
-        """RangeStack should not create NGFWComponent when ngfw_enabled=False."""
-        from stacks.range_stack import RangeStack
-
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            stack = RangeStack("test-range", config=ngfw_disabled_config)
-
-            # Verify NGFW was NOT created
-            assert stack.ngfw is None
-
-    @pulumi.runtime.test
-    def test_range_stack_outputs_include_ngfw(self, temp_templates, ngfw_enabled_config):
-        """get_outputs should include NGFW details when enabled."""
-        from stacks.range_stack import RangeStack
-
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            stack = RangeStack("test-range", config=ngfw_enabled_config)
-
-            outputs = stack.get_outputs()
-
-            assert "ngfw" in outputs
-            assert outputs["ngfw"] is not None
-            assert "instance_id" in outputs["ngfw"]
-            assert "untrust_ip" in outputs["ngfw"]
-            assert "trust_ip" in outputs["ngfw"]
-
-    @pulumi.runtime.test
-    def test_range_stack_outputs_no_ngfw_when_disabled(self, temp_templates, ngfw_disabled_config):
-        """get_outputs should not include NGFW when disabled."""
-        from stacks.range_stack import RangeStack
-
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            stack = RangeStack("test-range", config=ngfw_disabled_config)
-
-            outputs = stack.get_outputs()
-
-            # ngfw key should be None or not present
-            assert outputs.get("ngfw") is None

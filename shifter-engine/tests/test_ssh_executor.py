@@ -23,19 +23,19 @@ class TestSSHExecutorImports:
 
     def test_import_ssh_executor(self):
         """SSHExecutor module should be importable."""
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         assert SSHExecutor is not None
 
     def test_import_command_result(self):
         """CommandResult dataclass should be importable."""
-        from components.ssh_executor import CommandResult
+        from executors.ssh_executor import CommandResult
 
         assert CommandResult is not None
 
     def test_import_exceptions(self):
         """Exception classes should be importable."""
-        from components.ssh_executor import (
+        from executors.ssh_executor import (
             SSHExecutorError,
             CommandError,
             TimeoutError as SSHTimeoutError,
@@ -55,7 +55,7 @@ class TestRunCommandHappyPath:
     @patch("paramiko.SSHClient")
     def test_run_command_success(self, mock_ssh_class, mock_rsa_key):
         """Command succeeds, returns result with stdout/stderr."""
-        from components.ssh_executor import SSHExecutor, CommandResult
+        from executors.ssh_executor import SSHExecutor, CommandResult
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -86,7 +86,7 @@ class TestRunCommandHappyPath:
     @patch("paramiko.SSHClient")
     def test_run_command_returns_stderr_on_success(self, mock_ssh_class, mock_rsa_key):
         """Command can succeed but still have stderr output."""
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -114,7 +114,7 @@ class TestRunCommandExpectedFailures:
     @patch("paramiko.SSHClient")
     def test_run_command_nonzero_exit_raises(self, mock_ssh_class, mock_rsa_key):
         """Non-zero exit code raises CommandError."""
-        from components.ssh_executor import SSHExecutor, CommandError
+        from executors.ssh_executor import SSHExecutor, CommandError
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -141,7 +141,7 @@ class TestRunCommandExpectedFailures:
     def test_run_command_connection_error_raises(self, mock_ssh_class, mock_rsa_key):
         """SSH connection failure raises ConnectionError."""
         import paramiko
-        from components.ssh_executor import (
+        from executors.ssh_executor import (
             SSHExecutor,
             ConnectionError as SSHConnectionError,
         )
@@ -163,7 +163,7 @@ class TestRunCommandExpectedFailures:
     def test_run_command_timeout_raises(self, mock_ssh_class, mock_rsa_key):
         """Socket timeout raises TimeoutError."""
         import socket
-        from components.ssh_executor import SSHExecutor, TimeoutError as SSHTimeoutError
+        from executors.ssh_executor import SSHExecutor, TimeoutError as SSHTimeoutError
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -189,7 +189,7 @@ class TestWaitForAgentHappyPath:
         self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
     ):
         """SSH available immediately returns True."""
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -210,7 +210,7 @@ class TestWaitForAgentHappyPath:
     ):
         """SSH becomes available after a few retries."""
         import paramiko
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -245,7 +245,7 @@ class TestWaitForAgentExpectedFailures:
     ):
         """SSH never available raises TimeoutError."""
         import paramiko
-        from components.ssh_executor import SSHExecutor, TimeoutError as SSHTimeoutError
+        from executors.ssh_executor import SSHExecutor, TimeoutError as SSHTimeoutError
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -277,7 +277,7 @@ class TestRebootAndWaitHappyPath:
     ):
         """Reboot PAN-OS device and wait for it to come back."""
         import paramiko
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -314,7 +314,7 @@ class TestSSHExecutorInitialization:
     @patch("paramiko.RSAKey.from_private_key")
     def test_initialization_parses_private_key(self, mock_rsa_key):
         """SSHExecutor parses the provided private key."""
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         mock_rsa_key.return_value = MagicMock()
 
@@ -326,7 +326,7 @@ class TestSSHExecutorInitialization:
     @patch("paramiko.RSAKey.from_private_key")
     def test_initialization_custom_port(self, mock_rsa_key):
         """SSHExecutor accepts custom SSH port."""
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         mock_rsa_key.return_value = MagicMock()
 
@@ -337,7 +337,7 @@ class TestSSHExecutorInitialization:
     @patch("paramiko.RSAKey.from_private_key")
     def test_initialization_custom_username(self, mock_rsa_key):
         """SSHExecutor accepts custom username."""
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         mock_rsa_key.return_value = MagicMock()
 
@@ -348,7 +348,7 @@ class TestSSHExecutorInitialization:
     @patch("paramiko.RSAKey.from_private_key")
     def test_initialization_default_username_is_admin(self, mock_rsa_key):
         """SSHExecutor defaults to 'admin' username for PAN-OS."""
-        from components.ssh_executor import SSHExecutor
+        from executors.ssh_executor import SSHExecutor
 
         mock_rsa_key.return_value = MagicMock()
 
@@ -362,7 +362,7 @@ class TestCommandResultDataclass:
 
     def test_command_result_attributes(self):
         """CommandResult has expected attributes."""
-        from components.ssh_executor import CommandResult
+        from executors.ssh_executor import CommandResult
 
         result = CommandResult(
             success=True,
@@ -382,7 +382,7 @@ class TestCommandErrorException:
 
     def test_command_error_attributes(self):
         """CommandError has exit_code and stderr attributes."""
-        from components.ssh_executor import CommandError
+        from executors.ssh_executor import CommandError
 
         error = CommandError("Command failed", exit_code=1, stderr="error output")
 

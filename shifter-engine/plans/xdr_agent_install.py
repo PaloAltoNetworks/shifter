@@ -6,7 +6,7 @@ instances via SSM Run Command.
 
 from typing import Any, Dict, List
 
-from ..setup_plan import SetupStep
+from .base import SetupStep
 
 
 # PowerShell script to download XDR agent from S3 presigned URL

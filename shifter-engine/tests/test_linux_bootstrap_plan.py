@@ -5,7 +5,7 @@ from typing import Optional
 
 import pytest
 
-from components.plans.linux_bootstrap import LinuxBootstrapPlan
+from plans.linux_bootstrap import LinuxBootstrapPlan
 
 
 @dataclass

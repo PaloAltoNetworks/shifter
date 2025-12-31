@@ -2,7 +2,7 @@
 
 import pytest
 
-from components.plans.xdr_agent_install import XDRAgentInstallPlan
+from plans.xdr_agent_install import XDRAgentInstallPlan
 
 
 class TestXDRAgentInstallPlanSteps:

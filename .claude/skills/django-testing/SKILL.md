@@ -1,6 +1,6 @@
 ---
 name: django-testing
-description: Run Django tests for the Shifter portal. Use when the user asks to run tests, check if tests pass, test a specific module, or verify code changes with tests.
+description: How to run tests for the Shfiter Django application. Always use this skill to run tests for any part of the Django application. Use when the user asks to run tests, check if tests pass, test a specific module, or verify code changes with tests. See tdd-plan skill for how WRITE tests.
 ---
 
 # Django Testing

@@ -1,3 +1,8 @@
+---
+name: doc-writing
+description: Direction for how to write all documentation in this repository. Always use this skill when writing or updating documentation.
+---
+
 # Documentation Writing Style
 
 ## Voice

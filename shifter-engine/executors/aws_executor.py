@@ -642,3 +642,68 @@ class AWSExecutor:
             )
         except Exception as e:
             return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def describe_instances(self, instance_ids: list) -> CommandResult:
+        """Describe multiple EC2 instances.
+
+        Args:
+            instance_ids: List of instance IDs to describe.
+
+        Returns:
+            CommandResult with instance details in stdout as JSON.
+        """
+        if not instance_ids:
+            return CommandResult(
+                success=True,
+                stdout=json.dumps({"Reservations": []}),
+                stderr="",
+            )
+
+        try:
+            client = self.get_client("ec2")
+            response = client.describe_instances(InstanceIds=instance_ids)
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))
+
+    def describe_endpoints(self, service_name: str) -> CommandResult:
+        """Describe VPC endpoints filtered by service name.
+
+        Args:
+            service_name: The VPC endpoint service name to filter by.
+
+        Returns:
+            CommandResult with endpoint details in stdout as JSON.
+        """
+        try:
+            client = self.get_client("ec2")
+            response = client.describe_vpc_endpoints(
+                Filters=[{"Name": "service-name", "Values": [service_name]}]
+            )
+            return CommandResult(
+                success=True,
+                stdout=json.dumps(response, default=str),
+                stderr="",
+            )
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_message = e.response.get("Error", {}).get("Message", str(e))
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"{error_code}: {error_message}",
+            )
+        except Exception as e:
+            return CommandResult(success=False, stdout="", stderr=str(e))

@@ -98,6 +98,33 @@ class PulumiMocks:
             outputs["type"] = inputs.get("type", "String")
             outputs["value"] = inputs.get("value", "{}")
 
+        elif resource_type == "aws:lb/loadBalancer:LoadBalancer":
+            outputs["arn"] = f"arn:aws:elasticloadbalancing:us-east-2:123456789012:loadbalancer/gwy/{name}"
+            outputs["dnsName"] = f"{name}.elb.us-east-2.amazonaws.com"
+            outputs["loadBalancerType"] = inputs.get("loadBalancerType", "gateway")
+
+        elif resource_type == "aws:lb/targetGroup:TargetGroup":
+            outputs["arn"] = f"arn:aws:elasticloadbalancing:us-east-2:123456789012:targetgroup/{name}"
+            outputs["protocol"] = inputs.get("protocol", "GENEVE")
+            outputs["port"] = inputs.get("port", 6081)
+
+        elif resource_type == "aws:lb/listener:Listener":
+            outputs["arn"] = f"arn:aws:elasticloadbalancing:us-east-2:123456789012:listener/{name}"
+
+        elif resource_type == "aws:ec2/vpcEndpointService:VpcEndpointService":
+            outputs["serviceName"] = f"com.amazonaws.vpce.us-east-2.vpce-svc-{name[:8]}"
+            outputs["acceptanceRequired"] = inputs.get("acceptanceRequired", True)
+
+        elif resource_type == "aws:ec2/networkInterface:NetworkInterface":
+            outputs["privateIp"] = inputs.get("privateIps", ["10.1.1.50"])[0] if inputs.get("privateIps") else "10.1.1.50"
+            outputs["subnetId"] = inputs.get("subnetId", "subnet-mock")
+            outputs["sourceDestCheck"] = inputs.get("sourceDestCheck", True)
+
+        elif resource_type == "aws:s3/bucketObject:BucketObject":
+            outputs["bucket"] = inputs.get("bucket", "mock-bucket")
+            outputs["key"] = inputs.get("key", "mock-key")
+            outputs["etag"] = "mock-etag-123"
+
         return resource_id, outputs
 
     def call(self, args: Any) -> dict:

@@ -42,3 +42,29 @@ module "pulumi_provisioner_ecr" {
     Component = "pulumi-provisioner"
   }
 }
+
+# ------------------------------------------------------------------------------
+# S3 Cost Budget Alert
+# Defense-in-depth monitoring for unusual S3 costs (e.g., billing attacks)
+# ------------------------------------------------------------------------------
+
+resource "aws_budgets_budget" "s3_cost_alert" {
+  name         = "shifter-s3-cost-alert"
+  budget_type  = "COST"
+  limit_amount = "50"
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  cost_filter {
+    name   = "Service"
+    values = ["Amazon Simple Storage Service"]
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = ["bedwards@paloaltonetworks.com"]
+  }
+}

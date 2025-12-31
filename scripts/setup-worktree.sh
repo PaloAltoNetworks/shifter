@@ -17,28 +17,28 @@ fi
 
 echo "Setting up worktree: $WORKTREE_ROOT"
 
-# Portal venv
-if [ -L "$WORKTREE_ROOT/portal/.venv" ]; then
-    echo "portal/.venv symlink already exists"
-elif [ -d "$WORKTREE_ROOT/portal/.venv" ]; then
-    echo "Removing empty portal/.venv directory..."
-    rm -rf "$WORKTREE_ROOT/portal/.venv"
-    ln -s "$MAIN_REPO/portal/.venv" "$WORKTREE_ROOT/portal/.venv"
-    echo "Created portal/.venv symlink"
-elif [ -d "$WORKTREE_ROOT/portal" ]; then
-    ln -s "$MAIN_REPO/portal/.venv" "$WORKTREE_ROOT/portal/.venv"
-    echo "Created portal/.venv symlink"
+# Shifter venv
+if [ -L "$WORKTREE_ROOT/shifter/.venv" ]; then
+    echo "shifter/.venv symlink already exists"
+elif [ -d "$WORKTREE_ROOT/shifter/.venv" ]; then
+    echo "Removing empty shifter/.venv directory..."
+    rm -rf "$WORKTREE_ROOT/shifter/.venv"
+    ln -s "$MAIN_REPO/portal/.venv" "$WORKTREE_ROOT/shifter/.venv"
+    echo "Created shifter/.venv symlink"
+elif [ -d "$WORKTREE_ROOT/shifter" ]; then
+    ln -s "$MAIN_REPO/portal/.venv" "$WORKTREE_ROOT/shifter/.venv"
+    echo "Created shifter/.venv symlink"
 fi
 
-# Portal .env file (for Django settings like DJANGO_SECRET_KEY)
+# Shifter .env file (for Django settings like DJANGO_SECRET_KEY)
 if [ -f "$MAIN_REPO/portal/.env" ]; then
-    if [ -L "$WORKTREE_ROOT/portal/.env" ]; then
-        echo "portal/.env symlink already exists"
-    elif [ -f "$WORKTREE_ROOT/portal/.env" ]; then
-        echo "portal/.env already exists (not overwriting)"
-    elif [ -d "$WORKTREE_ROOT/portal" ]; then
-        ln -s "$MAIN_REPO/portal/.env" "$WORKTREE_ROOT/portal/.env"
-        echo "Created portal/.env symlink"
+    if [ -L "$WORKTREE_ROOT/shifter/.env" ]; then
+        echo "shifter/.env symlink already exists"
+    elif [ -f "$WORKTREE_ROOT/shifter/.env" ]; then
+        echo "shifter/.env already exists (not overwriting)"
+    elif [ -d "$WORKTREE_ROOT/shifter" ]; then
+        ln -s "$MAIN_REPO/portal/.env" "$WORKTREE_ROOT/shifter/.env"
+        echo "Created shifter/.env symlink"
     fi
 fi
 

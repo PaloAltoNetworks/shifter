@@ -120,3 +120,85 @@ class UserNGFWStack(pulumi.ComponentResource):
             "target_group_arn": self.target_group_arn,
             "service_name": self.service_name,
         }
+
+    def run_provision(self, orchestrator):
+        """Post-Pulumi provisioning via SetupOrchestrator.
+
+        Wait for SSH, verify device cert, configure XDR logging.
+
+        Args:
+            orchestrator: SetupOrchestrator instance to execute provisioning plans
+
+        Returns:
+            Result from orchestrator
+        """
+        from plans.ngfw_provision import NGFWProvisionPlan
+        from plans.gwlb_setup import GWLBSetupPlan
+
+        # Run NGFW provision plan (wait for SSH, configure XDR)
+        provision_plan = NGFWProvisionPlan()
+        provision_result = orchestrator.orchestrate(provision_plan, self)
+
+        if not provision_result.success:
+            return provision_result
+
+        # Run GWLB setup plan (register target)
+        gwlb_plan = GWLBSetupPlan()
+        gwlb_result = orchestrator.orchestrate(gwlb_plan, self)
+
+        return gwlb_result
+
+    def run_deprovision(self, orchestrator):
+        """Cleanup with license deactivation.
+
+        Deactivates VM-Series license before termination.
+
+        Args:
+            orchestrator: SetupOrchestrator instance to execute deprovision plan
+
+        Returns:
+            Result from orchestrator
+        """
+        from plans.ngfw_deprovision import NGFWDeprovisionPlan
+
+        deprovision_plan = NGFWDeprovisionPlan()
+        return orchestrator.orchestrate(deprovision_plan, self)
+
+    def run_ops(self, operation: str, orchestrator, **kwargs):
+        """Runtime operations via OpsOrchestrator.
+
+        Operations: start, stop, add-route, remove-route, reconcile, sweep
+
+        Args:
+            operation: Operation name (start, stop, add-route, remove-route, reconcile, sweep)
+            orchestrator: OpsOrchestrator instance to execute ops plans
+            **kwargs: Additional parameters for the operation
+
+        Returns:
+            Result from orchestrator
+
+        Raises:
+            ValueError: If unknown operation requested
+        """
+        operation_plans = {
+            "start": "plans.ngfw_start.NGFWStartPlan",
+            "stop": "plans.ngfw_stop.NGFWStopPlan",
+            "add-route": "plans.gwlb_add_route.GWLBAddRoutePlan",
+            "remove-route": "plans.gwlb_remove_route.GWLBRemoveRoutePlan",
+            "reconcile": "plans.ngfw_reconcile.NGFWReconcilePlan",
+            "sweep": "plans.user_ngfw_stack_sweep.UserNGFWStackSweepPlan",
+        }
+
+        if operation not in operation_plans:
+            raise ValueError(f"Unknown operation: {operation}. Valid operations: {list(operation_plans.keys())}")
+
+        # Dynamic import of plan class
+        plan_path = operation_plans[operation]
+        module_path, class_name = plan_path.rsplit(".", 1)
+
+        import importlib
+        module = importlib.import_module(module_path)
+        plan_class = getattr(module, class_name)
+
+        plan = plan_class()
+        return orchestrator.orchestrate(plan, self, **kwargs)

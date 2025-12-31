@@ -36,6 +36,17 @@ PANW SecOps Domain Consultants who need to:
 
 ---
 
+## AWS
+
+All resources are in `us-east-2`.
+
+| Environment | AWS Profile |
+|-------------|-------------|
+| dev | `panw-shifter-dev-workstation` |
+| prod | `dev-workstation-user` |
+
+---
+
 ## Platform Elements
 
 Shifter consists of four major elements:

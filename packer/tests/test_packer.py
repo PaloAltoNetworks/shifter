@@ -22,12 +22,20 @@ class TestScriptStructure:
         return list((SCRIPTS_DIR / "kali").glob("*.sh"))
 
     @pytest.fixture
+    def ubuntu_scripts(self):
+        return list((SCRIPTS_DIR / "ubuntu").glob("*.sh"))
+
+    @pytest.fixture
     def common_scripts(self):
         return list((SCRIPTS_DIR / "common").glob("*.sh"))
 
     def test_kali_scripts_exist(self, kali_scripts):
         """Kali directory should have scripts."""
         assert len(kali_scripts) >= 3, "Expected at least 3 kali scripts"
+
+    def test_ubuntu_scripts_exist(self, ubuntu_scripts):
+        """Ubuntu directory should have scripts."""
+        assert len(ubuntu_scripts) >= 4, "Expected at least 4 ubuntu scripts"
 
     def test_common_scripts_exist(self, common_scripts):
         """Common directory should have cleanup script."""
@@ -40,6 +48,13 @@ class TestScriptStructure:
             path = SCRIPTS_DIR / "kali" / script
             assert path.exists(), f"Missing required script: {script}"
 
+    def test_required_ubuntu_scripts(self):
+        """Check all required Ubuntu scripts exist."""
+        required = ["base.sh", "services.sh", "tools.sh", "claude-code.sh"]
+        for script in required:
+            path = SCRIPTS_DIR / "ubuntu" / script
+            assert path.exists(), f"Missing required Ubuntu script: {script}"
+
     def test_cleanup_script_exists(self):
         """Cleanup script should exist."""
         assert (SCRIPTS_DIR / "common" / "cleanup.sh").exists()
@@ -51,7 +66,7 @@ class TestScriptContent:
     @pytest.fixture
     def all_scripts(self):
         scripts = []
-        for pattern in ["kali/*.sh", "common/*.sh"]:
+        for pattern in ["kali/*.sh", "ubuntu/*.sh", "common/*.sh"]:
             scripts.extend(SCRIPTS_DIR.glob(pattern))
         return scripts
 
@@ -118,6 +133,10 @@ class TestPackerTemplates:
     def test_kali_template_exists(self):
         """Kali template should exist."""
         assert (PACKER_DIR / "kali.pkr.hcl").exists()
+
+    def test_ubuntu_template_exists(self):
+        """Ubuntu template should exist."""
+        assert (PACKER_DIR / "ubuntu.pkr.hcl").exists()
 
     def test_variables_file_exists(self):
         """Variables file should exist."""
@@ -195,3 +214,95 @@ class TestCleanup:
     def test_clear_ssh_keys(self, cleanup_content):
         """Cleanup should remove SSH host keys."""
         assert "ssh_host_" in cleanup_content
+
+
+class TestUbuntuServices:
+    """Test that Ubuntu services script includes required services."""
+
+    @pytest.fixture
+    def services_content(self):
+        return (SCRIPTS_DIR / "ubuntu" / "services.sh").read_text()
+
+    def test_apache_included(self, services_content):
+        """Apache with PHP should be installed."""
+        assert "apache2" in services_content
+        assert "libapache2-mod-php" in services_content
+
+    def test_mysql_included(self, services_content):
+        """MySQL should be installed."""
+        assert "mysql-server" in services_content
+
+    def test_docker_included(self, services_content):
+        """Docker should be installed."""
+        assert "docker" in services_content
+
+    def test_openssh_included(self, services_content):
+        """OpenSSH Server should be installed."""
+        assert "openssh-server" in services_content
+
+    def test_vsftpd_included(self, services_content):
+        """vsftpd should be installed."""
+        assert "vsftpd" in services_content
+
+    def test_samba_included(self, services_content):
+        """Samba should be installed (but not enabled)."""
+        assert "samba" in services_content
+
+    def test_services_enabled(self, services_content):
+        """Required services should be enabled."""
+        assert "systemctl enable apache2" in services_content
+        assert "systemctl enable mysql" in services_content
+        assert "systemctl enable docker" in services_content
+        assert "systemctl enable ssh" in services_content
+        assert "systemctl enable vsftpd" in services_content
+
+
+class TestUbuntuTools:
+    """Test that Ubuntu tools script includes required packages."""
+
+    @pytest.fixture
+    def tools_content(self):
+        return (SCRIPTS_DIR / "ubuntu" / "tools.sh").read_text()
+
+    def test_build_essential(self, tools_content):
+        """build-essential should be installed."""
+        assert "build-essential" in tools_content
+
+    def test_python3_included(self, tools_content):
+        """Python 3 with pip and venv should be installed."""
+        assert "python3" in tools_content
+        assert "python3-pip" in tools_content
+        assert "python3-venv" in tools_content
+
+    def test_nodejs_included(self, tools_content):
+        """Node.js 20.x should be installed."""
+        assert "nodejs" in tools_content
+        assert "setup_20" in tools_content
+
+    def test_git_included(self, tools_content):
+        """Git should be installed."""
+        assert "git" in tools_content
+
+    def test_basic_tools_included(self, tools_content):
+        """Basic tools should be installed."""
+        assert "curl" in tools_content
+        assert "nano" in tools_content
+        assert "netcat" in tools_content
+
+
+class TestUbuntuClaudeCode:
+    """Test Ubuntu Claude Code installation script."""
+
+    @pytest.fixture
+    def claude_content(self):
+        return (SCRIPTS_DIR / "ubuntu" / "claude-code.sh").read_text()
+
+    def test_npm_install(self, claude_content):
+        """Claude Code should be installed via npm."""
+        assert "npm install" in claude_content
+        assert "claude-code" in claude_content
+
+    def test_bedrock_config(self, claude_content):
+        """Bedrock environment variables should be set."""
+        assert "CLAUDE_CODE_USE_BEDROCK=1" in claude_content
+        assert "AWS_REGION" in claude_content

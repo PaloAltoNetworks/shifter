@@ -76,7 +76,7 @@ resource "aws_iam_role" "github_actions" {
 # Managed IAM Policies (split to avoid size limits)
 # ------------------------------------------------------------------------------
 
-# Core Infrastructure: ECR, S3 state, DynamoDB locking
+# Core Infrastructure: ECR, S3 state, DynamoDB locking, Budgets
 resource "aws_iam_policy" "core_infrastructure" {
   name = "shifter-${var.environment}-core-infrastructure"
 
@@ -156,6 +156,12 @@ resource "aws_iam_policy" "core_infrastructure" {
           "dynamodb:UpdateContinuousBackups"
         ]
         Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*-range-pulumi-locks"
+      },
+      {
+        Sid      = "Budgets"
+        Effect   = "Allow"
+        Action   = ["budgets:*"]
+        Resource = "arn:aws:budgets::${data.aws_caller_identity.current.account_id}:budget/shifter-*"
       }
     ]
   })

@@ -25,6 +25,16 @@ Pre-baked victim images with vulnerable services and Claude Code.
 - Node.js 20.x
 - Git, curl, nano, netcat
 
+### Building with Packer
+
+```bash
+cd packer
+packer init .
+packer build -var-file=dev.pkrvars.hcl ubuntu.pkr.hcl
+```
+
+Or use the GitHub Actions workflow "Packer AMI Build (Dev)" and select `ubuntu`.
+
 ## Windows Victim
 
 ### What's In It
@@ -106,10 +116,10 @@ The XDR agent is NOT in the AMI. Users upload their agent installer to S3 via th
 
 AMI IDs are managed via SSM Parameter Store:
 
-| SSM Parameter | Description |
-|---------------|-------------|
-| `/shifter/ami/victim` | Ubuntu victim AMI |
-| `/shifter/ami/windows` | Windows victim AMI |
-| `/shifter/ami/kali` | Kali attack AMI |
+| SSM Parameter | Description | Env Var |
+|---------------|-------------|---------|
+| `/shifter/ami/ubuntu` | Ubuntu victim AMI | `VICTIM_AMI_ID` |
+| `/shifter/ami/windows` | Windows victim AMI | `WINDOWS_AMI_ID` |
+| `/shifter/ami/kali` | Kali attack AMI | `KALI_AMI_ID` |
 
 GitHub Actions workflows update these parameters after successful builds.

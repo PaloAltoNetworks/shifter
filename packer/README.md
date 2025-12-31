@@ -13,6 +13,7 @@ Reproducible AMI builds for Shifter range instances.
 | AMI | Template | Description |
 |-----|----------|-------------|
 | Kali | `kali.pkr.hcl` | Kali Linux with pentesting tools, sshpass, Claude Code |
+| Ubuntu | `ubuntu.pkr.hcl` | Ubuntu 22.04 victim with Apache, MySQL, Docker, Claude Code |
 | Windows | `windows.pkr.hcl` | Windows Server 2022 with XAMPP, IIS, OpenSSH, Claude Code |
 
 ## Quick Start
@@ -32,8 +33,8 @@ AWS_PROFILE=panw-shifter-dev-workstation packer build -var-file=dev.pkrvars.hcl 
 
 After a successful build:
 1. AMI ID is printed to console
-2. Manifest written to `<ami_type>-manifest.json` (e.g., `kali-manifest.json`, `windows-manifest.json`)
-3. AMI ID is stored in SSM Parameter Store at `/shifter/ami/<ami_type>`
+2. Manifest written to `{ami_type}-manifest.json` (e.g., `kali-manifest.json`, `ubuntu-manifest.json`)
+3. SSM Parameter `/shifter/ami/{ami_type}` updated by GitHub Actions
 
 ## Kali AMI Contents
 
@@ -50,6 +51,32 @@ After a successful build:
 - Python 3, pip, venv
 - Node.js, npm
 - build-essential
+
+**Claude Code:**
+- `@anthropic-ai/claude-code`
+- Pre-configured for AWS Bedrock
+
+## Ubuntu AMI Contents
+
+**Base:**
+- Ubuntu 22.04 LTS
+- SSM Agent
+
+**Services (running on boot):**
+- Apache 2.4 with mod_php
+- MySQL 8.0
+- Docker
+- OpenSSH Server
+- vsftpd (FTP)
+
+**Services (installed, not running):**
+- Samba
+
+**Development:**
+- build-essential (gcc, g++, make)
+- Python 3, pip, venv
+- Node.js 20.x, npm
+- Git, curl, nano, netcat
 
 **Claude Code:**
 - `@anthropic-ai/claude-code`
@@ -85,6 +112,7 @@ After a successful build:
 ## Build Time
 
 - **Kali:** ~15-20 minutes (kali-linux-headless is large)
+- **Ubuntu:** ~5-10 minutes
 - **Windows:** ~20-30 minutes (includes sysprep)
 
 ## Customization

@@ -13,6 +13,7 @@ Reproducible AMI builds for Shifter range instances.
 | AMI | Template | Description |
 |-----|----------|-------------|
 | Kali | `kali.pkr.hcl` | Kali Linux with pentesting tools, sshpass, Claude Code |
+| Windows | `windows.pkr.hcl` | Windows Server 2022 with XAMPP, IIS, OpenSSH, Claude Code |
 
 ## Quick Start
 
@@ -31,8 +32,8 @@ AWS_PROFILE=panw-shifter-dev-workstation packer build -var-file=dev.pkrvars.hcl 
 
 After a successful build:
 1. AMI ID is printed to console
-2. Manifest written to `kali-manifest.json`
-3. Update `terraform/environments/*/terraform.tfvars` with new AMI ID
+2. Manifest written to `<ami_type>-manifest.json` (e.g., `kali-manifest.json`, `windows-manifest.json`)
+3. AMI ID is stored in SSM Parameter Store at `/shifter/ami/<ami_type>`
 
 ## Kali AMI Contents
 
@@ -54,9 +55,37 @@ After a successful build:
 - `@anthropic-ai/claude-code`
 - Pre-configured for AWS Bedrock
 
+## Windows AMI Contents
+
+**Base:**
+- Windows Server 2022 Datacenter
+- SSM Agent
+- WinRM enabled for remote management
+
+**Services:**
+- XAMPP (Apache 2.4, MySQL, PHP)
+- IIS with management tools
+- FTP Server
+- OpenSSH Server
+
+**Development:**
+- Python 3.12
+- Node.js 20.x, npm
+- Git
+
+**Claude Code:**
+- `@anthropic-ai/claude-code`
+- Installed to system PATH (`C:\Program Files\nodejs`)
+- Pre-configured for AWS Bedrock
+
+**Disabled Services:**
+- Print Spooler, Remote Registry, Edge Update, Themes
+- Windows Defender (via GPO registry keys for XDR compatibility)
+
 ## Build Time
 
-Expect ~15-20 minutes for a full Kali build (kali-linux-headless is large).
+- **Kali:** ~15-20 minutes (kali-linux-headless is large)
+- **Windows:** ~20-30 minutes (includes sysprep)
 
 ## Customization
 
@@ -103,3 +132,17 @@ Ensure:
 ### Build fails partway through
 
 Check the EC2 console - Packer may leave a running instance. Terminate it manually if needed.
+
+### Windows WinRM connection timeout
+
+Ensure:
+- Security group allows WinRM (port 5985) from your IP
+- Instance has public IP
+- User data script ran successfully (check EC2 console logs)
+
+### Windows sysprep fails
+
+If sysprep fails:
+- Check EC2Launch logs at `C:\ProgramData\Amazon\EC2Launch\log\`
+- Ensure all services are installed before sysprep runs
+- Verify EC2Launch v2 is present at `C:\Program Files\Amazon\EC2Launch\`

@@ -2,9 +2,10 @@
 
 from django.contrib import admin
 
+from cms.models import OperatingSystem
+
 from .models import (
     AgentConfig,
-    OperatingSystem,
     Range,
     UserNGFW,
 )

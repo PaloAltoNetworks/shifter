@@ -4,32 +4,8 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
-
-class OperatingSystem(models.Model):
-    """Reference table for supported operating systems."""
-
-    slug = models.SlugField(max_length=50, unique=True)
-    name = models.CharField(max_length=100)
-    extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
-
-    class Meta:
-        ordering = ["name"]
-        verbose_name = "Operating System"
-        verbose_name_plural = "Operating Systems"
-
-    def __str__(self):
-        return self.name
-
-    @classmethod
-    def get_for_extension(cls, extension: str):
-        """Find the OS that matches a given file extension."""
-        ext = extension.lower()
-        if not ext.startswith("."):
-            ext = f".{ext}"
-        for os in cls.objects.all():
-            if ext in os.extensions:
-                return os
-        return None
+# OperatingSystem has been moved to cms.models
+# See: cms/migrations/0004_move_operatingsystem_to_cms.py
 
 
 class Asset(models.Model):
@@ -189,7 +165,7 @@ class AgentConfig(FileAsset):
         related_name="agents",
     )
     os = models.ForeignKey(
-        OperatingSystem,
+        "cms.OperatingSystem",
         on_delete=models.PROTECT,
         related_name="agents",
     )

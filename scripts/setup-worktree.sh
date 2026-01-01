@@ -17,43 +17,43 @@ fi
 
 echo "Setting up worktree: $WORKTREE_ROOT"
 
-# Portal venv
-if [ -L "$WORKTREE_ROOT/portal/.venv" ]; then
-    echo "portal/.venv symlink already exists"
-elif [ -d "$WORKTREE_ROOT/portal/.venv" ]; then
-    echo "Removing empty portal/.venv directory..."
-    rm -rf "$WORKTREE_ROOT/portal/.venv"
-    ln -s "$MAIN_REPO/portal/.venv" "$WORKTREE_ROOT/portal/.venv"
-    echo "Created portal/.venv symlink"
-elif [ -d "$WORKTREE_ROOT/portal" ]; then
-    ln -s "$MAIN_REPO/portal/.venv" "$WORKTREE_ROOT/portal/.venv"
-    echo "Created portal/.venv symlink"
+# Shifter platform venv
+if [ -L "$WORKTREE_ROOT/shifter/shifter_platform/.venv" ]; then
+    echo "shifter/shifter_platform/.venv symlink already exists"
+elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform/.venv" ]; then
+    echo "Removing empty shifter/shifter_platform/.venv directory..."
+    rm -rf "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
+    ln -s "$MAIN_REPO/shifter/shifter_platform/.venv" "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
+    echo "Created shifter/shifter_platform/.venv symlink"
+elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform" ]; then
+    ln -s "$MAIN_REPO/shifter/shifter_platform/.venv" "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
+    echo "Created shifter/shifter_platform/.venv symlink"
 fi
 
-# Portal .env file (for Django settings like DJANGO_SECRET_KEY)
-if [ -f "$MAIN_REPO/portal/.env" ]; then
-    if [ -L "$WORKTREE_ROOT/portal/.env" ]; then
-        echo "portal/.env symlink already exists"
-    elif [ -f "$WORKTREE_ROOT/portal/.env" ]; then
-        echo "portal/.env already exists (not overwriting)"
-    elif [ -d "$WORKTREE_ROOT/portal" ]; then
-        ln -s "$MAIN_REPO/portal/.env" "$WORKTREE_ROOT/portal/.env"
-        echo "Created portal/.env symlink"
+# Shifter platform .env file (for Django settings like DJANGO_SECRET_KEY)
+if [ -f "$MAIN_REPO/shifter/shifter_platform/.env" ]; then
+    if [ -L "$WORKTREE_ROOT/shifter/shifter_platform/.env" ]; then
+        echo "shifter/shifter_platform/.env symlink already exists"
+    elif [ -f "$WORKTREE_ROOT/shifter/shifter_platform/.env" ]; then
+        echo "shifter/shifter_platform/.env already exists (not overwriting)"
+    elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform" ]; then
+        ln -s "$MAIN_REPO/shifter/shifter_platform/.env" "$WORKTREE_ROOT/shifter/shifter_platform/.env"
+        echo "Created shifter/shifter_platform/.env symlink"
     fi
 fi
 
-# Shifter-engine venv (if it exists in main repo)
-if [ -d "$MAIN_REPO/shifter-engine/.venv" ]; then
-    if [ -L "$WORKTREE_ROOT/shifter-engine/.venv" ]; then
-        echo "shifter-engine/.venv symlink already exists"
-    elif [ -d "$WORKTREE_ROOT/shifter-engine/.venv" ]; then
-        echo "Removing empty shifter-engine/.venv directory..."
-        rm -rf "$WORKTREE_ROOT/shifter-engine/.venv"
-        ln -s "$MAIN_REPO/shifter-engine/.venv" "$WORKTREE_ROOT/shifter-engine/.venv"
-        echo "Created shifter-engine/.venv symlink"
-    elif [ -d "$WORKTREE_ROOT/shifter-engine" ]; then
-        ln -s "$MAIN_REPO/shifter-engine/.venv" "$WORKTREE_ROOT/shifter-engine/.venv"
-        echo "Created shifter-engine/.venv symlink"
+# Engine provisioner venv (if it exists in main repo)
+if [ -d "$MAIN_REPO/shifter/engine/provisioner/.venv" ]; then
+    if [ -L "$WORKTREE_ROOT/shifter/engine/provisioner/.venv" ]; then
+        echo "shifter/engine/provisioner/.venv symlink already exists"
+    elif [ -d "$WORKTREE_ROOT/shifter/engine/provisioner/.venv" ]; then
+        echo "Removing empty shifter/engine/provisioner/.venv directory..."
+        rm -rf "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
+        ln -s "$MAIN_REPO/shifter/engine/provisioner/.venv" "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
+        echo "Created shifter/engine/provisioner/.venv symlink"
+    elif [ -d "$WORKTREE_ROOT/shifter/engine/provisioner" ]; then
+        ln -s "$MAIN_REPO/shifter/engine/provisioner/.venv" "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
+        echo "Created shifter/engine/provisioner/.venv symlink"
     fi
 fi
 

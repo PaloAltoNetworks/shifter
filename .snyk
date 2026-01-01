@@ -8,6 +8,6 @@ exclude:
     - "**/tests/**"
     - "**/test_*.py"
     - "**/conftest.py"
-    - "portal/tests/**"
-    - "shifter-engine/tests/**"
+    - "shifter/shifter_platform/tests/**"
+    - "shifter/engine/provisioner/tests/**"
     - "pulumi-provisioner/tests/**"

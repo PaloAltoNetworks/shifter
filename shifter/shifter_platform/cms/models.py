@@ -374,3 +374,32 @@ class Credential(CredentialBase):
         """Refresh and update original values."""
         super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
         self._store_original_values()
+
+
+class RangeInstance(models.Model):
+    """Tracks hydrated scenario configs sent to engine.
+
+    Uses integer IDs (not ForeignKeys) to decouple CMS from external models.
+    See GH issue #446 for planned migration to use FK for agent_id after
+    Asset/AgentConfig models are moved to CMS.
+
+    Attributes:
+        range_id: ID of the Range created by engine (IntegerField, not FK)
+        scenario_id: Template name used (e.g., 'basic', 'ad_attack_lab')
+        user_id: ID of the user who requested creation (IntegerField, not FK)
+        agent_id: ID of the agent used, if any (IntegerField, nullable)
+        created_at: When this record was created
+    """
+
+    range_id = models.IntegerField(unique=True)
+    scenario_id = models.CharField(max_length=50)
+    user_id = models.IntegerField()
+    agent_id = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Range Instance"
+        verbose_name_plural = "Range Instances"
+
+    def __str__(self):
+        return f"Range {self.range_id}: {self.scenario_id}"

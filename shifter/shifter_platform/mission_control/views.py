@@ -18,6 +18,7 @@ from cms.assets.services import create_agent as cms_create_agent
 from cms.assets.services import delete_agent as cms_delete_agent
 from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
 from cms.models import Credential
+from cms.services import list_scenarios as cms_list_scenarios
 from engine.services.allocation import AllocationError
 from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
 from engine.services.scenarios import ScenarioValidationError
@@ -525,7 +526,8 @@ def launch_range(request):
         return JsonResponse({"error": "agent_id is required"}, status=400)
 
     scenario = data.get("scenario", "basic")
-    if scenario not in ("basic", "ad_attack_lab"):
+    valid_scenarios = {s["id"] for s in cms_list_scenarios(request.user)}
+    if scenario not in valid_scenarios:
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
     # NGFW support is planned but not yet implemented with new models

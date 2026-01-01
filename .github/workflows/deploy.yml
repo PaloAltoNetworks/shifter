@@ -33,27 +33,26 @@ jobs:
         with:
           filters: |
             core:
-              - 'terraform/modules/ecr/**'
-              - 'terraform/environments/*/*.tf'
+              - 'platform/terraform/modules/ecr/**'
+              - 'platform/terraform/environments/*/*.tf'
               - '.github/workflows/_core.yml'
               - '.github/workflows/deploy.yml'
             range:
-              - 'terraform/modules/range/**'
-              - 'terraform/modules/pulumi-state/**'
-              - 'terraform/environments/*/range/**'
+              - 'platform/terraform/modules/range/**'
+              - 'platform/terraform/modules/pulumi-state/**'
+              - 'platform/terraform/environments/*/range/**'
               - '.github/workflows/_range.yml'
             shifter_engine:
-              - 'shifter-engine/**'
-              - 'terraform/modules/pulumi-provisioner/**'
-              - 'terraform/modules/ecr/**'
-              - 'terraform/environments/*/*.tf'
+              - 'shifter/engine/provisioner/**'
+              - 'platform/terraform/modules/pulumi-provisioner/**'
+              - 'platform/terraform/modules/ecr/**'
+              - 'platform/terraform/environments/*/*.tf'
               - '.github/workflows/_shifter-engine.yml'
               - '.github/workflows/deploy.yml'
             portal:
-              - 'terraform/modules/portal/**'
-              - 'terraform/environments/*/portal/**'
-              - 'portal/**'
-              - 'shifter-engine/**'
+              - 'platform/terraform/modules/portal/**'
+              - 'platform/terraform/environments/*/portal/**'
+              - 'shifter/**'
               - '.github/workflows/_portal.yml'
 
       - name: Set environment
@@ -73,7 +72,7 @@ jobs:
           echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> $GITHUB_OUTPUT
 
   # ============================================================================
-  # DEPENDENCY CHAIN: Core -> Range -> Portal
+  # DEPENDENCY CHAIN: Core -> Range -> Platform
   # Each component waits for its upstream dependency before running
   # ============================================================================
 
@@ -134,8 +133,10 @@ jobs:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
 
+  # NOTE: Job ID and variable names use legacy "portal" naming.
+  # Workflow file is _portal.yml. See #434 for rename tracking.
   portal:
-    name: Portal
+    name: Platform
     needs: [changes, quality, range, shifter-engine]
     if: |
       always() &&

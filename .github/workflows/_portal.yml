@@ -1,4 +1,4 @@
-name: Portal
+name: Platform
 
 on:
   workflow_call:
@@ -26,7 +26,7 @@ jobs:
     runs-on: self-hosted
     defaults:
       run:
-        working-directory: terraform/environments/${{ inputs.environment }}/portal
+        working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -37,7 +37,7 @@ jobs:
         with:
           terraform_version: "1.7.1"
       - run: terraform fmt -check -recursive
-        working-directory: terraform
+        working-directory: platform/terraform
       - run: terraform init
       - run: terraform validate
       - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
@@ -47,12 +47,12 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('terraform/environments/${{ inputs.environment }}/portal/plan.txt', 'utf8');
+            const plan = fs.readFileSync('platform/terraform/environments/${{ inputs.environment }}/portal/plan.txt', 'utf8');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `#### Terraform Plan - Portal (${{ inputs.environment }})\n<details><summary>Show Plan</summary>\n\n\`\`\`terraform\n${plan.substring(0, 60000)}\n\`\`\`\n\n</details>`
+              body: `#### Terraform Plan - Platform (${{ inputs.environment }})\n<details><summary>Show Plan</summary>\n\n\`\`\`terraform\n${plan.substring(0, 60000)}\n\`\`\`\n\n</details>`
             });
 
   apply:
@@ -65,7 +65,7 @@ jobs:
       (github.event_name != 'pull_request' || inputs.environment == 'dev')
     defaults:
       run:
-        working-directory: terraform/environments/${{ inputs.environment }}/portal
+        working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -105,7 +105,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./portal
+          context: ./shifter/shifter_platform
           push: true
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
@@ -138,7 +138,7 @@ jobs:
       - name: Get deployment config
         id: config
         run: |
-          TFVARS_FILE="terraform/environments/${ENV}/portal/terraform.tfvars"
+          TFVARS_FILE="platform/terraform/environments/${ENV}/portal/terraform.tfvars"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "registry=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> $GITHUB_OUTPUT
           echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
@@ -176,7 +176,7 @@ jobs:
             --filters "Name=tag:Name,Values=$INSTANCE_TAG" "Name=instance-state-name,Values=running" \
             --query 'Reservations[0].Instances[0].InstanceId' --output text)
           if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "Error: Could not find running Portal EC2 instance with tag: $INSTANCE_TAG"; exit 1
+            echo "Error: Could not find running Platform EC2 instance with tag: $INSTANCE_TAG"; exit 1
           fi
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
 
@@ -259,7 +259,7 @@ jobs:
             aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "StandardErrorContent" --output text
             exit 1
           fi
-          echo "Portal deployment successful!"
+          echo "Platform deployment successful!"
 
       - name: Deploy via SSM to ASG instances
         if: steps.config.outputs.enable_autoscaling == 'true'
@@ -342,4 +342,4 @@ jobs:
             echo "Deployment successful on $INSTANCE_ID"
           done
 
-          echo "Portal ASG deployment successful!"
+          echo "Platform ASG deployment successful!"

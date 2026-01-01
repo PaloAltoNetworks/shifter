@@ -46,7 +46,7 @@ prod account profile: `dev-workstation-user`
 | **Pulumi Provisioner** | `platform/terraform/modules/pulumi-provisioner/` | ECS Fargate task for range provisioning |
 | **CloudFormation** | `platform/cloudformation/{env}/` | Cortex XDR connector IAM roles (manually deployed) |
 
-*Portal is a legacy name. Deploys Shifter Django infrastructure.
+*Portal is a legacy name. Deploys Shifter Django infrastructure. Redis uses single-node in dev, HA replication group in prod.
 
 ## State Management
 
@@ -56,6 +56,14 @@ Terraform state stored in S3 with DynamoDB locking:
 |-------------|--------|------------|
 | dev | `shifter-dev-infra-*` | `shifter-dev-terraform-*` |
 | prod | `shifter-prod-infra-*` | `shifter-prod-terraform-*` |
+
+## Redis
+
+ElastiCache Redis:
+- **Dev:** Single-node `cache.t3.micro`
+- **Prod:** Replication group (primary + 1 replica, Multi-AZ, automatic failover)
+- Used for Django Channels and Celery broker
+- Prod snapshots: 1-day retention
 
 ## Related Docs
 

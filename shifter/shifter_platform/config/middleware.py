@@ -1,4 +1,4 @@
-"""Custom middleware for Shifter portal."""
+"""Custom middleware for Shifter platform."""
 
 from django.http import HttpResponse
 

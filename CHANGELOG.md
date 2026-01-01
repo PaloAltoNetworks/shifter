@@ -234,7 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Documentation section in Mission Control sidebar
-- Renders markdown docs from `portal/documentation/docs/` with navigation tree
+- Renders markdown docs from `shifter/shifter_platform/documentation/docs/` with navigation tree
 - Mermaid.js diagram support for architecture diagrams
 - Cortex XDR dark theme styling for documentation pages
 

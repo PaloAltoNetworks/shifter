@@ -209,7 +209,7 @@ class DirectUploader {
                     upload_token: this.uploadToken,
                 }),
             });
-        } catch (e) {
+        } catch {
             // Ignore cancel errors
         }
     }

@@ -234,13 +234,13 @@ class TestProviderLogoutUrl:
 
         request = MagicMock()
         request.is_secure.return_value = True
-        request.get_host.return_value = "portal.example.com"
+        request.get_host.return_value = "shifter.example.com"
 
         url = provider_logout_url(request)
 
         assert url.startswith("https://auth.example.com/logout?")
         assert "client_id=test-client-id" in url
-        assert "logout_uri=https%3A%2F%2Fportal.example.com%2F" in url
+        assert "logout_uri=https%3A%2F%2Fshifter.example.com%2F" in url
 
     def test_returns_http_logout_uri_when_not_secure(self, monkeypatch):
         """Uses http scheme when request is not secure."""

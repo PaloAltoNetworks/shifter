@@ -35,7 +35,7 @@ Jobs run only when relevant files change. `deploy.yml` detects changes and trigg
 |-----|-------------|
 | **core** | `platform/terraform/modules/ecr/**`, `platform/terraform/environments/*/*.tf` |
 | **range** | `platform/terraform/modules/range/**`, `platform/terraform/environments/*/range/**` |
-| **shifter_engine** | `shifter-engine/**`, `platform/terraform/modules/pulumi-provisioner/**` |
+| **shifter_engine** | `shifter/engine/provisioner/**`, `platform/terraform/modules/pulumi-provisioner/**` |
 | **portal** | `platform/terraform/modules/portal/**`, `shifter/**` |
 
 ## Environment Targeting

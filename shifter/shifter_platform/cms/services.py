@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, Any
 
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
+from engine.services import create_range as engine_create_range
 from engine.services.orchestration import cancel as engine_cancel
 from engine.services.orchestration import destroy as engine_destroy
-from engine.services.orchestration import launch as engine_launch
 from mission_control.models import AgentConfig, Range
 
 if TYPE_CHECKING:
@@ -749,25 +749,30 @@ def get_range(user: User, range_id: int) -> Any:
         raise
 
 
-def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False) -> Any:
-    """Compose scenario, trigger provisioning.
+def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False) -> int:
+    """Validate, hydrate, and trigger range provisioning.
 
-    Delegates to engine.services.orchestration.launch().
+    CMS validates scenario and agent requirements, hydrates the scenario
+    template with agent details, calls Engine, and stores RangeInstance.
 
     Args:
         user: User requesting the range
-        scenario: Scenario type (basic, ad_attack_lab)
+        scenario: Scenario ID (basic, ad_attack_lab)
         agent_id: ID of the agent to use for victim instances
         ngfw_enabled: Whether to deploy VM-Series NGFW inline
 
     Returns:
-        Range: The newly created range object
+        int: The range_id of the created range
 
     Raises:
         TypeError: If user is None, invalid type, or parameters are invalid
         ValueError: If user has no ID (unsaved) or parameters are invalid
-        OrchestrationError: If user already has an active range or validation fails
+        CMSError: If scenario not found, agent not found, or requirements not met
     """
+    from cms.exceptions import CMSError
+    from cms.models import RangeInstance
+    from cms.scenarios.hydrator import hydrate_scenario
+
     # Input validation - user
     if user is None:
         logger.error("create_range called with None user")
@@ -812,31 +817,44 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
     )
 
     try:
-        range_obj = engine_launch(
-            user=user,
+        # 1. Validate scenario exists
+        try:
+            get_scenario(scenario)
+        except CMSError:
+            logger.error("create_range: scenario '%s' not found for user_id=%s", scenario, user.id)
+            raise
+
+        # 2. Get agent (validates ownership and not deleted)
+        agent = get_agent(user, agent_id)
+
+        # 3. Validate agent meets scenario requirements
+        validate_scenario_requirements(scenario, agent)
+
+        # 4. Hydrate scenario with agent details
+        range_config = hydrate_scenario(scenario, agent)
+
+        # 5. Call engine to create range
+        range_id = engine_create_range(range_config)
+
+        # 6. Store RangeInstance record
+        RangeInstance.objects.create(
+            range_id=range_id,
+            scenario_id=scenario,
+            user_id=user.id,
             agent_id=agent_id,
-            scenario=scenario,
-            ngfw_enabled=ngfw_enabled,
         )
 
-        # Validate response from engine service
-        if range_obj is None:
-            logger.error("create_range: engine service returned None for user_id=%s", user.id)
-            raise TypeError("Engine service returned None instead of Range")
+        logger.debug(
+            "create_range completed: range_id=%s, scenario=%s, user_id=%s",
+            range_id,
+            scenario,
+            user.id,
+        )
 
-        if not isinstance(range_obj, Range):
-            logger.error(
-                "create_range: engine service returned invalid type %s for user_id=%s",
-                type(range_obj).__name__,
-                user.id,
-            )
-            raise TypeError(f"Engine service returned {type(range_obj).__name__}, expected Range")
+        return range_id
 
-        logger.debug("create_range returning range_id=%s for user_id=%s", range_obj.id, user.id)
-        return range_obj
-
-    except TypeError:
-        # Re-raise TypeErrors (our validation errors)
+    except (TypeError, ValueError, CMSError):
+        # Re-raise known errors
         raise
     except Exception:
         logger.exception("Error in create_range for user_id=%s", user.id)
@@ -1331,8 +1349,44 @@ def cancel_upload(user: User, upload_token: str) -> None:
 
 
 def get_storage_used(user: User) -> int:
-    """Check storage quota."""
-    raise NotImplementedError
+    """Get total bytes used by a user's active agents.
+
+    Args:
+        user: The user to check storage for
+
+    Returns:
+        int: Total bytes used by active agents (0 if none)
+
+    Raises:
+        TypeError: If user is None or not a User instance
+        ValueError: If user is not saved (no ID)
+    """
+    from cms.assets.services import get_storage_used as assets_get_storage_used
+
+    # Input validation - user
+    if user is None:
+        logger.error("get_storage_used called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("get_storage_used called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("get_storage_used called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    logger.debug("get_storage_used called for user_id=%s", user.id)
+
+    try:
+        result = assets_get_storage_used(user)
+
+        logger.debug("get_storage_used returning %d bytes for user_id=%s", result, user.id)
+        return result
+
+    except Exception:
+        logger.exception("Error in get_storage_used for user_id=%s", user.id)
+        raise
 
 
 # =============================================================================
@@ -1341,5 +1395,137 @@ def get_storage_used(user: User) -> int:
 
 
 def list_scenarios(user: User) -> list[Any]:
-    """Get available scenarios."""
-    raise NotImplementedError
+    """Get available scenarios with metadata.
+
+    Args:
+        user: User requesting scenarios
+
+    Returns:
+        List of scenario dictionaries with id, name, description,
+        requirements, and instances fields.
+
+    Raises:
+        TypeError: If user is None or invalid type
+        ValueError: If user is unsaved
+    """
+    from cms.scenarios.loader import get_all_scenarios
+
+    # Input validation - user
+    if user is None:
+        logger.error("list_scenarios called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("list_scenarios called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("list_scenarios called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    logger.debug("list_scenarios called for user_id=%s", user.id)
+
+    try:
+        scenarios = get_all_scenarios()
+
+        # Convert to list of dicts (deep copy to prevent mutation)
+        result = [scenario.model_dump() for scenario in scenarios]
+
+        logger.debug("list_scenarios returning %d scenarios for user_id=%s", len(result), user.id)
+        return result
+
+    except Exception:
+        logger.exception("Error in list_scenarios for user_id=%s", user.id)
+        raise
+
+
+def get_scenario(scenario_id: str) -> dict[str, Any]:
+    """Get a single scenario template by ID.
+
+    Args:
+        scenario_id: Unique scenario identifier
+
+    Returns:
+        Scenario dictionary with id, name, description, requirements, instances
+
+    Raises:
+        CMSError: If scenario not found
+    """
+    from cms.exceptions import CMSError
+    from cms.scenarios.loader import load_scenario
+
+    logger.debug("get_scenario called for scenario_id=%s", scenario_id)
+
+    try:
+        scenario = load_scenario(scenario_id)
+        return scenario.model_dump()
+
+    except ValueError as e:
+        logger.error("get_scenario: scenario '%s' not found", scenario_id)
+        raise CMSError(f"Scenario '{scenario_id}' not found") from e
+    except Exception:
+        logger.exception("Error in get_scenario for scenario_id=%s", scenario_id)
+        raise
+
+
+def validate_scenario_requirements(scenario_id: str, agent: Any) -> None:
+    """Validate that an agent meets scenario requirements.
+
+    Args:
+        scenario_id: Scenario to validate against
+        agent: AgentConfig instance (or None)
+
+    Returns:
+        None if validation passes
+
+    Raises:
+        CMSError: If validation fails (agent missing, wrong OS, etc.)
+    """
+    from cms.exceptions import CMSError
+    from cms.scenarios.loader import load_scenario
+
+    logger.debug("validate_scenario_requirements called for scenario_id=%s", scenario_id)
+
+    try:
+        scenario = load_scenario(scenario_id)
+    except ValueError as e:
+        logger.error("validate_scenario_requirements: scenario '%s' not found", scenario_id)
+        raise CMSError(f"Scenario '{scenario_id}' not found") from e
+
+    requirements = scenario.requirements
+
+    # Check if agent is required
+    if requirements.required and agent is None:
+        logger.error(
+            "validate_scenario_requirements: scenario '%s' requires an agent",
+            scenario_id,
+        )
+        raise CMSError(f"Scenario '{scenario_id}' requires an agent")
+
+    # Check OS requirement if specified
+    if requirements.os is not None and agent is not None:
+        # Get agent's OS slug
+        agent_os = agent.os.slug if hasattr(agent.os, "slug") else str(agent.os)
+
+        # Check if agent OS matches requirement (windows matches windows, etc.)
+        # For windows requirement, check if agent_os starts with 'windows'
+        if requirements.os == "windows":
+            if not agent_os.startswith("windows"):
+                logger.error(
+                    "validate_scenario_requirements: scenario '%s' requires windows, but agent has %s",
+                    scenario_id,
+                    agent_os,
+                )
+                raise CMSError(f"Scenario '{scenario_id}' requires a Windows agent, but agent has OS '{agent_os}'")
+        elif requirements.os == "linux" and not agent_os.startswith("linux"):
+            logger.error(
+                "validate_scenario_requirements: scenario '%s' requires linux, but agent has %s",
+                scenario_id,
+                agent_os,
+            )
+            raise CMSError(f"Scenario '{scenario_id}' requires a Linux agent, but agent has OS '{agent_os}'")
+
+    logger.debug(
+        "validate_scenario_requirements: validation passed for scenario_id=%s",
+        scenario_id,
+    )

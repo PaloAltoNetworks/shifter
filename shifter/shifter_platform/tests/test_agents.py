@@ -9,7 +9,8 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
-from mission_control.models import ActivityLog, AgentConfig, OperatingSystem
+from management.models import ActivityLog
+from mission_control.models import AgentConfig, OperatingSystem
 
 User = get_user_model()
 

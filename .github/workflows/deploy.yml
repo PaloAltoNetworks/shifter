@@ -22,7 +22,7 @@ jobs:
       core: ${{ steps.filter.outputs.core }}
       range: ${{ steps.filter.outputs.range }}
       shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
-      portal: ${{ steps.filter.outputs.portal }}
+      shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
     steps:
@@ -49,11 +49,11 @@ jobs:
               - 'platform/terraform/environments/*/*.tf'
               - '.github/workflows/_shifter-engine.yml'
               - '.github/workflows/deploy.yml'
-            portal:
+            shifter_platform:
               - 'platform/terraform/modules/portal/**'
               - 'platform/terraform/environments/*/portal/**'
               - 'shifter/**'
-              - '.github/workflows/_portal.yml'
+              - '.github/workflows/_shifter-platform.yml'
 
       - name: Set environment
         id: env
@@ -83,7 +83,7 @@ jobs:
       needs.changes.outputs.core == 'true' ||
       needs.changes.outputs.range == 'true' ||
       needs.changes.outputs.shifter_engine == 'true' ||
-      needs.changes.outputs.portal == 'true' ||
+      needs.changes.outputs.shifter_platform == 'true' ||
       github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/_quality.yml
 
@@ -133,18 +133,16 @@ jobs:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
 
-  # NOTE: Job ID and variable names use legacy "portal" naming.
-  # Workflow file is _portal.yml. See #434 for rename tracking.
-  portal:
-    name: Platform
+  shifter_platform:
+    name: Shifter Platform
     needs: [changes, quality, range, shifter-engine]
     if: |
       always() &&
-      (needs.changes.outputs.portal == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&
       (needs.shifter-engine.result == 'success' || needs.shifter-engine.result == 'skipped') &&
       needs.quality.result == 'success'
-    uses: ./.github/workflows/_portal.yml
+    uses: ./.github/workflows/_shifter-platform.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
       is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}

@@ -5,10 +5,17 @@ Content and asset management for Shifter platform.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
+
+from cms.assets.services import create_agent as assets_create_agent
+from cms.assets.services import delete_agent as assets_delete_agent
+from mission_control.models import AgentConfig
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -17,23 +24,279 @@ if TYPE_CHECKING:
 
 
 def create_agent(user: User, **kwargs: Any) -> Any:
-    """Create agent record."""
-    raise NotImplementedError
+    """Create agent record.
+
+    Delegates to cms.assets.services.create_agent() after validating user.
+
+    Args:
+        user: User who will own the agent
+        **kwargs: Arguments passed to assets service:
+            - name: Display name for the agent
+            - s3_key: S3 key where the agent file is stored
+            - filename: Original filename of the agent
+            - os_slug: Operating system slug (e.g., 'windows', 'linux-debian')
+            - file_size: Size of the agent file in bytes
+            - sha256: SHA256 hash of the agent file
+            - upload_method: Optional upload method for logging
+
+    Returns:
+        AgentConfig: The newly created agent record
+
+    Raises:
+        TypeError: If user is None or invalid type
+        ValueError: If user has no ID (unsaved)
+        AssetError: If the operating system is not found
+    """
+    # Input validation - user
+    if user is None:
+        logger.error("create_agent called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("create_agent called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("create_agent called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    logger.debug("create_agent called for user_id=%s", user.id)
+
+    try:
+        agent = assets_create_agent(user=user, **kwargs)
+
+        # Validate response from assets service
+        if agent is None:
+            logger.error("create_agent: assets service returned None for user_id=%s", user.id)
+            raise TypeError("Assets service returned None instead of AgentConfig")
+
+        if not isinstance(agent, AgentConfig):
+            logger.error(
+                "create_agent: assets service returned invalid type %s for user_id=%s",
+                type(agent).__name__,
+                user.id,
+            )
+            raise TypeError(f"Assets service returned {type(agent).__name__}, expected AgentConfig")
+
+        logger.debug("create_agent returning agent_id=%s for user_id=%s", agent.id, user.id)
+        return agent
+
+    except TypeError:
+        # Re-raise TypeErrors (our validation errors)
+        raise
+    except Exception:
+        logger.exception("Error in create_agent for user_id=%s", user.id)
+        raise
 
 
 def delete_agent(user: User, agent_id: int) -> None:
-    """Soft delete agent."""
-    raise NotImplementedError
+    """Soft delete agent.
+
+    Verifies ownership via get_agent, then delegates to cms.assets.services.delete_agent().
+
+    Args:
+        user: User requesting deletion
+        agent_id: ID of the agent to delete
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None, invalid type, or agent_id is invalid type
+        ValueError: If user has no ID (unsaved) or agent_id is invalid
+        CMSError: If agent not found or not owned by user
+        AssetError: If S3 delete fails
+    """
+    # Input validation - user
+    if user is None:
+        logger.error("delete_agent called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("delete_agent called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("delete_agent called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - agent_id
+    if agent_id is None:
+        logger.error("delete_agent called with None agent_id for user_id=%s", user.id)
+        raise TypeError("agent_id cannot be None")
+
+    if not isinstance(agent_id, int):
+        logger.error("delete_agent called with invalid agent_id type: %s", type(agent_id).__name__)
+        raise TypeError(f"agent_id must be an int, got {type(agent_id).__name__}")
+
+    if agent_id < 0:
+        logger.error("delete_agent called with negative agent_id=%s for user_id=%s", agent_id, user.id)
+        raise ValueError("agent_id must be non-negative")
+
+    logger.debug("delete_agent called for user_id=%s, agent_id=%s", user.id, agent_id)
+
+    try:
+        # Get agent (also verifies ownership and not deleted)
+        agent = get_agent(user, agent_id)
+
+        # Delete via assets service
+        assets_delete_agent(agent)
+
+        logger.debug("delete_agent completed for agent_id=%s, user_id=%s", agent_id, user.id)
+
+    except Exception:
+        logger.exception("Error in delete_agent for user_id=%s, agent_id=%s", user.id, agent_id)
+        raise
 
 
 def list_agents(user: User) -> list[Any]:
-    """Get user's agents."""
-    raise NotImplementedError
+    """Get user's agents.
+
+    Args:
+        user: User whose agents to retrieve
+
+    Returns:
+        List of AgentConfig instances belonging to the user
+
+    Raises:
+        TypeError: If user is None or invalid type
+        ValueError: If user has no ID (unsaved)
+    """
+    # Input validation
+    if user is None:
+        logger.error("list_agents called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("list_agents called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("list_agents called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    logger.debug("list_agents called for user_id=%s", user.id)
+
+    try:
+        result = AgentConfig.active_for_user(user)
+
+        # Validate response from model
+        if result is None:
+            logger.error("list_agents: model returned None for user_id=%s", user.id)
+            raise TypeError("Model returned None instead of iterable")
+
+        # Convert to list (handles QuerySet, tuple, generator)
+        agents = list(result)
+
+        # Validate list contents
+        for item in agents:
+            if not isinstance(item, AgentConfig):
+                logger.error(
+                    "list_agents: model returned invalid item type %s for user_id=%s",
+                    type(item).__name__,
+                    user.id,
+                )
+                raise TypeError(f"Model returned list containing {type(item).__name__}, expected AgentConfig")
+
+        logger.debug("list_agents returning %d agents for user_id=%s", len(agents), user.id)
+        return agents
+
+    except TypeError:
+        # Re-raise TypeErrors (our validation errors)
+        raise
+    except Exception:
+        logger.exception("Error in list_agents for user_id=%s", user.id)
+        raise
 
 
 def get_agent(user: User, agent_id: int) -> Any:
-    """Get single agent."""
-    raise NotImplementedError
+    """Get single agent by ID.
+
+    Args:
+        user: User requesting the agent
+        agent_id: ID of the agent to retrieve
+
+    Returns:
+        AgentConfig instance if found and owned by user
+
+    Raises:
+        TypeError: If user is None, invalid type, or agent_id is invalid type
+        ValueError: If user has no ID (unsaved) or agent_id is invalid
+        CMSError: If agent not found, not owned by user, or deleted
+    """
+    from cms.exceptions import CMSError
+
+    # Input validation - user
+    if user is None:
+        logger.error("get_agent called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("get_agent called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("get_agent called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - agent_id
+    if agent_id is None:
+        logger.error("get_agent called with None agent_id for user_id=%s", user.id)
+        raise TypeError("agent_id cannot be None")
+
+    if not isinstance(agent_id, int):
+        logger.error("get_agent called with invalid agent_id type: %s", type(agent_id).__name__)
+        raise TypeError(f"agent_id must be an int, got {type(agent_id).__name__}")
+
+    if agent_id < 0:
+        logger.error("get_agent called with negative agent_id=%s for user_id=%s", agent_id, user.id)
+        raise ValueError("agent_id must be non-negative")
+
+    logger.debug("get_agent called for user_id=%s, agent_id=%s", user.id, agent_id)
+
+    try:
+        agent = AgentConfig.objects.get(id=agent_id)
+
+        # Validate response from model
+        if agent is None:
+            logger.error("get_agent: model returned None for agent_id=%s", agent_id)
+            raise TypeError("Model returned None instead of AgentConfig")
+
+        if not isinstance(agent, AgentConfig):
+            logger.error(
+                "get_agent: model returned invalid type %s for agent_id=%s",
+                type(agent).__name__,
+                agent_id,
+            )
+            raise TypeError(f"Model returned {type(agent).__name__}, expected AgentConfig")
+
+        # Check ownership
+        if agent.user.id != user.id:
+            logger.error(
+                "get_agent: access denied - agent_id=%s owned by user_id=%s, requested by user_id=%s",
+                agent_id,
+                agent.user.id,
+                user.id,
+            )
+            raise CMSError(f"Agent {agent_id} not found")
+
+        # Check soft deletion
+        if agent.deleted_at is not None:
+            logger.error("get_agent: agent_id=%s is deleted", agent_id)
+            raise CMSError(f"Agent {agent_id} not found")
+
+        logger.debug("get_agent returning agent_id=%s for user_id=%s", agent_id, user.id)
+        return agent
+
+    except AgentConfig.DoesNotExist:
+        logger.error("get_agent: agent_id=%s not found", agent_id)
+        raise CMSError(f"Agent {agent_id} not found") from None
+    except (TypeError, CMSError):
+        # Re-raise TypeErrors and CMSErrors
+        raise
+    except Exception:
+        logger.exception("Error in get_agent for user_id=%s, agent_id=%s", user.id, agent_id)
+        raise
 
 
 # =============================================================================

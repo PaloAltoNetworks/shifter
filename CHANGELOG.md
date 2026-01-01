@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] - 2025-01-01
+
+### Added
+- CMS Services
+  - Extracted CMS services from Mission Control views
+- Unified Credential model
+
 ## [0.9.9] - 2025-12-31
 
 ### Added

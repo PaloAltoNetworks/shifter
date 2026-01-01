@@ -2,8 +2,6 @@
 
 import pytest
 
-from engine import services
-
 
 class TestRangeLifecycle:
     def test_create_range(self):

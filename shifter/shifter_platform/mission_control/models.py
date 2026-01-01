@@ -3,7 +3,6 @@
 from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
-from encrypted_model_fields.fields import EncryptedCharField
 
 
 class OperatingSystem(models.Model):
@@ -109,58 +108,8 @@ class Credential(Asset):
         return timezone.now() > self.expires_at
 
 
-class SCMCredential(Credential):
-    """Strata Cloud Manager registration credentials (PIN-based)."""
-
-    class SLSRegion(models.TextChoices):
-        AMERICAS = "americas", "Americas"
-        EUROPE = "europe", "Europe"
-        JAPAN = "japan", "Japan"
-        ASIAPACIFIC = "asiapacific", "Asia Pacific"
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="scm_credentials",
-    )
-
-    # SCM Registration
-    scm_folder_name = models.CharField(max_length=255)
-    scm_pin_id = models.CharField(max_length=255)
-    scm_pin_value = EncryptedCharField(max_length=255)
-
-    # Strata Logging Service
-    sls_region = models.CharField(
-        max_length=50,
-        choices=SLSRegion.choices,
-        default=SLSRegion.AMERICAS,
-    )
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "SCM Credential"
-        verbose_name_plural = "SCM Credentials"
-
-
-class NGFWDeploymentProfile(Credential):
-    """Software NGFW Credits deployment profile."""
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="ngfw_deployment_profiles",
-    )
-
-    # Licensing
-    authcode = EncryptedCharField(
-        max_length=100,
-        help_text="Authcode from CSP deployment profile (e.g., D9232090)",
-    )
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "NGFW Deployment Profile"
-        verbose_name_plural = "NGFW Deployment Profiles"
+# Note: SCMCredential and NGFWDeploymentProfile have been migrated to cms.Credential.
+# See cms/models.py for the unified Credential model.
 
 
 class UserNGFW(Asset):
@@ -183,19 +132,9 @@ class UserNGFW(Asset):
         related_name="ngfws",
     )
 
-    # Credentials (SCMCredential nullable for OTP flow)
-    scm_credential = models.ForeignKey(
-        SCMCredential,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="ngfws",
-    )
-    deployment_profile = models.ForeignKey(
-        NGFWDeploymentProfile,
-        on_delete=models.PROTECT,
-        related_name="ngfws",
-    )
+    # Note: Credentials are managed by CMS, not stored here.
+    # Engine receives hydrated config with decrypted values at provisioning time.
+    # CMS tracks credential→range associations if needed.
 
     # Lifecycle
     status = models.CharField(
@@ -230,33 +169,6 @@ class UserNGFW(Asset):
         ordering = ["-created_at"]
         verbose_name = "User NGFW"
         verbose_name_plural = "User NGFWs"
-
-
-class UserProfile(models.Model):
-    """Extended user data for soft delete and anonymization."""
-
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
-    cognito_sub = models.CharField(
-        max_length=36,
-        unique=True,
-        null=True,
-        blank=True,
-        db_index=True,
-        help_text="Cognito user pool subject identifier (UUID)",
-    )
-    deleted_at = models.DateTimeField(null=True, blank=True)
-    anonymized_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        verbose_name = "User Profile"
-        verbose_name_plural = "User Profiles"
-
-    def __str__(self):
-        return f"Profile for {self.user.email}"
-
-    @property
-    def is_deleted(self):
-        return self.deleted_at is not None
 
 
 class AgentConfig(FileAsset):
@@ -559,35 +471,6 @@ class Range(models.Model):
         if not victims:
             return None
         return victims[0].get("private_ip")
-
-
-class ActivityLog(models.Model):
-    """Generic activity/event log for analytics and auditing."""
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="activities",
-    )
-    action = models.CharField(max_length=100, db_index=True)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
-    metadata = models.JSONField(default=dict, blank=True)
-
-    class Meta:
-        ordering = ["-timestamp"]
-        verbose_name = "Activity Log"
-        verbose_name_plural = "Activity Logs"
-
-    def __str__(self):
-        user_str = self.user.email if self.user else "anonymous"
-        return f"{self.action} by {user_str} at {self.timestamp}"
-
-    @classmethod
-    def log(cls, action: str, user=None, **metadata):
-        """Convenience method to log an activity."""
-        return cls.objects.create(user=user, action=action, metadata=metadata)
 
 
 # Define Range status groupings (after class definition to reference Status enum)

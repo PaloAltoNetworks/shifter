@@ -11,10 +11,9 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
+from cms.models import Credential
 from mission_control.models import (
-    NGFWDeploymentProfile,
     Range,
-    SCMCredential,
     UserNGFW,
 )
 
@@ -48,10 +47,11 @@ def user2(db):
 
 @pytest.fixture
 def deployment_profile(user, db):
-    """Create a deployment profile for testing."""
-    return NGFWDeploymentProfile.objects.create(
+    """Create a deployment profile credential for testing."""
+    return Credential.objects.create(
         user=user,
         name="Test Deployment Profile",
+        credential_type=Credential.Type.DEPLOYMENT_PROFILE,
         authcode="D1234567",
     )
 
@@ -59,9 +59,10 @@ def deployment_profile(user, db):
 @pytest.fixture
 def scm_credential(user, db):
     """Create an SCM credential for testing."""
-    return SCMCredential.objects.create(
+    return Credential.objects.create(
         user=user,
         name="Test SCM Credential",
+        credential_type=Credential.Type.SCM,
         scm_folder_name="test-folder",
         scm_pin_id="pin-123",
         scm_pin_value="secret-pin-value",
@@ -70,25 +71,29 @@ def scm_credential(user, db):
 
 
 @pytest.fixture
-def user_ngfw(user, deployment_profile, scm_credential, db):
-    """Create a UserNGFW for testing."""
+def user_ngfw(user, db):
+    """Create a UserNGFW for testing.
+
+    Note: UserNGFW no longer has credential FKs. Credentials are managed by CMS
+    and passed as hydrated config values at provisioning time.
+    """
     return UserNGFW.objects.create(
         user=user,
         name="Test NGFW",
-        deployment_profile=deployment_profile,
-        scm_credential=scm_credential,
         status=UserNGFW.Status.READY,
     )
 
 
 @pytest.fixture
-def provisioned_ngfw(user, deployment_profile, scm_credential, db):
-    """Create a fully provisioned UserNGFW with AWS resources."""
+def provisioned_ngfw(user, db):
+    """Create a fully provisioned UserNGFW with AWS resources.
+
+    Note: UserNGFW no longer has credential FKs. Credentials are managed by CMS
+    and passed as hydrated config values at provisioning time.
+    """
     return UserNGFW.objects.create(
         user=user,
         name="Provisioned NGFW",
-        deployment_profile=deployment_profile,
-        scm_credential=scm_credential,
         status=UserNGFW.Status.ACTIVE,
         instance_id="i-1234567890abcdef0",
         mgmt_eni_id="eni-mgmt123",
@@ -169,26 +174,19 @@ class TestNGFWListView:
         assert response.status_code == 200
         assert len(response.context["ngfws"]) == 0
 
-    def test_excludes_other_users_ngfws(self, user, user2, deployment_profile, db):
+    def test_excludes_other_users_ngfws(self, user, user2, db):
         """User should only see their own NGFWs, not other users'."""
         # Create NGFW for user1 (the requesting user)
         UserNGFW.objects.create(
             user=user,
             name="User1 NGFW",
-            deployment_profile=deployment_profile,
             status=UserNGFW.Status.READY,
         )
 
-        # Create deployment profile and NGFW for user2
-        dp2 = NGFWDeploymentProfile.objects.create(
-            user=user2,
-            name="User2 Deployment Profile",
-            authcode="D7654321",
-        )
+        # Create NGFW for user2
         UserNGFW.objects.create(
             user=user2,
             name="User2 NGFW",
-            deployment_profile=dp2,
             status=UserNGFW.Status.READY,
         )
 
@@ -232,18 +230,11 @@ class TestNGFWDetailView:
         response = client.get(reverse("mission_control:ngfw_detail", args=[nonexistent_id]))
         assert response.status_code == 404
 
-    def test_404_for_other_users_ngfw(self, user, user2, deployment_profile, db):
+    def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to view another user's NGFW."""
-        # Create deployment profile for user2
-        dp2 = NGFWDeploymentProfile.objects.create(
-            user=user2,
-            name="User2 Deployment Profile",
-            authcode="D7654321",
-        )
         other_ngfw = UserNGFW.objects.create(
             user=user2,
             name="Other User NGFW",
-            deployment_profile=dp2,
             status=UserNGFW.Status.READY,
         )
 
@@ -359,12 +350,14 @@ class TestNGFWWizardView:
     def test_excludes_expired_credentials(self, user, db):
         """Expired credentials should not be listed."""
         # Create expired SCM credential
-        SCMCredential.objects.create(
+        Credential.objects.create(
             user=user,
             name="Expired Credential",
+            credential_type=Credential.Type.SCM,
             scm_folder_name="expired-folder",
             scm_pin_id="pin-expired",
             scm_pin_value="expired-value",
+            sls_region="americas",
             expires_at=timezone.now() - timezone.timedelta(days=1),
         )
 
@@ -438,15 +431,9 @@ class TestNGFWDeprovisionView:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to deprovision another user's NGFW."""
-        dp2 = NGFWDeploymentProfile.objects.create(
-            user=user2,
-            name="User2 Deployment Profile",
-            authcode="D7654321",
-        )
         other_ngfw = UserNGFW.objects.create(
             user=user2,
             name="Other User NGFW",
-            deployment_profile=dp2,
             status=UserNGFW.Status.READY,
         )
 
@@ -547,8 +534,12 @@ class TestNGFWProvisionAPI:
         assert "name" in data
         assert data["name"] == "New NGFW"
 
-    def test_creates_with_scm_credential(self, user, deployment_profile, scm_credential, db):
-        """Can provision using existing SCM credential (PIN method)."""
+    def test_creates_with_pin_method(self, user, deployment_profile, scm_credential, db):
+        """Can provision using PIN method with validated SCM credential.
+
+        Note: UserNGFW no longer stores credential FKs. CMS manages credentials
+        and passes hydrated config to Engine at provisioning time.
+        """
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:api_ngfw_provision"),
@@ -562,13 +553,14 @@ class TestNGFWProvisionAPI:
         )
         assert response.status_code == 201
         ngfw = UserNGFW.objects.get(name="PIN NGFW")
-        assert ngfw.scm_credential_id == scm_credential.id
+        assert ngfw.user == user
+        assert ngfw.status == UserNGFW.Status.PROVISIONING
 
     def test_400_for_invalid_deployment_profile_id(self, user, db):
         """Invalid deployment_profile_id should return 400."""
         client = get_authenticated_client(user)
         # Use ID that doesn't exist
-        max_id = NGFWDeploymentProfile.objects.order_by("-id").values_list("id", flat=True).first() or 0
+        max_id = Credential.objects.order_by("-id").values_list("id", flat=True).first() or 0
         response = client.post(
             reverse("mission_control:api_ngfw_provision"),
             data={
@@ -589,7 +581,7 @@ class TestNGFWProvisionAPI:
         """Invalid scm_credential_id should return 400."""
         client = get_authenticated_client(user)
         # Use ID that doesn't exist
-        max_id = SCMCredential.objects.order_by("-id").values_list("id", flat=True).first() or 0
+        max_id = Credential.objects.order_by("-id").values_list("id", flat=True).first() or 0
         response = client.post(
             reverse("mission_control:api_ngfw_provision"),
             data={
@@ -649,26 +641,19 @@ class TestNGFWListAPI:
         assert ngfw_data["name"] == "Test NGFW"
         assert ngfw_data["status"] == "ready"
 
-    def test_excludes_other_users_ngfws(self, user, user2, deployment_profile, db):
+    def test_excludes_other_users_ngfws(self, user, user2, db):
         """Should not return other user's NGFWs."""
         # Create NGFW for user1
         UserNGFW.objects.create(
             user=user,
             name="User1 NGFW",
-            deployment_profile=deployment_profile,
             status=UserNGFW.Status.READY,
         )
 
-        # Create deployment profile and NGFW for user2
-        dp2 = NGFWDeploymentProfile.objects.create(
-            user=user2,
-            name="User2 Deployment Profile",
-            authcode="D7654321",
-        )
+        # Create NGFW for user2
         UserNGFW.objects.create(
             user=user2,
             name="User2 NGFW",
-            deployment_profile=dp2,
             status=UserNGFW.Status.READY,
         )
 
@@ -718,12 +703,11 @@ class TestNGFWStatusAPI:
         assert "status" in data
         assert data["status"] == "ready"
 
-    def test_returns_provisioning_progress(self, user, deployment_profile, db):
+    def test_returns_provisioning_progress(self, user, db):
         """Should return progress for provisioning NGFWs."""
         ngfw = UserNGFW.objects.create(
             user=user,
             name="Provisioning NGFW",
-            deployment_profile=deployment_profile,
             status=UserNGFW.Status.PROVISIONING,
         )
 
@@ -736,15 +720,9 @@ class TestNGFWStatusAPI:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not see another user's NGFW status."""
-        dp2 = NGFWDeploymentProfile.objects.create(
-            user=user2,
-            name="User2 Profile",
-            authcode="D7654321",
-        )
         other_ngfw = UserNGFW.objects.create(
             user=user2,
             name="Other NGFW",
-            deployment_profile=dp2,
             status=UserNGFW.Status.READY,
         )
 
@@ -773,12 +751,11 @@ class TestNGFWStartAPI:
         response = client.get(reverse("mission_control:api_ngfw_start", args=[user_ngfw.id]))
         assert response.status_code == 405
 
-    def test_starts_stopped_ngfw(self, user, deployment_profile, db):
+    def test_starts_stopped_ngfw(self, user, db):
         """Should start a stopped NGFW - transitions to running state."""
         ngfw = UserNGFW.objects.create(
             user=user,
             name="Stopped NGFW",
-            deployment_profile=deployment_profile,
             status=UserNGFW.Status.STOPPED,
             instance_id="i-123456",
         )
@@ -813,12 +790,11 @@ class TestNGFWStartAPI:
         data = response.json()
         assert "error" in data
 
-    def test_400_for_provisioning_ngfw(self, user, deployment_profile, db):
+    def test_400_for_provisioning_ngfw(self, user, db):
         """Cannot start an NGFW that is still provisioning."""
         ngfw = UserNGFW.objects.create(
             user=user,
             name="Provisioning NGFW",
-            deployment_profile=deployment_profile,
             status=UserNGFW.Status.PROVISIONING,
         )
 
@@ -831,15 +807,9 @@ class TestNGFWStartAPI:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to start another user's NGFW."""
-        dp2 = NGFWDeploymentProfile.objects.create(
-            user=user2,
-            name="User2 Profile",
-            authcode="D7654321",
-        )
         other_ngfw = UserNGFW.objects.create(
             user=user2,
             name="Other NGFW",
-            deployment_profile=dp2,
             status=UserNGFW.Status.STOPPED,
         )
 
@@ -880,12 +850,11 @@ class TestNGFWStopAPI:
         # Verify it's no longer ACTIVE
         assert provisioned_ngfw.status != UserNGFW.Status.ACTIVE
 
-    def test_400_for_already_stopped(self, user, deployment_profile, db):
+    def test_400_for_already_stopped(self, user, db):
         """Stopping an already stopped NGFW should return 400."""
         ngfw = UserNGFW.objects.create(
             user=user,
             name="Stopped NGFW",
-            deployment_profile=deployment_profile,
             status=UserNGFW.Status.STOPPED,
         )
 
@@ -896,12 +865,11 @@ class TestNGFWStopAPI:
         data = response.json()
         assert "error" in data
 
-    def test_400_for_provisioning_ngfw(self, user, deployment_profile, db):
+    def test_400_for_provisioning_ngfw(self, user, db):
         """Cannot stop an NGFW that is still provisioning."""
         ngfw = UserNGFW.objects.create(
             user=user,
             name="Provisioning NGFW",
-            deployment_profile=deployment_profile,
             status=UserNGFW.Status.PROVISIONING,
         )
 
@@ -914,15 +882,9 @@ class TestNGFWStopAPI:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to stop another user's NGFW."""
-        dp2 = NGFWDeploymentProfile.objects.create(
-            user=user2,
-            name="User2 Profile",
-            authcode="D7654321",
-        )
         other_ngfw = UserNGFW.objects.create(
             user=user2,
             name="Other NGFW",
-            deployment_profile=dp2,
             status=UserNGFW.Status.ACTIVE,
         )
 
@@ -993,15 +955,9 @@ class TestNGFWDeprovisionAPI:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to deprovision another user's NGFW."""
-        dp2 = NGFWDeploymentProfile.objects.create(
-            user=user2,
-            name="User2 Profile",
-            authcode="D7654321",
-        )
         other_ngfw = UserNGFW.objects.create(
             user=user2,
             name="Other NGFW",
-            deployment_profile=dp2,
             status=UserNGFW.Status.READY,
         )
 

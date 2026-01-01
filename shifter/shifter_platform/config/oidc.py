@@ -7,6 +7,8 @@ from urllib.parse import urlencode
 
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
+from management.services import update_cognito_sub
+
 logger = logging.getLogger(__name__)
 
 # Django's UnicodeUsernameValidator pattern
@@ -106,19 +108,9 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
 
     def _update_cognito_sub(self, user, claims):
         """Store Cognito sub in user's profile."""
-        from mission_control.models import UserProfile
-
         cognito_sub = claims.get("sub")
         if not cognito_sub:
             logger.warning("OIDC claims missing 'sub' for user %s", user.email)
             return
 
-        profile, _created = UserProfile.objects.get_or_create(user=user)
-        if profile.cognito_sub != cognito_sub:
-            profile.cognito_sub = cognito_sub
-            profile.save(update_fields=["cognito_sub"])
-            logger.info(
-                "Updated cognito_sub for user %s: %s",
-                user.email,
-                cognito_sub,
-            )
+        update_cognito_sub(user, cognito_sub)

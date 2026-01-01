@@ -13,8 +13,9 @@ from cms.assets.services import (
     delete_agent,
     get_storage_used,
 )
+from cms.models import OperatingSystem
 from management.models import ActivityLog
-from mission_control.models import AgentConfig, OperatingSystem
+from mission_control.models import AgentConfig
 
 User = get_user_model()
 

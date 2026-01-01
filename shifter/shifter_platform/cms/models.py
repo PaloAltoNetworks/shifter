@@ -573,22 +573,29 @@ class AgentConfig(FileAsset):
 class RangeInstance(models.Model):
     """Tracks hydrated scenario configs sent to engine.
 
-    Uses integer IDs (not ForeignKeys) to decouple CMS from external models.
-    See GH issue #446 for planned migration to use FK for agent_id after
-    Asset/AgentConfig models are moved to CMS.
+    After GH issue #446:
+    - agent is now FK to AgentConfig (nullable, SET_NULL on delete)
+    - range_id remains IntegerField (CMS doesn't own Range model)
+    - user_id remains IntegerField (CMS doesn't own User model)
 
     Attributes:
         range_id: ID of the Range created by engine (IntegerField, not FK)
         scenario_id: Template name used (e.g., 'basic', 'ad_attack_lab')
         user_id: ID of the user who requested creation (IntegerField, not FK)
-        agent_id: ID of the agent used, if any (IntegerField, nullable)
+        agent: AgentConfig used, if any (FK, nullable)
         created_at: When this record was created
     """
 
     range_id = models.IntegerField(unique=True)
     scenario_id = models.CharField(max_length=50)
     user_id = models.IntegerField()
-    agent_id = models.IntegerField(null=True, blank=True)
+    agent = models.ForeignKey(
+        AgentConfig,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="range_instances",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

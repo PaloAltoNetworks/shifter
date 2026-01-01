@@ -10,7 +10,6 @@ These tests verify the OperatingSystem model is:
 import pytest
 from django.db import models
 
-
 # -----------------------------------------------------------------------------
 # Test OperatingSystem Model Structure
 # -----------------------------------------------------------------------------

@@ -4,8 +4,8 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
-# OperatingSystem has been moved to cms.models
-# See: cms/migrations/0004_move_operatingsystem_to_cms.py
+# AgentConfig and OperatingSystem have been moved to cms.models
+# See issue #446
 
 
 class Asset(models.Model):
@@ -147,38 +147,6 @@ class UserNGFW(Asset):
         verbose_name_plural = "User NGFWs"
 
 
-class AgentConfig(FileAsset):
-    """XDR/XSIAM agent installer uploaded by a user.
-
-    Inherits from FileAsset:
-    - name, created_at, deleted_at, is_deleted from Asset
-    - s3_key, original_filename, file_size_bytes, sha256_hash, file_size_mb from FileAsset
-
-    AgentConfig-specific:
-    - user: Owner of this agent (with related_name="agents")
-    - os: Operating system this agent is for
-    """
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="agents",
-    )
-    os = models.ForeignKey(
-        "cms.OperatingSystem",
-        on_delete=models.PROTECT,
-        related_name="agents",
-    )
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "Agent Config"
-        verbose_name_plural = "Agent Configs"
-
-    def __str__(self):
-        return f"{self.name} ({self.os.name})"
-
-
 class Range(models.Model):
     """User's cyber range instance with lifecycle management."""
 
@@ -198,7 +166,7 @@ class Range(models.Model):
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
     agent = models.ForeignKey(
-        AgentConfig,
+        "cms.AgentConfig",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -206,7 +174,7 @@ class Range(models.Model):
         help_text="Agent for victim instances",
     )
     dc_agent = models.ForeignKey(
-        AgentConfig,
+        "cms.AgentConfig",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

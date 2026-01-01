@@ -16,7 +16,7 @@ from cms.exceptions import CMSError
 from .loader import load_scenario
 
 if TYPE_CHECKING:
-    from mission_control.models import AgentConfig
+    from cms.models import AgentConfig
 
 logger = logging.getLogger(__name__)
 

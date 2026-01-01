@@ -1,18 +1,18 @@
 ---
 name: django-testing
-description: Run Django tests for the Shifter portal. Use when the user asks to run tests, check if tests pass, test a specific module, or verify code changes with tests.
+description: How to run tests for the Shifter Django application. Always use this skill to run tests for any part of the Django application. Use when the user asks to run tests, check if tests pass, test a specific module, or verify code changes with tests. See tdd-plan skill for how WRITE tests.
 ---
 
 # Django Testing
 
-Run tests for the Shifter Django portal.
+Run tests for the Shifter Platform Django app.
 
 ## Prerequisites
 
 Always activate the virtual environment and set the TESTING flag:
 
 ```bash
-cd /home/atomik/src/shifter/portal
+cd /home/atomik/src/shifter/shifter/shifter_platform
 source .venv/bin/activate
 export TESTING=1
 ```
@@ -21,21 +21,21 @@ export TESTING=1
 
 ### All Tests
 ```bash
-cd /home/atomik/src/shifter/portal
+cd /home/atomik/src/shifter/shifter/shifter_platform
 source .venv/bin/activate
 TESTING=1 python -m pytest
 ```
 
 ### Specific Test File
 ```bash
-cd /home/atomik/src/shifter/portal
+cd /home/atomik/src/shifter/shifter/shifter_platform
 source .venv/bin/activate
 TESTING=1 python -m pytest tests/test_views.py -v
 ```
 
 ### Specific Test Class or Function
 ```bash
-cd /home/atomik/src/shifter/portal
+cd /home/atomik/src/shifter/shifter/shifter_platform
 source .venv/bin/activate
 TESTING=1 python -m pytest tests/test_views.py::TestDashboard -v
 TESTING=1 python -m pytest tests/test_views.py::TestDashboard::test_dashboard_requires_login -v
@@ -43,7 +43,7 @@ TESTING=1 python -m pytest tests/test_views.py::TestDashboard::test_dashboard_re
 
 ### Run with Coverage
 ```bash
-cd /home/atomik/src/shifter/portal
+cd /home/atomik/src/shifter/shifter/shifter_platform
 source .venv/bin/activate
 TESTING=1 python -m pytest --cov=mission_control --cov-report=term-missing
 ```
@@ -52,7 +52,8 @@ TESTING=1 python -m pytest --cov=mission_control --cov-report=term-missing
 
 - **TESTING=1** is required - it configures Django to use test settings (SQLite, disabled external services)
 - **Always activate .venv** - dependencies are installed there
-- Tests are in `portal/tests/` directory
+- Tests are in `shifter/shifter_platform/tests/` directory
 - Use `-v` for verbose output
 - Use `-x` to stop on first failure
 - Use `--tb=short` for shorter tracebacks
+- If the venv does not exist in your worktree create it with uv

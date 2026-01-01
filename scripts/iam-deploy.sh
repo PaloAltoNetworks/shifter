@@ -76,7 +76,7 @@ echo "Action: $ACTION"
 echo "AWS Profile: $AWS_PROFILE"
 echo "=========================================="
 
-cd "$(dirname "$0")/../terraform/global/iam"
+cd "$(dirname "$0")/../platform/terraform/global/iam"
 
 # Clean and reinitialize for the target environment
 rm -rf .terraform .terraform.lock.hcl
@@ -108,5 +108,9 @@ case "$ACTION" in
     destroy)
         echo "Running terraform destroy..."
         AWS_PROFILE="$AWS_PROFILE" terraform destroy -var-file="${ENV}.tfvars"
+        ;;
+    *)
+        echo "Error: Unknown action '$ACTION'"
+        exit 1
         ;;
 esac

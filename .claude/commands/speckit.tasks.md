@@ -132,6 +132,8 @@ Every task MUST strictly follow this format:
 - **Phase 1**: Setup (project initialization)
 - **Phase 2**: Foundational (blocking prerequisites - MUST complete before user stories)
 - **Phase 3+**: User Stories in priority order (P1, P2, P3...)
-  - Within each story: Tests (if requested) → Models → Services → Endpoints → Integration
+  - Within each story: Tests (TDD process per .claude/skills/tdd-plan/SKILL.md is MANDATORY) → Models → Services → Endpoints → Integration
   - Each phase should be a complete, independently testable increment
+  - STOP and wait for user review of tests before implementing any code
+  - STOP and wait for user review of code before moving moving to the next task
 - **Final Phase**: Polish & Cross-Cutting Concerns

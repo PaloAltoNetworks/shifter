@@ -26,6 +26,8 @@ Infrastructure lifecycle. Range provisioning, NGFW operations, terminal connecti
 | `destroy_range(range_id)` | Tear down range infrastructure |
 | `cancel_range(range_id)` | Cancel in-progress provisioning |
 | `get_range_status(range_id)` | Get current state, progress, instances |
+| `pause_range(range_id)` | Pause range instances |
+| `resume_range(range_id)` | Resume range instances |
 | `connect_terminal(user, range_id, instance_type)` | Get SSH connection to instance |
 
 ### Internal Services

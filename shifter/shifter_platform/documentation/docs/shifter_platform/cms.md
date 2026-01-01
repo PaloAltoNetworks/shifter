@@ -31,6 +31,8 @@ Content and asset management.
 | `list_ranges(user)` | Get user's ranges |
 | `get_range(user, range_id)` | Get single range |
 | `cancel_range(user, range_id)` | Cancel provisioning range |
+| `pause_range(user, range_id)` | Pause range |
+| `resume_range(user, range_id)` | Resume range |
 
 #### Uploads
 

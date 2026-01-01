@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
-from mission_control.models import AgentConfig
+from engine.services.orchestration import cancel as engine_cancel
+from engine.services.orchestration import destroy as engine_destroy
+from engine.services.orchestration import launch as engine_launch
+from mission_control.models import AgentConfig, Range
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -601,39 +604,379 @@ def get_credential(user: User, credential_id: int) -> Any:
 # =============================================================================
 
 
-def create_range(user: User, scenario: str, agent_id: int, **kwargs: Any) -> Any:
-    """Compose scenario, trigger provisioning."""
-    raise NotImplementedError
-
-
-def destroy_range(user: User, range_id: int) -> None:
-    """Tear down range."""
-    raise NotImplementedError
-
-
 def list_ranges(user: User) -> list[Any]:
-    """Get user's ranges."""
-    raise NotImplementedError
+    """Get user's ranges.
+
+    Args:
+        user: User whose ranges to retrieve
+
+    Returns:
+        List of Range instances belonging to the user
+
+    Raises:
+        TypeError: If user is None or invalid type
+        ValueError: If user has no ID (unsaved)
+    """
+    # Input validation
+    if user is None:
+        logger.error("list_ranges called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("list_ranges called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("list_ranges called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    logger.debug("list_ranges called for user_id=%s", user.id)
+
+    try:
+        result = Range.objects.filter(user=user)
+
+        # Validate response from model
+        if result is None:
+            logger.error("list_ranges: model returned None for user_id=%s", user.id)
+            raise TypeError("Model returned None instead of iterable")
+
+        # Convert to list (handles QuerySet, tuple, generator)
+        ranges = list(result)
+
+        # Validate list contents
+        for item in ranges:
+            if not isinstance(item, Range):
+                logger.error(
+                    "list_ranges: model returned invalid item type %s for user_id=%s",
+                    type(item).__name__,
+                    user.id,
+                )
+                raise TypeError(f"Model returned list containing {type(item).__name__}, expected Range")
+
+        logger.debug("list_ranges returning %d ranges for user_id=%s", len(ranges), user.id)
+        return ranges
+
+    except TypeError:
+        # Re-raise TypeErrors (our validation errors)
+        raise
+    except Exception:
+        logger.exception("Error in list_ranges for user_id=%s", user.id)
+        raise
 
 
 def get_range(user: User, range_id: int) -> Any:
-    """Get single range."""
-    raise NotImplementedError
+    """Get single range by ID.
+
+    Args:
+        user: User requesting the range
+        range_id: ID of the range to retrieve
+
+    Returns:
+        Range instance if found and owned by user
+
+    Raises:
+        TypeError: If user is None, invalid type, or range_id is invalid type
+        ValueError: If user has no ID (unsaved) or range_id is invalid
+        CMSError: If range not found or not owned by user
+    """
+    from cms.exceptions import CMSError
+
+    # Input validation - user
+    if user is None:
+        logger.error("get_range called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("get_range called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("get_range called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - range_id
+    if range_id is None:
+        logger.error("get_range called with None range_id for user_id=%s", user.id)
+        raise TypeError("range_id cannot be None")
+
+    if not isinstance(range_id, int):
+        logger.error("get_range called with invalid range_id type: %s", type(range_id).__name__)
+        raise TypeError(f"range_id must be an int, got {type(range_id).__name__}")
+
+    if range_id < 0:
+        logger.error("get_range called with negative range_id=%s for user_id=%s", range_id, user.id)
+        raise ValueError("range_id must be non-negative")
+
+    logger.debug("get_range called for user_id=%s, range_id=%s", user.id, range_id)
+
+    try:
+        range_obj = Range.objects.get(id=range_id)
+
+        # Validate response from model
+        if range_obj is None:
+            logger.error("get_range: model returned None for range_id=%s", range_id)
+            raise TypeError("Model returned None instead of Range")
+
+        if not isinstance(range_obj, Range):
+            logger.error(
+                "get_range: model returned invalid type %s for range_id=%s",
+                type(range_obj).__name__,
+                range_id,
+            )
+            raise TypeError(f"Model returned {type(range_obj).__name__}, expected Range")
+
+        # Check ownership
+        if range_obj.user.id != user.id:
+            logger.error(
+                "get_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
+                range_id,
+                range_obj.user.id,
+                user.id,
+            )
+            raise CMSError(f"Range {range_id} not found")
+
+        logger.debug("get_range returning range_id=%s for user_id=%s", range_id, user.id)
+        return range_obj
+
+    except Range.DoesNotExist:
+        logger.error("get_range: range_id=%s not found", range_id)
+        raise CMSError(f"Range {range_id} not found") from None
+    except (TypeError, CMSError):
+        # Re-raise TypeErrors and CMSErrors
+        raise
+    except Exception:
+        logger.exception("Error in get_range for user_id=%s, range_id=%s", user.id, range_id)
+        raise
+
+
+def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False) -> Any:
+    """Compose scenario, trigger provisioning.
+
+    Delegates to engine.services.orchestration.launch().
+
+    Args:
+        user: User requesting the range
+        scenario: Scenario type (basic, ad_attack_lab)
+        agent_id: ID of the agent to use for victim instances
+        ngfw_enabled: Whether to deploy VM-Series NGFW inline
+
+    Returns:
+        Range: The newly created range object
+
+    Raises:
+        TypeError: If user is None, invalid type, or parameters are invalid
+        ValueError: If user has no ID (unsaved) or parameters are invalid
+        OrchestrationError: If user already has an active range or validation fails
+    """
+    # Input validation - user
+    if user is None:
+        logger.error("create_range called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("create_range called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("create_range called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - scenario
+    if scenario is None:
+        logger.error("create_range called with None scenario for user_id=%s", user.id)
+        raise ValueError("scenario cannot be None")
+
+    if not isinstance(scenario, str) or not scenario:
+        logger.error("create_range called with invalid scenario '%s' for user_id=%s", scenario, user.id)
+        raise ValueError("scenario must be a non-empty string")
+
+    # Input validation - agent_id
+    if agent_id is None:
+        logger.error("create_range called with None agent_id for user_id=%s", user.id)
+        raise TypeError("agent_id cannot be None")
+
+    if not isinstance(agent_id, int):
+        logger.error("create_range called with invalid agent_id type: %s", type(agent_id).__name__)
+        raise TypeError(f"agent_id must be an int, got {type(agent_id).__name__}")
+
+    if agent_id < 0:
+        logger.error("create_range called with negative agent_id=%s for user_id=%s", agent_id, user.id)
+        raise ValueError("agent_id must be non-negative")
+
+    logger.debug(
+        "create_range called for user_id=%s, scenario=%s, agent_id=%s, ngfw_enabled=%s",
+        user.id,
+        scenario,
+        agent_id,
+        ngfw_enabled,
+    )
+
+    try:
+        range_obj = engine_launch(
+            user=user,
+            agent_id=agent_id,
+            scenario=scenario,
+            ngfw_enabled=ngfw_enabled,
+        )
+
+        # Validate response from engine service
+        if range_obj is None:
+            logger.error("create_range: engine service returned None for user_id=%s", user.id)
+            raise TypeError("Engine service returned None instead of Range")
+
+        if not isinstance(range_obj, Range):
+            logger.error(
+                "create_range: engine service returned invalid type %s for user_id=%s",
+                type(range_obj).__name__,
+                user.id,
+            )
+            raise TypeError(f"Engine service returned {type(range_obj).__name__}, expected Range")
+
+        logger.debug("create_range returning range_id=%s for user_id=%s", range_obj.id, user.id)
+        return range_obj
+
+    except TypeError:
+        # Re-raise TypeErrors (our validation errors)
+        raise
+    except Exception:
+        logger.exception("Error in create_range for user_id=%s", user.id)
+        raise
+
+
+def destroy_range(user: User, range_id: int) -> None:
+    """Tear down range.
+
+    Verifies ownership via get_range, then delegates to engine.services.orchestration.destroy().
+
+    Args:
+        user: User requesting destruction
+        range_id: ID of the range to destroy
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None, invalid type, or range_id is invalid type
+        ValueError: If user has no ID (unsaved) or range_id is invalid
+        CMSError: If range not found or not owned by user
+        OrchestrationError: If no destroyable range
+    """
+    # Input validation - user
+    if user is None:
+        logger.error("destroy_range called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("destroy_range called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("destroy_range called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - range_id
+    if range_id is None:
+        logger.error("destroy_range called with None range_id for user_id=%s", user.id)
+        raise TypeError("range_id cannot be None")
+
+    if not isinstance(range_id, int):
+        logger.error("destroy_range called with invalid range_id type: %s", type(range_id).__name__)
+        raise TypeError(f"range_id must be an int, got {type(range_id).__name__}")
+
+    if range_id < 0:
+        logger.error("destroy_range called with negative range_id=%s for user_id=%s", range_id, user.id)
+        raise ValueError("range_id must be non-negative")
+
+    logger.debug("destroy_range called for user_id=%s, range_id=%s", user.id, range_id)
+
+    try:
+        # Get range (also verifies ownership)
+        get_range(user, range_id)
+
+        # Delegate to engine service
+        engine_destroy(user)
+
+        logger.debug("destroy_range completed for range_id=%s, user_id=%s", range_id, user.id)
+
+    except Exception:
+        logger.exception("Error in destroy_range for user_id=%s, range_id=%s", user.id, range_id)
+        raise
 
 
 def cancel_range(user: User, range_id: int) -> None:
-    """Cancel provisioning range."""
-    raise NotImplementedError
+    """Cancel provisioning range.
+
+    Verifies ownership via get_range, then delegates to engine.services.orchestration.cancel().
+
+    Args:
+        user: User requesting cancellation
+        range_id: ID of the range to cancel
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None, invalid type, or range_id is invalid type
+        ValueError: If user has no ID (unsaved) or range_id is invalid
+        CMSError: If range not found or not owned by user
+        OrchestrationError: If range not in cancellable status
+    """
+    # Input validation - user
+    if user is None:
+        logger.error("cancel_range called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("cancel_range called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("cancel_range called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - range_id
+    if range_id is None:
+        logger.error("cancel_range called with None range_id for user_id=%s", user.id)
+        raise TypeError("range_id cannot be None")
+
+    if not isinstance(range_id, int):
+        logger.error("cancel_range called with invalid range_id type: %s", type(range_id).__name__)
+        raise TypeError(f"range_id must be an int, got {type(range_id).__name__}")
+
+    if range_id < 0:
+        logger.error("cancel_range called with negative range_id=%s for user_id=%s", range_id, user.id)
+        raise ValueError("range_id must be non-negative")
+
+    logger.debug("cancel_range called for user_id=%s, range_id=%s", user.id, range_id)
+
+    try:
+        # Get range (also verifies ownership)
+        get_range(user, range_id)
+
+        # Delegate to engine service
+        engine_cancel(user)
+
+        logger.debug("cancel_range completed for range_id=%s, user_id=%s", range_id, user.id)
+
+    except Exception:
+        logger.exception("Error in cancel_range for user_id=%s, range_id=%s", user.id, range_id)
+        raise
 
 
 def pause_range(user: User, range_id: int) -> None:
-    """Pause range."""
-    raise NotImplementedError
+    """Pause range.
+
+    Note: Deferred feature - not implemented in current scope.
+    """
+    raise NotImplementedError("pause_range is not yet implemented")
 
 
 def resume_range(user: User, range_id: int) -> None:
-    """Resume range."""
-    raise NotImplementedError
+    """Resume range.
+
+    Note: Deferred feature - not implemented in current scope.
+    """
+    raise NotImplementedError("resume_range is not yet implemented")
 
 
 # =============================================================================

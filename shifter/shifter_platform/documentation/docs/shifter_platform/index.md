@@ -39,8 +39,7 @@ graph TB
 |--------|--------|
 | **CMS** | `Asset`, `FileAsset`, `Credential`, `AgentConfig`, `SCMCredential`, `NGFWDeploymentProfile`, `OperatingSystem` |
 | **Engine** | `Range`, `UserNGFW` |
-| **Mission Control** | `UserProfile` |
-| **Management** | `ActivityLog` |
+| **Management** | `UserProfile`, `ActivityLog` |
 
 ## Service Layer
 

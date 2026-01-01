@@ -1,10 +1,10 @@
 """Tests for OIDC utilities."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from config.oidc import generate_username, provider_logout_url
+from config.oidc import ShifterOIDCBackend, generate_username, provider_logout_url
 
 
 class TestGenerateUsername:
@@ -278,3 +278,96 @@ class TestProviderLogoutUrl:
 
         request = MagicMock()
         assert provider_logout_url(request) == "/"
+
+
+# =============================================================================
+# ShifterOIDCBackend._update_cognito_sub
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestShifterOIDCBackendUpdateCognitoSub:
+    """Tests for ShifterOIDCBackend._update_cognito_sub method."""
+
+    # -------------------------------------------------------------------------
+    # Happy path
+    # -------------------------------------------------------------------------
+
+    def test_calls_update_cognito_sub_service(self):
+        """_update_cognito_sub calls management service with user and sub."""
+        backend = ShifterOIDCBackend()
+        user = MagicMock()
+        user.email = "test@example.com"
+        claims = {"sub": "abc-123-cognito-sub"}
+
+        with patch("config.oidc.update_cognito_sub") as mock_update:
+            backend._update_cognito_sub(user, claims)
+
+        mock_update.assert_called_once_with(user, "abc-123-cognito-sub")
+
+    def test_extracts_sub_from_claims(self):
+        """_update_cognito_sub extracts sub value from claims dict."""
+        backend = ShifterOIDCBackend()
+        user = MagicMock()
+        user.email = "test@example.com"
+        claims = {"sub": "xyz-789", "email": "test@example.com", "name": "Test"}
+
+        with patch("config.oidc.update_cognito_sub") as mock_update:
+            backend._update_cognito_sub(user, claims)
+
+        mock_update.assert_called_once_with(user, "xyz-789")
+
+    # -------------------------------------------------------------------------
+    # Input validation - missing sub
+    # -------------------------------------------------------------------------
+
+    def test_logs_warning_when_sub_missing(self):
+        """_update_cognito_sub logs warning when claims has no sub."""
+        backend = ShifterOIDCBackend()
+        user = MagicMock()
+        user.email = "test@example.com"
+        claims = {"email": "test@example.com"}  # no sub
+
+        with patch("config.oidc.logger") as mock_logger:
+            backend._update_cognito_sub(user, claims)
+
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args
+        assert "missing 'sub'" in call_args[0][0]
+        assert "test@example.com" in str(call_args)
+
+    def test_does_not_call_service_when_sub_missing(self):
+        """_update_cognito_sub does not call service when sub is missing."""
+        backend = ShifterOIDCBackend()
+        user = MagicMock()
+        user.email = "test@example.com"
+        claims = {}  # no sub
+
+        with patch("config.oidc.update_cognito_sub") as mock_update:
+            backend._update_cognito_sub(user, claims)
+
+        mock_update.assert_not_called()
+
+    def test_does_not_call_service_when_sub_is_none(self):
+        """_update_cognito_sub does not call service when sub is None."""
+        backend = ShifterOIDCBackend()
+        user = MagicMock()
+        user.email = "test@example.com"
+        claims = {"sub": None}
+
+        with patch("config.oidc.update_cognito_sub") as mock_update:
+            backend._update_cognito_sub(user, claims)
+
+        mock_update.assert_not_called()
+
+    def test_does_not_call_service_when_sub_is_empty_string(self):
+        """_update_cognito_sub does not call service when sub is empty."""
+        backend = ShifterOIDCBackend()
+        user = MagicMock()
+        user.email = "test@example.com"
+        claims = {"sub": ""}
+
+        with patch("config.oidc.update_cognito_sub") as mock_update:
+            backend._update_cognito_sub(user, claims)
+
+        mock_update.assert_not_called()

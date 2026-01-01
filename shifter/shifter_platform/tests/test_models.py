@@ -3,12 +3,11 @@
 import pytest
 from django.contrib.auth import get_user_model
 
+from management.models import ActivityLog, UserProfile
 from mission_control.models import (
-    ActivityLog,
     AgentConfig,
     OperatingSystem,
     Range,
-    UserProfile,
 )
 
 User = get_user_model()

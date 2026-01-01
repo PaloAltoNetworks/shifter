@@ -120,6 +120,53 @@ class CredentialBase(Asset):
         return timezone.now() > self.expires_at
 
 
+# -----------------------------------------------------------------------------
+# Reference Models
+# -----------------------------------------------------------------------------
+
+
+class OperatingSystem(models.Model):
+    """Reference table for supported operating systems.
+
+    Used for categorizing file assets by their target platform.
+    """
+
+    slug = models.SlugField(max_length=50, unique=True)
+    name = models.CharField(max_length=100)
+    extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Operating System"
+        verbose_name_plural = "Operating Systems"
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def get_for_extension(cls, extension: str):
+        """Find the OS that matches a given file extension.
+
+        Args:
+            extension: File extension with or without leading dot (e.g., '.msi' or 'msi')
+
+        Returns:
+            OperatingSystem instance if found, None otherwise
+        """
+        ext = extension.lower()
+        if not ext.startswith("."):
+            ext = f".{ext}"
+        for os in cls.objects.all():
+            if ext in os.extensions:
+                return os
+        return None
+
+
+# -----------------------------------------------------------------------------
+# Credential Models
+# -----------------------------------------------------------------------------
+
+
 class Credential(CredentialBase):
     """Unified credential model with type discrimination.
 

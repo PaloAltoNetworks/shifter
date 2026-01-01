@@ -7,6 +7,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2025-12-31
+
+### Added
+- Portal NGFW Management UI (#416)
+  - NGFW list view at `/mission-control/assets/ngfw/`
+  - NGFW detail view with AWS resources, PAN-OS info, linked ranges
+  - 5-step setup wizard (Name & Credentials → Registration → Confirm → Provisioning → Complete)
+  - Deprovision confirmation view with linked ranges warning
+  - API endpoints:
+    - `GET /api/ngfw/list/` - List user's NGFWs
+    - `POST /api/ngfw/` - Start provisioning
+    - `GET /api/ngfw/<id>/status/` - Poll provisioning status
+    - `POST /api/ngfw/<id>/start/` - Start NGFW
+    - `POST /api/ngfw/<id>/stop/` - Stop NGFW
+    - `POST /api/ngfw/<id>/deprovision/` - Deprovision NGFW
+  - WebSocket consumer for real-time provisioning status updates
+  - XDR manual configuration instructions with serial number display
+  - 62 tests covering all views and APIs
+- Test review skill (`.claude/skills/test-review/`)
+  - 6 quality criteria with specific fail indicators
+  - Anti-pattern catalog by severity (HIGH/MEDIUM/LOW)
+  - Coverage gap detection checklist
+  - Scoring formula and fix guidance
+
+### Note
+- NGFW API endpoints are stubbed pending Issue #414 (UserNGFWStack)
+- UI is complete and functional with simulated provisioning flow
+
+## [0.9.7] - 2025-12-30
+
+### Security
+- Hardened GitHub Actions OIDC IAM permissions to limit blast radius (#430)
+  - Restricted `iam:CreateRole`, `iam:AttachRolePolicy`, `iam:PutRolePolicy` to specific role name patterns
+  - Restricted `iam:CreateInstanceProfile` to matching instance profile patterns
+  - Restricted `iam:PassRole` to same role patterns
+  - Allowed patterns: `dev-portal-*`, `prod-portal-*`, `dev-range-*`, `prod-range-*`, `shifter-*`, `github-actions-shifter-*`
+  - Prevents attacker from creating arbitrary roles with `AdministratorAccess` if GHA is compromised
+
+## [0.9.6] - 2025-12-30
+
+### Added
+- S3 cost budget alerts for dev and prod environments
+  - Defense-in-depth monitoring for unusual S3 costs
+  - Alerts at 80% of $50/month threshold
+
+## [0.9.3] - 2025-12-30
+
+### Added
+- Windows victim AMI Packer build (#410)
+  - `windows.pkr.hcl` Packer template with WinRM communicator
+  - PowerShell provisioning scripts: base, services, tools, claude-code, sysprep
+  - XAMPP, IIS, FTP Server, OpenSSH Server
+  - Python 3.12, Node.js 20.x, Git
+  - Claude Code configured for Bedrock (system PATH at `C:\Program Files\nodejs`)
+  - WinRM enabled for remote management
+  - Windows Defender disabled via GPO for XDR compatibility
+  - EC2Launch v2 sysprep for AMI finalization
+- GitHub Actions workflow support for Windows AMI builds
+
+### Changed
+- Updated packer README with Windows AMI documentation
+- Updated victim-ami.md with Packer build instructions
+
+## [0.9.2] - 2025-12-30
+
+### Added
+- Ubuntu victim AMI Packer configuration (#409)
+  - `ubuntu.pkr.hcl` template following Kali pattern
+  - Provisioning scripts: base.sh, services.sh, tools.sh, claude-code.sh
+  - Services: Apache 2.4 with mod_php, MySQL 8.0, Docker, OpenSSH, vsftpd, Samba
+  - Development tools: build-essential, Python 3, Node.js 20.x, Git
+  - Claude Code configured for AWS Bedrock
+- GitHub Actions workflow support for Ubuntu AMI builds
+- Ubuntu test classes in shifter/packer/tests/test_packer.py
+
+### Changed
+- SSM parameter for victim AMI renamed from `/shifter/ami/victim` to `/shifter/ami/ubuntu`
+- Terraform data sources updated for new SSM parameter name
+
+## [0.9.1] - 2025-12-30
+
+### Changed
+- Engine architecture refactor (#413)
+  - Executors moved to `executors/` (ssm_executor, ssh_executor)
+  - Orchestrators moved to `orchestrators/` (setup_orchestrator)
+  - Plans moved to `plans/` (setup_plan.py → base.py)
+  - RangeStack moved to `stacks/`
+  - New: `AWSExecutor`, `OpsOrchestrator` stubs
+  - New: Base protocols for executors and orchestrators
+
+## [0.9.0] - 2025-12-30
+
+### Added
+- NGFW database models for persistent per-user NGFW support (#412)
+  - `SCMCredential` model for Strata Cloud Manager PIN-based registration
+  - `NGFWDeploymentProfile` model for Software NGFW Credits authcodes
+  - `UserNGFW` model for persistent NGFW instances
+  - `Asset` and `Credential` abstract base classes with soft delete and expiration
+- Field-level encryption for sensitive credentials using `django-encrypted-model-fields`
+  - `scm_pin_value` and `authcode` fields encrypted at rest
+  - `FIELD_ENCRYPTION_KEY` environment variable required in production
+- Range model fields for NGFW integration
+  - `ngfw` FK to UserNGFW (SET_NULL on delete)
+  - `gwlb_endpoint_id` for GWLB endpoint tracking
+- Django admin for new models (SCMCredential, NGFWDeploymentProfile, UserNGFW)
+- Database grants for provisioner_lambda user on new tables
+- NGFW infrastructure foundation for persistent per-user NGFW instances (#408)
+  - Dedicated /22 subnet (10.1.4.0/22) for ~500 NGFW capacity
+  - Management security group (SSH/HTTPS from Portal for management)
+  - Dataplane security group (all VPC traffic via GWLB)
+  - IAM role with S3 bootstrap read and CloudWatch Logs access
+  - CloudWatch alarm for NGFW capacity (>400 triggers SNS alert)
+  - Terraform outputs for Engine/Pulumi consumption
+
+### Removed
+- `StrataConfig` model (superseded by `SCMCredential` and `NGFWDeploymentProfile`)
+- Range fields: `ngfw_enabled`, `strata_config`, `ngfw_instance_id`, `ngfw_untrust_ip`, `ngfw_trust_ip`
+
+## [0.8.9] - 2025-12-29
+
+### Added
+- Packer infrastructure for reproducible AMI builds (#273)
+- sshpass in Kali AMI for non-interactive SSH (#273)
+- GitHub Actions workflow for AMI builds
+
+## [0.8.8] - 2025-12-29
+
+### Changed
+- Remove redundant SSH security group rules (#290)
+
+## [0.8.7] - 2025-12-29
+
+### Added
+- `standup_duration` property on Range model for tracking provisioning time
+
+## [0.8.6] - 2025-12-29
+
+### Changed
+- Remove Step Functions permissions from GitHub OIDC role (cleanup after v1 provisioner removal)
+
+## [0.8.5] - 2025-12-29
+
+### Fixed
+- Dashboard dropdown behavior and portal test stability
+
+## [0.8.4] - 2025-12-29
+
+### Changed
+- Extract service layer from views.py (engine, cms apps)
+- Centralize Range status groupings as frozenset constants
+
+## [0.8.3] - 2025-12-29
+
+### Changes
+- Refactor consumers.py for maintanability
+
+## [0.8.2] - 2025-12-27
+
+### Added
+- NGFW (VM-Series) support
+- Strata Cloud Manager support
+- Cortex XDR sidebar submenu styling
+- Asset Menu
+
+### Changes
+- GitGuardian and Snyk ignore tests
+
 ## [0.8.1] - 2025-12-27
 
 ### Changed
@@ -67,7 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Documentation section in Mission Control sidebar
-- Renders markdown docs from `portal/documentation/docs/` with navigation tree
+- Renders markdown docs from `shifter/shifter_platform/documentation/docs/` with navigation tree
 - Mermaid.js diagram support for architecture diagrams
 - Cortex XDR dark theme styling for documentation pages
 

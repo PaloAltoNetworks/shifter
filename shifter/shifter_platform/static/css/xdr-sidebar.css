@@ -1,0 +1,535 @@
+/* =============================================================================
+   CORTEX XDR SIDEBAR - Direct port from Cortex XDR
+   ============================================================================= */
+
+/* CSS Variables - Dark theme (default) */
+:root {
+  --xdr-left-nav-width: 56px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-8: 32px;
+  --border-radius-xs: 4px;
+}
+
+:root.open-left-nav,
+body.nav-lock {
+  --xdr-left-nav-width: 270px;
+}
+
+/* Nav component host styles */
+.left-nav {
+  --nav-shadow-color: rgb(0 0 0 / 0.0784);
+  --nav-bg: #000;
+  --nav-lock-button-color: #333;
+  --nav-lock-button-color-hover: #929191;
+  --nav-lock-button-bg-color-hover: rgb(6 35 20 / 0.698);
+  --nav-lock-button-color-active: #fefefe;
+  --nav-footer-modal-border: #333;
+  --nav-item-hover-bg-color: #05180f;
+  --nav-item-active-bg-color: #062314;
+  --nav-item-active-icon-color: var(--xdr-brand, #0c6);
+  --nav-item-text-color: #fefefe;
+  --nav-sub-item-text-color: #b8b8b8;
+  --nav-sub-item-text-active-color: #eaebeb;
+  --nav-item-favorite-color: #b8b8b8;
+  --nav-item-favorite-active-color: #fefefe;
+  --nav-profile-text-color: #eaebeb;
+  --nav-profile-bg: #333;
+  --nav-profile-hover-bg: rgb(6 35 20 / 0.698);
+  --nav-profile-active-bg: #062314;
+  --nav-dialog-bg: #151515;
+  --nav-dialog-border: #333;
+  --nav-theme-bg: #151515;
+  --nav-theme-color: #b8b8b8;
+  --nav-theme-selected-color: var(--xdr-brand, #0c6);
+  --nav-theme-selected-bg: #333;
+
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  z-index: 999;
+}
+
+/* Left nav body - the expanding container */
+.left-nav-body {
+  transition: max-width 0.3s ease-in-out;
+  max-width: 270px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: var(--nav-bg);
+  overflow: hidden; /* Clip submenu panel during slide animation */
+  position: relative;
+}
+
+/* Minimized state */
+.left-nav.minimized .left-nav-body {
+  max-width: 56px;
+}
+
+/* Expanded/locked state */
+body.nav-lock .left-nav .left-nav-body,
+.left-nav:not(.minimized) .left-nav-body {
+  min-width: 270px;
+  max-width: 270px;
+}
+
+/* Tailwind utility classes used by Cortex */
+.tw-mx-3 {
+  margin-left: var(--spacing-3);
+  margin-right: var(--spacing-3);
+}
+
+.tw-mb-2 {
+  margin-bottom: var(--spacing-2);
+}
+
+.tw-flex {
+  display: flex;
+}
+
+.tw-size-8 {
+  width: var(--spacing-8);
+  height: var(--spacing-8);
+}
+
+.tw-items-center {
+  align-items: center;
+}
+
+.tw-justify-center {
+  justify-content: center;
+}
+
+.tw-rounded {
+  border-radius: var(--border-radius-xs);
+}
+
+/* Header link - logo area */
+.header-link {
+  margin: 0 8px;
+  align-items: center;
+  display: flex;
+  height: 52px;
+  text-decoration: none;
+}
+
+.header-link:hover,
+.nav-menu-item:hover,
+.nav-profile:hover {
+  text-decoration: none;
+}
+
+.left-nav a {
+  text-decoration: none;
+}
+
+.left-nav a:hover {
+  text-decoration: none;
+}
+
+.header-link:focus-visible {
+  outline: 1px solid var(--xdr-border, #484848) !important;
+}
+
+/* Lock button - main sidebar (hidden when submenu is open) */
+.lock-button {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  z-index: 50;
+  color: var(--nav-lock-button-color);
+  background-color: transparent;
+  border: 0;
+  cursor: pointer;
+  display: none;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 0;
+}
+
+/* Show main lock when expanded but NOT when submenu is open */
+.left-nav:not(.minimized, .submenu-open) .lock-button {
+  display: flex;
+}
+
+.lock-button:hover,
+.submenu-lock-button:hover {
+  background-color: var(--nav-lock-button-bg-color-hover);
+  color: #fff;
+}
+
+.lock-button.active,
+.submenu-lock-button.active {
+  color: #fff;
+}
+
+/* Lock button inside submenu panel */
+.submenu-lock-button {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  color: var(--nav-lock-button-color);
+  background-color: transparent;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 0;
+}
+
+/* Reset button base styles */
+.reset-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Nav menu item - the main navigation buttons */
+.nav-menu-item {
+  align-items: center;
+  background-color: transparent;
+  border: 0;
+  border-radius: 4px;
+  display: flex;
+  color: var(--nav-item-text-color);
+  font-size: 14px;
+  overflow: hidden;
+  position: relative;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Level 0 items (main nav) */
+.nav-menu-item.nav-menu-item-level-0 {
+  height: 32px;
+  max-width: 100%;
+  min-height: 32px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.nav-menu-item.nav-menu-item-level-0:hover,
+.nav-menu-item.nav-menu-item-level-0.is-open {
+  background-color: var(--nav-item-hover-bg-color);
+}
+
+.nav-menu-item.nav-menu-item-level-0.active-link {
+  background-color: var(--nav-item-active-bg-color);
+  font-weight: 700;
+}
+
+.nav-menu-item.nav-menu-item-level-0.active-link .nav-icon {
+  color: var(--nav-item-active-icon-color);
+}
+
+/* Icon wrapper */
+.nav-menu-item .nav-icon {
+  margin: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.nav-menu-item .nav-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Nav menu item content (text) */
+.nav-menu-item-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 8px;
+}
+
+/* Hide when minimized */
+.hide-when-minimized {
+  overflow: hidden;
+  transition: opacity 0.3s ease-out;
+  white-space: nowrap;
+}
+
+.left-nav.minimized .hide-when-minimized {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Active top item marker */
+.active-top-item {
+  /* Visual indicator for active section */
+}
+
+/* Nav menu sections container */
+.nav-menu-sections {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.nav-menu-sections::-webkit-scrollbar {
+  display: none;
+}
+
+/* Footer section */
+.nav-footer {
+  margin: 16px 12px;
+  margin-top: auto;
+}
+
+/* User profile area */
+.nav-profile {
+  display: flex;
+  align-items: center;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 4px;
+  height: 32px;
+}
+
+.nav-profile:hover {
+  background-color: var(--nav-profile-hover-bg);
+}
+
+.nav-profile-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background-color: var(--nav-profile-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nav-profile-text-color);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.nav-profile-info {
+  margin-left: 8px;
+  overflow: hidden;
+  height: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.nav-profile-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nav-profile-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-profile-email {
+  font-size: 12px;
+  color: var(--nav-sub-item-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Logo SVG styling */
+.header-link svg {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  flex-shrink: 0;
+}
+
+.header-link .logo-text {
+  margin-left: 10px;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.header-link .logo-text-main {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+
+.header-link .logo-text-sub {
+  font-weight: 600;
+  color: #a4a4a4;
+}
+
+.header-link .logo-text-tagline {
+  font-size: 9px;
+  font-weight: 400;
+  color: #a4a4a4;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
+}
+
+/* Tooltip styles */
+.tooltip.main-side-nav-menu-item-tooltip {
+  opacity: 1;
+}
+
+.xdr-dark-theme .tooltip.main-side-nav-menu-item-tooltip {
+  --nav-tooltip-bg: #1f1f1f;
+  --nav-tooltip-color: #fefefe;
+  --nav-tooltip-shadow: 0 0 8px 2px rgb(0 0 0 / 0.5);
+}
+
+.tooltip.main-side-nav-menu-item-tooltip .arrow {
+  display: none;
+}
+
+.tooltip.main-side-nav-menu-item-tooltip .tooltip-inner {
+  padding: 6px 12px;
+  background-color: var(--nav-tooltip-bg);
+  color: var(--nav-tooltip-color);
+  box-shadow: var(--nav-tooltip-shadow);
+}
+
+/* =============================================================================
+   SLIDING SUBMENU PANEL STYLES
+   ============================================================================= */
+
+/* Header container */
+.nav-header {
+  position: relative;
+}
+
+/* Submenu panel - slides in from right */
+.nav-submenu-panel {
+  position: absolute;
+  top: 0;
+  left: 56px;
+  width: 214px;
+  height: 100vh;
+  background-color: var(--nav-bg);
+  transform: translateX(100%);
+  opacity: 0;
+  transition: transform 0.35s ease-out, opacity 0.35s ease-out;
+  pointer-events: none;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Show submenu panel */
+.left-nav.submenu-open .nav-submenu-panel {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Hide submenu panel when minimized */
+.left-nav.minimized .nav-submenu-panel {
+  display: none;
+}
+
+/* Back button header - aligned with lock button */
+.nav-submenu-header {
+  padding: 10px 12px; /* Match lock button top: 10px */
+  height: 52px;
+  display: flex;
+  align-items: flex-start;
+}
+
+.nav-back-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--nav-item-text-color);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 4px;
+  height: 32px; /* Same height as lock button */
+}
+
+.nav-back-button:hover {
+  color: var(--nav-sub-item-text-active-color);
+}
+
+.nav-back-arrow {
+  font-size: 14px;
+}
+
+/* Submenu title */
+.nav-submenu-title {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nav-sub-item-text-color);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Submenu items container */
+.nav-submenu-items {
+  padding: 0 12px;
+}
+
+/* Hide text labels when submenu is open (show only icons) */
+.left-nav.submenu-open .hide-when-submenu {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Level 1 items (submenu items - text only, no icons) */
+.nav-menu-item.nav-menu-item-level-1 {
+  height: 32px;
+  max-width: 100%;
+  min-height: 32px;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0 12px; /* Horizontal padding for text */
+  font-size: 14px;
+  color: var(--nav-item-text-color); /* White text for unselected items */
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  text-decoration: none;
+}
+
+.nav-menu-item.nav-menu-item-level-1:hover {
+  background-color: var(--nav-item-hover-bg-color);
+  color: var(--nav-item-text-color);
+  text-decoration: none;
+}
+
+.nav-menu-item.nav-menu-item-level-1.active-link {
+  background-color: var(--nav-item-active-bg-color);
+  color: var(--nav-item-active-icon-color); /* Green text for active item */
+  font-weight: 600;
+}
+
+/* Submenu trigger button */
+.nav-submenu-trigger {
+  width: 100%;
+  text-align: left;
+}

@@ -1,0 +1,614 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="{% url 'mission_control:ngfw_list' %}" class="breadcrumb-link">NGFWs</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>Setup</span>
+    </div>
+    <h1 class="page-title">Setup NGFW</h1>
+    <p class="page-subtitle">Configure a persistent VM-Series firewall for your ranges</p>
+</div>
+
+<!-- Step Indicator -->
+<div class="wizard-steps mb-lg">
+    <div class="wizard-step active" data-step="1">
+        <div class="wizard-step-number">1</div>
+        <div class="wizard-step-label">Name & Credentials</div>
+    </div>
+    <div class="wizard-step" data-step="2">
+        <div class="wizard-step-number">2</div>
+        <div class="wizard-step-label">Registration</div>
+    </div>
+    <div class="wizard-step" data-step="3">
+        <div class="wizard-step-number">3</div>
+        <div class="wizard-step-label">Confirm</div>
+    </div>
+    <div class="wizard-step" data-step="4">
+        <div class="wizard-step-number">4</div>
+        <div class="wizard-step-label">Provisioning</div>
+    </div>
+    <div class="wizard-step" data-step="5">
+        <div class="wizard-step-number">5</div>
+        <div class="wizard-step-label">Complete</div>
+    </div>
+</div>
+
+<!-- Step 1: Name & Credentials -->
+<div class="card wizard-panel" id="step-1">
+    <div class="card-title">Name & Credentials</div>
+    <p class="text-muted mb-lg">Enter a name for your NGFW and select credentials.</p>
+
+    <div class="form-group">
+        <label class="form-label" for="ngfw-name">NGFW Name</label>
+        <input type="text" id="ngfw-name" class="form-input" placeholder="e.g., Production NGFW">
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Deployment Profile</label>
+        {% if deployment_profiles %}
+        <div class="xdr-dropdown full-width" id="deployment-profile-dropdown">
+            <input type="hidden" name="deployment_profile_id" id="deployment-profile-value">
+            <button type="button" class="xdr-dropdown-trigger">
+                <span class="xdr-dropdown-value placeholder">-- Select a deployment profile --</span>
+                <span class="xdr-dropdown-chevron"></span>
+            </button>
+            <div class="xdr-dropdown-panel">
+                <ul class="xdr-dropdown-items" id="deployment-profile-items">
+                    {% for profile in deployment_profiles %}
+                    <li class="xdr-dropdown-item" data-value="{{ profile.id }}">
+                        <span class="item-label">{{ profile.name }}</span>
+                        <span class="item-description">Authcode: {{ profile.authcode|slice:":4" }}****</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        <p class="text-small text-muted mt-sm">
+            Contains the Software NGFW Credits authcode.
+            <a href="#" class="link">Create new profile</a>
+        </p>
+        {% else %}
+        <div class="empty-credentials">
+            <p class="text-muted">No deployment profiles found.</p>
+            <a href="#" class="btn btn-secondary mt-sm">Create Deployment Profile</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">SCM Credential (Optional)</label>
+        {% if scm_credentials %}
+        <div class="xdr-dropdown full-width" id="scm-credential-dropdown">
+            <input type="hidden" name="scm_credential_id" id="scm-credential-value">
+            <button type="button" class="xdr-dropdown-trigger">
+                <span class="xdr-dropdown-value placeholder">-- Select (or use OTP instead) --</span>
+                <span class="xdr-dropdown-chevron"></span>
+            </button>
+            <div class="xdr-dropdown-panel">
+                <ul class="xdr-dropdown-items" id="scm-credential-items">
+                    {% for cred in scm_credentials %}
+                    <li class="xdr-dropdown-item" data-value="{{ cred.id }}">
+                        <span class="item-label">{{ cred.name }}</span>
+                        <span class="item-description">Folder: {{ cred.scm_folder_name }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        <p class="text-small text-muted mt-sm">
+            Contains the auto-registration PIN. If not selected, you'll enter an OTP in step 2.
+        </p>
+        {% else %}
+        <div class="empty-credentials">
+            <p class="text-muted">No SCM credentials found. You'll need to use OTP registration.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="wizard-actions">
+        <a href="{% url 'mission_control:ngfw_list' %}" class="btn btn-secondary">Cancel</a>
+        <button type="button" class="btn btn-primary" id="step-1-next">Next</button>
+    </div>
+</div>
+
+<!-- Step 2: Registration Method -->
+<div class="card wizard-panel" id="step-2" style="display: none;">
+    <div class="card-title">Registration Method</div>
+    <p class="text-muted mb-lg">Choose how to register the NGFW with Strata Cloud Manager.</p>
+
+    <div class="form-group" id="pin-option" style="display: none;">
+        <label class="form-radio">
+            <input type="radio" name="registration_method" value="pin" checked>
+            <div>
+                <div class="form-radio-label">Use stored PIN</div>
+                <div class="form-radio-help">
+                    Use the auto-registration PIN from your selected SCM credential.
+                </div>
+            </div>
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label class="form-radio">
+            <input type="radio" name="registration_method" value="otp" id="otp-radio">
+            <div>
+                <div class="form-radio-label">Enter One-Time Password (OTP)</div>
+                <div class="form-radio-help">
+                    Generate an OTP in Strata Cloud Manager and enter it below. Valid for 60 minutes.
+                </div>
+            </div>
+        </label>
+    </div>
+
+    <div class="form-group otp-fields" id="otp-fields" style="display: none;">
+        <label class="form-label" for="otp-value">OTP Value</label>
+        <input type="text" id="otp-value" class="form-input" placeholder="Enter OTP from SCM">
+        <p class="text-small text-muted mt-sm">
+            Generate an OTP in SCM: Configuration &gt; NGFW Setup &gt; Software Firewalls &gt; Add
+        </p>
+
+        <label class="form-label mt-md" for="otp-folder">SCM Folder Name</label>
+        <input type="text" id="otp-folder" class="form-input" placeholder="e.g., My-Folder">
+
+        <label class="form-label mt-md" for="otp-sls-region">SLS Region</label>
+        <select id="otp-sls-region" class="form-input">
+            <option value="americas">Americas</option>
+            <option value="europe">Europe</option>
+            <option value="japan">Japan</option>
+            <option value="asiapacific">Asia Pacific</option>
+        </select>
+    </div>
+
+    <div class="wizard-actions">
+        <button type="button" class="btn btn-secondary" id="step-2-back">Back</button>
+        <button type="button" class="btn btn-primary" id="step-2-next">Next</button>
+    </div>
+</div>
+
+<!-- Step 3: Confirm -->
+<div class="card wizard-panel" id="step-3" style="display: none;">
+    <div class="card-title">Confirm Setup</div>
+    <p class="text-muted mb-lg">Review your configuration before starting provisioning.</p>
+
+    <div class="confirm-summary">
+        <div class="confirm-row">
+            <span class="confirm-label">NGFW Name</span>
+            <span class="confirm-value" id="confirm-name">--</span>
+        </div>
+        <div class="confirm-row">
+            <span class="confirm-label">Deployment Profile</span>
+            <span class="confirm-value" id="confirm-profile">--</span>
+        </div>
+        <div class="confirm-row">
+            <span class="confirm-label">Registration Method</span>
+            <span class="confirm-value" id="confirm-registration">--</span>
+        </div>
+        <div class="confirm-row">
+            <span class="confirm-label">SCM Folder</span>
+            <span class="confirm-value" id="confirm-folder">--</span>
+        </div>
+        <div class="confirm-row">
+            <span class="confirm-label">SLS Region</span>
+            <span class="confirm-value" id="confirm-sls">--</span>
+        </div>
+    </div>
+
+    <div class="warning-box mt-lg">
+        <strong>Important:</strong> Provisioning will take approximately 15-30 minutes.
+        The NGFW will be created and configured automatically.
+    </div>
+
+    <div class="wizard-actions">
+        <button type="button" class="btn btn-secondary" id="step-3-back">Back</button>
+        <button type="button" class="btn btn-primary" id="step-3-provision">Start Provisioning</button>
+    </div>
+</div>
+
+<!-- Step 4: Provisioning Progress -->
+<div class="card wizard-panel" id="step-4" style="display: none;">
+    <div class="card-title">Provisioning</div>
+    <p class="text-muted mb-lg">Your NGFW is being set up. This typically takes 15-30 minutes.</p>
+
+    <div class="progress-container">
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="progress-status" id="progress-status">Initializing...</div>
+    </div>
+
+    <div class="progress-steps mt-lg">
+        <div class="progress-step" id="pstep-ec2">
+            <span class="progress-step-icon"></span>
+            <span>Launching EC2 Instance</span>
+        </div>
+        <div class="progress-step" id="pstep-ssh">
+            <span class="progress-step-icon"></span>
+            <span>Waiting for SSH</span>
+        </div>
+        <div class="progress-step" id="pstep-license">
+            <span class="progress-step-icon"></span>
+            <span>Activating License</span>
+        </div>
+        <div class="progress-step" id="pstep-cert">
+            <span class="progress-step-icon"></span>
+            <span>Device Certificate</span>
+        </div>
+        <div class="progress-step" id="pstep-xdr">
+            <span class="progress-step-icon"></span>
+            <span>Configuring XDR Integration</span>
+        </div>
+        <div class="progress-step" id="pstep-gwlb">
+            <span class="progress-step-icon"></span>
+            <span>Setting up GWLB</span>
+        </div>
+    </div>
+</div>
+
+<!-- Step 5: Complete -->
+<div class="card wizard-panel" id="step-5" style="display: none;">
+    <div class="card-title">Setup Complete</div>
+
+    <div class="success-message mb-lg">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="#52c41a"/>
+        </svg>
+        <p>Your NGFW has been successfully provisioned!</p>
+    </div>
+
+    <div class="serial-number-box">
+        <div class="serial-label">Serial Number</div>
+        <div class="serial-value" id="ngfw-serial">--</div>
+    </div>
+
+    <div class="xdr-instructions mt-lg">
+        <div class="xdr-instructions-title">Complete XDR Integration (Manual Step)</div>
+        <p class="text-small text-muted mb-sm">
+            To complete the XDR integration, perform these steps in the XDR Console:
+        </p>
+        <ol class="xdr-steps">
+            <li>Go to <strong>XDR Console &gt; Settings &gt; Data Sources &gt; NGFW</strong></li>
+            <li>Click <strong>"Add Instance"</strong></li>
+            <li>Select firewall serial: <code id="serial-in-steps">--</code> from dropdown</li>
+            <li>Complete the wizard</li>
+        </ol>
+    </div>
+
+    <div class="wizard-actions">
+        <a href="{% url 'mission_control:ngfw_list' %}" class="btn btn-secondary">View All NGFWs</a>
+        <a href="#" class="btn btn-primary" id="view-ngfw-btn">View NGFW Details</a>
+    </div>
+</div>
+
+<style>
+.breadcrumb {
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+.breadcrumb-link {
+    color: var(--xdr-text-secondary);
+    text-decoration: none;
+}
+
+.breadcrumb-link:hover {
+    color: var(--xdr-text);
+}
+
+.breadcrumb-sep {
+    color: var(--xdr-text-secondary);
+    margin: 0 8px;
+}
+
+/* Wizard Steps */
+.wizard-steps {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.wizard-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    position: relative;
+}
+
+.wizard-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    width: 100%;
+    height: 2px;
+    background: var(--xdr-border);
+}
+
+.wizard-step.active::after,
+.wizard-step.complete::after {
+    background: #52c41a;
+}
+
+.wizard-step-number {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--xdr-border);
+    color: var(--xdr-text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    z-index: 1;
+}
+
+.wizard-step.active .wizard-step-number {
+    background: #1890ff;
+    color: #fff;
+}
+
+.wizard-step.complete .wizard-step-number {
+    background: #52c41a;
+    color: #fff;
+}
+
+.wizard-step-label {
+    font-size: 11px;
+    color: var(--xdr-text-secondary);
+    margin-top: 8px;
+}
+
+.wizard-step.active .wizard-step-label {
+    color: var(--xdr-text);
+}
+
+/* Form Elements */
+.form-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--xdr-background);
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    color: var(--xdr-text);
+    font-size: 14px;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: #1890ff;
+}
+
+.form-radio {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    background: var(--xdr-background);
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.form-radio:hover {
+    border-color: #1890ff;
+}
+
+.form-radio input[type="radio"] {
+    margin-top: 4px;
+}
+
+.form-radio-label {
+    font-weight: 600;
+    color: var(--xdr-text);
+}
+
+.form-radio-help {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    margin-top: 4px;
+}
+
+/* Wizard Actions */
+.wizard-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--xdr-border);
+}
+
+/* Confirm Summary */
+.confirm-summary {
+    background: var(--xdr-background);
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.confirm-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--xdr-border);
+}
+
+.confirm-row:last-child {
+    border-bottom: none;
+}
+
+.confirm-label {
+    color: var(--xdr-text-secondary);
+}
+
+.confirm-value {
+    color: var(--xdr-text);
+    font-weight: 500;
+}
+
+/* Warning Box */
+.warning-box {
+    background: rgba(250, 173, 20, 0.1);
+    border: 1px solid rgba(250, 173, 20, 0.3);
+    border-radius: 4px;
+    padding: 12px 16px;
+    color: #faad14;
+    font-size: 13px;
+}
+
+/* Progress */
+.progress-container {
+    text-align: center;
+}
+
+.progress-bar {
+    height: 8px;
+    background: var(--xdr-border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #1890ff;
+    transition: width 0.5s ease;
+}
+
+.progress-status {
+    margin-top: 12px;
+    color: var(--xdr-text-secondary);
+}
+
+.progress-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.progress-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--xdr-background);
+    border-radius: 4px;
+    color: var(--xdr-text-secondary);
+}
+
+.progress-step.active {
+    color: var(--xdr-text);
+}
+
+.progress-step.complete {
+    color: #52c41a;
+}
+
+.progress-step-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+}
+
+.progress-step.active .progress-step-icon {
+    border-color: #1890ff;
+    background: #1890ff;
+}
+
+.progress-step.complete .progress-step-icon {
+    border-color: #52c41a;
+    background: #52c41a;
+}
+
+/* Success */
+.success-message {
+    text-align: center;
+    padding: 24px;
+}
+
+.success-message svg {
+    margin-bottom: 16px;
+}
+
+.success-message p {
+    font-size: 18px;
+    color: var(--xdr-text);
+}
+
+.serial-number-box {
+    text-align: center;
+    background: var(--xdr-background);
+    border-radius: 4px;
+    padding: 24px;
+}
+
+.serial-label {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    margin-bottom: 8px;
+}
+
+.serial-value {
+    font-size: 24px;
+    font-family: monospace;
+    color: #52c41a;
+}
+
+/* XDR Instructions */
+.xdr-instructions {
+    background: rgba(24, 144, 255, 0.1);
+    border: 1px solid rgba(24, 144, 255, 0.3);
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.xdr-instructions-title {
+    font-weight: 600;
+    color: #1890ff;
+    margin-bottom: 8px;
+}
+
+.xdr-steps {
+    margin: 8px 0 0 24px;
+    padding: 0;
+    color: var(--xdr-text);
+}
+
+.xdr-steps li {
+    margin-bottom: 4px;
+}
+
+.xdr-steps code {
+    background: var(--xdr-surface);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+    color: #52c41a;
+}
+
+.empty-credentials {
+    padding: 16px;
+    background: var(--xdr-background);
+    border-radius: 4px;
+    text-align: center;
+}
+</style>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/ngfw.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const wizard = new NGFWWizardManager({
+        csrfToken: '{{ csrf_token }}',
+        provisionUrl: '{% url "mission_control:ngfw_list" %}',  // Placeholder until API implemented
+        statusWsUrl: 'wss://' + window.location.host + '/ws/ngfw/status/',
+    });
+    wizard.init();
+});
+</script>
+{% endblock %}

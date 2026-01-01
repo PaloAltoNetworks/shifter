@@ -1,4 +1,4 @@
-"""CMS models - Unified Credential model."""
+"""CMS models - Asset hierarchy and content management models."""
 
 from __future__ import annotations
 
@@ -8,11 +8,116 @@ import re
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 from encrypted_model_fields.fields import EncryptedCharField
 
-from mission_control.models import Credential as CredentialBase
+# CredentialBase is defined locally below (migrated from mission_control)
 
 logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# Abstract Base Models
+# -----------------------------------------------------------------------------
+
+
+class Asset(models.Model):
+    """Abstract base for user-owned assets with soft delete.
+
+    Provides common fields and behavior for all asset types:
+    - name: User-friendly identifier
+    - created_at: Automatic creation timestamp
+    - deleted_at: Soft delete timestamp (None = active)
+
+    Subclasses must define a 'user' ForeignKey field.
+    """
+
+    name = models.CharField(max_length=100, help_text="User-friendly name")
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def is_deleted(self):
+        """Return True if this asset has been soft-deleted."""
+        return self.deleted_at is not None
+
+    @classmethod
+    def active_for_user(cls, user):
+        """Return non-deleted assets for a user.
+
+        Args:
+            user: The user to filter by
+
+        Returns:
+            QuerySet of active (non-deleted) assets for the user
+        """
+        return cls.objects.filter(user=user, deleted_at__isnull=True)
+
+
+class FileAsset(Asset):
+    """Abstract base class for file-backed assets stored in S3.
+
+    Extends Asset with fields for S3 storage:
+    - s3_key: Full S3 object key
+    - original_filename: Original uploaded filename
+    - file_size_bytes: File size for quota tracking
+    - sha256_hash: Content hash for integrity/deduplication
+    """
+
+    s3_key = models.CharField(max_length=500, help_text="S3 object key")
+    original_filename = models.CharField(max_length=255)
+    file_size_bytes = models.PositiveBigIntegerField()
+    sha256_hash = models.CharField(max_length=64)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def file_size_mb(self):
+        """Return file size in megabytes, rounded to 1 decimal."""
+        return round(self.file_size_bytes / (1024 * 1024), 1)
+
+
+class CredentialBase(Asset):
+    """Abstract base for credential assets with expiration tracking.
+
+    Extends Asset with credential-specific fields:
+    - expires_at: Optional expiration timestamp
+    - last_verified_at: Last external validation timestamp
+    - last_used_at: Last provisioning use timestamp
+    """
+
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this credential expires (user sets at creation)",
+    )
+    last_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time credential was validated against external system",
+    )
+    last_used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time credential was used for provisioning",
+    )
+
+    class Meta:
+        abstract = True
+
+    @property
+    def is_expired(self):
+        """Return True if this credential has expired."""
+        if not self.expires_at:
+            return False
+        return timezone.now() > self.expires_at
 
 
 class Credential(CredentialBase):
@@ -122,22 +227,6 @@ class Credential(CredentialBase):
         # Store original values after loading from DB
         self._store_original_values()
 
-    def _store_original_values(self):
-        """Store original values for immutability checks.
-
-        Uses __dict__ access to avoid triggering deferred field loading,
-        which would cause infinite recursion during Django's .only() queries.
-        """
-        if self.pk:
-            self._is_new = False
-            # Access via __dict__ to avoid triggering deferred field refresh
-            self._original_credential_type = self.__dict__.get("credential_type")
-            self._original_user_id = self.__dict__.get("user_id")
-            self._original_authcode = self.__dict__.get("authcode", "")
-            self._original_deleted_at = self.__dict__.get("deleted_at")
-        else:
-            self._is_new = True
-
     def __str__(self):
         """Return credential name (no sensitive data)."""
         return self.name
@@ -145,6 +234,47 @@ class Credential(CredentialBase):
     def __repr__(self):
         """Return safe representation (no sensitive data)."""
         return f"<Credential(id={self.pk}, name='{self.name}', type='{self.credential_type}')>"
+
+    def save(self, *args, **kwargs):
+        """Save with validation.
+
+        Logs DEBUG on successful save (create or update).
+        Exceptions from validation or database are propagated, not swallowed.
+
+        Raises:
+            ValidationError: If validation fails
+            DatabaseError: If database operation fails
+        """
+        is_create = self._is_new
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+        # Log success
+        user_context = f"user_id={self.user_id}"
+        if is_create:
+            logger.debug(
+                "Credential created: id=%s, %s, credential_type=%s, name='%s'",
+                self.pk,
+                user_context,
+                self.credential_type,
+                self.name,
+            )
+        else:
+            logger.debug(
+                "Credential updated: id=%s, %s, credential_type=%s, name='%s'",
+                self.pk,
+                user_context,
+                self.credential_type,
+                self.name,
+            )
+
+        # Update stored original values after save
+        self._store_original_values()
+
+    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+        """Refresh and update original values."""
+        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        self._store_original_values()
 
     def clean(self):
         """Validate the credential based on its type and state.
@@ -334,46 +464,21 @@ class Credential(CredentialBase):
             if scm_exists:
                 errors["scm_folder_name"] = "An SCM credential with this folder and PIN ID already exists."
 
-    def save(self, *args, **kwargs):
-        """Save with validation.
+    def _store_original_values(self):
+        """Store original values for immutability checks.
 
-        Logs DEBUG on successful save (create or update).
-        Exceptions from validation or database are propagated, not swallowed.
-
-        Raises:
-            ValidationError: If validation fails
-            DatabaseError: If database operation fails
+        Uses __dict__ access to avoid triggering deferred field loading,
+        which would cause infinite recursion during Django's .only() queries.
         """
-        is_create = self._is_new
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-        # Log success
-        user_context = f"user_id={self.user_id}"
-        if is_create:
-            logger.debug(
-                "Credential created: id=%s, %s, credential_type=%s, name='%s'",
-                self.pk,
-                user_context,
-                self.credential_type,
-                self.name,
-            )
+        if self.pk:
+            self._is_new = False
+            # Access via __dict__ to avoid triggering deferred field refresh
+            self._original_credential_type = self.__dict__.get("credential_type")
+            self._original_user_id = self.__dict__.get("user_id")
+            self._original_authcode = self.__dict__.get("authcode", "")
+            self._original_deleted_at = self.__dict__.get("deleted_at")
         else:
-            logger.debug(
-                "Credential updated: id=%s, %s, credential_type=%s, name='%s'",
-                self.pk,
-                user_context,
-                self.credential_type,
-                self.name,
-            )
-
-        # Update stored original values after save
-        self._store_original_values()
-
-    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
-        """Refresh and update original values."""
-        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
-        self._store_original_values()
+            self._is_new = True
 
 
 class RangeInstance(models.Model):

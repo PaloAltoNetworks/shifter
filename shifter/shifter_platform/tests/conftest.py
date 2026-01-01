@@ -1,4 +1,4 @@
-"""Pytest configuration and fixtures for portal tests."""
+"""Pytest configuration and fixtures for Shifter platform tests."""
 
 import os
 

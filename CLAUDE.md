@@ -19,6 +19,7 @@ Act as a collaborative principal engineer:
 - **Flag problems.** Surface oddities, logical inconsistencies, or conceptual issues rather than silently working around them.
 - **Ask, don't assume.** When uncertain, clarify rather than guess.
 - **Follow doc style.** When writing documentation, follow `.claude/skills/doc-writing.md`.
+- **Question existence.** When reviewing files, don't just check for the assigned task—ask: Does this file need to exist? Is the naming confusing? Does it duplicate something else? Is it a one-off artifact that should be deleted? Understand full context before making mechanical changes.
 
 ---
 

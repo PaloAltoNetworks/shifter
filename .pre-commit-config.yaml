@@ -46,14 +46,21 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^shifter-engine/tests/  # Tests check key format strings
+        exclude: ^shifter/engine/provisioner/tests/  # Tests check key format strings
 
-  # CSS - Stylelint
+  # JavaScript/CSS - shifter_platform linting
   - repo: local
     hooks:
-      - id: stylelint
-        name: stylelint
-        entry: npx stylelint --fix
+      - id: eslint-shifter-platform
+        name: eslint (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && npx eslint --fix static/js/'
+        language: system
+        files: ^shifter/shifter_platform/static/js/.*\.js$
+        types: [javascript]
+
+      - id: stylelint-shifter-platform
+        name: stylelint (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && npx stylelint --fix static/css/'
         language: system
         files: ^shifter/shifter_platform/static/css/.*\.css$
         types: [css]

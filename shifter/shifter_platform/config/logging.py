@@ -1,7 +1,7 @@
-"""Centralized logging configuration for Django portal using Elastic Common Schema (ECS).
+"""Centralized logging configuration for Shifter platform using Elastic Common Schema (ECS).
 
 Provides ECS-compliant log formatting for XDR/XSIAM ingestion with consistent schema
-across all portal components. ECS is the industry standard adopted by OpenTelemetry
+across all platform components. ECS is the industry standard adopted by OpenTelemetry
 for semantic conventions.
 
 Usage in settings.py:

@@ -1,371 +1,359 @@
 ---
 name: test-driven-development
-description: Use when implementing any feature or bugfix, before writing implementation code
+description: Use when doing any development work, before writing implementation or refactoring or bug fix or any other code change.
 ---
+# Test-Driven Development Skill
 
-# Test-Driven Development (TDD)
+Expert guidance for writing comprehensive, focused tests in Python using pytest.
 
-## Overview
+## Core Principle
 
-Write the test first. Watch it fail. Write minimal code to pass.
+**A test validates ONE responsibility of ONE component.** Tests must be comprehensive for that responsibility while ignoring everything else.
 
-**Core principle:** If you didn't watch the test fail, you don't know if it tests the right thing.
+## The Testing Contract
 
-**Violating the letter of the rules is violating the spirit of the rules.**
+Every function has a contract:
+1. **Inputs** - What minimum data does it need?
+2. **Outputs** - What does it return/produce?
+3. **Side effects** - What does it change (DB, files, external systems)?
+4. **Errors** - What can go wrong and how does it handle that?
+5. **Logging** - What does it record about its behavior?
 
-## When to Use
+Your tests must verify ALL FIVE, and ONLY these five things.
 
-**Always:**
-- New features
-- Bug fixes
-- Refactoring
-- Behavior changes
-
-**Exceptions (ask your human partner):**
-- Throwaway prototypes
-- Generated code
-- Configuration files
-
-Thinking "skip TDD just this once"? Stop. That's rationalization.
-
-## The Iron Law
-
-```
-NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
-```
-
-Write code before the test? Delete it. Start over.
-
-**No exceptions:**
-- Don't keep it as "reference"
-- Don't "adapt" it while writing tests
-- Don't look at it
-- Delete means delete
-
-Implement fresh from tests. Period.
-
-## Red-Green-Refactor
-
-```dot
-digraph tdd_cycle {
-    rankdir=LR;
-    red [label="RED\nWrite failing test", shape=box, style=filled, fillcolor="#ffcccc"];
-    verify_red [label="Verify fails\ncorrectly", shape=diamond];
-    green [label="GREEN\nMinimal code", shape=box, style=filled, fillcolor="#ccffcc"];
-    verify_green [label="Verify passes\nAll green", shape=diamond];
-    refactor [label="REFACTOR\nClean up", shape=box, style=filled, fillcolor="#ccccff"];
-    next [label="Next", shape=ellipse];
-
-    red -> verify_red;
-    verify_red -> green [label="yes"];
-    verify_red -> red [label="wrong\nfailure"];
-    green -> verify_green;
-    verify_green -> refactor [label="yes"];
-    verify_green -> green [label="no"];
-    refactor -> verify_green [label="stay\ngreen"];
-    verify_green -> next;
-    next -> red;
-}
-```
-
-### RED - Write Failing Test
-
-Write one minimal test showing what should happen.
-
-<Good>
-```typescript
-test('retries failed operations 3 times', async () => {
-  let attempts = 0;
-  const operation = () => {
-    attempts++;
-    if (attempts < 3) throw new Error('fail');
-    return 'success';
-  };
-
-  const result = await retryOperation(operation);
-
-  expect(result).toBe('success');
-  expect(attempts).toBe(3);
-});
-```
-Clear name, tests real behavior, one thing
-</Good>
-
-<Bad>
-```typescript
-test('retry works', async () => {
-  const mock = jest.fn()
-    .mockRejectedValueOnce(new Error())
-    .mockRejectedValueOnce(new Error())
-    .mockResolvedValueOnce('success');
-  await retryOperation(mock);
-  expect(mock).toHaveBeenCalledTimes(3);
-});
-```
-Vague name, tests mock not code
-</Bad>
-
-**Requirements:**
-- One behavior
-- Clear name
-- Real code (no mocks unless unavoidable)
-
-### Verify RED - Watch It Fail
-
-**MANDATORY. Never skip.**
-
-```bash
-npm test path/to/test.test.ts
+## Test Organization Template
+```python
+class TestFunctionName:
+    """Tests for module.function_name."""
+    
+    # ---------------------------------------------------------------------
+    # Happy path - function succeeds
+    # ---------------------------------------------------------------------
+    
+    def test_returns_expected_output_for_valid_input(self):
+        """Function returns correct result when inputs are valid."""
+        # Mock external dependencies
+        # Call function with valid inputs
+        # Assert return value is correct
+    
+    def test_produces_expected_side_effects(self):
+        """Function creates/modifies expected state."""
+        # Mock external dependencies
+        # Call function
+        # Assert database/file/external system changed correctly
+    
+    # ---------------------------------------------------------------------
+    # Input validation - minimum required data
+    # ---------------------------------------------------------------------
+    
+    def test_succeeds_with_minimum_required_input(self):
+        """Function works with bare minimum valid input."""
+        # Call with only required parameters
+        # Assert success
+    
+    def test_raises_error_when_required_input_missing(self):
+        """Function raises appropriate error when required data absent."""
+        # Call without required parameter/field
+        # Assert raises specific exception with clear message
+    
+    def test_raises_error_when_input_invalid(self):
+        """Function validates input format/type/constraints."""
+        # Call with wrong type/format/out of bounds value
+        # Assert raises specific exception with clear message
+    
+    # ---------------------------------------------------------------------
+    # Error handling - what can go wrong
+    # ---------------------------------------------------------------------
+    
+    def test_handles_dependency_failure_gracefully(self):
+        """Function handles external dependency failures appropriately."""
+        # Mock dependency to raise exception
+        # Call function
+        # Assert either: recovers gracefully OR propagates with context
+    
+    def test_propagates_critical_errors(self):
+        """Function propagates errors it cannot handle."""
+        # Mock dependency to raise exception
+        # Assert function raises same/wrapped exception
+    
+    def test_logs_error_on_failure(self):
+        """Function logs ERROR when operations fail."""
+        # Mock dependency to fail
+        # Capture logs at ERROR level
+        # Call function (catching expected exception)
+        # Assert error logged with relevant context
+    
+    # ---------------------------------------------------------------------
+    # Logging - observability
+    # ---------------------------------------------------------------------
+    
+    def test_logs_debug_on_success(self):
+        """Function logs DEBUG when operation succeeds."""
+        # Capture logs at DEBUG level
+        # Call function successfully
+        # Assert debug message contains key information
+    
+    def test_logs_info_for_significant_events(self):
+        """Function logs INFO for business-relevant events."""
+        # Only if function has INFO-worthy events
+        # Capture logs at INFO level
+        # Call function
+        # Assert info logged appropriately
+    
+    # ---------------------------------------------------------------------
+    # Boundary conditions
+    # ---------------------------------------------------------------------
+    
+    def test_handles_empty_input_correctly(self):
+        """Function behaves correctly with empty/null input."""
+        # Call with empty list/string/None
+        # Assert appropriate behavior (error, empty result, etc.)
+    
+    def test_handles_large_input_correctly(self):
+        """Function handles edge cases in input size/scale."""
+        # Call with maximum/large valid input
+        # Assert success without performance degradation
 ```
 
-Confirm:
-- Test fails (not errors)
-- Failure message is expected
-- Fails because feature missing (not typos)
+## Critical Rules
 
-**Test passes?** You're testing existing behavior. Fix test.
+### Rule 1: Mock Everything External
 
-**Test errors?** Fix error, re-run until it fails correctly.
+**Mock ANY dependency the function doesn't own:**
+- Database queries
+- External API calls
+- File system operations
+- Other service layer functions
+- System time/randomness
+```python
+# CORRECT - mocking external dependency
+def test_creates_user_profile(self):
+    with patch("management.services.create_user_profile") as mock:
+        user = User.objects.create_user(username="test@example.com")
+    mock.assert_called_once_with(user)
 
-### GREEN - Minimal Code
+# WRONG - testing the dependency's behavior
+def test_creates_user_profile(self):
+    user = User.objects.create_user(username="test@example.com")
+    assert UserProfile.objects.filter(user=user).exists()  # This tests UserProfile creation, not the handler!
+```
 
-Write simplest code to pass the test.
+### Rule 2: Test Logging Explicitly
 
-<Good>
-```typescript
-async function retryOperation<T>(fn: () => Promise<T>): Promise<T> {
-  for (let i = 0; i < 3; i++) {
-    try {
-      return await fn();
-    } catch (e) {
-      if (i === 2) throw e;
+**Every test suite must verify logging:**
+- DEBUG logs for normal operations
+- ERROR logs for failures
+- Include relevant context in log messages
+```python
+def test_logs_debug_on_success(self, caplog):
+    """Service logs debug when operation succeeds."""
+    with caplog.at_level(logging.DEBUG, logger="myapp.services"):
+        result = my_function(arg="value")
+    
+    assert "operation succeeded" in caplog.text
+    assert "value" in caplog.text  # Verify context included
+
+def test_logs_error_on_failure(self, caplog):
+    """Service logs error when dependency fails."""
+    with (
+        caplog.at_level(logging.ERROR, logger="myapp.services"),
+        patch("myapp.services.external_call", side_effect=Exception("fail")),
+        pytest.raises(Exception),
+    ):
+        my_function(arg="value")
+    
+    assert "operation failed" in caplog.text
+    assert "value" in caplog.text  # Verify context included
+```
+
+### Rule 3: Test Exception Handling
+
+**Test BOTH error propagation AND error handling:**
+```python
+# Test that critical errors propagate
+def test_propagates_database_error(self):
+    """Function propagates database errors to caller."""
+    with (
+        patch("myapp.models.Thing.objects.get", side_effect=DatabaseError("DB down")),
+        pytest.raises(DatabaseError, match="DB down"),
+    ):
+        my_function(id=1)
+
+# Test that recoverable errors are handled
+def test_handles_missing_optional_data(self):
+    """Function continues when optional dependency unavailable."""
+    with patch("myapp.services.optional_service", side_effect=NotFoundError()):
+        result = my_function(id=1)
+    
+    assert result is not None  # Function completed despite optional failure
+```
+
+### Rule 4: Test Input Validation
+
+**Verify the function validates its contract:**
+```python
+def test_requires_user_id(self):
+    """Function raises ValueError when user_id is None."""
+    with pytest.raises(ValueError, match="user_id is required"):
+        my_function(user_id=None)
+
+def test_requires_positive_amount(self):
+    """Function raises ValueError when amount is negative."""
+    with pytest.raises(ValueError, match="amount must be positive"):
+        my_function(amount=-10)
+
+def test_succeeds_with_minimum_input(self):
+    """Function works with only required fields provided."""
+    result = my_function(user_id=1)  # No optional params
+    assert result.status == "success"
+```
+
+### Rule 5: Don't Test Dependencies
+
+**If it's not YOUR code, don't test it:**
+```python
+# WRONG - testing Django's behavior
+def test_user_save_creates_record(self):
+    user = User(username="test")
+    user.save()
+    assert User.objects.filter(username="test").exists()  # Testing Django ORM
+
+# WRONG - testing external library
+def test_requests_makes_http_call(self):
+    response = requests.get("http://example.com")
+    assert response.status_code == 200  # Testing requests library
+
+# CORRECT - testing YOUR code that uses dependencies
+def test_fetch_user_data_calls_api_correctly(self):
+    with patch("myapp.services.requests.get") as mock_get:
+        mock_get.return_value.json.return_value = {"id": 1}
+        
+        result = fetch_user_data(user_id=1)
+        
+        mock_get.assert_called_once_with("https://api.example.com/users/1")
+        assert result == {"id": 1}
+```
+
+## Common Mistakes to Avoid
+
+### Mistake 1: Testing Implementation Instead of Behavior
+```python
+# WRONG - testing how it works
+def test_uses_correct_query(self):
+    with patch("myapp.models.User.objects.filter") as mock_filter:
+        get_active_users()
+        mock_filter.assert_called_with(is_active=True)
+
+# CORRECT - testing what it produces
+def test_returns_only_active_users(self):
+    User.objects.create(username="active", is_active=True)
+    User.objects.create(username="inactive", is_active=False)
+    
+    result = get_active_users()
+    
+    assert len(result) == 1
+    assert result[0].username == "active"
+```
+
+### Mistake 2: Surface-Level Assertions
+```python
+# WRONG - only testing it doesn't crash
+def test_process_payment(self):
+    result = process_payment(amount=100, user_id=1)
+    assert result is not None  # Useless test
+
+# CORRECT - testing actual behavior
+def test_process_payment_creates_transaction(self):
+    result = process_payment(amount=100, user_id=1)
+    
+    assert result.status == "completed"
+    assert result.amount == 100
+    assert Transaction.objects.filter(user_id=1, amount=100).exists()
+```
+
+### Mistake 3: Missing Error Cases
+```python
+# INCOMPLETE - only testing success
+def test_create_user(self):
+    user = create_user(email="test@example.com")
+    assert user.email == "test@example.com"
+
+# COMPLETE - testing failure modes too
+def test_create_user_requires_email(self):
+    with pytest.raises(ValueError, match="email is required"):
+        create_user(email=None)
+
+def test_create_user_rejects_invalid_email(self):
+    with pytest.raises(ValueError, match="invalid email format"):
+        create_user(email="not-an-email")
+
+def test_create_user_logs_error_on_database_failure(self, caplog):
+    with (
+        caplog.at_level(logging.ERROR),
+        patch("myapp.models.User.objects.create", side_effect=DatabaseError()),
+        pytest.raises(DatabaseError),
+    ):
+        create_user(email="test@example.com")
+    
+    assert "Failed to create user" in caplog.text
+```
+
+## Test Naming Convention
+
+Test names should complete the sentence: "It ______"
+```python
+# GOOD names
+def test_returns_empty_list_when_no_results():
+def test_raises_value_error_when_amount_negative():
+def test_logs_error_when_api_call_fails():
+def test_propagates_database_error_to_caller():
+
+# BAD names  
+def test_happy_path():  # What does success mean?
+def test_error_handling():  # Which error?
+def test_edge_case():  # Which edge?
+```
+
+## Pytest Fixtures and Mocking
+```python
+# Good fixture for common test data
+@pytest.fixture
+def valid_user():
+    """Return valid user data for testing."""
+    return {
+        "email": "test@example.com",
+        "username": "testuser",
+        "is_active": True,
     }
-  }
-  throw new Error('unreachable');
-}
-```
-Just enough to pass
-</Good>
 
-<Bad>
-```typescript
-async function retryOperation<T>(
-  fn: () => Promise<T>,
-  options?: {
-    maxRetries?: number;
-    backoff?: 'linear' | 'exponential';
-    onRetry?: (attempt: number) => void;
-  }
-): Promise<T> {
-  // YAGNI
-}
-```
-Over-engineered
-</Bad>
-
-Don't add features, refactor other code, or "improve" beyond the test.
-
-### Verify GREEN - Watch It Pass
-
-**MANDATORY.**
-
-```bash
-npm test path/to/test.test.ts
+# Good use of patch as context manager
+def test_sends_email_on_signup(self):
+    with patch("myapp.services.send_email") as mock_send:
+        signup_user(email="test@example.com")
+        
+        mock_send.assert_called_once()
+        args, kwargs = mock_send.call_args
+        assert kwargs["to"] == "test@example.com"
+        assert "Welcome" in kwargs["subject"]
 ```
 
-Confirm:
-- Test passes
-- Other tests still pass
-- Output pristine (no errors, warnings)
+## The Test-First Workflow
 
-**Test fails?** Fix code, not test.
+1. **Read the function signature** - What inputs does it take?
+2. **Read the function docstring** - What should it do?
+3. **Identify the contract** - Inputs, outputs, side effects, errors, logging
+4. **Write test structure** - Organize into sections as shown above
+5. **Implement tests** - One section at a time
+6. **Run tests** - They should fail (function doesn't exist yet or is incomplete)
+7. **Implement function** - Make tests pass
+8. **Refactor** - Improve code while tests stay green
 
-**Other tests fail?** Fix now.
+## Remember
 
-### REFACTOR - Clean Up
+- **Comprehensive > Minimal** - Test all five parts of the contract
+- **Focused > Broad** - One responsibility per test
+- **Explicit > Implicit** - Mock dependencies, verify logging, check errors
+- **Behavior > Implementation** - Test what it does, not how
+- **Clear > Clever** - Simple assertions, obvious test names
 
-After green only:
-- Remove duplication
-- Improve names
-- Extract helpers
-
-Keep tests green. Don't add behavior.
-
-### Repeat
-
-Next failing test for next feature.
-
-## Good Tests
-
-| Quality | Good | Bad |
-|---------|------|-----|
-| **Minimal** | One thing. "and" in name? Split it. | `test('validates email and domain and whitespace')` |
-| **Clear** | Name describes behavior | `test('test1')` |
-| **Shows intent** | Demonstrates desired API | Obscures what code should do |
-
-## Why Order Matters
-
-**"I'll write tests after to verify it works"**
-
-Tests written after code pass immediately. Passing immediately proves nothing:
-- Might test wrong thing
-- Might test implementation, not behavior
-- Might miss edge cases you forgot
-- You never saw it catch the bug
-
-Test-first forces you to see the test fail, proving it actually tests something.
-
-**"I already manually tested all the edge cases"**
-
-Manual testing is ad-hoc. You think you tested everything but:
-- No record of what you tested
-- Can't re-run when code changes
-- Easy to forget cases under pressure
-- "It worked when I tried it" ≠ comprehensive
-
-Automated tests are systematic. They run the same way every time.
-
-**"Deleting X hours of work is wasteful"**
-
-Sunk cost fallacy. The time is already gone. Your choice now:
-- Delete and rewrite with TDD (X more hours, high confidence)
-- Keep it and add tests after (30 min, low confidence, likely bugs)
-
-The "waste" is keeping code you can't trust. Working code without real tests is technical debt.
-
-**"TDD is dogmatic, being pragmatic means adapting"**
-
-TDD IS pragmatic:
-- Finds bugs before commit (faster than debugging after)
-- Prevents regressions (tests catch breaks immediately)
-- Documents behavior (tests show how to use code)
-- Enables refactoring (change freely, tests catch breaks)
-
-"Pragmatic" shortcuts = debugging in production = slower.
-
-**"Tests after achieve the same goals - it's spirit not ritual"**
-
-No. Tests-after answer "What does this do?" Tests-first answer "What should this do?"
-
-Tests-after are biased by your implementation. You test what you built, not what's required. You verify remembered edge cases, not discovered ones.
-
-Tests-first force edge case discovery before implementing. Tests-after verify you remembered everything (you didn't).
-
-30 minutes of tests after ≠ TDD. You get coverage, lose proof tests work.
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "Too simple to test" | Simple code breaks. Test takes 30 seconds. |
-| "I'll test after" | Tests passing immediately prove nothing. |
-| "Tests after achieve same goals" | Tests-after = "what does this do?" Tests-first = "what should this do?" |
-| "Already manually tested" | Ad-hoc ≠ systematic. No record, can't re-run. |
-| "Deleting X hours is wasteful" | Sunk cost fallacy. Keeping unverified code is technical debt. |
-| "Keep as reference, write tests first" | You'll adapt it. That's testing after. Delete means delete. |
-| "Need to explore first" | Fine. Throw away exploration, start with TDD. |
-| "Test hard = design unclear" | Listen to test. Hard to test = hard to use. |
-| "TDD will slow me down" | TDD faster than debugging. Pragmatic = test-first. |
-| "Manual test faster" | Manual doesn't prove edge cases. You'll re-test every change. |
-| "Existing code has no tests" | You're improving it. Add tests for existing code. |
-
-## Red Flags - STOP and Start Over
-
-- Code before test
-- Test after implementation
-- Test passes immediately
-- Can't explain why test failed
-- Tests added "later"
-- Rationalizing "just this once"
-- "I already manually tested it"
-- "Tests after achieve the same purpose"
-- "It's about spirit not ritual"
-- "Keep as reference" or "adapt existing code"
-- "Already spent X hours, deleting is wasteful"
-- "TDD is dogmatic, I'm being pragmatic"
-- "This is different because..."
-
-**All of these mean: Delete code. Start over with TDD.**
-
-## Example: Bug Fix
-
-**Bug:** Empty email accepted
-
-**RED**
-```typescript
-test('rejects empty email', async () => {
-  const result = await submitForm({ email: '' });
-  expect(result.error).toBe('Email required');
-});
-```
-
-**Verify RED**
-```bash
-$ npm test
-FAIL: expected 'Email required', got undefined
-```
-
-**GREEN**
-```typescript
-function submitForm(data: FormData) {
-  if (!data.email?.trim()) {
-    return { error: 'Email required' };
-  }
-  // ...
-}
-```
-
-**Verify GREEN**
-```bash
-$ npm test
-PASS
-```
-
-**REFACTOR**
-Extract validation for multiple fields if needed.
-
-## Verification Checklist
-
-Before marking work complete:
-
-- [ ] Every new function/method has a test
-- [ ] Watched each test fail before implementing
-- [ ] Each test failed for expected reason (feature missing, not typo)
-- [ ] Wrote minimal code to pass each test
-- [ ] All tests pass
-- [ ] Output pristine (no errors, warnings)
-- [ ] Tests use real code (mocks only if unavoidable)
-- [ ] Edge cases and errors covered
-
-Can't check all boxes? You skipped TDD. Start over.
-
-## When Stuck
-
-| Problem | Solution |
-|---------|----------|
-| Don't know how to test | Write wished-for API. Write assertion first. Ask your human partner. |
-| Test too complicated | Design too complicated. Simplify interface. |
-| Must mock everything | Code too coupled. Use dependency injection. |
-| Test setup huge | Extract helpers. Still complex? Simplify design. |
-
-## Debugging Integration
-
-Bug found? Write failing test reproducing it. Follow TDD cycle. Test proves fix and prevents regression.
-
-Never fix bugs without a test.
-
-## Testing Anti-Patterns
-
-When adding mocks or test utilities, read @testing-anti-patterns.md to avoid common pitfalls:
-- Testing mock behavior instead of real behavior
-- Adding test-only methods to production classes
-- Mocking without understanding dependencies
-
-## Final Rule
-
-```
-Production code → test exists and failed first
-Otherwise → not TDD
-```
-
-No exceptions without your human partner's permission.
+If a test feels hard to write, the code might have unclear responsibilities or too many dependencies. That's valuable feedback.

@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "documentation.apps.DocumentationConfig",
     "engine.apps.EngineConfig",
     "cms.apps.CMSConfig",
+    "management.apps.ManagementConfig",
 ]
 
 MIDDLEWARE = [

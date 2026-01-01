@@ -1,24 +1,25 @@
 """Unit tests for NGFW-related models.
 
 Tests for:
-- SCMCredential (renamed from StrataConfig concept)
-- NGFWDeploymentProfile
-- UserNGFW
+- SCMCredential (legacy, to be deprecated)
+- NGFWDeploymentProfile (legacy, to be deprecated)
+- UserNGFW (decoupled from credentials)
 - Range.ngfw FK relationship
 
 These tests focus on edge cases and subtle bugs:
 - Expiration boundary conditions
 - Encrypted field behavior
-- FK on_delete behavior
 - Status transitions
 - Query filtering logic
+
+Note: UserNGFW no longer has FK relationships to credential models.
+Credentials are managed by CMS and passed as hydrated config at provisioning time.
 """
 
 from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db.models import ProtectedError
 from django.utils import timezone
 
 from mission_control.models import (
@@ -308,79 +309,42 @@ class TestNGFWDeploymentProfile:
 
 @pytest.mark.django_db
 class TestUserNGFW:
-    """Tests for UserNGFW model."""
+    """Tests for UserNGFW model.
+
+    Note: UserNGFW no longer has credential FKs. Credentials are managed by CMS
+    and passed as hydrated config values at provisioning time.
+    """
 
     @pytest.fixture
     def user(self):
         return User.objects.create_user(username="test@example.com", email="test@example.com")
 
-    @pytest.fixture
-    def deployment_profile(self, user):
-        return NGFWDeploymentProfile.objects.create(
-            user=user,
-            name="Test Profile",
-            authcode="AUTH123",
-        )
-
-    @pytest.fixture
-    def scm_credential(self, user):
-        return SCMCredential.objects.create(
-            user=user,
-            name="Test SCM",
-            scm_folder_name="folder",
-            scm_pin_id="PIN",
-            scm_pin_value="secret",
-        )
-
-    def test_create_with_required_fields(self, user, deployment_profile):
-        """UserNGFW can be created with required fields."""
+    def test_create_with_required_fields(self, user):
+        """UserNGFW can be created with just user and name."""
         ngfw = UserNGFW.objects.create(
             user=user,
             name="My NGFW",
-            deployment_profile=deployment_profile,
         )
         assert ngfw.pk is not None
         assert ngfw.status == UserNGFW.Status.NOT_PROVISIONED
 
-    def test_scm_credential_nullable_for_otp_flow(self, user, deployment_profile):
-        """scm_credential can be null (OTP flow)."""
-        ngfw = UserNGFW.objects.create(
-            user=user,
-            name="OTP NGFW",
-            deployment_profile=deployment_profile,
-            scm_credential=None,
-        )
-        assert ngfw.scm_credential is None
+    def test_no_credential_fks(self, user):
+        """UserNGFW should not have credential FK fields (decoupled architecture)."""
+        ngfw = UserNGFW(user=user, name="Test")
+        assert not hasattr(ngfw, "deployment_profile")
+        assert not hasattr(ngfw, "scm_credential")
 
-    def test_scm_credential_can_be_set(self, user, deployment_profile, scm_credential):
-        """scm_credential can be set (PIN flow)."""
-        ngfw = UserNGFW.objects.create(
-            user=user,
-            name="PIN NGFW",
-            deployment_profile=deployment_profile,
-            scm_credential=scm_credential,
-        )
-        assert ngfw.scm_credential == scm_credential
-
-    def test_str_returns_name(self, user, deployment_profile):
+    def test_str_returns_name(self, user):
         """__str__ returns the NGFW name."""
-        ngfw = UserNGFW(
-            user=user,
-            name="Test NGFW",
-            deployment_profile=deployment_profile,
-        )
+        ngfw = UserNGFW(user=user, name="Test NGFW")
         assert str(ngfw) == "Test NGFW"
 
-    def test_default_status_is_not_provisioned(self, user, deployment_profile):
+    def test_default_status_is_not_provisioned(self, user):
         """Default status is NOT_PROVISIONED."""
-        ngfw = UserNGFW.objects.create(
-            user=user,
-            name="New NGFW",
-            deployment_profile=deployment_profile,
-        )
+        ngfw = UserNGFW.objects.create(user=user, name="New NGFW")
         assert ngfw.status == "not_provisioned"
 
-    def test_all_status_choices_valid(self, user, deployment_profile):
+    def test_all_status_choices_valid(self, user):
         """All status choices can be set."""
         valid_statuses = [
             "not_provisioned",
@@ -397,66 +361,28 @@ class TestUserNGFW:
             ngfw = UserNGFW.objects.create(
                 user=user,
                 name=f"NGFW {status}",
-                deployment_profile=deployment_profile,
                 status=status,
             )
             ngfw.full_clean()
             assert ngfw.status == status
 
-    # --- FK on_delete behavior tests ---
+    def test_user_cascade_deletes_ngfw(self, user):
+        """Deleting user cascades to delete their NGFWs."""
+        ngfw = UserNGFW.objects.create(user=user, name="User's NGFW")
+        ngfw_pk = ngfw.pk
 
-    def test_deployment_profile_protect_prevents_delete(self, user, deployment_profile):
-        """Deleting deployment_profile with linked NGFW raises ProtectedError."""
-        UserNGFW.objects.create(
-            user=user,
-            name="Linked NGFW",
-            deployment_profile=deployment_profile,
-        )
+        user.delete()
 
-        with pytest.raises(ProtectedError):
-            deployment_profile.delete()
-
-    def test_scm_credential_protect_prevents_delete(self, user, deployment_profile, scm_credential):
-        """Deleting scm_credential with linked NGFW raises ProtectedError."""
-        UserNGFW.objects.create(
-            user=user,
-            name="Linked NGFW",
-            deployment_profile=deployment_profile,
-            scm_credential=scm_credential,
-        )
-
-        with pytest.raises(ProtectedError):
-            scm_credential.delete()
-
-    def test_user_delete_blocked_by_protected_fks(self, user, deployment_profile):
-        """Deleting user is blocked when they have NGFWs with protected FKs.
-
-        This is intentional - users must soft-delete their credentials and NGFWs
-        before account deletion can proceed. Prevents orphaned expensive resources.
-        """
-        UserNGFW.objects.create(
-            user=user,
-            name="User's NGFW",
-            deployment_profile=deployment_profile,
-        )
-
-        # User deletion is blocked because NGFWDeploymentProfile uses PROTECT
-        with pytest.raises(ProtectedError):
-            user.delete()
+        assert not UserNGFW.objects.filter(pk=ngfw_pk).exists()
 
     # --- active_for_user tests ---
 
-    def test_active_for_user_excludes_deleted(self, user, deployment_profile):
+    def test_active_for_user_excludes_deleted(self, user):
         """active_for_user excludes soft-deleted NGFWs."""
-        active = UserNGFW.objects.create(
-            user=user,
-            name="Active NGFW",
-            deployment_profile=deployment_profile,
-        )
+        active = UserNGFW.objects.create(user=user, name="Active NGFW")
         UserNGFW.objects.create(
             user=user,
             name="Deleted NGFW",
-            deployment_profile=deployment_profile,
             deleted_at=timezone.now(),
         )
 
@@ -464,25 +390,12 @@ class TestUserNGFW:
         assert len(result) == 1
         assert result[0] == active
 
-    def test_active_for_user_filters_by_user(self, user, deployment_profile):
+    def test_active_for_user_filters_by_user(self, user):
         """active_for_user only returns NGFWs for specified user."""
         other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
-        other_profile = NGFWDeploymentProfile.objects.create(
-            user=other_user,
-            name="Other Profile",
-            authcode="OTHER",
-        )
 
-        UserNGFW.objects.create(
-            user=user,
-            name="My NGFW",
-            deployment_profile=deployment_profile,
-        )
-        UserNGFW.objects.create(
-            user=other_user,
-            name="Other NGFW",
-            deployment_profile=other_profile,
-        )
+        UserNGFW.objects.create(user=user, name="My NGFW")
+        UserNGFW.objects.create(user=other_user, name="Other NGFW")
 
         result = list(UserNGFW.active_for_user(user))
         assert len(result) == 1
@@ -501,20 +414,8 @@ class TestRangeNGFWRelationship:
         return User.objects.create_user(username="test@example.com", email="test@example.com")
 
     @pytest.fixture
-    def deployment_profile(self, user):
-        return NGFWDeploymentProfile.objects.create(
-            user=user,
-            name="Test Profile",
-            authcode="AUTH123",
-        )
-
-    @pytest.fixture
-    def ngfw(self, user, deployment_profile):
-        return UserNGFW.objects.create(
-            user=user,
-            name="Test NGFW",
-            deployment_profile=deployment_profile,
-        )
+    def ngfw(self, user):
+        return UserNGFW.objects.create(user=user, name="Test NGFW")
 
     def test_range_ngfw_nullable(self, user):
         """Range.ngfw can be null (no NGFW attached)."""
@@ -526,13 +427,10 @@ class TestRangeNGFWRelationship:
         range_obj = Range.objects.create(user=user, ngfw=ngfw)
         assert range_obj.ngfw == ngfw
 
-    def test_ngfw_delete_sets_range_ngfw_null(self, user, ngfw, deployment_profile):
+    def test_ngfw_delete_sets_range_ngfw_null(self, user, ngfw):
         """Deleting NGFW sets Range.ngfw to NULL (SET_NULL behavior)."""
         range_obj = Range.objects.create(user=user, ngfw=ngfw)
 
-        # Must unlink from deployment_profile first to delete NGFW
-        # Actually, we need to soft-delete or use a workaround
-        # For this test, we'll delete the profile too
         ngfw.delete()
 
         range_obj.refresh_from_db()

@@ -636,7 +636,7 @@ def list_agents_for_launch(request):
 @require_GET
 def ngfw_list(request):
     """List user's NGFWs with status badges."""
-    ngfws = UserNGFW.active_for_user(request.user).select_related("deployment_profile", "scm_credential")
+    ngfws = UserNGFW.active_for_user(request.user)
 
     context = {
         "page_title": "NGFWs",
@@ -817,11 +817,12 @@ def api_ngfw_provision(request):
             return JsonResponse({"error": "otp_folder required for OTP method"}, status=400)
 
     # Create NGFW record
+    # Note: Credentials are managed by CMS, not stored on UserNGFW.
+    # The credential IDs are validated above but will be passed to
+    # the provisioning backend through the CMS service interface.
     ngfw = UserNGFW.objects.create(
         user=request.user,
         name=name,
-        deployment_profile=deployment_profile,
-        scm_credential=scm_credential,
         status=UserNGFW.Status.PROVISIONING,
     )
 

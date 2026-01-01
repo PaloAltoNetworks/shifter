@@ -1,10 +1,11 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 0.0.0 → 1.0.0 (MAJOR - initial constitution)
-Modified principles: N/A (first version)
+Version change: 0.0.0 → 1.2.0 (MINOR - added Speed to Value, customer-facing polish, revised Simplicity)
+Modified principles:
+  - V. Simplicity First → V. Simplicity & Pragmatism (removed single-process constraint)
 Added sections:
-  - Core Principles (5 principles)
+  - Core Principles (6 principles, added Speed to Value)
   - Platform Constraints
   - Development Workflow
   - Governance
@@ -21,7 +22,19 @@ Follow-up TODOs:
 
 ## Core Principles
 
-### I. Safety & Isolation
+### I. Speed to Value
+
+User time is worth $100-200/hr. Current demo setup can take a day or more. Every
+feature MUST minimize time from login to productive use.
+
+- Self-service by default; users MUST NOT need admin intervention for standard operations
+- Turnkey experience: users cannot install tools locally on work laptops
+- Pre-built scenarios and templates MUST be available for common use cases
+- Provisioning status MUST be visible in real-time (WebSocket, not polling)
+- Async operations and multi-process execution where needed for responsiveness
+- Customer-facing polish: UI MUST be consistent with PANW Cortex product suite aesthetics
+
+### II. Safety & Isolation
 
 Ranges MUST be network-isolated. All infrastructure provisioned by the Engine runs in a
 dedicated Range VPC with egress filtering via AWS Network Firewall. No direct internet
@@ -33,7 +46,7 @@ from the Portal VPC.
 - SSH access MUST route through authenticated WebSocket consumers in Mission Control
 - MFA MUST be enforced for all user authentication (Cognito TOTP)
 
-### II. Human Oversight
+### III. Human Oversight
 
 Human oversight is required for all scenario execution. AI-driven attack capabilities
 exist to provide realistic training, but all actions MUST be logged and auditable.
@@ -43,14 +56,14 @@ exist to provide realistic training, but all actions MUST be logged and auditabl
 - No autonomous attack execution without user initiation
 - Activity logs MUST include user, action, timestamp, and relevant metadata
 
-### III. Domain-Driven Design
+### IV. Domain-Driven Design
 
 The platform is organized into four bounded contexts, each a Django app with distinct
 responsibilities. Cross-domain communication uses Python service interfaces, not HTTP.
 
 | Domain | App | Responsibility |
 |--------|-----|----------------|
-| Mission Control | `mission_control` | Presentation layer. DRF API, views, WebSocket consumers. |
+| Mission Control | `mission_control` | Presentation layer. Views, API endpoints, WebSocket consumers. |
 | Shifter Engine | `engine` | Infrastructure lifecycle. Range provisioning, NGFW operations. |
 | Shifter CMS | `cms` | Content management. Assets, credentials, scenarios. |
 | Shifter Management | `management` | Platform administration. Audit logging, user management. |
@@ -60,7 +73,7 @@ responsibilities. Cross-domain communication uses Python service interfaces, not
 - Cross-domain foreign keys are permitted; business logic via service calls
 - Status updates MUST use Redis pub/sub channels, not database polling
 
-### IV. Infrastructure as Code
+### V. Infrastructure as Code
 
 All AWS infrastructure MUST be defined in Terraform. Manual console changes are
 prohibited except for initial bootstrap operations.
@@ -71,21 +84,23 @@ prohibited except for initial bootstrap operations.
 - OIDC federation for CI/CD authentication; no long-lived AWS credentials
 - Range subnets created at runtime by Pulumi Provisioner (Engine), not Terraform
 
-### V. Simplicity First
+### VI. Simplicity & Pragmatism
 
-Start simple. Add complexity only when justified by concrete requirements, not
-hypothetical future needs.
+Keep things simple. Don't reinvent the wheel. Use proven, solid technologies.
 
 - YAGNI: Do not build features that are not immediately required
 - Prefer Django conventions over custom abstractions
-- Single process deployment; microservices complexity not warranted for current scale
-- REST via DRF; no GraphQL or alternative API paradigms without justification
+- Use multi-process/async where needed for performance and responsiveness
+- Question existence: Does this file/abstraction need to exist? Is it duplicative?
 
 ## Platform Constraints
 
-Shifter is an internal enablement tool, not a product.
+Shifter is an enterprise cyber range platform in the broadest sense. It is an internal
+enablement tool, not a product—but it is used in front of customers and MUST be polished.
 
-- Target users: Technical sellers demonstrating XDR/XSIAM capabilities
+- Target users: PANW SecOps Domain Consultants who need turnkey, self-service access
+- Use cases: XDR/XSIAM demos, attack scenario testing, purple/red/blue team exercises
+- Customer-facing: UI/UX MUST be professional and consistent with Cortex product suite
 - NOT for product/stress testing PANW products or services
 - NOT a replacement for BYOS, shared demo tenants, or official enablement tools
 - Domain: `keplerops.com` (temporary; will migrate to `paloaltonetworks.com` if adopted)
@@ -136,9 +151,24 @@ This constitution supersedes all other development practices. Amendments require
 - **MINOR**: New principles added or existing guidance materially expanded
 - **PATCH**: Clarifications, wording fixes, non-semantic refinements
 
+### Agent Conduct
+
+AI agents working on this codebase MUST act as a collaborative principal engineer:
+
+- Do exactly what is requested, not some interpreted variation
+- Ask before making changes beyond what was explicitly requested
+- Never add "helpful" extras, refactors, or improvements unless you get explicit permission FIRST
+- Think before doing: understand context and the bigger picture before starting any task
+- Flag problems: surface oddities, inconsistencies, or subtle breakage rather than skating past
+- Stop and discuss with the user if something doesn't make sense
+- Never make architectural decisions for the user; get explicit permission
+- Follow the user's lead; do not jump ahead on tasks
+- NEVER run git commands (add, commit, push, PR) unless explicitly instructed by the user
+- MUST follow the TDD workflow in `.claude/skills/tdd-plan/SKILL.md` for all implementation work
+
 ### Compliance
 
-All PRs and code reviews MUST verify alignment with these principles. Use
-`.cursor/rules` and agent guidance files for runtime development guidance.
+Code reviews MUST verify alignment with these principles. Use `.cursor/rules` and
+agent guidance files for runtime development guidance.
 
-**Version**: 1.0.0 | **Ratified**: TODO(RATIFICATION_DATE): original adoption date unknown | **Last Amended**: 2025-12-31
+**Version**: 1.2.0 | **Ratified**: TODO(RATIFICATION_DATE): original adoption date unknown | **Last Amended**: 2025-01-01

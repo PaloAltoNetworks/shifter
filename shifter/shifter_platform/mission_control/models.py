@@ -183,19 +183,9 @@ class UserNGFW(Asset):
         related_name="ngfws",
     )
 
-    # Credentials (SCMCredential nullable for OTP flow)
-    scm_credential = models.ForeignKey(
-        SCMCredential,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="ngfws",
-    )
-    deployment_profile = models.ForeignKey(
-        NGFWDeploymentProfile,
-        on_delete=models.PROTECT,
-        related_name="ngfws",
-    )
+    # Note: Credentials are managed by CMS, not stored here.
+    # Engine receives hydrated config with decrypted values at provisioning time.
+    # CMS tracks credential→range associations if needed.
 
     # Lifecycle
     status = models.CharField(

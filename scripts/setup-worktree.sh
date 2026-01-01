@@ -42,18 +42,18 @@ if [ -f "$MAIN_REPO/shifter/shifter_platform/.env" ]; then
     fi
 fi
 
-# Shifter-engine venv (if it exists in main repo)
-if [ -d "$MAIN_REPO/shifter-engine/.venv" ]; then
-    if [ -L "$WORKTREE_ROOT/shifter-engine/.venv" ]; then
-        echo "shifter-engine/.venv symlink already exists"
-    elif [ -d "$WORKTREE_ROOT/shifter-engine/.venv" ]; then
-        echo "Removing empty shifter-engine/.venv directory..."
-        rm -rf "$WORKTREE_ROOT/shifter-engine/.venv"
-        ln -s "$MAIN_REPO/shifter-engine/.venv" "$WORKTREE_ROOT/shifter-engine/.venv"
-        echo "Created shifter-engine/.venv symlink"
-    elif [ -d "$WORKTREE_ROOT/shifter-engine" ]; then
-        ln -s "$MAIN_REPO/shifter-engine/.venv" "$WORKTREE_ROOT/shifter-engine/.venv"
-        echo "Created shifter-engine/.venv symlink"
+# Engine provisioner venv (if it exists in main repo)
+if [ -d "$MAIN_REPO/shifter/engine/provisioner/.venv" ]; then
+    if [ -L "$WORKTREE_ROOT/shifter/engine/provisioner/.venv" ]; then
+        echo "shifter/engine/provisioner/.venv symlink already exists"
+    elif [ -d "$WORKTREE_ROOT/shifter/engine/provisioner/.venv" ]; then
+        echo "Removing empty shifter/engine/provisioner/.venv directory..."
+        rm -rf "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
+        ln -s "$MAIN_REPO/shifter/engine/provisioner/.venv" "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
+        echo "Created shifter/engine/provisioner/.venv symlink"
+    elif [ -d "$WORKTREE_ROOT/shifter/engine/provisioner" ]; then
+        ln -s "$MAIN_REPO/shifter/engine/provisioner/.venv" "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
+        echo "Created shifter/engine/provisioner/.venv symlink"
     fi
 fi
 

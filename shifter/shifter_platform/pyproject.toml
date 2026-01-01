@@ -1,7 +1,7 @@
 [project]
-name = "shifter-portal"
+name = "shifter-platform"
 version = "0.1.0"
-description = "Self-service cyber range portal"
+description = "Self-service cyber range platform"
 requires-python = ">=3.12"
 dependencies = [
     "asyncssh",

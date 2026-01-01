@@ -1,5 +1,5 @@
 """
-Django settings for Shifter portal.
+Django settings for Shifter platform.
 """
 
 import os
@@ -266,7 +266,7 @@ OIDC_EXEMPT_URLS = [
 # ------------------------------------------------------------------------------
 # Used for encrypting sensitive credential fields (SCM PINs, authcodes)
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-# In production: stored in Secrets Manager alongside other portal secrets
+# In production: stored in Secrets Manager alongside other platform secrets
 
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
 if not FIELD_ENCRYPTION_KEY:

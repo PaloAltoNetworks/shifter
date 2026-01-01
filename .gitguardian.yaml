@@ -12,6 +12,6 @@ paths-ignore:
   # Shifter Platform test directory
   - "shifter/shifter_platform/tests/**"
   # Shifter Engine test directory
-  - "shifter-engine/tests/**"
+  - "shifter/engine/provisioner/tests/**"
   # Legacy path (may appear in git history)
   - "pulumi-provisioner/tests/**"

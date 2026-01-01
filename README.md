@@ -17,59 +17,6 @@ Self-service enterprise cyber range platform. Users provision isolated attack en
 
 Shifter complements existing demo environments and tools. It is not intended to replace them. BYOS, shared demo tenants, and other enablement resources are the official and primary demo tooling for technical sellers.
 
-## Quick Links
-
-| Doc | Purpose |
-|-----|---------|
-| [Local Setup](shifter/shifter_platform/documentation/docs/dev/local-setup.md) | Get the platform running locally |
-| [Architecture](shifter/shifter_platform/documentation/docs/architecture.md) | System design and components |
-| [Portal](shifter/shifter_platform/documentation/docs/portal/index.md) | Django app structure |
-| [Execution Plane](shifter/shifter_platform/documentation/docs/execution/index.md) | AMIs, ranges, provisioning |
-
-## Repo Structure
-
-```
-├── shifter/
-│   ├── shifter_platform/ # Django app (auth, UI, range management)
-│   └── packer/           # AMI builds (Kali, victims)
-├── shifter-engine/       # Pulumi-based range provisioner (ECS task)
-├── platform/terraform/   # Infrastructure (VPCs, IAM, runners)
-│   ├── environments/     # dev/, prod/ configs
-│   ├── modules/          # Reusable modules
-│   └── global/           # IAM, OIDC, runners
-└── scripts/              # Dev utilities
-```
-
-## Key Commands
-
-```bash
-# Shifter Platform (Django)
-cd shifter/shifter_platform && uv run python manage.py runserver
-
-# Tests
-cd shifter/shifter_platform && uv run pytest
-cd shifter-engine && pytest
-
-# AMI build (triggers GitHub workflow)
-./scripts/ami.sh -b kali    # Build in dev
-./scripts/ami.sh -p kali    # Promote to prod
-
-# Terraform - environment infra (CI/CD managed)
-cd platform/terraform/environments/dev/portal && terraform plan
-
-# Terraform - global infra (manual, not in CI/CD)
-./scripts/iam-deploy.sh dev   # IAM, OIDC roles
-cd platform/terraform/global/github-runner && terraform apply -var-file=dev.tfvars
-```
-
-## Git Workflow
-
-`feature/* → dev → main`
-
-- `main` deploys to prod
-- `dev` deploys to dev
-- PRs required for all merges
-
 ## Ethics
 
 AI-driven attack capabilities exist in the wild. Defenders need realistic exposure. [Read more](shifter/shifter_platform/documentation/docs/ops/ethics.md).

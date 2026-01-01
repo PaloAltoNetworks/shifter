@@ -1,5 +1,5 @@
 """
-ASGI config for Shifter portal.
+ASGI config for Shifter platform.
 
 Configures Django Channels for WebSocket support (terminal SSH connections).
 """

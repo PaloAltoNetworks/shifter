@@ -222,6 +222,11 @@ variable "redis_engine_version" {
   type        = string
 }
 
+variable "redis_enable_replication" {
+  description = "Enable Redis replication with automatic failover"
+  type        = bool
+}
+
 # ------------------------------------------------------------------------------
 # Log Aggregation
 # ------------------------------------------------------------------------------

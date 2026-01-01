@@ -1,4 +1,4 @@
-"""Simple views for the portal."""
+"""Simple views for the platform."""
 
 from django.shortcuts import render
 

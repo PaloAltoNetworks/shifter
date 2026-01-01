@@ -147,7 +147,7 @@ class DashboardManager {
      * Handle scenario dropdown change.
      * AD scenario uses same agent for DC and victim (no separate DC agent needed).
      */
-    _onScenarioChange(scenario) {
+    _onScenarioChange(_scenario) {
         // DC agent section is not needed - same agent used for DC and victim
         // Keep it hidden for all scenarios
         if (this.dcAgentSection) {

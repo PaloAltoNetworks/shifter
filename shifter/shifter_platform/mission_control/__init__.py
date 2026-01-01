@@ -1,1 +1,1 @@
-# Mission Control - authenticated portal area
+# Mission Control - authenticated platform area

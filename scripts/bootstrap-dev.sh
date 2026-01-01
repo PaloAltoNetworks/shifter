@@ -612,7 +612,7 @@ echo ""
 echo "Add these to GitHub secrets:"
 echo "  AWS_ROLE_ARN_DEV: $ROLE_ARN"
 echo ""
-echo "Use these in terraform/environments/dev/backend.tf:"
+echo "Use these in platform/terraform/environments/dev/backend.tf:"
 echo ""
 cat <<EOF
 terraform {

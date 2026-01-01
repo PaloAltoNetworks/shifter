@@ -76,7 +76,7 @@ echo "Action: $ACTION"
 echo "AWS Profile: $AWS_PROFILE"
 echo "=========================================="
 
-cd "$(dirname "$0")/../terraform/global/iam"
+cd "$(dirname "$0")/../platform/terraform/global/iam"
 
 # Clean and reinitialize for the target environment
 rm -rf .terraform .terraform.lock.hcl

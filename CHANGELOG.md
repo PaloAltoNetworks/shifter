@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2025-12-31
+
+### Added
+- Portal NGFW Management UI (#416)
+  - NGFW list view at `/mission-control/assets/ngfw/`
+  - NGFW detail view with AWS resources, PAN-OS info, linked ranges
+  - 5-step setup wizard (Name & Credentials → Registration → Confirm → Provisioning → Complete)
+  - Deprovision confirmation view with linked ranges warning
+  - API endpoints:
+    - `GET /api/ngfw/list/` - List user's NGFWs
+    - `POST /api/ngfw/` - Start provisioning
+    - `GET /api/ngfw/<id>/status/` - Poll provisioning status
+    - `POST /api/ngfw/<id>/start/` - Start NGFW
+    - `POST /api/ngfw/<id>/stop/` - Stop NGFW
+    - `POST /api/ngfw/<id>/deprovision/` - Deprovision NGFW
+  - WebSocket consumer for real-time provisioning status updates
+  - XDR manual configuration instructions with serial number display
+  - 62 tests covering all views and APIs
+- Test review skill (`.claude/skills/test-review/`)
+  - 6 quality criteria with specific fail indicators
+  - Anti-pattern catalog by severity (HIGH/MEDIUM/LOW)
+  - Coverage gap detection checklist
+  - Scoring formula and fix guidance
+
+### Note
+- NGFW API endpoints are stubbed pending Issue #414 (UserNGFWStack)
+- UI is complete and functional with simulated provisioning flow
+
 ## [0.9.7] - 2025-12-30
 
 ### Security
@@ -52,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Development tools: build-essential, Python 3, Node.js 20.x, Git
   - Claude Code configured for AWS Bedrock
 - GitHub Actions workflow support for Ubuntu AMI builds
-- Ubuntu test classes in packer/tests/test_packer.py
+- Ubuntu test classes in shifter/packer/tests/test_packer.py
 
 ### Changed
 - SSM parameter for victim AMI renamed from `/shifter/ami/victim` to `/shifter/ami/ubuntu`
@@ -206,7 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Documentation section in Mission Control sidebar
-- Renders markdown docs from `portal/documentation/docs/` with navigation tree
+- Renders markdown docs from `shifter/shifter_platform/documentation/docs/` with navigation tree
 - Mermaid.js diagram support for architecture diagrams
 - Cortex XDR dark theme styling for documentation pages
 

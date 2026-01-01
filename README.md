@@ -17,62 +17,9 @@ Self-service enterprise cyber range platform. Users provision isolated attack en
 
 Shifter complements existing demo environments and tools. It is not intended to replace them. BYOS, shared demo tenants, and other enablement resources are the official and primary demo tooling for technical sellers.
 
-## Quick Links
-
-| Doc | Purpose |
-|-----|---------|
-| [Local Setup](portal/documentation/docs/dev/local-setup.md) | Get the portal running locally |
-| [Architecture](portal/documentation/docs/architecture.md) | System design and components |
-| [Portal](portal/documentation/docs/portal/index.md) | Django app structure |
-| [Execution Plane](portal/documentation/docs/execution/index.md) | AMIs, ranges, provisioning |
-
-## Repo Structure
-
-```
-shifter/
-├── portal/              # Django app (auth, UI, range management)
-├── shifter-engine/      # Pulumi-based range provisioner (ECS task)
-├── terraform/           # Infrastructure (VPCs, IAM, runners)
-│   ├── environments/    # dev/, prod/ configs
-│   ├── modules/         # Reusable modules
-│   └── global/          # IAM, OIDC, runners
-├── packer/              # AMI builds (Kali, victims)
-└── scripts/             # Dev utilities
-```
-
-## Key Commands
-
-```bash
-# Portal
-cd portal && uv run python manage.py runserver
-
-# Tests
-cd portal && uv run pytest
-cd shifter-engine && pytest
-
-# AMI build (triggers GitHub workflow)
-./scripts/ami.sh -b kali    # Build in dev
-./scripts/ami.sh -p kali    # Promote to prod
-
-# Terraform - environment infra (CI/CD managed)
-cd terraform/environments/dev/portal && terraform plan
-
-# Terraform - global infra (manual, not in CI/CD)
-./scripts/iam-deploy.sh dev   # IAM, OIDC roles
-cd terraform/global/github-runner && terraform apply -var-file=dev.tfvars
-```
-
-## Git Workflow
-
-`feature/* → dev → main`
-
-- `main` deploys to prod
-- `dev` deploys to dev
-- PRs required for all merges
-
 ## Ethics
 
-AI-driven attack capabilities exist in the wild. Defenders need realistic exposure. [Read more](portal/documentation/docs/ops/ethics.md).
+AI-driven attack capabilities exist in the wild. Defenders need realistic exposure. [Read more](shifter/shifter_platform/documentation/docs/ops/ethics.md).
 
 ## Safety
 

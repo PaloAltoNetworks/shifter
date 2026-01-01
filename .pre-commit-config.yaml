@@ -7,18 +7,18 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-        files: ^portal/
+        files: ^shifter/shifter_platform/
       - id: ruff-format
-        files: ^portal/
+        files: ^shifter/shifter_platform/
 
-  # Python - Tests (portal)
+  # Python - Tests (shifter_platform)
   - repo: local
     hooks:
-      - id: pytest-portal
-        name: pytest (portal)
-        entry: bash -c 'cd portal && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q'
+      - id: pytest-shifter
+        name: pytest (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q'
         language: system
-        files: ^portal/
+        files: ^shifter/shifter_platform/
         pass_filenames: false
         always_run: true
 
@@ -27,10 +27,10 @@ repos:
     rev: 1.9.2
     hooks:
       - id: bandit
-        args: [-c, portal/pyproject.toml, -r]
+        args: [-c, shifter/shifter_platform/pyproject.toml, -r]
         additional_dependencies: ["bandit[toml]"]
-        files: ^portal/
-        exclude: ^portal/(tests|\.venv)/
+        files: ^shifter/shifter_platform/
+        exclude: ^shifter/shifter_platform/(tests|\.venv)/
 
   # General
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -46,16 +46,23 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^shifter-engine/tests/  # Tests check key format strings
+        exclude: ^shifter/engine/provisioner/tests/  # Tests check key format strings
 
-  # CSS - Stylelint
+  # JavaScript/CSS - shifter_platform linting
   - repo: local
     hooks:
-      - id: stylelint
-        name: stylelint
-        entry: npx stylelint --fix
+      - id: eslint-shifter-platform
+        name: eslint (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && npx eslint --fix static/js/'
         language: system
-        files: ^portal/static/css/.*\.css$
+        files: ^shifter/shifter_platform/static/js/.*\.js$
+        types: [javascript]
+
+      - id: stylelint-shifter-platform
+        name: stylelint (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && npx stylelint --fix static/css/'
+        language: system
+        files: ^shifter/shifter_platform/static/css/.*\.css$
         types: [css]
 
   # Packer tests
@@ -63,9 +70,9 @@ repos:
     hooks:
       - id: pytest-packer
         name: pytest (packer)
-        entry: bash -c 'cd packer && uv run pytest tests/ -q'
+        entry: bash -c 'cd shifter/packer && uv run pytest tests/ -q'
         language: system
-        files: ^packer/
+        files: ^shifter/packer/
         pass_filenames: false
 
   # Terraform
@@ -73,18 +80,18 @@ repos:
     rev: v1.96.3
     hooks:
       - id: terraform_fmt
-        files: ^terraform/
+        files: ^platform/terraform/
       - id: terraform_validate
-        files: ^terraform/
+        files: ^platform/terraform/
 
   # IaC Security (Terraform, Dockerfile)
   - repo: https://github.com/bridgecrewio/checkov
     rev: 3.2.346
     hooks:
       - id: checkov
-        files: ^terraform/
+        files: ^platform/terraform/
         args:
-          [--quiet, --compact, --directory, terraform/, --soft-fail]
+          [--quiet, --compact, --directory, platform/terraform/, --soft-fail]
 
   # Shell scripts
   - repo: https://github.com/shellcheck-py/shellcheck-py

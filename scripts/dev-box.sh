@@ -50,7 +50,7 @@ case "${1:-status}" in
         instance_id=$(get_instance_id)
         if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
             echo "Dev box not found. Deploy it first with:"
-            echo "  cd terraform/global/dev-box && terraform apply"
+            echo "  cd platform/terraform/global/dev-box && terraform apply"
             exit 1
         fi
 
@@ -94,7 +94,7 @@ case "${1:-status}" in
         instance_id=$(get_instance_id)
         if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
             echo "Dev box not found. Deploy it first with:"
-            echo "  cd terraform/global/dev-box && terraform apply"
+            echo "  cd platform/terraform/global/dev-box && terraform apply"
             exit 1
         fi
 

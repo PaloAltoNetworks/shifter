@@ -1,0 +1,23 @@
+<powershell>
+# Windows victim instance setup script
+# Minimal - all real setup is handled by SSM plans
+
+$ErrorActionPreference = "Stop"
+$LogFile = "C:\Windows\Temp\user-data.log"
+
+function Log-Message {
+    param([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $Message" | Out-File -FilePath $LogFile -Append
+    Write-Host $Message
+}
+
+Log-Message "Victim Windows instance booting..."
+
+# All setup (hostname, SSH, XDR) is handled by SSM plans:
+#   - BootstrapPlan: hostname + SSH configuration
+#   - XDRAgentInstallPlan: XDR agent installation
+# This keeps user_data minimal and testable.
+
+Log-Message "user_data complete. SSM will handle remaining setup."
+</powershell>

@@ -1,8 +1,17 @@
 # .gitguardian.yaml
-# GitGuardian configuration for APTL security lab
-# Only ignore specific paths with intentional test credentials
+# GitGuardian configuration for Shifter cyber range
+# Ignore test files that contain mock credentials
 
 version: v1
 
-# Ignore only CTF scenarios (files/* already in .gitignore)
 paths-ignore:
+  # Test files contain mock/fake credentials for unit tests
+  - "**/tests/**"
+  - "**/test_*.py"
+  - "**/conftest.py"
+  # Shifter Platform test directory
+  - "shifter/shifter_platform/tests/**"
+  # Shifter Engine test directory
+  - "shifter/engine/provisioner/tests/**"
+  # Legacy path (may appear in git history)
+  - "pulumi-provisioner/tests/**"

@@ -21,8 +21,8 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
       range: ${{ steps.filter.outputs.range }}
-      pulumi_provisioner: ${{ steps.filter.outputs.pulumi_provisioner }}
-      portal: ${{ steps.filter.outputs.portal }}
+      shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
+      shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
     steps:
@@ -33,33 +33,36 @@ jobs:
         with:
           filters: |
             core:
-              - 'terraform/modules/ecr/**'
-              - 'terraform/environments/*/*.tf'
+              - 'platform/terraform/modules/ecr/**'
+              - 'platform/terraform/environments/*/*.tf'
               - '.github/workflows/_core.yml'
               - '.github/workflows/deploy.yml'
             range:
-              - 'terraform/modules/range/**'
-              - 'terraform/modules/pulumi-state/**'
-              - 'terraform/environments/*/range/**'
+              - 'platform/terraform/modules/range/**'
+              - 'platform/terraform/modules/pulumi-state/**'
+              - 'platform/terraform/environments/*/range/**'
               - '.github/workflows/_range.yml'
             shifter_engine:
-              - 'shifter-engine/**'
-              - 'terraform/modules/pulumi-provisioner/**'
-              - 'terraform/modules/ecr/**'
-              - 'terraform/environments/*/*.tf'
+              - 'shifter/engine/provisioner/**'
+              - 'platform/terraform/modules/pulumi-provisioner/**'
+              - 'platform/terraform/modules/ecr/**'
+              - 'platform/terraform/environments/*/*.tf'
               - '.github/workflows/_shifter-engine.yml'
               - '.github/workflows/deploy.yml'
-            portal:
-              - 'terraform/modules/portal/**'
-              - 'terraform/environments/*/portal/**'
-              - 'portal/**'
-              - '.github/workflows/_portal.yml'
+            shifter_platform:
+              - 'platform/terraform/modules/portal/**'
+              - 'platform/terraform/environments/*/portal/**'
+              - 'shifter/**'
+              - '.github/workflows/_shifter-platform.yml'
 
       - name: Set environment
         id: env
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             ENV="${{ github.base_ref == 'dev' && 'dev' || 'prod' }}"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual runs always target dev for safety
+            ENV="dev"
           elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
             ENV="dev"
           else
@@ -69,7 +72,7 @@ jobs:
           echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> $GITHUB_OUTPUT
 
   # ============================================================================
-  # DEPENDENCY CHAIN: Core -> Range -> Portal
+  # DEPENDENCY CHAIN: Core -> Range -> Platform
   # Each component waits for its upstream dependency before running
   # ============================================================================
 
@@ -79,8 +82,8 @@ jobs:
     if: |
       needs.changes.outputs.core == 'true' ||
       needs.changes.outputs.range == 'true' ||
-      needs.changes.outputs.pulumi_provisioner == 'true' ||
-      needs.changes.outputs.portal == 'true' ||
+      needs.changes.outputs.shifter_engine == 'true' ||
+      needs.changes.outputs.shifter_platform == 'true' ||
       github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/_quality.yml
 
@@ -130,16 +133,16 @@ jobs:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
 
-  portal:
-    name: Portal
+  shifter_platform:
+    name: Shifter Platform
     needs: [changes, quality, range, shifter-engine]
     if: |
       always() &&
-      (needs.changes.outputs.portal == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&
       (needs.shifter-engine.result == 'success' || needs.shifter-engine.result == 'skipped') &&
       needs.quality.result == 'success'
-    uses: ./.github/workflows/_portal.yml
+    uses: ./.github/workflows/_shifter-platform.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
       is_dev: ${{ needs.changes.outputs.is_dev == 'true' }}

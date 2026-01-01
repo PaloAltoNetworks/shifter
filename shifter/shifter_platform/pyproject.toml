@@ -18,6 +18,7 @@ dependencies = [
     "markdown",
     "mozilla-django-oidc",
     "psycopg[binary]",
+    "pydantic>=2.12.5",
     "python-dotenv",
     "whitenoise",
 ]

@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when doing any development work, before writing implementation or refactoring or bug fix or any other code change.
+description: You must follow this skill for all development work, before writing implementation or refactoring or bug fix or any other code change. You must structure you TODO as this task describes.
 ---
 # Test-Driven Development Skill
 

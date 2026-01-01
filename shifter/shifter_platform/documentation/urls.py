@@ -8,6 +8,6 @@ app_name = "documentation"
 
 urlpatterns = [
     path("", views.doc_index, name="index"),
-    # Catch-all for nested paths like "portal/design-system"
+    # Catch-all for nested paths like "platform_infrastructure/networking"
     re_path(r"^(?P<path>.+)/$", views.doc_page, name="page"),
 ]

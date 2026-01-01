@@ -34,3 +34,8 @@ variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
 }
+
+variable "enable_replication" {
+  description = "Enable replication group with automatic failover (false for single-node)"
+  type        = bool
+}

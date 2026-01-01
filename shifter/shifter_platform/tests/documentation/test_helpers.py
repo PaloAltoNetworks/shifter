@@ -231,7 +231,7 @@ class TestPathSanitization:
         import os
 
         # This is what we use in the view
-        result = os.path.normpath("portal/../index")
+        result = os.path.normpath("section/../index")
         assert ".." not in result
 
     def test_lstrip_removes_leading_slash(self):

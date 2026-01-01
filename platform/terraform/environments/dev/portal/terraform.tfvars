@@ -91,8 +91,9 @@ scale_down_threshold = 30
 # Redis
 # ------------------------------------------------------------------------------
 
-redis_node_type      = "cache.t3.micro"
-redis_engine_version = "7.1"
+redis_node_type          = "cache.t3.micro"
+redis_engine_version     = "7.1"
+redis_enable_replication = false
 
 # ------------------------------------------------------------------------------
 # Log Aggregation

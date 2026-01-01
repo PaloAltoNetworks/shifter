@@ -157,6 +157,7 @@ module "redis" {
   allowed_cidr_blocks = [module.vpc.vpc_cidr]
   node_type           = var.redis_node_type
   engine_version      = var.redis_engine_version
+  enable_replication  = var.redis_enable_replication
 
   tags = var.tags
 }

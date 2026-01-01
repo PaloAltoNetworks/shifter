@@ -13,7 +13,7 @@ Responsibilities:
 import pytest
 from django.contrib.auth import get_user_model
 
-from mission_control.models import AgentConfig, OperatingSystem
+from cms.models import AgentConfig, OperatingSystem
 
 User = get_user_model()
 

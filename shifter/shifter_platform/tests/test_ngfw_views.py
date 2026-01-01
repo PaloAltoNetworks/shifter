@@ -11,10 +11,9 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
+from cms.models import Credential
 from mission_control.models import (
-    NGFWDeploymentProfile,
     Range,
-    SCMCredential,
     UserNGFW,
 )
 
@@ -48,10 +47,11 @@ def user2(db):
 
 @pytest.fixture
 def deployment_profile(user, db):
-    """Create a deployment profile for testing."""
-    return NGFWDeploymentProfile.objects.create(
+    """Create a deployment profile credential for testing."""
+    return Credential.objects.create(
         user=user,
         name="Test Deployment Profile",
+        credential_type=Credential.Type.DEPLOYMENT_PROFILE,
         authcode="D1234567",
     )
 
@@ -59,9 +59,10 @@ def deployment_profile(user, db):
 @pytest.fixture
 def scm_credential(user, db):
     """Create an SCM credential for testing."""
-    return SCMCredential.objects.create(
+    return Credential.objects.create(
         user=user,
         name="Test SCM Credential",
+        credential_type=Credential.Type.SCM,
         scm_folder_name="test-folder",
         scm_pin_id="pin-123",
         scm_pin_value="secret-pin-value",
@@ -349,12 +350,14 @@ class TestNGFWWizardView:
     def test_excludes_expired_credentials(self, user, db):
         """Expired credentials should not be listed."""
         # Create expired SCM credential
-        SCMCredential.objects.create(
+        Credential.objects.create(
             user=user,
             name="Expired Credential",
+            credential_type=Credential.Type.SCM,
             scm_folder_name="expired-folder",
             scm_pin_id="pin-expired",
             scm_pin_value="expired-value",
+            sls_region="americas",
             expires_at=timezone.now() - timezone.timedelta(days=1),
         )
 
@@ -557,7 +560,7 @@ class TestNGFWProvisionAPI:
         """Invalid deployment_profile_id should return 400."""
         client = get_authenticated_client(user)
         # Use ID that doesn't exist
-        max_id = NGFWDeploymentProfile.objects.order_by("-id").values_list("id", flat=True).first() or 0
+        max_id = Credential.objects.order_by("-id").values_list("id", flat=True).first() or 0
         response = client.post(
             reverse("mission_control:api_ngfw_provision"),
             data={
@@ -578,7 +581,7 @@ class TestNGFWProvisionAPI:
         """Invalid scm_credential_id should return 400."""
         client = get_authenticated_client(user)
         # Use ID that doesn't exist
-        max_id = SCMCredential.objects.order_by("-id").values_list("id", flat=True).first() or 0
+        max_id = Credential.objects.order_by("-id").values_list("id", flat=True).first() or 0
         response = client.post(
             reverse("mission_control:api_ngfw_provision"),
             data={

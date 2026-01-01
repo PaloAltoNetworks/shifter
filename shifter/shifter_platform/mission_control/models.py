@@ -3,7 +3,6 @@
 from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
-from encrypted_model_fields.fields import EncryptedCharField
 
 
 class OperatingSystem(models.Model):
@@ -109,58 +108,8 @@ class Credential(Asset):
         return timezone.now() > self.expires_at
 
 
-class SCMCredential(Credential):
-    """Strata Cloud Manager registration credentials (PIN-based)."""
-
-    class SLSRegion(models.TextChoices):
-        AMERICAS = "americas", "Americas"
-        EUROPE = "europe", "Europe"
-        JAPAN = "japan", "Japan"
-        ASIAPACIFIC = "asiapacific", "Asia Pacific"
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="scm_credentials",
-    )
-
-    # SCM Registration
-    scm_folder_name = models.CharField(max_length=255)
-    scm_pin_id = models.CharField(max_length=255)
-    scm_pin_value = EncryptedCharField(max_length=255)
-
-    # Strata Logging Service
-    sls_region = models.CharField(
-        max_length=50,
-        choices=SLSRegion.choices,
-        default=SLSRegion.AMERICAS,
-    )
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "SCM Credential"
-        verbose_name_plural = "SCM Credentials"
-
-
-class NGFWDeploymentProfile(Credential):
-    """Software NGFW Credits deployment profile."""
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="ngfw_deployment_profiles",
-    )
-
-    # Licensing
-    authcode = EncryptedCharField(
-        max_length=100,
-        help_text="Authcode from CSP deployment profile (e.g., D9232090)",
-    )
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "NGFW Deployment Profile"
-        verbose_name_plural = "NGFW Deployment Profiles"
+# Note: SCMCredential and NGFWDeploymentProfile have been migrated to cms.Credential.
+# See cms/models.py for the unified Credential model.
 
 
 class UserNGFW(Asset):

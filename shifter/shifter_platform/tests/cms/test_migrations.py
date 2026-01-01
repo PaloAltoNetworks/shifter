@@ -21,38 +21,24 @@ def get_migration_functions():
 
 @pytest.mark.django_db
 class TestCredentialDataMigration:
-    """Tests for the credential data migration (0002_migrate_credentials)."""
+    """Tests for the credential data migration (0002_migrate_credentials).
 
-    def test_scm_credentials_migrated(self, django_user_model):
-        """SCMCredential records should be migrated to cms.Credential."""
+    Note: The original SCMCredential and NGFWDeploymentProfile models have been
+    removed. These tests now verify that the cms.Credential model works correctly
+    for both credential types.
+    """
+
+    def test_scm_credential_type_works(self, django_user_model):
+        """SCM credential type should work in cms.Credential."""
         from cms.models import Credential
-        from mission_control.models import SCMCredential
 
-        # Create a user and SCM credential using old model
         user = django_user_model.objects.create_user(
             username="migrationtest",
             email="migration@test.com",
             password="test",
         )
 
-        SCMCredential.objects.create(
-            user=user,
-            name="Test SCM Cred",
-            scm_folder_name="test-folder",
-            scm_pin_id="PIN123",
-            scm_pin_value="secret-pin",
-            sls_region="americas",
-        )
-
-        # Check that we can query the equivalent in cms.Credential
-        # Note: Migration already ran, so we verify the model works
-        Credential.objects.filter(
-            user=user,
-            credential_type=Credential.Type.SCM,
-        ).exists()  # Verify query works
-
-        # The migration runs at DB setup time, so we just verify
-        # we can create and query SCM-type credentials
+        # Create SCM-type credential
         new_cred = Credential.objects.create(
             user=user,
             name="New SCM Cred",
@@ -68,25 +54,17 @@ class TestCredentialDataMigration:
         assert new_cred.scm_pin_id == "PIN456"
         assert new_cred.sls_region == "europe"
 
-    def test_deployment_profiles_migrated(self, django_user_model):
-        """NGFWDeploymentProfile records should be migrated to cms.Credential."""
+    def test_deployment_profile_type_works(self, django_user_model):
+        """Deployment profile credential type should work in cms.Credential."""
         from cms.models import Credential
-        from mission_control.models import NGFWDeploymentProfile
 
-        # Create a user and deployment profile using old model
         user = django_user_model.objects.create_user(
             username="migrationtest2",
             email="migration2@test.com",
             password="test",
         )
 
-        NGFWDeploymentProfile.objects.create(
-            user=user,
-            name="Test Profile",
-            authcode="D1234567",
-        )
-
-        # Verify we can create deployment profile type in cms.Credential
+        # Create deployment profile type credential
         new_cred = Credential.objects.create(
             user=user,
             name="New Profile",
@@ -130,8 +108,8 @@ class TestCredentialDataMigration:
         assert loaded.last_verified_at is not None
         assert loaded.last_used_at is not None
 
-    def test_soft_deleted_credentials_migrated(self, django_user_model):
-        """Soft-deleted credentials should also be migrated."""
+    def test_soft_deleted_credentials_work(self, django_user_model):
+        """Soft-deleted credentials should work correctly."""
         from django.utils import timezone
 
         from cms.models import Credential

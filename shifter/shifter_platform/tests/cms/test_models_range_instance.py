@@ -1,14 +1,17 @@
 """Tests for RangeInstance model.
 
 RangeInstance tracks hydrated scenario configs sent to engine.
-Uses integer IDs only - NO ForeignKey relationships to external models.
-See GH issue #446 for planned migration to use FK for agent_id.
+
+After GH issue #446:
+- agent field is now a ForeignKey to AgentConfig (nullable)
+- range_id remains an IntegerField (not FK) - CMS doesn't own Range
+- user_id remains an IntegerField (not FK) - CMS doesn't own User
 
 This decoupled design allows CMS to track:
 - Which scenario template was used (scenario_id)
 - Which range was created (range_id - integer, not FK)
 - Which user requested it (user_id - integer, not FK)
-- Which agent was used (agent_id - integer, not FK, nullable)
+- Which agent was used (agent - FK to AgentConfig, nullable)
 """
 
 import pytest
@@ -63,29 +66,17 @@ class TestRangeInstanceModel:
         )
         assert ri.user_id == 99999
 
-    def test_agent_id_is_optional(self, db):
-        """agent_id can be None (for scenarios that don't require agent)."""
+    def test_agent_is_optional(self, db):
+        """agent FK can be None (for scenarios that don't require agent)."""
         from cms.models import RangeInstance
 
         ri = RangeInstance.objects.create(
             range_id=1,
             scenario_id="basic",
             user_id=1,
-            agent_id=None,
+            agent=None,
         )
-        assert ri.agent_id is None
-
-    def test_agent_id_can_be_set(self, db):
-        """agent_id can be set to an integer."""
-        from cms.models import RangeInstance
-
-        ri = RangeInstance.objects.create(
-            range_id=1,
-            scenario_id="basic",
-            user_id=1,
-            agent_id=42,
-        )
-        assert ri.agent_id == 42
+        assert ri.agent is None
 
     def test_scenario_id_stores_template_name(self, db):
         """scenario_id stores the template name (not the full config)."""
@@ -202,3 +193,179 @@ class TestRangeInstanceModel:
 
         with pytest.raises(IntegrityError):
             RangeInstance.objects.create(range_id=1, scenario_id="basic", user_id=1)
+
+
+@pytest.mark.django_db
+class TestRangeInstanceAgentFK:
+    """Tests for RangeInstance.agent ForeignKey to AgentConfig.
+
+    GH Issue #446: agent_id IntegerField converted to agent FK to AgentConfig.
+    AgentConfig uses soft delete (deleted_at), so FK uses SET_NULL for edge cases.
+    """
+
+    def test_agent_is_fk_to_agent_config(self, db):
+        """RangeInstance.agent is a ForeignKey to AgentConfig."""
+        from django.db.models import ForeignKey
+
+        from cms.models import AgentConfig, RangeInstance
+
+        agent_field = RangeInstance._meta.get_field("agent")
+        assert isinstance(agent_field, ForeignKey)
+        assert agent_field.related_model == AgentConfig
+
+    def test_agent_fk_is_nullable(self, db):
+        """RangeInstance.agent can be None (for scenarios without agents)."""
+        from cms.models import RangeInstance
+
+        ri = RangeInstance.objects.create(
+            range_id=100,
+            scenario_id="basic",
+            user_id=1,
+            agent=None,
+        )
+        assert ri.agent is None
+
+    def test_agent_fk_can_be_set(self, db):
+        """RangeInstance.agent can be set to an AgentConfig instance."""
+        from django.contrib.auth import get_user_model
+
+        from cms.models import AgentConfig, OperatingSystem, RangeInstance
+
+        User = get_user_model()
+        user = User.objects.create_user(username="test@example.com", password="test")
+        os = OperatingSystem.objects.create(name="Linux", slug="linux", extensions="deb")
+        agent = AgentConfig.objects.create(
+            name="Test Agent",
+            user=user,
+            os=os,
+            s3_key="agents/test/agent.deb",
+            original_filename="agent.deb",
+            file_size_bytes=1024,
+            sha256_hash="a" * 64,
+        )
+
+        ri = RangeInstance.objects.create(
+            range_id=101,
+            scenario_id="basic",
+            user_id=user.id,
+            agent=agent,
+        )
+        assert ri.agent == agent
+        assert ri.agent.id == agent.id
+
+    def test_agent_fk_on_delete_is_set_null(self, db):
+        """FK uses SET_NULL (not CASCADE) - RangeInstance preserved if agent hard-deleted."""
+        from django.db.models import SET_NULL
+
+        from cms.models import RangeInstance
+
+        agent_field = RangeInstance._meta.get_field("agent")
+        # Verify on_delete is SET_NULL (preserves history if admin hard-deletes)
+        assert agent_field.remote_field.on_delete == SET_NULL
+
+    def test_agent_fk_works_with_soft_deleted_agent(self, db):
+        """RangeInstance.agent FK still works when agent is soft-deleted."""
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+
+        from cms.models import AgentConfig, OperatingSystem, RangeInstance
+
+        User = get_user_model()
+        user = User.objects.create_user(username="soft@example.com", password="test")
+        os, _ = OperatingSystem.objects.get_or_create(
+            slug="windows-soft-test",
+            defaults={"name": "Windows Soft Test", "extensions": "msi"},
+        )
+        agent = AgentConfig.objects.create(
+            name="Soft Delete Agent",
+            user=user,
+            os=os,
+            s3_key="agents/test/agent-soft.msi",
+            original_filename="agent-soft.msi",
+            file_size_bytes=2048,
+            sha256_hash="b" * 64,
+        )
+
+        ri = RangeInstance.objects.create(
+            range_id=102,
+            scenario_id="basic",
+            user_id=user.id,
+            agent=agent,
+        )
+
+        # Soft delete the agent (set deleted_at)
+        agent.deleted_at = timezone.now()
+        agent.save()
+
+        # FK still works - RangeInstance still references the soft-deleted agent
+        ri.refresh_from_db()
+        assert ri.agent == agent
+        assert ri.agent.is_deleted is True
+
+    def test_agent_fk_related_name(self, db):
+        """AgentConfig can access its RangeInstances via related_name."""
+        from django.contrib.auth import get_user_model
+
+        from cms.models import AgentConfig, OperatingSystem, RangeInstance
+
+        User = get_user_model()
+        user = User.objects.create_user(username="related@example.com", password="test")
+        os = OperatingSystem.objects.create(name="Kali", slug="kali", extensions="deb")
+        agent = AgentConfig.objects.create(
+            name="Related Test Agent",
+            user=user,
+            os=os,
+            s3_key="agents/test/agent2.deb",
+            original_filename="agent2.deb",
+            file_size_bytes=1024,
+            sha256_hash="c" * 64,
+        )
+
+        ri1 = RangeInstance.objects.create(
+            range_id=103,
+            scenario_id="basic",
+            user_id=user.id,
+            agent=agent,
+        )
+        ri2 = RangeInstance.objects.create(
+            range_id=104,
+            scenario_id="ad_attack_lab",
+            user_id=user.id,
+            agent=agent,
+        )
+
+        # Access RangeInstances via related_name
+        related_instances = agent.range_instances.all()
+        assert related_instances.count() == 2
+        assert ri1 in related_instances
+        assert ri2 in related_instances
+
+    def test_agent_fk_select_related(self, db):
+        """RangeInstance.agent can be efficiently loaded with select_related."""
+        from django.contrib.auth import get_user_model
+
+        from cms.models import AgentConfig, OperatingSystem, RangeInstance
+
+        User = get_user_model()
+        user = User.objects.create_user(username="select@example.com", password="test")
+        os = OperatingSystem.objects.create(name="Ubuntu", slug="ubuntu", extensions="deb")
+        agent = AgentConfig.objects.create(
+            name="Select Related Agent",
+            user=user,
+            os=os,
+            s3_key="agents/test/agent3.deb",
+            original_filename="agent3.deb",
+            file_size_bytes=1024,
+            sha256_hash="d" * 64,
+        )
+
+        RangeInstance.objects.create(
+            range_id=105,
+            scenario_id="basic",
+            user_id=user.id,
+            agent=agent,
+        )
+
+        # Should be able to use select_related to load agent efficiently
+        ri = RangeInstance.objects.select_related("agent").get(range_id=105)
+        assert ri.agent.name == "Select Related Agent"

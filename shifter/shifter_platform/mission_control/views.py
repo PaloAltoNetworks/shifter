@@ -17,14 +17,14 @@ from cms.assets.services import AssetError, get_storage_used
 from cms.assets.services import create_agent as cms_create_agent
 from cms.assets.services import delete_agent as cms_delete_agent
 from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
-from cms.models import Credential
+from cms.models import AgentConfig, Credential
 from cms.services import list_scenarios as cms_list_scenarios
 from engine.services.allocation import AllocationError
 from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
 from engine.services.scenarios import ScenarioValidationError
 from engine.services.serialization import range_to_dict
 
-from .models import AgentConfig, Range, UserNGFW
+from .models import Range, UserNGFW
 from .services.s3 import (
     S3Error,
     generate_presigned_upload_url,

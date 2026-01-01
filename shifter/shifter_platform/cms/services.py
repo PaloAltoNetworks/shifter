@@ -842,7 +842,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
             range_id=range_id,
             scenario_id=scenario,
             user_id=user.id,
-            agent_id=agent_id,
+            agent=agent,
         )
 
         logger.debug(

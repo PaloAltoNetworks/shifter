@@ -1,0 +1,200 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">Launch and manage your cyber ranges</p>
+</div>
+
+<!-- No Active Range State -->
+<div class="card" id="no-range-state">
+    <div class="card-title">Launch a Range</div>
+    <p class="text-muted mb-lg">
+        Select a scenario and agent to launch a new cyber range environment.
+    </p>
+
+    <div class="form-group">
+        <label class="form-label">Scenario</label>
+        <div class="xdr-dropdown full-width" id="scenario-dropdown">
+            <input type="hidden" name="scenario" id="scenario-select-value" value="basic">
+            <button type="button" class="xdr-dropdown-trigger">
+                <span class="xdr-dropdown-value">Basic Range</span>
+                <span class="xdr-dropdown-chevron"></span>
+            </button>
+            <div class="xdr-dropdown-panel">
+                <ul class="xdr-dropdown-items" id="scenario-items">
+                    <li class="xdr-dropdown-item selected" data-value="basic">
+                        <span class="item-label">Basic Range</span>
+                        <span class="item-description">Kali + Victim</span>
+                    </li>
+                    <li class="xdr-dropdown-item" data-value="ad_attack_lab">
+                        <span class="item-label">AD Attack Lab</span>
+                        <span class="item-description">Kali + Domain Controller + Domain-joined Victim</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Agent</label>
+        <div class="xdr-dropdown full-width" id="agent-dropdown">
+            <input type="hidden" name="agent" id="agent-select-value">
+            <button type="button" class="xdr-dropdown-trigger">
+                <span class="xdr-dropdown-value placeholder">-- Select an agent --</span>
+                <span class="xdr-dropdown-chevron"></span>
+            </button>
+            <div class="xdr-dropdown-panel">
+                <ul class="xdr-dropdown-items" id="agent-items">
+                    <!-- Will be populated dynamically -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- DC Agent dropdown - shown only for AD Attack Lab scenario -->
+    <div class="form-group" id="dc-agent-section" style="display: none;">
+        <label class="form-label">DC Agent <span class="text-muted text-small">(Windows only)</span></label>
+        <div class="xdr-dropdown full-width" id="dc-agent-dropdown">
+            <input type="hidden" name="dc_agent" id="dc-agent-select-value">
+            <button type="button" class="xdr-dropdown-trigger">
+                <span class="xdr-dropdown-value placeholder">-- Select a Windows agent --</span>
+                <span class="xdr-dropdown-chevron"></span>
+            </button>
+            <div class="xdr-dropdown-panel">
+                <ul class="xdr-dropdown-items" id="dc-agent-items">
+                    <!-- Will be populated dynamically with Windows agents only -->
+                </ul>
+            </div>
+        </div>
+        <p class="text-small text-muted mt-sm" id="dc-agent-hint">
+            The Domain Controller requires a Windows (MSI) agent installer.
+        </p>
+    </div>
+
+    <button class="btn btn-primary" id="launch-btn" disabled>
+        Launch Range
+    </button>
+
+    <p class="text-small text-muted mt-md">
+        No agents yet?&nbsp; <a href="{% url 'mission_control:agents' %}" class="link">Upload one first</a>
+    </p>
+</div>
+
+<!-- Provisioning State (hidden by default) -->
+<div class="card" id="provisioning-state" style="display: none;">
+    <div class="card-title">Provisioning Range</div>
+    <div class="status status-provisioning mb-md">
+        <span class="status-dot"></span>
+        <span>Setting up infrastructure...</span>
+    </div>
+    <p class="text-muted text-small mb-lg">
+        This usually takes 2-3 minutes. You'll be notified when ready.
+    </p>
+    <button class="btn btn-danger" id="cancel-btn">
+        Cancel
+    </button>
+</div>
+
+<!-- Active Range State (hidden by default) -->
+<div class="card" id="active-range-state" style="display: none;">
+    <div class="flex-between">
+        <div>
+            <div class="card-title">Active Range</div>
+            <div class="status status-active mb-md">
+                <span class="status-dot"></span>
+                <span>Running</span>
+            </div>
+        </div>
+        <div class="text-right text-small text-muted">
+            <div>Started: <span id="range-started">--</span></div>
+            <div>Agent: <span id="range-agent">--</span></div>
+        </div>
+    </div>
+
+    <!-- NGFW Details (shown when range has linked NGFW) -->
+    <div id="ngfw-details" class="range-details mt-md" style="display: none;">
+        <div class="range-details-header">VM-Series NGFW</div>
+        <div class="range-details-grid">
+            <div class="range-details-item">
+                <span class="range-details-label">Linked NGFW</span>
+                <span class="range-details-value">
+                    <a href="#" id="ngfw-detail-link" class="link">View Details</a>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex-row gap-md mt-lg">
+        <a href="{% url 'mission_control:terminal' %}" class="btn btn-primary" id="open-workspace-btn">
+            Open Terminal
+        </a>
+        <button class="btn btn-secondary" id="pause-btn" disabled title="Coming soon">
+            Pause
+        </button>
+        <button class="btn btn-danger" id="destroy-btn">
+            Destroy
+        </button>
+    </div>
+</div>
+
+<!-- Paused Range State (hidden by default) -->
+<div class="card" id="paused-range-state" style="display: none;">
+    <div class="flex-between">
+        <div>
+            <div class="card-title">Paused Range</div>
+            <div class="status status-paused mb-md">
+                <span class="status-dot"></span>
+                <span>Paused</span>
+            </div>
+        </div>
+        <div class="text-right text-small text-muted">
+            <div>Paused: <span id="range-paused-at">--</span></div>
+            <div>Agent: <span id="paused-range-agent">--</span></div>
+        </div>
+    </div>
+
+    <div class="flex-row gap-md mt-lg">
+        <button class="btn btn-primary" id="resume-btn" disabled title="Coming soon">
+            Resume
+        </button>
+        <button class="btn btn-danger" id="destroy-paused-btn">
+            Destroy
+        </button>
+    </div>
+</div>
+
+<!-- Failed State (hidden by default) -->
+<div class="card" id="failed-state" style="display: none;">
+    <div class="card-title">Range Failed</div>
+    <div class="status status-error mb-md">
+        <span class="status-dot"></span>
+        <span>Provisioning Failed</span>
+    </div>
+    <p class="text-muted text-small mb-lg">
+        <strong>Error:</strong> <span id="error-message">Unknown error occurred</span>
+    </p>
+    <button class="btn btn-secondary" id="dismiss-error-btn">
+        Dismiss
+    </button>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/dashboard.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dashboard = new DashboardManager({
+        csrfToken: '{{ csrf_token }}',
+        statusUrl: '{% url "mission_control:range_status" %}',
+        launchUrl: '{% url "mission_control:launch_range" %}',
+        cancelUrl: '{% url "mission_control:cancel_range" %}',
+        destroyUrl: '{% url "mission_control:destroy_range" %}',
+        agentsUrl: '{% url "mission_control:list_agents" %}',
+        // ngfwConfigsUrl removed - NGFW UI pending UserNGFW views (issue #412)
+    });
+    dashboard.init();
+});
+</script>
+{% endblock %}

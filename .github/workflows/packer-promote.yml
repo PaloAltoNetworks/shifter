@@ -1,0 +1,100 @@
+name: Packer AMI Promote to Prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      ami_type:
+        description: 'AMI type to promote'
+        required: true
+        type: choice
+        options:
+          - kali
+          - ubuntu
+          - windows
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.ami_type }} AMI to prod
+    runs-on: self-hosted
+
+    steps:
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-2
+
+      - name: Get dev AMI ID from SSM
+        run: |
+          DEV_AMI_ID=$(aws ssm get-parameter --name "/shifter/ami/${{ inputs.ami_type }}" --query Parameter.Value --output text)
+          echo "DEV_AMI_ID=$DEV_AMI_ID" >> $GITHUB_ENV
+          echo "## Promoting ${{ inputs.ami_type }} AMI to prod" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dev AMI ID:** \`$DEV_AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Get dev account ID
+        run: |
+          DEV_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "DEV_ACCOUNT_ID=$DEV_ACCOUNT_ID" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials (prod)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - name: Get prod account ID
+        run: |
+          PROD_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "PROD_ACCOUNT_ID=$PROD_ACCOUNT_ID" >> $GITHUB_ENV
+
+      - name: Switch back to dev to share AMI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-2
+
+      - name: Share AMI with prod account
+        run: |
+          aws ec2 modify-image-attribute \
+            --image-id "$DEV_AMI_ID" \
+            --launch-permission "Add=[{UserId=$PROD_ACCOUNT_ID}]"
+          echo "- **Shared with prod account:** $PROD_ACCOUNT_ID" >> $GITHUB_STEP_SUMMARY
+
+      - name: Configure AWS credentials (prod) for copy
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - name: Copy AMI to prod account
+        run: |
+          PROD_AMI_ID=$(aws ec2 copy-image \
+            --source-region us-east-2 \
+            --source-image-id "$DEV_AMI_ID" \
+            --name "shifter-${{ inputs.ami_type }}-${{ github.run_id }}" \
+            --description "Promoted from dev by GitHub Actions run ${{ github.run_id }}" \
+            --query ImageId --output text)
+          echo "PROD_AMI_ID=$PROD_AMI_ID" >> $GITHUB_ENV
+          echo "- **Prod AMI ID:** \`$PROD_AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for prod AMI to be available
+        run: |
+          echo "Waiting for AMI $PROD_AMI_ID to become available..."
+          aws ec2 wait image-available --image-ids "$PROD_AMI_ID"
+          echo "- **Prod AMI Status:** available" >> $GITHUB_STEP_SUMMARY
+
+      - name: Update prod SSM Parameter
+        run: |
+          aws ssm put-parameter \
+            --name "/shifter/ami/${{ inputs.ami_type }}" \
+            --type String \
+            --value "$PROD_AMI_ID" \
+            --overwrite \
+            --description "Promoted from dev by GitHub Actions run ${{ github.run_id }}"
+          echo "- **Prod SSM:** \`/shifter/ami/${{ inputs.ami_type }}\` updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Done!** Prod now uses the same AMI as dev." >> $GITHUB_STEP_SUMMARY

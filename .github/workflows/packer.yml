@@ -1,0 +1,92 @@
+name: Packer AMI Build (Dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ami_type:
+        description: 'AMI to build'
+        required: true
+        type: choice
+        options:
+          - kali
+          - ubuntu
+          - windows
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.ami_type }} AMI in dev
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: shifter/packer
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --dev
+        working-directory: shifter/packer
+
+      - name: Run Packer tests
+        run: uv run pytest tests/ -v
+        working-directory: shifter/packer
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-2
+
+      - name: Initialize Packer
+        run: packer init .
+
+      - name: Validate template
+        run: packer validate -var-file=dev.pkrvars.hcl ${{ inputs.ami_type }}.pkr.hcl
+
+      - name: Build AMI
+        run: |
+          packer build -color=false -var-file=dev.pkrvars.hcl ${{ inputs.ami_type }}.pkr.hcl
+
+          # Extract AMI ID from manifest
+          AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' ${{ inputs.ami_type }}-manifest.json)
+          echo "AMI_ID=$AMI_ID" >> $GITHUB_ENV
+          echo "## Dev AMI Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** ${{ inputs.ami_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AMI ID:** \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region:** us-east-2" >> $GITHUB_STEP_SUMMARY
+
+      - name: Update dev SSM Parameter
+        run: |
+          aws ssm put-parameter \
+            --name "/shifter/ami/${{ inputs.ami_type }}" \
+            --type String \
+            --value "$AMI_ID" \
+            --overwrite \
+            --description "Built by GitHub Actions run ${{ github.run_id }}"
+          echo "- **SSM Parameter:** \`/shifter/ami/${{ inputs.ami_type }}\` updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next step:** Test in dev, then run 'Packer AMI Promote to Prod' workflow" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.ami_type }}-manifest
+          path: shifter/packer/${{ inputs.ami_type }}-manifest.json

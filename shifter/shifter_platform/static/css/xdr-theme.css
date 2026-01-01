@@ -1,0 +1,337 @@
+/* Cortex XDR Theme - Exact Match */
+
+:root {
+    --xdr-background: #1f1f1f;
+    --xdr-surface: #151515;
+    --xdr-text: #eaebeb;
+    --xdr-text-secondary: #b8b8b8;
+    --xdr-border: #333;
+    --xdr-hover: rgb(255, 255, 255, 0.08);
+}
+
+html, body {
+    min-width: 1024px;
+    margin: 0;
+    padding: 0;
+}
+
+html.xdr-dark-theme,
+body.xdr-dark-theme {
+    background: var(--xdr-background);
+    color: var(--xdr-text);
+    font-family: Lato, Assistant, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+.layout {
+    min-height: 100vh;
+    margin-left: var(--xdr-left-nav-width, 56px);
+    transition: margin-left 0.3s ease-in-out;
+}
+
+.main {
+    padding: 24px;
+    background: var(--xdr-background);
+}
+
+/* Page Header */
+.page-header {
+    margin-bottom: 24px;
+}
+
+.page-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 0;
+}
+
+/* Cards */
+.card {
+    background: var(--xdr-surface);
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 0 0 12px;
+}
+
+/* Buttons - Cortex XDR white pill style */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    min-width: 90px;
+    padding: 0 30px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: Lato, sans-serif;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.2s ease;
+}
+
+.btn,
+.btn:hover,
+.btn:focus,
+.btn:active {
+    text-decoration: none;
+}
+
+.btn-primary {
+    background: #fff;
+    color: #000;
+}
+
+.btn-primary:disabled {
+    opacity: 0.36;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--xdr-text);
+    border: 1px solid var(--xdr-border);
+}
+
+.btn-secondary:disabled {
+    opacity: 0.36;
+    cursor: not-allowed;
+}
+
+/* Tables */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th,
+.table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--xdr-border);
+}
+
+.table th {
+    font-weight: 600;
+    color: var(--xdr-text-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.table td {
+    color: var(--xdr-text);
+}
+
+.table tbody tr:hover {
+    background: var(--xdr-hover);
+}
+
+/* Forms */
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin-bottom: 4px;
+}
+
+.form-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    color: var(--xdr-text);
+    font-size: 14px;
+    font-family: Lato, sans-serif;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: #00d26a;
+}
+
+/* Checkbox */
+.form-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.form-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 2px 0 0;
+    accent-color: #00d26a;
+    cursor: pointer;
+}
+
+.form-checkbox-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--xdr-text);
+}
+
+.form-checkbox-help {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    margin-top: 2px;
+}
+
+/* Range Details */
+.range-details {
+    background: rgb(255, 255, 255, 0.03);
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    padding: 12px;
+}
+
+.range-details-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--xdr-text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.range-details-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.range-details-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.range-details-label {
+    font-size: 11px;
+    color: var(--xdr-text-secondary);
+}
+
+.range-details-value {
+    font-size: 13px;
+    color: var(--xdr-text);
+    font-family: monospace;
+}
+
+/* Status */
+.status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.status-online .status-dot { background: #00d26a; }
+.status-offline .status-dot { background: #707070; }
+.status-error .status-dot { background: #ff4d4f; }
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 48px;
+    color: var(--xdr-text-secondary);
+}
+
+.empty-state-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 16px 0 8px;
+}
+
+.empty-state h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 16px 0 8px;
+}
+
+.empty-state p {
+    font-size: 14px;
+    color: var(--xdr-text-secondary);
+    margin: 0;
+}
+
+.empty-state-graphic {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    margin: 0 auto 16px;
+}
+
+.empty-state-graphic-arc {
+    position: absolute;
+    inset: 0;
+    border: 3px solid var(--xdr-border);
+    border-radius: 24px;
+    border-top-color: transparent;
+    border-left-color: transparent;
+    transform: rotate(-45deg);
+}
+
+.empty-state-graphic-icon {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.empty-state-graphic-icon svg {
+    width: 48px;
+    height: 48px;
+    color: var(--xdr-text-secondary);
+}
+
+/* Links */
+a {
+    color: #128df3;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #484848;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #575757;
+}

@@ -95,6 +95,11 @@ If verification fails, you MUST create fix phases:
 ☐ Phase 1.4 FINAL VERIFY: Run pytest [entire test suite], confirm no regressions
 ☐ Phase 1.4 VERIFY: Run pre-commit run --all-files, confirm fixed
 
+## Running Tests
+
+For all test, use virtual environments.
+
+For Django, use the django-testing skill.
 
 ```
 

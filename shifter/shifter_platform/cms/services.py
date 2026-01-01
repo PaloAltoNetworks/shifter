@@ -985,18 +985,344 @@ def resume_range(user: User, range_id: int) -> None:
 
 
 def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dict[str, Any]:
-    """Validate, generate presigned URL."""
-    raise NotImplementedError
+    """Validate and generate presigned URL for direct S3 upload.
+
+    Validates user quota, file extension, and generates all components needed
+    for the client to upload directly to S3.
+
+    Args:
+        user: User initiating the upload
+        name: Display name for the agent
+        filename: Original filename (used for extension validation)
+        file_size: Expected file size in bytes
+
+    Returns:
+        Dict containing:
+            - presigned_url: URL for PUT request to S3
+            - s3_key: S3 key where file will be uploaded
+            - upload_token: Signed token for completion verification
+            - expected_os: Operating system slug from file extension
+
+    Raises:
+        TypeError: If user is None, invalid type, or file_size is invalid type
+        ValueError: If user is unsaved, name/filename is empty, or file_size is invalid
+        CMSError: If quota exceeded, invalid extension, or S3 error
+    """
+    from django.conf import settings
+
+    from cms.assets.services import get_storage_used
+    from cms.exceptions import CMSError
+    from mission_control.services.s3 import S3Error, generate_presigned_upload_url
+    from mission_control.services.upload_token import generate_upload_token
+    from mission_control.services.validation import ValidationError, validate_file_extension
+
+    # Input validation - user
+    if user is None:
+        logger.error("initiate_upload called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("initiate_upload called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("initiate_upload called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - name
+    if name is None:
+        logger.error("initiate_upload called with None name for user_id=%s", user.id)
+        raise ValueError("name cannot be None")
+
+    name = name.strip()
+    if not name:
+        logger.error("initiate_upload called with empty name for user_id=%s", user.id)
+        raise ValueError("name cannot be empty")
+
+    # Input validation - filename
+    if filename is None:
+        logger.error("initiate_upload called with None filename for user_id=%s", user.id)
+        raise ValueError("filename cannot be None")
+
+    filename = filename.strip()
+    if not filename:
+        logger.error("initiate_upload called with empty filename for user_id=%s", user.id)
+        raise ValueError("filename cannot be empty")
+
+    # Input validation - file_size
+    if file_size is None:
+        logger.error("initiate_upload called with None file_size for user_id=%s", user.id)
+        raise TypeError("file_size cannot be None")
+
+    if not isinstance(file_size, int):
+        logger.error("initiate_upload called with invalid file_size type: %s", type(file_size).__name__)
+        raise TypeError(f"file_size must be an int, got {type(file_size).__name__}")
+
+    if file_size <= 0:
+        logger.error("initiate_upload called with invalid file_size=%s for user_id=%s", file_size, user.id)
+        raise ValueError("file_size must be positive")
+
+    logger.debug(
+        "initiate_upload called for user_id=%s, filename=%s, file_size=%s",
+        user.id,
+        filename,
+        file_size,
+    )
+
+    try:
+        # Check storage quota
+        current_usage = get_storage_used(user)
+        quota_bytes = settings.AGENT_USER_STORAGE_QUOTA_MB * 1024 * 1024
+        if current_usage + file_size > quota_bytes:
+            available_mb = (quota_bytes - current_usage) / 1024 / 1024
+            logger.error(
+                "initiate_upload: quota exceeded for user_id=%s - current=%s, requested=%s, quota=%s",
+                user.id,
+                current_usage,
+                file_size,
+                quota_bytes,
+            )
+            raise CMSError(
+                f"Storage quota exceeded. You have {available_mb:.1f} MB available "
+                f"of {settings.AGENT_USER_STORAGE_QUOTA_MB} MB total."
+            )
+
+        # Validate file extension
+        try:
+            file_format = validate_file_extension(filename)
+        except ValidationError as e:
+            logger.error("initiate_upload: validation error for user_id=%s - %s", user.id, str(e))
+            raise CMSError(str(e)) from e
+
+        # Generate presigned URL
+        try:
+            presigned_url, s3_key = generate_presigned_upload_url(
+                user_id=user.id,
+                filename=filename,
+            )
+        except S3Error as e:
+            logger.error("initiate_upload: S3 error for user_id=%s - %s", user.id, str(e))
+            raise CMSError("Failed to initiate upload") from e
+
+        # Generate upload token
+        upload_token = generate_upload_token(
+            user_id=user.id,
+            s3_key=s3_key,
+            name=name,
+            filename=filename,
+            os_slug=file_format.os_slug,
+            file_size=file_size,
+        )
+
+        logger.debug(
+            "initiate_upload completed for user_id=%s, filename=%s, s3_key=%s",
+            user.id,
+            filename,
+            s3_key,
+        )
+
+        return {
+            "presigned_url": presigned_url,
+            "s3_key": s3_key,
+            "upload_token": upload_token,
+            "expected_os": file_format.os_slug,
+        }
+
+    except (TypeError, ValueError, CMSError):
+        # Re-raise known errors
+        raise
+    except Exception:
+        logger.exception("Error in initiate_upload for user_id=%s", user.id)
+        raise
 
 
 def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
-    """Verify and finalize upload."""
-    raise NotImplementedError
+    """Verify and finalize upload after file has been uploaded to S3.
+
+    Verifies the upload token, checks the S3 object exists with correct size,
+    tags it as completed, and creates the agent record.
+
+    Args:
+        user: User who initiated the upload
+        upload_token: Signed token from initiate_upload
+        sha256: SHA256 hash of the uploaded file (computed client-side)
+
+    Returns:
+        AgentConfig: The newly created agent record
+
+    Raises:
+        TypeError: If user is None or invalid type
+        ValueError: If user is unsaved, or upload_token/sha256 is empty
+        CMSError: If token is invalid/expired, S3 verification fails, or size mismatch
+    """
+    from cms.assets.services import create_agent
+    from cms.exceptions import CMSError
+    from mission_control.services.s3 import S3Error, tag_s3_object, verify_s3_object_exists
+    from mission_control.services.upload_token import verify_upload_token
+
+    # Input validation - user
+    if user is None:
+        logger.error("complete_upload called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("complete_upload called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("complete_upload called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - upload_token
+    if upload_token is None:
+        logger.error("complete_upload called with None upload_token for user_id=%s", user.id)
+        raise ValueError("upload_token cannot be None")
+
+    upload_token = upload_token.strip()
+    if not upload_token:
+        logger.error("complete_upload called with empty upload_token for user_id=%s", user.id)
+        raise ValueError("upload_token cannot be empty")
+
+    # Input validation - sha256
+    if sha256 is None:
+        logger.error("complete_upload called with None sha256 for user_id=%s", user.id)
+        raise ValueError("sha256 cannot be None")
+
+    sha256 = sha256.strip()
+    if not sha256:
+        logger.error("complete_upload called with empty sha256 for user_id=%s", user.id)
+        raise ValueError("sha256 cannot be empty")
+
+    logger.debug("complete_upload called for user_id=%s", user.id)
+
+    try:
+        # Verify upload token
+        try:
+            payload = verify_upload_token(upload_token, user.id)
+        except ValueError as e:
+            logger.error("complete_upload: token verification failed for user_id=%s - %s", user.id, str(e))
+            raise CMSError("Invalid upload token") from e
+
+        s3_key = payload["s3_key"]
+        expected_size = payload["file_size"]
+
+        # Verify S3 object exists
+        try:
+            actual_size, _etag = verify_s3_object_exists(s3_key)
+        except S3Error as e:
+            logger.error("complete_upload: S3 verification failed for user_id=%s - %s", user.id, str(e))
+            raise CMSError("Upload not found in storage") from e
+
+        # Verify size matches
+        if actual_size != expected_size:
+            logger.error(
+                "complete_upload: size mismatch for user_id=%s - expected=%s, actual=%s",
+                user.id,
+                expected_size,
+                actual_size,
+            )
+            raise CMSError(f"File size mismatch: expected {expected_size}, got {actual_size}")
+
+        # Tag S3 object as completed
+        tag_s3_object(s3_key, {"status": "completed"})
+
+        # Create agent record
+        agent = create_agent(
+            user=user,
+            name=payload["name"],
+            s3_key=s3_key,
+            filename=payload["filename"],
+            os_slug=payload["os_slug"],
+            file_size=expected_size,
+            sha256=sha256,
+            upload_method="presigned",
+        )
+
+        logger.debug("complete_upload completed for user_id=%s, agent_id=%s", user.id, agent.id)
+
+        return agent
+
+    except (TypeError, ValueError, CMSError):
+        # Re-raise known errors
+        raise
+    except Exception:
+        logger.exception("Error in complete_upload for user_id=%s", user.id)
+        raise
 
 
 def cancel_upload(user: User, upload_token: str) -> None:
-    """Clean up failed upload."""
-    raise NotImplementedError
+    """Cancel an upload and clean up the S3 object.
+
+    Verifies the upload token and attempts to delete the S3 object.
+    S3 delete failures are logged but don't cause the operation to fail
+    (best effort cleanup).
+
+    Args:
+        user: User who initiated the upload
+        upload_token: Signed token from initiate_upload
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None or invalid type
+        ValueError: If user is unsaved or upload_token is empty
+        CMSError: If token is invalid/expired
+    """
+    from cms.exceptions import CMSError
+    from mission_control.services.s3 import S3Error, delete_agent
+    from mission_control.services.upload_token import verify_upload_token
+
+    # Input validation - user
+    if user is None:
+        logger.error("cancel_upload called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("cancel_upload called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    if user.id is None:
+        logger.error("cancel_upload called with unsaved user (id=None)")
+        raise ValueError("user must be saved (have an ID)")
+
+    # Input validation - upload_token
+    if upload_token is None:
+        logger.error("cancel_upload called with None upload_token for user_id=%s", user.id)
+        raise ValueError("upload_token cannot be None")
+
+    upload_token = upload_token.strip()
+    if not upload_token:
+        logger.error("cancel_upload called with empty upload_token for user_id=%s", user.id)
+        raise ValueError("upload_token cannot be empty")
+
+    logger.debug("cancel_upload called for user_id=%s", user.id)
+
+    try:
+        # Verify upload token
+        try:
+            payload = verify_upload_token(upload_token, user.id)
+        except ValueError as e:
+            logger.error("cancel_upload: token verification failed for user_id=%s - %s", user.id, str(e))
+            raise CMSError("Invalid upload token") from e
+
+        s3_key = payload["s3_key"]
+
+        # Attempt to delete S3 object (best effort)
+        try:
+            delete_agent(s3_key)
+        except S3Error as e:
+            # Log but don't fail - the object may not exist yet
+            logger.warning("cancel_upload: S3 delete failed for user_id=%s, s3_key=%s - %s", user.id, s3_key, str(e))
+
+        logger.debug("cancel_upload completed for user_id=%s, s3_key=%s", user.id, s3_key)
+
+    except (TypeError, ValueError, CMSError):
+        # Re-raise known errors
+        raise
+    except Exception:
+        logger.exception("Error in cancel_upload for user_id=%s", user.id)
+        raise
 
 
 # =============================================================================

@@ -17,12 +17,13 @@ from cms.assets.services import AssetError, get_storage_used
 from cms.assets.services import create_agent as cms_create_agent
 from cms.assets.services import delete_agent as cms_delete_agent
 from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
+from cms.models import Credential
 from engine.services.allocation import AllocationError
 from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
 from engine.services.scenarios import ScenarioValidationError
 from engine.services.serialization import range_to_dict
 
-from .models import AgentConfig, NGFWDeploymentProfile, Range, SCMCredential, UserNGFW
+from .models import AgentConfig, Range, UserNGFW
 from .services.s3 import (
     S3Error,
     generate_presigned_upload_url,
@@ -682,15 +683,20 @@ def ngfw_detail(request, ngfw_id):
 @require_GET
 def ngfw_wizard(request):
     """Setup wizard for provisioning a new NGFW."""
+    # TODO: migrate to CMS - move credential queries to cms.services
     # Get user's non-expired SCM credentials
-    scm_credentials = SCMCredential.active_for_user(request.user).filter(
-        expires_at__isnull=True
-    ) | SCMCredential.active_for_user(request.user).filter(expires_at__gt=timezone.now())
+    scm_credentials = Credential.active_for_user(request.user).filter(
+        credential_type=Credential.Type.SCM, expires_at__isnull=True
+    ) | Credential.active_for_user(request.user).filter(
+        credential_type=Credential.Type.SCM, expires_at__gt=timezone.now()
+    )
 
     # Get user's deployment profiles (non-expired)
-    deployment_profiles = NGFWDeploymentProfile.active_for_user(request.user).filter(
-        expires_at__isnull=True
-    ) | NGFWDeploymentProfile.active_for_user(request.user).filter(expires_at__gt=timezone.now())
+    deployment_profiles = Credential.active_for_user(request.user).filter(
+        credential_type=Credential.Type.DEPLOYMENT_PROFILE, expires_at__isnull=True
+    ) | Credential.active_for_user(request.user).filter(
+        credential_type=Credential.Type.DEPLOYMENT_PROFILE, expires_at__gt=timezone.now()
+    )
 
     context = {
         "page_title": "Setup NGFW",
@@ -793,8 +799,16 @@ def api_ngfw_provision(request):
     if errors:
         return JsonResponse({"error": ", ".join(errors)}, status=400)
 
+    # TODO: migrate to CMS - move credential validation to cms.services
     # Validate deployment profile belongs to user
-    deployment_profile = NGFWDeploymentProfile.active_for_user(request.user).filter(id=deployment_profile_id).first()
+    deployment_profile = (
+        Credential.active_for_user(request.user)
+        .filter(
+            id=deployment_profile_id,
+            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
+        )
+        .first()
+    )
     if not deployment_profile:
         return JsonResponse({"error": "Deployment profile not found"}, status=400)
 
@@ -804,7 +818,14 @@ def api_ngfw_provision(request):
         scm_credential_id = data.get("scm_credential_id")
         if not scm_credential_id:
             return JsonResponse({"error": "scm_credential_id required for PIN method"}, status=400)
-        scm_credential = SCMCredential.active_for_user(request.user).filter(id=scm_credential_id).first()
+        scm_credential = (
+            Credential.active_for_user(request.user)
+            .filter(
+                id=scm_credential_id,
+                credential_type=Credential.Type.SCM,
+            )
+            .first()
+        )
         if not scm_credential:
             return JsonResponse({"error": "SCM credential not found"}, status=400)
     else:  # otp

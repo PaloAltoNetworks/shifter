@@ -22,7 +22,7 @@ jobs:
     runs-on: self-hosted
     defaults:
       run:
-        working-directory: packer
+        working-directory: shifter/packer
 
     steps:
       - name: Checkout
@@ -38,11 +38,11 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --dev
-        working-directory: packer
+        working-directory: shifter/packer
 
       - name: Run Packer tests
         run: uv run pytest tests/ -v
-        working-directory: packer
+        working-directory: shifter/packer
 
       - name: Setup Packer
         uses: hashicorp/setup-packer@main
@@ -89,4 +89,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.ami_type }}-manifest
-          path: packer/${{ inputs.ami_type }}-manifest.json
+          path: shifter/packer/${{ inputs.ami_type }}-manifest.json

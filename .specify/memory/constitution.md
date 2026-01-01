@@ -1,50 +1,144 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+==================
+Version change: 0.0.0 → 1.0.0 (MAJOR - initial constitution)
+Modified principles: N/A (first version)
+Added sections:
+  - Core Principles (5 principles)
+  - Platform Constraints
+  - Development Workflow
+  - Governance
+Removed sections: N/A
+Templates requiring updates:
+  - .specify/templates/plan-template.md ✅ (Constitution Check section compatible)
+  - .specify/templates/spec-template.md ✅ (no changes needed)
+  - .specify/templates/tasks-template.md ✅ (no changes needed)
+Follow-up TODOs:
+  - RATIFICATION_DATE: Original adoption date unknown
+-->
+
+# Shifter Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Safety & Isolation
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Ranges MUST be network-isolated. All infrastructure provisioned by the Engine runs in a
+dedicated Range VPC with egress filtering via AWS Network Firewall. No direct internet
+ingress to range instances is permitted. VPC peering exists only for terminal access
+from the Portal VPC.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+- Range instances MUST NOT have public IP addresses
+- Egress MUST be filtered through Network Firewall with domain-based rules
+- SSH access MUST route through authenticated WebSocket consumers in Mission Control
+- MFA MUST be enforced for all user authentication (Cognito TOTP)
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. Human Oversight
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+Human oversight is required for all scenario execution. AI-driven attack capabilities
+exist to provide realistic training, but all actions MUST be logged and auditable.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+- All AI actions MUST be logged via `management.services.log_activity()`
+- Users MUST explicitly trigger range provisioning, destruction, and scenario execution
+- No autonomous attack execution without user initiation
+- Activity logs MUST include user, action, timestamp, and relevant metadata
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### III. Domain-Driven Design
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+The platform is organized into four bounded contexts, each a Django app with distinct
+responsibilities. Cross-domain communication uses Python service interfaces, not HTTP.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+| Domain | App | Responsibility |
+|--------|-----|----------------|
+| Mission Control | `mission_control` | Presentation layer. DRF API, views, WebSocket consumers. |
+| Shifter Engine | `engine` | Infrastructure lifecycle. Range provisioning, NGFW operations. |
+| Shifter CMS | `cms` | Content management. Assets, credentials, scenarios. |
+| Shifter Management | `management` | Platform administration. Audit logging, user management. |
+
+- Domains MUST expose functionality via service modules (`<app>.services`)
+- Views MUST NOT contain business logic; they handle HTTP concerns only
+- Cross-domain foreign keys are permitted; business logic via service calls
+- Status updates MUST use Redis pub/sub channels, not database polling
+
+### IV. Infrastructure as Code
+
+All AWS infrastructure MUST be defined in Terraform. Manual console changes are
+prohibited except for initial bootstrap operations.
+
+- Terraform modules in `platform/terraform/modules/` for reusable components
+- Environment configs in `platform/terraform/environments/{dev,prod}/`
+- State stored in S3 with DynamoDB locking
+- OIDC federation for CI/CD authentication; no long-lived AWS credentials
+- Range subnets created at runtime by Pulumi Provisioner (Engine), not Terraform
+
+### V. Simplicity First
+
+Start simple. Add complexity only when justified by concrete requirements, not
+hypothetical future needs.
+
+- YAGNI: Do not build features that are not immediately required
+- Prefer Django conventions over custom abstractions
+- Single process deployment; microservices complexity not warranted for current scale
+- REST via DRF; no GraphQL or alternative API paradigms without justification
+
+## Platform Constraints
+
+Shifter is an internal enablement tool, not a product.
+
+- Target users: Technical sellers demonstrating XDR/XSIAM capabilities
+- NOT for product/stress testing PANW products or services
+- NOT a replacement for BYOS, shared demo tenants, or official enablement tools
+- Domain: `keplerops.com` (temporary; will migrate to `paloaltonetworks.com` if adopted)
+- Identity: Cognito (temporary; will migrate to PANW SSO if adopted)
+
+### Ethics
+
+AI-driven attack capabilities exist because defenders need realistic exposure.
+All attack tooling MUST be contained within isolated ranges with no external impact.
+
+## Development Workflow
+
+### CI/CD
+
+GitHub Actions with self-hosted runners. Workflows trigger on file path changes.
+
+| Branch | Behavior |
+|--------|----------|
+| `dev` | Deploy to dev environment |
+| `main` | Deploy to prod environment |
+| PR to `dev` | Plan and apply to dev |
+| PR to `main` | Plan only (no apply) |
+
+### Quality Gates
+
+- Linting and security scanning via `_quality.yml`
+- SonarCloud quality gate MUST pass
+- All infrastructure changes require Terraform plan review
+
+### Code Review
+
+- PRs MUST verify compliance with this constitution
+- Complexity additions MUST be justified in PR description
+- Cross-domain changes MUST document service interface impacts
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes all other development practices. Amendments require:
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+1. Documentation of the proposed change
+2. Review and approval via PR
+3. Migration plan for any breaking changes
+4. Version increment following semantic versioning
+
+### Versioning Policy
+
+- **MAJOR**: Backward-incompatible principle removals or redefinitions
+- **MINOR**: New principles added or existing guidance materially expanded
+- **PATCH**: Clarifications, wording fixes, non-semantic refinements
+
+### Compliance
+
+All PRs and code reviews MUST verify alignment with these principles. Use
+`.cursor/rules` and agent guidance files for runtime development guidance.
+
+**Version**: 1.0.0 | **Ratified**: TODO(RATIFICATION_DATE): original adoption date unknown | **Last Amended**: 2025-12-31

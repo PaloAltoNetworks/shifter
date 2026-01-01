@@ -9,7 +9,8 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
-from mission_control.models import ActivityLog, AgentConfig, OperatingSystem
+from management.models import ActivityLog
+from mission_control.models import AgentConfig, OperatingSystem
 from mission_control.services.upload_token import (
     generate_upload_token,
     verify_upload_token,

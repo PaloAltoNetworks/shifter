@@ -10,10 +10,11 @@ from typing import TYPE_CHECKING, Any
 
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
+from cms.models import AgentConfig
 from engine.services import create_range as engine_create_range
 from engine.services.orchestration import cancel as engine_cancel
 from engine.services.orchestration import destroy as engine_destroy
-from mission_control.models import AgentConfig, Range
+from mission_control.models import Range
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -841,7 +842,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
             range_id=range_id,
             scenario_id=scenario,
             user_id=user.id,
-            agent_id=agent_id,
+            agent=agent,
         )
 
         logger.debug(

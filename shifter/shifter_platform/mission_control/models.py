@@ -1,115 +1,14 @@
-"""Mission Control models."""
+"""Mission Control models.
+
+Asset base classes (Asset, FileAsset, CredentialBase) have been moved to cms.models.
+AgentConfig and OperatingSystem have been moved to cms.models.
+See issue #446.
+"""
 
 from django.conf import settings
 from django.db import models, transaction
-from django.utils import timezone
 
-
-class OperatingSystem(models.Model):
-    """Reference table for supported operating systems."""
-
-    slug = models.SlugField(max_length=50, unique=True)
-    name = models.CharField(max_length=100)
-    extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
-
-    class Meta:
-        ordering = ["name"]
-        verbose_name = "Operating System"
-        verbose_name_plural = "Operating Systems"
-
-    def __str__(self):
-        return self.name
-
-    @classmethod
-    def get_for_extension(cls, extension: str):
-        """Find the OS that matches a given file extension."""
-        ext = extension.lower()
-        if not ext.startswith("."):
-            ext = f".{ext}"
-        for os in cls.objects.all():
-            if ext in os.extensions:
-                return os
-        return None
-
-
-class Asset(models.Model):
-    """Abstract base for user-owned assets with soft delete."""
-
-    name = models.CharField(max_length=100, help_text="User-friendly name")
-    created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        abstract = True
-
-    def __str__(self):
-        return self.name
-
-    @property
-    def is_deleted(self):
-        return self.deleted_at is not None
-
-    @classmethod
-    def active_for_user(cls, user):
-        """Return non-deleted assets for a user."""
-        return cls.objects.filter(user=user, deleted_at__isnull=True)
-
-
-class FileAsset(Asset):
-    """Abstract base class for file-backed assets stored in S3.
-
-    Extends Asset with fields for S3 storage:
-    - s3_key: Full S3 object key
-    - original_filename: Original uploaded filename
-    - file_size_bytes: File size for quota tracking
-    - sha256_hash: Content hash for integrity/deduplication
-    """
-
-    s3_key = models.CharField(max_length=500, help_text="S3 object key")
-    original_filename = models.CharField(max_length=255)
-    file_size_bytes = models.PositiveBigIntegerField()
-    sha256_hash = models.CharField(max_length=64)
-
-    class Meta:
-        abstract = True
-
-    @property
-    def file_size_mb(self):
-        """Return file size in megabytes, rounded to 1 decimal."""
-        return round(self.file_size_bytes / (1024 * 1024), 1)
-
-
-class Credential(Asset):
-    """Abstract base for credential assets with expiration tracking."""
-
-    expires_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When this credential expires (user sets at creation)",
-    )
-    last_verified_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Last time credential was validated against external system",
-    )
-    last_used_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Last time credential was used for provisioning",
-    )
-
-    class Meta:
-        abstract = True
-
-    @property
-    def is_expired(self):
-        if not self.expires_at:
-            return False
-        return timezone.now() > self.expires_at
-
-
-# Note: SCMCredential and NGFWDeploymentProfile have been migrated to cms.Credential.
-# See cms/models.py for the unified Credential model.
+from cms.models import Asset
 
 
 class UserNGFW(Asset):
@@ -171,38 +70,6 @@ class UserNGFW(Asset):
         verbose_name_plural = "User NGFWs"
 
 
-class AgentConfig(FileAsset):
-    """XDR/XSIAM agent installer uploaded by a user.
-
-    Inherits from FileAsset:
-    - name, created_at, deleted_at, is_deleted from Asset
-    - s3_key, original_filename, file_size_bytes, sha256_hash, file_size_mb from FileAsset
-
-    AgentConfig-specific:
-    - user: Owner of this agent (with related_name="agents")
-    - os: Operating system this agent is for
-    """
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="agents",
-    )
-    os = models.ForeignKey(
-        OperatingSystem,
-        on_delete=models.PROTECT,
-        related_name="agents",
-    )
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "Agent Config"
-        verbose_name_plural = "Agent Configs"
-
-    def __str__(self):
-        return f"{self.name} ({self.os.name})"
-
-
 class Range(models.Model):
     """User's cyber range instance with lifecycle management."""
 
@@ -222,7 +89,7 @@ class Range(models.Model):
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
     agent = models.ForeignKey(
-        AgentConfig,
+        "cms.AgentConfig",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -230,7 +97,7 @@ class Range(models.Model):
         help_text="Agent for victim instances",
     )
     dc_agent = models.ForeignKey(
-        AgentConfig,
+        "cms.AgentConfig",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

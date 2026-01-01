@@ -528,6 +528,48 @@ class Credential(CredentialBase):
             self._is_new = True
 
 
+# -----------------------------------------------------------------------------
+# Agent Models
+# -----------------------------------------------------------------------------
+
+
+class AgentConfig(FileAsset):
+    """XDR/XSIAM agent installer uploaded by a user.
+
+    Inherits from FileAsset:
+    - name, created_at, deleted_at, is_deleted from Asset
+    - s3_key, original_filename, file_size_bytes, sha256_hash, file_size_mb from FileAsset
+
+    AgentConfig-specific:
+    - user: Owner of this agent (with related_name="cms_agents")
+    - os: Operating system this agent is for
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="cms_agents",
+    )
+    os = models.ForeignKey(
+        OperatingSystem,
+        on_delete=models.PROTECT,
+        related_name="cms_agents",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Agent Config"
+        verbose_name_plural = "Agent Configs"
+
+    def __str__(self):
+        return f"{self.name} ({self.os.name})"
+
+
+# -----------------------------------------------------------------------------
+# Range Instance Tracking
+# -----------------------------------------------------------------------------
+
+
 class RangeInstance(models.Model):
     """Tracks hydrated scenario configs sent to engine.
 

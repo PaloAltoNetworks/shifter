@@ -16,8 +16,7 @@ import pytest
 from django.contrib.auth import get_user_model
 
 from cms import services
-from cms.models import OperatingSystem
-from mission_control.models import AgentConfig
+from cms.models import AgentConfig, OperatingSystem
 
 User = get_user_model()
 

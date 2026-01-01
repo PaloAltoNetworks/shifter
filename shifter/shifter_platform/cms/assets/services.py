@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING
 from django.db.models import Sum
 from django.utils import timezone
 
-from mission_control.models import ActivityLog, AgentConfig, OperatingSystem
+from management.models import ActivityLog
+from mission_control.models import AgentConfig, OperatingSystem
 from mission_control.services.s3 import S3Error
 from mission_control.services.s3 import delete_agent as s3_delete
 

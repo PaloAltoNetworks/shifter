@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] - 2025-01-01
+
+### Added
+- CMS Services
+  - Extracted CMS services from Mission Control views
+- Unified Credential model
+
+## [0.9.9] - 2025-12-31
+
+### Added
+- Management services implementation
+  - cognito_sub update service
+  - activity log service
+  - user profile service
+
+### Changed
+- OIDC backend updated to use management services
+- User profile model moved to management domain
+- Activity log model moved to management domain
+
 ## [0.9.8] - 2025-12-31
 
 ### Added

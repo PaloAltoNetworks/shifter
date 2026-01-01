@@ -11,7 +11,8 @@ from engine.services.orchestration import (
     destroy,
     launch,
 )
-from mission_control.models import ActivityLog, AgentConfig, OperatingSystem, Range
+from management.models import ActivityLog
+from mission_control.models import AgentConfig, OperatingSystem, Range
 
 User = get_user_model()
 

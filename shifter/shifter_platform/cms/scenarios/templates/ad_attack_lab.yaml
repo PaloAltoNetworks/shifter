@@ -1,0 +1,23 @@
+id: ad_attack_lab
+name: AD Attack Lab
+description: Active Directory attack lab with domain controller, Kali attacker, and domain-joined Windows victim.
+
+requirements:
+  required: true
+  os: windows
+
+instances:
+  - role: attacker
+    os_type: kali
+
+  - role: dc
+    os_type: windows
+    domain_controller: true
+    dc_config:
+      domain_name: psycho.lab
+      netbios_name: PSYCHO
+
+  - role: victim
+    os_type: from_agent
+    agent_slot: primary
+    join_domain: true

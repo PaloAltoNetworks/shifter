@@ -862,14 +862,14 @@ class TestDestroyRange:
     def test_logs_error_when_engine_service_fails(self, user, caplog):
         """Service logs error when engine service raises exception."""
         from cms.models import RangeInstance
-        from engine.orchestration import OrchestrationError
+        from engine import EngineError
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_destroy_range", side_effect=OrchestrationError("No range to destroy")),
+            patch("cms.services.engine_destroy_range", side_effect=EngineError("No range to destroy")),
             caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(OrchestrationError),
+            pytest.raises(EngineError),
         ):
             services.destroy_range(user, 42)
         assert "error" in caplog.text.lower() or "exception" in caplog.text.lower()
@@ -899,16 +899,16 @@ class TestDestroyRange:
     # Error propagation - engine service errors
     # -------------------------------------------------------------------------
 
-    def test_propagates_orchestration_error(self, user):
-        """Service propagates OrchestrationError from engine service."""
+    def test_propagates_engine_error(self, user):
+        """Service propagates EngineError from engine service."""
         from cms.models import RangeInstance
-        from engine.orchestration import OrchestrationError
+        from engine import EngineError
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_destroy_range", side_effect=OrchestrationError("No range to destroy")),
-            pytest.raises(OrchestrationError, match="No range to destroy"),
+            patch("cms.services.engine_destroy_range", side_effect=EngineError("No range to destroy")),
+            pytest.raises(EngineError, match="No range to destroy"),
         ):
             services.destroy_range(user, 42)
 
@@ -1093,14 +1093,14 @@ class TestCancelRange:
     def test_logs_error_when_engine_service_fails(self, user, caplog):
         """Service logs error when engine service raises exception."""
         from cms.models import RangeInstance
-        from engine.orchestration import OrchestrationError
+        from engine import EngineError
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_cancel_range", side_effect=OrchestrationError("Cannot cancel range")),
+            patch("cms.services.engine_cancel_range", side_effect=EngineError("Cannot cancel range")),
             caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(OrchestrationError),
+            pytest.raises(EngineError),
         ):
             services.cancel_range(user, 42)
         assert "error" in caplog.text.lower() or "exception" in caplog.text.lower()
@@ -1130,16 +1130,16 @@ class TestCancelRange:
     # Error propagation - engine service errors
     # -------------------------------------------------------------------------
 
-    def test_propagates_orchestration_error(self, user):
-        """Service propagates OrchestrationError from engine service."""
+    def test_propagates_engine_error(self, user):
+        """Service propagates EngineError from engine service."""
         from cms.models import RangeInstance
-        from engine.orchestration import OrchestrationError
+        from engine import EngineError
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_cancel_range", side_effect=OrchestrationError("Cannot cancel range")),
-            pytest.raises(OrchestrationError, match="Cannot cancel range"),
+            patch("cms.services.engine_cancel_range", side_effect=EngineError("Cannot cancel range")),
+            pytest.raises(EngineError, match="Cannot cancel range"),
         ):
             services.cancel_range(user, 42)
 

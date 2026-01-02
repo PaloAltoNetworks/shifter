@@ -1,4 +1,8 @@
-"""Mission Control views."""
+"""Mission Control views.
+
+WARNING: This module is legacy code pending refactor to use CMS services.
+Many functions are stubbed out until the refactor is complete.
+"""
 
 import json
 import logging
@@ -13,37 +17,66 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from cms.assets.services import AssetError, get_storage_used
-from cms.assets.services import create_agent as cms_create_agent
-from cms.assets.services import delete_agent as cms_delete_agent
-from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
-from cms.models import AgentConfig, Credential
-from cms.services import list_scenarios as cms_list_scenarios
-from engine.allocation import AllocationError
-from engine.orchestration import OrchestrationError, cancel, destroy, launch
-from engine.scenarios import ScenarioValidationError
-from engine.serialization import range_to_dict
-
-from .models import Range, UserNGFW
-from .services.s3 import (
+from cms.assets.s3 import (
     S3Error,
     generate_presigned_upload_url,
     tag_s3_object,
     verify_s3_object_exists,
 )
-from .services.s3 import (
+from cms.assets.s3 import (
     delete_agent as s3_delete,
 )
-from .services.s3 import (
+from cms.assets.s3 import (
     upload_agent as s3_upload,
 )
-from .services.upload_token import generate_upload_token, verify_upload_token
-from .services.validation import (
+from cms.assets.services import AssetError, get_storage_used
+from cms.assets.services import create_agent as cms_create_agent
+from cms.assets.services import delete_agent as cms_delete_agent
+from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
+from cms.assets.upload_token import generate_upload_token, verify_upload_token
+from cms.assets.validation import (
     ValidationError,
     get_allowed_extensions,
     validate_agent_file,
     validate_file_extension,
 )
+from cms.models import AgentConfig, Credential
+from cms.services import list_scenarios as cms_list_scenarios
+from engine.models import Range, UserNGFW
+
+
+# TODO: Mission Control is legacy - these are stubs until MC is refactored to use CMS
+class AllocationError(Exception):
+    pass
+
+
+class OrchestrationError(Exception):
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class ScenarioValidationError(Exception):
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def launch(*args, **kwargs):
+    raise NotImplementedError("Mission Control must be refactored to use CMS")
+
+
+def cancel(*args, **kwargs):
+    raise NotImplementedError("Mission Control must be refactored to use CMS")
+
+
+def destroy(*args, **kwargs):
+    raise NotImplementedError("Mission Control must be refactored to use CMS")
+
+
+def range_to_dict(range_obj):
+    raise NotImplementedError("Mission Control must be refactored to use CMS")
+
 
 logger = logging.getLogger(__name__)
 

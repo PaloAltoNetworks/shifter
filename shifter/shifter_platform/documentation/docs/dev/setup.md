@@ -16,23 +16,23 @@ Use the deployment CLI which walks you through each step with confirmations:
 
 ```bash
 # Preview what will happen (no changes made)
-./scripts/deploy.py full --env prod --dry-run
+./scripts/bootstrap/deploy.py full --env prod --profile <your-prod-profile> --dry-run
 
 # Run the full deployment
-AWS_PROFILE=<your-prod-profile> ./scripts/deploy.py full --env prod
+./scripts/bootstrap/deploy.py full --env prod --profile <your-prod-profile>
 ```
 
 Or run phases separately:
 
 ```bash
 # Phase 1: Bootstrap AWS account (S3, DynamoDB, IAM)
-AWS_PROFILE=<your-prod-profile> ./scripts/deploy.py bootstrap --env prod
+./scripts/bootstrap/deploy.py bootstrap --env prod --profile <your-prod-profile>
 
 # Or use standalone bash scripts:
 # AWS_PROFILE=<your-prod-profile> ./scripts/bootstrap/prod.sh
 
 # Phase 2: Deploy Terraform (Core → Range → Portal)
-AWS_PROFILE=<your-prod-profile> ./scripts/deploy.py terraform --env prod
+./scripts/bootstrap/deploy.py terraform --env prod --profile <your-prod-profile>
 ```
 
 ### 1. Bootstrap AWS Account
@@ -63,8 +63,8 @@ Copy the backend config from bootstrap output to these files:
 | File | State Key |
 |------|-----------|
 | `platform/terraform/environments/prod/backend.tf` | `shifter/prod/terraform.tfstate` |
-| `platform/terraform/environments/prod/portal/backend.tf` | `shifter/prod/portal/terraform.tfstate` |
-| `platform/terraform/environments/prod/range/backend.tf` | `shifter/prod/range/terraform.tfstate` |
+| `platform/terraform/environments/prod/portal/backend.tf` | `prod/portal/terraform.tfstate` |
+| `platform/terraform/environments/prod/range/backend.tf` | `prod/range/terraform.tfstate` |
 
 ### 4. Configure terraform.tfvars
 
@@ -114,7 +114,7 @@ Deploy in this order (dependencies flow down):
 **Using the CLI (recommended):**
 
 ```bash
-AWS_PROFILE=<your-profile> ./scripts/deploy.py terraform --env prod
+./scripts/bootstrap/deploy.py terraform --env prod --profile <your-profile>
 ```
 
 The CLI walks through each component, shows the plan, and asks for confirmation before applying.
@@ -204,12 +204,12 @@ Cognito is fully configured by Terraform. You only need to:
    ```bash
    # Get user pool ID from terraform output
    USER_POOL_ID=$(terraform output -raw cognito_user_pool_id)
-   
+
    # Create user
    aws cognito-idp admin-create-user \
      --user-pool-id $USER_POOL_ID \
-     --username user@paloaltonetworks.com \
-     --user-attributes Name=email,Value=user@paloaltonetworks.com \
+     --username YOUR_EMAIL@example.com \
+     --user-attributes Name=email,Value=YOUR_EMAIL@example.com \
      --profile <your-profile>
    ```
 

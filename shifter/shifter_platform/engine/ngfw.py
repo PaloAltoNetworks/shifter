@@ -14,7 +14,7 @@ from django.utils import timezone
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from engine.models import UserNGFW
+    from cms.models import UserNGFW
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def list_ngfws(user: User) -> QuerySet[UserNGFW]:
     Raises:
         TypeError: If user is None
     """
-    from engine.models import UserNGFW
+    from cms.models import UserNGFW
 
     # Input validation
     if user is None:
@@ -59,7 +59,7 @@ def get_ngfw(user: User, ngfw_id: int) -> UserNGFW:
         UserNGFW.DoesNotExist: If NGFW not found or deleted
         PermissionError: If user doesn't own the NGFW
     """
-    from engine.models import UserNGFW
+    from cms.models import UserNGFW
 
     # Input validation - user
     if user is None:
@@ -122,7 +122,7 @@ def provision_ngfw(user: User, name: str) -> UserNGFW:
         TypeError: If user or name is None
         ValueError: If name is empty or whitespace
     """
-    from engine.models import UserNGFW
+    from cms.models import UserNGFW
 
     # Input validation - user
     if user is None:
@@ -173,7 +173,7 @@ def start_ngfw(user: User, ngfw_id: int) -> UserNGFW:
         UserNGFW.DoesNotExist: If NGFW not found
         PermissionError: If user doesn't own the NGFW
     """
-    from engine.models import UserNGFW
+    from cms.models import UserNGFW
 
     # Input validation - user
     if user is None:
@@ -248,7 +248,7 @@ def stop_ngfw(user: User, ngfw_id: int) -> UserNGFW:
         UserNGFW.DoesNotExist: If NGFW not found
         PermissionError: If user doesn't own the NGFW
     """
-    from engine.models import UserNGFW
+    from cms.models import UserNGFW
 
     # Input validation - user
     if user is None:
@@ -324,7 +324,7 @@ def deprovision_ngfw(user: User, ngfw_id: int, confirm_name: str) -> UserNGFW:
         UserNGFW.DoesNotExist: If NGFW not found
         PermissionError: If user doesn't own the NGFW
     """
-    from engine.models import UserNGFW
+    from cms.models import UserNGFW
 
     # Input validation - user
     if user is None:

@@ -16,10 +16,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from engine.models import (
-    Range,
-    UserNGFW,
-)
+from cms.models import UserNGFW
+from engine.models import Range
 
 User = get_user_model()
 

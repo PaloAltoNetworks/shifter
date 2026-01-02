@@ -64,4 +64,3 @@ channel_layer.group_send(
 Channel groups:
 - `range_{range_id}` - range lifecycle updates
 - `ngfw_{ngfw_id}` - NGFW lifecycle updates
-

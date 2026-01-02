@@ -21,7 +21,7 @@ Terminal access to range instances.
 
 **Flow:**
 1. Authenticate user from scope
-2. Call `engine.services.connect_terminal(user, range_id, instance_type)`
+2. Call `engine.connect_terminal(user, range_id, instance_type)`
 3. Accept WebSocket
 4. Pipe: WebSocket input → SSH, SSH output → WebSocket
 

@@ -210,10 +210,10 @@ class TestUploadLock:
 class TestRangeToJson:
     def test_serializes_range_correctly(self, user):
         from django.utils import timezone
+        from engine.serialization import range_to_dict
 
         from cms.models import AgentConfig, OperatingSystem
         from engine.models import Range
-        from engine.serialization import range_to_dict
 
         windows_os = OperatingSystem.objects.get(slug="windows")
         agent = AgentConfig.objects.create(
@@ -247,8 +247,9 @@ class TestRangeToJson:
         assert "victim_ip" not in result  # Security: internal detail not exposed
 
     def test_handles_null_agent(self, user):
-        from engine.models import Range
         from engine.serialization import range_to_dict
+
+        from engine.models import Range
 
         range_obj = Range.objects.create(
             user=user,

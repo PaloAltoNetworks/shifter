@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from shared.schemas import RangeRequest
+
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
@@ -16,12 +18,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def create_range(range_config: dict[str, Any]) -> int:
+def create_range(request: RangeRequest) -> int:
     """Provision infrastructure for range.
 
     Args:
-        range_config: Fully resolved configuration dict containing
-            scenario, agent details, credentials, and instance specs.
+        request: Validated RangeRequest with scenario, user, and instances.
 
     Returns:
         range_id: The ID of the created range.

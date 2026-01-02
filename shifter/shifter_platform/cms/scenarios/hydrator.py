@@ -1,7 +1,7 @@
 """Scenario hydration for Engine consumption.
 
 Takes a scenario template + agent and produces a fully resolved
-range_config dict with:
+RangeRequest with:
 - Resolved os_type (from_agent -> actual OS)
 - Embedded agent details for instances with agent_slot
 """
@@ -9,9 +9,10 @@ range_config dict with:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from cms.exceptions import CMSError
+from shared.schemas import AgentDetails, DCConfig, InstanceSpec, RangeRequest
 
 from .loader import load_scenario
 
@@ -21,29 +22,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def hydrate_scenario(scenario_id: str, agent: AgentConfig | None) -> dict[str, Any]:
+def hydrate_scenario(
+    scenario_id: str,
+    user_id: int,
+    agent: AgentConfig | None,
+) -> RangeRequest:
     """Hydrate a scenario template with agent details.
 
     Args:
-        scenario_id: ID of the scenario template (e.g., 'basic', 'ad_attack_lab')
+        scenario_id: ID of the scenario template (e.g., 'basic')
+        user_id: ID of the user requesting the range
         agent: The agent to use for victim instances
 
     Returns:
-        Dict with scenario_id and hydrated instances list:
-        {
-            "scenario_id": "basic",
-            "instances": [
-                {"role": "attacker", "os_type": "kali"},
-                {"role": "victim", "os_type": "windows", "agent": {...}}
-            ]
-        }
+        RangeRequest with scenario_id, user_id, and hydrated instances
 
     Raises:
         CMSError: If scenario not found or agent is None
     """
     # Validate agent
     if agent is None:
-        logger.error("hydrate_scenario called with None agent for scenario=%s", scenario_id)
+        logger.error(
+            "hydrate_scenario called with None agent for scenario=%s",
+            scenario_id,
+        )
         raise CMSError("agent is required for scenario hydration")
 
     # Load scenario template
@@ -57,22 +59,23 @@ def hydrate_scenario(scenario_id: str, agent: AgentConfig | None) -> dict[str, A
     agent_os_type = _resolve_agent_os(agent)
 
     # Hydrate instances
-    instances = []
+    instances: list[InstanceSpec] = []
     for instance in template.instances:
         hydrated = _hydrate_instance(instance, agent, agent_os_type)
         instances.append(hydrated)
 
     logger.debug(
-        "Hydrated scenario: scenario_id=%s, instance_count=%d, agent_id=%s",
+        "Hydrated scenario: scenario_id=%s, user_id=%s, instances=%d",
         scenario_id,
+        user_id,
         len(instances),
-        agent.id,
     )
 
-    return {
-        "scenario_id": scenario_id,
-        "instances": instances,
-    }
+    return RangeRequest(
+        scenario_id=scenario_id,
+        user_id=user_id,
+        instances=instances,
+    )
 
 
 def _resolve_agent_os(agent: AgentConfig) -> str:
@@ -92,10 +95,10 @@ def _resolve_agent_os(agent: AgentConfig) -> str:
 
 
 def _hydrate_instance(
-    instance: Any,  # InstanceConfig from schema
+    instance: object,  # InstanceConfig from schema
     agent: AgentConfig,
     agent_os_type: str,
-) -> dict[str, Any]:
+) -> InstanceSpec:
     """Hydrate a single instance config.
 
     Args:
@@ -104,30 +107,32 @@ def _hydrate_instance(
         agent_os_type: Resolved OS type from agent
 
     Returns:
-        Hydrated instance dict
+        Hydrated InstanceSpec
     """
-    result: dict[str, Any] = {
-        "role": instance.role,
-        "os_type": instance.os_type if instance.os_type != "from_agent" else agent_os_type,
-    }
+    # Resolve os_type
+    os_type = instance.os_type if instance.os_type != "from_agent" else agent_os_type
 
-    # Include DC config if present
+    # Build DC config if present
+    dc_config = None
     if instance.dc_config:
-        result["dc_config"] = {
-            "domain_name": instance.dc_config.domain_name,
-            "netbios_name": instance.dc_config.netbios_name,
-        }
+        dc_config = DCConfig(
+            domain_name=instance.dc_config.domain_name,
+            netbios_name=instance.dc_config.netbios_name,
+        )
 
-    # Include join_domain if True
-    if instance.join_domain:
-        result["join_domain"] = True
-
-    # Embed agent details if instance has agent_slot
+    # Build agent details if instance has agent_slot
+    agent_details = None
     if instance.agent_slot:
-        result["agent"] = {
-            "s3_key": agent.s3_key,
-            "filename": agent.original_filename,
-            "sha256": agent.sha256_hash,
-        }
+        agent_details = AgentDetails(
+            s3_key=agent.s3_key,
+            filename=agent.original_filename,
+            sha256=agent.sha256_hash,
+        )
 
-    return result
+    return InstanceSpec(
+        role=instance.role,
+        os_type=os_type,
+        agent=agent_details,
+        dc_config=dc_config,
+        join_domain=instance.join_domain,
+    )

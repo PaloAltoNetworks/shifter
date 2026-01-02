@@ -604,7 +604,7 @@ class TestCreateRangeEngineCall:
 
     @patch("cms.services.engine_create_range")
     def test_calls_engine_create_range(self, mock_engine, user, windows_agent):
-        """create_range calls engine.create_range with hydrated config."""
+        """create_range calls engine.create_range with RangeRequest."""
         mock_engine.return_value = 42  # Engine returns range_id
 
         services.create_range(user, "basic", windows_agent.id)
@@ -613,47 +613,50 @@ class TestCreateRangeEngineCall:
         mock_engine.assert_called_once()
 
     @patch("cms.services.engine_create_range")
-    def test_engine_receives_range_config_dict(self, mock_engine, user, windows_agent):
-        """Engine receives a range_config dict with scenario and instances."""
+    def test_engine_receives_range_request(self, mock_engine, user, windows_agent):
+        """Engine receives a RangeRequest with scenario and instances."""
+        from shared.schemas import RangeRequest
+
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
 
-        # Get the range_config passed to engine
+        # Get the RangeRequest passed to engine
         call_args = mock_engine.call_args
-        range_config = call_args[0][0]  # First positional arg
+        range_request = call_args[0][0]  # First positional arg
 
-        assert isinstance(range_config, dict)
-        assert "scenario_id" in range_config
-        assert "instances" in range_config
+        assert isinstance(range_request, RangeRequest)
+        assert range_request.scenario_id == "basic"
+        assert range_request.user_id == user.id
+        assert isinstance(range_request.instances, list)
 
     @patch("cms.services.engine_create_range")
-    def test_range_config_has_correct_scenario_id(self, mock_engine, user, windows_agent):
-        """range_config includes the correct scenario_id."""
+    def test_range_request_has_correct_scenario_id(self, mock_engine, user, windows_agent):
+        """RangeRequest includes the correct scenario_id."""
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
 
-        range_config = mock_engine.call_args[0][0]
-        assert range_config["scenario_id"] == "basic"
+        range_request = mock_engine.call_args[0][0]
+        assert range_request.scenario_id == "basic"
 
     @patch("cms.services.engine_create_range")
-    def test_range_config_has_hydrated_instances(self, mock_engine, user, windows_agent):
-        """range_config instances are hydrated with resolved OS and agent."""
+    def test_range_request_has_hydrated_instances(self, mock_engine, user, windows_agent):
+        """RangeRequest instances are hydrated with resolved OS and agent."""
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
 
-        range_config = mock_engine.call_args[0][0]
-        instances = range_config["instances"]
+        range_request = mock_engine.call_args[0][0]
+        instances = range_request.instances
 
         # Basic scenario has attacker and victim
         assert len(instances) == 2
 
-        victim = next(i for i in instances if i["role"] == "victim")
-        assert victim["os_type"] == "windows"  # Resolved from agent
-        assert "agent" in victim
-        assert victim["agent"]["s3_key"] == "agents/123/agent.msi"
+        victim = next(i for i in instances if i.role == "victim")
+        assert victim.os_type == "windows"  # Resolved from agent
+        assert victim.agent is not None
+        assert victim.agent.s3_key == "agents/123/agent.msi"
 
 
 @pytest.mark.django_db

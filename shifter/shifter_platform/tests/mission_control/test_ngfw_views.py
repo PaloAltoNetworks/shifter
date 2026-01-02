@@ -11,8 +11,8 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from cms.models import Credential
-from engine.models import Range, UserNGFW
+from cms.models import Credential, UserNGFW
+from engine.models import Range
 
 User = get_user_model()
 

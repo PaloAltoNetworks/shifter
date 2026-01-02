@@ -28,7 +28,7 @@ class TestStartProvisioning:
     )
     def test_returns_none_when_not_configured(self):
         """When ECS config is incomplete, returns None (local dev fallback)."""
-        from mission_control.services.engine import start_provisioning
+        from engine.services.ecs import start_provisioning
 
         result = start_provisioning(range_id=1)
         assert result is None
@@ -37,7 +37,7 @@ class TestStartProvisioning:
         """Successfully starts ECS task."""
         with (
             override_settings(**ecs_settings),
-            patch("mission_control.services.engine.boto3.client") as mock_client,
+            patch("engine.services.ecs.boto3.client") as mock_client,
         ):
             mock_ecs = mock_client.return_value
             mock_ecs.run_task.return_value = {
@@ -45,7 +45,7 @@ class TestStartProvisioning:
                 "failures": [],
             }
 
-            from mission_control.services.engine import start_provisioning
+            from engine.services.ecs import start_provisioning
 
             result = start_provisioning(range_id=42)
 
@@ -63,7 +63,7 @@ class TestStartProvisioning:
         """ClientError from AWS is propagated."""
         with (
             override_settings(**ecs_settings),
-            patch("mission_control.services.engine.boto3.client") as mock_client,
+            patch("engine.services.ecs.boto3.client") as mock_client,
         ):
             mock_ecs = mock_client.return_value
             mock_ecs.run_task.side_effect = ClientError(
@@ -71,7 +71,7 @@ class TestStartProvisioning:
                 "RunTask",
             )
 
-            from mission_control.services.engine import start_provisioning
+            from engine.services.ecs import start_provisioning
 
             with pytest.raises(ClientError):
                 start_provisioning(range_id=1)
@@ -80,7 +80,7 @@ class TestStartProvisioning:
         """Raises ClientError when ECS task fails to start."""
         with (
             override_settings(**ecs_settings),
-            patch("mission_control.services.engine.boto3.client") as mock_client,
+            patch("engine.services.ecs.boto3.client") as mock_client,
         ):
             mock_ecs = mock_client.return_value
             mock_ecs.run_task.return_value = {
@@ -88,7 +88,7 @@ class TestStartProvisioning:
                 "failures": [{"reason": "RESOURCE:MEMORY", "arn": "arn:..."}],
             }
 
-            from mission_control.services.engine import start_provisioning
+            from engine.services.ecs import start_provisioning
 
             with pytest.raises(ClientError) as exc_info:
                 start_provisioning(range_id=1)
@@ -104,7 +104,7 @@ class TestStartTeardown:
     )
     def test_returns_none_when_not_configured(self):
         """When ECS config is incomplete, returns None (local dev fallback)."""
-        from mission_control.services.engine import start_teardown
+        from engine.services.ecs import start_teardown
 
         result = start_teardown(range_id=1)
         assert result is None
@@ -113,7 +113,7 @@ class TestStartTeardown:
         """Successfully starts ECS teardown task."""
         with (
             override_settings(**ecs_settings),
-            patch("mission_control.services.engine.boto3.client") as mock_client,
+            patch("engine.services.ecs.boto3.client") as mock_client,
         ):
             mock_ecs = mock_client.return_value
             mock_ecs.run_task.return_value = {
@@ -121,7 +121,7 @@ class TestStartTeardown:
                 "failures": [],
             }
 
-            from mission_control.services.engine import start_teardown
+            from engine.services.ecs import start_teardown
 
             result = start_teardown(range_id=99)
 
@@ -135,7 +135,7 @@ class TestStartTeardown:
         """ClientError from AWS is propagated."""
         with (
             override_settings(**ecs_settings),
-            patch("mission_control.services.engine.boto3.client") as mock_client,
+            patch("engine.services.ecs.boto3.client") as mock_client,
         ):
             mock_ecs = mock_client.return_value
             mock_ecs.run_task.side_effect = ClientError(
@@ -143,7 +143,7 @@ class TestStartTeardown:
                 "RunTask",
             )
 
-            from mission_control.services.engine import start_teardown
+            from engine.services.ecs import start_teardown
 
             with pytest.raises(ClientError):
                 start_teardown(range_id=1)
@@ -153,7 +153,7 @@ class TestGetTaskStatus:
     @override_settings(AWS_REGION="us-east-2", PULUMI_ECS_CLUSTER_ARN="")
     def test_returns_none_when_cluster_not_configured(self):
         """Returns None when cluster ARN not configured."""
-        from mission_control.services.engine import get_task_status
+        from engine.services.ecs import get_task_status
 
         result = get_task_status("arn:aws:ecs:us-east-2:123:task/test/abc")
         assert result is None
@@ -161,7 +161,7 @@ class TestGetTaskStatus:
     @override_settings(AWS_REGION="us-east-2")
     def test_returns_none_for_empty_arn(self):
         """Returns None when no task ARN provided."""
-        from mission_control.services.engine import get_task_status
+        from engine.services.ecs import get_task_status
 
         result = get_task_status("")
         assert result is None
@@ -175,7 +175,7 @@ class TestGetTaskStatus:
 
         with (
             override_settings(**ecs_settings),
-            patch("mission_control.services.engine.boto3.client") as mock_client,
+            patch("engine.services.ecs.boto3.client") as mock_client,
         ):
             mock_ecs = mock_client.return_value
             mock_ecs.describe_tasks.return_value = {
@@ -191,7 +191,7 @@ class TestGetTaskStatus:
                 ]
             }
 
-            from mission_control.services.engine import get_task_status
+            from engine.services.ecs import get_task_status
 
             arn = "arn:aws:ecs:us-east-2:123:task/test/abc"
             result = get_task_status(arn)
@@ -205,12 +205,12 @@ class TestGetTaskStatus:
         """Returns UNKNOWN status when task not found."""
         with (
             override_settings(**ecs_settings),
-            patch("mission_control.services.engine.boto3.client") as mock_client,
+            patch("engine.services.ecs.boto3.client") as mock_client,
         ):
             mock_ecs = mock_client.return_value
             mock_ecs.describe_tasks.return_value = {"tasks": []}
 
-            from mission_control.services.engine import get_task_status
+            from engine.services.ecs import get_task_status
 
             arn = "arn:aws:ecs:us-east-2:123:task/test/abc"
             result = get_task_status(arn)
@@ -222,7 +222,7 @@ class TestGetTaskStatus:
         """Returns None when describe_tasks fails."""
         with (
             override_settings(**ecs_settings),
-            patch("mission_control.services.engine.boto3.client") as mock_client,
+            patch("engine.services.ecs.boto3.client") as mock_client,
         ):
             mock_ecs = mock_client.return_value
             mock_ecs.describe_tasks.side_effect = ClientError(
@@ -230,7 +230,7 @@ class TestGetTaskStatus:
                 "DescribeTasks",
             )
 
-            from mission_control.services.engine import get_task_status
+            from engine.services.ecs import get_task_status
 
             arn = "arn:aws:ecs:us-east-2:123:task/test/abc"
             result = get_task_status(arn)

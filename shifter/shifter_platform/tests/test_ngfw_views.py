@@ -12,10 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from cms.models import Credential
-from mission_control.models import (
-    Range,
-    UserNGFW,
-)
+from engine.models import Range, UserNGFW
 
 User = get_user_model()
 
@@ -273,7 +270,7 @@ class TestNGFWDetailView:
 
     def test_shows_linked_ranges(self, user, provisioned_ngfw, db):
         """Ranges linked to this NGFW should be displayed."""
-        from mission_control.models import AgentConfig, OperatingSystem
+        from cms.models import AgentConfig, OperatingSystem
 
         # Create an agent and range linked to this NGFW
         windows_os = OperatingSystem.objects.get(slug="windows")
@@ -403,7 +400,7 @@ class TestNGFWDeprovisionView:
 
     def test_shows_linked_ranges_warning(self, user, provisioned_ngfw, db):
         """Warning should show linked ranges."""
-        from mission_control.models import AgentConfig, OperatingSystem
+        from cms.models import AgentConfig, OperatingSystem
 
         # Create a range linked to this NGFW
         windows_os = OperatingSystem.objects.get(slug="windows")

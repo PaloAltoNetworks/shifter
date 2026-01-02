@@ -4,8 +4,9 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+from cms.models import AgentConfig, OperatingSystem
+from engine.models import Range
 from engine.services.serialization import range_to_dict
-from mission_control.models import AgentConfig, OperatingSystem, Range
 
 User = get_user_model()
 

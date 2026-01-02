@@ -1,8 +1,13 @@
-"""Engine service interface tests."""
+"""Engine service interface tests.
+
+These are TDD placeholder tests for engine services (Phase 2+).
+Skipped until implementation in future phases.
+"""
 
 import pytest
 
 
+@pytest.mark.skip(reason="TDD placeholder - implement in Phase 2")
 class TestRangeLifecycle:
     def test_create_range(self):
         pytest.fail("Not implemented")

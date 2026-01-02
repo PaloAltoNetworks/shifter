@@ -2,16 +2,34 @@
 
 AWS account bootstrap automation for Shifter infrastructure.
 
-## Usage
+## Features
 
-The `deploy.py` CLI provides an interactive walkthrough for bootstrapping a bare AWS account and deploying infrastructure.
+The `deploy.py` CLI provides an interactive walkthrough for bootstrapping a bare AWS account and deploying infrastructure with intelligent automation:
 
-It creates:
+**Automated Steps (with confirmation):**
+- GitHub secrets configuration (via `gh` CLI)
+- Backend.tf file updates
+- Git commit and push
+
+**Manual Steps (external systems):**
+- DNS record creation (ACM validation, ALB pointing)
+
+**What It Creates:**
 - S3 bucket for Terraform state
 - DynamoDB table for state locking
 - GitHub OIDC provider for keyless CI/CD
 - IAM role with all required permissions
 - Optionally deploys Terraform infrastructure
+
+## Interactive Prompts
+
+When automated options are available, you'll see:
+```
+[y/n/m]:
+  y = yes (run automatically)
+  n = no (skip this step)
+  m = manual (show instructions and wait)
+```
 
 ## Commands
 

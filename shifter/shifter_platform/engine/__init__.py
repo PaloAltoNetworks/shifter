@@ -4,6 +4,7 @@ Range provisioning, NGFW operations, terminal connections.
 """
 
 from .services import (
+    EngineError,
     cancel_range,
     connect_terminal,
     create_range,
@@ -14,6 +15,7 @@ from .services import (
 )
 
 __all__ = [
+    "EngineError",
     "cancel_range",
     "connect_terminal",
     "create_range",

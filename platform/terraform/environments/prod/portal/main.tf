@@ -393,7 +393,7 @@ module "pulumi_provisioner" {
 
   # Alarms
   enable_alarms = true
-  alarm_email   = "bedwards@paloaltonetworks.com"
+  alarm_email   = "YOUR_EMAIL@example.com" # TODO: Replace with your email for CloudWatch alarms
 }
 
 # ------------------------------------------------------------------------------
@@ -427,7 +427,7 @@ module "log_aggregation" {
 
   # Monitoring
   enable_alarms = true
-  alarm_email   = "bedwards@paloaltonetworks.com"
+  alarm_email   = "YOUR_EMAIL@example.com" # TODO: Replace with your email for CloudWatch alarms
 
   tags = var.tags
 }

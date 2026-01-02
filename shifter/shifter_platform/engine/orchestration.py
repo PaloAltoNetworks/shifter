@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 
 from django.utils import timezone
 
+from engine.ecs import start_provisioning, start_teardown
 from engine.models import Range
-from engine.services.ecs import start_provisioning, start_teardown
 from management.models import ActivityLog
 
 from .allocation import allocate_subnet_index

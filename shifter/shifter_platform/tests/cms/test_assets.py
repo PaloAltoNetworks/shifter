@@ -328,7 +328,7 @@ class TestDeleteAgent:
     @patch("cms.assets.services.s3_delete")
     def test_raises_if_s3_delete_fails(self, mock_s3_delete, windows_agent):
         """Should raise AssetError if S3 delete fails."""
-        from mission_control.services.s3 import S3Error
+        from cms.assets.s3 import S3Error
 
         mock_s3_delete.side_effect = S3Error("Delete failed")
 
@@ -340,7 +340,7 @@ class TestDeleteAgent:
     @patch("cms.assets.services.s3_delete")
     def test_agent_not_deleted_if_s3_fails(self, mock_s3_delete, windows_agent):
         """Should not soft delete agent if S3 delete fails."""
-        from mission_control.services.s3 import S3Error
+        from cms.assets.s3 import S3Error
 
         mock_s3_delete.side_effect = S3Error("Delete failed")
 

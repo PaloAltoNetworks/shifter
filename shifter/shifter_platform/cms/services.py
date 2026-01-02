@@ -10,11 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
-from cms.models import AgentConfig
-from engine.services import create_range as engine_create_range
-from engine.services.orchestration import cancel as engine_cancel
-from engine.services.orchestration import destroy as engine_destroy
-from mission_control.models import Range
+from cms.models import AgentConfig, RangeInstance
+from engine import cancel_range as engine_cancel_range
+from engine import create_range as engine_create_range
+from engine import destroy_range as engine_destroy_range
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -606,13 +605,13 @@ def get_credential(user: User, credential_id: int) -> Any:
 
 
 def list_ranges(user: User) -> list[Any]:
-    """Get user's ranges.
+    """Get user's range instances.
 
     Args:
-        user: User whose ranges to retrieve
+        user: User whose range instances to retrieve
 
     Returns:
-        List of Range instances belonging to the user
+        List of RangeInstance instances belonging to the user
 
     Raises:
         TypeError: If user is None or invalid type
@@ -634,7 +633,7 @@ def list_ranges(user: User) -> list[Any]:
     logger.debug("list_ranges called for user_id=%s", user.id)
 
     try:
-        result = Range.objects.filter(user=user)
+        result = RangeInstance.objects.filter(user_id=user.id)
 
         # Validate response from model
         if result is None:
@@ -646,13 +645,13 @@ def list_ranges(user: User) -> list[Any]:
 
         # Validate list contents
         for item in ranges:
-            if not isinstance(item, Range):
+            if not isinstance(item, RangeInstance):
                 logger.error(
                     "list_ranges: model returned invalid item type %s for user_id=%s",
                     type(item).__name__,
                     user.id,
                 )
-                raise TypeError(f"Model returned list containing {type(item).__name__}, expected Range")
+                raise TypeError(f"Model returned list containing {type(item).__name__}, expected RangeInstance")
 
         logger.debug("list_ranges returning %d ranges for user_id=%s", len(ranges), user.id)
         return ranges
@@ -666,14 +665,14 @@ def list_ranges(user: User) -> list[Any]:
 
 
 def get_range(user: User, range_id: int) -> Any:
-    """Get single range by ID.
+    """Get single range instance by range ID.
 
     Args:
-        user: User requesting the range
+        user: User requesting the range instance
         range_id: ID of the range to retrieve
 
     Returns:
-        Range instance if found and owned by user
+        RangeInstance if found and owned by user
 
     Raises:
         TypeError: If user is None, invalid type, or range_id is invalid type
@@ -711,27 +710,27 @@ def get_range(user: User, range_id: int) -> Any:
     logger.debug("get_range called for user_id=%s, range_id=%s", user.id, range_id)
 
     try:
-        range_obj = Range.objects.get(id=range_id)
+        range_obj = RangeInstance.objects.get(range_id=range_id)
 
         # Validate response from model
         if range_obj is None:
             logger.error("get_range: model returned None for range_id=%s", range_id)
-            raise TypeError("Model returned None instead of Range")
+            raise TypeError("Model returned None instead of RangeInstance")
 
-        if not isinstance(range_obj, Range):
+        if not isinstance(range_obj, RangeInstance):
             logger.error(
                 "get_range: model returned invalid type %s for range_id=%s",
                 type(range_obj).__name__,
                 range_id,
             )
-            raise TypeError(f"Model returned {type(range_obj).__name__}, expected Range")
+            raise TypeError(f"Model returned {type(range_obj).__name__}, expected RangeInstance")
 
         # Check ownership
-        if range_obj.user.id != user.id:
+        if range_obj.user_id != user.id:
             logger.error(
                 "get_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
                 range_id,
-                range_obj.user.id,
+                range_obj.user_id,
                 user.id,
             )
             raise CMSError(f"Range {range_id} not found")
@@ -739,7 +738,7 @@ def get_range(user: User, range_id: int) -> Any:
         logger.debug("get_range returning range_id=%s for user_id=%s", range_id, user.id)
         return range_obj
 
-    except Range.DoesNotExist:
+    except RangeInstance.DoesNotExist:
         logger.error("get_range: range_id=%s not found", range_id)
         raise CMSError(f"Range {range_id} not found") from None
     except (TypeError, CMSError):
@@ -865,7 +864,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
 def destroy_range(user: User, range_id: int) -> None:
     """Tear down range.
 
-    Verifies ownership via get_range, then delegates to engine.services.orchestration.destroy().
+    Verifies ownership via get_range, then delegates to engine.orchestration.destroy().
 
     Args:
         user: User requesting destruction
@@ -913,7 +912,7 @@ def destroy_range(user: User, range_id: int) -> None:
         get_range(user, range_id)
 
         # Delegate to engine service
-        engine_destroy(user)
+        engine_destroy_range(range_id)
 
         logger.debug("destroy_range completed for range_id=%s, user_id=%s", range_id, user.id)
 
@@ -925,7 +924,7 @@ def destroy_range(user: User, range_id: int) -> None:
 def cancel_range(user: User, range_id: int) -> None:
     """Cancel provisioning range.
 
-    Verifies ownership via get_range, then delegates to engine.services.orchestration.cancel().
+    Verifies ownership via get_range, then delegates to engine.orchestration.cancel().
 
     Args:
         user: User requesting cancellation
@@ -973,7 +972,7 @@ def cancel_range(user: User, range_id: int) -> None:
         get_range(user, range_id)
 
         # Delegate to engine service
-        engine_cancel(user)
+        engine_cancel_range(range_id)
 
         logger.debug("cancel_range completed for range_id=%s, user_id=%s", range_id, user.id)
 
@@ -1029,11 +1028,11 @@ def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dic
     """
     from django.conf import settings
 
+    from cms.assets.s3 import S3Error, generate_presigned_upload_url
     from cms.assets.services import get_storage_used
+    from cms.assets.upload_token import generate_upload_token
+    from cms.assets.validation import ValidationError, validate_file_extension
     from cms.exceptions import CMSError
-    from mission_control.services.s3 import S3Error, generate_presigned_upload_url
-    from mission_control.services.upload_token import generate_upload_token
-    from mission_control.services.validation import ValidationError, validate_file_extension
 
     # Input validation - user
     if user is None:
@@ -1174,10 +1173,10 @@ def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
         ValueError: If user is unsaved, or upload_token/sha256 is empty
         CMSError: If token is invalid/expired, S3 verification fails, or size mismatch
     """
+    from cms.assets.s3 import S3Error, tag_s3_object, verify_s3_object_exists
     from cms.assets.services import create_agent
+    from cms.assets.upload_token import verify_upload_token
     from cms.exceptions import CMSError
-    from mission_control.services.s3 import S3Error, tag_s3_object, verify_s3_object_exists
-    from mission_control.services.upload_token import verify_upload_token
 
     # Input validation - user
     if user is None:
@@ -1288,9 +1287,9 @@ def cancel_upload(user: User, upload_token: str) -> None:
         ValueError: If user is unsaved or upload_token is empty
         CMSError: If token is invalid/expired
     """
+    from cms.assets.s3 import S3Error, delete_agent
+    from cms.assets.upload_token import verify_upload_token
     from cms.exceptions import CMSError
-    from mission_control.services.s3 import S3Error, delete_agent
-    from mission_control.services.upload_token import verify_upload_token
 
     # Input validation - user
     if user is None:

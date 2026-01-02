@@ -1,4 +1,4 @@
-"""Tests for engine.services.scenarios module."""
+"""Tests for scenarios module."""
 
 from datetime import timedelta
 
@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from cms.models import AgentConfig, OperatingSystem
-from engine.services.scenarios import (
+from engine.scenarios import (
     ScenarioValidationError,
     get_scenario_config,
     validate_launch,

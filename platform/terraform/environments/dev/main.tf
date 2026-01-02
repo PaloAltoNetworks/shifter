@@ -65,6 +65,6 @@ resource "aws_budgets_budget" "s3_cost_alert" {
     threshold                  = 80
     threshold_type             = "PERCENTAGE"
     notification_type          = "ACTUAL"
-    subscriber_email_addresses = ["bedwards@paloaltonetworks.com"]
+    subscriber_email_addresses = ["YOUR_EMAIL@example.com"] # TODO: Replace with your email for budget alerts
   }
 }

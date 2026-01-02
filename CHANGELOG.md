@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.10] - 2025-01-01
+## [0.10.1] - 2025-01-02
+
+- Engine services extraction and implementation (excl pause/resume)
+  - NGFW services deferred to upcoming patch
+  - Mission Control re-wire deferred to upcoming patch
+- Model migrations
+- Range DSL foundation (Shared Schema)
+- Redis replication for HA (single-node in dev, replication group in prod)
+- Interactive cli app for account bootstrap and infrastructure deployment
+
+## [0.10.0] - 2025-01-01
 
 ### Added
-- CMS Services
-  - Extracted CMS services from Mission Control views
+- CMS services extraction and implementation
 - Unified Credential model
 
 ## [0.9.9] - 2025-12-31

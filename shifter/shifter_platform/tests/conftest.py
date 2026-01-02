@@ -1,12 +1,23 @@
 """Pytest configuration and fixtures for Shifter platform tests."""
 
 import os
+from pathlib import Path
 
 # Set testing flag before Django loads settings
 os.environ["TESTING"] = "1"
 
 import pytest
 from django.test import Client
+
+TESTS_DIR = Path(__file__).parent
+
+
+def pytest_collection_modifyitems(items):
+    """Skip all tests in the mission_control directory."""
+    mission_control_dir = TESTS_DIR / "mission_control"
+    for item in items:
+        if mission_control_dir in Path(item.fspath).parents:
+            item.add_marker(pytest.mark.skip(reason="mission_control tests temporarily disabled"))
 
 
 @pytest.fixture

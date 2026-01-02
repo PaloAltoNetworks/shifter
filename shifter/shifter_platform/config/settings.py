@@ -57,6 +57,8 @@ INSTALLED_APPS = [
     "documentation.apps.DocumentationConfig",
     "engine.apps.EngineConfig",
     "cms.apps.CMSConfig",
+    "management.apps.ManagementConfig",
+    "shared.apps.SharedConfig",
 ]
 
 MIDDLEWARE = [
@@ -280,7 +282,8 @@ if not FIELD_ENCRYPTION_KEY:
 # Shifter Configuration
 # ------------------------------------------------------------------------------
 
-SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "bedwards@paloaltonetworks.com")
+# TODO: Set via SHIFTER_SUPPORT_EMAIL env var
+SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "support@example.com")
 
 # ------------------------------------------------------------------------------
 # AWS S3 Configuration

@@ -1,0 +1,15 @@
+id: basic
+name: Basic Range
+description: A basic attacker-victim range with Kali Linux attacker and user-provided agent on victim.
+
+requirements:
+  required: true
+  os: null
+
+instances:
+  - role: attacker
+    os_type: kali
+
+  - role: victim
+    os_type: from_agent
+    agent_slot: primary

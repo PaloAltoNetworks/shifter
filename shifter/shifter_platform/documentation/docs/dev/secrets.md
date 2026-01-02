@@ -100,7 +100,7 @@ aws secretsmanager create-secret \
 3. Restart portal
 
 ### GitHub OIDC Role
-Role ARN doesn't change. Trust policy updates are in `terraform/global/iam/`.
+Role ARN doesn't change. Trust policy updates are in `platform/terraform/global/iam/`.
 
 ## Accessing Secrets Locally
 

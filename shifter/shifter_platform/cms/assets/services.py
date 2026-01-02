@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 from django.db.models import Sum
 from django.utils import timezone
 
+from cms.assets.s3 import S3Error
+from cms.assets.s3 import delete_agent as s3_delete
 from cms.models import AgentConfig, OperatingSystem
 from management.models import ActivityLog
-from mission_control.services.s3 import S3Error
-from mission_control.services.s3 import delete_agent as s3_delete
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User

@@ -304,6 +304,27 @@ class Range(models.Model):
                 return instance
         return None
 
+    def get_instance_by_uuid(self, uuid: str) -> dict | None:
+        """Get instance details by UUID.
+
+        Args:
+            uuid: Instance UUID (required, non-empty)
+
+        Returns:
+            Dictionary with instance details or None if not found
+
+        Raises:
+            ValueError: If uuid is None or empty string
+        """
+        if not uuid:
+            raise ValueError("uuid is required")
+        if not self.provisioned_instances:
+            return None
+        for instance in self.provisioned_instances:
+            if instance.get("uuid") == uuid:
+                return instance
+        return None
+
     @property
     def attacker_instance(self) -> dict | None:
         """Get the attacker instance details."""

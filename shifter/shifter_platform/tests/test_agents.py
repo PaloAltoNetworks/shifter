@@ -217,7 +217,7 @@ class TestUploadAgent:
     @patch("mission_control.views.s3_upload")
     def test_s3_upload_error_no_agent_created(self, mock_upload, user, settings):
         """S3 error should prevent agent creation in DB."""
-        from mission_control.services.s3 import S3Error
+        from cms.assets.s3 import S3Error
 
         settings.AGENT_MAX_FILE_SIZE_MB = 200
         mock_upload.side_effect = S3Error("S3 is down")
@@ -313,7 +313,7 @@ class TestDeleteAgent:
 
     @patch("cms.assets.services.s3_delete")
     def test_s3_error_prevents_delete(self, mock_delete, user, agent):
-        from mission_control.services.s3 import S3Error
+        from cms.assets.s3 import S3Error
 
         mock_delete.side_effect = S3Error("Failed")
 

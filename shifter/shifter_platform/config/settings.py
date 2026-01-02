@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "engine.apps.EngineConfig",
     "cms.apps.CMSConfig",
     "management.apps.ManagementConfig",
+    "shared.apps.SharedConfig",
 ]
 
 MIDDLEWARE = [

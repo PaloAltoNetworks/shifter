@@ -1,4 +1,4 @@
-"""Tests for engine.services.orchestration module."""
+"""Tests for engine.orchestration module."""
 
 from unittest.mock import patch
 
@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 
 from cms.models import AgentConfig, OperatingSystem
 from engine.models import Range
-from engine.services.orchestration import (
+from engine.orchestration import (
     OrchestrationError,
     cancel,
     destroy,
@@ -96,7 +96,7 @@ def create_range(user, agent, status, **kwargs):
 class TestLaunch:
     """Tests for launch function."""
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_creates_range_with_provisioning_status(self, mock_provisioning, user, windows_agent):
         """Launch should create a range with PROVISIONING status."""
         mock_provisioning.return_value = None
@@ -107,7 +107,7 @@ class TestLaunch:
         assert range_obj.user == user
         assert range_obj.agent == windows_agent
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_sets_instance_config_from_scenario(self, mock_provisioning, user, linux_agent):
         """Launch should set instance_config based on scenario and agent OS."""
         mock_provisioning.return_value = None
@@ -121,7 +121,7 @@ class TestLaunch:
         assert range_obj.instance_config[1]["role"] == "victim"
         assert range_obj.instance_config[1]["os_type"] == "ubuntu"
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_allocates_subnet_index(self, mock_provisioning, user, windows_agent):
         """Launch should allocate a subnet index for the range."""
         mock_provisioning.return_value = None
@@ -131,7 +131,7 @@ class TestLaunch:
         assert range_obj.subnet_index is not None
         assert 1 <= range_obj.subnet_index <= 254
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_triggers_provisioner(self, mock_provisioning, user, windows_agent):
         """Launch should call start_provisioning with the range ID."""
         mock_provisioning.return_value = "arn:aws:ecs:task/12345"
@@ -140,7 +140,7 @@ class TestLaunch:
 
         mock_provisioning.assert_called_once_with(range_obj.id)
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_stores_task_arn_when_returned(self, mock_provisioning, user, windows_agent):
         """Launch should store the task ARN when provisioner returns one."""
         task_arn = "arn:aws:ecs:task/12345"
@@ -152,7 +152,7 @@ class TestLaunch:
         range_obj.refresh_from_db()
         assert range_obj.step_function_execution_arn == task_arn
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_handles_none_task_arn(self, mock_provisioning, user, windows_agent):
         """Launch should handle None task ARN (local dev without ECS)."""
         mock_provisioning.return_value = None
@@ -163,7 +163,7 @@ class TestLaunch:
         # step_function_execution_arn defaults to empty string, not None
         assert range_obj.step_function_execution_arn in (None, "")
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_logs_activity(self, mock_provisioning, user, windows_agent):
         """Launch should create an activity log entry."""
         mock_provisioning.return_value = None
@@ -178,7 +178,7 @@ class TestLaunch:
         assert log_entry.metadata["range_id"] == range_obj.id
         assert log_entry.metadata["agent_id"] == windows_agent.id
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_rejects_when_active_range_exists(self, mock_provisioning, user, windows_agent):
         """Launch should raise OrchestrationError if user has active range."""
         # Create an existing active range
@@ -191,7 +191,7 @@ class TestLaunch:
         assert exc_info.value.status_code == 409
         mock_provisioning.assert_not_called()
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_rejects_provisioning_range_as_active(self, mock_provisioning, user, windows_agent):
         """Launch should reject when user has a range in PROVISIONING status."""
         create_range(user, windows_agent, Range.Status.PROVISIONING, subnet_index=1)
@@ -202,7 +202,7 @@ class TestLaunch:
         assert exc_info.value.status_code == 409
         mock_provisioning.assert_not_called()
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_allows_launch_when_previous_range_destroyed(self, mock_provisioning, user, windows_agent):
         """Launch should succeed when previous range is DESTROYED."""
         create_range(user, windows_agent, Range.Status.DESTROYED, subnet_index=1)
@@ -214,7 +214,7 @@ class TestLaunch:
         # Should get a different range ID
         assert Range.objects.filter(user=user, status=Range.Status.PROVISIONING).count() == 1
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_ad_scenario_sets_dc_agent(self, mock_provisioning, user, windows_agent):
         """AD Attack Lab scenario should set dc_agent to same as agent."""
         mock_provisioning.return_value = None
@@ -224,7 +224,7 @@ class TestLaunch:
         assert range_obj.dc_agent == windows_agent
         assert len(range_obj.instance_config) == 3  # kali + DC + victim
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_basic_scenario_has_no_dc_agent(self, mock_provisioning, user, windows_agent):
         """Basic scenario should not set dc_agent."""
         mock_provisioning.return_value = None
@@ -233,7 +233,7 @@ class TestLaunch:
 
         assert range_obj.dc_agent is None
 
-    @patch("engine.services.orchestration.start_provisioning")
+    @patch("engine.orchestration.start_provisioning")
     def test_returns_range_object(self, mock_provisioning, user, windows_agent):
         """Launch should return the created Range object."""
         mock_provisioning.return_value = None
@@ -366,7 +366,7 @@ class TestCancel:
 class TestDestroy:
     """Tests for destroy function."""
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_sets_destroying_status(self, mock_teardown, user, windows_agent):
         """Destroy should set range status to DESTROYING."""
         mock_teardown.return_value = None
@@ -377,7 +377,7 @@ class TestDestroy:
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.DESTROYING
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_triggers_teardown(self, mock_teardown, user, windows_agent):
         """Destroy should call start_teardown with the range ID."""
         mock_teardown.return_value = "arn:aws:ecs:task/teardown-12345"
@@ -387,7 +387,7 @@ class TestDestroy:
 
         mock_teardown.assert_called_once_with(range_obj.id)
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_stores_task_arn_when_returned(self, mock_teardown, user, windows_agent):
         """Destroy should store the task ARN when teardown returns one."""
         task_arn = "arn:aws:ecs:task/teardown-12345"
@@ -399,7 +399,7 @@ class TestDestroy:
         range_obj.refresh_from_db()
         assert range_obj.step_function_execution_arn == task_arn
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_works_for_ready_range(self, mock_teardown, user, windows_agent):
         """Destroy should work for READY status."""
         mock_teardown.return_value = None
@@ -410,7 +410,7 @@ class TestDestroy:
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.DESTROYING
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_works_for_paused_range(self, mock_teardown, user, windows_agent):
         """Destroy should work for PAUSED status."""
         mock_teardown.return_value = None
@@ -421,7 +421,7 @@ class TestDestroy:
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.DESTROYING
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_works_for_failed_range(self, mock_teardown, user, windows_agent):
         """Destroy should work for FAILED status (cleanup resources)."""
         mock_teardown.return_value = None
@@ -432,7 +432,7 @@ class TestDestroy:
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.DESTROYING
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_works_for_resuming_range(self, mock_teardown, user, windows_agent):
         """Destroy should work for RESUMING status."""
         mock_teardown.return_value = None
@@ -451,7 +451,7 @@ class TestDestroy:
         assert "no range to destroy" in str(exc_info.value).lower()
         assert exc_info.value.status_code == 404
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_raises_for_already_destroying_range(self, mock_teardown, user, windows_agent):
         """Destroy should raise error for range already being destroyed."""
         create_range(user, windows_agent, Range.Status.DESTROYING)
@@ -462,7 +462,7 @@ class TestDestroy:
         assert exc_info.value.status_code == 404
         mock_teardown.assert_not_called()
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_logs_activity(self, mock_teardown, user, windows_agent):
         """Destroy should create an activity log entry."""
         mock_teardown.return_value = None
@@ -477,7 +477,7 @@ class TestDestroy:
         assert log_entry is not None
         assert log_entry.metadata["range_id"] == range_obj.id
 
-    @patch("engine.services.orchestration.start_teardown")
+    @patch("engine.orchestration.start_teardown")
     def test_only_destroys_own_range(self, mock_teardown, user, other_user, windows_agent):
         """Destroy should only affect the specified user's range."""
         mock_teardown.return_value = None

@@ -1,20 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# Bootstrap script for shifter prod AWS account
-# Run with: AWS_PROFILE=<your-prod-profile> ./scripts/bootstrap-prod.sh
-#
-# This script creates:
-# - S3 bucket for Terraform state
-# - DynamoDB table for Terraform locking
-# - GitHub OIDC provider for keyless CI/CD auth
-# - IAM role with permissions for all Shifter infrastructure
+# Bootstrap script for shifter dev AWS account
+# Run with: AWS_PROFILE=<your-dev-profile> ./scripts/bootstrap/dev.sh
 
 REGION="us-east-2"
 GITHUB_ORG="Brad-Edwards"
 GITHUB_REPO="shifter"
 
-echo "=== Shifter Prod Account Bootstrap ==="
+echo "=== Shifter Dev Account Bootstrap ==="
 echo "Region: $REGION"
 echo ""
 
@@ -22,13 +16,13 @@ echo ""
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 echo "Account ID: $ACCOUNT_ID"
 
-# Generate UUID suffix for uniqueness
+# Generate UUID suffix
 UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 echo "Generated UUID: $UUID"
 echo ""
 
-# --- S3 Bucket for Terraform State ---
-BUCKET_NAME="shifter-infra-${UUID}"
+# --- S3 Bucket ---
+BUCKET_NAME="shifter-dev-infra-${UUID}"
 echo "Creating S3 bucket: $BUCKET_NAME"
 
 aws s3api create-bucket \
@@ -57,8 +51,8 @@ aws s3api put-public-access-block \
 
 echo "✓ S3 bucket created"
 
-# --- DynamoDB Table for Terraform Locking ---
-TABLE_NAME="shifter-terraform-${UUID}"
+# --- DynamoDB Table ---
+TABLE_NAME="shifter-dev-terraform-${UUID}"
 echo "Creating DynamoDB table: $TABLE_NAME"
 
 aws dynamodb create-table \
@@ -71,24 +65,24 @@ aws dynamodb create-table \
 aws dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$REGION"
 echo "✓ DynamoDB table created"
 
-# --- GitHub OIDC Provider ---
+# --- OIDC Provider ---
 echo "Creating GitHub OIDC provider"
 
 OIDC_ARN=$(aws iam create-open-id-connect-provider \
     --url "https://token.actions.githubusercontent.com" \
     --client-id-list "sts.amazonaws.com" \
     --thumbprint-list "6938fd4d98bab03faadb97b34396831e3780aea1" "1b511abead59c6ce207077c0bf0e0043b1382612" \
-    --tags Key=Name,Value=github-actions-oidc Key=Project,Value=shifter Key=Environment,Value=prod \
+    --tags Key=Name,Value=github-actions-oidc-dev Key=Project,Value=shifter Key=Environment,Value=dev \
     --query OpenIDConnectProviderArn --output text 2>/dev/null || \
     aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn" --output text)
 
 echo "✓ OIDC provider: $OIDC_ARN"
 
 # --- IAM Role ---
-ROLE_NAME="github-actions-shifter-prod"
+ROLE_NAME="github-actions-shifter-dev"
 echo "Creating IAM role: $ROLE_NAME"
 
-# Trust policy - allows GitHub Actions to assume this role
+# Trust policy
 cat > /tmp/trust-policy.json <<EOF
 {
     "Version": "2012-10-17",
@@ -115,14 +109,14 @@ EOF
 aws iam create-role \
     --role-name "$ROLE_NAME" \
     --assume-role-policy-document file:///tmp/trust-policy.json \
-    --tags Key=Name,Value="$ROLE_NAME" Key=Project,Value=shifter Key=Environment,Value=prod
+    --tags Key=Name,Value="$ROLE_NAME" Key=Project,Value=shifter Key=Environment,Value=dev
 
 echo "✓ IAM role created"
 
 # --- IAM Policies ---
 echo "Creating IAM policies..."
 
-# 1. Core Infrastructure (ECR, S3, DynamoDB)
+# Core Infrastructure policy
 cat > /tmp/core-infra.json <<EOF
 {
     "Version": "2012-10-17",
@@ -131,7 +125,7 @@ cat > /tmp/core-infra.json <<EOF
             "Sid": "ECR",
             "Effect": "Allow",
             "Action": ["ecr:*"],
-            "Resource": "arn:aws:ecr:${REGION}:${ACCOUNT_ID}:repository/shifter-*"
+            "Resource": "arn:aws:ecr:${REGION}:${ACCOUNT_ID}:repository/shifter-dev-*"
         },
         {
             "Sid": "ECRAuth",
@@ -149,18 +143,15 @@ cat > /tmp/core-infra.json <<EOF
                 "s3:DeleteObject"
             ],
             "Resource": [
-                "arn:aws:s3:::shifter-infra-*",
-                "arn:aws:s3:::shifter-infra-*/*"
+                "arn:aws:s3:::shifter-dev-infra-*",
+                "arn:aws:s3:::shifter-dev-infra-*/*"
             ]
         },
         {
-            "Sid": "S3Buckets",
+            "Sid": "S3UserStorage",
             "Effect": "Allow",
             "Action": ["s3:*"],
-            "Resource": [
-                "arn:aws:s3:::shifter-*",
-                "arn:aws:s3:::shifter-*/*"
-            ]
+            "Resource": "arn:aws:s3:::shifter-dev-user-storage-*"
         },
         {
             "Sid": "DynamoDB",
@@ -168,18 +159,9 @@ cat > /tmp/core-infra.json <<EOF
             "Action": [
                 "dynamodb:GetItem",
                 "dynamodb:PutItem",
-                "dynamodb:DeleteItem",
-                "dynamodb:CreateTable",
-                "dynamodb:DeleteTable",
-                "dynamodb:DescribeTable",
-                "dynamodb:UpdateTable",
-                "dynamodb:TagResource",
-                "dynamodb:UntagResource",
-                "dynamodb:ListTagsOfResource"
+                "dynamodb:DeleteItem"
             ],
-            "Resource": [
-                "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/shifter-*"
-            ]
+            "Resource": "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/shifter-dev-terraform-*"
         }
     ]
 }
@@ -187,10 +169,10 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-core-infrastructure" \
+    --policy-name "shifter-dev-core-infrastructure" \
     --policy-document file:///tmp/core-infra.json
 
-# 2. VPC Networking
+# VPC Networking policy
 cat > /tmp/vpc.json <<EOF
 {
     "Version": "2012-10-17",
@@ -208,8 +190,6 @@ cat > /tmp/vpc.json <<EOF
                 "ec2:*Address*",
                 "ec2:*SecurityGroup*",
                 "ec2:*Tags",
-                "ec2:*FlowLog*",
-                "ec2:*VpcEndpoint*",
                 "ec2:Describe*",
                 "ec2:CreateTags",
                 "ec2:DeleteTags"
@@ -222,10 +202,10 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-vpc-networking" \
+    --policy-name "shifter-dev-vpc-networking" \
     --policy-document file:///tmp/vpc.json
 
-# 3. EC2 Instances
+# EC2 Instances policy
 cat > /tmp/ec2.json <<EOF
 {
     "Version": "2012-10-17",
@@ -253,8 +233,7 @@ cat > /tmp/ec2.json <<EOF
                 "ec2:DescribeInstanceCreditSpecifications",
                 "ec2:DescribeKeyPairs",
                 "ec2:CreateKeyPair",
-                "ec2:DeleteKeyPair",
-                "ec2:*LaunchTemplate*"
+                "ec2:DeleteKeyPair"
             ],
             "Resource": "*"
         }
@@ -264,11 +243,11 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-ec2-instances" \
+    --policy-name "shifter-dev-ec2-instances" \
     --policy-document file:///tmp/ec2.json
 
-# 4. ELB, ACM, WAF
-cat > /tmp/elb-acm-waf.json <<EOF
+# ELB and ACM policy
+cat > /tmp/elb-acm.json <<EOF
 {
     "Version": "2012-10-17",
     "Statement": [
@@ -283,12 +262,6 @@ cat > /tmp/elb-acm-waf.json <<EOF
             "Effect": "Allow",
             "Action": ["acm:*"],
             "Resource": "*"
-        },
-        {
-            "Sid": "WAF",
-            "Effect": "Allow",
-            "Action": ["wafv2:*"],
-            "Resource": "*"
         }
     ]
 }
@@ -296,10 +269,10 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-elb-acm-waf" \
-    --policy-document file:///tmp/elb-acm-waf.json
+    --policy-name "shifter-dev-elb-acm" \
+    --policy-document file:///tmp/elb-acm.json
 
-# 5. IAM (scoped)
+# IAM Scoped policy
 cat > /tmp/iam.json <<EOF
 {
     "Version": "2012-10-17",
@@ -357,10 +330,10 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-iam-scoped" \
+    --policy-name "shifter-dev-iam-scoped" \
     --policy-document file:///tmp/iam.json
 
-# 6. Lambda, Step Functions, CloudWatch, SNS, EventBridge
+# Lambda and Step Functions policy
 cat > /tmp/lambda-sfn.json <<EOF
 {
     "Version": "2012-10-17",
@@ -368,19 +341,50 @@ cat > /tmp/lambda-sfn.json <<EOF
         {
             "Sid": "Lambda",
             "Effect": "Allow",
-            "Action": ["lambda:*"],
+            "Action": [
+                "lambda:CreateFunction",
+                "lambda:DeleteFunction",
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:GetFunctionCodeSigningConfig",
+                "lambda:UpdateFunctionCode",
+                "lambda:UpdateFunctionConfiguration",
+                "lambda:ListVersionsByFunction",
+                "lambda:PublishVersion",
+                "lambda:AddPermission",
+                "lambda:RemovePermission",
+                "lambda:GetPolicy",
+                "lambda:TagResource",
+                "lambda:UntagResource",
+                "lambda:ListTags"
+            ],
             "Resource": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:*"
         },
         {
             "Sid": "LambdaLayers",
             "Effect": "Allow",
-            "Action": ["lambda:*"],
+            "Action": [
+                "lambda:PublishLayerVersion",
+                "lambda:GetLayerVersion",
+                "lambda:DeleteLayerVersion",
+                "lambda:ListLayerVersions"
+            ],
             "Resource": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:layer:*"
         },
         {
             "Sid": "StepFunctions",
             "Effect": "Allow",
-            "Action": ["states:*"],
+            "Action": [
+                "states:CreateStateMachine",
+                "states:DeleteStateMachine",
+                "states:DescribeStateMachine",
+                "states:UpdateStateMachine",
+                "states:ListStateMachines",
+                "states:ListStateMachineVersions",
+                "states:TagResource",
+                "states:UntagResource",
+                "states:ListTagsForResource"
+            ],
             "Resource": "arn:aws:states:${REGION}:${ACCOUNT_ID}:stateMachine:*"
         },
         {
@@ -392,26 +396,67 @@ cat > /tmp/lambda-sfn.json <<EOF
         {
             "Sid": "CloudWatchLogs",
             "Effect": "Allow",
-            "Action": ["logs:*"],
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:DeleteLogGroup",
+                "logs:DescribeLogGroups",
+                "logs:PutRetentionPolicy",
+                "logs:TagLogGroup",
+                "logs:UntagLogGroup",
+                "logs:ListTagsLogGroup",
+                "logs:ListTagsForResource",
+                "logs:TagResource",
+                "logs:UntagResource"
+            ],
             "Resource": "arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:*"
         },
         {
             "Sid": "CloudWatchAlarms",
             "Effect": "Allow",
-            "Action": ["cloudwatch:*"],
-            "Resource": "*"
+            "Action": [
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:ListTagsForResource",
+                "cloudwatch:TagResource",
+                "cloudwatch:UntagResource"
+            ],
+            "Resource": "arn:aws:cloudwatch:${REGION}:${ACCOUNT_ID}:alarm:*"
         },
         {
             "Sid": "SNS",
             "Effect": "Allow",
-            "Action": ["sns:*"],
-            "Resource": "arn:aws:sns:${REGION}:${ACCOUNT_ID}:*"
+            "Action": [
+                "sns:CreateTopic",
+                "sns:DeleteTopic",
+                "sns:GetTopicAttributes",
+                "sns:SetTopicAttributes",
+                "sns:ListTagsForResource",
+                "sns:TagResource",
+                "sns:UntagResource",
+                "sns:Subscribe",
+                "sns:Unsubscribe",
+                "sns:GetSubscriptionAttributes"
+            ],
+            "Resource": "arn:aws:sns:${REGION}:${ACCOUNT_ID}:*-dev-portal-*"
         },
         {
             "Sid": "EventBridge",
             "Effect": "Allow",
-            "Action": ["events:*"],
-            "Resource": "arn:aws:events:${REGION}:${ACCOUNT_ID}:rule/*"
+            "Action": [
+                "events:PutRule",
+                "events:DeleteRule",
+                "events:DescribeRule",
+                "events:EnableRule",
+                "events:DisableRule",
+                "events:PutTargets",
+                "events:RemoveTargets",
+                "events:ListTargetsByRule",
+                "events:ListTagsForResource",
+                "events:TagResource",
+                "events:UntagResource"
+            ],
+            "Resource": "arn:aws:events:${REGION}:${ACCOUNT_ID}:rule/*-dev-portal-*"
         }
     ]
 }
@@ -419,10 +464,10 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-lambda-sfn" \
+    --policy-name "shifter-dev-lambda-sfn" \
     --policy-document file:///tmp/lambda-sfn.json
 
-# 7. RDS
+# RDS policy
 cat > /tmp/rds.json <<EOF
 {
     "Version": "2012-10-17",
@@ -430,7 +475,29 @@ cat > /tmp/rds.json <<EOF
         {
             "Sid": "RDS",
             "Effect": "Allow",
-            "Action": ["rds:*"],
+            "Action": [
+                "rds:CreateDBInstance",
+                "rds:DeleteDBInstance",
+                "rds:DescribeDBInstances",
+                "rds:ModifyDBInstance",
+                "rds:RebootDBInstance",
+                "rds:StartDBInstance",
+                "rds:StopDBInstance",
+                "rds:CreateDBSubnetGroup",
+                "rds:DeleteDBSubnetGroup",
+                "rds:DescribeDBSubnetGroups",
+                "rds:ModifyDBSubnetGroup",
+                "rds:CreateDBParameterGroup",
+                "rds:DeleteDBParameterGroup",
+                "rds:DescribeDBParameterGroups",
+                "rds:ModifyDBParameterGroup",
+                "rds:DescribeDBParameters",
+                "rds:AddTagsToResource",
+                "rds:RemoveTagsFromResource",
+                "rds:ListTagsForResource",
+                "rds:DescribeDBEngineVersions",
+                "rds:DescribeOrderableDBInstanceOptions"
+            ],
             "Resource": "*"
         }
     ]
@@ -439,10 +506,10 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-rds" \
+    --policy-name "shifter-dev-rds" \
     --policy-document file:///tmp/rds.json
 
-# 8. Secrets Manager and KMS
+# Secrets Manager and KMS policy
 cat > /tmp/secrets-kms.json <<EOF
 {
     "Version": "2012-10-17",
@@ -450,8 +517,20 @@ cat > /tmp/secrets-kms.json <<EOF
         {
             "Sid": "SecretsManager",
             "Effect": "Allow",
-            "Action": ["secretsmanager:*"],
-            "Resource": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:shifter-*"
+            "Action": [
+                "secretsmanager:CreateSecret",
+                "secretsmanager:DeleteSecret",
+                "secretsmanager:DescribeSecret",
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:PutSecretValue",
+                "secretsmanager:UpdateSecret",
+                "secretsmanager:TagResource",
+                "secretsmanager:UntagResource",
+                "secretsmanager:GetResourcePolicy",
+                "secretsmanager:PutResourcePolicy",
+                "secretsmanager:DeleteResourcePolicy"
+            ],
+            "Resource": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:shifter-dev-*"
         },
         {
             "Sid": "SecretsManagerRandom",
@@ -462,7 +541,19 @@ cat > /tmp/secrets-kms.json <<EOF
         {
             "Sid": "KMS",
             "Effect": "Allow",
-            "Action": ["kms:*"],
+            "Action": [
+                "kms:CreateKey",
+                "kms:DescribeKey",
+                "kms:CreateAlias",
+                "kms:DeleteAlias",
+                "kms:ListAliases",
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:GenerateDataKey",
+                "kms:TagResource",
+                "kms:UntagResource",
+                "kms:ScheduleKeyDeletion"
+            ],
             "Resource": "*"
         }
     ]
@@ -471,10 +562,10 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-secrets-kms" \
+    --policy-name "shifter-dev-secrets-kms" \
     --policy-document file:///tmp/secrets-kms.json
 
-# 9. SSM and Cognito
+# SSM and Cognito policy
 cat > /tmp/ssm-cognito.json <<EOF
 {
     "Version": "2012-10-17",
@@ -482,7 +573,12 @@ cat > /tmp/ssm-cognito.json <<EOF
         {
             "Sid": "SSM",
             "Effect": "Allow",
-            "Action": ["ssm:*"],
+            "Action": [
+                "ssm:SendCommand",
+                "ssm:GetCommandInvocation",
+                "ssm:ListCommandInvocations",
+                "ssm:DescribeInstanceInformation"
+            ],
             "Resource": "*"
         },
         {
@@ -497,142 +593,15 @@ EOF
 
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-ssm-cognito" \
+    --policy-name "shifter-dev-ssm-cognito" \
     --policy-document file:///tmp/ssm-cognito.json
-
-# 10. ECS (for Pulumi Provisioner)
-cat > /tmp/ecs.json <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "ECS",
-            "Effect": "Allow",
-            "Action": ["ecs:*"],
-            "Resource": "*"
-        }
-    ]
-}
-EOF
-
-aws iam put-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-ecs" \
-    --policy-document file:///tmp/ecs.json
-
-# 11. ElastiCache (Redis)
-cat > /tmp/elasticache.json <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "ElastiCache",
-            "Effect": "Allow",
-            "Action": ["elasticache:*"],
-            "Resource": "*"
-        }
-    ]
-}
-EOF
-
-aws iam put-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-elasticache" \
-    --policy-document file:///tmp/elasticache.json
-
-# 12. Network Firewall (Range VPC)
-cat > /tmp/networkfirewall.json <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "NetworkFirewall",
-            "Effect": "Allow",
-            "Action": ["network-firewall:*"],
-            "Resource": "*"
-        }
-    ]
-}
-EOF
-
-aws iam put-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-networkfirewall" \
-    --policy-document file:///tmp/networkfirewall.json
-
-# 13. Kinesis Firehose and SQS (Log Aggregation)
-cat > /tmp/firehose-sqs.json <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "Firehose",
-            "Effect": "Allow",
-            "Action": ["firehose:*"],
-            "Resource": "*"
-        },
-        {
-            "Sid": "SQS",
-            "Effect": "Allow",
-            "Action": ["sqs:*"],
-            "Resource": "*"
-        }
-    ]
-}
-EOF
-
-aws iam put-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-firehose-sqs" \
-    --policy-document file:///tmp/firehose-sqs.json
-
-# 14. Auto Scaling (ASG for dev portal)
-cat > /tmp/autoscaling.json <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "AutoScaling",
-            "Effect": "Allow",
-            "Action": ["autoscaling:*"],
-            "Resource": "*"
-        }
-    ]
-}
-EOF
-
-aws iam put-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-autoscaling" \
-    --policy-document file:///tmp/autoscaling.json
-
-# 15. Budgets (cost alerts)
-cat > /tmp/budgets.json <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "Budgets",
-            "Effect": "Allow",
-            "Action": ["budgets:*"],
-            "Resource": "*"
-        }
-    ]
-}
-EOF
-
-aws iam put-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-name "shifter-prod-budgets" \
-    --policy-document file:///tmp/budgets.json
 
 echo "✓ All IAM policies attached"
 
 # Cleanup temp files
 rm -f /tmp/trust-policy.json /tmp/core-infra.json /tmp/vpc.json /tmp/ec2.json \
-      /tmp/elb-acm-waf.json /tmp/iam.json /tmp/lambda-sfn.json /tmp/rds.json \
-      /tmp/secrets-kms.json /tmp/ssm-cognito.json /tmp/ecs.json /tmp/elasticache.json \
-      /tmp/networkfirewall.json /tmp/firehose-sqs.json /tmp/autoscaling.json /tmp/budgets.json
+      /tmp/elb-acm.json /tmp/iam.json /tmp/lambda-sfn.json /tmp/rds.json \
+      /tmp/secrets-kms.json /tmp/ssm-cognito.json
 
 # Get role ARN
 ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" --query Role.Arn --output text)
@@ -640,17 +609,16 @@ ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" --query Role.Arn --output t
 echo ""
 echo "=== Bootstrap Complete ==="
 echo ""
-echo "STEP 1: Add to GitHub Secrets (Settings → Secrets → Actions):"
-echo "  AWS_ROLE_ARN: $ROLE_ARN"
+echo "Add these to GitHub secrets:"
+echo "  AWS_ROLE_ARN_DEV: $ROLE_ARN"
 echo ""
-echo "STEP 2: Update backend.tf files with these values:"
+echo "Use these in platform/terraform/environments/dev/backend.tf:"
 echo ""
-echo "--- platform/terraform/environments/prod/backend.tf ---"
 cat <<EOF
 terraform {
   backend "s3" {
     bucket         = "${BUCKET_NAME}"
-    key            = "shifter/prod/terraform.tfstate"
+    key            = "shifter/dev/terraform.tfstate"
     region         = "${REGION}"
     dynamodb_table = "${TABLE_NAME}"
     encrypt        = true
@@ -671,52 +639,10 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Environment = "prod"
+      Environment = "dev"
       Project     = "shifter"
       ManagedBy   = "terraform"
     }
   }
 }
 EOF
-
-echo ""
-echo "--- platform/terraform/environments/prod/portal/backend.tf ---"
-cat <<EOF
-terraform {
-  backend "s3" {
-    bucket         = "${BUCKET_NAME}"
-    key            = "shifter/prod/portal/terraform.tfstate"
-    region         = "${REGION}"
-    dynamodb_table = "${TABLE_NAME}"
-    encrypt        = true
-  }
-}
-EOF
-
-echo ""
-echo "--- platform/terraform/environments/prod/range/backend.tf ---"
-cat <<EOF
-terraform {
-  backend "s3" {
-    bucket         = "${BUCKET_NAME}"
-    key            = "shifter/prod/range/terraform.tfstate"
-    region         = "${REGION}"
-    dynamodb_table = "${TABLE_NAME}"
-    encrypt        = true
-  }
-}
-EOF
-
-echo ""
-echo "STEP 3: Deploy in order:"
-echo "  1. platform/terraform/environments/prod/        (Core: ECR repos)"
-echo "  2. platform/terraform/environments/prod/range/  (Range VPC + Pulumi state)"
-echo "  3. platform/terraform/environments/prod/portal/ (Portal infrastructure)"
-echo ""
-echo "STEP 4: After Portal deploy, wait for ACM certificate validation:"
-echo "  - Watch terraform output for CNAME records"
-echo "  - Add CNAME records to your DNS provider"
-echo "  - Wait ~5 min for validation"
-echo ""
-echo "STEP 5: Point your domain to the ALB DNS name from terraform output"
-echo ""

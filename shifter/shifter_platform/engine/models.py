@@ -91,21 +91,10 @@ class Range(models.Model):
     CANCELLABLE_STATUSES: frozenset[str]  # Range can be cancelled (early lifecycle only)
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
-    agent = models.ForeignKey(
-        "cms.AgentConfig",
-        on_delete=models.SET_NULL,
+    cms_user_id = models.PositiveIntegerField(
         null=True,
         blank=True,
-        related_name="ranges",
-        help_text="Agent for victim instances",
-    )
-    dc_agent = models.ForeignKey(
-        "cms.AgentConfig",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="dc_ranges",
-        help_text="Agent for DC instances (Windows only, required for AD scenarios)",
+        help_text="User ID from CMS (may differ from Django user.id)",
     )
     ngfw = models.ForeignKey(
         "UserNGFW",
@@ -153,10 +142,10 @@ class Range(models.Model):
     )
 
     # Shifter Engine fields (v2)
-    instance_config = models.JSONField(
+    range_config = models.JSONField(
         null=True,
         blank=True,
-        help_text="JSON array of instance configurations for Shifter Engine",
+        help_text="Full RangeRequest from CMS (scenario_id, user_id, instances)",
     )
     provisioned_instances = models.JSONField(
         null=True,
@@ -189,8 +178,8 @@ class Range(models.Model):
         db_table = "mission_control_range"
 
     def __str__(self):
-        agent_name = self.agent.name if self.agent else "Unknown Agent"
-        return f"Range {self.id} ({agent_name}) - {self.status}"
+        scenario = self.range_config.get("scenario_id", "unknown") if self.range_config else "unknown"
+        return f"Range {self.id} ({scenario}) - {self.status}"
 
     @property
     def is_active(self):

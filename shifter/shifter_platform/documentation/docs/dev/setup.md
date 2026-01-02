@@ -12,19 +12,38 @@ Deploying Shifter from a bare AWS account to full production.
 
 ## Cold-Start Deployment (New AWS Account)
 
-### 1. Bootstrap AWS Account
-
-Create S3 bucket, DynamoDB table, OIDC provider, and IAM role:
+Use the deployment CLI which walks you through each step with confirmations:
 
 ```bash
-# Prod account
-AWS_PROFILE=<your-prod-profile> ./scripts/bootstrap-prod.sh
+# Preview what will happen (no changes made)
+./scripts/deploy.py full --env prod --dry-run
 
-# Dev account (if deploying dev)
-AWS_PROFILE=<your-dev-profile> ./scripts/bootstrap-dev.sh
+# Run the full deployment
+AWS_PROFILE=<your-prod-profile> ./scripts/deploy.py full --env prod
 ```
 
-The script outputs:
+Or run phases separately:
+
+```bash
+# Phase 1: Bootstrap AWS account (S3, DynamoDB, IAM)
+AWS_PROFILE=<your-prod-profile> ./scripts/deploy.py bootstrap --env prod
+
+# Or use standalone bash scripts:
+# AWS_PROFILE=<your-prod-profile> ./scripts/bootstrap/prod.sh
+
+# Phase 2: Deploy Terraform (Core → Range → Portal)
+AWS_PROFILE=<your-prod-profile> ./scripts/deploy.py terraform --env prod
+```
+
+### 1. Bootstrap AWS Account
+
+The `bootstrap` command creates:
+- S3 bucket for Terraform state
+- DynamoDB table for state locking
+- GitHub OIDC provider (keyless CI/CD auth)
+- IAM role with all required permissions
+
+It outputs:
 - GitHub secret value (`AWS_ROLE_ARN`)
 - Backend configuration for `backend.tf` files
 
@@ -92,27 +111,32 @@ Deploy in this order (dependencies flow down):
 └─────────────────────────────────┘
 ```
 
-**Via CI/CD (recommended):**
+**Using the CLI (recommended):**
 
-Push to `main` branch to trigger deployment.
+```bash
+AWS_PROFILE=<your-profile> ./scripts/deploy.py terraform --env prod
+```
+
+The CLI walks through each component, shows the plan, and asks for confirmation before applying.
+
+**Via CI/CD:**
+
+Push to `main` branch to trigger deployment (after bootstrap and backend.tf are configured).
 
 **Manual deployment:**
 
 ```bash
 # Step 1: Core (ECR)
 cd platform/terraform/environments/prod
-AWS_PROFILE=<your-profile> terraform init
-AWS_PROFILE=<your-profile> terraform apply
+AWS_PROFILE=<your-profile> terraform init && terraform plan && terraform apply
 
 # Step 2: Range VPC
 cd range
-AWS_PROFILE=<your-profile> terraform init
-AWS_PROFILE=<your-profile> terraform apply
+AWS_PROFILE=<your-profile> terraform init && terraform plan && terraform apply
 
 # Step 3: Portal
 cd ../portal
-AWS_PROFILE=<your-profile> terraform init
-AWS_PROFILE=<your-profile> terraform apply
+AWS_PROFILE=<your-profile> terraform init && terraform plan && terraform apply
 ```
 
 ### 6. ACM Certificate Validation

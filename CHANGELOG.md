@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2025-01-02
+
+- Engine services extraction and implementation (excl pause/resume)
+  - NGFW services deferred to upcoming patch
+  - Mission Control re-wire deferred to upcoming patch
+- Model migrations
+- Range DSL foundation (Shared Schema)
+- Redis replication for HA (single-node in dev, replication group in prod)
+- Interactive cli app for account bootstrap and infrastructure deployment
+
+## [0.10.0] - 2025-01-01
+
+### Added
+- CMS services extraction and implementation
+- Unified Credential model
+
+## [0.9.9] - 2025-12-31
+
+### Added
+- Management services implementation
+  - cognito_sub update service
+  - activity log service
+  - user profile service
+
+### Changed
+- OIDC backend updated to use management services
+- User profile model moved to management domain
+- Activity log model moved to management domain
+
 ## [0.9.8] - 2025-12-31
 
 ### Added

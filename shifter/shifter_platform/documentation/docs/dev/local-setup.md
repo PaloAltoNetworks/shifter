@@ -5,7 +5,7 @@ Run the Shifter portal locally for development.
 ## Quick Start
 
 ```bash
-cd portal
+cd shifter/shifter_platform
 source .venv/bin/activate
 TESTING=1 python manage.py runserver
 ```
@@ -17,7 +17,7 @@ Portal runs at `http://localhost:8000`
 ### 1. Create Python Virtual Environment
 
 ```bash
-cd portal
+cd shifter/shifter_platform
 python3.12 -m venv .venv
 source .venv/bin/activate
 ```

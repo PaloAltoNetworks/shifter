@@ -831,10 +831,10 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
         validate_scenario_requirements(scenario, agent)
 
         # 4. Hydrate scenario with agent details
-        range_config = hydrate_scenario(scenario, agent)
+        range_request = hydrate_scenario(scenario, user.id, agent)
 
         # 5. Call engine to create range
-        range_id = engine_create_range(range_config)
+        range_id = engine_create_range(range_request)
 
         # 6. Store RangeInstance record
         RangeInstance.objects.create(

@@ -5,7 +5,7 @@ How we manage infrastructure.
 ## Directory Structure
 
 ```
-terraform/
+platform/terraform/
 ├── environments/
 │   ├── dev/
 │   │   ├── main.tf           # ECR repositories
@@ -30,6 +30,8 @@ terraform/
 │   │   └── cognito/
 │   ├── range/
 │   │   └── vpc/
+│   ├── pulumi-provisioner/   # ECS task for Shifter Engine
+│   ├── pulumi-state/         # S3 + DynamoDB for Pulumi
 │   └── ecr/
 └── global/                   # Cross-environment resources
     ├── iam/                  # GitHub OIDC, roles
@@ -57,7 +59,7 @@ State is stored in S3 with DynamoDB locking:
 ### Initialize
 
 ```bash
-cd terraform/environments/dev/portal
+cd platform/terraform/environments/dev/portal
 AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform init
 ```
 
@@ -88,9 +90,7 @@ domain_name        = "dev.shifter.example.com"
 enable_autoscaling = false
 ```
 
-### In GitHub Secrets (Not Committed)
-
-The same tfvars content is stored in GitHub Secrets for CI/CD, where workflows write it to disk before running Terraform.
+Terraform variables are committed to the repo. CI/CD reads them directly after checkout.
 
 ### In AWS Secrets Manager (Runtime)
 
@@ -195,11 +195,10 @@ terraform fmt -recursive
 
 ## Adding New Infrastructure
 
-1. Create module in `terraform/modules/` if reusable
-2. Add to environment in `terraform/environments/{env}/`
+1. Create module in `platform/terraform/modules/` if reusable
+2. Add to environment in `platform/terraform/environments/{env}/`
 3. Update tfvars with required variables
-4. Update GitHub secret with same tfvars
-5. Test in dev before prod
+4. Test in dev before prod
 
 ## Debugging
 

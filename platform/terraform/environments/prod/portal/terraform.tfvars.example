@@ -1,6 +1,7 @@
 # Portal Infrastructure Configuration
 # Copy to terraform.tfvars and fill in values
-# DO NOT commit terraform.tfvars - sync to TF_VARS_PROD_PORTAL secret
+# terraform.tfvars IS committed to the repo (config, not secrets)
+# Sensitive values (passwords, keys) go in AWS Secrets Manager, not here
 
 # ------------------------------------------------------------------------------
 # General

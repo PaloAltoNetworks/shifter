@@ -1,6 +1,6 @@
 """Tests for Django admin configuration."""
 
-from mission_control.admin import UserNGFWAdmin
+from engine.admin import UserNGFWAdmin
 
 
 class TestUserNGFWAdmin:

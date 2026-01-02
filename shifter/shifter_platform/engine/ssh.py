@@ -78,12 +78,12 @@ class SSHConnection:
 
             logger.info("SSH connection established to %s@%s:%d", self.username, self.host, self.port)
 
-        except asyncssh.DisconnectError as e:
-            logger.exception("SSH disconnect error connecting to %s", self.host)
-            raise SSHConnectionError(f"SSH connection failed: {e}") from e
         except asyncssh.PermissionDenied as e:
             logger.exception("SSH permission denied for %s@%s", self.username, self.host)
             raise SSHConnectionError("SSH authentication failed") from e
+        except asyncssh.DisconnectError as e:
+            logger.exception("SSH disconnect error connecting to %s", self.host)
+            raise SSHConnectionError(f"SSH connection failed: {e}") from e
         except asyncssh.KeyImportError as e:
             logger.exception("Invalid SSH key format for %s@%s", self.username, self.host)
             raise SSHConnectionError("Invalid SSH key format") from e

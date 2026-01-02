@@ -1,4 +1,4 @@
-"""Tests for engine.services.serialization module."""
+"""Tests for serialization module."""
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from cms.models import AgentConfig, OperatingSystem
 from engine.models import Range
-from engine.services.serialization import range_to_dict
+from engine.serialization import range_to_dict
 
 User = get_user_model()
 

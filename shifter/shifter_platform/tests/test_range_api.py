@@ -40,8 +40,8 @@ def test_agent(db, django_user_model, windows_os):
 def mock_provisioner():
     """Mock the engine service to avoid AWS calls."""
     with (
-        patch("engine.services.ecs.start_provisioning") as mock_provision,
-        patch("engine.services.ecs.start_teardown") as mock_teardown,
+        patch("engine.ecs.start_provisioning") as mock_provision,
+        patch("engine.ecs.start_teardown") as mock_teardown,
     ):
         mock_provision.return_value = None  # No ARN in test mode
         mock_teardown.return_value = None
@@ -129,7 +129,7 @@ class TestLaunchRange:
 
     def test_successful_launch_with_ecs(self, client, test_agent):
         """Test launch with mocked ECS."""
-        mock_path = "engine.services.ecs._get_ecs_client"
+        mock_path = "engine.ecs._get_ecs_client"
         with patch(mock_path) as mock_client:
             task_arn = "arn:aws:ecs:us-east-2:123:task/test/abc123"
             mock_client.return_value.run_task.return_value = {

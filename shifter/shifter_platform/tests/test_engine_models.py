@@ -260,3 +260,276 @@ class TestUserNGFWModel:
 
         ngfw = UserNGFW(user=user, name="Test NGFW")
         assert str(ngfw) == "Test NGFW"
+
+
+@pytest.mark.django_db
+class TestRangeGetInstanceByUUID:
+    """Tests for Range.get_instance_by_uuid().
+
+    Tests the instance lookup method contract:
+    - Inputs: uuid string (required, non-empty)
+    - Outputs: instance dict or None
+    - Side effects: none (pure read operation)
+    - Errors: ValueError for invalid uuid input
+    - Logging: none (simple getter)
+    """
+
+    @pytest.fixture
+    def user(self):
+        return User.objects.create_user(
+            username="uuid_test@example.com",
+            email="uuid_test@example.com",
+        )
+
+    # -------------------------------------------------------------------------
+    # Outputs - returns matching instance dict
+    # -------------------------------------------------------------------------
+
+    def test_returns_instance_when_uuid_matches(self, user):
+        """Method returns instance dict when UUID matches."""
+        from engine.models import Range
+
+        instance_data = {
+            "uuid": "abc-123-def",
+            "role": "attacker",
+            "private_ip": "10.1.1.10",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[instance_data],
+        )
+
+        result = range_obj.get_instance_by_uuid("abc-123-def")
+
+        assert result == instance_data
+
+    def test_returns_correct_instance_from_multiple(self, user):
+        """Method returns correct instance when multiple exist."""
+        from engine.models import Range
+
+        attacker = {
+            "uuid": "attacker-uuid-111",
+            "role": "attacker",
+            "private_ip": "10.1.1.10",
+        }
+        victim = {
+            "uuid": "victim-uuid-222",
+            "role": "victim",
+            "private_ip": "10.1.1.20",
+        }
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[attacker, victim],
+        )
+
+        result = range_obj.get_instance_by_uuid("victim-uuid-222")
+
+        assert result == victim
+
+    def test_returns_none_when_uuid_not_found(self, user):
+        """Method returns None when UUID doesn't match any instance."""
+        from engine.models import Range
+
+        instance_data = {
+            "uuid": "existing-uuid",
+            "role": "attacker",
+            "private_ip": "10.1.1.10",
+        }
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[instance_data],
+        )
+
+        result = range_obj.get_instance_by_uuid("non-existent-uuid")
+
+        assert result is None
+
+    def test_returns_none_when_provisioned_instances_empty(self, user):
+        """Method returns None when provisioned_instances is empty list."""
+        from engine.models import Range
+
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[],
+        )
+
+        result = range_obj.get_instance_by_uuid("any-uuid")
+
+        assert result is None
+
+    def test_returns_none_when_provisioned_instances_null(self, user):
+        """Method returns None when provisioned_instances is None."""
+        from engine.models import Range
+
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=None,
+        )
+
+        result = range_obj.get_instance_by_uuid("any-uuid")
+
+        assert result is None
+
+    # -------------------------------------------------------------------------
+    # Input validation - uuid parameter
+    # -------------------------------------------------------------------------
+
+    def test_raises_on_none_uuid(self, user):
+        """Method raises ValueError when uuid is None."""
+        from engine.models import Range
+
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[{"uuid": "test", "role": "attacker"}],
+        )
+
+        with pytest.raises(ValueError, match="uuid"):
+            range_obj.get_instance_by_uuid(None)
+
+    def test_raises_on_empty_uuid(self, user):
+        """Method raises ValueError when uuid is empty string."""
+        from engine.models import Range
+
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[{"uuid": "test", "role": "attacker"}],
+        )
+
+        with pytest.raises(ValueError, match="uuid"):
+            range_obj.get_instance_by_uuid("")
+
+    # -------------------------------------------------------------------------
+    # Side effects - none expected (pure read operation)
+    # -------------------------------------------------------------------------
+
+    def test_does_not_modify_provisioned_instances(self, user):
+        """Method does not modify the provisioned_instances data."""
+        from engine.models import Range
+
+        instance_data = {
+            "uuid": "abc-123-def",
+            "role": "attacker",
+            "private_ip": "10.1.1.10",
+        }
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[instance_data],
+        )
+        original_data = range_obj.provisioned_instances.copy()
+
+        range_obj.get_instance_by_uuid("abc-123-def")
+
+        assert range_obj.provisioned_instances == original_data
+
+    def test_does_not_save_to_database(self, user):
+        """Method does not trigger database save."""
+        from engine.models import Range
+
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[{"uuid": "test", "role": "attacker"}],
+        )
+        original_updated_at = range_obj.updated_at
+
+        range_obj.get_instance_by_uuid("test")
+        range_obj.refresh_from_db()
+
+        assert range_obj.updated_at == original_updated_at
+
+    # -------------------------------------------------------------------------
+    # Error handling - malformed data
+    # -------------------------------------------------------------------------
+
+    def test_skips_instances_without_uuid_key(self, user):
+        """Method skips instances that don't have a uuid key."""
+        from engine.models import Range
+
+        malformed = {"role": "attacker", "private_ip": "10.1.1.10"}  # no uuid
+        valid = {"uuid": "valid-uuid", "role": "victim", "private_ip": "10.1.1.20"}
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[malformed, valid],
+        )
+
+        result = range_obj.get_instance_by_uuid("valid-uuid")
+
+        assert result == valid
+
+    def test_returns_none_when_all_instances_malformed(self, user):
+        """Method returns None when no instances have uuid key."""
+        from engine.models import Range
+
+        malformed1 = {"role": "attacker", "private_ip": "10.1.1.10"}
+        malformed2 = {"role": "victim", "private_ip": "10.1.1.20"}
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[malformed1, malformed2],
+        )
+
+        result = range_obj.get_instance_by_uuid("any-uuid")
+
+        assert result is None
+
+    # -------------------------------------------------------------------------
+    # Boundary conditions
+    # -------------------------------------------------------------------------
+
+    def test_handles_single_instance(self, user):
+        """Method works correctly with single instance in list."""
+        from engine.models import Range
+
+        instance = {"uuid": "only-one", "role": "attacker"}
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[instance],
+        )
+
+        result = range_obj.get_instance_by_uuid("only-one")
+
+        assert result == instance
+
+    def test_handles_many_instances(self, user):
+        """Method finds instance in large list."""
+        from engine.models import Range
+
+        instances = [{"uuid": f"uuid-{i}", "role": "victim"} for i in range(100)]
+        target = {"uuid": "target-uuid", "role": "attacker"}
+        instances.insert(50, target)
+
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=instances,
+        )
+
+        result = range_obj.get_instance_by_uuid("target-uuid")
+
+        assert result == target
+
+    def test_case_sensitive_uuid_match(self, user):
+        """Method performs case-sensitive UUID matching."""
+        from engine.models import Range
+
+        instance = {"uuid": "ABC-123", "role": "attacker"}
+        range_obj = Range.objects.create(
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[instance],
+        )
+
+        result = range_obj.get_instance_by_uuid("abc-123")
+
+        assert result is None  # lowercase doesn't match uppercase

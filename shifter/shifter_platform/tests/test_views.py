@@ -213,7 +213,7 @@ class TestRangeToJson:
 
         from cms.models import AgentConfig, OperatingSystem
         from engine.models import Range
-        from engine.services.serialization import range_to_dict
+        from engine.serialization import range_to_dict
 
         windows_os = OperatingSystem.objects.get(slug="windows")
         agent = AgentConfig.objects.create(
@@ -248,7 +248,7 @@ class TestRangeToJson:
 
     def test_handles_null_agent(self, user):
         from engine.models import Range
-        from engine.services.serialization import range_to_dict
+        from engine.serialization import range_to_dict
 
         range_obj = Range.objects.create(
             user=user,

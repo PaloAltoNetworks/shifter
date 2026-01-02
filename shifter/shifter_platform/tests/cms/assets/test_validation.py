@@ -4,7 +4,7 @@ import io
 
 import pytest
 
-from mission_control.services.validation import (
+from cms.assets.validation import (
     ALLOWED_FORMATS,
     ValidationError,
     get_allowed_extensions,

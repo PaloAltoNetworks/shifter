@@ -9,12 +9,12 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
-from cms.models import AgentConfig, OperatingSystem
-from management.models import ActivityLog
-from mission_control.services.upload_token import (
+from cms.assets.upload_token import (
     generate_upload_token,
     verify_upload_token,
 )
+from cms.models import AgentConfig, OperatingSystem
+from management.models import ActivityLog
 
 User = get_user_model()
 
@@ -426,7 +426,7 @@ class TestCompleteUpload:
 
     @patch("mission_control.views.verify_s3_object_exists")
     def test_rejects_missing_s3_object(self, mock_verify, user, settings):
-        from mission_control.services.s3 import S3Error
+        from cms.assets.s3 import S3Error
 
         settings.AGENT_UPLOAD_URL_EXPIRES = 3600
         mock_verify.side_effect = S3Error("Object not found")

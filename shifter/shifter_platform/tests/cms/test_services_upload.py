@@ -297,8 +297,8 @@ class TestInitiateUpload:
 
     def test_raises_cmserror_on_invalid_extension(self, user):
         """Service raises CMSError when file extension is not allowed."""
+        from cms.assets.validation import ValidationError
         from cms.exceptions import CMSError
-        from mission_control.services.validation import ValidationError
 
         validation_path = "mission_control.services.validation.validate_file_extension"
         with (
@@ -312,8 +312,8 @@ class TestInitiateUpload:
 
     def test_raises_cmserror_on_s3_error(self, user):
         """Service raises CMSError when S3 presigned URL generation fails."""
+        from cms.assets.s3 import S3Error
         from cms.exceptions import CMSError
-        from mission_control.services.s3 import S3Error
 
         with (
             patch("cms.assets.services.get_storage_used", return_value=0),
@@ -367,8 +367,8 @@ class TestInitiateUpload:
 
     def test_logs_error_on_validation_failure(self, user, caplog):
         """Service logs error when file extension validation fails."""
+        from cms.assets.validation import ValidationError
         from cms.exceptions import CMSError
-        from mission_control.services.validation import ValidationError
 
         validation_path = "mission_control.services.validation.validate_file_extension"
         with (
@@ -603,8 +603,8 @@ class TestCompleteUpload:
 
     def test_raises_cmserror_when_s3_object_not_found(self, user):
         """Service raises CMSError when S3 object doesn't exist."""
+        from cms.assets.s3 import S3Error
         from cms.exceptions import CMSError
-        from mission_control.services.s3 import S3Error
 
         token_payload = {
             "s3_key": "agents/1/abc_agent.msi",
@@ -694,8 +694,8 @@ class TestCompleteUpload:
 
     def test_logs_error_on_s3_verification_failure(self, user, caplog):
         """Service logs error when S3 verification fails."""
+        from cms.assets.s3 import S3Error
         from cms.exceptions import CMSError
-        from mission_control.services.s3 import S3Error
 
         token_payload = {
             "s3_key": "agents/1/abc_agent.msi",
@@ -852,7 +852,7 @@ class TestCancelUpload:
 
     def test_succeeds_when_s3_delete_fails(self, user):
         """Service succeeds even when S3 delete fails (best effort cleanup)."""
-        from mission_control.services.s3 import S3Error
+        from cms.assets.s3 import S3Error
 
         token_payload = {
             "s3_key": "agents/1/abc_agent.msi",
@@ -871,7 +871,7 @@ class TestCancelUpload:
 
     def test_succeeds_when_s3_object_not_found(self, user):
         """Service succeeds when S3 object doesn't exist (already deleted)."""
-        from mission_control.services.s3 import S3Error
+        from cms.assets.s3 import S3Error
 
         token_payload = {
             "s3_key": "agents/1/abc_agent.msi",
@@ -926,7 +926,7 @@ class TestCancelUpload:
 
     def test_logs_warning_on_s3_delete_failure(self, user, caplog):
         """Service logs warning when S3 delete fails."""
-        from mission_control.services.s3 import S3Error
+        from cms.assets.s3 import S3Error
 
         token_payload = {
             "s3_key": "agents/1/abc_agent.msi",

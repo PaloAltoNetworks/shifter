@@ -1,11 +1,11 @@
-"""Tests for engine.services.allocation module."""
+"""Tests for engine.allocation module."""
 
 import pytest
 from django.contrib.auth import get_user_model
 
 from cms.models import AgentConfig, OperatingSystem
+from engine.allocation import AllocationError, allocate_subnet_index
 from engine.models import Range
-from engine.services.allocation import AllocationError, allocate_subnet_index
 
 User = get_user_model()
 

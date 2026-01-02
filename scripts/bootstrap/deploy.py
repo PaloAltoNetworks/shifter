@@ -20,6 +20,7 @@ Usage:
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -89,7 +90,11 @@ def confirm(msg: str, default_yes: bool = False) -> bool:
 
 
 def confirm_or_manual(msg: str) -> str:
-    """Prompt for yes/no/manual. Returns 'yes', 'no', or 'manual'."""
+    """Prompt for yes/no/manual. Returns 'yes', 'no', or 'manual'.
+
+    Note: 'no' will cause the script to abort with an error explanation,
+    as all steps are required for a functioning deployment.
+    """
     # Check if we're in a non-interactive environment
     if not sys.stdin.isatty():
         return "manual"
@@ -102,7 +107,7 @@ def confirm_or_manual(msg: str) -> str:
             return "no"
         if response in ("m", "manual"):
             return "manual"
-        print("Please enter 'y' (yes), 'n' (no), or 'm' (manual)")
+        print("Please enter 'y' (yes), 'n' (no - will abort), or 'm' (manual)")
 
 
 def wait_for_user(msg: str) -> None:
@@ -282,12 +287,25 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     # Audience: sts.amazonaws.com (official AWS STS audience for OIDC)
     # Note: As of July 2024, AWS IAM automatically trusts GitHub's root CAs
     # so thumbprints are no longer required for token.actions.githubusercontent.com
-    run_cmd([
+    result = run_cmd([
         "aws", "iam", "create-open-id-connect-provider",
         "--url", "https://token.actions.githubusercontent.com",
         "--client-id-list", "sts.amazonaws.com",
         "--tags", f"Key=Name,Value=github-actions-oidc-{config.env}", "Key=Project,Value=shifter"
-    ], dry_run=dry_run, check=False, profile=profile)  # May already exist
+    ], dry_run=dry_run, check=False, profile=profile)  # May already exist (EntityAlreadyExists error is OK)
+
+    # Verify provider exists
+    if not dry_run:
+        verify_result = subprocess.run([
+            "aws", "--profile", profile, "iam", "list-open-id-connect-providers",
+            "--query", "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn",
+            "--output", "text"
+        ], capture_output=True, text=True)
+
+        if verify_result.returncode != 0 or not verify_result.stdout.strip():
+            error("Failed to create or verify OIDC provider")
+            error("GitHub Actions will not be able to authenticate to AWS")
+            sys.exit(1)
 
     success("OIDC provider ready")
 
@@ -306,12 +324,12 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     else:
         oidc_arn = f"arn:aws:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com"
 
-        # OIDC Trust Policy for GitHub Actions
-        # VERIFIED OFFICIAL VALUES (Brad Edwards, 2026-01-02):
-        # - token.actions.githubusercontent.com:aud must be "sts.amazonaws.com"
-        # - token.actions.githubusercontent.com:sub format: "repo:ORG/REPO:*"
-        # Source: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
-        trust_policy = {
+    # OIDC Trust Policy for GitHub Actions
+    # VERIFIED OFFICIAL VALUES (Brad Edwards, 2026-01-02):
+    # - token.actions.githubusercontent.com:aud must be "sts.amazonaws.com"
+    # - token.actions.githubusercontent.com:sub format: "repo:ORG/REPO:*"
+    # Source: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+    trust_policy = {
         "Version": "2012-10-17",
         "Statement": [{
             "Effect": "Allow",
@@ -417,10 +435,13 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
                     return
                 else:
                     error(f"Failed to set secret: {result.stderr}")
-                    warn("Falling back to manual method")
+                    error("GitHub CLI command failed")
+                    error("Try manual method or fix gh authentication")
+                    sys.exit(1)
             elif choice == "no":
-                info("Skipping GitHub secret configuration")
-                return
+                error("GitHub secret is required for CI/CD to authenticate with AWS")
+                error("Without this, GitHub Actions cannot deploy infrastructure")
+                sys.exit(1)
             # If manual, fall through to manual instructions
         else:
             warn("GitHub CLI (gh) not found - using manual method")
@@ -501,7 +522,8 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
                     success(f"Wrote {filepath}")
                 except Exception as e:
                     error(f"Failed to write {filepath}: {e}")
-                    return
+                    error("Cannot continue without backend configuration files")
+                    sys.exit(1)
 
             # Offer to commit and push
             commit_choice = confirm_or_manual("Commit and push these changes to git?")
@@ -520,7 +542,9 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
                     success("Changes committed and pushed")
                 except subprocess.CalledProcessError as e:
                     error(f"Git operation failed: {e}")
-                    warn("You'll need to commit and push manually")
+                    error("Backend configuration must be committed before Terraform can use it")
+                    error("Fix git issues or choose manual method to commit later")
+                    sys.exit(1)
             elif commit_choice == "manual":
                 info("You should run:")
                 code_block(f"git add platform/terraform/environments/{env}/\ngit commit -m 'Update backend config for {env}'\ngit push")
@@ -542,7 +566,9 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
 
             success("Backend configuration updated")
         else:
-            info("Skipping backend configuration")
+            error("Backend configuration is required for Terraform state management")
+            error("Without this, Terraform cannot store or track infrastructure state")
+            sys.exit(1)
 
 
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
@@ -562,8 +588,14 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         info(f"Component: {component}")
 
         if not dry_run and not confirm(f"Deploy {component}?"):
-            warn(f"Skipping {component}")
-            continue
+            error(f"{component.title()} deployment is required")
+            if component == "core":
+                error("Core creates ECR repositories needed for container images")
+            elif component == "range":
+                error("Range VPC is required for isolated attack/defense environments")
+            elif component == "portal":
+                error("Portal is the main application infrastructure")
+            sys.exit(1)
 
         base_path = get_repo_root() / "platform" / "terraform" / "environments" / env
         tf_dir = base_path if component == "core" else base_path / component
@@ -579,11 +611,19 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         try:
             # Init
             info("Running terraform init...")
-            run_cmd(["terraform", "init"], dry_run=dry_run)
+            init_result = run_cmd(["terraform", "init"], dry_run=dry_run)
+            if not dry_run and init_result and init_result.returncode != 0:
+                error(f"Terraform init failed for {component}")
+                error("Check that backend.tf is correctly configured")
+                sys.exit(1)
 
             # Plan
             info("Running terraform plan...")
-            run_cmd(["terraform", "plan", "-out=tfplan"], dry_run=dry_run)
+            plan_result = run_cmd(["terraform", "plan", "-out=tfplan"], dry_run=dry_run)
+            if not dry_run and plan_result and plan_result.returncode != 0:
+                error(f"Terraform plan failed for {component}")
+                error("Review errors above and fix before continuing")
+                sys.exit(1)
 
             if not dry_run:
                 # Show plan summary
@@ -591,12 +631,18 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
                 subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)
 
                 if not confirm(f"\nApply this plan?"):
-                    warn("Apply skipped by user")
-                    continue
+                    error(f"Terraform apply for {component} is required")
+                    error("All infrastructure components are mandatory for Shifter to function")
+                    sys.exit(1)
 
                 # Apply
                 info("Running terraform apply...")
-                run_cmd(["terraform", "apply", "tfplan"])
+                apply_result = run_cmd(["terraform", "apply", "tfplan"])
+
+                if apply_result and apply_result.returncode != 0:
+                    error(f"Terraform apply failed for {component}")
+                    error("Infrastructure deployment incomplete")
+                    sys.exit(1)
 
                 success(f"{component} deployed successfully")
 
@@ -763,7 +809,7 @@ This will guide you through a complete Shifter deployment:
 
 Automated steps will ask for confirmation:
   [y] yes - run automatically
-  [n] no - skip this step
+  [n] no - abort (all steps are required)
   [m] manual - show instructions and wait
 
 Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
@@ -809,6 +855,42 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
     walkthrough_final_steps(env)
 
 
+def check_dependencies():
+    """Check all required dependencies before starting."""
+    required = {
+        "aws": "AWS CLI - https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+        "terraform": "Terraform - https://developer.hashicorp.com/terraform/downloads",
+        "git": "Git - https://git-scm.com/downloads",
+    }
+
+    optional = {
+        "gh": "GitHub CLI - https://cli.github.com/ (recommended for automating GitHub secrets)"
+    }
+
+    missing_required = []
+    missing_optional = []
+
+    for cmd, desc in required.items():
+        if not shutil.which(cmd):
+            missing_required.append(f"  - {cmd}: {desc}")
+
+    for cmd, desc in optional.items():
+        if not shutil.which(cmd):
+            missing_optional.append(f"  - {cmd}: {desc}")
+
+    if missing_required:
+        error("Missing required dependencies:")
+        for item in missing_required:
+            print(item)
+        sys.exit(1)
+
+    if missing_optional:
+        warn("Missing optional dependencies (some automation features will be unavailable):")
+        for item in missing_optional:
+            print(item)
+        print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Shifter deployment CLI - interactive deployment guide",
@@ -828,6 +910,9 @@ Examples:
   ./scripts/bootstrap/deploy.py terraform --env prod --profile my-prod-profile
         """
     )
+
+    # Check dependencies first
+    check_dependencies()
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 

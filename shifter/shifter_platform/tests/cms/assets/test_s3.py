@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from mission_control.services.s3 import (
+from cms.assets.s3 import (
     S3Error,
     delete_agent,
     get_s3_client,
@@ -15,7 +15,7 @@ from mission_control.services.s3 import (
 
 
 class TestGetS3Client:
-    @patch("mission_control.services.s3.boto3")
+    @patch("cms.assets.s3.boto3")
     def test_creates_client_with_region(self, mock_boto3, settings):
         settings.AWS_S3_REGION = "us-west-2"
         get_s3_client()
@@ -28,7 +28,7 @@ class TestGetS3Client:
 
 
 class TestUploadAgent:
-    @patch("mission_control.services.s3.get_s3_client")
+    @patch("cms.assets.s3.get_s3_client")
     def test_successful_upload(self, mock_get_client, settings):
         settings.AWS_S3_BUCKET_NAME = "test-bucket"
         mock_client = MagicMock()
@@ -55,7 +55,7 @@ class TestUploadAgent:
             upload_agent(file_obj, 123, "agent.msi")
         assert "not configured" in str(exc.value)
 
-    @patch("mission_control.services.s3.get_s3_client")
+    @patch("cms.assets.s3.get_s3_client")
     def test_raises_on_client_error(self, mock_get_client, settings):
         settings.AWS_S3_BUCKET_NAME = "test-bucket"
         mock_client = MagicMock()
@@ -69,7 +69,7 @@ class TestUploadAgent:
             upload_agent(file_obj, 123, "agent.msi")
         assert "Failed to upload" in str(exc.value)
 
-    @patch("mission_control.services.s3.get_s3_client")
+    @patch("cms.assets.s3.get_s3_client")
     def test_calculates_correct_sha256(self, mock_get_client, settings):
         settings.AWS_S3_BUCKET_NAME = "test-bucket"
         mock_client = MagicMock()
@@ -84,7 +84,7 @@ class TestUploadAgent:
 
 
 class TestDeleteAgent:
-    @patch("mission_control.services.s3.get_s3_client")
+    @patch("cms.assets.s3.get_s3_client")
     def test_successful_delete(self, mock_get_client, settings):
         settings.AWS_S3_BUCKET_NAME = "test-bucket"
         mock_client = MagicMock()
@@ -101,7 +101,7 @@ class TestDeleteAgent:
             delete_agent("some/key")
         assert "not configured" in str(exc.value)
 
-    @patch("mission_control.services.s3.get_s3_client")
+    @patch("cms.assets.s3.get_s3_client")
     def test_raises_on_client_error(self, mock_get_client, settings):
         settings.AWS_S3_BUCKET_NAME = "test-bucket"
         mock_client = MagicMock()

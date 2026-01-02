@@ -19,10 +19,10 @@ from cms.assets.services import delete_agent as cms_delete_agent
 from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
 from cms.models import AgentConfig, Credential
 from cms.services import list_scenarios as cms_list_scenarios
-from engine.services.allocation import AllocationError
-from engine.services.orchestration import OrchestrationError, cancel, destroy, launch
-from engine.services.scenarios import ScenarioValidationError
-from engine.services.serialization import range_to_dict
+from engine.allocation import AllocationError
+from engine.orchestration import OrchestrationError, cancel, destroy, launch
+from engine.scenarios import ScenarioValidationError
+from engine.serialization import range_to_dict
 
 from .models import Range, UserNGFW
 from .services.s3 import (

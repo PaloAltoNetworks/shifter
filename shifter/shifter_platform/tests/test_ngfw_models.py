@@ -16,7 +16,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from mission_control.models import (
+from engine.models import (
     Range,
     UserNGFW,
 )

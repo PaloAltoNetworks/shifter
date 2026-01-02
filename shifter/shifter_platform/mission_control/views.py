@@ -40,9 +40,9 @@ from cms.assets.validation import (
     validate_agent_file,
     validate_file_extension,
 )
-from cms.models import AgentConfig, Credential
+from cms.models import AgentConfig, Credential, UserNGFW
 from cms.services import list_scenarios as cms_list_scenarios
-from engine.models import Range, UserNGFW
+from engine.models import Range
 
 
 # TODO: Mission Control is legacy - these are stubs until MC is refactored to use CMS

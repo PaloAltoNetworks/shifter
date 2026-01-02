@@ -3,6 +3,12 @@
 
 Guides you through deploying Shifter infrastructure from a bare AWS account.
 
+Features:
+- Interactive prompts with automated options (via gh CLI, git)
+- Confirmation before any changes (yes/no/manual)
+- Dry-run mode to preview without making changes
+- Manual fallback for all steps
+
 Usage:
     ./scripts/bootstrap/deploy.py bootstrap --env prod --profile my-prod-profile
     ./scripts/bootstrap/deploy.py bootstrap --env prod --profile my-prod-profile --dry-run
@@ -80,6 +86,23 @@ def confirm(msg: str, default_yes: bool = False) -> bool:
         if response in ("n", "no", ""):
             return False
         print("Please enter 'y' or 'n'")
+
+
+def confirm_or_manual(msg: str) -> str:
+    """Prompt for yes/no/manual. Returns 'yes', 'no', or 'manual'."""
+    # Check if we're in a non-interactive environment
+    if not sys.stdin.isatty():
+        return "manual"
+
+    while True:
+        response = input(f"{Colors.YELLOW}{msg} [y/n/m]: {Colors.END}").strip().lower()
+        if response in ("y", "yes"):
+            return "yes"
+        if response in ("n", "no"):
+            return "no"
+        if response in ("m", "manual"):
+            return "manual"
+        print("Please enter 'y' (yes), 'n' (no), or 'm' (manual)")
 
 
 def wait_for_user(msg: str) -> None:
@@ -375,15 +398,40 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
     print(f"  {Colors.BOLD}Name:{Colors.END}  {secret_name}")
     print(f"  {Colors.BOLD}Value:{Colors.END} {role_arn}")
 
-    print(f"\n{Colors.BOLD}Steps:{Colors.END}")
-    # USER-SPECIFIC: Construct URL from config for user's actual repo
-    print(f"  1. Go to: https://github.com/{github_org}/{github_repo}/settings/secrets/actions")
-    print("  2. Click 'New repository secret'")
-    print(f"  3. Name: {secret_name}")
-    print(f"  4. Value: {role_arn}")
-    print("  5. Click 'Add secret'")
-
     if not dry_run:
+        # Check if gh CLI is available
+        gh_available = subprocess.run(["which", "gh"], capture_output=True).returncode == 0
+
+        if gh_available:
+            print(f"\n{Colors.GREEN}✓ GitHub CLI detected{Colors.END}")
+            choice = confirm_or_manual("Automatically set this secret using gh CLI?")
+
+            if choice == "yes":
+                info(f"Running: gh secret set {secret_name} --repo {github_org}/{github_repo}")
+                result = subprocess.run(
+                    ["gh", "secret", "set", secret_name, "--body", role_arn, "--repo", f"{github_org}/{github_repo}"],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    success("GitHub secret configured via gh CLI")
+                    return
+                else:
+                    error(f"Failed to set secret: {result.stderr}")
+                    warn("Falling back to manual method")
+            elif choice == "no":
+                info("Skipping GitHub secret configuration")
+                return
+            # If manual, fall through to manual instructions
+        else:
+            warn("GitHub CLI (gh) not found - using manual method")
+
+        # Manual method
+        print(f"\n{Colors.BOLD}Manual Steps:{Colors.END}")
+        print(f"  1. Go to: https://github.com/{github_org}/{github_repo}/settings/secrets/actions")
+        print("  2. Click 'New repository secret'")
+        print(f"  3. Name: {secret_name}")
+        print(f"  4. Value: {role_arn}")
+        print("  5. Click 'Add secret'")
         wait_for_user("Add the GitHub secret, then press Enter to continue.")
         success("GitHub secret configured")
 
@@ -409,6 +457,7 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
         (f"platform/terraform/environments/{env}/range/backend.tf", f"{env}/range/terraform.tfstate"),
     ]
 
+    # Show what will be written
     for filepath, state_key in backends:
         subheader(filepath)
 
@@ -430,17 +479,70 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
             warn(f"File not found: {full_path}")
 
     if not dry_run:
-        wait_for_user(
-            "Update the backend.tf files shown above with the new bucket and table names.\n"
-            "You can copy the code blocks directly into each file."
-        )
+        choice = confirm_or_manual("Automatically write these backend.tf files?")
 
-        if confirm("Commit and push the backend.tf changes now?"):
-            info("You should run:")
-            code_block(f"git add platform/terraform/environments/{env}/\ngit commit -m 'Update backend config for {env}'\ngit push")
-            wait_for_user("Commit and push the changes, then press Enter.")
+        if choice == "yes":
+            # Write the files
+            for filepath, state_key in backends:
+                full_path = repo_root / filepath
+                backend_config = f'''terraform {{
+  backend "s3" {{
+    bucket         = "{bucket}"
+    key            = "{state_key}"
+    region         = "{region}"
+    dynamodb_table = "{table}"
+    encrypt        = true
+  }}
+}}
+'''
+                try:
+                    full_path.parent.mkdir(parents=True, exist_ok=True)
+                    full_path.write_text(backend_config)
+                    success(f"Wrote {filepath}")
+                except Exception as e:
+                    error(f"Failed to write {filepath}: {e}")
+                    return
 
-        success("Backend configuration updated")
+            # Offer to commit and push
+            commit_choice = confirm_or_manual("Commit and push these changes to git?")
+
+            if commit_choice == "yes":
+                try:
+                    info(f"Adding files: platform/terraform/environments/{env}/")
+                    subprocess.run(["git", "add", f"platform/terraform/environments/{env}/"], check=True, cwd=repo_root)
+
+                    info(f"Committing: Update backend config for {env}")
+                    subprocess.run(["git", "commit", "-m", f"Update backend config for {env}"], check=True, cwd=repo_root)
+
+                    info("Pushing to remote...")
+                    subprocess.run(["git", "push"], check=True, cwd=repo_root)
+
+                    success("Changes committed and pushed")
+                except subprocess.CalledProcessError as e:
+                    error(f"Git operation failed: {e}")
+                    warn("You'll need to commit and push manually")
+            elif commit_choice == "manual":
+                info("You should run:")
+                code_block(f"git add platform/terraform/environments/{env}/\ngit commit -m 'Update backend config for {env}'\ngit push")
+                wait_for_user("Commit and push the changes, then press Enter.")
+
+            success("Backend configuration updated")
+
+        elif choice == "manual":
+            # Manual method
+            wait_for_user(
+                "Update the backend.tf files shown above with the new bucket and table names.\n"
+                "You can copy the code blocks directly into each file."
+            )
+
+            if confirm("Commit and push the backend.tf changes now?"):
+                info("You should run:")
+                code_block(f"git add platform/terraform/environments/{env}/\ngit commit -m 'Update backend config for {env}'\ngit push")
+                wait_for_user("Commit and push the changes, then press Enter.")
+
+            success("Backend configuration updated")
+        else:
+            info("Skipping backend configuration")
 
 
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
@@ -653,11 +755,16 @@ def full_deployment(env: str, profile: str, dry_run: bool = False) -> None:
 This will guide you through a complete Shifter deployment:
 
   1. Bootstrap AWS account (S3, DynamoDB, IAM)
-  2. Configure GitHub secrets
-  3. Update Terraform backend configuration
+  2. Configure GitHub secrets (automated with gh CLI or manual)
+  3. Update Terraform backend configuration (automated or manual)
   4. Deploy infrastructure (Core → Range → Portal)
-  5. Configure DNS and SSL certificate
+  5. Configure DNS and SSL certificate (manual - external DNS)
   6. Create first user
+
+Automated steps will ask for confirmation:
+  [y] yes - run automatically
+  [n] no - skip this step
+  [m] manual - show instructions and wait
 
 Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
 """)

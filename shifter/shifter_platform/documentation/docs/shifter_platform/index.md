@@ -14,7 +14,7 @@ graph TB
 
     subgraph Services
         MC --> CMS_SVC[cms.services]
-        MC --> ENG_SVC[engine.services]
+        MC --> ENG_SVC[engine]
         MC --> MGT_SVC[management.services]
     end
 
@@ -48,7 +48,7 @@ Domains expose Python service interfaces. No HTTP between apps.
 ```mermaid
 graph LR
     Views[MC Views/API] --> CMS[cms.services]
-    Views --> ENG[engine.services]
+    Views --> ENG[engine]
     CMS --> CMS_Models[(CMS Models)]
     ENG --> ENG_Models[(Engine Models)]
 ```
@@ -57,7 +57,7 @@ Mission Control imports and calls domain services:
 
 ```python
 from cms.services import create_agent, get_storage_used
-from engine.services import launch_range, destroy_range
+from engine import launch_range, destroy_range
 ```
 
 Services own business logic. Views handle HTTP concerns only.

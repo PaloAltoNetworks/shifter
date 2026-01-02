@@ -5,7 +5,8 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 
-from mission_control.models import AgentConfig, OperatingSystem, Range
+from cms.models import AgentConfig, OperatingSystem
+from engine.models import Range
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ This module handles serialization of Range objects to JSON-compatible dicts.
 
 from typing import Any
 
-from mission_control.models import Range
+from engine.models import Range
 
 
 def range_to_dict(range_obj: Range) -> dict[str, Any]:

@@ -120,7 +120,7 @@ class TestGetUserStorageUsed:
 
     def test_sums_active_agent_sizes(self, user):
         from cms.assets.services import get_storage_used
-        from mission_control.models import AgentConfig, OperatingSystem
+        from cms.models import AgentConfig, OperatingSystem
 
         windows_os = OperatingSystem.objects.get(slug="windows")
 
@@ -150,7 +150,7 @@ class TestGetUserStorageUsed:
         from django.utils import timezone
 
         from cms.assets.services import get_storage_used
-        from mission_control.models import AgentConfig, OperatingSystem
+        from cms.models import AgentConfig, OperatingSystem
 
         windows_os = OperatingSystem.objects.get(slug="windows")
 
@@ -211,8 +211,9 @@ class TestRangeToJson:
     def test_serializes_range_correctly(self, user):
         from django.utils import timezone
 
+        from cms.models import AgentConfig, OperatingSystem
+        from engine.models import Range
         from engine.services.serialization import range_to_dict
-        from mission_control.models import AgentConfig, OperatingSystem, Range
 
         windows_os = OperatingSystem.objects.get(slug="windows")
         agent = AgentConfig.objects.create(
@@ -246,8 +247,8 @@ class TestRangeToJson:
         assert "victim_ip" not in result  # Security: internal detail not exposed
 
     def test_handles_null_agent(self, user):
+        from engine.models import Range
         from engine.services.serialization import range_to_dict
-        from mission_control.models import Range
 
         range_obj = Range.objects.create(
             user=user,

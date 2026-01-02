@@ -3,8 +3,9 @@
 import pytest
 from django.contrib.auth import get_user_model
 
+from cms.models import AgentConfig, OperatingSystem
+from engine.models import Range
 from engine.services.allocation import AllocationError, allocate_subnet_index
-from mission_control.models import AgentConfig, OperatingSystem, Range
 
 User = get_user_model()
 

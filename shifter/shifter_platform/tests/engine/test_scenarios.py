@@ -6,12 +6,12 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+from cms.models import AgentConfig, OperatingSystem
 from engine.services.scenarios import (
     ScenarioValidationError,
     get_scenario_config,
     validate_launch,
 )
-from mission_control.models import AgentConfig, OperatingSystem
 
 User = get_user_model()
 

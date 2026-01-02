@@ -6,7 +6,7 @@ ensuring no conflicts between active ranges.
 
 from django.db import transaction
 
-from mission_control.models import Range
+from engine.models import Range
 
 
 class AllocationError(Exception):

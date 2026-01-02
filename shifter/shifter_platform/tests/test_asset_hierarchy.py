@@ -12,7 +12,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from mission_control.models import AgentConfig, Asset, FileAsset, OperatingSystem
+from cms.models import AgentConfig, Asset, FileAsset, OperatingSystem
 
 User = get_user_model()
 
@@ -294,8 +294,8 @@ class TestAgentConfigInheritsCorrectly:
         assert agent.os == windows_os
         assert agent.os.name == "Windows"
 
-    def test_agent_config_user_related_name_preserved(self, user, windows_os):
-        """AgentConfig user FK has related_name='agents' preserved."""
+    def test_agent_config_user_related_name(self, user, windows_os):
+        """AgentConfig user FK has related_name='cms_agents'."""
         AgentConfig.objects.create(
             user=user,
             os=windows_os,
@@ -305,9 +305,9 @@ class TestAgentConfigInheritsCorrectly:
             file_size_bytes=1024,
             sha256_hash="abc123",
         )
-        # Access via reverse relation
-        assert user.agents.count() == 1
-        assert user.agents.first().name == "Test"
+        # Access via reverse relation (cms_agents, not agents)
+        assert user.cms_agents.count() == 1
+        assert user.cms_agents.first().name == "Test"
 
     def test_str_method_includes_name_and_os(self, user, windows_os):
         """__str__ returns name with OS for identification."""

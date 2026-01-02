@@ -5,6 +5,8 @@ from unittest.mock import patch
 import pytest
 from django.contrib.auth import get_user_model
 
+from cms.models import AgentConfig, OperatingSystem
+from engine.models import Range
 from engine.services.orchestration import (
     OrchestrationError,
     cancel,
@@ -12,7 +14,6 @@ from engine.services.orchestration import (
     launch,
 )
 from management.models import ActivityLog
-from mission_control.models import AgentConfig, OperatingSystem, Range
 
 User = get_user_model()
 

@@ -570,6 +570,67 @@ class AgentConfig(FileAsset):
 # -----------------------------------------------------------------------------
 
 
+class UserNGFW(Asset):
+    """Persistent NGFW instance. Users can have multiple."""
+
+    class Status(models.TextChoices):
+        NOT_PROVISIONED = "not_provisioned", "Not Provisioned"
+        PROVISIONING = "provisioning", "Provisioning"
+        READY = "ready", "Ready"
+        STARTING = "starting", "Starting"
+        ACTIVE = "active", "Active"
+        STOPPING = "stopping", "Stopping"
+        STOPPED = "stopped", "Stopped"
+        DEPROVISIONING = "deprovisioning", "Deprovisioning"
+        FAILED = "failed", "Failed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ngfws",
+    )
+
+    # Note: Credentials are managed by CMS, not stored here.
+    # Engine receives hydrated config with decrypted values at provisioning time.
+    # CMS tracks credential→range associations if needed.
+
+    # Lifecycle
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NOT_PROVISIONED,
+    )
+
+    # AWS Resources - NGFW
+    instance_id = models.CharField(max_length=32, blank=True)
+    mgmt_eni_id = models.CharField(max_length=32, blank=True)
+    data_eni_id = models.CharField(max_length=32, blank=True)
+    management_ip = models.GenericIPAddressField(null=True, blank=True)
+    dataplane_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    # AWS Resources - GWLB
+    gwlb_arn = models.CharField(max_length=256, blank=True)
+    target_group_arn = models.CharField(max_length=256, blank=True)
+    gwlb_service_name = models.CharField(max_length=256, blank=True)
+
+    # PAN-OS Info
+    serial_number = models.CharField(max_length=32, blank=True)
+    device_cert_status = models.CharField(max_length=32, blank=True)
+    xdr_configured = models.BooleanField(default=False)
+
+    # Timestamps (beyond Asset's created_at, deleted_at)
+    provisioned_at = models.DateTimeField(null=True, blank=True)
+    last_started_at = models.DateTimeField(null=True, blank=True)
+    last_stopped_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "User NGFW"
+        verbose_name_plural = "User NGFWs"
+        # Keep using original table name from mission_control
+        db_table = "mission_control_userngfw"
+
+
 class RangeInstance(models.Model):
     """Tracks hydrated scenario configs sent to engine.
 

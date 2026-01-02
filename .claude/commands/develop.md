@@ -16,7 +16,7 @@ Before writing your TODO list:
 1. **What is the context?** - How does this work fit into the overall system? Ask the user for context if needed.
 1. **Understand the scope and blast radius** - What files/functions need to change? What other files will this impact?
 3. **Consider expert perspective** - What would a principal engineer say about how to approach this task?
-4. **Consider best practices** - Is the concept and task consistent with Martin Fowler's guidance, being pythonic? 
+4. **Consider best practices** - Is the concept and task consistent with Martin Fowler's guidance, being pythonic?
 5. **Identify dependencies** - What order must changes happen in?
 6. **Break into functions** - One function = one phase with full TDD cycle
 7. **Consider skills** - Which skills apply to each phase?

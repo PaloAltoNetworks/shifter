@@ -7,10 +7,10 @@ import logging
 from dataclasses import dataclass
 
 from asgiref.sync import sync_to_async
-from channels.generic.websocket import AsyncJsonWebsocketConsumer, AsyncWebsocketConsumer
+from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import AnonymousUser
 
-from mission_control.models import Range, UserNGFW
+from engine.models import Range
 from mission_control.services.secrets import SecretsError, get_ssh_key
 from mission_control.services.ssh import SSHConnection, SSHConnectionError
 
@@ -125,7 +125,6 @@ class SSHConsumer(AsyncWebsocketConsumer):
         Returns:
             Range object if authorized, None otherwise (closes with appropriate code).
         """
-        from asgiref.sync import sync_to_async
 
         try:
             range_obj = await sync_to_async(Range.objects.select_related("user").get)(id=self.range_id)
@@ -327,137 +326,3 @@ class SSHConsumer(AsyncWebsocketConsumer):
         except Exception:
             logger.exception("Unexpected error reading SSH output")
             await self.close(code=4500)
-
-
-class NGFWProvisioningConsumer(AsyncJsonWebsocketConsumer):
-    """
-    WebSocket consumer for NGFW provisioning status updates.
-
-    Provides real-time status updates during NGFW provisioning.
-    Backend services can send updates via channel layer to notify
-    the user of provisioning progress.
-
-    URL pattern: ws/ngfw/<ngfw_id>/status/
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.ngfw_id: int | None = None
-        self.group_name: str | None = None
-
-    def _get_authenticated_user(self):
-        """Get authenticated user from scope.
-
-        Returns:
-            User object if authenticated, None otherwise.
-        """
-        user = self.scope.get("user")
-        if not user or isinstance(user, AnonymousUser):
-            return None
-        return user
-
-    async def connect(self):
-        """Handle WebSocket connection request."""
-        try:
-            await self._do_connect()
-        except Exception:
-            logger.exception("Unexpected error in NGFW WebSocket connect")
-            await self.close(code=4500)
-
-    async def _do_connect(self):
-        """Internal connect logic."""
-        # Step 1: Verify authentication
-        user = self._get_authenticated_user()
-        if not user:
-            logger.warning("Unauthenticated NGFW WebSocket connection attempt")
-            await self.close(code=4001)
-            return
-
-        # Step 2: Parse URL parameters
-        self.ngfw_id = int(self.scope["url_route"]["kwargs"]["ngfw_id"])
-
-        # Step 3: Verify user owns the NGFW
-        ngfw = await sync_to_async(lambda: UserNGFW.active_for_user(user).filter(id=self.ngfw_id).first())()
-        if not ngfw:
-            logger.warning(
-                "User %s attempted to access NGFW %s status",
-                user.id,
-                self.ngfw_id,
-            )
-            await self.close(code=4004)
-            return
-
-        # Step 4: Join channel group for this NGFW
-        self.group_name = f"ngfw_{self.ngfw_id}"
-        await self.channel_layer.group_add(self.group_name, self.channel_name)
-
-        # Step 5: Accept connection and send initial status
-        await self.accept()
-        logger.info(
-            "NGFW status WebSocket connected for ngfw %s user %s",
-            self.ngfw_id,
-            user.id,
-        )
-
-        # Send initial status
-        await self.send_json(
-            {
-                "type": "status",
-                "ngfw_id": ngfw.id,
-                "status": ngfw.status,
-                "serial_number": ngfw.serial_number,
-            }
-        )
-
-    async def disconnect(self, close_code):
-        """Handle WebSocket disconnection."""
-        try:
-            if self.group_name:
-                await self.channel_layer.group_discard(self.group_name, self.channel_name)
-            logger.info(
-                "NGFW status WebSocket disconnected for ngfw %s (code: %s)",
-                self.ngfw_id,
-                close_code,
-            )
-        except Exception:
-            logger.exception("Error during NGFW WebSocket disconnect cleanup")
-
-    async def receive_json(self, content):
-        """Handle incoming JSON messages.
-
-        Currently only supports 'subscribe' messages for
-        initial connection acknowledgment.
-        """
-        msg_type = content.get("type")
-        if msg_type == "subscribe":
-            # Client is subscribing - already handled in connect
-            pass
-
-    async def ngfw_status_update(self, event):
-        """
-        Handler for status updates sent via channel layer.
-
-        Other services can send updates using:
-            channel_layer.group_send(
-                f"ngfw_{ngfw_id}",
-                {
-                    "type": "ngfw.status.update",
-                    "status": "active",
-                    "progress": 100,
-                    "step": "complete",
-                    "message": "Provisioning complete",
-                    "serial_number": "001234567890",
-                }
-            )
-        """
-        await self.send_json(
-            {
-                "type": "status_update",
-                "ngfw_id": self.ngfw_id,
-                "status": event.get("status"),
-                "progress": event.get("progress"),
-                "step": event.get("step"),
-                "message": event.get("message"),
-                "serial_number": event.get("serial_number"),
-            }
-        )

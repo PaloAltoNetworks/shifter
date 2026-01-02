@@ -1,6 +1,12 @@
 """NGFW service functions.
 
 Service layer for UserNGFW lifecycle management.
+
+TODO: This module imports from cms.models (UserNGFW). This violates the
+Engine boundary - Engine should not depend on CMS. UserNGFW should either:
+1. Move back to Engine (if it's truly infrastructure), or
+2. These NGFW functions should move to CMS (if NGFW is content/asset)
+See GitHub issue #437 for tracking.
 """
 
 from __future__ import annotations

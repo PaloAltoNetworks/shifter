@@ -27,9 +27,11 @@ When automated options are available, you'll see:
 ```
 [y/n/m]:
   y = yes (run automatically)
-  n = no (skip this step)
+  n = no (abort - all steps are required)
   m = manual (show instructions and wait)
 ```
+
+**Note:** All steps are mandatory for a functioning deployment. Choosing 'n' will abort the script with an explanation of why that step is required.
 
 ## Commands
 

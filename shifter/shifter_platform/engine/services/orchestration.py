@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 from django.utils import timezone
 
 from engine.models import Range
+from engine.services.ecs import start_provisioning, start_teardown
 from management.models import ActivityLog
-from mission_control.services.engine import start_provisioning, start_teardown
 
 from .allocation import allocate_subnet_index
 from .scenarios import get_scenario_config, validate_launch

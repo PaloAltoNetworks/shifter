@@ -305,6 +305,27 @@ AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 
 # ------------------------------------------------------------------------------
+# SQS Worker Configuration
+# ------------------------------------------------------------------------------
+# Queue URLs are passed via environment variables by the deployment workflow.
+# Each worker polls one queue and dispatches to the corresponding handler.
+
+SQS_QUEUE_CONFIG = {
+    "cms": {
+        "url": os.environ.get("SQS_CMS_URL", ""),
+        "handler": "cms.handlers.process_range_event",
+    },
+    "engine": {
+        "url": os.environ.get("SQS_ENGINE_URL", ""),
+        "handler": "engine.handlers.process_range_event",
+    },
+    "mc": {
+        "url": os.environ.get("SQS_MC_URL", ""),
+        "handler": "mission_control.handlers.process_range_event",
+    },
+}
+
+# ------------------------------------------------------------------------------
 # Django REST Framework Configuration
 # ------------------------------------------------------------------------------
 

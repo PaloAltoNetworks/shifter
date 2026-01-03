@@ -1,8 +1,7 @@
 """Event publishing for Shifter Engine provisioner.
 
-This module handles publishing range status events to Redis for consumption
-by Django Channels workers. It's designed to run without Django, using
-direct Redis connections.
+This module handles publishing range status events to SNS for fan-out
+to Django Celery workers via SQS queues.
 
 Usage from provisioner:
     from events import publish_status_update, publish_ready, publish_failed
@@ -26,11 +25,11 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-import redis
-from asgiref.sync import async_to_sync
+import boto3
 
 logger = logging.getLogger(__name__)
 
+# TODO: #641 shared package
 # Event type constants (matching shared.messages.events)
 EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
 EVENT_TYPE_PROVISIONED = "range.provisioned"
@@ -45,25 +44,30 @@ STATUS_FAILED = "failed"
 STATUS_DESTROYING = "destroying"
 STATUS_DESTROYED = "destroyed"
 
-# Channel names for Django Channels workers
-CHANNEL_ENGINE_STATUS = "range.status.engine"
-CHANNEL_CMS_STATUS = "range.status.cms"
 
-
-def _get_redis_client() -> redis.Redis:
-    """Get Redis client from environment configuration.
+def _get_sns_client():
+    """Get SNS client with region from environment.
 
     Returns:
-        Redis client connected to configured Redis server.
+        boto3 SNS client configured for the appropriate region.
+    """
+    region = os.environ.get("AWS_REGION", "us-east-2")
+    return boto3.client("sns", region_name=region)
+
+
+def _get_sns_topic_arn() -> str:
+    """Get SNS topic ARN from environment.
+
+    Returns:
+        SNS topic ARN for range events.
 
     Raises:
-        ValueError: If REDIS_URL not set in environment.
+        ValueError: If SNS_RANGE_EVENTS_ARN not set in environment.
     """
-    redis_url = os.environ.get("REDIS_URL")
-    if not redis_url:
-        raise ValueError("REDIS_URL environment variable not set")
-
-    return redis.from_url(redis_url)
+    arn = os.environ.get("SNS_RANGE_EVENTS_ARN")
+    if not arn:
+        raise ValueError("SNS_RANGE_EVENTS_ARN environment variable not set")
+    return arn
 
 
 def _create_event(
@@ -84,7 +88,6 @@ def _create_event(
         Event dictionary ready for JSON serialization.
     """
     return {
-        "type": "range.status",  # Django Channels message type
         "event_type": event_type,
         "event_id": str(uuid4()),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -94,47 +97,40 @@ def _create_event(
     }
 
 
-def _publish_to_channels(event: dict) -> None:
-    """Publish event to Django Channels via Redis.
+def _publish_event(event: dict) -> None:
+    """Publish event to SNS topic.
 
-    Publishes to both Engine and CMS channel workers using
-    the asgi_redis channel layer protocol.
+    Publishes the event to SNS for fan-out to Django Celery workers
+    via SQS queues.
 
     Args:
         event: Event dictionary to publish.
     """
-    client = _get_redis_client()
-
-    # Serialize event to JSON
-    message = json.dumps(event)
-
-    range_id = event.get("range_id")
-
-    # Publish to Redis channels for Django Channels workers
-    # Using Redis pub/sub for channel layer messages
-    for channel in [CHANNEL_ENGINE_STATUS, CHANNEL_CMS_STATUS]:
-        try:
-            # Use Redis PUBLISH for channel layer
-            # The channel layer uses a specific format for routing
-            client.publish(f"asgi:{channel}", message)
-            logger.debug("Published to channel %s: range_id=%s", channel, range_id)
-        except Exception as e:
-            logger.error(
-                "Failed to publish to channel %s: range_id=%s error=%s",
-                channel,
-                range_id,
-                str(e),
-            )
-
-    # Also publish to range-specific channel for WebSocket consumers
-    range_channel = f"range_status_{range_id}"
     try:
-        client.publish(f"asgi:{range_channel}", message)
-        logger.debug("Published to channel %s", range_channel)
+        sns = _get_sns_client()
+        topic_arn = _get_sns_topic_arn()
+
+        sns.publish(
+            TopicArn=topic_arn,
+            Message=json.dumps(event),
+            MessageAttributes={
+                "event_type": {
+                    "DataType": "String",
+                    "StringValue": event.get("event_type", "unknown"),
+                }
+            },
+        )
+
+        logger.debug(
+            "Published event to SNS: range_id=%s event_type=%s",
+            event.get("range_id"),
+            event.get("event_type"),
+        )
+
     except Exception as e:
         logger.error(
-            "Failed to publish to channel %s: error=%s",
-            range_channel,
+            "Failed to publish event to SNS: range_id=%s error=%s",
+            event.get("range_id"),
             str(e),
         )
 
@@ -171,13 +167,16 @@ def publish_status_update(
         new_status,
     )
 
-    _publish_to_channels(event)
+    _publish_event(event)
 
 
 def publish_ready(
     range_id: int,
     user_id: int,
     instances: list[dict[str, Any]],
+    subnet_id: str | None = None,
+    subnet_cidr: str | None = None,
+    pulumi_stack: str | None = None,
 ) -> None:
     """Publish a provisioning complete event.
 
@@ -185,6 +184,9 @@ def publish_ready(
         range_id: ID of the range
         user_id: ID of the user who owns the range
         instances: List of provisioned instance details
+        subnet_id: AWS subnet ID where instances are provisioned
+        subnet_cidr: CIDR block of the provisioned subnet
+        pulumi_stack: Name of the Pulumi stack
     """
     # First publish status update
     publish_status_update(
@@ -200,6 +202,9 @@ def publish_ready(
         range_id=range_id,
         user_id=user_id,
         instances=instances,
+        subnet_id=subnet_id,
+        subnet_cidr=subnet_cidr,
+        pulumi_stack=pulumi_stack,
     )
 
     logger.info(
@@ -208,7 +213,7 @@ def publish_ready(
         len(instances),
     )
 
-    _publish_to_channels(event)
+    _publish_event(event)
 
 
 def publish_failed(
@@ -254,7 +259,7 @@ def publish_destroyed(range_id: int, user_id: int) -> None:
 
     logger.info("Publishing destroyed event: range_id=%s", range_id)
 
-    _publish_to_channels(event)
+    _publish_event(event)
 
 
 def publish_cancelled(range_id: int, user_id: int) -> None:
@@ -272,4 +277,4 @@ def publish_cancelled(range_id: int, user_id: int) -> None:
 
     logger.info("Publishing cancelled event: range_id=%s", range_id)
 
-    _publish_to_channels(event)
+    _publish_event(event)

@@ -415,3 +415,26 @@ resource "aws_iam_role_policy" "kms" {
     ]
   })
 }
+
+# ------------------------------------------------------------------------------
+# Task Role Policy - SNS (for range event publishing)
+# ------------------------------------------------------------------------------
+# Provisioner publishes range lifecycle events to SNS for fan-out to
+# Django services (CMS, Engine, Mission Control).
+
+resource "aws_iam_role_policy" "sns_publish" {
+  name = "sns-publish"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SNSPublishRangeEvents"
+      Effect = "Allow"
+      Action = [
+        "sns:Publish"
+      ]
+      Resource = var.sns_topic_arn
+    }]
+  })
+}

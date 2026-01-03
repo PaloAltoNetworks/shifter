@@ -11,7 +11,7 @@ class TestStartEcsTask:
     """Tests for _start_ecs_task() internal function.
 
     Contract:
-    - Inputs: range_id (int), command (str)
+    - Inputs: range_id (int), user_id (int), command (str)
     - Outputs: ECS task ARN (str) if successful, None if ECS not configured
     - Side effects: Calls ECS run_task API
     - Errors: Raises ClientError if ECS task fails to start
@@ -39,7 +39,7 @@ class TestStartEcsTask:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            result = _start_ecs_task(range_id=42, command="provision")
+            result = _start_ecs_task(range_id=42, user_id=7, command="provision")
 
             assert result == "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
 
@@ -60,7 +60,7 @@ class TestStartEcsTask:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            _start_ecs_task(range_id=42, command="provision")
+            _start_ecs_task(range_id=42, user_id=7, command="provision")
 
             mock_ecs.run_task.assert_called_once()
             call_kwargs = mock_ecs.run_task.call_args[1]
@@ -68,8 +68,8 @@ class TestStartEcsTask:
             assert call_kwargs["taskDefinition"] == "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
             assert call_kwargs["launchType"] == "FARGATE"
 
-    def test_passes_range_id_and_command_to_container(self, settings):
-        """Function passes range_id and command to container overrides."""
+    def test_passes_range_id_user_id_and_command_to_container(self, settings):
+        """Function passes range_id, user_id, and command to container overrides."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -85,12 +85,17 @@ class TestStartEcsTask:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            _start_ecs_task(range_id=99, command="destroy")
+            _start_ecs_task(range_id=99, user_id=7, command="destroy")
 
             call_kwargs = mock_ecs.run_task.call_args[1]
             overrides = call_kwargs["overrides"]["containerOverrides"][0]
-            assert "99" in overrides["command"] or 99 in overrides["command"]
-            assert "destroy" in overrides["command"]
+            command = overrides["command"]
+            # Verify range_id is passed
+            assert "99" in command or 99 in command
+            # Verify user_id is passed
+            assert "7" in command or 7 in command
+            # Verify command is passed
+            assert "destroy" in command
 
     # -------------------------------------------------------------------------
     # Configuration - ECS not configured
@@ -107,7 +112,7 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        result = _start_ecs_task(range_id=42, command="provision")
+        result = _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert result is None
 
@@ -122,7 +127,7 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        result = _start_ecs_task(range_id=42, command="provision")
+        result = _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert result is None
 
@@ -137,7 +142,7 @@ class TestStartEcsTask:
             delattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID")
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        result = _start_ecs_task(range_id=42, command="provision")
+        result = _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert result is None
 
@@ -152,7 +157,7 @@ class TestStartEcsTask:
         if hasattr(settings, "PULUMI_PRIVATE_SUBNET_IDS"):
             delattr(settings, "PULUMI_PRIVATE_SUBNET_IDS")
 
-        result = _start_ecs_task(range_id=42, command="provision")
+        result = _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert result is None
 
@@ -166,7 +171,7 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = ""
 
-        result = _start_ecs_task(range_id=42, command="provision")
+        result = _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert result is None
 
@@ -180,7 +185,7 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "   ,   ,   "
 
-        result = _start_ecs_task(range_id=42, command="provision")
+        result = _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert result is None
 
@@ -199,7 +204,7 @@ class TestStartEcsTask:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with pytest.raises((TypeError, ValueError)):
-            _start_ecs_task(range_id=None, command="provision")
+            _start_ecs_task(range_id=None, user_id=7, command="provision")
 
     def test_raises_when_range_id_is_negative(self, settings):
         """Function raises error when range_id is negative."""
@@ -212,7 +217,7 @@ class TestStartEcsTask:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with pytest.raises((TypeError, ValueError)):
-            _start_ecs_task(range_id=-1, command="provision")
+            _start_ecs_task(range_id=-1, user_id=7, command="provision")
 
     def test_raises_when_range_id_is_string(self, settings):
         """Function raises error when range_id is a string."""
@@ -225,7 +230,46 @@ class TestStartEcsTask:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with pytest.raises((TypeError, ValueError)):
-            _start_ecs_task(range_id="42", command="provision")
+            _start_ecs_task(range_id="42", user_id=7, command="provision")
+
+    def test_raises_when_user_id_is_none(self, settings):
+        """Function raises error when user_id is None."""
+        from engine.ecs import _start_ecs_task
+
+        settings.AWS_REGION = "us-east-2"
+        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+
+        with pytest.raises((TypeError, ValueError)):
+            _start_ecs_task(range_id=42, user_id=None, command="provision")
+
+    def test_raises_when_user_id_is_negative(self, settings):
+        """Function raises error when user_id is negative."""
+        from engine.ecs import _start_ecs_task
+
+        settings.AWS_REGION = "us-east-2"
+        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+
+        with pytest.raises((TypeError, ValueError)):
+            _start_ecs_task(range_id=42, user_id=-1, command="provision")
+
+    def test_raises_when_user_id_is_string(self, settings):
+        """Function raises error when user_id is a string."""
+        from engine.ecs import _start_ecs_task
+
+        settings.AWS_REGION = "us-east-2"
+        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+
+        with pytest.raises((TypeError, ValueError)):
+            _start_ecs_task(range_id=42, user_id="7", command="provision")
 
     def test_raises_when_command_is_none(self, settings):
         """Function raises error when command is None."""
@@ -238,7 +282,7 @@ class TestStartEcsTask:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with pytest.raises((TypeError, ValueError)):
-            _start_ecs_task(range_id=42, command=None)
+            _start_ecs_task(range_id=42, user_id=7, command=None)
 
     def test_raises_when_command_is_empty(self, settings):
         """Function raises error when command is empty string."""
@@ -251,7 +295,7 @@ class TestStartEcsTask:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with pytest.raises((TypeError, ValueError)):
-            _start_ecs_task(range_id=42, command="")
+            _start_ecs_task(range_id=42, user_id=7, command="")
 
     # -------------------------------------------------------------------------
     # Error handling
@@ -276,7 +320,7 @@ class TestStartEcsTask:
             mock_get_client.return_value = mock_ecs
 
             with pytest.raises(ClientError):
-                _start_ecs_task(range_id=42, command="provision")
+                _start_ecs_task(range_id=42, user_id=7, command="provision")
 
     def test_raises_client_error_when_no_tasks_returned(self, settings):
         """Function raises ClientError when ECS returns empty tasks list."""
@@ -299,7 +343,7 @@ class TestStartEcsTask:
             mock_get_client.return_value = mock_ecs
 
             with pytest.raises(ClientError):
-                _start_ecs_task(range_id=42, command="provision")
+                _start_ecs_task(range_id=42, user_id=7, command="provision")
 
     def test_propagates_get_ecs_client_error(self, settings):
         """Function propagates errors from _get_ecs_client."""
@@ -315,7 +359,7 @@ class TestStartEcsTask:
             mock_get_client.side_effect = ValueError("AWS_REGION is required")
 
             with pytest.raises(ValueError, match="AWS_REGION"):
-                _start_ecs_task(range_id=42, command="provision")
+                _start_ecs_task(range_id=42, user_id=7, command="provision")
 
     # -------------------------------------------------------------------------
     # Logging
@@ -330,7 +374,7 @@ class TestStartEcsTask:
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
 
         with caplog.at_level(logging.WARNING, logger="engine.ecs"):
-            _start_ecs_task(range_id=42, command="provision")
+            _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         log_text = caplog.text.lower()
         assert "warning" in log_text or "incomplete" in log_text or "skipping" in log_text
@@ -346,7 +390,7 @@ class TestStartEcsTask:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "   ,   "
 
         with caplog.at_level(logging.ERROR, logger="engine.ecs"):
-            _start_ecs_task(range_id=42, command="provision")
+            _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert "error" in caplog.text.lower() or "empty" in caplog.text.lower() or "invalid" in caplog.text.lower()
 
@@ -370,7 +414,7 @@ class TestStartEcsTask:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            _start_ecs_task(range_id=42, command="provision")
+            _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert "42" in caplog.text or "range_id" in caplog.text.lower()
 
@@ -396,7 +440,7 @@ class TestStartEcsTask:
             )
             mock_get_client.return_value = mock_ecs
 
-            _start_ecs_task(range_id=42, command="provision")
+            _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert "error" in caplog.text.lower() or "failed" in caplog.text.lower()
 
@@ -424,6 +468,6 @@ class TestStartEcsTask:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            _start_ecs_task(range_id=42, command="provision")
+            _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert "error" in caplog.text.lower() or "failed" in caplog.text.lower()

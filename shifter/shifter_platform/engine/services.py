@@ -80,7 +80,7 @@ def create_range(request: RangeSpec) -> int:
     )
 
     # Trigger ECS provisioning
-    task_arn = start_provisioning(range_obj.id)
+    task_arn = start_provisioning(range_obj.id, request.user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
@@ -130,7 +130,7 @@ def destroy_range(range_id: int) -> bool:
 
     logger.info("destroy_range: set status to DESTROYING range_id=%s", range_id)
 
-    task_arn = start_teardown(range_id)
+    task_arn = start_teardown(range_id, range_obj.cms_user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn

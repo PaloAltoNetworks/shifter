@@ -504,6 +504,23 @@ resource "aws_iam_policy" "lambda_sfn" {
         ]
       },
       {
+        Sid    = "SQS"
+        Effect = "Allow"
+        Action = [
+          "sqs:CreateQueue",
+          "sqs:DeleteQueue",
+          "sqs:GetQueueAttributes",
+          "sqs:SetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ListQueueTags",
+          "sqs:TagQueue",
+          "sqs:UntagQueue"
+        ]
+        Resource = [
+          "arn:aws:sqs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*-portal-*"
+        ]
+      },
+      {
         Sid    = "EventBridge"
         Effect = "Allow"
         Action = [

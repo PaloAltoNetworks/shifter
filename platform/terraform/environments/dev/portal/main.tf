@@ -184,6 +184,49 @@ module "cognito" {
 }
 
 # ------------------------------------------------------------------------------
+# Shared Alerting SNS Topic
+# ------------------------------------------------------------------------------
+
+resource "aws_sns_topic" "alerts" {
+  name = "${local.name_prefix}-alerts"
+  tags = var.tags
+}
+
+resource "aws_sns_topic_subscription" "alerts_email" {
+  count = var.alarm_email != "" ? 1 : 0
+
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alarm_email
+}
+
+# ------------------------------------------------------------------------------
+# Messaging (SNS/SQS)
+# ------------------------------------------------------------------------------
+
+module "messaging" {
+  source = "../../../modules/portal/messaging"
+
+  name_prefix                = local.name_prefix
+  tags                       = var.tags
+  consumers                  = var.messaging_consumers
+  visibility_timeout_seconds = var.messaging_visibility_timeout_seconds
+  message_retention_seconds  = var.messaging_message_retention_seconds
+
+  # Dead Letter Queue
+  enable_dlq                    = var.messaging_enable_dlq
+  dlq_max_receive_count         = var.messaging_dlq_max_receive_count
+  dlq_message_retention_seconds = var.messaging_dlq_message_retention_seconds
+
+  # CloudWatch Alarms
+  enable_alarms               = var.messaging_enable_alarms
+  alarm_queue_depth_threshold = var.messaging_alarm_queue_depth_threshold
+  alarm_message_age_threshold = var.messaging_alarm_message_age_threshold
+  alarm_dlq_threshold         = var.messaging_alarm_dlq_threshold
+  alarm_actions               = var.alarm_email != "" ? [aws_sns_topic.alerts.arn] : []
+}
+
+# ------------------------------------------------------------------------------
 # EC2
 # ------------------------------------------------------------------------------
 
@@ -224,6 +267,10 @@ module "ec2" {
   scale_up_threshold   = var.scale_up_threshold
   scale_down_threshold = var.scale_down_threshold
   log_retention_days   = var.log_retention_days
+
+  # Messaging (SQS queues for Celery workers)
+  sqs_queue_arns = values(module.messaging.sqs_queue_arns)
+  sqs_queue_urls = module.messaging.sqs_queue_urls
 
   tags = var.tags
 }
@@ -390,6 +437,9 @@ module "pulumi_provisioner" {
   ngfw_security_group_id = data.terraform_remote_state.range.outputs.ngfw_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_security_group_id : ""
   ngfw_ami_id            = data.terraform_remote_state.range.outputs.vm_series_ami_id
   ngfw_instance_type     = data.terraform_remote_state.range.outputs.vm_series_instance_type
+
+  # Messaging (SNS topic for range event publishing)
+  sns_topic_arn = module.messaging.sns_topic_arn
 }
 
 # ------------------------------------------------------------------------------

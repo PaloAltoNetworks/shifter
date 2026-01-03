@@ -82,6 +82,16 @@ repos:
         files: ^shifter/packer/
         pass_filenames: false
 
+  # Provisioner tests
+  - repo: local
+    hooks:
+      - id: pytest-provisioner
+        name: pytest (provisioner)
+        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && TESTING=1 python -m pytest tests/ -q'
+        language: system
+        files: ^shifter/engine/provisioner/
+        pass_filenames: false
+
   # Terraform
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.96.3

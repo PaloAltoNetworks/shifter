@@ -329,7 +329,7 @@ class TestCreateRange:
 
             create_range(mock_request)
 
-            mock_start.assert_called_once_with(99)
+            mock_start.assert_called_once_with(99, 1)
 
     def test_stores_task_arn_when_provisioning_returns_one(self):
         """Service stores ECS task ARN when start_provisioning returns one."""

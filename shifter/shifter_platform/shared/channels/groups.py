@@ -1,14 +1,10 @@
 """Channel group name utilities for Shifter platform.
 
-These helpers provide consistent channel/group naming across
-Engine, CMS, and Mission Control consumers.
+These helpers provide consistent group naming for Django Channels
+WebSocket layer (Mission Control browser connections).
 """
 
 from __future__ import annotations
-
-# Channel names for background workers
-CHANNEL_ENGINE_STATUS = "range.status.engine"
-CHANNEL_CMS_STATUS = "range.status.cms"
 
 
 def range_event_group(range_id: int) -> str:

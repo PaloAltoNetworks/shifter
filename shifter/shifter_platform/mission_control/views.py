@@ -448,13 +448,13 @@ def cancel_upload(request):
 
 @login_required
 @require_GET
-def get_range_status(request):
+def get_range(request):
     """
-    Get the current user's active range status.
+    Get the current user's active range.
 
     Response (JSON):
         - has_range: true/false
-        - range: Range object (if exists)
+        - range: RangeContext object (if exists)
     """
     active_range = get_active_range(request.user)
 

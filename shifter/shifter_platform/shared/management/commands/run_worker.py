@@ -16,8 +16,8 @@ Health monitoring:
 from __future__ import annotations
 
 import contextlib
+import importlib
 import logging
-import os
 import signal
 import sys
 import tempfile
@@ -29,35 +29,23 @@ import boto3
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from cms.handlers import process_range_event as cms_handler
-from engine.handlers import process_range_event as engine_handler
-from mission_control.handlers import process_range_event as mc_handler
-
 logger = logging.getLogger(__name__)
 
 # Heartbeat file location - Docker HEALTHCHECK monitors this
 HEARTBEAT_DIR = Path(tempfile.gettempdir())
 
-QUEUE_CONFIG: dict[str, dict] = {
-    "cms": {
-        "url_env": "SQS_CMS_URL",
-        "handler": cms_handler,
-    },
-    "engine": {
-        "url_env": "SQS_ENGINE_URL",
-        "handler": engine_handler,
-    },
-    "mc": {
-        "url_env": "SQS_MC_URL",
-        "handler": mc_handler,
-    },
-}
+
+def _import_handler(handler_path: str) -> Callable:
+    """Import handler function from dotted path."""
+    module_path, func_name = handler_path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, func_name)
 
 
 class Command(BaseCommand):
     """SQS worker that polls a queue and dispatches to handlers."""
 
-    help = "Run SQS worker for a specific queue (cms, engine, or mc)"
+    help = "Run SQS worker for a specific queue"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -67,12 +55,13 @@ class Command(BaseCommand):
         self.queue_name: str = ""
 
     def add_arguments(self, parser):
+        queue_choices = list(settings.SQS_QUEUE_CONFIG.keys())
         parser.add_argument(
             "--queue",
             type=str,
-            choices=["cms", "engine", "mc"],
+            choices=queue_choices,
             required=True,
-            help="Queue to consume from: cms, engine, or mc",
+            help=f"Queue to consume from: {', '.join(queue_choices)}",
         )
         parser.add_argument(
             "--wait-time",
@@ -92,12 +81,14 @@ class Command(BaseCommand):
         wait_time = options["wait_time"]
         max_messages = options["max_messages"]
 
-        config = QUEUE_CONFIG[self.queue_name]
-        queue_url = os.environ.get(config["url_env"], "")
-        handler: Callable = config["handler"]
+        config = settings.SQS_QUEUE_CONFIG[self.queue_name]
+        queue_url = config["url"]
+        handler: Callable = _import_handler(config["handler"])
 
         if not queue_url:
-            self.stderr.write(self.style.ERROR(f"Environment variable {config['url_env']} not set"))
+            self.stderr.write(
+                self.style.ERROR(f"SQS URL not configured for queue '{self.queue_name}'")
+            )
             sys.exit(1)
 
         # Set up heartbeat file for health monitoring
@@ -212,6 +203,11 @@ class Command(BaseCommand):
             self.sqs.delete_message(
                 QueueUrl=queue_url,
                 ReceiptHandle=receipt_handle,
+            )
+            logger.debug(
+                "Message acknowledged: queue=%s message_id=%s",
+                self.queue_name,
+                message.get("MessageId"),
             )
 
         except Exception:

@@ -307,7 +307,7 @@ class TestRunProvision:
     """Tests for provision flow."""
 
     def test_run_provision_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
-        """pulumi up success, outputs parsed, status updated."""
+        """pulumi up success, outputs parsed, events published."""
         mock_run, mock_result = mock_subprocess
 
         outputs = {
@@ -329,16 +329,21 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.update_range_status") as mock_update:
+        with patch("main.publish_status_update") as mock_status, patch("main.publish_ready") as mock_ready:
             from main import _run_provision
 
             env = os.environ.copy()
-            _run_provision(42, "range-42", env)
+            _run_provision(42, 7, "range-42", env)
 
-            # Verify status was updated to provisioning then ready
-            calls = mock_update.call_args_list
-            assert calls[0][0] == (42, "provisioning")
-            assert calls[1][0][1] == "ready"
+            # Verify status update event was published
+            mock_status.assert_called_once_with(
+                range_id=42, user_id=7, old_status="pending", new_status="provisioning"
+            )
+            # Verify ready event was published with instance details
+            mock_ready.assert_called_once()
+            call_kwargs = mock_ready.call_args[1]
+            assert call_kwargs["range_id"] == 42
+            assert call_kwargs["user_id"] == 7
 
     def test_run_provision_failure(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """pulumi up failure should raise exception."""
@@ -346,22 +351,23 @@ class TestRunProvision:
         mock_result.returncode = 1
         mock_result.stderr = "Pulumi error: resource creation failed"
 
-        with patch("main.update_range_status"):
+        with patch("main.publish_status_update"):
             from main import _run_provision
 
             env = os.environ.copy()
 
             with pytest.raises(Exception, match="Pulumi up failed"):
-                _run_provision(42, "range-42", env)
+                _run_provision(42, 7, "range-42", env)
 
-    def test_run_provision_saves_provisioned_instances(
+    def test_run_provision_publishes_ready_with_all_outputs(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients
     ):
-        """provisioned_instances JSON should be saved to DB."""
+        """publish_ready should receive all Pulumi outputs."""
         mock_run, mock_result = mock_subprocess
 
         outputs = {
             "subnet_id": "subnet-12345",
+            "subnet_cidr": "10.1.6.0/24",
             "instances": [
                 {"role": "attacker", "instance_id": "i-kali"},
                 {"role": "victim", "instance_id": "i-victim"},
@@ -381,18 +387,18 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.update_range_status") as mock_update:
+        with patch("main.publish_status_update"), patch("main.publish_ready") as mock_ready:
             from main import _run_provision
 
             env = os.environ.copy()
-            _run_provision(42, "range-42", env)
+            _run_provision(42, 7, "range-42", env)
 
-            # Check provisioned_instances was passed
-            ready_call = mock_update.call_args_list[1]
-            assert "provisioned_instances" in ready_call[1]
-            instances_json = ready_call[1]["provisioned_instances"]
-            parsed = json.loads(instances_json)
-            assert len(parsed) == 2
+            # Check all outputs were passed to publish_ready
+            call_kwargs = mock_ready.call_args[1]
+            assert call_kwargs["subnet_id"] == "subnet-12345"
+            assert call_kwargs["subnet_cidr"] == "10.1.6.0/24"
+            assert call_kwargs["pulumi_stack"] == "range-42"
+            assert len(call_kwargs["instances"]) == 2
 
     def test_run_provision_ignores_ngfw_outputs(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients
@@ -424,17 +430,17 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.update_range_status") as mock_update:
+        with patch("main.publish_status_update"), patch("main.publish_ready") as mock_ready:
             from main import _run_provision
 
             env = os.environ.copy()
-            _run_provision(42, "range-42", env)
+            _run_provision(42, 7, "range-42", env)
 
-            # NGFW fields should NOT be passed (moved to UserNGFW model in issue 412)
-            ready_call = mock_update.call_args_list[1]
-            assert "ngfw_instance_id" not in ready_call[1]
-            assert "ngfw_untrust_ip" not in ready_call[1]
-            assert "ngfw_trust_ip" not in ready_call[1]
+            # NGFW fields should NOT be in kwargs (moved to UserNGFW model in issue 412)
+            call_kwargs = mock_ready.call_args[1]
+            assert "ngfw_instance_id" not in call_kwargs
+            assert "ngfw_untrust_ip" not in call_kwargs
+            assert "ngfw_trust_ip" not in call_kwargs
 
 class TestRunDestroy:
     """Tests for destroy flow."""
@@ -515,11 +521,11 @@ class TestRunPulumi:
         mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
-        with patch("main.update_range_status"):
+        with patch("main.publish_failed"):
             from main import run_pulumi
 
             with pytest.raises(ValueError, match="Unknown operation"):
-                run_pulumi("invalid", 42)
+                run_pulumi("invalid", 42, 7)
 
     def test_run_pulumi_prod_auto_cleanup(self, mock_subprocess, mocker, mock_boto3_clients):
         """Production failure should trigger auto-destroy."""
@@ -555,11 +561,11 @@ class TestRunPulumi:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.update_range_status"):
+        with patch("main.publish_failed"), patch("main.publish_status_update"):
             from main import run_pulumi
 
             with pytest.raises(Exception):
-                run_pulumi("up", 42)
+                run_pulumi("up", 42, 7)
 
             # Verify destroy was attempted after failure
             calls = mock_run.call_args_list
@@ -593,11 +599,11 @@ class TestRunPulumi:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.update_range_status"):
+        with patch("main.publish_failed"), patch("main.publish_status_update"):
             from main import run_pulumi
 
             with pytest.raises(Exception):
-                run_pulumi("up", 42)
+                run_pulumi("up", 42, 7)
 
             # Verify destroy WAS attempted - auto-cleanup now enabled for all environments
             calls = mock_run.call_args_list
@@ -626,22 +632,21 @@ class TestRunPulumi:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.update_range_status") as mock_update:
+        with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
             from main import run_pulumi
 
             with pytest.raises(Exception):
-                run_pulumi("up", 42)
+                run_pulumi("up", 42, 7)
 
-            # Find the failed status update call
-            failed_calls = [c for c in mock_update.call_args_list if c[0][1] == "failed"]
-            assert len(failed_calls) == 1
-            error_msg = failed_calls[0][1].get("error_message", "")
-            assert len(error_msg) <= 1000
+            # Verify publish_failed was called with truncated error
+            mock_publish.assert_called_once()
+            call_kwargs = mock_publish.call_args[1]
+            assert len(call_kwargs["error_message"]) <= 1000
 
-    def test_run_pulumi_updates_status_on_failure(
+    def test_run_pulumi_publishes_failed_event_on_failure(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients
     ):
-        """Status should be set to 'failed' with error_message."""
+        """Failure should publish failed event with error_message."""
         mock_run, mock_result = mock_subprocess
 
         def side_effect(*args, **kwargs):
@@ -657,16 +662,18 @@ class TestRunPulumi:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.update_range_status") as mock_update:
+        with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
             from main import run_pulumi
 
             with pytest.raises(Exception):
-                run_pulumi("up", 42)
+                run_pulumi("up", 42, 7)
 
-            # Verify status was set to failed
-            failed_calls = [c for c in mock_update.call_args_list if c[0][1] == "failed"]
-            assert len(failed_calls) == 1
-            assert "error_message" in failed_calls[0][1]
+            # Verify failed event was published with correct user_id
+            mock_publish.assert_called_once()
+            call_kwargs = mock_publish.call_args[1]
+            assert call_kwargs["range_id"] == 42
+            assert call_kwargs["user_id"] == 7
+            assert "error_message" in call_kwargs
 
 
 class TestUpdateNgfwStatus:
@@ -828,8 +835,8 @@ class TestMainEntryPoint:
     CLI behavior including argument parsing and exit codes.
     """
 
-    def test_main_requires_operation_arg(self):
-        """Exit with error if no operation argument provided."""
+    def test_main_requires_resource_arg(self):
+        """Exit with error if no resource argument provided."""
         result = subprocess.run(
             [sys.executable, "main.py"],
             cwd=str(Path(__file__).parent.parent),
@@ -841,10 +848,10 @@ class TestMainEntryPoint:
         # argparse shows usage/error on missing required args
         assert "usage:" in result.stderr.lower() or "error:" in result.stderr.lower()
 
-    def test_main_missing_range_id_arg(self):
+    def test_main_range_missing_range_id_arg(self):
         """Exit with error when --range-id argument is missing."""
         result = subprocess.run(
-            [sys.executable, "main.py", "provision"],
+            [sys.executable, "main.py", "range", "provision"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
@@ -854,10 +861,23 @@ class TestMainEntryPoint:
         assert result.returncode != 0
         assert "--range-id" in result.stderr or "required" in result.stderr.lower()
 
-    def test_main_invalid_range_id_arg(self):
+    def test_main_range_missing_user_id_arg(self):
+        """Exit with error when --user-id argument is missing."""
+        result = subprocess.run(
+            [sys.executable, "main.py", "range", "provision", "--range-id", "42"],
+            cwd=str(Path(__file__).parent.parent),
+            capture_output=True,
+            text=True,
+        )
+
+        # Should fail due to missing --user-id
+        assert result.returncode != 0
+        assert "--user-id" in result.stderr or "required" in result.stderr.lower()
+
+    def test_main_range_invalid_range_id_arg(self):
         """Exit with error when --range-id is not an integer."""
         result = subprocess.run(
-            [sys.executable, "main.py", "provision", "--range-id", "not-a-number"],
+            [sys.executable, "main.py", "range", "provision", "--range-id", "not-a-number", "--user-id", "7"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
@@ -867,10 +887,10 @@ class TestMainEntryPoint:
         assert result.returncode != 0
         assert "invalid int value" in result.stderr.lower()
 
-    def test_main_invalid_operation(self):
-        """Exit with error for invalid operation."""
+    def test_main_invalid_resource(self):
+        """Exit with error for invalid resource."""
         result = subprocess.run(
-            [sys.executable, "main.py", "invalid_op", "--range-id", "42"],
+            [sys.executable, "main.py", "invalid_resource"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
@@ -885,11 +905,11 @@ class TestMainEntryPoint:
         mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
-        with patch("main.update_range_status"):
+        with patch("main.publish_failed"):
             from main import run_pulumi
 
             with pytest.raises(ValueError, match="Unknown operation"):
-                run_pulumi("invalid_op", 42)
+                run_pulumi("invalid_op", 42, 7)
 
 
 class TestNgfwProvisionCLI:
@@ -1088,6 +1108,155 @@ class TestNgfwProvisionCLI:
         # Verify status was set to failed
         failed_calls = [c for c in mock_update.call_args_list if c[0][1] == "failed"]
         assert len(failed_calls) == 1
+
+
+class TestEventPublishing:
+    """Tests for SNS event publishing integration in provision/destroy flows."""
+
+    def test_run_provision_publishes_status_update_event(
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
+    ):
+        """Provision flow should publish status update events via SNS."""
+        monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
+
+        mock_run, mock_result = mock_subprocess
+        outputs = {"subnet_id": "subnet-12345", "instances": []}
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mock_run.side_effect = side_effect
+
+        with patch("main.publish_status_update") as mock_publish, patch("main.publish_ready"):
+            from main import _run_provision
+
+            env = os.environ.copy()
+            _run_provision(42, 7, "range-42", env)
+
+            # Verify status update event was published with correct user_id
+            mock_publish.assert_called_once()
+            call_kwargs = mock_publish.call_args[1]
+            assert call_kwargs["range_id"] == 42
+            assert call_kwargs["user_id"] == 7
+
+    def test_run_provision_publishes_ready_event(
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
+    ):
+        """Provision success should publish ready event with instances."""
+        monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
+
+        mock_run, mock_result = mock_subprocess
+        outputs = {
+            "subnet_id": "subnet-12345",
+            "instances": [{"role": "attacker", "ip": "10.1.1.10"}],
+        }
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mock_run.side_effect = side_effect
+
+        with patch("main.publish_status_update"), patch("main.publish_ready") as mock_publish:
+            from main import _run_provision
+
+            env = os.environ.copy()
+            _run_provision(42, 7, "range-42", env)
+
+            # Verify ready event was published with correct user_id
+            mock_publish.assert_called_once()
+            call_kwargs = mock_publish.call_args[1]
+            assert call_kwargs["range_id"] == 42
+            assert call_kwargs["user_id"] == 7
+
+    def test_run_destroy_publishes_status_update_event(
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
+    ):
+        """Destroy flow should publish status update events via SNS."""
+        monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
+
+        mock_run, mock_result = mock_subprocess
+        mock_result.returncode = 0
+
+        with (
+            patch("main.update_range_status"),
+            patch("events.publish_status_update") as mock_publish,
+        ):
+            from main import _run_destroy
+
+            env = os.environ.copy()
+            _run_destroy(42, "range-42", env)
+
+            # Verify status update was published
+            mock_publish.assert_called()
+
+    def test_run_destroy_publishes_destroyed_event(
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
+    ):
+        """Destroy success should publish destroyed event."""
+        monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
+
+        mock_run, mock_result = mock_subprocess
+        mock_result.returncode = 0
+
+        with (
+            patch("main.update_range_status"),
+            patch("main.publish_destroyed") as mock_publish,
+        ):
+            from main import _run_destroy
+
+            env = os.environ.copy()
+            _run_destroy(42, "range-42", env)
+
+            # Verify destroyed event was published
+            mock_publish.assert_called_once()
+
+    def test_run_pulumi_failure_publishes_failed_event(
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
+    ):
+        """Pulumi failure should publish failed event."""
+        monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
+
+        mock_run, mock_result = mock_subprocess
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            if "up" in cmd:
+                result.returncode = 1
+                result.stderr = "Some error"
+            else:
+                result.returncode = 0
+            result.stdout = ""
+            return result
+
+        mock_run.side_effect = side_effect
+
+        with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
+            from main import run_pulumi
+
+            with pytest.raises(Exception):
+                run_pulumi("up", 42, 7)
+
+            # Verify failed event was published with correct user_id
+            mock_publish.assert_called_once()
+            call_kwargs = mock_publish.call_args[1]
+            assert call_kwargs["user_id"] == 7
 
 
 class TestNgfwDeprovisionCLI:

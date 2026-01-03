@@ -15,6 +15,8 @@ import sys
 import boto3
 import psycopg
 
+from events import publish_destroyed, publish_failed, publish_ready, publish_status_update
+
 
 def get_db_connection() -> psycopg.Connection:
     """Get database connection using RDS IAM auth.
@@ -98,12 +100,13 @@ def update_ngfw_status(user_ngfw_id: int, status: str, **kwargs) -> None:
         conn.commit()
 
 
-def run_pulumi(operation: str, range_id: int) -> None:
+def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
     """Run Pulumi operation.
 
     Args:
         operation: Either 'up' (provision) or 'destroy' (teardown).
         range_id: The ID of the range to operate on.
+        user_id: The Django user ID who owns this range.
 
     Raises:
         Exception: If the Pulumi operation fails.
@@ -120,7 +123,7 @@ def run_pulumi(operation: str, range_id: int) -> None:
         _set_stack_config(env, range_id)
 
         if operation == "up":
-            _run_provision(range_id, stack_name, env)
+            _run_provision(range_id, user_id, stack_name, env)
         elif operation == "destroy":
             _run_destroy(range_id, stack_name, env)
         else:
@@ -140,7 +143,8 @@ def run_pulumi(operation: str, range_id: int) -> None:
                 capture_output=True,
             )
 
-        update_range_status(range_id, "failed", error_message=error_msg)
+        # Publish failed event - Celery workers handle DB updates
+        publish_failed(range_id=range_id, user_id=user_id, error_message=error_msg)
         raise
 
 
@@ -242,15 +246,17 @@ def _set_stack_config(env: dict, range_id: int) -> None:
             )
 
 
-def _run_provision(range_id: int, stack_name: str, env: dict) -> None:
+def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> None:
     """Run Pulumi up to provision the range.
 
     Args:
         range_id: The range ID being provisioned.
+        user_id: The Django user ID who owns this range.
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
-    update_range_status(range_id, "provisioning")
+    # Publish status change event - Celery workers handle DB updates
+    publish_status_update(range_id=range_id, user_id=user_id, old_status="pending", new_status="provisioning")
     print("Running pulumi up...")
 
     result = subprocess.run(
@@ -281,16 +287,14 @@ def _run_provision(range_id: int, stack_name: str, env: dict) -> None:
     output_data = json.loads(outputs.stdout)
     print(f"Stack outputs: {json.dumps(output_data, indent=2)}")
 
-    # Update range with provisioned resources
-    # Note: NGFW fields are stored in UserNGFW model, not Range (issue 412)
-    update_range_status(
-        range_id,
-        "ready",
+    # Publish ready event with instance details - Celery workers handle DB updates
+    publish_ready(
+        range_id=range_id,
+        user_id=user_id,
+        instances=output_data.get("instances", []),
         subnet_id=output_data.get("subnet_id"),
         subnet_cidr=output_data.get("subnet_cidr"),
-        provisioned_instances=json.dumps(output_data.get("instances", [])),
         pulumi_stack=stack_name,
-        ready_at="NOW()",
     )
 
 
@@ -303,6 +307,8 @@ def _run_destroy(range_id: int, stack_name: str, env: dict) -> None:
         env: Environment dictionary for subprocess.
     """
     update_range_status(range_id, "destroying")
+    # Publish status change event
+    publish_status_update(range_id=range_id, user_id=0, old_status="ready", new_status="destroying")
     print("Running pulumi destroy...")
 
     result = subprocess.run(
@@ -331,6 +337,9 @@ def _run_destroy(range_id: int, stack_name: str, env: dict) -> None:
     )
 
     update_range_status(range_id, "destroyed", destroyed_at="NOW()")
+
+    # Publish destroyed event
+    publish_destroyed(range_id=range_id, user_id=0)
 
 
 # Import NGFW operation dependencies
@@ -662,26 +671,11 @@ if __name__ == "__main__":
         required=True,
         help=RANGE_ID_HELP,
     )
-
-    # Legacy support: allow 'provision' and 'destroy' as top-level subcommands
-    provision_parser = subparsers.add_parser(
-        "provision", help="(Legacy) Provision a range"
-    )
-    provision_parser.add_argument(
-        "--range-id",
+    range_parser.add_argument(
+        "--user-id",
         type=int,
         required=True,
-        help=RANGE_ID_HELP,
-    )
-
-    destroy_parser = subparsers.add_parser(
-        "destroy", help="(Legacy) Destroy a range"
-    )
-    destroy_parser.add_argument(
-        "--range-id",
-        type=int,
-        required=True,
-        help=RANGE_ID_HELP,
+        help="Django User ID of the range owner",
     )
 
     # NGFW operations
@@ -760,23 +754,18 @@ if __name__ == "__main__":
 
         print(f"Completed NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
 
-    elif args.resource in ("range", "provision", "destroy"):
+    elif args.resource == "range":
         # Handle range operations
-        if args.resource == "range":
-            operation = args.operation
-        else:
-            # Legacy: 'provision' or 'destroy' as direct subcommand
-            operation = args.resource
-
         range_id = args.range_id
+        user_id = args.user_id
 
         # Map Django command names to Pulumi operations
         operation_map = {"provision": "up", "destroy": "destroy"}
-        pulumi_op = operation_map[operation]
+        pulumi_op = operation_map[args.operation]
 
-        print(f"Starting {pulumi_op} for range {range_id}")
+        print(f"Starting {pulumi_op} for range {range_id} (user {user_id})")
         print(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
-        run_pulumi(pulumi_op, range_id)
+        run_pulumi(pulumi_op, range_id, user_id)
 
         print(f"Completed {pulumi_op} for range {range_id}")

@@ -87,12 +87,12 @@ class TestDestroyRange:
             assert mock_range.status == Range.Status.DESTROYING
             mock_range.save.assert_any_call(update_fields=["status"])
 
-    def test_calls_start_teardown_with_range_id(self):
-        """Service calls start_teardown with the range ID."""
+    def test_calls_start_teardown_with_range_id_and_user_id(self):
+        """Service calls start_teardown with the range ID and user ID."""
         from engine.models import Range
         from engine.services import destroy_range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY, cms_user_id=7)
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range),
@@ -100,7 +100,7 @@ class TestDestroyRange:
         ):
             destroy_range(42)
 
-            mock_teardown.assert_called_once_with(42)
+            mock_teardown.assert_called_once_with(42, 7)
 
     def test_stores_task_arn_when_returned(self):
         """Service stores ECS task ARN when start_teardown returns one."""

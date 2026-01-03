@@ -92,7 +92,7 @@ class DashboardManager {
             } else if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
                 // Resume polling when tab becomes visible again if in transitional state
                 // Do an immediate status check since state may have changed while hidden
-                this.loadStatus();
+                this.loadRange();
             }
         });
     }
@@ -182,7 +182,7 @@ class DashboardManager {
         // Load agents and current status in parallel
         await Promise.all([
             this.loadAgents(),
-            this.loadStatus(),
+            this.loadRange(),
         ]);
     }
 
@@ -212,7 +212,7 @@ class DashboardManager {
         this._populateDcAgentDropdown(this.agents);
     }
 
-    async loadStatus() {
+    async loadRange() {
         const data = await this._fetchJson(this.statusUrl, 'Failed to load status');
         if (!data) {
             return;

@@ -36,25 +36,30 @@ def _get_ecs_client():
     return client
 
 
-def _start_ecs_task(range_id: int, command: str) -> str | None:
+def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     """Start an ECS Fargate task for provisioning operations.
 
     Args:
         range_id: Database ID of the Range
+        user_id: Django User ID of the User
         command: Command to run ("provision" or "destroy")
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
 
     Raises:
-        TypeError: If range_id is not an integer or command is not a string
-        ValueError: If range_id is negative or command is empty
+        TypeError: If range_id is not an integer or user_id is not an integer or command is not a string
+        ValueError: If range_id is negative or user_id is negative or command is empty
         ClientError: If ECS task fails to start
     """
     if range_id is None or not isinstance(range_id, int):
         raise TypeError("range_id must be an integer")
+    if user_id is None or not isinstance(user_id, int):
+        raise TypeError("user_id must be an integer")
     if range_id < 0:
         raise ValueError("range_id must be non-negative")
+    if user_id < 0:
+        raise ValueError("user_id must be non-negative")
     if command is None or not isinstance(command, str):
         raise TypeError("command must be a string")
     if not command.strip():
@@ -100,7 +105,7 @@ def _start_ecs_task(range_id: int, command: str) -> str | None:
                 "containerOverrides": [
                     {
                         "name": "pulumi-provisioner",
-                        "command": [command, "--range-id", str(range_id)],
+                        "command": [command, "--range-id", str(range_id), "--user-id", str(user_id)],
                     }
                 ]
             },
@@ -125,12 +130,12 @@ def _start_ecs_task(range_id: int, command: str) -> str | None:
         raise
 
 
-def start_provisioning(range_id: int) -> str | None:
+def start_provisioning(range_id: int, user_id: int) -> str | None:
     """Start provisioning a range via ECS Fargate.
 
     Args:
         range_id: Database ID of the Range to provision
-
+        user_id: Django User ID of the User
     Returns:
         ECS task ARN if successful, None if ECS is not configured
         (falls back to stub behavior for local dev)
@@ -138,14 +143,15 @@ def start_provisioning(range_id: int) -> str | None:
     Raises:
         ClientError: If ECS task fails to start
     """
-    return _start_ecs_task(range_id, "provision")
+    return _start_ecs_task(range_id, user_id, "provision")
 
 
-def start_teardown(range_id: int) -> str | None:
+def start_teardown(range_id: int, user_id: int) -> str | None:
     """Start teardown of a range via ECS Fargate.
 
     Args:
         range_id: Database ID of the Range to teardown
+        user_id: User ID for event publishing in the provisioner
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
@@ -154,7 +160,7 @@ def start_teardown(range_id: int) -> str | None:
     Raises:
         ClientError: If ECS task fails to start
     """
-    return _start_ecs_task(range_id, "destroy")
+    return _start_ecs_task(range_id, user_id, "destroy")
 
 
 def _start_ngfw_ecs_task(ngfw_id: int, command: list[str]) -> str | None:

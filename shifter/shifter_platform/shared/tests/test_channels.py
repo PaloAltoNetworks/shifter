@@ -39,19 +39,3 @@ class TestUserEventGroup:
         result = user_event_group(1)
 
         assert result == "user_1"
-
-
-class TestChannelNames:
-    """Tests for channel name constants."""
-
-    def test_engine_channel_name(self):
-        """Engine channel has correct name."""
-        from shared.channels.groups import CHANNEL_ENGINE_STATUS
-
-        assert CHANNEL_ENGINE_STATUS == "range.status.engine"
-
-    def test_cms_channel_name(self):
-        """CMS channel has correct name."""
-        from shared.channels.groups import CHANNEL_CMS_STATUS
-
-        assert CHANNEL_CMS_STATUS == "range.status.cms"

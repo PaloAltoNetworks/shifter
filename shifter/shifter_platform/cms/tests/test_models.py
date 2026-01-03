@@ -256,7 +256,7 @@ class TestRangeInstanceModel:
     def test_terminal_status_with_update_fields_still_sets_deleted_at(self):
         """Terminal status with update_fields=['status'] still sets deleted_at.
 
-        This tests the pattern used by CMSRangeStatusConsumer which uses
+        This tests the pattern used by cms.tasks.process_range_event which uses
         save(update_fields=['status']) for efficiency.
         """
         from cms.models import RangeInstance

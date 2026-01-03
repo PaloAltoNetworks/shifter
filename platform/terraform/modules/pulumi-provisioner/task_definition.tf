@@ -46,6 +46,8 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "NGFW_AMI_ID", value = var.ngfw_ami_id },
       { name = "NGFW_INSTANCE_TYPE", value = var.ngfw_instance_type },
       { name = "NGFW_SECURITY_GROUP_ID", value = var.ngfw_security_group_id },
+      # Messaging (SNS for range events)
+      { name = "SNS_RANGE_EVENTS_ARN", value = var.sns_topic_arn },
     ]
 
     logConfiguration = {

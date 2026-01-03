@@ -604,7 +604,7 @@ class TestCreateRangeEngineCall:
 
     @patch("cms.services.engine_create_range")
     def test_calls_engine_create_range(self, mock_engine, user, windows_agent):
-        """create_range calls engine.create_range with RangeRequest."""
+        """create_range calls engine.create_range with RangeSpec."""
         mock_engine.return_value = 42  # Engine returns range_id
 
         services.create_range(user, "basic", windows_agent.id)
@@ -614,25 +614,25 @@ class TestCreateRangeEngineCall:
 
     @patch("cms.services.engine_create_range")
     def test_engine_receives_range_request(self, mock_engine, user, windows_agent):
-        """Engine receives a RangeRequest with scenario and instances."""
-        from shared.schemas import RangeRequest
+        """Engine receives a RangeSpec with scenario and instances."""
+        from shared.schemas import RangeSpec
 
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
 
-        # Get the RangeRequest passed to engine
+        # Get the RangeSpec passed to engine
         call_args = mock_engine.call_args
         range_request = call_args[0][0]  # First positional arg
 
-        assert isinstance(range_request, RangeRequest)
+        assert isinstance(range_request, RangeSpec)
         assert range_request.scenario_id == "basic"
         assert range_request.user_id == user.id
         assert isinstance(range_request.instances, list)
 
     @patch("cms.services.engine_create_range")
     def test_range_request_has_correct_scenario_id(self, mock_engine, user, windows_agent):
-        """RangeRequest includes the correct scenario_id."""
+        """RangeSpec includes the correct scenario_id."""
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
@@ -642,7 +642,7 @@ class TestCreateRangeEngineCall:
 
     @patch("cms.services.engine_create_range")
     def test_range_request_has_hydrated_instances(self, mock_engine, user, windows_agent):
-        """RangeRequest instances are hydrated with resolved OS and agent."""
+        """RangeSpec instances are hydrated with resolved OS and agent."""
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
@@ -711,22 +711,62 @@ class TestCreateRangeReturn:
     """Tests for create_range() return value."""
 
     @patch("cms.services.engine_create_range")
-    def test_returns_range_id(self, mock_engine, user, windows_agent):
-        """create_range returns the range_id from engine."""
+    def test_returns_range_context(self, mock_engine, user, windows_agent):
+        """create_range returns a RangeContext."""
+        from shared.schemas.range import RangeContext
+
         mock_engine.return_value = 42
 
         result = services.create_range(user, "basic", windows_agent.id)
 
-        assert result == 42
+        assert isinstance(result, RangeContext)
 
     @patch("cms.services.engine_create_range")
-    def test_returns_integer(self, mock_engine, user, windows_agent):
-        """create_range returns an integer range_id."""
-        mock_engine.return_value = 100
+    def test_range_context_has_range_id(self, mock_engine, user, windows_agent):
+        """RangeContext contains the range_id from engine."""
+        mock_engine.return_value = 42
 
         result = services.create_range(user, "basic", windows_agent.id)
 
-        assert isinstance(result, int)
+        assert result.range_id == 42
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_scenario_id(self, mock_engine, user, windows_agent):
+        """RangeContext contains the scenario_id."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert result.scenario_id == "basic"
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_user_id(self, mock_engine, user, windows_agent):
+        """RangeContext contains the user_id."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert result.user_id == user.id
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_agent_name(self, mock_engine, user, windows_agent):
+        """RangeContext contains the agent_name."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert result.agent_name == "Windows Agent"
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_pending_status(self, mock_engine, user, windows_agent):
+        """RangeContext has PENDING status initially."""
+        from shared.enums import RangeStatus
+
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert result.status == RangeStatus.PENDING
 
 
 @pytest.mark.django_db

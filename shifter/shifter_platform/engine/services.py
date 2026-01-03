@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from shared.schemas import RangeRequest
+from shared.schemas import RangeSpec
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -24,19 +24,19 @@ class EngineError(Exception):
     pass
 
 
-def create_range(request: RangeRequest) -> int:
+def create_range(request: RangeSpec) -> int:
     """Provision infrastructure for range.
 
     Creates a Range record, allocates subnet, and triggers ECS provisioning.
 
     Args:
-        request: Validated RangeRequest with scenario, user, and instances.
+        request: Validated RangeSpec with scenario, user, and instances.
 
     Returns:
         range_id: The ID of the created range.
 
     Raises:
-        TypeError: If request is not a RangeRequest
+        TypeError: If request is not a RangeSpec
         ValueError: If subnet allocation fails (capacity exhausted)
         User.DoesNotExist: If user_id doesn't map to a Django user
     """
@@ -48,8 +48,8 @@ def create_range(request: RangeRequest) -> int:
     User = get_user_model()
 
     # Validate request type
-    if not isinstance(request, RangeRequest):
-        raise TypeError(f"request must be RangeRequest, got {type(request).__name__}")
+    if not isinstance(request, RangeSpec):
+        raise TypeError(f"request must be RangeSpec, got {type(request).__name__}")
 
     logger.debug(
         "create_range: scenario=%s user_id=%s instances=%d",

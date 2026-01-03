@@ -19,7 +19,7 @@ urlpatterns = [
     path("api/upload/complete/", views.complete_upload, name="complete_upload"),
     path("api/upload/cancel/", views.cancel_upload, name="cancel_upload"),
     # Range API
-    path("api/range/status/", views.get_range_status, name="range_status"),
+    path("api/range/", views.get_range, name="get_range"),
     path("api/range/launch/", views.launch_range, name="launch_range"),
     path("api/range/cancel/", views.cancel_range, name="cancel_range"),
     path("api/range/destroy/", views.destroy_range, name="destroy_range"),

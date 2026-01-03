@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
+from cms.assets.validation import get_allowed_extensions as _get_allowed_extensions
 from cms.models import AgentConfig, RangeInstance
 from engine import cancel_range as engine_cancel_range
 from engine import create_range as engine_create_range
@@ -190,17 +191,48 @@ def list_agents(user: User) -> list[dict[str, Any]]:
             logger.error("list_agents: model returned None for user_id=%s", user.id)
             raise TypeError("Model returned None instead of iterable")
 
-        # Convert to projection dicts
-        agents = [
-            {
+        # Convert to projection dicts with validation
+        agents = []
+        for agent in result:
+            # Validate agent has required attributes
+            if not hasattr(agent, "id") or not hasattr(agent, "name") or not hasattr(agent, "os"):
+                logger.error("list_agents: invalid agent object in result for user_id=%s", user.id)
+                raise TypeError("Model returned invalid agent object")
+
+            agent_dict = {
                 "id": agent.id,
                 "name": agent.name,
                 "os_name": agent.os.name,
                 "os_slug": agent.os.slug,
                 "file_size_mb": agent.file_size_mb,
+                "original_filename": agent.original_filename,
+                "created_at": agent.created_at,
             }
-            for agent in result
-        ]
+
+            # Validate dict values are non-empty and correct types
+            if not isinstance(agent_dict["id"], int):
+                logger.error("list_agents: agent.id is not int for user_id=%s", user.id)
+                raise TypeError("agent.id must be int")
+            if not isinstance(agent_dict["name"], str) or not agent_dict["name"]:
+                logger.error("list_agents: agent.name is not non-empty str for user_id=%s", user.id)
+                raise TypeError("agent.name must be non-empty str")
+            if not isinstance(agent_dict["os_name"], str) or not agent_dict["os_name"]:
+                logger.error("list_agents: agent.os.name is not non-empty str for user_id=%s", user.id)
+                raise TypeError("agent.os.name must be non-empty str")
+            if not isinstance(agent_dict["os_slug"], str) or not agent_dict["os_slug"]:
+                logger.error("list_agents: agent.os.slug is not non-empty str for user_id=%s", user.id)
+                raise TypeError("agent.os.slug must be non-empty str")
+            if not isinstance(agent_dict["file_size_mb"], (int, float)):
+                logger.error("list_agents: agent.file_size_mb is not number for user_id=%s", user.id)
+                raise TypeError("agent.file_size_mb must be number")
+            if not isinstance(agent_dict["original_filename"], str) or not agent_dict["original_filename"]:
+                logger.error("list_agents: agent.original_filename is not non-empty str for user_id=%s", user.id)
+                raise TypeError("agent.original_filename must be non-empty str")
+            if agent_dict["created_at"] is None:
+                logger.error("list_agents: agent.created_at is None for user_id=%s", user.id)
+                raise TypeError("agent.created_at must not be None")
+
+            agents.append(agent_dict)
 
         logger.debug("list_agents returning %d agents for user_id=%s", len(agents), user.id)
         return agents
@@ -301,6 +333,15 @@ def get_agent(user: User, agent_id: int) -> Any:
     except Exception:
         logger.exception("Error in get_agent for user_id=%s, agent_id=%s", user.id, agent_id)
         raise
+
+
+def get_allowed_extensions() -> list[str]:
+    """Get list of allowed file extensions for agent uploads.
+
+    Returns:
+        List of allowed extensions (e.g., ['.msi', '.deb', '.rpm'])
+    """
+    return _get_allowed_extensions()
 
 
 # =============================================================================

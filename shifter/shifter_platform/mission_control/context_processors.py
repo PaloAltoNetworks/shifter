@@ -12,11 +12,11 @@ def active_range(request):
     """
     Add active range information to template context.
 
-    Uses CMS service to get the user's active range as a RangeRef.
+    Uses CMS service to get the user's active range as a RangeContext.
 
     Provides:
         - has_active_range: Boolean indicating if user has a ready range
-        - active_range: The user's active RangeRef (or None)
+        - active_range: The user's active RangeContext (or None)
     """
     if not request.user.is_authenticated:
         return {

@@ -19,7 +19,7 @@ from engine import destroy_range as engine_destroy_range
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from shared.schemas import RangeContext, RangeRef
+    from shared.schemas import RangeContext
 
 logger = logging.getLogger(__name__)
 
@@ -791,8 +791,8 @@ def get_range(user: User, range_id: int) -> Any:
         raise
 
 
-def get_active_range(user: User) -> RangeRef | None:
-    """Get user's active (non-deleted) range as a RangeRef projection.
+def get_active_range(user: User) -> RangeContext | None:
+    """Get user's active (non-deleted) range as a RangeContext projection.
 
     Returns the most recently created range that:
     - Belongs to the user
@@ -802,7 +802,7 @@ def get_active_range(user: User) -> RangeRef | None:
     via RangeInstance.save(), so filtering by deleted_at is sufficient.
 
     Used by Mission Control to check if user has an active range.
-    Returns a RangeRef (minimal reference projection) rather than raw model to:
+    Returns a RangeContext rather than raw model to:
     - Provide only the essential identifiers (range_id, user_id, status)
     - Validate data before returning to caller
     - Hide implementation details from presentation layer
@@ -811,14 +811,14 @@ def get_active_range(user: User) -> RangeRef | None:
         user: User whose active range to retrieve
 
     Returns:
-        RangeRef if user has an active range, None otherwise
+        RangeContext if user has an active range, None otherwise
 
     Raises:
         TypeError: If user is None or invalid type
-        ValidationError: If RangeRef creation fails validation
+        ValidationError: If RangeContext creation fails validation
         Exception: Database errors are logged and propagated
     """
-    from shared.schemas import RangeRef
+    from shared.schemas import RangeContext
 
     # Input validation
     if user is None:
@@ -849,8 +849,8 @@ def get_active_range(user: User) -> RangeRef | None:
             instance.status,
             user.id,
         )
-        # RangeRef.from_instance validates data before returning
-        return RangeRef.from_instance(instance)
+        # RangeContext.from_instance validates data before returning
+        return RangeContext.from_instance(instance)
     else:
         logger.debug("get_active_range found no active range for user_id=%s", user.id)
         return None

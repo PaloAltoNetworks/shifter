@@ -3,7 +3,7 @@
 import logging
 
 from cms.services import get_active_range
-from shared.enums import RangeStatus
+from shared.schemas import RangeContext
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +27,26 @@ def active_range(request):
     user_id = request.user.id
 
     try:
-        # Get the user's active range from CMS (returns RangeRef or None)
-        range_ref = get_active_range(request.user)
+        # Get the user's active range from CMS (returns RangeContext or None)
+        range_context = get_active_range(request.user)
+        if range_context is not None and not isinstance(range_context, RangeContext):
+            logger.error(
+                "active_range context processor: get_active_range returned invalid type %s for user_id=%s",
+                type(range_context).__name__,
+                user_id,
+            )
+            return {
+                "has_active_range": False,
+                "active_range": None,
+            }
 
-        if range_ref is not None:
-            is_ready = range_ref.status == RangeStatus.READY
+        if range_context is not None:
+            is_ready = range_context.is_ready
             logger.info(
                 "active_range context processor: found range for user_id=%s, "
                 "status=%s, is_ready=%s",
                 user_id,
-                range_ref.status,
+                range_context.status,
                 is_ready,
             )
             has_ready_range = is_ready
@@ -49,7 +59,7 @@ def active_range(request):
 
         return {
             "has_active_range": has_ready_range,
-            "active_range": range_ref,
+            "active_range": range_context,
         }
 
     except Exception:

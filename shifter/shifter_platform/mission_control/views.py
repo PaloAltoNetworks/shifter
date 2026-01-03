@@ -14,7 +14,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from cms import create_range as cms_create_range
-from cms import get_allowed_extensions
+from cms import get_active_range, get_allowed_extensions
 from cms import list_agents as cms_list_agents
 from cms import list_scenarios as cms_list_scenarios
 from cms.exceptions import CMSError
@@ -456,7 +456,7 @@ def get_range_status(request):
         - has_range: true/false
         - range: Range object (if exists)
     """
-    active_range = Range.get_active_for_user(request.user)
+    active_range = get_active_range(request.user)
 
     if not active_range:
         return JsonResponse({"has_range": False, "range": None})
@@ -464,7 +464,7 @@ def get_range_status(request):
     return JsonResponse(
         {
             "has_range": True,
-            "range": range_to_dict(active_range),
+            "range": active_range.model_dump(mode="json"),
         }
     )
 

@@ -1,7 +1,4 @@
 """Mission Control views.
-
-WARNING: This module is legacy code pending refactor to use CMS services.
-Many functions are stubbed out until the refactor is complete.
 """
 
 import json
@@ -16,28 +13,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
+from cms import create_range as cms_create_range
+from cms import get_allowed_extensions
+from cms import list_agents as cms_list_agents
+from cms import list_scenarios as cms_list_scenarios
 from cms.exceptions import CMSError
-from cms.services import create_range as cms_create_range
-from cms.services import list_agents as cms_list_agents
-from cms.services import list_scenarios as cms_list_scenarios
-
-
-# TODO: Mission Control is legacy - these are stubs until MC is refactored to use CMS
-class AllocationError(Exception):
-    pass
-
-
-class OrchestrationError(Exception):
-    def __init__(self, message: str, status_code: int = 400):
-        super().__init__(message)
-        self.status_code = status_code
-
-
-class ScenarioValidationError(Exception):
-    def __init__(self, message: str, status_code: int = 400):
-        super().__init__(message)
-        self.status_code = status_code
-
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +37,11 @@ def dashboard(request):
 @require_GET
 def agents(request):
     """Agent management - upload and manage XDR/XSIAM agents."""
-    user_agents = AgentConfig.active_for_user(request.user).select_related("os")
 
     context = {
         "page_title": "Agents",
         "active_nav": "agents",
-        "agents": user_agents,
+        "agents": cms_list_agents(request.user),
         "allowed_extensions": ", ".join(get_allowed_extensions()),
     }
     return render(request, "mission_control/agents.html", context)
@@ -582,17 +561,15 @@ def destroy_range(request):
 
 @login_required
 @require_GET
-def list_agents_for_launch(request):
+def list_agents(request):
     """
-    Get user's agents for the launch dropdown.
+    Get user's agents.
 
     Response (JSON):
-        - agents: List of {id, name, os_name, os_slug, file_size_mb}
+        - agents: List of {id, name, os_name, os_slug, file_size_mb, original_filename, created_at}
 
     The os_slug field allows frontend to filter agents by OS type
     (e.g., 'windows' for DC agent dropdown in AD scenarios).
     """
     agents = cms_list_agents(request.user)
     return JsonResponse({"agents": agents})
-
-

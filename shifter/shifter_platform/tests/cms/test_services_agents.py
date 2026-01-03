@@ -75,10 +75,20 @@ class TestListAgents:
 
     def test_returns_one_agent_dict_when_model_returns_one(self, user):
         """Service returns one agent dict when model returns one."""
+        from django.utils import timezone
+
         mock_os = Mock()
         mock_os.name = "Windows"
         mock_os.slug = "windows"
-        mock_agent = Mock(spec=AgentConfig, id=42, os=mock_os, file_size_mb=50)
+        created = timezone.now()
+        mock_agent = Mock(
+            spec=AgentConfig,
+            id=42,
+            os=mock_os,
+            file_size_mb=50,
+            original_filename="agent.msi",
+            created_at=created,
+        )
         mock_agent.name = "Mock Agent"
         mock_qs = Mock()
         mock_qs.select_related.return_value = [mock_agent]
@@ -88,11 +98,28 @@ class TestListAgents:
             assert result[0]["id"] == 42
             assert result[0]["name"] == "Mock Agent"
             assert result[0]["os_slug"] == "windows"
+            assert result[0]["original_filename"] == "agent.msi"
+            assert result[0]["created_at"] == created
 
     def test_returns_five_agent_dicts_when_model_returns_five(self, user):
         """Service returns all agents as dicts."""
-        mock_os = Mock(name="Windows", slug="windows")
-        mock_agents = [Mock(spec=AgentConfig, id=i, name=f"Agent {i}", os=mock_os, file_size_mb=10) for i in range(5)]
+        from django.utils import timezone
+
+        mock_os = Mock(slug="windows")
+        mock_os.name = "Windows"
+        created = timezone.now()
+        mock_agents = []
+        for i in range(5):
+            agent = Mock(
+                spec=AgentConfig,
+                id=i,
+                os=mock_os,
+                file_size_mb=10,
+                original_filename=f"agent{i}.msi",
+                created_at=created,
+            )
+            agent.name = f"Agent {i}"
+            mock_agents.append(agent)
         mock_qs = Mock()
         mock_qs.select_related.return_value = mock_agents
         with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
@@ -115,8 +142,23 @@ class TestListAgents:
 
     def test_logs_debug_on_success_with_count(self, user, caplog):
         """Service logs debug on success with count."""
-        mock_os = Mock(name="Windows", slug="windows")
-        mock_agents = [Mock(spec=AgentConfig, id=i, name=f"Agent {i}", os=mock_os, file_size_mb=10) for i in range(3)]
+        from django.utils import timezone
+
+        mock_os = Mock(slug="windows")
+        mock_os.name = "Windows"
+        created = timezone.now()
+        mock_agents = []
+        for i in range(3):
+            agent = Mock(
+                spec=AgentConfig,
+                id=i,
+                os=mock_os,
+                file_size_mb=10,
+                original_filename=f"agent{i}.msi",
+                created_at=created,
+            )
+            agent.name = f"Agent {i}"
+            mock_agents.append(agent)
         mock_qs = Mock()
         mock_qs.select_related.return_value = mock_agents
         with (
@@ -150,44 +192,54 @@ class TestListAgents:
 
     def test_raises_on_model_returns_none(self, user):
         """Service raises TypeError if model returns None instead of list."""
-        with patch.object(AgentConfig, "active_for_user", return_value=None), pytest.raises(TypeError):
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = None
+        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs), pytest.raises(TypeError):
             services.list_agents(user)
 
     def test_raises_on_model_returns_string(self, user):
         """Service raises TypeError if model returns string instead of list."""
-        with patch.object(AgentConfig, "active_for_user", return_value="not a list"), pytest.raises(TypeError):
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = "not a list"
+        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs), pytest.raises(TypeError):
             services.list_agents(user)
 
     def test_raises_on_model_returns_dict(self, user):
         """Service raises TypeError if model returns dict instead of list."""
         mock_qs = Mock()
-        mock_qs.select_related.return_value = None
+        mock_qs.select_related.return_value = {"agents": []}
         with (
-            patch.object(AgentConfig, "active_for_user", return_value={"agents": []}),
+            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
             pytest.raises(TypeError),
         ):
             services.list_agents(user)
 
     def test_raises_on_model_returns_list_of_strings(self, user):
         """Service raises TypeError if model returns list of wrong type."""
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = ["a", "b", "c"]
         with (
-            patch.object(AgentConfig, "active_for_user", return_value=["a", "b", "c"]),
+            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
             pytest.raises(TypeError),
         ):
             services.list_agents(user)
 
     def test_raises_on_model_returns_list_of_dicts(self, user):
         """Service raises TypeError if model returns list of dicts instead of AgentConfig."""
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = [{"id": 1}, {"id": 2}]
         with (
-            patch.object(AgentConfig, "active_for_user", return_value=[{"id": 1}, {"id": 2}]),
+            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
             pytest.raises(TypeError),
         ):
             services.list_agents(user)
 
     def test_logs_error_on_invalid_model_response(self, user, caplog):
         """Service logs error when model returns invalid response."""
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = None
         with (
-            patch.object(AgentConfig, "active_for_user", return_value=None),
+            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
             caplog.at_level(logging.ERROR, logger="cms.services"),
             pytest.raises(TypeError),
         ):
@@ -210,11 +262,18 @@ class TestListAgents:
 
     def test_returns_list_of_dicts(self, user):
         """Service returns list of dicts, not model instances."""
+        from django.utils import timezone
+
         mock_os = Mock()
         mock_os.name = "Windows"
         mock_os.slug = "windows"
         mock_agent = Mock(
-            spec=AgentConfig, id=1, os=mock_os, file_size_mb=10
+            spec=AgentConfig,
+            id=1,
+            os=mock_os,
+            file_size_mb=10,
+            original_filename="agent.msi",
+            created_at=timezone.now(),
         )
         mock_agent.name = "Agent"
         mock_qs = Mock()
@@ -225,12 +284,19 @@ class TestListAgents:
             assert type(result[0]) is dict
 
     def test_dict_has_required_keys(self, user):
-        """Each dict has id, name, os_name, os_slug, file_size_mb."""
+        """Each dict has id, name, os_name, os_slug, file_size_mb, original_filename, created_at."""
+        from django.utils import timezone
+
         mock_os = Mock()
         mock_os.name = "Windows"
         mock_os.slug = "windows"
         mock_agent = Mock(
-            spec=AgentConfig, id=1, os=mock_os, file_size_mb=10
+            spec=AgentConfig,
+            id=1,
+            os=mock_os,
+            file_size_mb=10,
+            original_filename="agent.msi",
+            created_at=timezone.now(),
         )
         mock_agent.name = "Agent"
         mock_qs = Mock()
@@ -243,14 +309,26 @@ class TestListAgents:
             assert "os_name" in agent
             assert "os_slug" in agent
             assert "file_size_mb" in agent
+            assert "original_filename" in agent
+            assert "created_at" in agent
 
     def test_dict_values_have_correct_types(self, user):
-        """Dict values have correct types: id=int, strings, file_size_mb=number."""
+        """Dict values have correct types: id=int, strings, file_size_mb=number, created_at=datetime."""
+        from datetime import datetime
+
+        from django.utils import timezone
+
         mock_os = Mock()
         mock_os.name = "Windows"
         mock_os.slug = "windows"
+        created = timezone.now()
         mock_agent = Mock(
-            spec=AgentConfig, id=42, os=mock_os, file_size_mb=50
+            spec=AgentConfig,
+            id=42,
+            os=mock_os,
+            file_size_mb=50,
+            original_filename="agent.msi",
+            created_at=created,
         )
         mock_agent.name = "Test Agent"
         mock_qs = Mock()
@@ -263,6 +341,8 @@ class TestListAgents:
             assert isinstance(agent["os_name"], str)
             assert isinstance(agent["os_slug"], str)
             assert isinstance(agent["file_size_mb"], (int, float))
+            assert isinstance(agent["original_filename"], str)
+            assert isinstance(agent["created_at"], datetime)
 
     # --- Input validation ---
 

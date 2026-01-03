@@ -57,40 +57,57 @@ class TestListAgents:
 
     def test_calls_active_for_user_with_user(self, user):
         """Service calls AgentConfig.active_for_user with the user."""
-        with patch.object(AgentConfig, "active_for_user", return_value=[]) as mock_active:
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = []
+        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs) as mock_active:
             services.list_agents(user)
             mock_active.assert_called_once_with(user)
 
-    # --- Service returns what model returns ---
+    # --- Service returns projection dicts ---
 
     def test_returns_empty_list_when_model_returns_empty(self, user):
         """Service returns empty list when model returns empty queryset."""
-        with patch.object(AgentConfig, "active_for_user", return_value=[]):
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = []
+        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
             result = services.list_agents(user)
             assert result == []
 
-    def test_returns_one_agent_when_model_returns_one(self, user):
-        """Service returns one agent when model returns one."""
-        mock_agent = Mock(spec=AgentConfig, id=42, name="Mock Agent")
-        with patch.object(AgentConfig, "active_for_user", return_value=[mock_agent]):
+    def test_returns_one_agent_dict_when_model_returns_one(self, user):
+        """Service returns one agent dict when model returns one."""
+        mock_os = Mock()
+        mock_os.name = "Windows"
+        mock_os.slug = "windows"
+        mock_agent = Mock(spec=AgentConfig, id=42, os=mock_os, file_size_mb=50)
+        mock_agent.name = "Mock Agent"
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = [mock_agent]
+        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
             result = services.list_agents(user)
             assert len(result) == 1
-            assert result[0].id == 42
+            assert result[0]["id"] == 42
+            assert result[0]["name"] == "Mock Agent"
+            assert result[0]["os_slug"] == "windows"
 
-    def test_returns_five_agents_when_model_returns_five(self, user):
-        """Service returns all agents model returns."""
-        mock_agents = [Mock(spec=AgentConfig, id=i, name=f"Agent {i}") for i in range(5)]
-        with patch.object(AgentConfig, "active_for_user", return_value=mock_agents):
+    def test_returns_five_agent_dicts_when_model_returns_five(self, user):
+        """Service returns all agents as dicts."""
+        mock_os = Mock(name="Windows", slug="windows")
+        mock_agents = [Mock(spec=AgentConfig, id=i, name=f"Agent {i}", os=mock_os, file_size_mb=10) for i in range(5)]
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = mock_agents
+        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
             result = services.list_agents(user)
             assert len(result) == 5
-            assert [a.id for a in result] == [0, 1, 2, 3, 4]
+            assert [a["id"] for a in result] == [0, 1, 2, 3, 4]
 
     # --- Logging ---
 
     def test_logs_debug_on_entry(self, user, caplog):
         """Service logs debug on entry with user info."""
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = []
         with (
-            patch.object(AgentConfig, "active_for_user", return_value=[]),
+            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
             caplog.at_level(logging.DEBUG, logger="cms.services"),
         ):
             services.list_agents(user)
@@ -98,9 +115,12 @@ class TestListAgents:
 
     def test_logs_debug_on_success_with_count(self, user, caplog):
         """Service logs debug on success with count."""
-        mock_agents = [Mock(spec=AgentConfig) for _ in range(3)]
+        mock_os = Mock(name="Windows", slug="windows")
+        mock_agents = [Mock(spec=AgentConfig, id=i, name=f"Agent {i}", os=mock_os, file_size_mb=10) for i in range(3)]
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = mock_agents
         with (
-            patch.object(AgentConfig, "active_for_user", return_value=mock_agents),
+            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
             caplog.at_level(logging.DEBUG, logger="cms.services"),
         ):
             services.list_agents(user)
@@ -140,6 +160,8 @@ class TestListAgents:
 
     def test_raises_on_model_returns_dict(self, user):
         """Service raises TypeError if model returns dict instead of list."""
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = None
         with (
             patch.object(AgentConfig, "active_for_user", return_value={"agents": []}),
             pytest.raises(TypeError),
@@ -172,35 +194,75 @@ class TestListAgents:
             services.list_agents(user)
         assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower()
 
+    def test_logs_error_on_model_returns_none(self, user, caplog):
+        """Service logs error when model returns None."""
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = None
+        with (
+            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
+            caplog.at_level(logging.ERROR, logger="cms.services"),
+            pytest.raises(TypeError),
+        ):
+            services.list_agents(user)
+        assert "none" in caplog.text.lower() or "error" in caplog.text.lower()
+
     # --- Return type guarantee ---
 
-    def test_returns_list_class_not_queryset(self, user):
-        """Service returns list class, not QuerySet."""
-        # Simulate QuerySet-like object
+    def test_returns_list_of_dicts(self, user):
+        """Service returns list of dicts, not model instances."""
+        mock_os = Mock()
+        mock_os.name = "Windows"
+        mock_os.slug = "windows"
+        mock_agent = Mock(
+            spec=AgentConfig, id=1, os=mock_os, file_size_mb=10
+        )
+        mock_agent.name = "Agent"
         mock_qs = Mock()
-        mock_qs.__iter__ = Mock(return_value=iter([Mock(spec=AgentConfig)]))
+        mock_qs.select_related.return_value = [mock_agent]
         with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
             result = services.list_agents(user)
             assert type(result) is list
+            assert type(result[0]) is dict
 
-    def test_returns_list_class_not_tuple(self, user):
-        """Service returns list, not tuple even if model returns tuple."""
-        mock_agent = Mock(spec=AgentConfig)
-        with patch.object(AgentConfig, "active_for_user", return_value=(mock_agent,)):
+    def test_dict_has_required_keys(self, user):
+        """Each dict has id, name, os_name, os_slug, file_size_mb."""
+        mock_os = Mock()
+        mock_os.name = "Windows"
+        mock_os.slug = "windows"
+        mock_agent = Mock(
+            spec=AgentConfig, id=1, os=mock_os, file_size_mb=10
+        )
+        mock_agent.name = "Agent"
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = [mock_agent]
+        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
             result = services.list_agents(user)
-            assert type(result) is list
+            agent = result[0]
+            assert "id" in agent
+            assert "name" in agent
+            assert "os_name" in agent
+            assert "os_slug" in agent
+            assert "file_size_mb" in agent
 
-    def test_handles_generator_from_model(self, user):
-        """Service converts generator to list."""
-
-        def agent_generator():
-            yield Mock(spec=AgentConfig)
-            yield Mock(spec=AgentConfig)
-
-        with patch.object(AgentConfig, "active_for_user", return_value=agent_generator()):
+    def test_dict_values_have_correct_types(self, user):
+        """Dict values have correct types: id=int, strings, file_size_mb=number."""
+        mock_os = Mock()
+        mock_os.name = "Windows"
+        mock_os.slug = "windows"
+        mock_agent = Mock(
+            spec=AgentConfig, id=42, os=mock_os, file_size_mb=50
+        )
+        mock_agent.name = "Test Agent"
+        mock_qs = Mock()
+        mock_qs.select_related.return_value = [mock_agent]
+        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
             result = services.list_agents(user)
-            assert type(result) is list
-            assert len(result) == 2
+            agent = result[0]
+            assert isinstance(agent["id"], int)
+            assert isinstance(agent["name"], str)
+            assert isinstance(agent["os_name"], str)
+            assert isinstance(agent["os_slug"], str)
+            assert isinstance(agent["file_size_mb"], (int, float))
 
     # --- Input validation ---
 

@@ -10,15 +10,15 @@
     <div class="terminal-header">
         <div class="terminal-header-left">
             <h1 class="terminal-title">Terminal</h1>
-            {% if range_ready %}
-            <span class="terminal-range-info">Range #{{ range.id }} - {{ range.agent.name }}</span>
+            {% if has_active_range %}
+            <span class="terminal-range-info">Range #{{ active_range.range_id }}</span>
             {% else %}
             <span class="terminal-range-info text-muted">No active range</span>
             {% endif %}
         </div>
     </div>
 
-    {% if range_ready %}
+    {% if has_active_range %}
     <div class="terminal-container" id="terminal-container">
         <!-- Kali Terminal Pane -->
         <div class="terminal-pane" id="kali-pane">
@@ -30,7 +30,7 @@
                     </svg>
                 </span>
                 <span class="pane-title">Kali Linux</span>
-                <span class="pane-subtitle">{{ range.kali_private_ip }}</span>
+                <span class="pane-subtitle">Attacker</span>
                 <div class="pane-status" id="kali-status">
                     <span class="status-indicator connecting"></span>
                     <span>Connecting...</span>
@@ -56,7 +56,7 @@
                     </svg>
                 </span>
                 <span class="pane-title">Victim</span>
-                <span class="pane-subtitle">{{ range.victim_private_ip }}</span>
+                <span class="pane-subtitle">Target</span>
                 <div class="pane-status" id="victim-status">
                     <span class="status-indicator connecting"></span>
                     <span>Connecting...</span>
@@ -67,7 +67,7 @@
             </div>
         </div>
     </div>
-    {% else %}
+    {% else %}{# has_active_range #}
     <!-- No active range state -->
     <div class="terminal-disconnected">
         <div class="disconnected-content">
@@ -86,12 +86,12 @@
             </a>
         </div>
     </div>
-    {% endif %}
+    {% endif %}{# has_active_range #}
 </div>
 {% endblock %}
 
 {% block extra_js %}
-{% if range_ready %}
+{% if has_active_range %}
 <!-- xterm.js from CDN with SRI -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" integrity="sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH" crossorigin="anonymous"></script>
@@ -102,7 +102,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const terminalManager = new TerminalManager({
-        rangeId: {{ range_id }},
+        rangeId: {{ active_range.range_id }},
         kaliContainerId: 'kali-terminal',
         victimContainerId: 'victim-terminal',
         wsProtocol: window.location.protocol === 'https:' ? 'wss:' : 'ws:',
@@ -111,5 +111,5 @@ document.addEventListener('DOMContentLoaded', function() {
     terminalManager.init();
 });
 </script>
-{% endif %}
+{% endif %}{# has_active_range #}
 {% endblock %}

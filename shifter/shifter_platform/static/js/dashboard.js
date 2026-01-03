@@ -303,28 +303,10 @@ class DashboardManager {
     }
 
     _updateActiveState() {
-        const rangeStarted = document.getElementById('range-started');
         const rangeAgent = document.getElementById('range-agent');
 
-        if (rangeStarted && this.currentRange.ready_at) {
-            rangeStarted.textContent = this._formatDate(this.currentRange.ready_at);
-        }
         if (rangeAgent && this.currentRange.agent_name) {
             rangeAgent.textContent = this.currentRange.agent_name;
-        }
-
-        // Update NGFW details - show link to NGFW detail page if range has linked NGFW
-        const ngfwDetails = document.getElementById('ngfw-details');
-        if (ngfwDetails) {
-            if (this.currentRange.ngfw_id) {
-                ngfwDetails.style.display = 'block';
-                const ngfwLink = document.getElementById('ngfw-detail-link');
-                if (ngfwLink) {
-                    ngfwLink.href = `/mission-control/assets/ngfw/${this.currentRange.ngfw_id}/`;
-                }
-            } else {
-                ngfwDetails.style.display = 'none';
-            }
         }
     }
 

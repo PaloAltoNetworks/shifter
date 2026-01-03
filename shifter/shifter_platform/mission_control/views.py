@@ -13,36 +13,13 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from cms.assets.s3 import (
-    S3Error,
-    generate_presigned_upload_url,
-    tag_s3_object,
-    verify_s3_object_exists,
-)
-from cms.assets.s3 import (
-    delete_agent as s3_delete,
-)
-from cms.assets.s3 import (
-    upload_agent as s3_upload,
-)
-from cms.assets.services import AssetError, get_storage_used
-from cms.assets.services import create_agent as cms_create_agent
-from cms.assets.services import delete_agent as cms_delete_agent
-from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
-from cms.assets.upload_token import generate_upload_token, verify_upload_token
-from cms.assets.validation import (
-    ValidationError,
-    get_allowed_extensions,
-    validate_agent_file,
-    validate_file_extension,
-)
-from cms.models import AgentConfig, Credential, UserNGFW
+from cms.exceptions import CMSError
+from cms.services import create_range as cms_create_range
+from cms.services import list_agents as cms_list_agents
 from cms.services import list_scenarios as cms_list_scenarios
-from engine.models import Range
 
 
 # TODO: Mission Control is legacy - these are stubs until MC is refactored to use CMS
@@ -60,22 +37,6 @@ class ScenarioValidationError(Exception):
     def __init__(self, message: str, status_code: int = 400):
         super().__init__(message)
         self.status_code = status_code
-
-
-def launch(*args, **kwargs):
-    raise NotImplementedError("Mission Control must be refactored to use CMS")
-
-
-def cancel(*args, **kwargs):
-    raise NotImplementedError("Mission Control must be refactored to use CMS")
-
-
-def destroy(*args, **kwargs):
-    raise NotImplementedError("Mission Control must be refactored to use CMS")
-
-
-def range_to_dict(range_obj):
-    raise NotImplementedError("Mission Control must be refactored to use CMS")
 
 
 logger = logging.getLogger(__name__)
@@ -209,19 +170,14 @@ def delete_agent(request, agent_id):
 @login_required
 @require_GET
 def terminal(request):
-    """Terminal - SSH access to range instances."""
-    # Get user's active range (may be None or not ready)
-    active_range = Range.get_active_for_user(request.user)
+    """Terminal - SSH access to range instances.
 
-    # Check if range is ready for terminal access
-    range_ready = active_range and active_range.status == Range.Status.READY
-
+    Uses active_range and has_active_range from context processor.
+    Template accesses active_range.range_id for WebSocket connection.
+    """
     context = {
         "page_title": "Terminal",
         "active_nav": "terminal",
-        "range": active_range if range_ready else None,
-        "range_id": active_range.id if range_ready else None,
-        "range_ready": range_ready,
     }
     return render(request, "mission_control/terminal.html", context)
 
@@ -563,40 +519,27 @@ def launch_range(request):
     if scenario not in valid_scenarios:
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
-    # NGFW support is planned but not yet implemented with new models
-    # For now, ngfw_enabled is always False
-    ngfw_enabled = False
-
     try:
-        range_obj = launch(
+        range_ctx = cms_create_range(
             request.user,
-            agent_id,
             scenario,
-            ngfw_enabled=ngfw_enabled,
+            agent_id,
         )
-    except OrchestrationError as e:
-        return JsonResponse({"error": str(e)}, status=e.status_code)
-    except ScenarioValidationError as e:
-        return JsonResponse({"error": str(e)}, status=e.status_code)
-    except AllocationError as e:
-        logger.error("Failed to allocate subnet index: %s", e)
-        return JsonResponse(
-            {"error": "No capacity available. Please try again later or destroy existing ranges."},
-            status=503,
-        )
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
     logger.info(
         "Range launched: user=%s range_id=%s agent=%s scenario=%s",
         request.user.email,
-        range_obj.id,
-        range_obj.agent.name,
+        range_ctx.range_id,
+        range_ctx.agent_name,
         scenario,
     )
 
     return JsonResponse(
         {
             "success": True,
-            "range": range_to_dict(range_obj),
+            "range": range_ctx.model_dump(mode="json"),
         }
     )
 
@@ -649,434 +592,7 @@ def list_agents_for_launch(request):
     The os_slug field allows frontend to filter agents by OS type
     (e.g., 'windows' for DC agent dropdown in AD scenarios).
     """
-    agents = AgentConfig.active_for_user(request.user).select_related("os")
-    agent_list = [
-        {
-            "id": agent.id,
-            "name": agent.name,
-            "os_name": agent.os.name,
-            "os_slug": agent.os.slug,
-            "file_size_mb": agent.file_size_mb,
-        }
-        for agent in agents
-    ]
-    return JsonResponse({"agents": agent_list})
+    agents = cms_list_agents(request.user)
+    return JsonResponse({"agents": agents})
 
 
-# -----------------------------------------------------------------------------
-# NGFW Management Views
-# -----------------------------------------------------------------------------
-
-
-@login_required
-@require_GET
-def ngfw_list(request):
-    """List user's NGFWs with status badges."""
-    ngfws = UserNGFW.active_for_user(request.user)
-
-    context = {
-        "page_title": "NGFWs",
-        "active_nav": "ngfw",
-        "ngfws": ngfws,
-    }
-    return render(request, "mission_control/assets/ngfw/list.html", context)
-
-
-@login_required
-@require_GET
-def ngfw_detail(request, ngfw_id):
-    """Display NGFW details including AWS resources and linked ranges."""
-    ngfw = get_object_or_404(
-        UserNGFW,
-        id=ngfw_id,
-        user=request.user,
-        deleted_at__isnull=True,
-    )
-
-    # Get ranges linked to this NGFW
-    linked_ranges = Range.objects.filter(
-        ngfw=ngfw,
-        status__in=[
-            Range.Status.PENDING,
-            Range.Status.PROVISIONING,
-            Range.Status.READY,
-            Range.Status.PAUSED,
-            Range.Status.RESUMING,
-        ],
-    )
-
-    context = {
-        "page_title": ngfw.name,
-        "active_nav": "ngfw",
-        "ngfw": ngfw,
-        "linked_ranges": linked_ranges,
-    }
-    return render(request, "mission_control/assets/ngfw/detail.html", context)
-
-
-@login_required
-@require_GET
-def ngfw_wizard(request):
-    """Setup wizard for provisioning a new NGFW."""
-    # TODO: migrate to CMS - move credential queries to cms.services
-    # Get user's non-expired SCM credentials
-    scm_credentials = Credential.active_for_user(request.user).filter(
-        credential_type=Credential.Type.SCM, expires_at__isnull=True
-    ) | Credential.active_for_user(request.user).filter(
-        credential_type=Credential.Type.SCM, expires_at__gt=timezone.now()
-    )
-
-    # Get user's deployment profiles (non-expired)
-    deployment_profiles = Credential.active_for_user(request.user).filter(
-        credential_type=Credential.Type.DEPLOYMENT_PROFILE, expires_at__isnull=True
-    ) | Credential.active_for_user(request.user).filter(
-        credential_type=Credential.Type.DEPLOYMENT_PROFILE, expires_at__gt=timezone.now()
-    )
-
-    context = {
-        "page_title": "Setup NGFW",
-        "active_nav": "ngfw",
-        "scm_credentials": scm_credentials,
-        "deployment_profiles": deployment_profiles,
-    }
-    return render(request, "mission_control/assets/ngfw/wizard.html", context)
-
-
-@login_required
-@require_GET
-def ngfw_deprovision(request, ngfw_id):
-    """Deprovision confirmation page with warnings."""
-    ngfw = get_object_or_404(
-        UserNGFW,
-        id=ngfw_id,
-        user=request.user,
-        deleted_at__isnull=True,
-    )
-
-    # Get ranges linked to this NGFW
-    linked_ranges = Range.objects.filter(
-        ngfw=ngfw,
-        status__in=[
-            Range.Status.PENDING,
-            Range.Status.PROVISIONING,
-            Range.Status.READY,
-            Range.Status.PAUSED,
-            Range.Status.RESUMING,
-        ],
-    )
-
-    context = {
-        "page_title": f"Deprovision {ngfw.name}",
-        "active_nav": "ngfw",
-        "ngfw": ngfw,
-        "linked_ranges": linked_ranges,
-    }
-    return render(request, "mission_control/assets/ngfw/deprovision.html", context)
-
-
-# -----------------------------------------------------------------------------
-# NGFW API Endpoints
-# -----------------------------------------------------------------------------
-
-
-@login_required
-@require_GET
-def api_ngfw_list(request):
-    """
-    List user's NGFWs as JSON.
-
-    Response (JSON):
-        - ngfws: List of NGFW objects with id, name, status
-    """
-    ngfws = UserNGFW.active_for_user(request.user)
-    return JsonResponse({"ngfws": [{"id": n.id, "name": n.name, "status": n.status} for n in ngfws]})
-
-
-@login_required
-@require_POST
-def api_ngfw_provision(request):
-    """
-    Start NGFW provisioning.
-
-    Request body (JSON):
-        - name: NGFW name (required)
-        - deployment_profile_id: ID of deployment profile (required)
-        - registration_method: 'pin' or 'otp' (required)
-        - scm_credential_id: ID of SCM credential (required for 'pin' method)
-        - otp_value: OTP value (required for 'otp' method)
-        - otp_folder: SCM folder name (required for 'otp' method)
-        - sls_region: SLS region (required for 'otp' method)
-
-    Response (JSON):
-        - id: Created NGFW ID
-        - name: NGFW name
-        - status: NGFW status
-    """
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    # Required fields
-    name = data.get("name", "").strip()
-    deployment_profile_id = data.get("deployment_profile_id")
-    registration_method = data.get("registration_method")
-
-    # Validate required fields
-    errors = []
-    if not name:
-        errors.append("name is required")
-    if not deployment_profile_id:
-        errors.append("deployment_profile_id is required")
-    if registration_method not in ("pin", "otp"):
-        errors.append("registration_method must be 'pin' or 'otp'")
-
-    if errors:
-        return JsonResponse({"error": ", ".join(errors)}, status=400)
-
-    # TODO: migrate to CMS - move credential validation to cms.services
-    # Validate deployment profile belongs to user
-    deployment_profile = (
-        Credential.active_for_user(request.user)
-        .filter(
-            id=deployment_profile_id,
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-        )
-        .first()
-    )
-    if not deployment_profile:
-        return JsonResponse({"error": "Deployment profile not found"}, status=400)
-
-    # Handle registration method-specific validation
-    scm_credential = None
-    if registration_method == "pin":
-        scm_credential_id = data.get("scm_credential_id")
-        if not scm_credential_id:
-            return JsonResponse({"error": "scm_credential_id required for PIN method"}, status=400)
-        scm_credential = (
-            Credential.active_for_user(request.user)
-            .filter(
-                id=scm_credential_id,
-                credential_type=Credential.Type.SCM,
-            )
-            .first()
-        )
-        if not scm_credential:
-            return JsonResponse({"error": "SCM credential not found"}, status=400)
-    else:  # otp
-        otp_value = data.get("otp_value", "").strip()
-        otp_folder = data.get("otp_folder", "").strip()
-        _sls_region = data.get("sls_region", "americas")
-        if not otp_value:
-            return JsonResponse({"error": "otp_value required for OTP method"}, status=400)
-        if not otp_folder:
-            return JsonResponse({"error": "otp_folder required for OTP method"}, status=400)
-
-    # Create NGFW record
-    # Note: Credentials are managed by CMS, not stored on UserNGFW.
-    # The credential IDs are validated above but will be passed to
-    # the provisioning backend through the CMS service interface.
-    ngfw = UserNGFW.objects.create(
-        user=request.user,
-        name=name,
-        status=UserNGFW.Status.PROVISIONING,
-    )
-
-    # Store OTP data if using OTP method (for provisioning task to use)
-    if registration_method == "otp":
-        # In a real implementation, this would be passed to the provisioning task
-        # For now, store in a way that can be retrieved by the provisioning backend
-        pass
-
-    logger.info(
-        "NGFW provisioning started: user=%s ngfw_id=%s name=%s method=%s",
-        request.user.email,
-        ngfw.id,
-        name,
-        registration_method,
-    )
-
-    # TODO: Trigger actual provisioning via engine service (Issue #414)
-    # For now, the NGFW is created with PROVISIONING status
-
-    return JsonResponse(
-        {
-            "id": ngfw.id,
-            "name": ngfw.name,
-            "status": ngfw.status,
-        },
-        status=201,
-    )
-
-
-@login_required
-@require_GET
-def api_ngfw_status(request, ngfw_id):
-    """
-    Get NGFW status.
-
-    Response (JSON):
-        - id: NGFW ID
-        - name: NGFW name
-        - status: Current status
-        - serial_number: Serial number (if provisioned)
-    """
-    ngfw = UserNGFW.active_for_user(request.user).filter(id=ngfw_id).first()
-    if not ngfw:
-        return JsonResponse({"error": "NGFW not found"}, status=404)
-
-    return JsonResponse(
-        {
-            "id": ngfw.id,
-            "name": ngfw.name,
-            "status": ngfw.status,
-            "serial_number": ngfw.serial_number,
-            "instance_id": ngfw.instance_id,
-        }
-    )
-
-
-@login_required
-@require_POST
-def api_ngfw_start(request, ngfw_id):
-    """
-    Start an NGFW (EC2 instance).
-
-    Only valid for NGFWs in 'ready' or 'stopped' status.
-
-    Response (JSON):
-        - id: NGFW ID
-        - status: New status (starting)
-    """
-    ngfw = UserNGFW.active_for_user(request.user).filter(id=ngfw_id).first()
-    if not ngfw:
-        return JsonResponse({"error": "NGFW not found"}, status=404)
-
-    # Validate current status
-    if ngfw.status not in (UserNGFW.Status.READY, UserNGFW.Status.STOPPED):
-        return JsonResponse(
-            {"error": f"Cannot start NGFW in '{ngfw.status}' status"},
-            status=400,
-        )
-
-    # Update status to starting
-    ngfw.status = UserNGFW.Status.STARTING
-    ngfw.save(update_fields=["status"])
-
-    # TODO: Trigger actual EC2 start via engine service (Issue #414)
-    # For now, simulate by setting to ACTIVE immediately
-    ngfw.status = UserNGFW.Status.ACTIVE
-    ngfw.last_started_at = timezone.now()
-    ngfw.save(update_fields=["status", "last_started_at"])
-
-    logger.info(
-        "NGFW started: user=%s ngfw_id=%s",
-        request.user.email,
-        ngfw.id,
-    )
-
-    return JsonResponse(
-        {
-            "id": ngfw.id,
-            "status": ngfw.status,
-        }
-    )
-
-
-@login_required
-@require_POST
-def api_ngfw_stop(request, ngfw_id):
-    """
-    Stop an NGFW (EC2 instance).
-
-    Only valid for NGFWs in 'active' status.
-
-    Response (JSON):
-        - id: NGFW ID
-        - status: New status (stopping/stopped)
-    """
-    ngfw = UserNGFW.active_for_user(request.user).filter(id=ngfw_id).first()
-    if not ngfw:
-        return JsonResponse({"error": "NGFW not found"}, status=404)
-
-    # Validate current status
-    if ngfw.status != UserNGFW.Status.ACTIVE:
-        return JsonResponse(
-            {"error": f"Cannot stop NGFW in '{ngfw.status}' status"},
-            status=400,
-        )
-
-    # Update status to stopping
-    ngfw.status = UserNGFW.Status.STOPPING
-    ngfw.save(update_fields=["status"])
-
-    # TODO: Trigger actual EC2 stop via engine service (Issue #414)
-    # For now, simulate by setting to STOPPED immediately
-    ngfw.status = UserNGFW.Status.STOPPED
-    ngfw.last_stopped_at = timezone.now()
-    ngfw.save(update_fields=["status", "last_stopped_at"])
-
-    logger.info(
-        "NGFW stopped: user=%s ngfw_id=%s",
-        request.user.email,
-        ngfw.id,
-    )
-
-    return JsonResponse(
-        {
-            "id": ngfw.id,
-            "status": ngfw.status,
-        }
-    )
-
-
-@login_required
-@require_POST
-def api_ngfw_deprovision(request, ngfw_id):
-    """
-    Deprovision an NGFW.
-
-    Request body (JSON):
-        - confirm_name: Must match NGFW name exactly
-
-    Response (JSON):
-        - id: NGFW ID
-        - status: New status (deprovisioning)
-    """
-    ngfw = UserNGFW.active_for_user(request.user).filter(id=ngfw_id).first()
-    if not ngfw:
-        return JsonResponse({"error": "NGFW not found"}, status=404)
-
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    confirm_name = data.get("confirm_name", "")
-    if not confirm_name:
-        return JsonResponse({"error": "confirm_name is required"}, status=400)
-
-    if confirm_name != ngfw.name:
-        return JsonResponse(
-            {"error": "Name confirmation does not match"},
-            status=400,
-        )
-
-    # Update status to deprovisioning
-    ngfw.status = UserNGFW.Status.DEPROVISIONING
-    ngfw.save(update_fields=["status"])
-
-    # TODO: Trigger actual deprovisioning via engine service (Issue #414)
-
-    logger.info(
-        "NGFW deprovisioning started: user=%s ngfw_id=%s",
-        request.user.email,
-        ngfw.id,
-    )
-
-    return JsonResponse(
-        {
-            "id": ngfw.id,
-            "status": ngfw.status,
-        }
-    )

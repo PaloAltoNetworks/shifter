@@ -20,54 +20,60 @@ class TestActiveRangeContextProcessor:
     # Happy path - authenticated user with active range
     # ---------------------------------------------------------------------
 
-    def test_returns_active_range_ref(self):
-        """Returns RangeRef when user has an active range."""
+    def test_returns_active_range_context(self):
+        """Returns RangeContext when user has an active range."""
         from mission_control.context_processors import active_range
-        from shared.schemas import RangeRef
+        from shared.schemas import RangeContext
 
         mock_request = MagicMock()
         mock_request.user.is_authenticated = True
         mock_request.user.id = 42
 
-        mock_range_ref = RangeRef(
+        mock_range_context = RangeContext(
             range_id=1,
             user_id=42,
+            scenario_id="basic",
             status=RangeStatus.READY,
+            instances=[],
+            agent_name="Test Agent",
         )
 
         with patch(
             "mission_control.context_processors.get_active_range",
-            return_value=mock_range_ref,
+            return_value=mock_range_context,
         ):
             result = active_range(mock_request)
 
         assert result["has_active_range"] is True
-        assert result["active_range"] is mock_range_ref
+        assert result["active_range"] is mock_range_context
         assert result["active_range"].status == RangeStatus.READY
 
     def test_returns_false_for_non_ready_range(self):
         """Returns has_active_range=False when range is not ready."""
         from mission_control.context_processors import active_range
-        from shared.schemas import RangeRef
+        from shared.schemas import RangeContext
 
         mock_request = MagicMock()
         mock_request.user.is_authenticated = True
         mock_request.user.id = 42
 
-        mock_range_ref = RangeRef(
+        mock_range_context = RangeContext(
             range_id=1,
             user_id=42,
+            scenario_id="basic",
             status=RangeStatus.PROVISIONING,
+            instances=[],
+            agent_name="Test Agent",
         )
 
         with patch(
             "mission_control.context_processors.get_active_range",
-            return_value=mock_range_ref,
+            return_value=mock_range_context,
         ):
             result = active_range(mock_request)
 
         assert result["has_active_range"] is False
-        assert result["active_range"] is mock_range_ref
+        assert result["active_range"] is mock_range_context
         assert result["active_range"].status == RangeStatus.PROVISIONING
 
     def test_returns_none_when_no_active_range(self):
@@ -155,6 +161,46 @@ class TestActiveRangeContextProcessor:
         assert result["has_active_range"] is False
         assert result["active_range"] is None
 
+    def test_handles_invalid_return_type_gracefully(self):
+        """Returns None when service returns invalid type (not RangeContext)."""
+        from mission_control.context_processors import active_range
+
+        mock_request = MagicMock()
+        mock_request.user.is_authenticated = True
+        mock_request.user.id = 42
+
+        # Return a dict instead of RangeContext
+        with patch(
+            "mission_control.context_processors.get_active_range",
+            return_value={"range_id": 1, "status": "ready"},
+        ):
+            result = active_range(mock_request)
+
+        assert result["has_active_range"] is False
+        assert result["active_range"] is None
+
+    def test_logs_error_on_invalid_return_type(self):
+        """Logs ERROR when service returns invalid type."""
+        from mission_control.context_processors import active_range
+
+        mock_request = MagicMock()
+        mock_request.user.is_authenticated = True
+        mock_request.user.id = 42
+
+        with (
+            patch("mission_control.context_processors.logger") as mock_logger,
+            patch(
+                "mission_control.context_processors.get_active_range",
+                return_value="not a RangeContext",
+            ),
+        ):
+            active_range(mock_request)
+
+        mock_logger.error.assert_called_once()
+        call_args = mock_logger.error.call_args[0]
+        assert "invalid type" in call_args[0]
+        assert "str" in call_args  # type name in args
+
     # ---------------------------------------------------------------------
     # Logging - verify logger methods are called
     # ---------------------------------------------------------------------
@@ -162,23 +208,26 @@ class TestActiveRangeContextProcessor:
     def test_logs_info_when_range_found(self):
         """Logs INFO when active range is found."""
         from mission_control.context_processors import active_range
-        from shared.schemas import RangeRef
+        from shared.schemas import RangeContext
 
         mock_request = MagicMock()
         mock_request.user.is_authenticated = True
         mock_request.user.id = 42
 
-        mock_range_ref = RangeRef(
+        mock_range_context = RangeContext(
             range_id=1,
             user_id=42,
+            scenario_id="basic",
             status=RangeStatus.READY,
+            instances=[],
+            agent_name="Test Agent",
         )
 
         with (
             patch("mission_control.context_processors.logger") as mock_logger,
             patch(
                 "mission_control.context_processors.get_active_range",
-                return_value=mock_range_ref,
+                return_value=mock_range_context,
             ),
         ):
             active_range(mock_request)
@@ -234,56 +283,64 @@ class TestActiveRangeContextProcessor:
         assert 42 in call_args
 
     # ---------------------------------------------------------------------
-    # RangeRef status checks
+    # RangeContext status checks
     # ---------------------------------------------------------------------
 
-    def test_uses_status_comparison_for_is_ready(self):
-        """Uses RangeStatus comparison for determining ready state."""
+    def test_uses_is_ready_property(self):
+        """Uses RangeContext.is_ready property for determining ready state."""
         from mission_control.context_processors import active_range
-        from shared.schemas import RangeRef
+        from shared.schemas import RangeContext
 
         mock_request = MagicMock()
         mock_request.user.is_authenticated = True
         mock_request.user.id = 42
 
-        # Create RangeRef with READY status
-        mock_range_ref = RangeRef(
+        # Create RangeContext with READY status
+        mock_range_context = RangeContext(
             range_id=1,
             user_id=42,
+            scenario_id="basic",
             status=RangeStatus.READY,
+            instances=[],
+            agent_name="Test Agent",
         )
 
         with patch(
             "mission_control.context_processors.get_active_range",
-            return_value=mock_range_ref,
+            return_value=mock_range_context,
         ):
             result = active_range(mock_request)
 
         # Verify has_active_range is True for READY status
         assert result["has_active_range"] is True
         assert result["active_range"].status == RangeStatus.READY
+        assert result["active_range"].is_ready is True
 
     def test_terminal_range_not_considered_active(self):
         """Terminal ranges (DESTROYED, FAILED) are not considered has_active_range."""
         from mission_control.context_processors import active_range
-        from shared.schemas import RangeRef
+        from shared.schemas import RangeContext
 
         mock_request = MagicMock()
         mock_request.user.is_authenticated = True
         mock_request.user.id = 42
 
         for status in [RangeStatus.DESTROYED, RangeStatus.FAILED]:
-            mock_range_ref = RangeRef(
+            mock_range_context = RangeContext(
                 range_id=1,
                 user_id=42,
+                scenario_id="basic",
                 status=status,
+                instances=[],
+                agent_name="Test Agent",
             )
 
             with patch(
                 "mission_control.context_processors.get_active_range",
-                return_value=mock_range_ref,
+                return_value=mock_range_context,
             ):
                 result = active_range(mock_request)
 
             assert result["has_active_range"] is False, f"Expected False for {status}"
             assert result["active_range"].status == status
+            assert result["active_range"].is_ready is False

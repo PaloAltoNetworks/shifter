@@ -7,6 +7,8 @@ from django.urls import reverse
 
 from cms.models import AgentConfig, OperatingSystem
 from engine.models import Range
+from shared.enums import RangeStatus
+from shared.schemas import RangeContext
 
 
 @pytest.fixture
@@ -50,13 +52,22 @@ def mock_provisioner():
 
 @pytest.mark.django_db
 class TestRangeStatus:
+    """Tests for get_range_status view.
+
+    The view now consumes RangeContext from cms.get_active_range().
+    Tests mock the CMS service layer to return RangeContext projections.
+    """
+
     def test_requires_login(self, client):
         response = client.get(reverse("mission_control:range_status"))
         assert response.status_code == 302  # Redirect to login
 
     def test_returns_no_range_when_none_exists(self, client, test_agent):
         client.force_login(test_agent.user)
-        response = client.get(reverse("mission_control:range_status"))
+
+        with patch("mission_control.views.get_active_range", return_value=None):
+            response = client.get(reverse("mission_control:range_status"))
+
         assert response.status_code == 200
         data = response.json()
         assert data["has_range"] is False
@@ -65,24 +76,87 @@ class TestRangeStatus:
     def test_returns_active_range(self, client, test_agent):
         client.force_login(test_agent.user)
 
-        # Create an active range
-        range_obj = Range.objects.create(
-            user=test_agent.user,
-            agent=test_agent,
-            status=Range.Status.READY,
-            victim_ip="10.0.1.100",  # Stored in DB but not exposed to client
-            chat_url="http://localhost:3000/chat/1",
+        # Create a RangeContext projection (what CMS service returns)
+        mock_range_context = RangeContext(
+            range_id=42,
+            user_id=test_agent.user.id,
+            scenario_id="basic",
+            status=RangeStatus.READY,
+            instances=[],
+            agent_name="Test XDR Agent",
         )
 
-        response = client.get(reverse("mission_control:range_status"))
+        with patch(
+            "mission_control.views.get_active_range",
+            return_value=mock_range_context,
+        ):
+            response = client.get(reverse("mission_control:range_status"))
+
         assert response.status_code == 200
         data = response.json()
         assert data["has_range"] is True
-        assert data["range"]["id"] == range_obj.id
+        assert data["range"]["range_id"] == 42
         assert data["range"]["status"] == "ready"
-        assert data["range"]["chat_url"] == "http://localhost:3000/chat/1"
-        # victim_ip intentionally not exposed to client (internal infra detail)
-        assert "victim_ip" not in data["range"]
+        assert data["range"]["agent_name"] == "Test XDR Agent"
+        assert data["range"]["scenario_id"] == "basic"
+        # Computed properties are included in model_dump
+        assert data["range"]["is_ready"] is True
+        assert data["range"]["is_terminal"] is False
+        assert data["range"]["is_active"] is True
+
+    def test_returns_provisioning_range(self, client, test_agent):
+        """Test range in provisioning state has correct computed properties."""
+        client.force_login(test_agent.user)
+
+        mock_range_context = RangeContext(
+            range_id=42,
+            user_id=test_agent.user.id,
+            scenario_id="basic",
+            status=RangeStatus.PROVISIONING,
+            instances=[],
+            agent_name="Test Agent",
+        )
+
+        with patch(
+            "mission_control.views.get_active_range",
+            return_value=mock_range_context,
+        ):
+            response = client.get(reverse("mission_control:range_status"))
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["has_range"] is True
+        assert data["range"]["status"] == "provisioning"
+        assert data["range"]["is_ready"] is False
+        assert data["range"]["is_terminal"] is False
+        assert data["range"]["is_active"] is True
+
+    def test_returns_destroying_range(self, client, test_agent):
+        """Test range in destroying state has correct computed properties."""
+        client.force_login(test_agent.user)
+
+        mock_range_context = RangeContext(
+            range_id=42,
+            user_id=test_agent.user.id,
+            scenario_id="basic",
+            status=RangeStatus.DESTROYING,
+            instances=[],
+            agent_name="Test Agent",
+        )
+
+        with patch(
+            "mission_control.views.get_active_range",
+            return_value=mock_range_context,
+        ):
+            response = client.get(reverse("mission_control:range_status"))
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["has_range"] is True
+        assert data["range"]["status"] == "destroying"
+        assert data["range"]["is_ready"] is False
+        assert data["range"]["is_terminal"] is False
+        assert data["range"]["is_active"] is True
 
 
 @pytest.mark.django_db

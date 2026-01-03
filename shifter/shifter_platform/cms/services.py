@@ -18,6 +18,8 @@ from engine import destroy_range as engine_destroy_range
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+    from shared.schemas import RangeContext, RangeRef
+
 logger = logging.getLogger(__name__)
 
 
@@ -152,14 +154,14 @@ def delete_agent(user: User, agent_id: int) -> None:
         raise
 
 
-def list_agents(user: User) -> list[Any]:
-    """Get user's agents.
+def list_agents(user: User) -> list[dict[str, Any]]:
+    """Get user's agents as projection dicts.
 
     Args:
         user: User whose agents to retrieve
 
     Returns:
-        List of AgentConfig instances belonging to the user
+        List of agent dicts with keys: id, name, os_name, os_slug, file_size_mb
 
     Raises:
         TypeError: If user is None or invalid type
@@ -181,25 +183,24 @@ def list_agents(user: User) -> list[Any]:
     logger.debug("list_agents called for user_id=%s", user.id)
 
     try:
-        result = AgentConfig.active_for_user(user)
+        result = AgentConfig.active_for_user(user).select_related("os")
 
         # Validate response from model
         if result is None:
             logger.error("list_agents: model returned None for user_id=%s", user.id)
             raise TypeError("Model returned None instead of iterable")
 
-        # Convert to list (handles QuerySet, tuple, generator)
-        agents = list(result)
-
-        # Validate list contents
-        for item in agents:
-            if not isinstance(item, AgentConfig):
-                logger.error(
-                    "list_agents: model returned invalid item type %s for user_id=%s",
-                    type(item).__name__,
-                    user.id,
-                )
-                raise TypeError(f"Model returned list containing {type(item).__name__}, expected AgentConfig")
+        # Convert to projection dicts
+        agents = [
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "os_name": agent.os.name,
+                "os_slug": agent.os.slug,
+                "file_size_mb": agent.file_size_mb,
+            }
+            for agent in result
+        ]
 
         logger.debug("list_agents returning %d agents for user_id=%s", len(agents), user.id)
         return agents
@@ -749,7 +750,72 @@ def get_range(user: User, range_id: int) -> Any:
         raise
 
 
-def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False) -> int:
+def get_active_range(user: User) -> RangeRef | None:
+    """Get user's active (non-deleted) range as a RangeRef projection.
+
+    Returns the most recently created range that:
+    - Belongs to the user
+    - Is not soft-deleted (deleted_at is None)
+
+    Note: Terminal statuses (DESTROYED, FAILED) automatically set deleted_at
+    via RangeInstance.save(), so filtering by deleted_at is sufficient.
+
+    Used by Mission Control to check if user has an active range.
+    Returns a RangeRef (minimal reference projection) rather than raw model to:
+    - Provide only the essential identifiers (range_id, user_id, status)
+    - Validate data before returning to caller
+    - Hide implementation details from presentation layer
+
+    Args:
+        user: User whose active range to retrieve
+
+    Returns:
+        RangeRef if user has an active range, None otherwise
+
+    Raises:
+        TypeError: If user is None or invalid type
+        ValidationError: If RangeRef creation fails validation
+        Exception: Database errors are logged and propagated
+    """
+    from shared.schemas import RangeRef
+
+    # Input validation
+    if user is None:
+        logger.error("get_active_range called with None user")
+        raise TypeError("user cannot be None")
+
+    if not hasattr(user, "id"):
+        logger.error("get_active_range called with invalid user type: %s", type(user).__name__)
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+
+    logger.debug("get_active_range called for user_id=%s", user.id)
+
+    try:
+        # Query for active ranges (non-deleted)
+        # Terminal statuses auto-set deleted_at, so this is sufficient
+        instance = RangeInstance.active.filter(user_id=user.id).order_by("-created_at").first()
+    except TypeError:
+        # Re-raise TypeErrors (shouldn't happen but be defensive)
+        raise
+    except Exception:
+        logger.exception("Error in get_active_range for user_id=%s", user.id)
+        raise
+
+    if instance:
+        logger.debug(
+            "get_active_range found range_id=%s status=%s for user_id=%s",
+            instance.range_id,
+            instance.status,
+            user.id,
+        )
+        # RangeRef.from_instance validates data before returning
+        return RangeRef.from_instance(instance)
+    else:
+        logger.debug("get_active_range found no active range for user_id=%s", user.id)
+        return None
+
+
+def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False) -> RangeContext:
     """Validate, hydrate, and trigger range provisioning.
 
     CMS validates scenario and agent requirements, hydrates the scenario
@@ -762,7 +828,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
         ngfw_enabled: Whether to deploy VM-Series NGFW inline
 
     Returns:
-        int: The range_id of the created range
+        RangeContext: Template-safe projection of the created range
 
     Raises:
         TypeError: If user is None, invalid type, or parameters are invalid
@@ -837,7 +903,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
         range_id = engine_create_range(range_request)
 
         # 6. Store RangeInstance record
-        RangeInstance.objects.create(
+        range_instance = RangeInstance.objects.create(
             range_id=range_id,
             scenario_id=scenario,
             user_id=user.id,
@@ -851,7 +917,10 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
             user.id,
         )
 
-        return range_id
+        # 7. Return RangeContext projection
+        from shared.schemas import RangeContext
+
+        return RangeContext.from_instance(range_instance)
 
     except (TypeError, ValueError, CMSError):
         # Re-raise known errors

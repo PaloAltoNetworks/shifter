@@ -1,4 +1,4 @@
-"""WebSocket consumers for terminal SSH connections and NGFW provisioning status."""
+"""WebSocket consumers for terminal SSH connections and range status updates."""
 
 import asyncio
 import contextlib
@@ -11,8 +11,8 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import AnonymousUser
 
 from engine.models import Range
+from engine.ssh import SSHConnection, SSHConnectionError
 from mission_control.services.secrets import SecretsError, get_ssh_key
-from mission_control.services.ssh import SSHConnection, SSHConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -326,3 +326,90 @@ class SSHConsumer(AsyncWebsocketConsumer):
         except Exception:
             logger.exception("Unexpected error reading SSH output")
             await self.close(code=4500)
+
+
+class RangeStatusConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for real-time range status updates.
+
+    Pushes status updates to browser when range lifecycle events occur.
+    Uses "hydrate on connect, stream deltas" pattern.
+
+    URL pattern: ws/range-status/<range_id>/
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.range_id: int | None = None
+        self.group_name: str | None = None
+
+    async def connect(self):
+        """Handle WebSocket connection - join range group and send initial state."""
+        from shared.channels.groups import range_event_group
+
+        # Verify authentication
+        user = self.scope.get("user")
+        if not user or isinstance(user, AnonymousUser):
+            logger.warning("Unauthenticated WebSocket connection attempt to range status")
+            await self.close(code=4001)
+            return
+
+        # Get range_id from URL
+        self.range_id = int(self.scope["url_route"]["kwargs"]["range_id"])
+        self.group_name = range_event_group(self.range_id)
+
+        # Verify user owns this range
+        try:
+            range_obj = await sync_to_async(Range.objects.get)(id=self.range_id)
+            if range_obj.user_id != user.id:
+                logger.warning(
+                    "User %s attempted to subscribe to range %s owned by %s",
+                    user.id,
+                    self.range_id,
+                    range_obj.user_id,
+                )
+                await self.close(code=4003)
+                return
+        except Range.DoesNotExist:
+            logger.warning("Range %s not found for status subscription", self.range_id)
+            await self.close(code=4004)
+            return
+
+        # Join the range group
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+
+        # Accept the connection
+        await self.accept()
+
+        # Hydrate: send current status immediately
+        await self.send(text_data=json.dumps({
+            "type": "status",
+            "range_id": self.range_id,
+            "status": range_obj.status,
+        }))
+
+        logger.info("Range status WebSocket connected for range %s", self.range_id)
+
+    async def disconnect(self, close_code):
+        """Handle WebSocket disconnection - leave range group."""
+        if self.group_name:
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+        logger.info(
+            "Range status WebSocket disconnected for range %s (code: %s)",
+            self.range_id,
+            close_code,
+        )
+
+    async def range_status(self, event):
+        """Handle range status update from channel layer.
+
+        Called when a status update is broadcast to the range group.
+        """
+        await self.send(text_data=json.dumps({
+            "type": "status",
+            "range_id": event.get("range_id"),
+            "status": event.get("new_status"),
+            "old_status": event.get("old_status"),
+            "error_message": event.get("error_message"),
+        }))

@@ -81,7 +81,7 @@ class Range(models.Model):
     range_config = models.JSONField(
         null=True,
         blank=True,
-        help_text="Full RangeRequest from CMS (scenario_id, user_id, instances)",
+        help_text="Full RangeSpec from CMS (scenario_id, user_id, instances)",
     )
     provisioned_instances = models.JSONField(
         null=True,

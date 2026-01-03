@@ -65,6 +65,13 @@ repos:
         files: ^shifter/shifter_platform/static/css/.*\.css$
         types: [css]
 
+      - id: jest-shifter-platform
+        name: jest (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && npm test'
+        language: system
+        files: ^shifter/shifter_platform/static/js/.*\.js$
+        pass_filenames: false
+
   # Packer tests
   - repo: local
     hooks:

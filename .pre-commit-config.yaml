@@ -116,3 +116,22 @@ repos:
     hooks:
       - id: shellcheck
         files: ^scripts/
+
+  # Architecture checks (informational - non-blocking)
+  - repo: local
+    hooks:
+      - id: check-layer-imports
+        name: architecture (layer imports)
+        entry: bash -c 'python scripts/check_layer_imports.py || true'
+        language: system
+        files: ^shifter/shifter_platform/
+        pass_filenames: false
+        verbose: true
+
+      - id: check-model-fks
+        name: architecture (model FKs)
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python manage.py check_model_fks || true'
+        language: system
+        files: ^shifter/shifter_platform/
+        pass_filenames: false
+        verbose: true

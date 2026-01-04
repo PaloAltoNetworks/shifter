@@ -134,3 +134,56 @@ jobs:
           files: shifter/shifter_platform/coverage/lcov.info
           flags: shifter-javascript
           fail_ci_if_error: false
+
+  architecture:
+    name: Architecture Checks
+    runs-on: self-hosted
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: shifter
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
+      - name: Check layer imports
+        run: python scripts/check_layer_imports.py -o layer-imports.json
+        continue-on-error: true
+
+      - name: Check model FKs
+        working-directory: shifter/shifter_platform
+        env:
+          TESTING: "1"
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: shifter
+          DB_USER: test
+          DB_PASSWORD: test
+        run: uv run python manage.py check_model_fks -o model-fks.json
+        continue-on-error: true
+
+      - name: Upload architecture reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-reports
+          path: |
+            layer-imports.json
+            shifter/shifter_platform/model-fks.json
+          retention-days: 30

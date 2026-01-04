@@ -1,8 +1,9 @@
 """Tests for check_model_fks management command."""
 
+import contextlib
 import json
 from io import StringIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.core.management import call_command
@@ -109,12 +110,8 @@ class TestCheckModelFksCommand:
     def test_command_json_output(self):
         """Command outputs valid JSON with --json flag."""
         out = StringIO()
-        try:
-            call_command(
-                "check_model_fks", "--json", "-q", stdout=out, stderr=StringIO()
-            )
-        except SystemExit:
-            pass
+        with contextlib.suppress(SystemExit):
+            call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
 
         output = out.getvalue()
         data = json.loads(output)
@@ -127,12 +124,8 @@ class TestCheckModelFksCommand:
     def test_command_json_has_all_layers(self):
         """JSON output includes all layers."""
         out = StringIO()
-        try:
-            call_command(
-                "check_model_fks", "--json", "-q", stdout=out, stderr=StringIO()
-            )
-        except SystemExit:
-            pass
+        with contextlib.suppress(SystemExit):
+            call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
 
         data = json.loads(out.getvalue())
 
@@ -142,12 +135,8 @@ class TestCheckModelFksCommand:
     def test_command_stats_structure(self):
         """Stats in JSON output have expected structure."""
         out = StringIO()
-        try:
-            call_command(
-                "check_model_fks", "--json", "-q", stdout=out, stderr=StringIO()
-            )
-        except SystemExit:
-            pass
+        with contextlib.suppress(SystemExit):
+            call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
 
         data = json.loads(out.getvalue())
         stats = data["stats"]
@@ -162,10 +151,8 @@ class TestCheckModelFksCommand:
         """--quiet flag suppresses summary output."""
         out = StringIO()
         err = StringIO()
-        try:
+        with contextlib.suppress(SystemExit):
             call_command("check_model_fks", "--json", "-q", stdout=out, stderr=err)
-        except SystemExit:
-            pass
 
         # Summary should not appear
         assert "MODEL FK SUMMARY" not in out.getvalue()
@@ -174,26 +161,23 @@ class TestCheckModelFksCommand:
     def test_command_shows_summary_by_default(self):
         """Summary is shown by default."""
         out = StringIO()
-        try:
+        with contextlib.suppress(SystemExit):
             call_command("check_model_fks", stdout=out, stderr=StringIO())
-        except SystemExit:
-            pass
 
         assert "MODEL FK SUMMARY" in out.getvalue()
 
     def test_command_output_file(self, tmp_path):
         """--output flag saves JSON to file."""
         output_file = tmp_path / "report.json"
-        try:
+        with contextlib.suppress(SystemExit):
             call_command(
                 "check_model_fks",
-                "-o", str(output_file),
+                "-o",
+                str(output_file),
                 "-q",
                 stdout=StringIO(),
                 stderr=StringIO(),
             )
-        except SystemExit:
-            pass
 
         assert output_file.exists()
         data = json.loads(output_file.read_text())
@@ -220,24 +204,18 @@ class TestCheckModelFksCommand:
             return_value=mock_stats,
         ):
             with pytest.raises(SystemExit) as exc_info:
-                call_command(
-                    "check_model_fks", "-q", stdout=StringIO(), stderr=StringIO()
-                )
+                call_command("check_model_fks", "-q", stdout=StringIO(), stderr=StringIO())
             assert exc_info.value.code == 1
 
     def test_reverse_relations_filtered_out(self):
         """Reverse relations (ManyToOneRel etc.) are not included."""
         out = StringIO()
-        try:
-            call_command(
-                "check_model_fks", "--json", "-q", stdout=out, stderr=StringIO()
-            )
-        except SystemExit:
-            pass
+        with contextlib.suppress(SystemExit):
+            call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
 
         data = json.loads(out.getvalue())
 
         # Check that no field_type is a reverse relation
-        for layer, relationships in data["relationships"].items():
+        for _layer, relationships in data["relationships"].items():
             for rel in relationships:
                 assert rel["field_type"] not in REVERSE_RELATION_TYPES

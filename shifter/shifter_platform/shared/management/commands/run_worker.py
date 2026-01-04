@@ -86,9 +86,7 @@ class Command(BaseCommand):
         handler: Callable = _import_handler(config["handler"])
 
         if not queue_url:
-            self.stderr.write(
-                self.style.ERROR(f"SQS URL not configured for queue '{self.queue_name}'")
-            )
+            self.stderr.write(self.style.ERROR(f"SQS URL not configured for queue '{self.queue_name}'"))
             sys.exit(1)
 
         # Set up heartbeat file for health monitoring

@@ -8,7 +8,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from shared.schemas import RangeSpec
+from shared.schemas import RangeContext, RangeSpec
+from shared.enums import RangeStatus
+from shared.enums import CANCELLABLE_STATUSES, TERMINAL_STATUSES
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -140,7 +142,7 @@ def destroy_range(range_id: int) -> bool:
     return True
 
 
-def cancel_range(range_id: int) -> bool:
+def cancel_range(range_ctx: RangeContext) -> None:
     """Cancel in-progress provisioning.
 
     Only works for ranges in PENDING or PROVISIONING status.
@@ -151,41 +153,72 @@ def cancel_range(range_id: int) -> bool:
     to abort and clean up. See GitHub issue for tracking.
 
     Args:
-        range_id: The ID of the range to cancel.
+        range_ctx: RangeContext with range_id and metadata.
 
     Returns:
-        True if range was cancelled.
-        False if range not found or not in a cancellable status.
-    """
-    from django.utils import timezone
+        None
 
+    Raises:
+        TypeError: If range_ctx is None or not a RangeContext.
+        ValueError: If range_ctx.range_id is None or negative.
+    """
+    # Input validation
+    if range_ctx is None:
+        logger.error("cancel_range called with None range_ctx")
+        raise TypeError("range_ctx cannot be None")
+
+    if not isinstance(range_ctx, RangeContext):
+        logger.error(
+            "cancel_range called with invalid type: %s",
+            type(range_ctx).__name__,
+        )
+        raise TypeError(
+            f"range_ctx must be RangeContext, got {type(range_ctx).__name__}"
+        )
+
+    if range_ctx.range_id is None:
+        logger.error("cancel_range called with None range_id")
+        raise ValueError("range_ctx.range_id cannot be None")
+
+    if not isinstance(range_ctx.range_id, int) or range_ctx.range_id < 0:
+        logger.error(
+            "cancel_range called with invalid range_id: %s",
+            range_ctx.range_id,
+        )
+        raise ValueError("range_ctx.range_id must be a non-negative integer")
+
+    logger.debug(
+        "cancel_range: range_id=%s user_id=%s status=%s",
+        range_ctx.range_id,
+        range_ctx.user_id,
+        range_ctx.status,
+    )
     from engine.models import Range
 
-    logger.debug("cancel_range: range_id=%s", range_id)
+    range_id = range_ctx.range_id
 
     try:
         range_obj = Range.objects.get(id=range_id)
     except Range.DoesNotExist:
         logger.warning("cancel_range: range not found range_id=%s", range_id)
-        return False
+        return
 
-    # Only cancel ranges in early lifecycle
-    if range_obj.status not in Range.CANCELLABLE_STATUSES:
+    if range_ctx.status not in CANCELLABLE_STATUSES:
         logger.warning(
             "cancel_range: range not cancellable range_id=%s status=%s",
             range_id,
-            range_obj.status,
+            range_ctx.status,
         )
-        return False
+        return
 
-    # Mark as destroyed immediately
-    range_obj.status = Range.Status.DESTROYED
-    range_obj.destroyed_at = timezone.now()
-    range_obj.save(update_fields=["status", "destroyed_at"])
+    range_ctx.status = RangeStatus.DESTROYING
+    range_obj.status = Range.Status.DESTROYING
+    range_obj.save(update_fields=["status"])
+
+    # Provisioner will poll for status and destroy when it sees DESTROYING
+    # accept small risk of race condition. TODO: #465
 
     logger.info("cancel_range: cancelled range_id=%s", range_id)
-
-    return True
 
 
 def get_range_status(range_id: int) -> dict[str, Any] | None:

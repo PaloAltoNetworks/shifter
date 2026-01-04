@@ -46,20 +46,18 @@ class TestRangeModel:
         assert Range.Status.FAILED == "failed"
 
     def test_terminal_statuses_defined(self):
-        """Range.TERMINAL_STATUSES is defined."""
-        from engine.models import Range
+        """shared.enums.TERMINAL_STATUSES contains terminal states."""
+        from shared.enums import TERMINAL_STATUSES, RangeStatus
 
-        assert hasattr(Range, "TERMINAL_STATUSES")
-        assert Range.Status.DESTROYED in Range.TERMINAL_STATUSES
-        assert Range.Status.FAILED in Range.TERMINAL_STATUSES
+        assert RangeStatus.DESTROYED in TERMINAL_STATUSES
+        assert RangeStatus.FAILED in TERMINAL_STATUSES
 
     def test_cancellable_statuses_defined(self):
-        """Range.CANCELLABLE_STATUSES is defined."""
-        from engine.models import Range
+        """shared.enums.CANCELLABLE_STATUSES contains cancellable states."""
+        from shared.enums import CANCELLABLE_STATUSES, RangeStatus
 
-        assert hasattr(Range, "CANCELLABLE_STATUSES")
-        assert Range.Status.PENDING in Range.CANCELLABLE_STATUSES
-        assert Range.Status.PROVISIONING in Range.CANCELLABLE_STATUSES
+        assert RangeStatus.PENDING in CANCELLABLE_STATUSES
+        assert RangeStatus.PROVISIONING in CANCELLABLE_STATUSES
 
     # -------------------------------------------------------------------------
     # Model method tests

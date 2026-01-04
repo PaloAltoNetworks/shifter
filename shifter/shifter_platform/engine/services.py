@@ -171,9 +171,7 @@ def cancel_range(range_ctx: RangeContext) -> None:
             "cancel_range called with invalid type: %s",
             type(range_ctx).__name__,
         )
-        raise TypeError(
-            f"range_ctx must be RangeContext, got {type(range_ctx).__name__}"
-        )
+        raise TypeError(f"range_ctx must be RangeContext, got {type(range_ctx).__name__}")
 
     if range_ctx.range_id is None:
         logger.error("cancel_range called with None range_id")

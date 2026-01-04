@@ -8,8 +8,6 @@ Infrastructure lifecycle models for Shifter platform.
 from django.conf import settings
 from django.db import models, transaction
 
-from shared.enums import CANCELLABLE_STATUSES, TERMINAL_STATUSES
-
 
 class Range(models.Model):
     """User's cyber range instance with lifecycle management."""
@@ -23,7 +21,6 @@ class Range(models.Model):
         DESTROYING = "destroying", "Destroying"
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
-
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
     cms_user_id = models.PositiveIntegerField(

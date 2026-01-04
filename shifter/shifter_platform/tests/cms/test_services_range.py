@@ -836,24 +836,53 @@ class TestDestroyRange:
         from cms.models import RangeInstance
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range) as mock_get,
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
             patch("cms.services.engine_destroy_range"),
         ):
+            mock_ctx_cls.from_instance.return_value = Mock(range_id=42)
             services.destroy_range(user, 42)
             mock_get.assert_called_once_with(user, 42)
 
-    def test_calls_engine_destroy_with_range_id(self, user):
-        """Service delegates to engine.destroy_range with range_id."""
+    def test_updates_status_to_destroying(self, user):
+        """Service sets status to DESTROYING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import RangeStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
+        with (
+            patch.object(services, "get_range", return_value=mock_range),
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
+            patch("cms.services.engine_destroy_range"),
+        ):
+            mock_ctx_cls.from_instance.return_value = Mock(range_id=42)
+            services.destroy_range(user, 42)
+
+            # Verify status was set
+            assert mock_range.status == RangeStatus.DESTROYING.value
+            # Verify save was called with update_fields
+            mock_range.save.assert_called_once_with(update_fields=["status"])
+
+    def test_calls_engine_destroy_with_range_context(self, user):
+        """Service passes RangeContext (not range_id) to engine."""
         from cms.models import RangeInstance
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
+        mock_ctx = Mock(range_id=42)
         with (
             patch.object(services, "get_range", return_value=mock_range),
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
             patch("cms.services.engine_destroy_range") as mock_destroy,
         ):
+            mock_ctx_cls.from_instance.return_value = mock_ctx
             services.destroy_range(user, 42)
-            mock_destroy.assert_called_once_with(42)
+
+            # Verify engine was called with RangeContext
+            mock_destroy.assert_called_once_with(mock_ctx)
 
     # -------------------------------------------------------------------------
     # Service returns None (void function)
@@ -864,10 +893,13 @@ class TestDestroyRange:
         from cms.models import RangeInstance
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
             patch("cms.services.engine_destroy_range"),
         ):
+            mock_ctx_cls.from_instance.return_value = Mock(range_id=42)
             result = services.destroy_range(user, 42)
             assert result is None
 
@@ -880,11 +912,14 @@ class TestDestroyRange:
         from cms.models import RangeInstance
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
             patch("cms.services.engine_destroy_range"),
             caplog.at_level(logging.DEBUG, logger="cms.services"),
         ):
+            mock_ctx_cls.from_instance.return_value = Mock(range_id=42)
             services.destroy_range(user, 42)
         assert str(user.id) in caplog.text
         assert "42" in caplog.text
@@ -894,11 +929,14 @@ class TestDestroyRange:
         from cms.models import RangeInstance
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
             patch("cms.services.engine_destroy_range"),
             caplog.at_level(logging.DEBUG, logger="cms.services"),
         ):
+            mock_ctx_cls.from_instance.return_value = Mock(range_id=42)
             services.destroy_range(user, 42)
         assert "42" in caplog.text
 
@@ -924,12 +962,15 @@ class TestDestroyRange:
         from engine import EngineError
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
             patch("cms.services.engine_destroy_range", side_effect=EngineError("No range to destroy")),
             caplog.at_level(logging.ERROR, logger="cms.services"),
             pytest.raises(EngineError),
         ):
+            mock_ctx_cls.from_instance.return_value = Mock(range_id=42)
             services.destroy_range(user, 42)
         assert "error" in caplog.text.lower() or "exception" in caplog.text.lower()
 
@@ -964,11 +1005,14 @@ class TestDestroyRange:
         from engine import EngineError
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
             patch("cms.services.engine_destroy_range", side_effect=EngineError("No range to destroy")),
             pytest.raises(EngineError, match="No range to destroy"),
         ):
+            mock_ctx_cls.from_instance.return_value = Mock(range_id=42)
             services.destroy_range(user, 42)
 
     def test_propagates_unexpected_exception(self, user):
@@ -976,11 +1020,14 @@ class TestDestroyRange:
         from cms.models import RangeInstance
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
+            patch("shared.schemas.RangeContext") as mock_ctx_cls,
             patch("cms.services.engine_destroy_range", side_effect=Exception("DB connection failed")),
             pytest.raises(Exception, match="DB connection failed"),
         ):
+            mock_ctx_cls.from_instance.return_value = Mock(range_id=42)
             services.destroy_range(user, 42)
 
     # -------------------------------------------------------------------------

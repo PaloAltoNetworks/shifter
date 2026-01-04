@@ -69,7 +69,7 @@ class TestStartEcsTask:
             assert call_kwargs["launchType"] == "FARGATE"
 
     def test_passes_range_id_user_id_and_command_to_container(self, settings):
-        """Function passes range_id, user_id, and command to container overrides."""
+        """Function passes resource type, command, range_id, and user_id to container overrides."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -90,12 +90,8 @@ class TestStartEcsTask:
             call_kwargs = mock_ecs.run_task.call_args[1]
             overrides = call_kwargs["overrides"]["containerOverrides"][0]
             command = overrides["command"]
-            # Verify range_id is passed
-            assert "99" in command or 99 in command
-            # Verify user_id is passed
-            assert "7" in command or 7 in command
-            # Verify command is passed
-            assert "destroy" in command
+            # Verify exact command format: ["range", "destroy", "--range-id", "99", "--user-id", "7"]
+            assert command == ["range", "destroy", "--range-id", "99", "--user-id", "7"]
 
     # -------------------------------------------------------------------------
     # Configuration - ECS not configured

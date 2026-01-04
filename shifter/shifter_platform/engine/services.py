@@ -8,9 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from shared.enums import CANCELLABLE_STATUSES, RangeStatus
 from shared.schemas import RangeContext, RangeSpec
-from shared.enums import RangeStatus
-from shared.enums import CANCELLABLE_STATUSES, TERMINAL_STATUSES
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -92,14 +91,14 @@ def create_range(request: RangeSpec) -> int:
     return range_obj.id
 
 
-def destroy_range(range_id: int) -> bool:
+def destroy_range(request: RangeContext) -> bool:
     """Tear down range infrastructure.
 
     Sets status to DESTROYING and triggers async ECS teardown.
     Idempotent: returns True if range is already being destroyed.
 
     Args:
-        range_id: The ID of the range to destroy.
+        request: RangeContext with range_id and metadata.
 
     Returns:
         True if range exists and destruction initiated (or already in progress).
@@ -108,31 +107,31 @@ def destroy_range(range_id: int) -> bool:
     from engine.ecs import start_teardown
     from engine.models import Range
 
-    logger.debug("destroy_range: range_id=%s", range_id)
+    logger.debug("destroy_range: range_id=%s", request.range_id)
 
     try:
-        range_obj = Range.objects.get(id=range_id)
+        range_obj = Range.objects.get(id=request.range_id)
     except Range.DoesNotExist:
-        logger.warning("destroy_range: range not found range_id=%s", range_id)
+        logger.warning("destroy_range: range not found range_id=%s", request.range_id)
         return False
 
     # Already destroyed - nothing to do
-    if range_obj.status == Range.Status.DESTROYED:
-        logger.warning("destroy_range: range already destroyed range_id=%s", range_id)
+    if range_obj.status == RangeStatus.DESTROYED:
+        logger.warning("destroy_range: range already destroyed range_id=%s", request.range_id)
         return False
 
     # Already destroying - idempotent success
-    if range_obj.status == Range.Status.DESTROYING:
-        logger.info("destroy_range: range already destroying range_id=%s", range_id)
+    if range_obj.status == RangeStatus.DESTROYING:
+        logger.info("destroy_range: range already destroying range_id=%s", request.range_id)
         return True
 
     # Set status and trigger teardown
-    range_obj.status = Range.Status.DESTROYING
+    range_obj.status = RangeStatus.DESTROYING.value
     range_obj.save(update_fields=["status"])
 
-    logger.info("destroy_range: set status to DESTROYING range_id=%s", range_id)
+    logger.info("destroy_range: set status to DESTROYING range_id=%s", request.range_id)
 
-    task_arn = start_teardown(range_id, range_obj.cms_user_id)
+    task_arn = start_teardown(request.range_id, request.user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn

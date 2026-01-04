@@ -8,6 +8,8 @@ Infrastructure lifecycle models for Shifter platform.
 from django.conf import settings
 from django.db import models, transaction
 
+from shared.enums import CANCELLABLE_STATUSES, TERMINAL_STATUSES
+
 
 class Range(models.Model):
     """User's cyber range instance with lifecycle management."""
@@ -22,9 +24,6 @@ class Range(models.Model):
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
 
-    # Status groupings for lifecycle queries
-    TERMINAL_STATUSES: frozenset[str]  # Range has reached end of lifecycle
-    CANCELLABLE_STATUSES: frozenset[str]  # Range can be cancelled (early lifecycle only)
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
     cms_user_id = models.PositiveIntegerField(
@@ -289,18 +288,3 @@ class Range(models.Model):
         if not victims:
             return None
         return victims[0].get("private_ip")
-
-
-# Define Range status groupings (after class definition to reference Status enum)
-Range.TERMINAL_STATUSES = frozenset(
-    {
-        Range.Status.DESTROYED,
-        Range.Status.FAILED,
-    }
-)
-Range.CANCELLABLE_STATUSES = frozenset(
-    {
-        Range.Status.PENDING,
-        Range.Status.PROVISIONING,
-    }
-)

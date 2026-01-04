@@ -450,18 +450,13 @@ class TestRunDestroy:
         mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
-        with (
-            patch("main.publish_status_update") as mock_status,
-            patch("main.publish_destroyed") as mock_destroyed,
-        ):
+        with patch("main.publish_destroyed") as mock_destroyed:
             from main import _run_destroy
 
             env = os.environ.copy()
             _run_destroy(42, 7, "range-42", env)
 
-            # Verify events published with correct user_id
-            mock_status.assert_called_once()
-            assert mock_status.call_args[1]["user_id"] == 7
+            # Verify destroyed event published with correct user_id
             mock_destroyed.assert_called_once()
             assert mock_destroyed.call_args[1]["user_id"] == 7
 
@@ -471,13 +466,12 @@ class TestRunDestroy:
         mock_result.returncode = 1
         mock_result.stderr = "Destroy failed"
 
-        with patch("main.publish_status_update"):
-            from main import _run_destroy
+        from main import _run_destroy
 
-            env = os.environ.copy()
+        env = os.environ.copy()
 
-            with pytest.raises(Exception, match="Pulumi destroy failed"):
-                _run_destroy(42, 7, "range-42", env)
+        with pytest.raises(Exception, match="Pulumi destroy failed"):
+            _run_destroy(42, 7, "range-42", env)
 
     def test_run_destroy_stack_removed(self, mock_env_vars, mock_boto3_clients, mocker):
         """Stack should be removed after successful destroy."""
@@ -490,10 +484,7 @@ class TestRunDestroy:
 
         mock_run = mocker.patch("subprocess.run", side_effect=side_effect)
 
-        with (
-            patch("main.publish_status_update"),
-            patch("main.publish_destroyed"),
-        ):
+        with patch("main.publish_destroyed"):
             from main import _run_destroy
 
             env = os.environ.copy()
@@ -1175,28 +1166,6 @@ class TestEventPublishing:
             assert call_kwargs["range_id"] == 42
             assert call_kwargs["user_id"] == 7
 
-    def test_run_destroy_publishes_status_update_event(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
-    ):
-        """Destroy flow should publish status update events via SNS."""
-        monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
-
-        mock_run, mock_result = mock_subprocess
-        mock_result.returncode = 0
-
-        with (
-            patch("main.publish_status_update") as mock_publish,
-            patch("main.publish_destroyed"),
-        ):
-            from main import _run_destroy
-
-            env = os.environ.copy()
-            _run_destroy(42, 7, "range-42", env)
-
-            # Verify status update was published with correct user_id
-            mock_publish.assert_called()
-            assert mock_publish.call_args[1]["user_id"] == 7
-
     def test_run_destroy_publishes_destroyed_event(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
     ):
@@ -1206,10 +1175,7 @@ class TestEventPublishing:
         mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
-        with (
-            patch("main.publish_status_update"),
-            patch("main.publish_destroyed") as mock_publish,
-        ):
+        with patch("main.publish_destroyed") as mock_publish:
             from main import _run_destroy
 
             env = os.environ.copy()

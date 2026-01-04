@@ -450,16 +450,20 @@ class TestRunDestroy:
         mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
-        with patch("main.update_range_status") as mock_update:
+        with (
+            patch("main.publish_status_update") as mock_status,
+            patch("main.publish_destroyed") as mock_destroyed,
+        ):
             from main import _run_destroy
 
             env = os.environ.copy()
-            _run_destroy(42, "range-42", env)
+            _run_destroy(42, 7, "range-42", env)
 
-            # Verify status transitions
-            calls = mock_update.call_args_list
-            assert calls[0][0] == (42, "destroying")
-            assert calls[1][0][1] == "destroyed"
+            # Verify events published with correct user_id
+            mock_status.assert_called_once()
+            assert mock_status.call_args[1]["user_id"] == 7
+            mock_destroyed.assert_called_once()
+            assert mock_destroyed.call_args[1]["user_id"] == 7
 
     def test_run_destroy_failure(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """pulumi destroy failure should raise exception."""
@@ -467,13 +471,13 @@ class TestRunDestroy:
         mock_result.returncode = 1
         mock_result.stderr = "Destroy failed"
 
-        with patch("main.update_range_status"):
+        with patch("main.publish_status_update"):
             from main import _run_destroy
 
             env = os.environ.copy()
 
             with pytest.raises(Exception, match="Pulumi destroy failed"):
-                _run_destroy(42, "range-42", env)
+                _run_destroy(42, 7, "range-42", env)
 
     def test_run_destroy_stack_removed(self, mock_env_vars, mock_boto3_clients, mocker):
         """Stack should be removed after successful destroy."""
@@ -486,32 +490,19 @@ class TestRunDestroy:
 
         mock_run = mocker.patch("subprocess.run", side_effect=side_effect)
 
-        with patch("main.update_range_status"):
+        with (
+            patch("main.publish_status_update"),
+            patch("main.publish_destroyed"),
+        ):
             from main import _run_destroy
 
             env = os.environ.copy()
-            _run_destroy(42, "range-42", env)
+            _run_destroy(42, 7, "range-42", env)
 
             # Verify stack rm was called
             calls = mock_run.call_args_list
             rm_calls = [c for c in calls if "rm" in str(c[0][0])]
             assert len(rm_calls) == 1
-
-    def test_run_destroy_sets_destroyed_at(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
-        """destroyed_at timestamp should be set."""
-        mock_run, mock_result = mock_subprocess
-        mock_result.returncode = 0
-
-        with patch("main.update_range_status") as mock_update:
-            from main import _run_destroy
-
-            env = os.environ.copy()
-            _run_destroy(42, "range-42", env)
-
-            # Check destroyed_at was passed
-            destroyed_call = mock_update.call_args_list[1]
-            assert destroyed_call[1].get("destroyed_at") == "NOW()"
-
 
 class TestRunPulumi:
     """Tests for main run_pulumi function."""
@@ -1194,16 +1185,17 @@ class TestEventPublishing:
         mock_result.returncode = 0
 
         with (
-            patch("main.update_range_status"),
-            patch("events.publish_status_update") as mock_publish,
+            patch("main.publish_status_update") as mock_publish,
+            patch("main.publish_destroyed"),
         ):
             from main import _run_destroy
 
             env = os.environ.copy()
-            _run_destroy(42, "range-42", env)
+            _run_destroy(42, 7, "range-42", env)
 
-            # Verify status update was published
+            # Verify status update was published with correct user_id
             mock_publish.assert_called()
+            assert mock_publish.call_args[1]["user_id"] == 7
 
     def test_run_destroy_publishes_destroyed_event(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
@@ -1215,16 +1207,17 @@ class TestEventPublishing:
         mock_result.returncode = 0
 
         with (
-            patch("main.update_range_status"),
+            patch("main.publish_status_update"),
             patch("main.publish_destroyed") as mock_publish,
         ):
             from main import _run_destroy
 
             env = os.environ.copy()
-            _run_destroy(42, "range-42", env)
+            _run_destroy(42, 7, "range-42", env)
 
-            # Verify destroyed event was published
+            # Verify destroyed event was published with correct user_id
             mock_publish.assert_called_once()
+            assert mock_publish.call_args[1]["user_id"] == 7
 
     def test_run_pulumi_failure_publishes_failed_event(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch

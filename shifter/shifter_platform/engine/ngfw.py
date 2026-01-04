@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 from django.db.models import QuerySet
 from django.utils import timezone
 
+from shared.constants import USER_CANNOT_BE_NONE
+
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
@@ -42,7 +44,7 @@ def list_ngfws(user: User) -> QuerySet[UserNGFW]:
     # Input validation
     if user is None:
         logger.error("list_ngfws called with None user")
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
 
     logger.debug("list_ngfws called for user_id=%s", user.id)
 
@@ -70,7 +72,7 @@ def get_ngfw(user: User, ngfw_id: int) -> UserNGFW:
     # Input validation - user
     if user is None:
         logger.error("get_ngfw called with None user")
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
 
     # Input validation - ngfw_id
     if ngfw_id is None:
@@ -133,7 +135,7 @@ def provision_ngfw(user: User, name: str) -> UserNGFW:
     # Input validation - user
     if user is None:
         logger.error("provision_ngfw called with None user")
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
 
     # Input validation - name
     if name is None:
@@ -184,7 +186,7 @@ def start_ngfw(user: User, ngfw_id: int) -> UserNGFW:
     # Input validation - user
     if user is None:
         logger.error("start_ngfw called with None user")
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
 
     # Input validation - ngfw_id
     if ngfw_id is None:
@@ -259,7 +261,7 @@ def stop_ngfw(user: User, ngfw_id: int) -> UserNGFW:
     # Input validation - user
     if user is None:
         logger.error("stop_ngfw called with None user")
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
 
     # Input validation - ngfw_id
     if ngfw_id is None:
@@ -335,7 +337,7 @@ def deprovision_ngfw(user: User, ngfw_id: int, confirm_name: str) -> UserNGFW:
     # Input validation - user
     if user is None:
         logger.error("deprovision_ngfw called with None user")
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
 
     # Input validation - ngfw_id
     if ngfw_id is None:

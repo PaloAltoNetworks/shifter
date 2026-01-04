@@ -62,7 +62,7 @@ Terraform state stored in S3 with DynamoDB locking:
 ElastiCache Redis:
 - **Dev:** Single-node `cache.t3.micro`
 - **Prod:** Replication group (primary + 1 replica, Multi-AZ, automatic failover)
-- Used for Django Channels and Celery broker
+- Used for Django Channels
 - Prod snapshots: 1-day retention
 
 ## Related Docs

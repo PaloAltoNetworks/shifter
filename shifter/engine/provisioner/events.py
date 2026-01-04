@@ -1,7 +1,7 @@
 """Event publishing for Shifter Engine provisioner.
 
 This module handles publishing range status events to SNS for fan-out
-to Django Celery workers via SQS queues.
+via SQS queues.
 
 Usage from provisioner:
     from events import publish_status_update, publish_ready, publish_failed
@@ -100,7 +100,7 @@ def _create_event(
 def _publish_event(event: dict) -> None:
     """Publish event to SNS topic.
 
-    Publishes the event to SNS for fan-out to Django Celery workers
+    Publishes the event to SNS
     via SQS queues.
 
     Args:

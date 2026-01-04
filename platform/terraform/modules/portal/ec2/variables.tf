@@ -152,11 +152,11 @@ variable "scale_down_threshold" {
 # ------------------------------------------------------------------------------
 
 variable "sqs_queue_arns" {
-  description = "List of SQS queue ARNs for Celery workers to consume from"
+  description = "List of SQS queue ARNs for message consumers"
   type        = list(string)
 }
 
 variable "sqs_queue_urls" {
-  description = "Map of consumer name to SQS queue URL for Celery workers"
+  description = "Map of consumer name to SQS queue URL for message consumers"
   type        = map(string)
 }

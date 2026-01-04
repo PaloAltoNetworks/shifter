@@ -196,7 +196,8 @@ def main():
     args = parser.parse_args()
 
     script_dir = Path(__file__).parent
-    base_path = script_dir.parent / "shifter" / "shifter_platform"
+    # Go up two levels: check_layer_imports -> scripts -> repo root
+    base_path = script_dir.parent.parent / "shifter" / "shifter_platform"
 
     if not base_path.exists():
         print(json.dumps({"error": f"{base_path} not found"}), file=sys.stderr)

@@ -125,7 +125,7 @@ def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
         if operation == "up":
             _run_provision(range_id, user_id, stack_name, env)
         elif operation == "destroy":
-            _run_destroy(range_id, stack_name, env)
+            _run_destroy(range_id, user_id, stack_name, env)
         else:
             raise ValueError(f"Unknown operation: {operation}")
 
@@ -298,17 +298,17 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
     )
 
 
-def _run_destroy(range_id: int, stack_name: str, env: dict) -> None:
+def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> None:
     """Run Pulumi destroy to tear down the range.
 
     Args:
         range_id: The range ID being destroyed.
+        user_id: The Django user ID who owns this range.
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
-    update_range_status(range_id, "destroying")
-    # Publish status change event
-    publish_status_update(range_id=range_id, user_id=0, old_status="ready", new_status="destroying")
+    # Publish status change event (Engine already set status to DESTROYING before ECS task)
+    publish_status_update(range_id=range_id, user_id=user_id, old_status="ready", new_status="destroying")
     print("Running pulumi destroy...")
 
     result = subprocess.run(
@@ -336,10 +336,8 @@ def _run_destroy(range_id: int, stack_name: str, env: dict) -> None:
         capture_output=True,
     )
 
-    update_range_status(range_id, "destroyed", destroyed_at="NOW()")
-
     # Publish destroyed event
-    publish_destroyed(range_id=range_id, user_id=0)
+    publish_destroyed(range_id=range_id, user_id=user_id)
 
 
 # Import NGFW operation dependencies

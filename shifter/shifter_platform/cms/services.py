@@ -8,11 +8,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from shifter.shifter_platform.cms.exceptions import CMSError
-
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
 from cms.assets.validation import get_allowed_extensions as _get_allowed_extensions
+from cms.exceptions import CMSError
 from cms.models import AgentConfig, RangeInstance
 from engine import cancel_range as engine_cancel_range
 from engine import create_range as engine_create_range
@@ -987,7 +986,8 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
 def destroy_range(user: User, range_id: int) -> None:
     """Tear down range.
 
-    Verifies ownership via get_range, then delegates to engine.orchestration.destroy().
+    Verifies ownership via get_range, updates CMS status to DESTROYING,
+    then delegates to engine.services.destroy_range with RangeContext.
 
     Args:
         user: User requesting destruction
@@ -1000,8 +1000,10 @@ def destroy_range(user: User, range_id: int) -> None:
         TypeError: If user is None, invalid type, or range_id is invalid type
         ValueError: If user has no ID (unsaved) or range_id is invalid
         CMSError: If range not found or not owned by user
-        OrchestrationError: If no destroyable range
+        EngineError: If engine fails to destroy range
     """
+    from shared.schemas import RangeContext
+
     # Input validation - user
     if user is None:
         logger.error("destroy_range called with None user")
@@ -1030,15 +1032,33 @@ def destroy_range(user: User, range_id: int) -> None:
 
     logger.debug("destroy_range called for user_id=%s, range_id=%s", user.id, range_id)
 
-    try:
-        # Get range (also verifies ownership)
-        get_range(user, range_id)
+    instance = None
 
-        # Delegate to engine service
-        engine_destroy_range(range_id)
+    try:
+        # Get range instance (verifies ownership and captures current status)
+        instance = get_range(user, range_id)
+        if instance is None:
+            logger.warning("destroy_range: range not found for user_id=%s, range_id=%s", user.id, range_id)
+            raise CMSError("Range not found")
+    except (TypeError, ValueError, CMSError):
+        logger.error("destroy_range: user and range mismatch for user_id=%s, range_id=%s", user.id, range_id)
+        raise
+
+    try:
+        # Update CMS status to DESTROYING (CMS is authoritative)
+        instance.status = RangeStatus.DESTROYING.value
+        instance.save(update_fields=["status"])
+        if instance.status != RangeStatus.DESTROYING.value:
+            raise CMSError("Range status not updated to DESTROYING")
+
+        range_ctx = RangeContext.from_instance(instance)
+        engine_destroy_range(range_ctx)
 
         logger.debug("destroy_range completed for range_id=%s, user_id=%s", range_id, user.id)
 
+    except (TypeError, ValueError, CMSError):
+        # Re-raise known errors
+        raise
     except Exception:
         logger.exception("Error in destroy_range for user_id=%s, range_id=%s", user.id, range_id)
         raise

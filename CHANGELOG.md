@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Arch as Code foundation: Code and model level service layer boundary violation detection in CI/CD and pre-commit
 - Independent processes consume range status updates
 - Claude develop skill
+- Centralized code coverage reporting
 
 ### Changed
 
@@ -35,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frontend tests not included in pre-commit
 - Remove stale Celery references
 - Linting
+- Some tests not called
+- Pre-commit and CI/CD test, lint, quality, and sast coverage
+- SonarQube coverage exclusions
+- Tests for repo utility apps and Architecture as Code tests
 
 ## [0.10.0] - 2025-01-01
 

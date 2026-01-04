@@ -47,8 +47,8 @@ Example:
 - Imports like "layer.submodule.internal" = deep coupling, red flag
 
 Usage:
-    python scripts/check_layer_imports.py
-    python scripts/check_layer_imports.py -o report.json
+    python scripts/check_layer_imports/check_layer_imports.py
+    python scripts/check_layer_imports/check_layer_imports.py -o report.json
 """
 
 import argparse
@@ -144,11 +144,13 @@ def compute_stats(imports: dict) -> dict:
             if is_violation(from_layer, to_layer):
                 stats["violations"] += len(modules)
                 layer_has_violation = True
-                stats["violation_details"].append({
-                    "from": from_layer,
-                    "to": to_layer,
-                    "modules": modules,
-                })
+                stats["violation_details"].append(
+                    {
+                        "from": from_layer,
+                        "to": to_layer,
+                        "modules": modules,
+                    }
+                )
 
         if layer_has_violation:
             stats["layers_with_violations"].append(from_layer)
@@ -158,9 +160,7 @@ def compute_stats(imports: dict) -> dict:
 
     # Determine clean layers (no violations)
     for layer in ALL_LAYERS:
-        has_violation = any(
-            v["from"] == layer for v in stats["violation_details"]
-        )
+        has_violation = any(v["from"] == layer for v in stats["violation_details"])
         if not has_violation:
             stats["clean_layers"].append(layer)
 
@@ -190,19 +190,9 @@ def print_summary(stats: dict, file=sys.stderr) -> None:
 
 def main():
     """Check cross-layer imports and output JSON with summary stats."""
-    parser = argparse.ArgumentParser(
-        description="Check cross-layer imports between service layers"
-    )
-    parser.add_argument(
-        "-o", "--output",
-        metavar="FILE",
-        help="Save JSON output to file instead of stdout"
-    )
-    parser.add_argument(
-        "-q", "--quiet",
-        action="store_true",
-        help="Suppress summary output (JSON only)"
-    )
+    parser = argparse.ArgumentParser(description="Check cross-layer imports between service layers")
+    parser.add_argument("-o", "--output", metavar="FILE", help="Save JSON output to file instead of stdout")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress summary output (JSON only)")
     args = parser.parse_args()
 
     script_dir = Path(__file__).parent

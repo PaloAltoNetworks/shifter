@@ -1,17 +1,3 @@
-[project]
-name = "packer"
-version = "0.1.0"
-description = "Packer AMI build configuration"
-requires-python = ">=3.12"
-dependencies = []
-
-[dependency-groups]
-dev = [
-    "pytest-cov>=7.0.0",
-    "pytest>=9.0.2",
-    "ruff>=0.14.10",
-]
-
 [tool.ruff]
 target-version = "py312"
 line-length = 120

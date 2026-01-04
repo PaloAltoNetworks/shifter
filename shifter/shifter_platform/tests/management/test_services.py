@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from management import services
 from management.models import ActivityLog, UserProfile
+from shared.constants import USER_CANNOT_BE_NONE
 
 # =============================================================================
 # log_activity
@@ -208,7 +209,7 @@ class TestGetUserProfileInputValidation:
 
     def test_raises_type_error_for_none_user(self):
         """get_user_profile raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.get_user_profile(None)
 
     def test_raises_value_error_for_unsaved_user(self):
@@ -343,7 +344,7 @@ class TestMarkUserDeletedInputValidation:
 
     def test_raises_type_error_for_none_user(self):
         """mark_user_deleted raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.mark_user_deleted(None)
 
     def test_raises_value_error_for_unsaved_user(self):
@@ -438,7 +439,7 @@ class TestCreateUserProfile:
 
     def test_raises_type_error_for_none_user(self):
         """create_user_profile raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.create_user_profile(None)
 
     def test_raises_value_error_for_unsaved_user(self):
@@ -493,7 +494,7 @@ class TestSaveUserProfile:
 
     def test_raises_type_error_for_none_user(self):
         """save_user_profile raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.save_user_profile(None)
 
     def test_raises_value_error_for_unsaved_user(self):
@@ -595,7 +596,7 @@ class TestUpdateCognitoSubInputValidation:
 
     def test_raises_type_error_for_none_user(self):
         """update_cognito_sub raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.update_cognito_sub(None, "abc-123")
 
     def test_raises_value_error_for_unsaved_user(self):

@@ -43,7 +43,7 @@ cp /root/.docker/config.json /home/ec2-user/.docker/config.json
 chown -R ec2-user:ec2-user /home/ec2-user/.docker
 
 # ------------------------------------------------------------------------------
-# Export SQS Queue URLs for Celery workers (used by docker-compose)
+# Export SQS Queue URLs for message consumers workers (used by docker-compose)
 # ------------------------------------------------------------------------------
 cat <<EOF >> /etc/environment
 SQS_CMS_URL=${sqs_cms_url}

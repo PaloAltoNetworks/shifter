@@ -143,7 +143,7 @@ def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
                 capture_output=True,
             )
 
-        # Publish failed event - Celery workers handle DB updates
+        # Publish failed event
         publish_failed(range_id=range_id, user_id=user_id, error_message=error_msg)
         raise
 
@@ -255,7 +255,7 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
-    # Publish status change event - Celery workers handle DB updates
+    # Publish status change event
     publish_status_update(range_id=range_id, user_id=user_id, new_status="provisioning")
     print("Running pulumi up...")
 
@@ -287,7 +287,7 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
     output_data = json.loads(outputs.stdout)
     print(f"Stack outputs: {json.dumps(output_data, indent=2)}")
 
-    # Publish ready event with instance details - Celery workers handle DB updates
+    # Publish ready event with instance details
     publish_ready(
         range_id=range_id,
         user_id=user_id,

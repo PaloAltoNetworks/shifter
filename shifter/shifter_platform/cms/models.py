@@ -659,6 +659,7 @@ class RangeInstance(models.Model):
         user_id: ID of the user who requested creation (IntegerField, not FK)
         agent: AgentConfig used, if any (FK, nullable)
         status: Current lifecycle status (pending, provisioning, ready, etc.)
+        range_spec: Hydrated RangeSpec JSON (instance specs, scenario details)
         created_at: When this record was created
         deleted_at: When this record was soft-deleted (null if active)
     """
@@ -674,6 +675,7 @@ class RangeInstance(models.Model):
         related_name="range_instances",
     )
     status = models.CharField(max_length=20, default="pending")
+    range_spec = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
@@ -712,7 +714,6 @@ class RangeInstance(models.Model):
             # If update_fields is specified, add deleted_at to ensure it's saved
             update_fields = kwargs.get("update_fields")
             if update_fields is not None and "deleted_at" not in update_fields:
-                # Convert to list if tuple, then add deleted_at
-                kwargs["update_fields"] = list(update_fields) + ["deleted_at"]
+                kwargs["update_fields"] = [*list(update_fields), "deleted_at"]
 
         super().save(*args, **kwargs)

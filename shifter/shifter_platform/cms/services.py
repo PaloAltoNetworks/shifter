@@ -851,27 +851,21 @@ def get_active_range(user: User) -> RangeContext | None:
             instance.status,
             user.id,
         )
-        # Build RangeContext with instances from engine's Range.range_config
-        from engine.models import Range
         from shared.enums import RangeStatus
         from shared.schemas import InstanceContext
 
-        # Get instance data from engine
+        # Get instance data from stored range_spec
         instance_contexts = []
-        try:
-            engine_range = Range.objects.get(id=instance.range_id)
-            if engine_range.range_config and "instances" in engine_range.range_config:
-                instance_contexts = [
-                    InstanceContext(
-                        uuid=spec.get("uuid"),
-                        role=spec["role"],
-                        os_type=spec["os_type"],
-                        join_domain=spec.get("join_domain", False),
-                    )
-                    for spec in engine_range.range_config["instances"]
-                ]
-        except Range.DoesNotExist:
-            logger.warning("Engine Range %s not found for RangeInstance", instance.range_id)
+        if instance.range_spec and "instances" in instance.range_spec:
+            instance_contexts = [
+                InstanceContext(
+                    uuid=spec.get("uuid"),
+                    role=spec["role"],
+                    os_type=spec["os_type"],
+                    join_domain=spec.get("join_domain", False),
+                )
+                for spec in instance.range_spec["instances"]
+            ]
 
         # Get agent_name from FK if exists
         agent_name = instance.agent.name if instance.agent else None
@@ -986,12 +980,13 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
         # 5. Call engine to create range
         range_id = engine_create_range(range_request)
 
-        # 6. Store RangeInstance record
+        # 6. Store RangeInstance record with hydrated spec
         RangeInstance.objects.create(
             range_id=range_id,
             scenario_id=scenario,
             user_id=user.id,
             agent=agent,
+            range_spec=range_request.model_dump(mode="json"),
         )
 
         logger.debug(

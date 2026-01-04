@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2025-01-04
+
+### Changed
+- GitHub runners replaced with auto-scaling ephemeral runners via terraform-aws-github-runner module
+  - Scale from zero on workflow trigger
+  - EC2 spot instances for cost savings
+  - GitHub App authentication for secure runner registration
+- Added runner-deploy.sh script for runner infrastructure management
+- Added manual-deployment.md documentation for global terraform stacks
+
+
 ## [0.10.1] - 2025-01-02
 
 ### Added

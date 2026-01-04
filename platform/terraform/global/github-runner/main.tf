@@ -1,8 +1,8 @@
 # ------------------------------------------------------------------------------
-# GitHub Actions Self-Hosted Runner
+# GitHub Actions Self-Hosted Runner (Auto-Scaling)
 # ------------------------------------------------------------------------------
-# Provisions an EC2 spot instance to run GitHub Actions workflows.
-# Access via SSM Session Manager (no SSH required).
+# Uses the terraform-aws-github-runner module for auto-scaling, ephemeral runners.
+# Runners scale from 0 when idle and auto-register via GitHub App authentication.
 # ------------------------------------------------------------------------------
 
 terraform {
@@ -12,6 +12,10 @@ terraform {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
     }
   }
 
@@ -30,162 +34,160 @@ provider "aws" {
   }
 }
 
+# ------------------------------------------------------------------------------
+# Data Sources
+# ------------------------------------------------------------------------------
+
 data "aws_caller_identity" "current" {}
 
-# ------------------------------------------------------------------------------
-# Latest Amazon Linux 2023 AMI
-# ------------------------------------------------------------------------------
-
-data "aws_ami" "al2023" {
-  most_recent = true
-  owners      = ["amazon"]
-
+# Get default VPC subnets for runner placement
+data "aws_subnets" "default" {
   filter {
-    name   = "name"
-    values = ["al2023-ami-*-x86_64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
+    name   = "vpc-id"
+    values = [var.vpc_id]
   }
 }
 
-# ------------------------------------------------------------------------------
-# Security Group
-# ------------------------------------------------------------------------------
+# Fetch GitHub App secrets from SSM Parameter Store
+data "aws_ssm_parameter" "github_app_key" {
+  name            = var.github_app_key_ssm_path
+  with_decryption = true
+}
 
-resource "aws_security_group" "runner" {
-  name        = "shifter-github-runner"
-  description = "Security group for GitHub Actions runner"
-  vpc_id      = var.vpc_id
-
-  # No inbound rules needed - runner uses outbound HTTPS to GitHub
-  # Access via SSM Session Manager (no SSH required)
-
-  # All outbound (runner needs to reach GitHub, ECR, SSM endpoints, etc.)
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "All outbound"
-  }
-
-  tags = {
-    Name = "shifter-github-runner"
-  }
+data "aws_ssm_parameter" "github_app_webhook_secret" {
+  name            = var.github_app_webhook_secret_ssm_path
+  with_decryption = true
 }
 
 # ------------------------------------------------------------------------------
-# IAM Role for Runner
+# Random suffix for unique resource naming
 # ------------------------------------------------------------------------------
 
-resource "aws_iam_role" "runner" {
-  name = "shifter-github-runner"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "ec2.amazonaws.com"
-      }
-    }]
-  })
+resource "random_id" "suffix" {
+  byte_length = 4
 }
 
-resource "aws_iam_instance_profile" "runner" {
-  name = "shifter-github-runner"
-  role = aws_iam_role.runner.name
+# ------------------------------------------------------------------------------
+# Download Lambda Functions from GitHub Releases
+# ------------------------------------------------------------------------------
+
+module "lambdas" {
+  source  = "github-aws-runners/github-runner/aws//modules/download-lambda"
+  version = "~> 5.0"
+
+  lambdas = [
+    {
+      name = "webhook"
+      tag  = "v5.21.0"
+    },
+    {
+      name = "runners"
+      tag  = "v5.21.0"
+    },
+    {
+      name = "runner-binaries-syncer"
+      tag  = "v5.21.0"
+    }
+  ]
 }
 
-# SSM for remote access (alternative to SSH)
-resource "aws_iam_role_policy_attachment" "ssm" {
-  role       = aws_iam_role.runner.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
+# ------------------------------------------------------------------------------
+# IAM Policy for ECR Access (Docker builds)
+# ------------------------------------------------------------------------------
 
-# ECR access for Docker builds
-resource "aws_iam_role_policy" "ecr" {
-  name = "ecr-access"
-  role = aws_iam_role.runner.id
+resource "aws_iam_policy" "runner_ecr" {
+  name        = "shifter-runner-ecr-access"
+  description = "ECR access for GitHub Actions runner Docker builds"
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "ecr:GetAuthorizationToken",
-        "ecr:BatchCheckLayerAvailability",
-        "ecr:GetDownloadUrlForLayer",
-        "ecr:BatchGetImage",
-        "ecr:PutImage",
-        "ecr:InitiateLayerUpload",
-        "ecr:UploadLayerPart",
-        "ecr:CompleteLayerUpload"
-      ]
-      Resource = "*"
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload"
+        ]
+        Resource = "arn:aws:ecr:${var.region}:${data.aws_caller_identity.current.account_id}:repository/shifter-*"
+      }
+    ]
   })
 }
 
 # ------------------------------------------------------------------------------
-# EC2 Spot Instance
+# GitHub Actions Runner Module
 # ------------------------------------------------------------------------------
 
-resource "aws_spot_instance_request" "runner" {
-  count                = var.runner_count
-  ami                  = data.aws_ami.al2023.id
-  instance_type        = var.instance_type
-  spot_type            = "persistent"
-  wait_for_fulfillment = true
+module "github_runner" {
+  source  = "github-aws-runners/github-runner/aws"
+  version = "~> 5.0"
 
-  vpc_security_group_ids = [aws_security_group.runner.id]
-  subnet_id              = var.subnet_id
-  iam_instance_profile   = aws_iam_instance_profile.runner.name
+  prefix = "shifter-${var.environment}"
 
-  root_block_device {
-    volume_size = 50
-    volume_type = "gp3"
+  # AWS Configuration
+  aws_region = var.region
+  vpc_id     = var.vpc_id
+  subnet_ids = data.aws_subnets.default.ids
+
+  # GitHub App Configuration
+  github_app = {
+    id             = var.github_app_id
+    key_base64     = data.aws_ssm_parameter.github_app_key.value
+    webhook_secret = data.aws_ssm_parameter.github_app_webhook_secret.value
   }
 
-  user_data = base64encode(<<-EOF
-    #!/bin/bash
-    set -ex
+  # Lambda zip files from download module
+  # Order matches lambdas list: [0]=webhook, [1]=runners, [2]=runner-binaries-syncer
+  webhook_lambda_zip                = module.lambdas.files[0]
+  runners_lambda_zip                = module.lambdas.files[1]
+  runner_binaries_syncer_lambda_zip = module.lambdas.files[2]
 
-    # Install dependencies
-    dnf update -y
-    dnf install -y docker git jq tar unzip python3.12 python3.12-pip python3.12-devel nodejs npm
+  # Runner Configuration
+  enable_organization_runners = true
+  runner_extra_labels         = ["shifter", var.environment]
 
-    # Start Docker
-    systemctl enable --now docker
-    usermod -aG docker ec2-user
+  # Runner scaling configuration
+  runners_maximum_count          = var.runners_maximum_count
+  scale_down_schedule_expression = "cron(*/5 * * * ? *)" # Check every 5 minutes
 
-    # Create runner directory
-    mkdir -p /home/ec2-user/actions-runner
-    cd /home/ec2-user/actions-runner
+  # Instance configuration
+  instance_types = var.instance_types
 
-    # Download latest runner
-    RUNNER_VERSION=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name | sed 's/v//')
-    curl -o actions-runner-linux-x64-$${RUNNER_VERSION}.tar.gz -L https://github.com/actions/runner/releases/download/v$${RUNNER_VERSION}/actions-runner-linux-x64-$${RUNNER_VERSION}.tar.gz
-    tar xzf actions-runner-linux-x64-$${RUNNER_VERSION}.tar.gz
-    chown -R ec2-user:ec2-user /home/ec2-user/actions-runner
+  # Enable spot instances for cost savings
+  instance_target_capacity_type = "spot"
 
-    echo "Runner downloaded. SSH in and run ./config.sh to register."
-  EOF
-  )
+  # Runner OS and architecture
+  runner_os           = "linux"
+  runner_architecture = "x64"
 
+  # Ephemeral runners (recommended for security)
+  enable_ephemeral_runners = true
+
+  # Enable SSM for debugging access
+  enable_ssm_on_runners = true
+
+  # Additional IAM policies for runner instances
+  runner_iam_role_managed_policy_arns = [
+    aws_iam_policy.runner_ecr.arn
+  ]
+
+  # Logging
+  logging_retention_in_days = 14
+
+  # Tags
   tags = {
-    Name = "shifter-github-runner-${count.index + 1}"
+    Environment = var.environment
   }
-}
-
-# Tag the spot instances (spot requests don't propagate tags to instances)
-resource "aws_ec2_tag" "runner_name" {
-  count       = var.runner_count
-  resource_id = aws_spot_instance_request.runner[count.index].spot_instance_id
-  key         = "Name"
-  value       = "shifter-github-runner-${count.index + 1}"
 }

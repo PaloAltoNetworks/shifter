@@ -382,11 +382,15 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
         await self.accept()
 
         # Hydrate: send current status immediately
-        await self.send(text_data=json.dumps({
-            "type": "status",
-            "range_id": self.range_id,
-            "status": range_obj.status,
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "status",
+                    "range_id": self.range_id,
+                    "status": range_obj.status,
+                }
+            )
+        )
 
         logger.info("Range status WebSocket connected for range %s", self.range_id)
 
@@ -406,10 +410,13 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
 
         Called when a status update is broadcast to the range group.
         """
-        await self.send(text_data=json.dumps({
-            "type": "status",
-            "range_id": event.get("range_id"),
-            "status": event.get("new_status"),
-            "old_status": event.get("old_status"),
-            "error_message": event.get("error_message"),
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "status",
+                    "range_id": event.get("range_id"),
+                    "status": event.get("new_status"),
+                    "error_message": event.get("error_message"),
+                }
+            )
+        )

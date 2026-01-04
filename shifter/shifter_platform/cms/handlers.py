@@ -48,7 +48,6 @@ def process_range_event(message: str | dict) -> None:
                 "range_id": int,
                 "user_id": int,
                 "new_status": str,
-                "old_status": str,
                 "error_message": str | None
             }
 

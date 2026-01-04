@@ -96,7 +96,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 1,
                     "new_status": RangeStatus.PROVISIONING.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": 42,
                 }
             )
@@ -125,7 +124,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 2,
                     "new_status": RangeStatus.READY.value,
-                    "old_status": RangeStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -154,7 +152,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 3,
                     "new_status": RangeStatus.DESTROYED.value,
-                    "old_status": RangeStatus.DESTROYING.value,
                     "user_id": 42,
                 }
             )
@@ -215,7 +212,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 999,
                     "new_status": RangeStatus.READY.value,
-                    "old_status": RangeStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -245,7 +241,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 5,
                     "new_status": RangeStatus.READY.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": 999,  # Wrong user
                 }
             )
@@ -286,7 +281,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 6,
                     "new_status": RangeStatus.PROVISIONING.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": 42,
                 }
             )
@@ -323,7 +317,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 7,
                     "new_status": RangeStatus.PROVISIONING.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": 42,
                 }
             )
@@ -390,7 +383,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 8,
                     "new_status": RangeStatus.PROVISIONING.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": 42,
                 }
             )

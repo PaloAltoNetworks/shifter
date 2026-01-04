@@ -373,8 +373,8 @@ Thumbs.db
 # Log files
 *.log
 
-.cursor/mcp.json
-
-risks/
-
+# Notes, scratchpad, etc
 temp/
+
+# Central test coverage directory
+coverage/

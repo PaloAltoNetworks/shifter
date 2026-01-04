@@ -75,7 +75,7 @@ class TestParseSnsMessage:
 @pytest.fixture
 def user():
     """Create a test user."""
-    return User.objects.create_user(username="testuser", password="testpass")  # noqa: S106
+    return User.objects.create_user(username="testuser", password="testpass")
 
 
 @pytest.mark.django_db

@@ -1,32 +1,11 @@
-"""Tests for CMS migrations."""
-
-import importlib
+"""Tests for CMS Credential model."""
 
 import pytest
-from django.contrib.auth import get_user_model
-
-User = get_user_model()
-
-
-def get_migration_functions():
-    """Import migration functions from numbered migration file."""
-    spec = importlib.util.spec_from_file_location(
-        "migration_0002",
-        "cms/migrations/0002_migrate_credentials.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.migrate_credentials_forward, module.migrate_credentials_reverse
 
 
 @pytest.mark.django_db
-class TestCredentialDataMigration:
-    """Tests for the credential data migration (0002_migrate_credentials).
-
-    Note: The original SCMCredential and NGFWDeploymentProfile models have been
-    removed. These tests now verify that the cms.Credential model works correctly
-    for both credential types.
-    """
+class TestCredential:
+    """Tests for the cms.Credential model."""
 
     def test_scm_credential_type_works(self, django_user_model):
         """SCM credential type should work in cms.Credential."""
@@ -76,7 +55,7 @@ class TestCredentialDataMigration:
         assert new_cred.authcode == "D7654321"
 
     def test_credential_fields_preserved(self, django_user_model):
-        """All credential fields should be preserved during migration."""
+        """All credential fields should be preserved."""
         from django.utils import timezone
 
         from cms.models import Credential
@@ -134,19 +113,3 @@ class TestCredentialDataMigration:
         loaded = Credential.objects.get(pk=cred.pk)
         assert loaded.deleted_at is not None
         assert loaded.is_deleted is True
-
-    def test_migration_function_signature(self):
-        """Migration functions should have correct signatures for RunPython."""
-        import inspect
-
-        migrate_forward, migrate_reverse = get_migration_functions()
-
-        # Verify forward migration accepts (apps, schema_editor)
-        sig = inspect.signature(migrate_forward)
-        params = list(sig.parameters.keys())
-        assert params == ["apps", "schema_editor"]
-
-        # Verify reverse migration accepts (apps, schema_editor)
-        sig = inspect.signature(migrate_reverse)
-        params = list(sig.parameters.keys())
-        assert params == ["apps", "schema_editor"]

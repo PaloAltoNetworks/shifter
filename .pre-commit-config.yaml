@@ -6,31 +6,81 @@ repos:
     rev: v0.14.9
     hooks:
       - id: ruff
+        name: ruff (shifter_platform)
         args: [--fix]
         files: ^shifter/shifter_platform/
       - id: ruff-format
+        name: ruff-format (shifter_platform)
         files: ^shifter/shifter_platform/
+      - id: ruff
+        name: ruff (provisioner)
+        args: [--fix]
+        files: ^shifter/engine/provisioner/
+      - id: ruff-format
+        name: ruff-format (provisioner)
+        files: ^shifter/engine/provisioner/
+      - id: ruff
+        name: ruff (packer)
+        args: [--fix]
+        files: ^shifter/packer/
+      - id: ruff-format
+        name: ruff-format (packer)
+        files: ^shifter/packer/
+      - id: ruff
+        name: ruff (bootstrap)
+        args: [--fix]
+        files: ^scripts/bootstrap/
+      - id: ruff-format
+        name: ruff-format (bootstrap)
+        files: ^scripts/bootstrap/
+      - id: ruff
+        name: ruff (check_layer_imports)
+        args: [--fix]
+        files: ^scripts/check_layer_imports/
+      - id: ruff-format
+        name: ruff-format (check_layer_imports)
+        files: ^scripts/check_layer_imports/
 
   # Python - Tests (shifter_platform)
   - repo: local
     hooks:
       - id: pytest-shifter
         name: pytest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q'
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
         always_run: true
 
-  # Python - Security
+  # Python - Security (bandit)
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.2
     hooks:
       - id: bandit
-        args: [-c, shifter/shifter_platform/pyproject.toml, -r]
-        additional_dependencies: ["bandit[toml]"]
+        name: bandit (shifter_platform)
+        args: [-r, --skip, B101]
         files: ^shifter/shifter_platform/
         exclude: ^shifter/shifter_platform/(tests|\.venv)/
+      - id: bandit
+        name: bandit (provisioner)
+        args: [-r, --skip, B101]
+        files: ^shifter/engine/provisioner/
+        exclude: ^shifter/engine/provisioner/(tests|\.venv)/
+      - id: bandit
+        name: bandit (packer)
+        args: [-r, --skip, B101]
+        files: ^shifter/packer/
+        exclude: ^shifter/packer/(tests|\.venv)/
+      - id: bandit
+        name: bandit (bootstrap)
+        args: [-r, --skip, B101]
+        files: ^scripts/bootstrap/
+        exclude: ^scripts/bootstrap/(tests|\.venv)/
+      - id: bandit
+        name: bandit (check_layer_imports)
+        args: [-r, --skip, "B101,B112"]
+        files: ^scripts/check_layer_imports/
+        exclude: ^scripts/check_layer_imports/(tests|\.venv)/
 
   # General
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -46,7 +96,7 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/)  # Tests check key format strings
+        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/) # Tests check key format strings
 
   # JavaScript/CSS - shifter_platform linting
   - repo: local
@@ -67,7 +117,7 @@ repos:
 
       - id: jest-shifter-platform
         name: jest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && npm test'
+        entry: bash -c 'cd shifter/shifter_platform && npm test -- --coverage --coverageReporters=lcov --coverageReporters=text-summary --coverageDirectory=../../coverage/js'
         language: system
         files: ^shifter/shifter_platform/static/js/.*\.js$
         pass_filenames: false
@@ -77,7 +127,7 @@ repos:
     hooks:
       - id: pytest-packer
         name: pytest (packer)
-        entry: bash -c 'cd shifter/packer && uv run pytest tests/ -q'
+        entry: bash -c 'cd shifter/packer && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/packer --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/packer/
         pass_filenames: false
@@ -87,9 +137,29 @@ repos:
     hooks:
       - id: pytest-provisioner
         name: pytest (provisioner)
-        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && TESTING=1 python -m pytest tests/ -q'
+        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && TESTING=1 python -m pytest tests/ -q --cov=. --cov-report=html:../../../coverage/provisioner --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/engine/provisioner/
+        pass_filenames: false
+
+  # Bootstrap tests
+  - repo: local
+    hooks:
+      - id: pytest-bootstrap
+        name: pytest (bootstrap)
+        entry: bash -c 'cd scripts/bootstrap && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/bootstrap --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        language: system
+        files: ^scripts/bootstrap/
+        pass_filenames: false
+
+  # Check layer imports tests
+  - repo: local
+    hooks:
+      - id: pytest-check-layer-imports
+        name: pytest (check_layer_imports)
+        entry: bash -c 'cd scripts/check_layer_imports && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/check_layer_imports --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        language: system
+        files: ^scripts/check_layer_imports/
         pass_filenames: false
 
   # Terraform
@@ -122,7 +192,7 @@ repos:
     hooks:
       - id: check-layer-imports
         name: architecture (layer imports)
-        entry: bash -c 'python scripts/check_layer_imports.py || true'
+        entry: bash -c 'python scripts/check_layer_imports/check_layer_imports.py || true'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false

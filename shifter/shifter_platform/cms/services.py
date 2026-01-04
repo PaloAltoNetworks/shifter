@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from shifter.shifter_platform.cms.exceptions import CMSError
+
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
 from cms.assets.validation import get_allowed_extensions as _get_allowed_extensions
@@ -15,6 +17,7 @@ from cms.models import AgentConfig, RangeInstance
 from engine import cancel_range as engine_cancel_range
 from engine import create_range as engine_create_range
 from engine import destroy_range as engine_destroy_range
+from shared.enums import RangeStatus
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -924,6 +927,16 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
     )
 
     try:
+        # 0. Check user doesn't already have an active range
+        existing = get_active_range(user)
+        if existing:
+            logger.warning(
+                "create_range: user_id=%s already has active range_id=%s",
+                user.id,
+                existing.range_id,
+            )
+            raise CMSError("You already have an active range. Please destroy it before creating a new one.")
+
         # 1. Validate scenario exists
         try:
             get_scenario(scenario)
@@ -1077,15 +1090,31 @@ def cancel_range(user: User, range_id: int) -> None:
 
     logger.debug("cancel_range called for user_id=%s, range_id=%s", user.id, range_id)
 
+    instance = None
+
     try:
-        # Get range (also verifies ownership)
-        get_range(user, range_id)
+        # Get range instance (verifies ownership and captures current status)
+        instance = get_range(user, range_id)
+        if instance is None:
+            logger.warning("cancel_range: range not found for user_id=%s, range_id=%s", user.id, range_id)
+            raise CMSError("Range not found")
+    except (TypeError, ValueError, CMSError):
+        logger.error("cancel_range: user and range mismatch for user_id=%s, range_id=%s", user.id, range_id)
+        raise
 
-        # Delegate to engine service
-        engine_cancel_range(range_id)
+    try:
+        # Update CMS status to DESTROYED (CMS is authoritative)
+        # save() triggers invariant: terminal status auto-sets deleted_at
+        instance.status = RangeStatus.DESTROYED.value
+        instance.save(update_fields=["status"])
+        if instance.status != RangeStatus.DESTROYED.value:
+            raise CMSError("Range status not updated to DESTROYED")
 
-        logger.debug("cancel_range completed for range_id=%s, user_id=%s", range_id, user.id)
-
+        range_ctx = RangeContext.from_instance(instance)
+        engine_cancel_range(range_ctx)
+    except (TypeError, ValueError, CMSError):
+        # Re-raise known errors
+        raise
     except Exception:
         logger.exception("Error in cancel_range for user_id=%s, range_id=%s", user.id, range_id)
         raise

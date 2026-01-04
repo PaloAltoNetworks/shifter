@@ -386,6 +386,8 @@ class DashboardManager {
 
         } catch (error) {
             alert(error.message);
+            // Sync UI with CMS state (handles "already has active range" case)
+            await this.loadRange();
             this.launchBtn.disabled = false;
             this.launchBtn.textContent = 'Launch Range';
         }
@@ -403,6 +405,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
+                body: JSON.stringify({ range_id: this.currentRange.id }),
             });
 
             const data = await response.json();

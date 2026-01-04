@@ -257,6 +257,39 @@ class TestProcessRangeEvent:
         instance = RangeInstance.objects.get(range_id=5)
         assert instance.status == RangeStatus.PENDING.value
 
+    def test_rejects_invalid_status_value(self, caplog):
+        """Handler logs error and returns when status is not a valid RangeStatus."""
+        from cms.handlers import process_range_event
+        from cms.models import RangeInstance
+
+        RangeInstance.objects.create(
+            range_id=50,
+            scenario_id="basic",
+            user_id=42,
+            status=RangeStatus.PENDING.value,
+        )
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "range_id": 50,
+                    "new_status": "bogus_status",
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with caplog.at_level(logging.ERROR, logger="cms.handlers"):
+            process_range_event(message)
+
+        assert "Invalid status value" in caplog.text
+        assert "bogus_status" in caplog.text
+
+        # Status should be unchanged
+        instance = RangeInstance.objects.get(range_id=50)
+        assert instance.status == RangeStatus.PENDING.value
+
     # ---------------------------------------------------------------------
     # Error handling - database failures
     # ---------------------------------------------------------------------

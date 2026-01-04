@@ -9,6 +9,7 @@ import json
 import logging
 
 from cms.models import RangeInstance
+from shared.enums import RangeStatus
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,12 @@ def process_range_event(message: str | dict) -> None:
     range_id = event.get("range_id")
     user_id = event.get("user_id")
     new_status = event.get("new_status")
+
+    try:
+        RangeStatus(new_status)
+    except ValueError:
+        logger.error("Invalid status value: %s (range_id=%s)", new_status, range_id)
+        return
 
     try:
         instance = RangeInstance.objects.get(range_id=range_id)

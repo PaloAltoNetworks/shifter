@@ -509,8 +509,8 @@ class DashboardManager {
             const data = JSON.parse(event.data);
 
             if (data.type === 'status') {
-                const oldStatus = this.currentRange?.status;
                 const newStatus = data.status;
+                console.log(`Range status received: ${newStatus}`);
 
                 // Update current range status
                 if (this.currentRange) {
@@ -521,10 +521,6 @@ class DashboardManager {
                 }
 
                 this._updateUI();
-
-                if (oldStatus !== newStatus) {
-                    console.log(`Range status: ${oldStatus} -> ${newStatus}`);
-                }
 
                 // Close socket if we've reached a stable state
                 if (!this._isTransitionalState(newStatus)) {

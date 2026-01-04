@@ -851,8 +851,39 @@ def get_active_range(user: User) -> RangeContext | None:
             instance.status,
             user.id,
         )
-        # RangeContext.from_instance validates data before returning
-        return RangeContext.from_instance(instance)
+        # Build RangeContext with instances from engine's Range.range_config
+        from engine.models import Range
+        from shared.enums import RangeStatus
+        from shared.schemas import InstanceContext
+
+        # Get instance data from engine
+        instance_contexts = []
+        try:
+            engine_range = Range.objects.get(id=instance.range_id)
+            if engine_range.range_config and "instances" in engine_range.range_config:
+                instance_contexts = [
+                    InstanceContext(
+                        uuid=spec.get("uuid"),
+                        role=spec["role"],
+                        os_type=spec["os_type"],
+                        join_domain=spec.get("join_domain", False),
+                    )
+                    for spec in engine_range.range_config["instances"]
+                ]
+        except Range.DoesNotExist:
+            logger.warning("Engine Range %s not found for RangeInstance", instance.range_id)
+
+        # Get agent_name from FK if exists
+        agent_name = instance.agent.name if instance.agent else None
+
+        return RangeContext(
+            range_id=instance.range_id,
+            scenario_id=instance.scenario_id,
+            user_id=instance.user_id,
+            status=RangeStatus(instance.status),
+            instances=instance_contexts,
+            agent_name=agent_name,
+        )
     else:
         logger.debug("get_active_range found no active range for user_id=%s", user.id)
         return None
@@ -956,7 +987,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
         range_id = engine_create_range(range_request)
 
         # 6. Store RangeInstance record
-        range_instance = RangeInstance.objects.create(
+        RangeInstance.objects.create(
             range_id=range_id,
             scenario_id=scenario,
             user_id=user.id,
@@ -970,10 +1001,29 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
             user.id,
         )
 
-        # 7. Return RangeContext projection
-        from shared.schemas import RangeContext
+        # 7. Return RangeContext projection with instances
+        # Engine always sets PROVISIONING status on creation
+        from shared.enums import RangeStatus
+        from shared.schemas import InstanceContext, RangeContext
 
-        return RangeContext.from_instance(range_instance)
+        instance_contexts = [
+            InstanceContext(
+                uuid=spec.uuid,
+                role=spec.role,
+                os_type=spec.os_type,
+                join_domain=spec.join_domain,
+            )
+            for spec in range_request.instances
+        ]
+
+        return RangeContext(
+            range_id=range_id,
+            scenario_id=scenario,
+            user_id=user.id,
+            status=RangeStatus.PROVISIONING,
+            instances=instance_contexts,
+            agent_name=agent.name,
+        )
 
     except (TypeError, ValueError, CMSError):
         # Re-raise known errors

@@ -50,6 +50,7 @@ class InstanceSpec(BaseModel):
     """Single instance specification.
 
     Attributes:
+        uuid: Unique identifier for this instance (assigned during hydration).
         role: Instance role (attacker, victim, or dc).
         os_type: Operating system type (kali, ubuntu, or windows).
         agent: Optional agent details for agent installation.
@@ -57,6 +58,7 @@ class InstanceSpec(BaseModel):
         join_domain: Whether instance should join the domain (default False).
     """
 
+    uuid: str | None = None
     role: Literal["attacker", "victim", "dc"]
     os_type: Literal["kali", "ubuntu", "windows"]
     agent: AgentDetails | None = None
@@ -110,11 +112,13 @@ class InstanceContext(BaseModel):
     Used by Mission Control for rendering templates.
 
     Attributes:
+        uuid: Unique identifier for this instance.
         role: Instance role (attacker, victim, or dc).
         os_type: Operating system type (kali, ubuntu, or windows).
         join_domain: Whether instance should join the domain.
     """
 
+    uuid: str | None = None
     role: Literal["attacker", "victim", "dc"]
     os_type: Literal["kali", "ubuntu", "windows"]
     join_domain: bool = False

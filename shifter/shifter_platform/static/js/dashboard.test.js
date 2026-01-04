@@ -29,7 +29,7 @@ describe('DashboardManager destroyRange', () => {
             agentsUrl: '/agents',
         });
 
-        dashboard.currentRange = { id: 42, status: 'ready' };
+        dashboard.currentRange = { range_id: 42, status: 'ready' };
     });
 
     test('sends range_id in request body', async () => {

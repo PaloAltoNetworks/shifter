@@ -58,7 +58,7 @@ class TestStartProvisioning:
             assert call_kwargs["launchType"] == "FARGATE"
             # Check command override
             container_overrides = call_kwargs["overrides"]["containerOverrides"][0]
-            assert container_overrides["command"] == ["provision", "--range-id", "42", "--user-id", "7"]
+            assert container_overrides["command"] == ["range", "provision", "--range-id", "42", "--user-id", "7"]
 
     def test_raises_on_client_error(self, ecs_settings):
         """ClientError from AWS is propagated."""
@@ -133,7 +133,7 @@ class TestStartTeardown:
             mock_ecs.run_task.assert_called_once()
             # Check command override for destroy
             container_overrides = mock_ecs.run_task.call_args.kwargs["overrides"]["containerOverrides"][0]
-            assert container_overrides["command"] == ["destroy", "--range-id", "99", "--user-id", "7"]
+            assert container_overrides["command"] == ["range", "destroy", "--range-id", "99", "--user-id", "7"]
 
     def test_raises_on_client_error(self, ecs_settings):
         """ClientError from AWS is propagated."""

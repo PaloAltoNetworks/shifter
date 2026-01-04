@@ -46,7 +46,7 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^shifter/engine/provisioner/tests/  # Tests check key format strings
+        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/)  # Tests check key format strings
 
   # JavaScript/CSS - shifter_platform linting
   - repo: local

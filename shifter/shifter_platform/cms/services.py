@@ -1134,6 +1134,8 @@ def cancel_range(user: User, range_id: int) -> None:
         CMSError: If range not found or not owned by user
         OrchestrationError: If range not in cancellable status
     """
+    from shared.schemas import RangeContext
+
     # Input validation - user
     if user is None:
         logger.error("cancel_range called with None user")

@@ -57,40 +57,36 @@ class TestCancelRange:
             cancel_range(mock_ctx)
 
     # -------------------------------------------------------------------------
-    # Input validation - range_id value
+    # Input validation - range_id value (handled by Pydantic)
     # -------------------------------------------------------------------------
 
-    def test_raises_value_error_for_none_range_id(self):
-        """Service raises ValueError when range_ctx.range_id is None."""
-        from engine.services import cancel_range
+    def test_pydantic_rejects_none_range_id(self):
+        """RangeContext Pydantic validator rejects None range_id."""
+        from pydantic import ValidationError
 
-        range_ctx = RangeContext(
-            range_id=None,
-            user_id=1,
-            scenario_id="basic",
-            status=RangeStatus.DESTROYED,
-            instances=[],
-            agent_name="Test Agent",
-        )
+        with pytest.raises(ValidationError):
+            RangeContext(
+                range_id=None,
+                user_id=1,
+                scenario_id="basic",
+                status=RangeStatus.DESTROYED,
+                instances=[],
+                agent_name="Test Agent",
+            )
 
-        with pytest.raises(ValueError, match="range_id cannot be None"):
-            cancel_range(range_ctx)
+    def test_pydantic_rejects_negative_range_id(self):
+        """RangeContext Pydantic validator rejects negative range_id."""
+        from pydantic import ValidationError
 
-    def test_raises_value_error_for_negative_range_id(self):
-        """Service raises ValueError when range_ctx.range_id is negative."""
-        from engine.services import cancel_range
-
-        range_ctx = RangeContext(
-            range_id=-1,
-            user_id=1,
-            scenario_id="basic",
-            status=RangeStatus.DESTROYED,
-            instances=[],
-            agent_name="Test Agent",
-        )
-
-        with pytest.raises(ValueError, match="non-negative integer"):
-            cancel_range(range_ctx)
+        with pytest.raises(ValidationError):
+            RangeContext(
+                range_id=-1,
+                user_id=1,
+                scenario_id="basic",
+                status=RangeStatus.DESTROYED,
+                instances=[],
+                agent_name="Test Agent",
+            )
 
     # -------------------------------------------------------------------------
     # Success case - returns None
@@ -202,44 +198,32 @@ class TestCancelRange:
 
         assert "invalid" in caplog.text.lower() or "str" in caplog.text
 
-    def test_logs_error_for_none_range_id(self, caplog):
-        """Service logs error when range_id is None."""
-        from engine.services import cancel_range
+    def test_pydantic_validation_prevents_none_range_id(self):
+        """Pydantic validation prevents None range_id from reaching service."""
+        from pydantic import ValidationError
 
-        range_ctx = RangeContext(
-            range_id=None,
-            user_id=1,
-            scenario_id="basic",
-            status=RangeStatus.DESTROYED,
-            instances=[],
-            agent_name="Test Agent",
-        )
+        # RangeContext validator rejects None before service can log
+        with pytest.raises(ValidationError):
+            RangeContext(
+                range_id=None,
+                user_id=1,
+                scenario_id="basic",
+                status=RangeStatus.DESTROYED,
+                instances=[],
+                agent_name="Test Agent",
+            )
 
-        with (
-            caplog.at_level(logging.ERROR, logger="engine.services"),
-            pytest.raises(ValueError),
-        ):
-            cancel_range(range_ctx)
+    def test_pydantic_validation_prevents_invalid_range_id(self):
+        """Pydantic validation prevents invalid range_id from reaching service."""
+        from pydantic import ValidationError
 
-        assert "none" in caplog.text.lower() or "range_id" in caplog.text.lower()
-
-    def test_logs_error_for_invalid_range_id(self, caplog):
-        """Service logs error when range_id is invalid."""
-        from engine.services import cancel_range
-
-        range_ctx = RangeContext(
-            range_id=-5,
-            user_id=1,
-            scenario_id="basic",
-            status=RangeStatus.DESTROYED,
-            instances=[],
-            agent_name="Test Agent",
-        )
-
-        with (
-            caplog.at_level(logging.ERROR, logger="engine.services"),
-            pytest.raises(ValueError),
-        ):
-            cancel_range(range_ctx)
-
-        assert "-5" in caplog.text or "invalid" in caplog.text.lower()
+        # RangeContext validator rejects negative range_id before service can log
+        with pytest.raises(ValidationError):
+            RangeContext(
+                range_id=-5,
+                user_id=1,
+                scenario_id="basic",
+                status=RangeStatus.DESTROYED,
+                instances=[],
+                agent_name="Test Agent",
+            )

@@ -107,7 +107,14 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
                 "containerOverrides": [
                     {
                         "name": "pulumi-provisioner",
-                        "command": [ResourceType.RANGE.value, command, "--range-id", str(range_id), "--user-id", str(user_id)],
+                        "command": [
+                            ResourceType.RANGE.value,
+                            command,
+                            "--range-id",
+                            str(range_id),
+                            "--user-id",
+                            str(user_id),
+                        ],
                     }
                 ]
             },

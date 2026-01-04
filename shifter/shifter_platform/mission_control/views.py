@@ -1,5 +1,4 @@
-"""Mission Control views.
-"""
+"""Mission Control views."""
 
 import json
 import logging
@@ -26,6 +25,7 @@ from cms import list_scenarios as cms_list_scenarios
 from cms.assets.services import AssetError
 from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
 from cms.exceptions import CMSError
+from mission_control.utils import build_connection_urls
 
 logger = logging.getLogger(__name__)
 
@@ -266,12 +266,13 @@ def get_range(request):
     active_range = get_active_range(request.user)
 
     if not active_range:
-        return JsonResponse({"has_range": False, "range": None})
+        return JsonResponse({"has_range": False, "range": None, "connection_urls": []})
 
     return JsonResponse(
         {
             "has_range": True,
             "range": active_range.model_dump(mode="json"),
+            "connection_urls": build_connection_urls(active_range.instances),
         }
     )
 

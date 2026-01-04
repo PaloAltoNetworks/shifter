@@ -9,6 +9,7 @@ from .enums import (
     CANCELLABLE_STATUSES,
     TERMINAL_STATUSES,
     RangeStatus,
+    WebSocketCloseCode,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "CANCELLABLE_STATUSES",
     "TERMINAL_STATUSES",
     "RangeStatus",
+    "WebSocketCloseCode",
 ]

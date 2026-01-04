@@ -91,7 +91,7 @@ class DashboardManager {
                 this._closeStatusSocket();
             } else if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
                 // Reconnect WebSocket when tab becomes visible again if in transitional state
-                this._connectStatusSocket(this.currentRange.id);
+                this._connectStatusSocket(this.currentRange.range_id);
             }
         });
     }
@@ -222,7 +222,7 @@ class DashboardManager {
 
         // Connect WebSocket if in a transitional state
         if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-            this._connectStatusSocket(this.currentRange.id);
+            this._connectStatusSocket(this.currentRange.range_id);
         }
     }
 
@@ -382,7 +382,7 @@ class DashboardManager {
 
             this.currentRange = data.range;
             this._updateUI();
-            this._connectStatusSocket(data.range.id);
+            this._connectStatusSocket(data.range.range_id);
 
         } catch (error) {
             alert(error.message);
@@ -405,7 +405,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
-                body: JSON.stringify({ range_id: this.currentRange.id }),
+                body: JSON.stringify({ range_id: this.currentRange.range_id }),
             });
 
             const data = await response.json();
@@ -435,7 +435,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
-                body: JSON.stringify({ range_id: this.currentRange.id }),
+                body: JSON.stringify({ range_id: this.currentRange.range_id }),
             });
 
             const data = await response.json();

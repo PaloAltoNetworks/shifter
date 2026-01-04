@@ -152,6 +152,20 @@ class TestInstanceSpec:
         assert spec.role == "attacker"
         assert spec.os_type == "kali"
 
+    def test_uuid_defaults_to_none(self):
+        """InstanceSpec uuid field defaults to None."""
+        from shared.schemas.range import InstanceSpec
+
+        spec = InstanceSpec(role="attacker", os_type="kali")
+        assert spec.uuid is None
+
+    def test_uuid_accepts_string(self):
+        """InstanceSpec uuid accepts string value."""
+        from shared.schemas.range import InstanceSpec
+
+        spec = InstanceSpec(uuid="abc-123", role="attacker", os_type="kali")
+        assert spec.uuid == "abc-123"
+
     def test_role_is_required(self):
         """InstanceSpec requires role field."""
         from shared.schemas.range import InstanceSpec
@@ -458,6 +472,20 @@ class TestInstanceContext:
         ctx = InstanceContext(role="attacker", os_type="kali")
         assert ctx.role == "attacker"
         assert ctx.os_type == "kali"
+
+    def test_uuid_defaults_to_none(self):
+        """InstanceContext uuid field defaults to None."""
+        from shared.schemas.range import InstanceContext
+
+        ctx = InstanceContext(role="attacker", os_type="kali")
+        assert ctx.uuid is None
+
+    def test_uuid_accepts_string(self):
+        """InstanceContext uuid accepts string value."""
+        from shared.schemas.range import InstanceContext
+
+        ctx = InstanceContext(uuid="abc-123", role="attacker", os_type="kali")
+        assert ctx.uuid == "abc-123"
 
     def test_role_is_required(self):
         """InstanceContext requires role field."""

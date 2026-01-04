@@ -10,14 +10,11 @@ incoming requests against them.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import BaseModel, computed_field, field_validator
 
 from shared.enums import RangeStatus
-
-if TYPE_CHECKING:
-    from cms.models import RangeInstance
 
 
 class AgentDetails(BaseModel):
@@ -194,30 +191,6 @@ class RangeContext(BaseModel):
         """True if range is not in a terminal state."""
         return not self.is_terminal
 
-    @classmethod
-    def from_instance(cls, instance: RangeInstance) -> RangeContext:
-        """Create RangeContext from a RangeInstance model.
-
-        Args:
-            instance: RangeInstance Django model object.
-
-        Returns:
-            RangeContext with data projected from the instance.
-        """
-        # Get agent_name from the FK relationship if it exists
-        agent_name = None
-        if instance.agent is not None:
-            agent_name = instance.agent.name
-
-        return cls(
-            range_id=instance.range_id,
-            scenario_id=instance.scenario_id,
-            user_id=instance.user_id,
-            status=RangeStatus(instance.status),
-            instances=[],  # TODO(#457): Populate from RangeInstance.range_spec
-            agent_name=agent_name,
-        )
-
 
 class RangeRef(BaseModel):
     """Minimal range reference for operations like destroy/cancel.
@@ -234,22 +207,6 @@ class RangeRef(BaseModel):
     range_id: int
     user_id: int
     status: RangeStatus
-
-    @classmethod
-    def from_instance(cls, instance: RangeInstance) -> RangeRef:
-        """Create RangeRef from a RangeInstance model.
-
-        Args:
-            instance: RangeInstance Django model object.
-
-        Returns:
-            RangeRef with data projected from the instance.
-        """
-        return cls(
-            range_id=instance.range_id,
-            user_id=instance.user_id,
-            status=RangeStatus(instance.status),
-        )
 
     @field_validator("range_id")
     @classmethod

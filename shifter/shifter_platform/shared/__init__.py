@@ -11,11 +11,14 @@ from .enums import (
     RangeStatus,
     WebSocketCloseCode,
 )
+from .exceptions import AssetError, CMSError
 
 __all__ = [
     "ACTIVE_STATUSES",
     "CANCELLABLE_STATUSES",
     "TERMINAL_STATUSES",
+    "AssetError",
+    "CMSError",
     "RangeStatus",
     "WebSocketCloseCode",
 ]

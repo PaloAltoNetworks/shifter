@@ -1,7 +1,7 @@
 """Tests for SNS event publishing in events.py.
 
 This module tests the event publishing functions that send range status
-events to SNS for fan-out to Django Celery workers.
+events to SNS for fan-out.
 """
 
 from __future__ import annotations
@@ -301,7 +301,7 @@ class TestPublishReady:
 
             assert len(provisioned_events) == 1
             event = provisioned_events[0]
-            # None values should still be in the event (filtered by Celery consumer if needed)
+            # None values should still be in the event (filtered by consumers if needed)
             assert "subnet_id" in event
             assert "subnet_cidr" in event
             assert "pulumi_stack" in event

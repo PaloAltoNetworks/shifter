@@ -9,13 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.1] - 2025-01-02
 
+### Added
+- Cyber range DSL foundation (Shared Schema)
+- Interactive cli app for Shifter AWS account bootstrap and infrastructure deployment
+- Arch as Code foundation: Code and model level service layer boundary violation detection in CI/CD and pre-commit
+- Independent processes consume range status updates
+- Claude develop skill
+
+### Changed
+
+- CMS services extraction edge cases and fixes
+- Mission Control re-wire to use services
 - Engine services extraction and implementation (excl pause/resume)
   - NGFW services deferred to upcoming patch
   - Mission Control re-wire deferred to upcoming patch
-- Model migrations
-- Range DSL foundation (Shared Schema)
+- Model migrations to respect service layer separation
 - Redis replication for HA (single-node in dev, replication group in prod)
-- Interactive cli app for account bootstrap and infrastructure deployment
+- SNS/SQS for range status updates with alarms
+- Fault-tolerant fully alarmed range status consumer processes
+- Unit test coverage improvements
+
+### Fixed
+- In-depth help check short circuited by Django middleware
+- Remove dead code from service layer refactoring
+- Frontend tests not included in pre-commit
+- Remove stale Celery references
+- Linting
 
 ## [0.10.0] - 2025-01-01
 

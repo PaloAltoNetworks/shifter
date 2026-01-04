@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from django.utils import timezone
 
+from shared.constants import USER_CANNOT_BE_NONE
 from shared.enums import RangeStatus
 
 
@@ -173,7 +174,7 @@ class TestGetActiveRange:
         """Raises TypeError when user is None."""
         from cms.services import get_active_range
 
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             get_active_range(None)
 
     def test_raises_type_error_for_invalid_user(self):

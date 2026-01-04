@@ -268,7 +268,7 @@ module "ec2" {
   scale_down_threshold = var.scale_down_threshold
   log_retention_days   = var.log_retention_days
 
-  # Messaging (SQS queues for Celery workers)
+  # Messaging
   sqs_queue_arns = values(module.messaging.sqs_queue_arns)
   sqs_queue_urls = module.messaging.sqs_queue_urls
 

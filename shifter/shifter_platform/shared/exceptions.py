@@ -1,6 +1,7 @@
 """Shared exceptions for cross-layer error handling.
 
-These exceptions are raised by service layers and caught by presentation layers.
+These exceptions are raised by service layers and caught by
+presentation layers.
 """
 
 

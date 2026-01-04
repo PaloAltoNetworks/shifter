@@ -50,7 +50,6 @@ repos:
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
-        always_run: true
 
   # Python - Security (bandit)
   - repo: https://github.com/PyCQA/bandit

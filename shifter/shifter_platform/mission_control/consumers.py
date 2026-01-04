@@ -9,7 +9,6 @@ from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import AnonymousUser
 
-from engine.models import Range
 from shared.enums import WebSocketCloseCode
 
 logger = logging.getLogger(__name__)
@@ -41,6 +40,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
     async def _do_connect(self):
         """Authenticate, verify ownership, establish SSH connection."""
+        from cms import get_active_range
         from engine import connect_terminal
 
         # 1. Verify authentication
@@ -63,9 +63,9 @@ class SSHConsumer(AsyncWebsocketConsumer):
             self.instance_uuid,
         )
 
-        # 3. Get user's active range
-        range_obj = await sync_to_async(Range.get_active_for_user)(user)
-        if not range_obj:
+        # 3. Get user's active range via CMS
+        range_ctx = await sync_to_async(get_active_range)(user)
+        if not range_ctx:
             logger.warning(
                 "Terminal connection denied - no active range: user_id=%s",
                 user.id,
@@ -74,19 +74,22 @@ class SSHConsumer(AsyncWebsocketConsumer):
             return
 
         # 4. Verify range is ready
-        if range_obj.status != Range.Status.READY:
+        if not range_ctx.is_ready:
             logger.warning(
                 "Terminal connection denied - range not ready: range_id=%s status=%s",
-                range_obj.id,
-                range_obj.status,
+                range_ctx.range_id,
+                range_ctx.status,
             )
             await self.close(code=WebSocketCloseCode.NOT_FOUND)
             return
 
-        self.range_id = range_obj.id
+        self.range_id = range_ctx.range_id
 
         # 5. Verify instance exists in this range
-        instance = await sync_to_async(range_obj.get_instance_by_uuid)(self.instance_uuid)
+        instance = next(
+            (i for i in range_ctx.instances if i.uuid == self.instance_uuid),
+            None,
+        )
         if not instance:
             logger.warning(
                 "Terminal connection denied - instance not found: range_id=%s uuid=%s",
@@ -96,7 +99,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
             await self.close(code=WebSocketCloseCode.NOT_FOUND)
             return
 
-        # 6. Establish SSH connection
+        # 6. Establish SSH connection via engine
         try:
             self.ssh_conn = await sync_to_async(connect_terminal)(user, self.range_id, self.instance_uuid)
             await self.ssh_conn.connect()
@@ -134,9 +137,11 @@ class SSHConsumer(AsyncWebsocketConsumer):
         """Background task to read SSH output and send to WebSocket."""
         try:
             while True:
-                data = await self.ssh_conn.read()
+                data = await self.ssh_conn.receive()
                 if data:
-                    await self.send(text_data=json.dumps({"type": "output", "data": data}))
+                    # receive() returns bytes, decode to string for JSON
+                    output = data.decode("utf-8", errors="replace")
+                    await self.send(text_data=json.dumps({"type": "output", "data": output}))
                 else:
                     break
         except asyncio.CancelledError:
@@ -163,7 +168,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
         # Close SSH connection
         if self.ssh_conn:
             try:
-                await self.ssh_conn.close()
+                await self.ssh_conn.disconnect()
             except Exception:
                 logger.exception("Error closing SSH connection: uuid=%s", self.instance_uuid)
 
@@ -178,7 +183,8 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
             if msg_type == "input":
                 data = message.get("data", "")
-                await self.ssh_conn.write(data)
+                # send() expects bytes
+                await self.ssh_conn.send(data.encode("utf-8"))
 
             elif msg_type == "resize":
                 cols = message.get("cols", 80)
@@ -208,6 +214,8 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         """Handle WebSocket connection - join range group and send initial state."""
+        from cms import get_range
+        from cms.exceptions import CMSError
         from shared.channels.groups import range_event_group
 
         # Verify authentication
@@ -221,20 +229,16 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
         self.range_id = int(self.scope["url_route"]["kwargs"]["range_id"])
         self.group_name = range_event_group(self.range_id)
 
-        # Verify user owns this range
+        # Verify user owns this range via CMS (handles ownership check)
         try:
-            range_obj = await sync_to_async(Range.objects.get)(id=self.range_id)
-            if range_obj.user_id != user.id:
-                logger.warning(
-                    "User %s attempted to subscribe to range %s owned by %s",
-                    user.id,
-                    self.range_id,
-                    range_obj.user_id,
-                )
-                await self.close(code=WebSocketCloseCode.PERMISSION_DENIED)
-                return
-        except Range.DoesNotExist:
-            logger.warning("Range %s not found for status subscription", self.range_id)
+            range_instance = await sync_to_async(get_range)(user, self.range_id)
+        except CMSError:
+            # CMSError covers both not found and permission denied
+            logger.warning(
+                "Range %s not found or not owned by user %s",
+                self.range_id,
+                user.id,
+            )
             await self.close(code=WebSocketCloseCode.NOT_FOUND)
             return
 
@@ -250,7 +254,7 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
                 {
                     "type": "status",
                     "range_id": self.range_id,
-                    "status": range_obj.status,
+                    "status": range_instance.status,
                 }
             )
         )

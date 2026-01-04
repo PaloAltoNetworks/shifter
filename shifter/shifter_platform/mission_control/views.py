@@ -23,8 +23,8 @@ from cms import initiate_upload as cms_initiate_upload
 from cms import list_agents as cms_list_agents
 from cms import list_scenarios as cms_list_scenarios
 from cms.assets.services import AssetError
-from cms.assets.upload_session import check_upload_in_progress, set_upload_in_progress
 from cms.exceptions import CMSError
+from mission_control.upload_session import check_upload_in_progress, set_upload_in_progress
 from mission_control.utils import build_connection_urls
 
 logger = logging.getLogger(__name__)

@@ -1,8 +1,8 @@
-"""Tests for cms.assets.upload_session module."""
+"""Tests for mission_control.upload_session module."""
 
 import time
 
-from cms.assets.upload_session import (
+from mission_control.upload_session import (
     UPLOAD_LOCK_TIMEOUT,
     check_upload_in_progress,
     set_upload_in_progress,

@@ -51,22 +51,22 @@ def mock_provisioner():
 
 
 @pytest.mark.django_db
-class TestRangeStatus:
-    """Tests for get_range_status view.
+class TestGetRange:
+    """Tests for get_range view.
 
     The view now consumes RangeContext from cms.get_active_range().
     Tests mock the CMS service layer to return RangeContext projections.
     """
 
     def test_requires_login(self, client):
-        response = client.get(reverse("mission_control:range_status"))
+        response = client.get(reverse("mission_control:get_range"))
         assert response.status_code == 302  # Redirect to login
 
     def test_returns_no_range_when_none_exists(self, client, test_agent):
         client.force_login(test_agent.user)
 
         with patch("mission_control.views.get_active_range", return_value=None):
-            response = client.get(reverse("mission_control:range_status"))
+            response = client.get(reverse("mission_control:get_range"))
 
         assert response.status_code == 200
         data = response.json()
@@ -90,7 +90,7 @@ class TestRangeStatus:
             "mission_control.views.get_active_range",
             return_value=mock_range_context,
         ):
-            response = client.get(reverse("mission_control:range_status"))
+            response = client.get(reverse("mission_control:get_range"))
 
         assert response.status_code == 200
         data = response.json()
@@ -121,7 +121,7 @@ class TestRangeStatus:
             "mission_control.views.get_active_range",
             return_value=mock_range_context,
         ):
-            response = client.get(reverse("mission_control:range_status"))
+            response = client.get(reverse("mission_control:get_range"))
 
         assert response.status_code == 200
         data = response.json()
@@ -148,7 +148,7 @@ class TestRangeStatus:
             "mission_control.views.get_active_range",
             return_value=mock_range_context,
         ):
-            response = client.get(reverse("mission_control:range_status"))
+            response = client.get(reverse("mission_control:get_range"))
 
         assert response.status_code == 200
         data = response.json()
@@ -346,16 +346,40 @@ class TestLaunchRange:
 
 @pytest.mark.django_db
 class TestCancelRange:
+    """Tests for cancel_range view.
+
+    The view now requires range_id in the request body and delegates to
+    cms.cancel_range() which updates status to DESTROYED and calls engine.
+    """
+
     def test_requires_login(self, client):
         response = client.post(reverse("mission_control:cancel_range"))
         assert response.status_code == 302
 
-    def test_returns_404_when_no_range(self, client, test_agent):
+    def test_requires_range_id_in_body(self, client, test_agent):
+        """Request must include range_id in JSON body."""
         client.force_login(test_agent.user)
-        response = client.post(reverse("mission_control:cancel_range"))
-        assert response.status_code == 404
+        response = client.post(
+            reverse("mission_control:cancel_range"),
+            data={},
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        assert "range_id" in response.json()["error"]
 
-    def test_successful_cancel_provisioning(self, client, test_agent):
+    def test_returns_error_when_range_not_found(self, client, test_agent):
+        """Returns error when range_id doesn't exist."""
+        client.force_login(test_agent.user)
+        response = client.post(
+            reverse("mission_control:cancel_range"),
+            data={"range_id": 99999},
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        # CMS returns CMSError which is converted to 400
+
+    def test_successful_cancel(self, client, test_agent):
+        """Successfully cancels a range by setting status to DESTROYED."""
         client.force_login(test_agent.user)
 
         # Create a provisioning range
@@ -365,27 +389,65 @@ class TestCancelRange:
             status=Range.Status.PROVISIONING,
         )
 
-        response = client.post(reverse("mission_control:cancel_range"))
-        assert response.status_code == 200
-        assert response.json()["success"] is True
+        # Mock engine cancel to avoid AWS calls
+        with patch("cms.services.engine_cancel_range") as mock_engine:
+            response = client.post(
+                reverse("mission_control:cancel_range"),
+                data={"range_id": range_obj.id},
+                content_type="application/json",
+            )
+            assert response.status_code == 200
+            assert response.json()["success"] is True
 
-        range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYED
-        assert range_obj.destroyed_at is not None
+            # Verify engine was called with RangeContext
+            mock_engine.assert_called_once()
+            call_arg = mock_engine.call_args[0][0]
+            assert call_arg.range_id == range_obj.id
 
-    def test_cannot_cancel_ready_range(self, client, test_agent):
+    def test_cancel_sets_status_to_destroyed(self, client, test_agent):
+        """Cancel updates CMS status to DESTROYED before calling engine."""
         client.force_login(test_agent.user)
 
-        # Create a ready range (can't cancel, must destroy)
-        Range.objects.create(
+        range_obj = Range.objects.create(
             user=test_agent.user,
             agent=test_agent,
-            status=Range.Status.READY,
+            status=Range.Status.PROVISIONING,
         )
 
-        response = client.post(reverse("mission_control:cancel_range"))
-        assert response.status_code == 400
-        assert "Cannot cancel" in response.json()["error"]
+        with patch("cms.services.engine_cancel_range"):
+            client.post(
+                reverse("mission_control:cancel_range"),
+                data={"range_id": range_obj.id},
+                content_type="application/json",
+            )
+
+        # Verify CMS RangeInstance was updated (via model invariant)
+        from cms.models import RangeInstance
+
+        ri = RangeInstance.objects.get(range_id=range_obj.id)
+        assert ri.status == "destroyed"
+        assert ri.deleted_at is not None  # Terminal status invariant
+
+    def test_cannot_cancel_other_users_range(self, client, test_agent, django_user_model):
+        """Users cannot cancel ranges they don't own."""
+        other_user = django_user_model.objects.create_user(
+            username="other", email="other@example.com", password="testpass"
+        )
+        client.force_login(other_user)
+
+        # Create range owned by test_agent.user
+        range_obj = Range.objects.create(
+            user=test_agent.user,
+            agent=test_agent,
+            status=Range.Status.PROVISIONING,
+        )
+
+        response = client.post(
+            reverse("mission_control:cancel_range"),
+            data={"range_id": range_obj.id},
+            content_type="application/json",
+        )
+        assert response.status_code == 400  # CMSError for not found/not owned
 
 
 @pytest.mark.django_db

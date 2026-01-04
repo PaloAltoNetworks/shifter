@@ -183,7 +183,7 @@ class TestGetUserStorageUsed:
 @pytest.mark.django_db
 class TestUploadLock:
     def test_check_upload_in_progress_false_by_default(self, user):
-        from cms.assets.upload_session import check_upload_in_progress
+        from mission_control.upload_session import check_upload_in_progress
 
         client = get_authenticated_client(user)
         # Access the request through a view to get session
@@ -193,7 +193,7 @@ class TestUploadLock:
         assert check_upload_in_progress(client.session) is False
 
     def test_upload_lock_expires(self, user, settings):
-        from cms.assets.upload_session import UPLOAD_LOCK_TIMEOUT, check_upload_in_progress
+        from mission_control.upload_session import UPLOAD_LOCK_TIMEOUT, check_upload_in_progress
 
         client = get_authenticated_client(user)
         client.get(reverse("mission_control:dashboard"))

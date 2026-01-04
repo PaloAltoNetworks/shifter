@@ -59,9 +59,7 @@ def mock_cms_list_scenarios():
         {"id": "basic", "name": "Basic"},
         {"id": "ad_attack_lab", "name": "AD Attack Lab"},
     ]
-    with patch(
-        "mission_control.views.cms_list_scenarios", return_value=scenarios
-    ):
+    with patch("mission_control.views.cms_list_scenarios", return_value=scenarios):
         yield scenarios
 
 
@@ -114,9 +112,7 @@ class TestLaunchRangeInputValidation:
         assert response.status_code == 400
         assert response.json()["error"] == "Invalid JSON"
 
-    def test_returns_400_when_agent_id_missing(
-        self, client, mock_cms_list_scenarios
-    ):
+    def test_returns_400_when_agent_id_missing(self, client, mock_cms_list_scenarios):
         """View returns 400 when agent_id is not provided."""
         url = reverse("mission_control:launch_range")
         response = client.post(
@@ -127,9 +123,7 @@ class TestLaunchRangeInputValidation:
         assert response.status_code == 400
         assert "agent_id" in response.json()["error"]
 
-    def test_returns_400_when_agent_id_is_null(
-        self, client, mock_cms_list_scenarios
-    ):
+    def test_returns_400_when_agent_id_is_null(self, client, mock_cms_list_scenarios):
         """View returns 400 when agent_id is explicitly null."""
         url = reverse("mission_control:launch_range")
         response = client.post(
@@ -140,9 +134,7 @@ class TestLaunchRangeInputValidation:
         assert response.status_code == 400
         assert "agent_id" in response.json()["error"]
 
-    def test_returns_400_when_agent_id_is_zero(
-        self, client, mock_cms_list_scenarios
-    ):
+    def test_returns_400_when_agent_id_is_zero(self, client, mock_cms_list_scenarios):
         """View returns 400 when agent_id is zero (falsy)."""
         url = reverse("mission_control:launch_range")
         response = client.post(
@@ -163,9 +155,7 @@ class TestLaunchRangeInputValidation:
 class TestLaunchRangeScenarioValidation:
     """Tests for scenario validation in launch_range view."""
 
-    def test_accepts_basic_scenario(
-        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
-    ):
+    def test_accepts_basic_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
         """View accepts 'basic' scenario."""
         with patch(
             "mission_control.views.cms_create_range",
@@ -179,9 +169,7 @@ class TestLaunchRangeScenarioValidation:
             )
             assert response.status_code == 200
 
-    def test_accepts_ad_attack_lab_scenario(
-        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
-    ):
+    def test_accepts_ad_attack_lab_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
         """View accepts 'ad_attack_lab' scenario."""
         with patch(
             "mission_control.views.cms_create_range",
@@ -237,9 +225,7 @@ class TestLaunchRangeScenarioValidation:
             # If CMS is being used, ad_attack_lab should be invalid
             assert response.status_code == 400
 
-    def test_defaults_to_basic_scenario(
-        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
-    ):
+    def test_defaults_to_basic_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
         """View defaults to 'basic' scenario when not specified."""
         with patch(
             "mission_control.views.cms_create_range",
@@ -379,9 +365,7 @@ class TestLaunchRangeSuccess:
 class TestLaunchRangeErrorHandling:
     """Tests for error handling in launch_range view."""
 
-    def test_returns_400_on_cms_error(
-        self, client, windows_agent, mock_cms_list_scenarios
-    ):
+    def test_returns_400_on_cms_error(self, client, windows_agent, mock_cms_list_scenarios):
         """View returns 400 when cms_create_range raises CMSError."""
         from cms.exceptions import CMSError
 
@@ -399,9 +383,7 @@ class TestLaunchRangeErrorHandling:
             assert response.status_code == 400
             assert response.json()["error"] == "Agent not found"
 
-    def test_cms_error_message_passed_to_response(
-        self, client, windows_agent, mock_cms_list_scenarios
-    ):
+    def test_cms_error_message_passed_to_response(self, client, windows_agent, mock_cms_list_scenarios):
         """CMSError message is included in error response."""
         from cms.exceptions import CMSError
 
@@ -466,9 +448,7 @@ class TestLaunchRangeLogging:
 
             mock_logger.info.assert_not_called()
 
-    def test_no_log_on_cms_error(
-        self, client, windows_agent, mock_cms_list_scenarios
-    ):
+    def test_no_log_on_cms_error(self, client, windows_agent, mock_cms_list_scenarios):
         """View does not log INFO when CMSError occurs."""
         from cms.exceptions import CMSError
 

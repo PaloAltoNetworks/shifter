@@ -75,12 +75,14 @@ class Command(BaseCommand):
             help="Output results as JSON",
         )
         parser.add_argument(
-            "-o", "--output",
+            "-o",
+            "--output",
             metavar="FILE",
             help="Save JSON output to file",
         )
         parser.add_argument(
-            "-q", "--quiet",
+            "-q",
+            "--quiet",
             action="store_true",
             help="Suppress summary output",
         )
@@ -100,9 +102,8 @@ class Command(BaseCommand):
                 json.dump(output, f, indent=2)
             self.stderr.write(f"Output saved to {options['output']}")
 
-        if options["json"] or options["output"]:
-            if not options["output"]:
-                self.stdout.write(json.dumps(output, indent=2))
+        if options["json"] and not options["output"]:
+            self.stdout.write(json.dumps(output, indent=2))
 
         # Print summary unless quiet
         if not options["quiet"]:
@@ -174,12 +175,14 @@ class Command(BaseCommand):
             if layer_violations:
                 stats["layers_with_violations"].append(layer)
                 for v in layer_violations:
-                    stats["violation_details"].append({
-                        "from": layer,
-                        "model": v["model"],
-                        "field": v["field"],
-                        "references": v["references"],
-                    })
+                    stats["violation_details"].append(
+                        {
+                            "from": layer,
+                            "model": v["model"],
+                            "field": v["field"],
+                            "references": v["references"],
+                        }
+                    )
             else:
                 stats["clean_layers"].append(layer)
 
@@ -199,9 +202,7 @@ class Command(BaseCommand):
         if stats["violation_details"]:
             self.stdout.write("\nViolations detected:")
             for v in stats["violation_details"]:
-                self.stdout.write(
-                    f"  {v['from']}.{v['model']}.{v['field']} -> {v['references']}"
-                )
+                self.stdout.write(f"  {v['from']}.{v['model']}.{v['field']} -> {v['references']}")
         else:
             self.stdout.write(self.style.SUCCESS("\nNo violations detected!"))
 

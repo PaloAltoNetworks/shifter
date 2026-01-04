@@ -9,6 +9,17 @@ from __future__ import annotations
 from enum import Enum
 
 
+class ResourceType(str, Enum):
+    """Top-level resource categories managed by the engine.
+
+    RANGE and NGFW are independent resource types with separate lifecycles.
+    Used by the provisioner to dispatch to the correct setup/teardown logic.
+    """
+
+    RANGE = "range"
+    NGFW = "ngfw"
+
+
 class RangeStatus(str, Enum):
     """Range lifecycle status.
 

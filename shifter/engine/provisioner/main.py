@@ -307,8 +307,7 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
-    # Publish status change event (Engine already set status to DESTROYING before ECS task)
-    publish_status_update(range_id=range_id, user_id=user_id, old_status="ready", new_status="destroying")
+    # Engine already set status to DESTROYING before launching ECS task
     print("Running pulumi destroy...")
 
     result = subprocess.run(

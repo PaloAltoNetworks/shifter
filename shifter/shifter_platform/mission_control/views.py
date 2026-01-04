@@ -15,6 +15,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from cms import cancel_range as cms_cancel_range
 from cms import create_range as cms_create_range
+from cms import destroy_range as cms_destroy_range
 from cms import get_active_range, get_allowed_extensions
 from cms import list_agents as cms_list_agents
 from cms import list_scenarios as cms_list_scenarios
@@ -560,14 +561,26 @@ def destroy_range(request):
     """
     Destroy an active, paused, or failed range.
 
+    Request body (JSON):
+        - range_id: ID of range to destroy
+
     Sets status to DESTROYING and triggers async resource cleanup.
     """
     try:
-        destroy(request.user)
-    except OrchestrationError as e:
-        return JsonResponse({"error": str(e)}, status=e.status_code)
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    logger.info("Range destroyed: user=%s", request.user.email)
+    range_id = data.get("range_id")
+    if not range_id:
+        return JsonResponse({"error": "range_id is required"}, status=400)
+
+    try:
+        cms_destroy_range(request.user, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    logger.info("Range destroyed: user=%s range_id=%s", request.user.email, range_id)
 
     return JsonResponse({"success": True})
 

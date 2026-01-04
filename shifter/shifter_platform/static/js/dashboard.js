@@ -435,6 +435,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
+                body: JSON.stringify({ range_id: this.currentRange.id }),
             });
 
             const data = await response.json();

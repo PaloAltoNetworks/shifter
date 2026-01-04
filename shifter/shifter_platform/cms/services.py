@@ -1101,7 +1101,14 @@ def destroy_range(user: User, range_id: int) -> None:
         if instance.status != RangeStatus.DESTROYING.value:
             raise CMSError("Range status not updated to DESTROYING")
 
-        range_ctx = RangeContext.from_instance(instance)
+        range_ctx = RangeContext(
+            range_id=instance.range_id,
+            scenario_id=instance.scenario_id,
+            user_id=instance.user_id,
+            status=RangeStatus(instance.status),
+            instances=[],
+            agent_name=instance.agent.name if instance.agent else None,
+        )
         engine_destroy_range(range_ctx)
 
         logger.debug("destroy_range completed for range_id=%s, user_id=%s", range_id, user.id)
@@ -1180,7 +1187,14 @@ def cancel_range(user: User, range_id: int) -> None:
         if instance.status != RangeStatus.DESTROYED.value:
             raise CMSError("Range status not updated to DESTROYED")
 
-        range_ctx = RangeContext.from_instance(instance)
+        range_ctx = RangeContext(
+            range_id=instance.range_id,
+            scenario_id=instance.scenario_id,
+            user_id=instance.user_id,
+            status=RangeStatus(instance.status),
+            instances=[],
+            agent_name=instance.agent.name if instance.agent else None,
+        )
         engine_cancel_range(range_ctx)
     except (TypeError, ValueError, CMSError):
         # Re-raise known errors

@@ -215,8 +215,8 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         """Handle WebSocket connection - join range group and send initial state."""
         from cms import get_range
-        from cms.exceptions import CMSError
         from shared.channels.groups import range_event_group
+        from shared.exceptions import CMSError
 
         # Verify authentication
         user = self.scope.get("user")

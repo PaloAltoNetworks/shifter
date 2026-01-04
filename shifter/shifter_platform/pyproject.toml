@@ -42,6 +42,13 @@ testpaths = ["tests"]
 addopts = "--cov=config --cov=mission_control --cov=documentation --cov-report=term-missing --cov-report=xml:coverage.xml --ignore=tests/test_ngfw_models.py --ignore=tests/test_ngfw_views.py -k 'not test_ngfw'"
 env = ["TESTING=1"]
 
+[tool.coverage.run]
+omit = [
+    "tests/conftest.py",
+    "tests/*/conftest.py",
+    "*/migrations/*",
+]
+
 # Ruff - linting and formatting
 [tool.ruff]
 target-version = "py312"

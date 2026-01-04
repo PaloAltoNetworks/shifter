@@ -7,8 +7,235 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build and Analyze
+  # ===========================================================================
+  # Linting
+  # ===========================================================================
+
+  shifter-platform-lint:
+    name: Lint (shifter_platform)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: shifter/shifter_platform
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
+  shifter-platform-lint-js:
+    name: Lint JavaScript/CSS (shifter_platform)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: shifter/shifter_platform/package-lock.json
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: npm ci
+
+      - name: Lint JavaScript
+        working-directory: shifter/shifter_platform
+        run: npx eslint static/js/
+
+      - name: Lint CSS
+        working-directory: shifter/shifter_platform
+        run: npx stylelint static/css/
+
+  provisioner-lint:
+    name: Lint (provisioner)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Lint Python
+        working-directory: shifter/engine/provisioner
+        run: |
+          pip install ruff
+          ruff check .
+          ruff format --check .
+
+  packer-lint:
+    name: Lint (packer)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: shifter/packer
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
+  bootstrap-lint:
+    name: Lint (bootstrap)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: scripts/bootstrap
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
+  check-layer-imports-lint:
+    name: Lint (check_layer_imports)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: scripts/check_layer_imports
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
+  # ===========================================================================
+  # Architecture as Code
+  # ===========================================================================
+
+  check-layer-imports-arch:
+    name: Architecture (layer imports)
+    runs-on: self-hosted
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
+      - name: Check layer imports
+        run: python scripts/check_layer_imports/check_layer_imports.py
+
+  # ===========================================================================
+  # SAST (non-blocking)
+  # ===========================================================================
+
+  shifter-platform-sast:
+    name: SAST (shifter_platform)
+    runs-on: self-hosted
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Bandit
+        run: |
+          pip install bandit
+          bandit -r shifter/shifter_platform/ --skip B101 --exclude shifter/shifter_platform/tests,shifter/shifter_platform/.venv
+
+  provisioner-sast:
+    name: SAST (provisioner)
+    runs-on: self-hosted
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Bandit
+        run: |
+          pip install bandit
+          bandit -r shifter/engine/provisioner/ --skip B101 --exclude shifter/engine/provisioner/tests,shifter/engine/provisioner/.venv
+
+  packer-sast:
+    name: SAST (packer)
+    runs-on: self-hosted
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Bandit
+        run: |
+          pip install bandit
+          bandit -r shifter/packer/ --skip B101 --exclude shifter/packer/tests,shifter/packer/.venv
+
+  bootstrap-sast:
+    name: SAST (bootstrap)
+    runs-on: self-hosted
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Bandit
+        run: |
+          pip install bandit
+          bandit -r scripts/bootstrap/ --skip B101 --exclude scripts/bootstrap/tests,scripts/bootstrap/.venv
+
+  check-layer-imports-sast:
+    name: SAST (check_layer_imports)
+    runs-on: self-hosted
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Bandit
+        working-directory: scripts/check_layer_imports
+        run: |
+          pip install bandit[toml]
+          bandit -r . -c pyproject.toml
+
+  # ===========================================================================
+  # Python Tests
+  # ===========================================================================
+
+  shifter-platform-tests:
+    name: Tests (shifter_platform)
+    needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast, check-layer-imports-arch, model-fks-arch]
     runs-on: self-hosted
     services:
       postgres:
@@ -26,20 +253,15 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
-      - name: Lint Python
+      - name: Install dependencies
         working-directory: shifter/shifter_platform
-        run: |
-          uv sync --group dev
-          uv run ruff check .
-          uv run ruff format --check .
+        run: uv sync --group dev
 
-      - name: Test shifter_platform with coverage
+      - name: Run tests with coverage
         working-directory: shifter/shifter_platform
         env:
           TESTING: "1"
@@ -52,53 +274,34 @@ jobs:
           DB_PASSWORD: test
         run: |
           uv run python manage.py collectstatic --noinput
-          uv run pytest --cov=. --cov-report=xml --cov-report=term-missing
+          uv run pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register --cov=. --cov-report=xml --cov-report=term-missing
 
-      - name: Upload shifter_platform coverage
+      - name: Upload coverage
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           files: shifter/shifter_platform/coverage.xml
-          flags: shifter_platform
+          flags: shifter-platform
           fail_ci_if_error: false
 
-      - name: Cache Checkov
-        uses: actions/cache@v4
-        with:
-          path: ~/.local
-          key: ${{ runner.os }}-checkov-${{ hashFiles('.github/workflows/quality.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-checkov-
-
-      - name: Checkov IaC Security
-        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
-        with:
-          directory: platform/terraform/
-          framework: terraform
-          download_external_modules: true
-          quiet: true
-          compact: true
-          soft_fail: true
-      # SonarCloud uses automatic analysis (configured in SonarCloud settings)
-
   shifter-engine-tests:
-    name: Shifter Engine Tests
+    name: Tests (provisioner)
+    needs: [provisioner-lint, provisioner-sast]
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
       - name: Install dependencies
         working-directory: shifter/engine/provisioner
-        run: |
-          python3.12 -m venv .venv
-          source .venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+        run: uv sync --group dev
 
       - name: Run tests with coverage
         working-directory: shifter/engine/provisioner
-        run: |
-          source .venv/bin/activate
-          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=80
+        env:
+          TESTING: "1"
+        run: uv run pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=80
 
       - name: Upload coverage
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
@@ -107,8 +310,88 @@ jobs:
           flags: provisioner
           fail_ci_if_error: false
 
-  shifter-js-tests:
-    name: Shifter JavaScript Tests
+  packer-tests:
+    name: Tests (packer)
+    needs: [packer-lint, packer-sast]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: shifter/packer
+        run: uv sync --group dev
+
+      - name: Run tests with coverage
+        working-directory: shifter/packer
+        run: uv run pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        with:
+          files: shifter/packer/coverage.xml
+          flags: packer
+          fail_ci_if_error: false
+
+  bootstrap-tests:
+    name: Tests (bootstrap)
+    needs: [bootstrap-lint, bootstrap-sast]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: scripts/bootstrap
+        run: uv sync --group dev
+
+      - name: Run tests with coverage
+        working-directory: scripts/bootstrap
+        run: uv run pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        with:
+          files: scripts/bootstrap/coverage.xml
+          flags: bootstrap
+          fail_ci_if_error: false
+
+  check-layer-imports-tests:
+    name: Tests (check_layer_imports)
+    needs: [check-layer-imports-lint, check-layer-imports-sast]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: scripts/check_layer_imports
+        run: uv sync --group dev
+
+      - name: Run tests with coverage
+        working-directory: scripts/check_layer_imports
+        run: uv run pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        with:
+          files: scripts/check_layer_imports/coverage.xml
+          flags: check-layer-imports
+          fail_ci_if_error: false
+
+  # ===========================================================================
+  # JavaScript Tests
+  # ===========================================================================
+
+  shifter-platform-js-tests:
+    name: Tests JavaScript (shifter_platform)
+    needs: [shifter-platform-lint-js]
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -129,14 +412,42 @@ jobs:
         run: npm test -- --coverage
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           files: shifter/shifter_platform/coverage/lcov.info
           flags: shifter-javascript
           fail_ci_if_error: false
 
-  architecture:
-    name: Architecture Checks
+  # ===========================================================================
+  # Security
+  # ===========================================================================
+
+  security-iac:
+    name: Security (IaC)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Checkov
+        uses: actions/cache@v4
+        with:
+          path: ~/.local
+          key: ${{ runner.os }}-checkov-${{ hashFiles('.github/workflows/_quality.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-checkov-
+
+      - name: Checkov IaC Security
+        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        with:
+          directory: platform/terraform/
+          framework: terraform
+          download_external_modules: true
+          quiet: true
+          compact: true
+          soft_fail: true
+
+  model-fks-arch:
+    name: Architecture (model FKs)
     runs-on: self-hosted
     continue-on-error: true
     services:
@@ -163,10 +474,6 @@ jobs:
         working-directory: shifter/shifter_platform
         run: uv sync --group dev
 
-      - name: Check layer imports
-        run: python scripts/check_layer_imports.py -o layer-imports.json
-        continue-on-error: true
-
       - name: Check model FKs
         working-directory: shifter/shifter_platform
         env:
@@ -176,14 +483,4 @@ jobs:
           DB_NAME: shifter
           DB_USER: test
           DB_PASSWORD: test
-        run: uv run python manage.py check_model_fks -o model-fks.json
-        continue-on-error: true
-
-      - name: Upload architecture reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: architecture-reports
-          path: |
-            layer-imports.json
-            shifter/shifter_platform/model-fks.json
-          retention-days: 30
+        run: uv run python manage.py check_model_fks

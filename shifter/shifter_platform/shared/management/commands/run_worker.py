@@ -1,6 +1,6 @@
 """SQS worker management command.
 
-Replaces Celery workers with direct SQS polling using boto3.
+Direct SQS polling using boto3.
 Run one instance per queue:
 
     python manage.py run_worker --queue cms

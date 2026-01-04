@@ -39,7 +39,7 @@ prod account profile: `dev-workstation-user`
 
 | Component | Module | Purpose |
 |-----------|--------|---------|
-| **Global** | `platform/terraform/global/iam/` | GitHub OIDC provider, CI/CD IAM roles |
+| **Global** | `platform/terraform/global/iam/` | GitHub OIDC provider, CI/CD IAM roles, github-runner, dev-box |
 | **Core** | `platform/terraform/environments/{env}/` | ECR repositories, budget alerts |
 | **Range** | `platform/terraform/modules/range/` | Range VPC, security groups, Network Firewall |
 | **Portal*** | `platform/terraform/modules/portal/` | ALB, EC2/ASG, RDS, Redis, Cognito, S3 |
@@ -67,5 +67,6 @@ ElastiCache Redis:
 
 ## Related Docs
 
+- [Manual Deployment](manual-deployment.md) - Infrastructure elements deployed without CI/CD
 - [CI/CD](cicd.md) - Deployment pipelines
 - [Networking](networking.md) - VPC architecture and peering

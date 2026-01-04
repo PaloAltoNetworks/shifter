@@ -2,14 +2,49 @@
 """Check all cross-layer imports between service layers.
 
 The Shifter platform has five service layers:
-  - shared
-  - engine
-  - cms
-  - management
-  - mission_control
+  - shared        (lowest - common schemas, enums, exceptions)
+  - engine        (infrastructure provisioning)
+  - cms           (content management, orchestrates engine)
+  - management    (admin/platform management)
+  - mission_control (highest - presentation/UI layer)
 
 This script shows ALL imports from each layer to every other layer,
 giving a complete picture of the dependency matrix.
+
+## Layer Dependency Rules
+
+Valid directions (higher layers may import from lower):
+  - All layers may import from: shared
+  - cms, management, mission_control may import from: engine (public API only)
+  - mission_control may import from: cms, management
+
+Violations (lower layers should NOT import from higher):
+  - shared should NOT import from any other layer
+  - engine should NOT import from cms, management, mission_control
+  - cms should NOT import from management, mission_control
+
+## Interpreting Output
+
+The output format is:
+  "from_layer": {
+    "to_layer": ["module.path", "module.submodule", ...]
+  }
+
+Example:
+  "cms": {
+    "engine": ["engine"]           # OK: cms calls engine's public API
+    "shared": ["shared.schemas"]   # OK: cms uses shared types
+  }
+
+  "engine": {
+    "cms.models": ["cms.models"]   # VIOLATION: engine reaching into cms internals
+  }
+
+## What to look for
+
+- Imports like "layer" (e.g., "engine") = public API, usually OK
+- Imports like "layer.models" = internal access, often a violation
+- Imports like "layer.submodule.internal" = deep coupling, red flag
 
 Usage:
     python scripts/check_layer_imports.py

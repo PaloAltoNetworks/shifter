@@ -18,10 +18,10 @@ class TestGetActiveRange:
     # ---------------------------------------------------------------------
 
     def test_returns_active_range(self):
-        """Returns RangeRef for non-deleted, non-terminal range."""
+        """Returns RangeContext for non-deleted, non-terminal range."""
         from cms.models import RangeInstance
         from cms.services import get_active_range
-        from shared.schemas import RangeRef
+        from shared.schemas import RangeContext
 
         user = MagicMock()
         user.id = 42
@@ -37,13 +37,13 @@ class TestGetActiveRange:
         result = get_active_range(user)
 
         assert result is not None
-        assert isinstance(result, RangeRef)
+        assert isinstance(result, RangeContext)
         assert result.range_id == 1
         assert result.user_id == 42
         assert result.status == RangeStatus.READY
 
     def test_returns_provisioning_range(self):
-        """Returns RangeRef for range in PROVISIONING status."""
+        """Returns RangeContext for range in PROVISIONING status."""
         from cms.models import RangeInstance
         from cms.services import get_active_range
 
@@ -138,7 +138,7 @@ class TestGetActiveRange:
         assert result is None
 
     def test_returns_most_recent_active_range(self):
-        """Returns RangeRef for the most recently created active range."""
+        """Returns RangeContext for the most recently created active range."""
         from cms.models import RangeInstance
         from cms.services import get_active_range
 
@@ -287,11 +287,11 @@ class TestGetActiveRange:
         assert "42" in caplog.text
 
     # ---------------------------------------------------------------------
-    # Validation - RangeRef validates on creation
+    # Validation - RangeContext validates on creation
     # ---------------------------------------------------------------------
 
-    def test_validates_range_ref_on_creation(self):
-        """RangeRef.from_instance validates data (range_id must be positive)."""
+    def test_validates_range_context_on_creation(self):
+        """RangeContext validates data (range_id must be positive)."""
         from unittest.mock import patch
 
         from pydantic import ValidationError

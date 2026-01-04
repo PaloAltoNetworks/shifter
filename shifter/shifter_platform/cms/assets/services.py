@@ -17,13 +17,10 @@ from cms.assets.s3 import S3Error
 from cms.assets.s3 import delete_agent as s3_delete
 from cms.models import AgentConfig, OperatingSystem
 from management.models import ActivityLog
+from shared.exceptions import AssetError
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
-
-
-class AssetError(Exception):
-    """Error raised when an asset operation fails."""
 
 
 def get_storage_used(user: User) -> int:

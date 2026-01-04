@@ -1,8 +1,4 @@
-"""Tests for mission_control context processors.
-
-These tests live in cms/tests because mission_control tests are temporarily
-disabled, but the context processor uses cms.services.get_active_range.
-"""
+"""Tests for mission_control context processors."""
 
 from unittest.mock import MagicMock, patch
 
@@ -116,9 +112,7 @@ class TestActiveRangeContextProcessor:
         mock_request = MagicMock()
         mock_request.user.is_authenticated = False
 
-        with patch(
-            "mission_control.context_processors.get_active_range"
-        ) as mock_get_active_range:
+        with patch("mission_control.context_processors.get_active_range") as mock_get_active_range:
             active_range(mock_request)
 
         mock_get_active_range.assert_not_called()

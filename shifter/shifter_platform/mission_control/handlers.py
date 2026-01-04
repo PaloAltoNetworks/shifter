@@ -52,7 +52,6 @@ def process_range_event(message: str | dict) -> None:
                 "range_id": int,
                 "user_id": int,
                 "new_status": str,
-                "old_status": str,
                 "error_message": str | None
             }
 
@@ -68,7 +67,6 @@ def process_range_event(message: str | dict) -> None:
 
     range_id = event.get("range_id")
     new_status = event.get("new_status")
-    old_status = event.get("old_status")
     error_message = event.get("error_message")
 
     channel_layer = get_channel_layer()
@@ -80,7 +78,6 @@ def process_range_event(message: str | dict) -> None:
             "type": "range.status",
             "range_id": range_id,
             "new_status": new_status,
-            "old_status": old_status,
             "error_message": error_message,
         },
     )

@@ -7,7 +7,7 @@ Usage from provisioner:
     from events import publish_status_update, publish_ready, publish_failed
 
     # When status changes
-    publish_status_update(range_id=1, user_id=42, old_status="pending", new_status="provisioning")
+    publish_status_update(range_id=1, user_id=42, new_status="provisioning")
 
     # When provisioning completes
     publish_ready(range_id=1, user_id=42, instances=[...])
@@ -138,7 +138,6 @@ def _publish_event(event: dict) -> None:
 def publish_status_update(
     range_id: int,
     user_id: int,
-    old_status: str,
     new_status: str,
     error_message: str | None = None,
 ) -> None:
@@ -147,7 +146,6 @@ def publish_status_update(
     Args:
         range_id: ID of the range
         user_id: ID of the user who owns the range
-        old_status: Previous status value
         new_status: New status value
         error_message: Optional error message for failure events
     """
@@ -155,15 +153,13 @@ def publish_status_update(
         event_type=EVENT_TYPE_STATUS_UPDATED,
         range_id=range_id,
         user_id=user_id,
-        old_status=old_status,
         new_status=new_status,
         error_message=error_message,
     )
 
     logger.info(
-        "Publishing status update: range_id=%s old=%s new=%s",
+        "Publishing status update: range_id=%s new_status=%s",
         range_id,
-        old_status,
         new_status,
     )
 
@@ -192,7 +188,6 @@ def publish_ready(
     publish_status_update(
         range_id=range_id,
         user_id=user_id,
-        old_status=STATUS_PROVISIONING,
         new_status=STATUS_READY,
     )
 
@@ -231,7 +226,6 @@ def publish_failed(
     publish_status_update(
         range_id=range_id,
         user_id=user_id,
-        old_status=STATUS_PROVISIONING,
         new_status=STATUS_FAILED,
         error_message=error_message,
     )
@@ -247,7 +241,6 @@ def publish_destroyed(range_id: int, user_id: int) -> None:
     publish_status_update(
         range_id=range_id,
         user_id=user_id,
-        old_status=STATUS_DESTROYING,
         new_status=STATUS_DESTROYED,
     )
 

@@ -101,8 +101,30 @@
 <script src="{% static 'js/terminal.js' %}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Instances from RangeContext (uuid, role, os_type, etc.)
+    const instances = [
+        {% for instance in active_range.instances %}
+        {
+            uuid: "{{ instance.uuid }}",
+            role: "{{ instance.role }}",
+            osType: "{{ instance.os_type }}"
+        }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    // Connection URLs from context processor (uuid, terminal_url)
+    const connectionUrls = [
+        {% for conn in connection_urls %}
+        {
+            uuid: "{{ conn.uuid }}",
+            terminalUrl: "{{ conn.terminal_url }}"
+        }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+
     const terminalManager = new TerminalManager({
-        rangeId: {{ active_range.range_id }},
+        instances: instances,
+        connectionUrls: connectionUrls,
         kaliContainerId: 'kali-terminal',
         victimContainerId: 'victim-terminal',
         wsProtocol: window.location.protocol === 'https:' ? 'wss:' : 'ws:',

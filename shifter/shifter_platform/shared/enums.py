@@ -56,3 +56,25 @@ CANCELLABLE_STATUSES: set[RangeStatus] = {
     RangeStatus.PENDING,
     RangeStatus.PROVISIONING,
 }
+
+
+class WebSocketCloseCode(int, Enum):
+    """WebSocket close codes for Shifter consumers.
+
+    Standard codes (1000-1015) are defined by RFC 6455.
+    Application codes (4000-4999) are for application-specific use.
+    """
+
+    # Standard codes
+    NORMAL = 1000
+
+    # Application codes - Authentication/Authorization
+    NOT_AUTHENTICATED = 4001
+    PERMISSION_DENIED = 4003
+    NOT_FOUND = 4004
+    INVALID_REQUEST = 4005
+
+    # Application codes - Server errors
+    SERVER_ERROR = 4500
+    SSH_CONNECTION_FAILED = 4502
+    SERVICE_UNAVAILABLE = 4503

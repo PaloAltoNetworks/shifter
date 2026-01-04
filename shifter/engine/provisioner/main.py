@@ -256,7 +256,7 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
         env: Environment dictionary for subprocess.
     """
     # Publish status change event - Celery workers handle DB updates
-    publish_status_update(range_id=range_id, user_id=user_id, old_status="pending", new_status="provisioning")
+    publish_status_update(range_id=range_id, user_id=user_id, new_status="provisioning")
     print("Running pulumi up...")
 
     result = subprocess.run(

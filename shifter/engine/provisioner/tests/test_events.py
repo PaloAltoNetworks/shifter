@@ -92,7 +92,6 @@ class TestPublishEvent:
                 "event_type": "range.status.updated",
                 "range_id": 42,
                 "user_id": 1,
-                "old_status": "pending",
                 "new_status": "provisioning",
             }
 
@@ -179,7 +178,6 @@ class TestPublishStatusUpdate:
             publish_status_update(
                 range_id=42,
                 user_id=1,
-                old_status="pending",
                 new_status="provisioning",
             )
 
@@ -189,7 +187,6 @@ class TestPublishStatusUpdate:
             assert event["event_type"] == "range.status.updated"
             assert event["range_id"] == 42
             assert event["user_id"] == 1
-            assert event["old_status"] == "pending"
             assert event["new_status"] == "provisioning"
 
     def test_includes_error_message_when_provided(self, mock_sns_env):
@@ -200,7 +197,6 @@ class TestPublishStatusUpdate:
             publish_status_update(
                 range_id=42,
                 user_id=1,
-                old_status="provisioning",
                 new_status="failed",
                 error_message="Subnet exhausted",
             )
@@ -217,11 +213,11 @@ class TestPublishStatusUpdate:
             caplog.at_level(logging.INFO, logger="events"),
         ):
             publish_status_update(
-                range_id=42, user_id=1, old_status="pending", new_status="provisioning"
+                range_id=42, user_id=1, new_status="provisioning"
             )
 
             assert "42" in caplog.text
-            assert "pending" in caplog.text or "provisioning" in caplog.text
+            assert "provisioning" in caplog.text
 
 
 class TestPublishReady:

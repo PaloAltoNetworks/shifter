@@ -20,13 +20,11 @@ class TestRangeStatusUpdatedEvent:
         event = RangeStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            old_status=RangeStatus.PENDING,
             new_status=RangeStatus.PROVISIONING,
         )
 
         assert event.range_id == 1
         assert event.user_id == 42
-        assert event.old_status == RangeStatus.PENDING
         assert event.new_status == RangeStatus.PROVISIONING
         assert event.error_message is None
 
@@ -37,7 +35,6 @@ class TestRangeStatusUpdatedEvent:
         event = RangeStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            old_status=RangeStatus.PENDING,
             new_status=RangeStatus.PROVISIONING,
         )
 
@@ -51,7 +48,6 @@ class TestRangeStatusUpdatedEvent:
         event = RangeStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            old_status=RangeStatus.PENDING,
             new_status=RangeStatus.PROVISIONING,
         )
         after = datetime.now(UTC)
@@ -65,7 +61,6 @@ class TestRangeStatusUpdatedEvent:
         event = RangeStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            old_status=RangeStatus.PROVISIONING,
             new_status=RangeStatus.FAILED,
             error_message="Subnet exhausted",
         )
@@ -82,7 +77,6 @@ class TestRangeStatusUpdatedEvent:
         event = RangeStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            old_status=RangeStatus.PENDING,
             new_status=RangeStatus.PROVISIONING,
             correlation_id=correlation_id,
         )
@@ -100,7 +94,6 @@ class TestRangeStatusUpdatedEvent:
         event = RangeStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            old_status=RangeStatus.PENDING,
             new_status=RangeStatus.PROVISIONING,
         )
 
@@ -108,7 +101,6 @@ class TestRangeStatusUpdatedEvent:
 
         assert data["range_id"] == 1
         assert data["user_id"] == 42
-        assert data["old_status"] == "pending"
         assert data["new_status"] == "provisioning"
 
     def test_serializes_to_json(self):
@@ -118,7 +110,6 @@ class TestRangeStatusUpdatedEvent:
         event = RangeStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            old_status=RangeStatus.PENDING,
             new_status=RangeStatus.PROVISIONING,
         )
 
@@ -140,7 +131,6 @@ class TestRangeStatusUpdatedEvent:
             "timestamp": timestamp.isoformat(),
             "range_id": 1,
             "user_id": 42,
-            "old_status": "pending",
             "new_status": "provisioning",
         }
 

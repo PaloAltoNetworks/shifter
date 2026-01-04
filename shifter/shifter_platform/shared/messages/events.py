@@ -44,7 +44,6 @@ class RangeStatusUpdatedEvent(BaseEvent):
 
     range_id: int
     user_id: int
-    old_status: RangeStatus
     new_status: RangeStatus
     error_message: str | None = None
 

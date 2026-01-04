@@ -337,7 +337,7 @@ class TestRunProvision:
 
             # Verify status update event was published
             mock_status.assert_called_once_with(
-                range_id=42, user_id=7, old_status="pending", new_status="provisioning"
+                range_id=42, user_id=7, new_status="provisioning"
             )
             # Verify ready event was published with instance details
             mock_ready.assert_called_once()

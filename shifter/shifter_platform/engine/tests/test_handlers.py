@@ -102,7 +102,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.PROVISIONING.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": user.id,
                 }
             )
@@ -130,7 +129,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.READY.value,
-                    "old_status": RangeStatus.PROVISIONING.value,
                     "user_id": user.id,
                 }
             )
@@ -159,7 +157,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.DESTROYED.value,
-                    "old_status": RangeStatus.DESTROYING.value,
                     "user_id": user.id,
                 }
             )
@@ -187,7 +184,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.FAILED.value,
-                    "old_status": RangeStatus.PROVISIONING.value,
                     "user_id": user.id,
                     "error_message": "Subnet exhausted",
                 }
@@ -247,7 +243,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": 999999,
                     "new_status": RangeStatus.READY.value,
-                    "old_status": RangeStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -275,7 +270,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.READY.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": 999999,  # Wrong user
                 }
             )
@@ -311,7 +305,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.PROVISIONING.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": user.id,
                 }
             )
@@ -346,7 +339,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.PROVISIONING.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": user.id,
                 }
             )
@@ -411,7 +403,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.PROVISIONING.value,
-                    "old_status": RangeStatus.PENDING.value,
                     "user_id": user.id,
                 }
             )
@@ -438,7 +429,6 @@ class TestProcessRangeEvent:
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
                     "new_status": RangeStatus.FAILED.value,
-                    "old_status": RangeStatus.PROVISIONING.value,
                     "user_id": user.id,
                     # No error_message
                 }

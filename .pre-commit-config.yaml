@@ -1,6 +1,26 @@
 fail_fast: true
 
 repos:
+  # =============================================================================
+  # STAGE 1: Fast checks (linting, formatting, syntax)
+  # =============================================================================
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+        exclude: ^assets/styles/
+      - id: check-yaml
+        args: [--unsafe] # Allow custom YAML constructors (mkdocs plugins)
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: detect-private-key
+        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/) # Tests check key format strings
+
   # Python - Ruff (linting + formatting)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.9
@@ -41,15 +61,42 @@ repos:
         name: ruff-format (check_layer_imports)
         files: ^scripts/check_layer_imports/
 
-  # Python - Tests (shifter_platform)
+  # JavaScript/CSS linting
   - repo: local
     hooks:
-      - id: pytest-shifter
-        name: pytest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+      - id: eslint-shifter-platform
+        name: eslint (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && npx eslint --fix static/js/'
         language: system
-        files: ^shifter/shifter_platform/
-        pass_filenames: false
+        files: ^shifter/shifter_platform/static/js/.*\.js$
+        types: [javascript]
+
+      - id: stylelint-shifter-platform
+        name: stylelint (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && npx stylelint --fix static/css/'
+        language: system
+        files: ^shifter/shifter_platform/static/css/.*\.css$
+        types: [css]
+
+  # Shell scripts
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        files: ^scripts/
+
+  # Terraform formatting and validation
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.3
+    hooks:
+      - id: terraform_fmt
+        files: ^platform/terraform/
+      - id: terraform_validate
+        files: ^platform/terraform/
+
+  # =============================================================================
+  # STAGE 2: Security (SAST/DAST)
+  # =============================================================================
 
   # Python - Security (bandit)
   - repo: https://github.com/PyCQA/bandit
@@ -72,7 +119,9 @@ repos:
         exclude: ^shifter/packer/(tests|\.venv)/
       - id: bandit
         name: bandit (bootstrap)
-        args: [-r, --skip, B101]
+        # B101: assert, B404: subprocess import, B603: subprocess call, B607: partial path
+        # These are expected in deployment scripts that run CLI tools
+        args: [-r, --skip, "B101,B404,B603,B607"]
         files: ^scripts/bootstrap/
         exclude: ^scripts/bootstrap/(tests|\.venv)/
       - id: bandit
@@ -81,45 +130,40 @@ repos:
         files: ^scripts/check_layer_imports/
         exclude: ^scripts/check_layer_imports/(tests|\.venv)/
 
-  # General
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+  # IaC Security (Terraform, Dockerfile)
+  - repo: https://github.com/bridgecrewio/checkov
+    rev: 3.2.346
     hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-        exclude: ^assets/styles/
-      - id: check-yaml
-        args: [--unsafe] # Allow custom YAML constructors (mkdocs plugins)
-      - id: check-json
-      - id: check-added-large-files
-        args: [--maxkb=500]
-      - id: check-merge-conflict
-      - id: detect-private-key
-        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/) # Tests check key format strings
+      - id: checkov
+        files: ^platform/terraform/
+        args:
+          [--quiet, --compact, --directory, platform/terraform/, --soft-fail]
 
-  # JavaScript/CSS - shifter_platform linting
+  # =============================================================================
+  # STAGE 3: Architecture checks (informational - non-blocking)
+  # =============================================================================
+
   - repo: local
     hooks:
-      - id: eslint-shifter-platform
-        name: eslint (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && npx eslint --fix static/js/'
+      - id: check-layer-imports
+        name: architecture (layer imports)
+        entry: bash -c 'python scripts/check_layer_imports/check_layer_imports.py || true'
         language: system
-        files: ^shifter/shifter_platform/static/js/.*\.js$
-        types: [javascript]
-
-      - id: stylelint-shifter-platform
-        name: stylelint (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && npx stylelint --fix static/css/'
-        language: system
-        files: ^shifter/shifter_platform/static/css/.*\.css$
-        types: [css]
-
-      - id: jest-shifter-platform
-        name: jest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && npm test -- --coverage --coverageReporters=lcov --coverageReporters=text-summary --coverageDirectory=../../coverage/js'
-        language: system
-        files: ^shifter/shifter_platform/static/js/.*\.js$
+        files: ^shifter/shifter_platform/
         pass_filenames: false
+        verbose: true
+
+      - id: check-model-fks
+        name: architecture (model FKs)
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python manage.py check_model_fks || true'
+        language: system
+        files: ^shifter/shifter_platform/
+        pass_filenames: false
+        verbose: true
+
+  # =============================================================================
+  # STAGE 4: Tests (slowest - run last, shifter_platform last of all)
+  # =============================================================================
 
   # Packer tests
   - repo: local
@@ -161,46 +205,22 @@ repos:
         files: ^scripts/check_layer_imports/
         pass_filenames: false
 
-  # Terraform
-  - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: v1.96.3
-    hooks:
-      - id: terraform_fmt
-        files: ^platform/terraform/
-      - id: terraform_validate
-        files: ^platform/terraform/
-
-  # IaC Security (Terraform, Dockerfile)
-  - repo: https://github.com/bridgecrewio/checkov
-    rev: 3.2.346
-    hooks:
-      - id: checkov
-        files: ^platform/terraform/
-        args:
-          [--quiet, --compact, --directory, platform/terraform/, --soft-fail]
-
-  # Shell scripts
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
-    hooks:
-      - id: shellcheck
-        files: ^scripts/
-
-  # Architecture checks (informational - non-blocking)
+  # Jest tests (JS)
   - repo: local
     hooks:
-      - id: check-layer-imports
-        name: architecture (layer imports)
-        entry: bash -c 'python scripts/check_layer_imports/check_layer_imports.py || true'
+      - id: jest-shifter-platform
+        name: jest (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && npm test -- --coverage --coverageReporters=lcov --coverageReporters=text-summary --coverageDirectory=../../coverage/js'
         language: system
-        files: ^shifter/shifter_platform/
+        files: ^shifter/shifter_platform/static/js/.*\.js$
         pass_filenames: false
-        verbose: true
 
-      - id: check-model-fks
-        name: architecture (model FKs)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python manage.py check_model_fks || true'
+  # Shifter Platform tests (largest test suite - run last)
+  - repo: local
+    hooks:
+      - id: pytest-shifter
+        name: pytest (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
-        verbose: true

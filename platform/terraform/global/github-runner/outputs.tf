@@ -1,17 +1,18 @@
-output "runner_instance_ids" {
-  description = "Instance IDs of the GitHub Actions runners"
-  value       = aws_spot_instance_request.runner[*].spot_instance_id
+# ------------------------------------------------------------------------------
+# Outputs
+# ------------------------------------------------------------------------------
+
+output "webhook_endpoint" {
+  description = "GitHub webhook URL - configure this in your GitHub App settings"
+  value       = module.github_runner.webhook.endpoint
 }
 
-output "runner_names" {
-  description = "Names of the GitHub Actions runners"
-  value       = [for i in range(var.runner_count) : "shifter-github-runner-${i + 1}"]
+output "webhook_secret_ssm_path" {
+  description = "SSM path where webhook secret is stored"
+  value       = var.github_app_webhook_secret_ssm_path
 }
 
-output "ssm_commands" {
-  description = "SSM commands to connect to each runner"
-  value = [
-    for id in aws_spot_instance_request.runner[*].spot_instance_id :
-    "aws ssm start-session --target ${id} --region ${var.region}"
-  ]
+output "runner_labels" {
+  description = "Labels that runners will register with"
+  value       = ["self-hosted", "linux", "x64", "shifter", var.environment]
 }

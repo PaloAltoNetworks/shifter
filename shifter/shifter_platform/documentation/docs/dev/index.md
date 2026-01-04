@@ -53,7 +53,7 @@ shifter/
 │       │   │   └── range/      # Range VPC infra
 │       │   └── prod/
 │       ├── modules/            # Reusable Terraform modules
-│       └── global/             # Cross-environment resources (IAM, OIDC)
+│       └── global/             # Cross-environment resources (IAM, OIDC, github-runners)
 ├── scripts/                    # Bootstrap and utility scripts
 └── .github/workflows/          # CI/CD pipelines
 ```

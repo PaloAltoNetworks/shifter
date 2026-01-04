@@ -101,6 +101,27 @@ class TestHydrateScenario:
         assert "attacker" in roles
         assert "victim" in roles
 
+    def test_each_instance_has_uuid(self, user, windows_agent):
+        """Each instance gets a unique UUID."""
+        from cms.scenarios.hydrator import hydrate_scenario
+
+        result = hydrate_scenario("basic", user.id, windows_agent)
+        uuids = [i.uuid for i in result.instances]
+        assert all(uuid is not None for uuid in uuids)
+        assert len(set(uuids)) == len(uuids)  # All unique
+
+    def test_uuid_is_valid_format(self, user, windows_agent):
+        """Instance UUIDs are valid UUID4 format."""
+        import uuid
+
+        from cms.scenarios.hydrator import hydrate_scenario
+
+        result = hydrate_scenario("basic", user.id, windows_agent)
+        for instance in result.instances:
+            # Will raise ValueError if not valid UUID
+            parsed = uuid.UUID(instance.uuid)
+            assert parsed.version == 4
+
     # --- OS resolution from agent ---
 
     def test_resolves_from_agent_to_windows(self, user, windows_agent):

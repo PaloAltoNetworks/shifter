@@ -598,9 +598,7 @@ class TestCreateRangeValidation:
             services.create_range(user, "basic", other_agent.id)
 
     @patch("cms.services.engine_create_range")
-    def test_raises_when_user_already_has_active_range(
-        self, mock_engine, user, windows_agent
-    ):
+    def test_raises_when_user_already_has_active_range(self, mock_engine, user, windows_agent):
         """create_range raises CMSError when user has an existing active range."""
         from cms.exceptions import CMSError
         from cms.models import RangeInstance
@@ -777,15 +775,45 @@ class TestCreateRangeReturn:
         assert result.agent_name == "Windows Agent"
 
     @patch("cms.services.engine_create_range")
-    def test_range_context_has_pending_status(self, mock_engine, user, windows_agent):
-        """RangeContext has PENDING status initially."""
+    def test_range_context_has_provisioning_status(self, mock_engine, user, windows_agent):
+        """RangeContext has PROVISIONING status (engine invariant on creation)."""
         from shared.enums import RangeStatus
 
         mock_engine.return_value = 42
 
         result = services.create_range(user, "basic", windows_agent.id)
 
-        assert result.status == RangeStatus.PENDING
+        assert result.status == RangeStatus.PROVISIONING
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_instances(self, mock_engine, user, windows_agent):
+        """RangeContext contains instances list."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert len(result.instances) == 2  # basic scenario has attacker + victim
+
+    @patch("cms.services.engine_create_range")
+    def test_instances_have_uuids(self, mock_engine, user, windows_agent):
+        """Each instance has a UUID."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        for instance in result.instances:
+            assert instance.uuid is not None
+
+    @patch("cms.services.engine_create_range")
+    def test_instances_have_roles(self, mock_engine, user, windows_agent):
+        """Instances have correct roles from scenario."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        roles = [i.role for i in result.instances]
+        assert "attacker" in roles
+        assert "victim" in roles
 
 
 @pytest.mark.django_db

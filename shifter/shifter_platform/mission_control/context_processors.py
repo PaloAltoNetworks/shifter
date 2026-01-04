@@ -3,6 +3,7 @@
 import logging
 
 from cms.services import get_active_range
+from mission_control.utils import build_connection_urls
 from shared.schemas import RangeContext
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ def active_range(request):
         return {
             "has_active_range": False,
             "active_range": None,
+            "connection_urls": [],
         }
 
     user_id = request.user.id
@@ -38,28 +40,31 @@ def active_range(request):
             return {
                 "has_active_range": False,
                 "active_range": None,
+                "connection_urls": [],
             }
 
         if range_context is not None:
             is_ready = range_context.is_ready
             logger.info(
-                "active_range context processor: found range for user_id=%s, "
-                "status=%s, is_ready=%s",
+                "active_range context processor: found range for user_id=%s, status=%s, is_ready=%s",
                 user_id,
                 range_context.status,
                 is_ready,
             )
             has_ready_range = is_ready
+            connection_urls = build_connection_urls(range_context.instances)
         else:
             logger.info(
                 "active_range context processor: no active range for user_id=%s",
                 user_id,
             )
             has_ready_range = False
+            connection_urls = []
 
         return {
             "has_active_range": has_ready_range,
             "active_range": range_context,
+            "connection_urls": connection_urls,
         }
 
     except Exception:
@@ -70,4 +75,5 @@ def active_range(request):
         return {
             "has_active_range": False,
             "active_range": None,
+            "connection_urls": [],
         }

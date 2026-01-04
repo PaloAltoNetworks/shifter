@@ -9,6 +9,7 @@ RangeSpec with:
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import TYPE_CHECKING
 
 from cms.exceptions import CMSError
@@ -130,6 +131,7 @@ def _hydrate_instance(
         )
 
     return InstanceSpec(
+        uuid=str(uuid.uuid4()),
         role=instance.role,
         os_type=os_type,
         agent=agent_details,

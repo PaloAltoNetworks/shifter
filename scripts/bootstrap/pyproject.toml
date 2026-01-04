@@ -24,7 +24,13 @@ exclude = [".venv", "__pycache__"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP", "S", "T20", "SIM", "RUF"]
-ignore = ["S101"]
+# T201: print allowed (CLI tool)
+# S603/S607: subprocess allowed (AWS CLI/terraform calls)
+# SIM108: ternary operator not always clearer
+# RUF001: unicode chars in output are intentional
+# RUF005: list concat is clearer in some cases
+# RUF013: implicit Optional is fine for CLI tools
+ignore = ["S101", "T201", "S603", "S607", "SIM108", "RUF001", "RUF005", "RUF013"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105", "S106"]

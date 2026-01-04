@@ -13,5 +13,11 @@ paths-ignore:
   - "shifter/shifter_platform/tests/**"
   # Shifter Engine test directory
   - "shifter/engine/provisioner/tests/**"
+  # Packer test directory
+  - "shifter/packer/tests/**"
+  # Bootstrap scripts test directory
+  - "scripts/bootstrap/tests/**"
+  # Check layer imports test directory
+  - "scripts/check_layer_imports/tests/**"
   # Legacy path (may appear in git history)
   - "pulumi-provisioner/tests/**"

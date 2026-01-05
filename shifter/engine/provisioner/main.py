@@ -204,7 +204,7 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
     )
 
     if result.returncode != 0:
-        raise Exception(f"Stack creation failed: {result.stderr}")
+        raise RuntimeError(f"Stack creation failed: {result.stderr}")
 
     logger.info(f"Created new stack: {stack_name}")
 
@@ -282,7 +282,7 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
         logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
     if result.returncode != 0:
-        raise Exception(f"Pulumi up failed: {result.stderr}")
+        raise RuntimeError(f"Pulumi up failed: {result.stderr}")
 
     # Get outputs
     logger.info("Retrieving stack outputs...")
@@ -333,7 +333,7 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
         logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
     if result.returncode != 0:
-        raise Exception(f"Pulumi destroy failed: {result.stderr}")
+        raise RuntimeError(f"Pulumi destroy failed: {result.stderr}")
 
     # Remove stack
     logger.info(f"Removing stack: {stack_name}")
@@ -409,7 +409,7 @@ def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
         result = orchestrator.orchestrate(plan, context)
 
         if not result.success:
-            raise Exception(f"Operation {operation} failed")
+            raise RuntimeError(f"Operation {operation} failed")
 
         # Update success status with timestamp if applicable
         extra_kwargs = {}
@@ -534,7 +534,7 @@ def _run_ngfw_provision(user_ngfw_id: int, stack_name: str, env: dict) -> None:
         logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
     if result.returncode != 0:
-        raise Exception(f"NGFW Pulumi up failed: {result.stderr}")
+        raise RuntimeError(f"NGFW Pulumi up failed: {result.stderr}")
 
     # Get outputs
     logger.info("Retrieving NGFW stack outputs...")
@@ -573,7 +573,7 @@ def _run_ngfw_provision(user_ngfw_id: int, stack_name: str, env: dict) -> None:
     provision_result = orchestrator.orchestrate(provision_plan, context)
 
     if not provision_result.success:
-        raise Exception("NGFW post-Pulumi configuration failed")
+        raise RuntimeError("NGFW post-Pulumi configuration failed")
 
     # Update NGFW with provisioned resources
     update_ngfw_status(
@@ -636,7 +636,7 @@ def _run_ngfw_deprovision(user_ngfw_id: int, stack_name: str, env: dict) -> None
         logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
     if result.returncode != 0:
-        raise Exception(f"NGFW Pulumi destroy failed: {result.stderr}")
+        raise RuntimeError(f"NGFW Pulumi destroy failed: {result.stderr}")
 
     # Remove stack
     logger.info(f"Removing NGFW stack: {stack_name}")

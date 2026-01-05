@@ -738,24 +738,22 @@ class TestBootstrapAccount:
             ]
             assert len(dynamo_calls) > 0
 
-    def test_creates_github_oidc_provider(self, bootstrap_config, mock_subprocess):
-        """Function creates GitHub OIDC identity provider."""
+    def test_runs_terraform_to_create_oidc_and_role(self, bootstrap_config, mock_subprocess):
+        """Function runs Terraform to create OIDC provider and production IAM role."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("os.chdir"),
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
 
-            # Should call create-open-id-connect-provider
-            oidc_calls = [
+            # Should call terraform init and apply
+            terraform_calls = [
                 c
                 for c in mock_subprocess.call_args_list
-                if len(c[0]) > 0
-                and len(c[0][0]) > 0
-                and c[0][0][0] == "aws"
-                and "create-open-id-connect-provider" in " ".join(c[0][0])
+                if len(c[0]) > 0 and len(c[0][0]) > 0 and c[0][0][0] == "terraform"
             ]
-            assert len(oidc_calls) > 0
+            assert len(terraform_calls) > 0
 
     def test_creates_iam_role_for_github_actions(self, bootstrap_config, mock_subprocess):
         """Function creates IAM role for GitHub Actions."""
@@ -773,19 +771,23 @@ class TestBootstrapAccount:
             ]
             assert len(role_calls) > 0
 
-    def test_attaches_admin_policy_to_role(self, bootstrap_config, mock_subprocess):
-        """Function attaches policies to IAM role."""
+    def test_attaches_admin_policy_to_bootstrap_role(self, bootstrap_config, mock_subprocess):
+        """Function attaches AdministratorAccess to bootstrap role."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("os.chdir"),
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
 
-            # Should call put-role-policy
+            # Should call attach-role-policy with AdministratorAccess
             policy_calls = [
                 c
                 for c in mock_subprocess.call_args_list
-                if len(c[0]) > 0 and len(c[0][0]) > 0 and c[0][0][0] == "aws" and "put-role-policy" in " ".join(c[0][0])
+                if len(c[0]) > 0
+                and len(c[0][0]) > 0
+                and c[0][0][0] == "aws"
+                and "attach-role-policy" in " ".join(c[0][0])
             ]
             assert len(policy_calls) > 0
 
@@ -960,19 +962,28 @@ class TestWalkthroughGithubSecrets:
         }
 
         with (
-            patch("shutil.which", return_value="/usr/bin/gh"),
             patch("builtins.input", return_value="y"),
             patch("subprocess.run") as mock_run,
         ):
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+
+            def mock_subprocess_run(cmd, **kwargs):
+                cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+                if "which" in cmd_str:
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="/usr/bin/gh\n", stderr="")
+                elif "gh" in cmd_str and "secret" in cmd_str:
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+            mock_run.side_effect = mock_subprocess_run
 
             deploy.walkthrough_github_secrets(bootstrap_result)
 
             # Should call gh secret set
             gh_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "gh"]
             assert len(gh_calls) > 0
-            assert "secret" in gh_calls[0][0][0]
-            assert "set" in gh_calls[0][0][0]
+            # Find the set call
+            set_calls = [c for c in gh_calls if "set" in c[0][0]]
+            assert len(set_calls) > 0
 
     def test_includes_role_arn_in_gh_secret_command(self, bootstrap_config, mock_stdin_tty):
         """Function passes correct role ARN to gh secret set."""
@@ -984,11 +995,19 @@ class TestWalkthroughGithubSecrets:
         }
 
         with (
-            patch("shutil.which", return_value="/usr/bin/gh"),
             patch("builtins.input", return_value="y"),
             patch("subprocess.run") as mock_run,
         ):
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+
+            def mock_subprocess_run(cmd, **kwargs):
+                cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+                if "which" in cmd_str:
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="/usr/bin/gh\n", stderr="")
+                elif "gh" in cmd_str and "secret" in cmd_str:
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+            mock_run.side_effect = mock_subprocess_run
 
             deploy.walkthrough_github_secrets(bootstrap_result)
 

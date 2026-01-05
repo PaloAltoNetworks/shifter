@@ -41,11 +41,6 @@ PANW SecOps Domain Consultants who need to:
 
 All resources are in `us-east-2`.
 
-| Environment | AWS Profile |
-|-------------|-------------|
-| dev | `panw-shifter-dev-workstation` |
-| prod | `dev-workstation-user` |
-
 ---
 
 ## Platform Elements

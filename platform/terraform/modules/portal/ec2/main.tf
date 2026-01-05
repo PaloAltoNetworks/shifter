@@ -236,6 +236,50 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# IAM policy for reading deployment config from Parameter Store
+resource "aws_iam_role_policy" "ssm_parameter_read" {
+  count = var.ssm_parameter_store_prefix != "" ? 1 : 0
+
+  name = "ssm-parameter-read"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_parameter_store_prefix}/*"
+      }
+    ]
+  })
+}
+
+# IAM policy for completing ASG lifecycle actions
+resource "aws_iam_role_policy" "lifecycle_action" {
+  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
+
+  name = "lifecycle-action"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:CompleteLifecycleAction"
+        ]
+        Resource = aws_autoscaling_group.this[0].arn
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "this" {
   name = "${var.name_prefix}-ec2-profile"
   role = aws_iam_role.this.name
@@ -528,5 +572,119 @@ resource "aws_instance" "this" {
 
   lifecycle {
     ignore_changes = [ami]
+  }
+}
+
+# ------------------------------------------------------------------------------
+# ASG Lifecycle Hook (for SSM-based deployment)
+# ------------------------------------------------------------------------------
+
+resource "aws_autoscaling_lifecycle_hook" "launch" {
+  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
+
+  name                   = "${var.name_prefix}-launch-hook"
+  autoscaling_group_name = aws_autoscaling_group.this[0].name
+  lifecycle_transition   = "autoscaling:EC2_INSTANCE_LAUNCHING"
+  heartbeat_timeout      = var.lifecycle_hook_heartbeat_timeout
+  default_result         = "ABANDON"
+}
+
+# ------------------------------------------------------------------------------
+# EventBridge IAM Role (for triggering SSM Run Command)
+# ------------------------------------------------------------------------------
+
+resource "aws_iam_role" "eventbridge_ssm" {
+  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
+
+  name = "${var.name_prefix}-eventbridge-ssm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "eventbridge_ssm" {
+  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
+
+  name = "ssm-run-command"
+  role = aws_iam_role.eventbridge_ssm[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand"
+        ]
+        Resource = [
+          var.ssm_document_arn,
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/*"
+        ]
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# EventBridge Rule (for lifecycle hook events)
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_event_rule" "asg_launch" {
+  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
+
+  name        = "${var.name_prefix}-asg-launch"
+  description = "Trigger SSM deployment when ASG launches new instance"
+
+  event_pattern = jsonencode({
+    source      = ["aws.autoscaling"]
+    detail-type = ["EC2 Instance-launch Lifecycle Action"]
+    detail = {
+      AutoScalingGroupName = [aws_autoscaling_group.this[0].name]
+      LifecycleHookName    = [aws_autoscaling_lifecycle_hook.launch[0].name]
+    }
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_event_target" "ssm_deploy" {
+  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
+
+  rule     = aws_cloudwatch_event_rule.asg_launch[0].name
+  arn      = "arn:aws:ssm:${data.aws_region.current.name}::document/${var.ssm_document_name}"
+  role_arn = aws_iam_role.eventbridge_ssm[0].arn
+
+  run_command_targets {
+    key    = "InstanceIds"
+    values = ["$.detail.EC2InstanceId"]
+  }
+
+  input_transformer {
+    input_paths = {
+      instance_id  = "$.detail.EC2InstanceId"
+      asg_name     = "$.detail.AutoScalingGroupName"
+      hook_name    = "$.detail.LifecycleHookName"
+      action_token = "$.detail.LifecycleActionToken"
+    }
+
+    input_template = <<EOF
+{
+  "LifecycleHookName": [<hook_name>],
+  "AutoScalingGroupName": [<asg_name>],
+  "LifecycleActionToken": [<action_token>]
+}
+EOF
   }
 }

@@ -41,7 +41,7 @@ class TestAWSExecutorInit:
             mock_session = MagicMock()
             mock_boto3.Session.return_value = mock_session
 
-            executor = AWSExecutor(region_name="us-west-2")
+            AWSExecutor(region_name="us-west-2")
 
             mock_boto3.Session.assert_called_once_with(region_name="us-west-2")
 
@@ -107,9 +107,7 @@ class TestAWSExecutorRunCommand:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.describe_instances.return_value = {
-            "Reservations": [{"Instances": [{"InstanceId": "i-12345"}]}]
-        }
+        mock_client.describe_instances.return_value = {"Reservations": [{"Instances": [{"InstanceId": "i-12345"}]}]}
 
         executor = AWSExecutor(session=mock_session)
         result = executor.run_command("ec2", "describe_instances")
@@ -279,9 +277,7 @@ class TestAWSExecutorEC2StartInstance:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.start_instances.return_value = {
-            "StartingInstances": [{"InstanceId": "i-12345"}]
-        }
+        mock_client.start_instances.return_value = {"StartingInstances": [{"InstanceId": "i-12345"}]}
 
         executor = AWSExecutor(session=mock_session)
         result = executor.start_instance("i-12345")
@@ -344,9 +340,7 @@ class TestAWSExecutorEC2StopInstance:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.stop_instances.return_value = {
-            "StoppingInstances": [{"InstanceId": "i-12345"}]
-        }
+        mock_client.stop_instances.return_value = {"StoppingInstances": [{"InstanceId": "i-12345"}]}
 
         executor = AWSExecutor(session=mock_session)
         result = executor.stop_instance("i-12345")
@@ -592,9 +586,7 @@ class TestAWSExecutorVPCCreateEndpoint:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.create_vpc_endpoint.return_value = {
-            "VpcEndpoint": {"VpcEndpointId": "vpce-12345"}
-        }
+        mock_client.create_vpc_endpoint.return_value = {"VpcEndpoint": {"VpcEndpointId": "vpce-12345"}}
 
         executor = AWSExecutor(session=mock_session)
         executor.create_endpoint(
@@ -624,9 +616,7 @@ class TestAWSExecutorVPCDeleteEndpoint:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.delete_vpc_endpoints.return_value = {
-            "Unsuccessful": []
-        }
+        mock_client.delete_vpc_endpoints.return_value = {"Unsuccessful": []}
 
         executor = AWSExecutor(session=mock_session)
         result = executor.delete_endpoint("vpce-12345")

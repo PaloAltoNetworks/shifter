@@ -78,9 +78,7 @@ class TestXDRAgentInstallPlanContext:
     def test_get_context_returns_presigned_url(self):
         """get_context should return agent_presigned_url."""
         plan = XDRAgentInstallPlan()
-        context = plan.get_context({
-            "agent_presigned_url": "https://example.com/agent.msi"
-        })
+        context = plan.get_context({"agent_presigned_url": "https://example.com/agent.msi"})
         assert "agent_presigned_url" in context
         assert context["agent_presigned_url"] == "https://example.com/agent.msi"
 

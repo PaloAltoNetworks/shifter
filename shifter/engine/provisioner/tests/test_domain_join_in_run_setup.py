@@ -28,10 +28,13 @@ class TestRunSetupWithDomainJoin:
     @pytest.fixture
     def mock_env_vars(self):
         """Set up environment variables for DC config."""
-        with patch.dict(os.environ, {
-            "DC_DOMAIN_NAME": "internal.shifter",
-            "DC_DOMAIN_PASSWORD": "TestPassword123!",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "DC_DOMAIN_NAME": "internal.shifter",
+                "DC_DOMAIN_PASSWORD": "TestPassword123!",
+            },
+        ):
             yield
 
     @pytest.fixture
@@ -39,30 +42,26 @@ class TestRunSetupWithDomainJoin:
         """Create a mock SSM executor that succeeds."""
         executor = MagicMock(spec=SSMExecutor)
         executor.wait_for_agent.return_value = None
-        executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
         executor.reboot_and_wait.return_value = True
         return executor
 
-    def test_run_setup_with_join_domain_true_runs_domain_join_plan(
-        self, mock_env_vars, mock_executor
-    ):
+    def test_run_setup_with_join_domain_true_runs_domain_join_plan(self, mock_env_vars, mock_executor):
         """When join_domain=True and dc_ip provided, DomainJoinPlan executes."""
-        with patch("components.instance.SSMExecutor", return_value=mock_executor):
-            with patch("components.instance.SetupOrchestrator") as MockOrch:
-                mock_orchestrator = MagicMock()
-                mock_orchestrator.orchestrate.return_value = SetupResult(
-                    success=True
-                )
-                MockOrch.return_value = mock_orchestrator
+        with (
+            patch("components.instance.SSMExecutor", return_value=mock_executor),
+            patch("components.instance.SetupOrchestrator") as MockOrch,
+        ):
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.orchestrate.return_value = SetupResult(success=True)
+            MockOrch.return_value = mock_orchestrator
 
-                # For now, verify the plan structure
-                plan = DomainJoinPlan()
-                assert len(plan.steps) == 2  # set_dns, join_domain
-                assert plan.steps[0].name == "set_dns"
-                assert plan.steps[1].name == "join_domain"
-                assert plan.steps[1].requires_reboot is True
+            # For now, verify the plan structure
+            plan = DomainJoinPlan()
+            assert len(plan.steps) == 2  # set_dns, join_domain
+            assert plan.steps[0].name == "set_dns"
+            assert plan.steps[1].name == "join_domain"
+            assert plan.steps[1].requires_reboot is True
 
     def test_run_setup_domain_join_runs_after_xdr_install(self, mock_env_vars):
         """Domain join should run AFTER bootstrap and XDR install."""
@@ -98,30 +97,26 @@ class TestRunSetupWithDomainJoin:
         assert context["domain_admin_password"] == "TestPassword123!"
         assert context["domain_admin_user"] == "Administrator"  # Default
 
-    def test_run_setup_domain_join_failure_propagates_as_setup_error(
-        self, mock_env_vars
-    ):
+    def test_run_setup_domain_join_failure_propagates_as_setup_error(self, mock_env_vars):
         """When domain join fails, SetupError is raised."""
         from executors.ssm_executor import CommandError
 
         mock_executor = MagicMock(spec=SSMExecutor)
         mock_executor.wait_for_agent.return_value = None
         # DNS set succeeds, domain join fails with CommandError
-        dns_ok = CommandResult(
-            success=True, exit_code=0, stdout="DNS set", stderr=""
-        )
-        join_fail = CommandError(
-            "Domain join failed", exit_code=1, stderr="Access denied"
-        )
+        dns_ok = CommandResult(success=True, exit_code=0, stdout="DNS set", stderr="")
+        join_fail = CommandError("Domain join failed", exit_code=1, stderr="Access denied")
         mock_executor.run_command.side_effect = [dns_ok, join_fail]
 
         orchestrator = SetupOrchestrator(executor=mock_executor)
         plan = DomainJoinPlan()
-        context = plan.get_context({
-            "dc_ip": "10.1.100.10",
-            "domain_name": "internal.shifter",
-            "domain_admin_password": "TestPassword123!",
-        })
+        context = plan.get_context(
+            {
+                "dc_ip": "10.1.100.10",
+                "domain_name": "internal.shifter",
+                "domain_admin_password": "TestPassword123!",
+            }
+        )
 
         # Domain join failure should raise SetupError
         # The second step (join_domain) fails

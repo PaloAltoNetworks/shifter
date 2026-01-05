@@ -16,6 +16,7 @@ from plans.dc_setup import DCSetupPlan
 @dataclass
 class MockDCInstance:
     """Mock DC instance for testing."""
+
     domain_name: str = "shifter.local"
     netbios_name: str = "SHIFTER"
     dsrm_password: str = "DsrmPass123!"
@@ -95,14 +96,17 @@ class TestDCSetupPlanVerification:
 
         script = plan.verify_step.script.lower()
         # Should check AD DS in some way
-        assert any(check in script for check in [
-            "get-addomaincontroller",
-            "get-addomain",
-            "ad-domain-services",
-            "dcdiag",
-            "nltest",
-            "ntds",
-        ]), "Verification script should check AD DS status"
+        assert any(
+            check in script
+            for check in [
+                "get-addomaincontroller",
+                "get-addomain",
+                "ad-domain-services",
+                "dcdiag",
+                "nltest",
+                "ntds",
+            ]
+        ), "Verification script should check AD DS status"
 
 
 class TestDCSetupPlanContext:
@@ -173,13 +177,16 @@ class TestDCSetupPlanScripts:
         for step in plan.steps:
             script = step.script
             # Should have some form of error handling
-            assert any(handler in script for handler in [
-                "$ErrorActionPreference",
-                "-ErrorAction Stop",
-                "try",
-                "if ($LASTEXITCODE",
-                "exit 1",
-            ]), f"Step {step.name} should have error handling"
+            assert any(
+                handler in script
+                for handler in [
+                    "$ErrorActionPreference",
+                    "-ErrorAction Stop",
+                    "try",
+                    "if ($LASTEXITCODE",
+                    "exit 1",
+                ]
+            ), f"Step {step.name} should have error handling"
 
 
 class TestDCSetupPlanInterface:

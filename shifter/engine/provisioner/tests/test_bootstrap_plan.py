@@ -18,6 +18,7 @@ from plans.bootstrap import CONFIGURE_SSH_SCRIPT, SET_HOSTNAME_SCRIPT, Bootstrap
 @dataclass
 class MockInstance:
     """Mock instance for testing get_context."""
+
     hostname: str | None = None
     public_key: str = ""
 
@@ -150,8 +151,8 @@ class TestBootstrapPlanScripts:
 
     def test_scripts_handle_errors(self):
         """Scripts should have error handling."""
-        assert 'exit 1' in SET_HOSTNAME_SCRIPT
-        assert 'exit 1' in CONFIGURE_SSH_SCRIPT
+        assert "exit 1" in SET_HOSTNAME_SCRIPT
+        assert "exit 1" in CONFIGURE_SSH_SCRIPT
         assert '$ErrorActionPreference = "Stop"' in SET_HOSTNAME_SCRIPT
         assert '$ErrorActionPreference = "Stop"' in CONFIGURE_SSH_SCRIPT
 

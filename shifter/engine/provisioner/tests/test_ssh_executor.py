@@ -191,9 +191,7 @@ class TestWaitForAgentHappyPath:
     @patch("paramiko.SSHClient")
     @patch("time.sleep")
     @patch("time.time")
-    def test_wait_for_agent_success_immediately(
-        self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
-    ):
+    def test_wait_for_agent_success_immediately(self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH available immediately returns True."""
         from executors.ssh_executor import SSHExecutor
 
@@ -211,9 +209,7 @@ class TestWaitForAgentHappyPath:
     @patch("paramiko.SSHClient")
     @patch("time.sleep")
     @patch("time.time")
-    def test_wait_for_agent_eventually_online(
-        self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
-    ):
+    def test_wait_for_agent_eventually_online(self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH becomes available after a few retries."""
         import paramiko
 
@@ -247,9 +243,7 @@ class TestWaitForAgentExpectedFailures:
     @patch("paramiko.SSHClient")
     @patch("time.sleep")
     @patch("time.time")
-    def test_wait_for_agent_timeout_raises(
-        self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
-    ):
+    def test_wait_for_agent_timeout_raises(self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH never available raises TimeoutError."""
         import paramiko
 
@@ -281,9 +275,7 @@ class TestRebootAndWaitHappyPath:
     @patch("paramiko.SSHClient")
     @patch("time.sleep")
     @patch("time.time")
-    def test_reboot_and_wait_success(
-        self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
-    ):
+    def test_reboot_and_wait_success(self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key):
         """Reboot PAN-OS device and wait for it to come back."""
         import paramiko
 

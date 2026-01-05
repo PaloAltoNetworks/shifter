@@ -4,10 +4,10 @@
 
 ```bash
 # Dev
-export ENV=dev AWS_PROFILE=panw-shifter-dev-workstation
+export ENV=dev AWS_PROFILE=<dev account profile>
 
 # Prod
-export ENV=prod AWS_PROFILE=dev-workstation-user
+export ENV=prod AWS_PROFILE=<prod account profile>
 ```
 
 ## CLI Checks (Claude)

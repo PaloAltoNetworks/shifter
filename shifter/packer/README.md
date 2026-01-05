@@ -26,7 +26,7 @@ packer init .
 packer validate -var-file=dev.pkrvars.hcl .
 
 # Build AMI
-AWS_PROFILE=panw-shifter-dev-workstation packer build -var-file=dev.pkrvars.hcl .
+AWS_PROFILE=<dev account profile> packer build -var-file=dev.pkrvars.hcl .
 ```
 
 ## Build Output

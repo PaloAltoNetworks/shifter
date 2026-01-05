@@ -64,9 +64,9 @@ jobs:
       - name: Lint Python
         working-directory: shifter/engine/provisioner
         run: |
-          uv tool install ruff
-          ruff check .
-          ruff format --check .
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
 
   packer-lint:
     name: Lint (packer)

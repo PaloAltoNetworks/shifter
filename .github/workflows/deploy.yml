@@ -74,17 +74,22 @@ jobs:
 
       - name: Check for skip quality
         id: skip
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          # Only allow [skip quality] on PRs to dev branch
+          # Check for [skip quality] in commit message (PRs to dev only)
           SKIP="false"
+
+          # Only allow skip on PRs targeting dev
           if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]; then
-            if echo "$PR_TITLE" | grep -qi "\[skip quality\]"; then
+            # Get last commit message
+            COMMIT_MSG=$(git log -1 --pretty=%B)
+
+            # Check commit message for [skip quality]
+            if echo "$COMMIT_MSG" | grep -qi "\[skip quality\]"; then
               SKIP="true"
-              echo "::warning::Skipping quality checks (PR title contains [skip quality])"
+              echo "::warning::Skipping quality checks (commit message contains [skip quality])"
             fi
           fi
+
           echo "skip_quality=$SKIP" >> $GITHUB_OUTPUT
 
   # ============================================================================

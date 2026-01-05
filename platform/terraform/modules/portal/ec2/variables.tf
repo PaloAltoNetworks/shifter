@@ -3,6 +3,11 @@ variable "aws_region" {
   type        = string
 }
 
+variable "ec2_ami_id" {
+  description = "AMI ID for portal EC2 instances (use standard AL2023, not ECS-optimized)"
+  type        = string
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log retention in days"
   type        = number

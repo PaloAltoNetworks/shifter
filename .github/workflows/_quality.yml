@@ -58,17 +58,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Lint Python
         working-directory: shifter/engine/provisioner
         run: |
-          pip install ruff
-          ruff check .
-          ruff format --check .
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
 
   packer-lint:
     name: Lint (packer)
@@ -140,41 +138,35 @@ jobs:
         run: python scripts/check_layer_imports/check_layer_imports.py
 
   # ===========================================================================
-  # SAST (non-blocking)
+  # SAST
   # ===========================================================================
 
   shifter-platform-sast:
     name: SAST (shifter_platform)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Run Bandit
         run: |
-          pip install bandit
+          uv tool install bandit
           bandit -r shifter/shifter_platform/ --skip B101 --exclude shifter/shifter_platform/tests,shifter/shifter_platform/.venv
 
   provisioner-sast:
     name: SAST (provisioner)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Run Bandit
         run: |
-          pip install bandit
+          uv tool install bandit
           bandit -r shifter/engine/provisioner/ --skip B101 --exclude shifter/engine/provisioner/tests,shifter/engine/provisioner/.venv
 
   packer-sast:
@@ -184,14 +176,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Run Bandit
         run: |
-          pip install bandit
+          uv tool install bandit
           bandit -r shifter/packer/ --skip B101 --exclude shifter/packer/tests,shifter/packer/.venv
 
   bootstrap-sast:
@@ -201,14 +191,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Run Bandit
         run: |
-          pip install bandit
+          uv tool install bandit
           bandit -r scripts/bootstrap/ --skip B101 --exclude scripts/bootstrap/tests,scripts/bootstrap/.venv
 
   check-layer-imports-sast:
@@ -218,15 +206,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Run Bandit
         working-directory: scripts/check_layer_imports
         run: |
-          pip install bandit[toml]
+          uv tool install bandit
           bandit -r . -c pyproject.toml
 
   # ===========================================================================
@@ -235,7 +221,7 @@ jobs:
 
   shifter-platform-tests:
     name: Tests (shifter_platform)
-    needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast, check-layer-imports-arch, model-fks-arch]
+    needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
     runs-on: self-hosted
     services:
       postgres:
@@ -312,7 +298,7 @@ jobs:
 
   packer-tests:
     name: Tests (packer)
-    needs: [packer-lint, packer-sast]
+    needs: [packer-lint]
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -337,7 +323,7 @@ jobs:
 
   bootstrap-tests:
     name: Tests (bootstrap)
-    needs: [bootstrap-lint, bootstrap-sast]
+    needs: [bootstrap-lint]
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -362,7 +348,7 @@ jobs:
 
   check-layer-imports-tests:
     name: Tests (check_layer_imports)
-    needs: [check-layer-imports-lint, check-layer-imports-sast]
+    needs: [check-layer-imports-lint]
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4

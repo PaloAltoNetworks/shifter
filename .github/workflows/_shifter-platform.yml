@@ -259,6 +259,9 @@ jobs:
           COMMAND_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" --instance-ids "$INSTANCE_ID" \
             --parameters "commands=[
               'set -e',
+              'echo \"Waiting for Docker to be ready...\"',
+              'for i in {1..30}; do docker info >/dev/null 2>&1 && break || sleep 2; done',
+              'if ! docker info >/dev/null 2>&1; then echo \"Docker not available after 60s\"; exit 1; fi',
               'IMAGE=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}',
               'docker pull \$IMAGE',
               'echo \"Stopping existing containers...\"',
@@ -340,6 +343,9 @@ jobs:
             --targets "Key=tag:aws:autoscaling:groupName,Values=${ASG_NAME}" \
             --parameters "commands=[
               'set -e',
+              'echo \"Waiting for Docker to be ready...\"',
+              'for i in {1..30}; do docker info >/dev/null 2>&1 && break || sleep 2; done',
+              'if ! docker info >/dev/null 2>&1; then echo \"Docker not available after 60s\"; exit 1; fi',
               'IMAGE=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}',
               'docker pull \$IMAGE',
               'echo \"Stopping existing containers...\"',

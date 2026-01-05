@@ -364,7 +364,7 @@ resource "aws_autoscaling_group" "this" {
   vpc_zone_identifier       = var.subnet_ids
   target_group_arns         = [var.target_group_arn]
   health_check_type         = "ELB"
-  health_check_grace_period = 300
+  health_check_grace_period = 420
 
   min_size         = var.asg_min_size
   max_size         = var.asg_max_size

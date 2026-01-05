@@ -261,9 +261,9 @@ resource "aws_iam_role_policy" "ssm_parameter_read" {
   })
 }
 
-# IAM policy for completing ASG lifecycle actions
+# IAM policy for ASG lifecycle operations (used by user_data.sh)
 resource "aws_iam_role_policy" "lifecycle_action" {
-  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
+  count = var.enable_autoscaling ? 1 : 0
 
   name = "lifecycle-action"
   role = aws_iam_role.this.id
@@ -277,6 +277,13 @@ resource "aws_iam_role_policy" "lifecycle_action" {
           "autoscaling:CompleteLifecycleAction"
         ]
         Resource = aws_autoscaling_group.this[0].arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:DescribeAutoScalingInstances"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -344,13 +351,11 @@ resource "aws_launch_template" "this" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
-    aws_region         = var.aws_region
-    ecr_repository_url = var.ecr_repository_url
-    log_group_name     = local.log_group_name
-    sqs_cms_url        = lookup(var.sqs_queue_urls, "cms", "")
-    sqs_engine_url     = lookup(var.sqs_queue_urls, "engine", "")
-    sqs_mc_url         = lookup(var.sqs_queue_urls, "mc", "")
-    redis_endpoint     = var.redis_endpoint
+    aws_region                 = var.aws_region
+    ecr_repository_url         = var.ecr_repository_url
+    log_group_name             = local.log_group_name
+    ssm_parameter_store_prefix = var.ssm_parameter_store_prefix
+    lifecycle_hook_name        = "${var.name_prefix}-launch-hook"
   }))
 
   block_device_mappings {
@@ -527,13 +532,11 @@ resource "aws_instance" "this" {
   ebs_optimized          = true
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
-    aws_region         = var.aws_region
-    ecr_repository_url = var.ecr_repository_url
-    log_group_name     = local.log_group_name
-    sqs_cms_url        = lookup(var.sqs_queue_urls, "cms", "")
-    sqs_engine_url     = lookup(var.sqs_queue_urls, "engine", "")
-    sqs_mc_url         = lookup(var.sqs_queue_urls, "mc", "")
-    redis_endpoint     = var.redis_endpoint
+    aws_region                 = var.aws_region
+    ecr_repository_url         = var.ecr_repository_url
+    log_group_name             = local.log_group_name
+    ssm_parameter_store_prefix = var.ssm_parameter_store_prefix
+    lifecycle_hook_name        = ""
   }))
 
   root_block_device {
@@ -561,116 +564,15 @@ resource "aws_instance" "this" {
 }
 
 # ------------------------------------------------------------------------------
-# ASG Lifecycle Hook (for SSM-based deployment)
+# ASG Lifecycle Hook (holds instance until user_data completes deployment)
 # ------------------------------------------------------------------------------
 
 resource "aws_autoscaling_lifecycle_hook" "launch" {
-  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
+  count = var.enable_autoscaling ? 1 : 0
 
   name                   = "${var.name_prefix}-launch-hook"
   autoscaling_group_name = aws_autoscaling_group.this[0].name
   lifecycle_transition   = "autoscaling:EC2_INSTANCE_LAUNCHING"
   heartbeat_timeout      = var.lifecycle_hook_heartbeat_timeout
   default_result         = "ABANDON"
-}
-
-# ------------------------------------------------------------------------------
-# EventBridge IAM Role (for triggering SSM Run Command)
-# ------------------------------------------------------------------------------
-
-resource "aws_iam_role" "eventbridge_ssm" {
-  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
-
-  name = "${var.name_prefix}-eventbridge-ssm-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "events.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy" "eventbridge_ssm" {
-  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
-
-  name = "ssm-run-command"
-  role = aws_iam_role.eventbridge_ssm[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:SendCommand"
-        ]
-        Resource = [
-          var.ssm_document_arn,
-          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/*"
-        ]
-      }
-    ]
-  })
-}
-
-# ------------------------------------------------------------------------------
-# EventBridge Rule (for lifecycle hook events)
-# ------------------------------------------------------------------------------
-
-resource "aws_cloudwatch_event_rule" "asg_launch" {
-  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
-
-  name        = "${var.name_prefix}-asg-launch"
-  description = "Trigger SSM deployment when ASG launches new instance"
-
-  event_pattern = jsonencode({
-    source      = ["aws.autoscaling"]
-    detail-type = ["EC2 Instance-launch Lifecycle Action"]
-    detail = {
-      AutoScalingGroupName = [aws_autoscaling_group.this[0].name]
-      LifecycleHookName    = [aws_autoscaling_lifecycle_hook.launch[0].name]
-    }
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_cloudwatch_event_target" "ssm_deploy" {
-  count = var.enable_autoscaling && var.ssm_document_name != "" ? 1 : 0
-
-  rule     = aws_cloudwatch_event_rule.asg_launch[0].name
-  arn      = var.ssm_document_arn
-  role_arn = aws_iam_role.eventbridge_ssm[0].arn
-
-  run_command_targets {
-    key    = "tag:ShifterRole"
-    values = ["shifter-platform"]
-  }
-
-  input_transformer {
-    input_paths = {
-      instance_id  = "$.detail.EC2InstanceId"
-      asg_name     = "$.detail.AutoScalingGroupName"
-      hook_name    = "$.detail.LifecycleHookName"
-      action_token = "$.detail.LifecycleActionToken"
-    }
-
-    input_template = <<EOF
-{
-  "LifecycleHookName": ["<hook_name>"],
-  "AutoScalingGroupName": ["<asg_name>"],
-  "LifecycleActionToken": ["<action_token>"],
-  "TargetInstanceId": ["<instance_id>"]
-}
-EOF
-  }
 }

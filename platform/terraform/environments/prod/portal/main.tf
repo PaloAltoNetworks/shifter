@@ -311,9 +311,7 @@ module "ec2" {
   sqs_queue_arns = values(module.messaging.sqs_queue_arns)
   sqs_queue_urls = module.messaging.sqs_queue_urls
 
-  # SSM deployment (lifecycle hook + EventBridge)
-  ssm_document_name          = module.ssm.document_name
-  ssm_document_arn           = module.ssm.document_arn
+  # Parameter Store prefix for user_data bootstrap
   ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
 
   tags = var.tags

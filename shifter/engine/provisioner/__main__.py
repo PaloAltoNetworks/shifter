@@ -6,8 +6,8 @@ It loads configuration and creates a complete range using the RangeStack compone
 
 import pulumi
 
-from stacks import RangeStack
 from config import load_config
+from stacks import RangeStack
 
 
 def main() -> None:

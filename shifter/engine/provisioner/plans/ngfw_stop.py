@@ -8,7 +8,7 @@ Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -23,7 +23,7 @@ class NGFWStopStep:
 
     name: str
     action: str
-    params: List[str] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
 
 
 class NGFWStopPlan:
@@ -36,9 +36,9 @@ class NGFWStopPlan:
     Uses AWSExecutor methods for AWS API calls.
     """
 
-    name: str = "ngfw_stop"
+    name: ClassVar[str] = "ngfw_stop"
 
-    steps: List[NGFWStopStep] = [
+    steps: ClassVar[list[NGFWStopStep]] = [
         NGFWStopStep(
             name="stop_instance",
             action="stop_instance",
@@ -51,7 +51,7 @@ class NGFWStopPlan:
         ),
     ]
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get context variables for NGFW stop.
 
         Args:

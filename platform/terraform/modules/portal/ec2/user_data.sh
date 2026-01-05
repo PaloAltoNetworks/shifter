@@ -42,4 +42,15 @@ EOF
 cp /root/.docker/config.json /home/ec2-user/.docker/config.json
 chown -R ec2-user:ec2-user /home/ec2-user/.docker
 
+# ------------------------------------------------------------------------------
+# Export SQS Queue URLs for message consumers workers (used by docker-compose)
+# ------------------------------------------------------------------------------
+cat <<EOF >> /etc/environment
+SQS_CMS_URL=${sqs_cms_url}
+SQS_ENGINE_URL=${sqs_engine_url}
+SQS_MC_URL=${sqs_mc_url}
+REDIS_HOST=${redis_endpoint}
+AWS_REGION=${aws_region}
+EOF
+
 echo "EC2 user data complete. Docker ready for container deployment."

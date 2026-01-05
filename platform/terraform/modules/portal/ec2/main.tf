@@ -209,6 +209,28 @@ resource "aws_iam_role_policy" "ecs_run_task" {
   })
 }
 
+resource "aws_iam_role_policy" "sqs_consume" {
+  name = "sqs-consume"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = var.sqs_queue_arns
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.this.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -298,6 +320,10 @@ resource "aws_launch_template" "this" {
     aws_region         = var.aws_region
     ecr_repository_url = var.ecr_repository_url
     log_group_name     = local.log_group_name
+    sqs_cms_url        = lookup(var.sqs_queue_urls, "cms", "")
+    sqs_engine_url     = lookup(var.sqs_queue_urls, "engine", "")
+    sqs_mc_url         = lookup(var.sqs_queue_urls, "mc", "")
+    redis_endpoint     = var.redis_endpoint
   }))
 
   block_device_mappings {
@@ -476,6 +502,10 @@ resource "aws_instance" "this" {
     aws_region         = var.aws_region
     ecr_repository_url = var.ecr_repository_url
     log_group_name     = local.log_group_name
+    sqs_cms_url        = lookup(var.sqs_queue_urls, "cms", "")
+    sqs_engine_url     = lookup(var.sqs_queue_urls, "engine", "")
+    sqs_mc_url         = lookup(var.sqs_queue_urls, "mc", "")
+    redis_endpoint     = var.redis_endpoint
   }))
 
   root_block_device {

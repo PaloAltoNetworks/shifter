@@ -9,7 +9,7 @@ Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -24,7 +24,7 @@ class GWLBAddRouteStep:
 
     name: str
     action: str
-    params: List[str] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
 
 
 class GWLBAddRoutePlan:
@@ -38,9 +38,9 @@ class GWLBAddRoutePlan:
     Uses AWSExecutor methods for AWS API calls.
     """
 
-    name: str = "gwlb_add_route"
+    name: ClassVar[str] = "gwlb_add_route"
 
-    steps: List[GWLBAddRouteStep] = [
+    steps: ClassVar[list[GWLBAddRouteStep]] = [
         GWLBAddRouteStep(
             name="create_endpoint",
             action="create_endpoint",
@@ -58,7 +58,7 @@ class GWLBAddRoutePlan:
         ),
     ]
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get context variables for GWLB add route.
 
         Args:

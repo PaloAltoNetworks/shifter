@@ -9,7 +9,6 @@ This plan uses AWSExecutor for AWS API calls, not bash scripts.
 """
 
 from dataclasses import dataclass
-from typing import List
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,7 +18,7 @@ import pytest
 class MockNGFWReconcileInstance:
     """Mock instance for testing get_context."""
 
-    instance_ids: List[str] = None
+    instance_ids: list[str] = None
 
     def __post_init__(self):
         if self.instance_ids is None:

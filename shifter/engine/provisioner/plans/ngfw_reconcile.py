@@ -9,7 +9,7 @@ Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -24,7 +24,7 @@ class NGFWReconcileStep:
 
     name: str
     action: str
-    params: List[str] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
 
 
 class NGFWReconcilePlan:
@@ -36,9 +36,9 @@ class NGFWReconcilePlan:
     Uses AWSExecutor methods for AWS API calls.
     """
 
-    name: str = "ngfw_reconcile"
+    name: ClassVar[str] = "ngfw_reconcile"
 
-    steps: List[NGFWReconcileStep] = [
+    steps: ClassVar[list[NGFWReconcileStep]] = [
         NGFWReconcileStep(
             name="describe_instances",
             action="describe_instances",
@@ -46,7 +46,7 @@ class NGFWReconcilePlan:
         ),
     ]
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get context variables for NGFW reconcile.
 
         Args:

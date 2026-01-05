@@ -167,6 +167,13 @@ jobs:
               --output text 2>/dev/null || echo "")
             echo "redis_endpoint=${REDIS_ENDPOINT}" >> $GITHUB_OUTPUT
           fi
+          # Get SQS queue URLs for workers
+          SQS_CMS_URL=$(aws sqs get-queue-url --queue-name "${ENV}-portal-cms-tasks" --query "QueueUrl" --output text 2>/dev/null || echo "")
+          SQS_ENGINE_URL=$(aws sqs get-queue-url --queue-name "${ENV}-portal-engine-tasks" --query "QueueUrl" --output text 2>/dev/null || echo "")
+          SQS_MC_URL=$(aws sqs get-queue-url --queue-name "${ENV}-portal-mc-tasks" --query "QueueUrl" --output text 2>/dev/null || echo "")
+          echo "sqs_cms_url=${SQS_CMS_URL}" >> $GITHUB_OUTPUT
+          echo "sqs_engine_url=${SQS_ENGINE_URL}" >> $GITHUB_OUTPUT
+          echo "sqs_mc_url=${SQS_MC_URL}" >> $GITHUB_OUTPUT
 
       - name: Get Instance ID (single instance mode)
         id: instance
@@ -224,32 +231,47 @@ jobs:
           PULUMI_ECS_SECURITY_GROUP_ID: ${{ steps.config.outputs.pulumi_ecs_security_group_id }}
           PULUMI_PRIVATE_SUBNET_IDS: ${{ steps.config.outputs.pulumi_private_subnet_ids }}
           ACCOUNT_ID: ${{ steps.config.outputs.account_id }}
+          SQS_CMS_URL: ${{ steps.config.outputs.sqs_cms_url }}
+          SQS_ENGINE_URL: ${{ steps.config.outputs.sqs_engine_url }}
+          SQS_MC_URL: ${{ steps.config.outputs.sqs_mc_url }}
         run: |
           DB_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-db-credentials"
           APP_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-app"
           COGNITO_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-cognito"
+
+          # Common environment variables for all containers
+          COMMON_ENV="-e AWS_REGION=${AWS_REGION} \
+            -e AWS_S3_BUCKET_NAME=${S3_BUCKET} \
+            -e DB_SECRET_ARN=${DB_SECRET_ARN} \
+            -e APP_SECRET_ARN=${APP_SECRET_ARN} \
+            -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
+            -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
+            -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
+            -e SITE_URL=https://${PORTAL_DOMAIN} \
+            -e PULUMI_ECS_CLUSTER_ARN=${PULUMI_ECS_CLUSTER_ARN} \
+            -e PULUMI_TASK_DEFINITION_ARN=${PULUMI_TASK_DEFINITION_ARN} \
+            -e PULUMI_ECS_SECURITY_GROUP_ID=${PULUMI_ECS_SECURITY_GROUP_ID} \
+            -e PULUMI_PRIVATE_SUBNET_IDS=${PULUMI_PRIVATE_SUBNET_IDS} \
+            -e SQS_CMS_URL=${SQS_CMS_URL} \
+            -e SQS_ENGINE_URL=${SQS_ENGINE_URL} \
+            -e SQS_MC_URL=${SQS_MC_URL}"
 
           COMMAND_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" --instance-ids "$INSTANCE_ID" \
             --parameters "commands=[
               'set -e',
               'IMAGE=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}',
               'docker pull \$IMAGE',
-              'docker stop portal 2>/dev/null || true',
-              'docker rm portal 2>/dev/null || true',
-              'docker run -d --name portal --restart unless-stopped -p 8000:8000 \
-                -e AWS_REGION=${AWS_REGION} \
-                -e AWS_S3_BUCKET_NAME=${S3_BUCKET} \
-                -e DB_SECRET_ARN=${DB_SECRET_ARN} \
-                -e APP_SECRET_ARN=${APP_SECRET_ARN} \
-                -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
-                -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
-                -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
-                -e SITE_URL=https://${PORTAL_DOMAIN} \
-                -e PULUMI_ECS_CLUSTER_ARN=${PULUMI_ECS_CLUSTER_ARN} \
-                -e PULUMI_TASK_DEFINITION_ARN=${PULUMI_TASK_DEFINITION_ARN} \
-                -e PULUMI_ECS_SECURITY_GROUP_ID=${PULUMI_ECS_SECURITY_GROUP_ID} \
-                -e PULUMI_PRIVATE_SUBNET_IDS=${PULUMI_PRIVATE_SUBNET_IDS} \
-                \$IMAGE'
+              'echo \"Stopping existing containers...\"',
+              'docker stop portal worker-cms worker-engine worker-mc 2>/dev/null || true',
+              'docker rm portal worker-cms worker-engine worker-mc 2>/dev/null || true',
+              'echo \"Starting portal...\"',
+              'docker run -d --name portal --restart unless-stopped -p 8000:8000 ${COMMON_ENV} \$IMAGE',
+              'echo \"Starting workers...\"',
+              'docker run -d --name worker-cms --restart unless-stopped ${COMMON_ENV} \$IMAGE python manage.py run_worker --queue cms',
+              'docker run -d --name worker-engine --restart unless-stopped ${COMMON_ENV} \$IMAGE python manage.py run_worker --queue engine',
+              'docker run -d --name worker-mc --restart unless-stopped ${COMMON_ENV} \$IMAGE python manage.py run_worker --queue mc',
+              'echo \"All containers started\"',
+              'docker ps'
             ]" --timeout-seconds 300 --query "Command.CommandId" --output text)
 
           echo "SSM Command ID: $COMMAND_ID"
@@ -275,10 +297,31 @@ jobs:
           PULUMI_PRIVATE_SUBNET_IDS: ${{ steps.config.outputs.pulumi_private_subnet_ids }}
           REDIS_ENDPOINT: ${{ steps.config.outputs.redis_endpoint }}
           ACCOUNT_ID: ${{ steps.config.outputs.account_id }}
+          SQS_CMS_URL: ${{ steps.config.outputs.sqs_cms_url }}
+          SQS_ENGINE_URL: ${{ steps.config.outputs.sqs_engine_url }}
+          SQS_MC_URL: ${{ steps.config.outputs.sqs_mc_url }}
         run: |
           DB_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-db-credentials"
           APP_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-app"
           COGNITO_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-cognito"
+
+          # Common environment variables for all containers
+          COMMON_ENV="-e AWS_REGION=${AWS_REGION} \
+            -e AWS_S3_BUCKET_NAME=${S3_BUCKET} \
+            -e DB_SECRET_ARN=${DB_SECRET_ARN} \
+            -e APP_SECRET_ARN=${APP_SECRET_ARN} \
+            -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
+            -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
+            -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
+            -e SITE_URL=https://${PORTAL_DOMAIN} \
+            -e PULUMI_ECS_CLUSTER_ARN=${PULUMI_ECS_CLUSTER_ARN} \
+            -e PULUMI_TASK_DEFINITION_ARN=${PULUMI_TASK_DEFINITION_ARN} \
+            -e PULUMI_ECS_SECURITY_GROUP_ID=${PULUMI_ECS_SECURITY_GROUP_ID} \
+            -e PULUMI_PRIVATE_SUBNET_IDS=${PULUMI_PRIVATE_SUBNET_IDS} \
+            -e REDIS_HOST=${REDIS_ENDPOINT} \
+            -e SQS_CMS_URL=${SQS_CMS_URL} \
+            -e SQS_ENGINE_URL=${SQS_ENGINE_URL} \
+            -e SQS_MC_URL=${SQS_MC_URL}"
 
           # Get all running instances in the ASG
           INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
@@ -299,23 +342,17 @@ jobs:
               'set -e',
               'IMAGE=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}',
               'docker pull \$IMAGE',
-              'docker stop portal 2>/dev/null || true',
-              'docker rm portal 2>/dev/null || true',
-              'docker run -d --name portal --restart unless-stopped -p 8000:8000 \
-                -e AWS_REGION=${AWS_REGION} \
-                -e AWS_S3_BUCKET_NAME=${S3_BUCKET} \
-                -e DB_SECRET_ARN=${DB_SECRET_ARN} \
-                -e APP_SECRET_ARN=${APP_SECRET_ARN} \
-                -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
-                -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
-                -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
-                -e SITE_URL=https://${PORTAL_DOMAIN} \
-                -e PULUMI_ECS_CLUSTER_ARN=${PULUMI_ECS_CLUSTER_ARN} \
-                -e PULUMI_TASK_DEFINITION_ARN=${PULUMI_TASK_DEFINITION_ARN} \
-                -e PULUMI_ECS_SECURITY_GROUP_ID=${PULUMI_ECS_SECURITY_GROUP_ID} \
-                -e PULUMI_PRIVATE_SUBNET_IDS=${PULUMI_PRIVATE_SUBNET_IDS} \
-                -e REDIS_HOST=${REDIS_ENDPOINT} \
-                \$IMAGE'
+              'echo \"Stopping existing containers...\"',
+              'docker stop portal worker-cms worker-engine worker-mc 2>/dev/null || true',
+              'docker rm portal worker-cms worker-engine worker-mc 2>/dev/null || true',
+              'echo \"Starting portal...\"',
+              'docker run -d --name portal --restart unless-stopped -p 8000:8000 ${COMMON_ENV} \$IMAGE',
+              'echo \"Starting workers...\"',
+              'docker run -d --name worker-cms --restart unless-stopped ${COMMON_ENV} \$IMAGE python manage.py run_worker --queue cms',
+              'docker run -d --name worker-engine --restart unless-stopped ${COMMON_ENV} \$IMAGE python manage.py run_worker --queue engine',
+              'docker run -d --name worker-mc --restart unless-stopped ${COMMON_ENV} \$IMAGE python manage.py run_worker --queue mc',
+              'echo \"All containers started\"',
+              'docker ps'
             ]" --timeout-seconds 300 --query "Command.CommandId" --output text)
 
           echo "SSM Command ID: $COMMAND_ID"

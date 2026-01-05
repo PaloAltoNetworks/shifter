@@ -146,3 +146,17 @@ variable "scale_down_threshold" {
   description = "CPU percentage threshold to trigger scale down"
   type        = number
 }
+
+# ------------------------------------------------------------------------------
+# Messaging Variables (SQS)
+# ------------------------------------------------------------------------------
+
+variable "sqs_queue_arns" {
+  description = "List of SQS queue ARNs for message consumers"
+  type        = list(string)
+}
+
+variable "sqs_queue_urls" {
+  description = "Map of consumer name to SQS queue URL for message consumers"
+  type        = map(string)
+}

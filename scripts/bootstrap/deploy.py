@@ -967,7 +967,7 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
             github_repo=config.github_repo,
             aws_profile=profile,
         )
-        runner_result = walkthrough_runner_setup(runner_config, profile, dry_run=dry_run)
+        runner_result = walkthrough_runner_setup(runner_config, dry_run=dry_run)
         if runner_result:
             # Store app_id for terraform vars if needed
             info(f"Runner App ID: {runner_result.get('app_id', 'N/A')}")

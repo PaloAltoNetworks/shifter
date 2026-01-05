@@ -36,9 +36,11 @@ repos:
         name: ruff (provisioner)
         args: [--fix]
         files: ^shifter/engine/provisioner/
+        exclude: ^shifter/engine/provisioner/tests/
       - id: ruff-format
         name: ruff-format (provisioner)
         files: ^shifter/engine/provisioner/
+        exclude: ^shifter/engine/provisioner/tests/
       - id: ruff
         name: ruff (packer)
         args: [--fix]
@@ -109,7 +111,9 @@ repos:
         exclude: ^shifter/shifter_platform/(tests|\.venv)/
       - id: bandit
         name: bandit (provisioner)
-        args: [-r, --skip, B101]
+        # B101: assert, B404: subprocess import, B603: subprocess call, B607: partial path
+        # Provisioner uses subprocess for Pulumi CLI calls with hardcoded commands
+        args: [-r, --skip, "B101,B404,B603,B607"]
         files: ^shifter/engine/provisioner/
         exclude: ^shifter/engine/provisioner/(tests|\.venv)/
       - id: bandit

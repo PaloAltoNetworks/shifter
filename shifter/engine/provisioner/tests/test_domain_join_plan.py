@@ -4,12 +4,11 @@ DomainJoinPlan defines the steps to join a Windows machine to an AD domain.
 This plan is executed by the DC after promotion completes.
 """
 
-from unittest.mock import MagicMock
 
 import pytest
 
-from plans.domain_join import DomainJoinPlan
 from plans.base import SetupStep
+from plans.domain_join import DomainJoinPlan
 
 
 class TestDomainJoinPlanSteps:

@@ -4,10 +4,8 @@ These tests verify that the output building logic correctly maps
 role/os to instances regardless of creation order.
 """
 
-import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pulumi
 import pytest

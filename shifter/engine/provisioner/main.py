@@ -8,14 +8,19 @@ It handles:
 """
 
 import json
+import logging
 import os
-import subprocess
-import sys
+import subprocess  # nosec B404 - subprocess used for Pulumi CLI calls with hardcoded commands
 
 import boto3
 import psycopg
 
 from events import publish_destroyed, publish_failed, publish_ready, publish_status_update
+from executors.aws_executor import AWSExecutor
+from orchestrators.ops_orchestrator import OpsOrchestrator
+from orchestrators.setup_orchestrator import SetupOrchestrator
+
+logger = logging.getLogger(__name__)
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -67,7 +72,9 @@ def update_range_status(range_id: int, status: str, **kwargs) -> None:
                         values.append(value)
 
             values.append(range_id)
-            sql = f"UPDATE mission_control_range SET {', '.join(updates)} WHERE id = %s"
+            # Security: Column names in 'updates' are from hardcoded kwargs keys in calling code,
+            # not user input. Values are parameterized via %s placeholders.
+            sql = f"UPDATE mission_control_range SET {', '.join(updates)} WHERE id = %s"  # nosec B608  # noqa: S608
             cur.execute(sql, values)
         conn.commit()
 
@@ -95,7 +102,9 @@ def update_ngfw_status(user_ngfw_id: int, status: str, **kwargs) -> None:
                         values.append(value)
 
             values.append(user_ngfw_id)
-            sql = f"UPDATE mission_control_userngfw SET {', '.join(updates)} WHERE id = %s"
+            # Security: Column names in 'updates' are from hardcoded kwargs keys in calling code,
+            # not user input. Values are parameterized via %s placeholders.
+            sql = f"UPDATE mission_control_userngfw SET {', '.join(updates)} WHERE id = %s"  # nosec B608  # noqa: S608
             cur.execute(sql, values)
         conn.commit()
 
@@ -113,7 +122,8 @@ def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
     """
     stack_name = f"range-{range_id}"
     env = os.environ.copy()
-    env["PULUMI_CONFIG_PASSPHRASE"] = ""  # We use AWS KMS for secrets
+    # Security: Empty passphrase is intentional - we use AWS KMS via PULUMI_SECRETS_PROVIDER.
+    env["PULUMI_CONFIG_PASSPHRASE"] = ""  # nosec B105
 
     try:
         # Select or create stack with proper secrets provider
@@ -131,13 +141,13 @@ def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
 
     except Exception as e:
         error_msg = str(e)[:1000]
-        print(f"Operation failed: {error_msg}", file=sys.stderr)
+        logger.error(f"Operation failed: {error_msg}")
 
         if operation == "up":
             # Auto-cleanup on failure to avoid orphaned resources
-            print("Provision failed - attempting auto-cleanup...")
+            logger.info("Provision failed - attempting auto-cleanup...")
             subprocess.run(
-                ["pulumi", "destroy", "--yes", "--non-interactive"],
+                ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
                 cwd="/app",
                 env=env,
                 capture_output=True,
@@ -162,11 +172,11 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
     Raises:
         Exception: If stack selection/creation fails.
     """
-    print(f"Selecting stack: {stack_name}")
+    logger.info(f"Selecting stack: {stack_name}")
 
     # Try to select existing stack
-    result = subprocess.run(
-        ["pulumi", "stack", "select", stack_name],
+    result = subprocess.run(  # noqa: S603
+        ["pulumi", "stack", "select", stack_name],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
@@ -174,7 +184,7 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
     )
 
     if result.returncode == 0:
-        print(f"Selected existing stack: {stack_name}")
+        logger.info(f"Selected existing stack: {stack_name}")
         return
 
     # Stack doesn't exist - create with explicit secrets provider
@@ -183,10 +193,10 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
     secrets_provider = os.environ.get("PULUMI_SECRETS_PROVIDER")
     if not secrets_provider:
         raise ValueError("PULUMI_SECRETS_PROVIDER environment variable is required")
-    print(f"Creating new stack with secrets provider: {secrets_provider}")
+    logger.info(f"Creating new stack with secrets provider: {secrets_provider}")
 
-    result = subprocess.run(
-        ["pulumi", "stack", "init", stack_name, "--secrets-provider", secrets_provider],
+    result = subprocess.run(  # noqa: S603
+        ["pulumi", "stack", "init", stack_name, "--secrets-provider", secrets_provider],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
@@ -194,9 +204,9 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
     )
 
     if result.returncode != 0:
-        raise Exception(f"Stack creation failed: {result.stderr}")  # noqa: TRY002
+        raise Exception(f"Stack creation failed: {result.stderr}")
 
-    print(f"Created new stack: {stack_name}")
+    logger.info(f"Created new stack: {stack_name}")
 
 
 def _set_stack_config(env: dict, range_id: int) -> None:
@@ -229,16 +239,16 @@ def _set_stack_config(env: dict, range_id: int) -> None:
 
     for key, value in config_values.items():
         if value:
-            subprocess.run(
-                ["pulumi", "config", "set", key, value],
+            subprocess.run(  # noqa: S603
+                ["pulumi", "config", "set", key, value],  # noqa: S607
                 cwd="/app",
                 env=env,
                 capture_output=True,
             )
         else:
             # Remove empty config values to prevent stale values from persisting
-            subprocess.run(
-                ["pulumi", "config", "rm", key],
+            subprocess.run(  # noqa: S603
+                ["pulumi", "config", "rm", key],  # noqa: S607
                 cwd="/app",
                 env=env,
                 capture_output=True,
@@ -257,27 +267,27 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
     """
     # Publish status change event
     publish_status_update(range_id=range_id, user_id=user_id, new_status="provisioning")
-    print("Running pulumi up...")
+    logger.info("Running pulumi up...")
 
     result = subprocess.run(
-        ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],
+        ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
         text=True,
     )
 
-    print(f"Pulumi stdout:\n{result.stdout}")
+    logger.info(f"Pulumi stdout:\n{result.stdout}")
     if result.stderr:
-        print(f"Pulumi stderr:\n{result.stderr}")
+        logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
     if result.returncode != 0:
-        raise Exception(f"Pulumi up failed: {result.stderr}")  # noqa: TRY002
+        raise Exception(f"Pulumi up failed: {result.stderr}")
 
     # Get outputs
-    print("Retrieving stack outputs...")
+    logger.info("Retrieving stack outputs...")
     outputs = subprocess.run(
-        ["pulumi", "stack", "output", "--json"],
+        ["pulumi", "stack", "output", "--json"],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
@@ -285,7 +295,7 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
         check=True,
     )
     output_data = json.loads(outputs.stdout)
-    print(f"Stack outputs: {json.dumps(output_data, indent=2)}")
+    logger.info(f"Stack outputs: {json.dumps(output_data, indent=2)}")
 
     # Publish ready event with instance details
     publish_ready(
@@ -308,27 +318,27 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
         env: Environment dictionary for subprocess.
     """
     # Engine already set status to DESTROYING before launching ECS task
-    print("Running pulumi destroy...")
+    logger.info("Running pulumi destroy...")
 
     result = subprocess.run(
-        ["pulumi", "destroy", "--yes", "--non-interactive", "--skip-preview"],
+        ["pulumi", "destroy", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
         text=True,
     )
 
-    print(f"Pulumi stdout:\n{result.stdout}")
+    logger.info(f"Pulumi stdout:\n{result.stdout}")
     if result.stderr:
-        print(f"Pulumi stderr:\n{result.stderr}")
+        logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
     if result.returncode != 0:
-        raise Exception(f"Pulumi destroy failed: {result.stderr}")  # noqa: TRY002
+        raise Exception(f"Pulumi destroy failed: {result.stderr}")
 
     # Remove stack
-    print(f"Removing stack: {stack_name}")
-    subprocess.run(
-        ["pulumi", "stack", "rm", stack_name, "--yes"],
+    logger.info(f"Removing stack: {stack_name}")
+    subprocess.run(  # noqa: S603
+        ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
         cwd="/app",
         env=env,
         check=True,
@@ -337,12 +347,6 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
 
     # Publish destroyed event
     publish_destroyed(range_id=range_id, user_id=user_id)
-
-
-# Import NGFW operation dependencies
-from executors.aws_executor import AWSExecutor
-from orchestrators.ops_orchestrator import OpsOrchestrator
-from orchestrators.setup_orchestrator import SetupOrchestrator
 
 
 def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
@@ -388,6 +392,7 @@ def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
         module_path, class_name = plan_path.rsplit(".", 1)
 
         import importlib
+
         module = importlib.import_module(module_path)
         plan_class = getattr(module, class_name)
         plan = plan_class()
@@ -395,6 +400,7 @@ def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
         # Create context object with kwargs as attributes
         class Context:
             pass
+
         context = Context()
         for key, value in kwargs.items():
             setattr(context, key, value)
@@ -403,7 +409,7 @@ def run_ngfw_operation(operation: str, user_ngfw_id: int, **kwargs) -> None:
         result = orchestrator.orchestrate(plan, context)
 
         if not result.success:
-            raise Exception(f"Operation {operation} failed")  # noqa: TRY002
+            raise Exception(f"Operation {operation} failed")
 
         # Update success status with timestamp if applicable
         extra_kwargs = {}
@@ -433,7 +439,8 @@ def run_ngfw_pulumi(operation: str, user_ngfw_id: int) -> None:
     """
     stack_name = f"ngfw-{user_ngfw_id}"
     env = os.environ.copy()
-    env["PULUMI_CONFIG_PASSPHRASE"] = ""  # We use AWS KMS for secrets
+    # Security: Empty passphrase is intentional - we use AWS KMS via PULUMI_SECRETS_PROVIDER.
+    env["PULUMI_CONFIG_PASSPHRASE"] = ""  # nosec B105
 
     try:
         # Select or create stack with proper secrets provider
@@ -451,13 +458,13 @@ def run_ngfw_pulumi(operation: str, user_ngfw_id: int) -> None:
 
     except Exception as e:
         error_msg = str(e)[:1000]
-        print(f"NGFW operation failed: {error_msg}", file=sys.stderr)
+        logger.error(f"NGFW operation failed: {error_msg}")
 
         if operation == "up":
             # Auto-cleanup on failure to avoid orphaned resources
-            print("NGFW provision failed - attempting auto-cleanup...")
+            logger.info("NGFW provision failed - attempting auto-cleanup...")
             subprocess.run(
-                ["pulumi", "destroy", "--yes", "--non-interactive"],
+                ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
                 cwd="/app",
                 env=env,
                 capture_output=True,
@@ -488,15 +495,15 @@ def _set_ngfw_stack_config(env: dict, user_ngfw_id: int) -> None:
 
     for key, value in config_values.items():
         if value:
-            subprocess.run(
-                ["pulumi", "config", "set", key, value],
+            subprocess.run(  # noqa: S603
+                ["pulumi", "config", "set", key, value],  # noqa: S607
                 cwd="/app",
                 env=env,
                 capture_output=True,
             )
         else:
-            subprocess.run(
-                ["pulumi", "config", "rm", key],
+            subprocess.run(  # noqa: S603
+                ["pulumi", "config", "rm", key],  # noqa: S607
                 cwd="/app",
                 env=env,
                 capture_output=True,
@@ -512,27 +519,27 @@ def _run_ngfw_provision(user_ngfw_id: int, stack_name: str, env: dict) -> None:
         env: Environment dictionary for subprocess.
     """
     update_ngfw_status(user_ngfw_id, "provisioning")
-    print("Running pulumi up for NGFW...")
+    logger.info("Running pulumi up for NGFW...")
 
     result = subprocess.run(
-        ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],
+        ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
         text=True,
     )
 
-    print(f"Pulumi stdout:\n{result.stdout}")
+    logger.info(f"Pulumi stdout:\n{result.stdout}")
     if result.stderr:
-        print(f"Pulumi stderr:\n{result.stderr}")
+        logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
     if result.returncode != 0:
-        raise Exception(f"NGFW Pulumi up failed: {result.stderr}")  # noqa: TRY002
+        raise Exception(f"NGFW Pulumi up failed: {result.stderr}")
 
     # Get outputs
-    print("Retrieving NGFW stack outputs...")
+    logger.info("Retrieving NGFW stack outputs...")
     outputs = subprocess.run(
-        ["pulumi", "stack", "output", "--json"],
+        ["pulumi", "stack", "output", "--json"],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
@@ -540,10 +547,10 @@ def _run_ngfw_provision(user_ngfw_id: int, stack_name: str, env: dict) -> None:
         check=True,
     )
     output_data = json.loads(outputs.stdout)
-    print(f"NGFW Stack outputs: {json.dumps(output_data, indent=2)}")
+    logger.info(f"NGFW Stack outputs: {json.dumps(output_data, indent=2)}")
 
     # Run post-Pulumi configuration (wait for SSH, configure XDR, etc.)
-    print("Running post-Pulumi NGFW configuration...")
+    logger.info("Running post-Pulumi NGFW configuration...")
     executor = AWSExecutor()
     orchestrator = SetupOrchestrator(executor)
 
@@ -566,7 +573,7 @@ def _run_ngfw_provision(user_ngfw_id: int, stack_name: str, env: dict) -> None:
     provision_result = orchestrator.orchestrate(provision_plan, context)
 
     if not provision_result.success:
-        raise Exception("NGFW post-Pulumi configuration failed")  # noqa: TRY002
+        raise Exception("NGFW post-Pulumi configuration failed")
 
     # Update NGFW with provisioned resources
     update_ngfw_status(
@@ -593,7 +600,7 @@ def _run_ngfw_deprovision(user_ngfw_id: int, stack_name: str, env: dict) -> None
     update_ngfw_status(user_ngfw_id, "deprovisioning")
 
     # Run pre-destroy license deactivation
-    print("Running NGFW license deactivation...")
+    logger.info("Running NGFW license deactivation...")
     executor = AWSExecutor()
     orchestrator = SetupOrchestrator(executor)
 
@@ -611,30 +618,30 @@ def _run_ngfw_deprovision(user_ngfw_id: int, stack_name: str, env: dict) -> None
 
     deprovision_result = orchestrator.orchestrate(deprovision_plan, context)
     if not deprovision_result.success:
-        print("Warning: License deactivation failed, proceeding with destroy anyway")
+        logger.warning("License deactivation failed, proceeding with destroy anyway")
 
     # Run Pulumi destroy
-    print("Running pulumi destroy for NGFW...")
+    logger.info("Running pulumi destroy for NGFW...")
 
     result = subprocess.run(
-        ["pulumi", "destroy", "--yes", "--non-interactive", "--skip-preview"],
+        ["pulumi", "destroy", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
         text=True,
     )
 
-    print(f"Pulumi stdout:\n{result.stdout}")
+    logger.info(f"Pulumi stdout:\n{result.stdout}")
     if result.stderr:
-        print(f"Pulumi stderr:\n{result.stderr}")
+        logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
     if result.returncode != 0:
-        raise Exception(f"NGFW Pulumi destroy failed: {result.stderr}")  # noqa: TRY002
+        raise Exception(f"NGFW Pulumi destroy failed: {result.stderr}")
 
     # Remove stack
-    print(f"Removing NGFW stack: {stack_name}")
-    subprocess.run(
-        ["pulumi", "stack", "rm", stack_name, "--yes"],
+    logger.info(f"Removing NGFW stack: {stack_name}")
+    subprocess.run(  # noqa: S603
+        ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
         cwd="/app",
         env=env,
         check=True,
@@ -649,9 +656,7 @@ if __name__ == "__main__":
 
     RANGE_ID_HELP = "Database ID of the range to operate on"
 
-    parser = argparse.ArgumentParser(
-        description="Shifter Engine for provisioning cyber ranges and NGFW operations"
-    )
+    parser = argparse.ArgumentParser(description="Shifter Engine for provisioning cyber ranges and NGFW operations")
     subparsers = parser.add_subparsers(dest="resource", required=True, help="Resource type")
 
     # Range operations - backward compatible with: provision --range-id 42
@@ -723,8 +728,8 @@ if __name__ == "__main__":
 
     # Handle resource-based dispatch
     if args.resource == "ngfw":
-        print(f"Starting NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
-        print(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
+        logger.info(f"Starting NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
+        logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
         # Pulumi operations vs runtime operations
         if args.operation in ("provision", "deprovision"):
@@ -749,7 +754,7 @@ if __name__ == "__main__":
 
             run_ngfw_operation(args.operation, args.user_ngfw_id, **kwargs)
 
-        print(f"Completed NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
+        logger.info(f"Completed NGFW {args.operation} for user_ngfw_id {args.user_ngfw_id}")
 
     elif args.resource == "range":
         # Handle range operations
@@ -760,9 +765,9 @@ if __name__ == "__main__":
         operation_map = {"provision": "up", "destroy": "destroy"}
         pulumi_op = operation_map[args.operation]
 
-        print(f"Starting {pulumi_op} for range {range_id} (user {user_id})")
-        print(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
+        logger.info(f"Starting {pulumi_op} for range {range_id} (user {user_id})")
+        logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
         run_pulumi(pulumi_op, range_id, user_id)
 
-        print(f"Completed {pulumi_op} for range {range_id}")
+        logger.info(f"Completed {pulumi_op} for range {range_id}")

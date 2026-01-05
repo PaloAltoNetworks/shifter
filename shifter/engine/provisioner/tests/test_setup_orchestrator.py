@@ -4,24 +4,25 @@ SetupOrchestrator runs SetupPlans using an SSMExecutor.
 It handles step sequencing, reboots, and verification.
 """
 
-from unittest.mock import MagicMock, call, patch
 from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 import pytest
 
-# These imports will fail initially - that's expected for TDD
-from plans.base import SetupStep, SetupPlan
-from orchestrators.setup_orchestrator import (
-    SetupOrchestrator,
-    SetupError,
-    SetupResult,
-)
 from executors.ssm_executor import (
-    SSMExecutor,
-    CommandResult,
     CommandError,
+    CommandResult,
+    SSMExecutor,
     TimeoutError,
 )
+from orchestrators.setup_orchestrator import (
+    SetupError,
+    SetupOrchestrator,
+    SetupResult,
+)
+
+# These imports will fail initially - that's expected for TDD
+from plans.base import SetupStep
 
 
 @dataclass

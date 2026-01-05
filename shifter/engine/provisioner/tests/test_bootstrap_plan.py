@@ -9,17 +9,16 @@ Tests verify:
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pytest
 
-from plans.bootstrap import BootstrapPlan, SET_HOSTNAME_SCRIPT, CONFIGURE_SSH_SCRIPT
+from plans.bootstrap import CONFIGURE_SSH_SCRIPT, SET_HOSTNAME_SCRIPT, BootstrapPlan
 
 
 @dataclass
 class MockInstance:
     """Mock instance for testing get_context."""
-    hostname: Optional[str] = None
+    hostname: str | None = None
     public_key: str = ""
 
 

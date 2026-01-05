@@ -36,6 +36,7 @@ def dashboard(request):
     context = {
         "page_title": "Dashboard",
         "active_nav": "dashboard",
+        "provisioning_timeout_ms": django_settings.PROVISIONING_TIMEOUT_MS,
     }
     return render(request, "mission_control/dashboard.html", context)
 

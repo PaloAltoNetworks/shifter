@@ -965,6 +965,7 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
             region=config.region,
             github_org=config.github_org,
             github_repo=config.github_repo,
+            aws_profile=profile,
         )
         runner_result = walkthrough_runner_setup(runner_config, profile, dry_run=dry_run)
         if runner_result:

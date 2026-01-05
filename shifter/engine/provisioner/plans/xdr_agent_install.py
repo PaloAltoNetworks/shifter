@@ -4,13 +4,12 @@ Defines the steps to download and install Cortex XDR agent on Windows
 instances via SSM Run Command.
 """
 
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 from .base import SetupStep
 
-
 # PowerShell script to download XDR agent from S3 presigned URL
-DOWNLOAD_XDR_SCRIPT = '''
+DOWNLOAD_XDR_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 $presignedUrl = "{{ agent_presigned_url }}"
@@ -37,10 +36,10 @@ try {
     Write-Host "Error downloading XDR agent: $_"
     exit 1
 }
-'''
+"""
 
 # PowerShell script to install XDR agent silently
-INSTALL_XDR_SCRIPT = '''
+INSTALL_XDR_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 $installerPath = "C:\\Windows\\Temp\\cortex_xdr_installer.msi"
@@ -72,10 +71,10 @@ try {
     Write-Host "Error installing XDR agent: $_"
     exit 1
 }
-'''
+"""
 
 # PowerShell script to verify XDR agent is running
-VERIFY_XDR_SCRIPT = '''
+VERIFY_XDR_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 Write-Host "Verifying Cortex XDR agent..."
@@ -109,7 +108,7 @@ try {
     Write-Host "Error verifying XDR agent: $_"
     exit 1
 }
-'''
+"""
 
 
 class XDRAgentInstallPlan:
@@ -126,7 +125,7 @@ class XDRAgentInstallPlan:
     - Check XDR service is running
     """
 
-    steps: List[SetupStep] = [
+    steps: ClassVar[list[SetupStep]] = [
         SetupStep(
             name="download_xdr_agent",
             script=DOWNLOAD_XDR_SCRIPT,
@@ -139,14 +138,14 @@ class XDRAgentInstallPlan:
         ),
     ]
 
-    verify_step: SetupStep = SetupStep(
+    verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_xdr_agent",
         script=VERIFY_XDR_SCRIPT,
         timeout_seconds=120,  # 2 min for verification
         is_verification=True,
     )
 
-    def get_context(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def get_context(self, config: dict[str, Any]) -> dict[str, Any]:
         """Get template variables for XDR install scripts.
 
         Args:
@@ -160,8 +159,6 @@ class XDRAgentInstallPlan:
         """
         url = config.get("agent_presigned_url")
         if not url:
-            raise ValueError(
-                "config missing required key 'agent_presigned_url' for XDR install"
-            )
+            raise ValueError("config missing required key 'agent_presigned_url' for XDR install")
 
         return {"agent_presigned_url": url}

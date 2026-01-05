@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 # GitHub Actions Self-Hosted Runner
 # ------------------------------------------------------------------------------
-# Provisions an EC2 spot instance to run GitHub Actions workflows.
+# Provisions an EC2 on-demand instance to run GitHub Actions workflows.
 # Access via SSM Session Manager (no SSH required).
 # ------------------------------------------------------------------------------
 
@@ -132,15 +132,13 @@ resource "aws_iam_role_policy" "ecr" {
 }
 
 # ------------------------------------------------------------------------------
-# EC2 Spot Instance
+# EC2 On-Demand Instance
 # ------------------------------------------------------------------------------
 
-resource "aws_spot_instance_request" "runner" {
-  count                = var.runner_count
-  ami                  = data.aws_ami.al2023.id
-  instance_type        = var.instance_type
-  spot_type            = "persistent"
-  wait_for_fulfillment = true
+resource "aws_instance" "runner" {
+  count         = var.runner_count
+  ami           = data.aws_ami.al2023.id
+  instance_type = var.instance_type
 
   vpc_security_group_ids = [aws_security_group.runner.id]
   subnet_id              = var.subnet_id
@@ -180,12 +178,4 @@ resource "aws_spot_instance_request" "runner" {
   tags = {
     Name = "shifter-github-runner-${count.index + 1}"
   }
-}
-
-# Tag the spot instances (spot requests don't propagate tags to instances)
-resource "aws_ec2_tag" "runner_name" {
-  count       = var.runner_count
-  resource_id = aws_spot_instance_request.runner[count.index].spot_instance_id
-  key         = "Name"
-  value       = "shifter-github-runner-${count.index + 1}"
 }

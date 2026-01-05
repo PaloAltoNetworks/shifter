@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from executors.ssm_executor import SSMExecutor, CommandError
+from executors.ssm_executor import CommandError, SSMExecutor
 
 
 class TestSSMExecutorLinuxDocument:

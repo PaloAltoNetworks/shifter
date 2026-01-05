@@ -12,7 +12,7 @@ This executor provides specific methods for NGFW lifecycle operations:
 
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError, WaiterError
@@ -32,8 +32,8 @@ class AWSExecutor:
 
     def __init__(
         self,
-        session: Optional[boto3.Session] = None,
-        region_name: Optional[str] = None,
+        session: boto3.Session | None = None,
+        region_name: str | None = None,
     ):
         """Initialize AWSExecutor.
 
@@ -47,7 +47,7 @@ class AWSExecutor:
             self.session = boto3.Session(region_name=region_name)
 
         # Cache for boto3 clients
-        self._clients: Dict[str, Any] = {}
+        self._clients: dict[str, Any] = {}
 
     def get_client(self, service: str) -> Any:
         """Get a boto3 client for the specified service.
@@ -198,7 +198,7 @@ class AWSExecutor:
             return CommandResult(
                 success=False,
                 stdout="",
-                stderr=f"Waiter timeout: {str(e)}",
+                stderr=f"Waiter timeout: {e!s}",
             )
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
@@ -238,7 +238,7 @@ class AWSExecutor:
             return CommandResult(
                 success=False,
                 stdout="",
-                stderr=f"Waiter timeout: {str(e)}",
+                stderr=f"Waiter timeout: {e!s}",
             )
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
@@ -414,7 +414,7 @@ class AWSExecutor:
         self,
         vpc_id: str,
         service_name: str,
-        subnet_ids: List[str],
+        subnet_ids: list[str],
     ) -> CommandResult:
         """Create a VPC endpoint for GWLB.
 
@@ -689,9 +689,7 @@ class AWSExecutor:
         """
         try:
             client = self.get_client("ec2")
-            response = client.describe_vpc_endpoints(
-                Filters=[{"Name": "service-name", "Values": [service_name]}]
-            )
+            response = client.describe_vpc_endpoints(Filters=[{"Name": "service-name", "Values": [service_name]}])
             return CommandResult(
                 success=True,
                 stdout=json.dumps(response, default=str),

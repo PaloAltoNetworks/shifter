@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 from django.contrib.auth import get_user_model
 
-from shared.schemas import RangeRequest
+from shared.schemas import RangeSpec
 
 
 @pytest.mark.django_db
@@ -14,7 +14,7 @@ class TestCreateRange:
     """Tests for create_range() in engine/services.py.
 
     Tests the service contract:
-    - Inputs: request (required RangeRequest)
+    - Inputs: request (required RangeSpec)
     - Outputs: int (range_id of created range)
     - Side effects: looks up User, allocates subnet, creates Range, triggers ECS provisioning
     - Errors: TypeError (wrong type), ValueError (subnet exhausted), User.DoesNotExist
@@ -33,7 +33,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="basic-attack",
             user_id=1,
             instances=[],
@@ -62,7 +62,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="advanced-scenario",
             user_id=99,
             instances=[],
@@ -94,7 +94,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=42,
             instances=[],
@@ -126,7 +126,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -158,7 +158,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -188,7 +188,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=123,
             instances=[],
@@ -217,7 +217,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -246,7 +246,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -275,7 +275,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[{"role": "attacker"}],
@@ -309,7 +309,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -329,7 +329,7 @@ class TestCreateRange:
 
             create_range(mock_request)
 
-            mock_start.assert_called_once_with(99)
+            mock_start.assert_called_once_with(99, 1)
 
     def test_stores_task_arn_when_provisioning_returns_one(self):
         """Service stores ECS task ARN when start_provisioning returns one."""
@@ -339,7 +339,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -369,7 +369,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -397,21 +397,21 @@ class TestCreateRange:
         """Service raises TypeError when request is None."""
         from engine import create_range
 
-        with pytest.raises(TypeError, match="request must be RangeRequest"):
+        with pytest.raises(TypeError, match="request must be RangeSpec"):
             create_range(None)
 
     def test_raises_on_invalid_request_type(self):
-        """Service raises TypeError when request is not a RangeRequest."""
+        """Service raises TypeError when request is not a RangeSpec."""
         from engine import create_range
 
-        with pytest.raises(TypeError, match="request must be RangeRequest"):
+        with pytest.raises(TypeError, match="request must be RangeSpec"):
             create_range({"scenario_id": "test", "user_id": 1})
 
     def test_raises_on_string_request(self):
         """Service raises TypeError when request is a string."""
         from engine import create_range
 
-        with pytest.raises(TypeError, match="request must be RangeRequest"):
+        with pytest.raises(TypeError, match="request must be RangeSpec"):
             create_range("not-a-request")
 
     def test_raises_on_plain_dict_request(self):
@@ -424,7 +424,7 @@ class TestCreateRange:
             "instances": [],
         }
 
-        with pytest.raises(TypeError, match="request must be RangeRequest"):
+        with pytest.raises(TypeError, match="request must be RangeSpec"):
             create_range(request_dict)
 
     # -------------------------------------------------------------------------
@@ -438,7 +438,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=9999,
             instances=[],
@@ -463,7 +463,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -487,7 +487,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -518,7 +518,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="advanced-persistent-threat",
             user_id=1,
             instances=[],
@@ -551,7 +551,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=777,
             instances=[],
@@ -580,7 +580,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[Mock(), Mock(), Mock()],
@@ -618,7 +618,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -647,7 +647,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -676,7 +676,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -709,7 +709,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],
@@ -739,7 +739,7 @@ class TestCreateRange:
         User = get_user_model()
 
         mock_request = Mock(
-            spec=RangeRequest,
+            spec=RangeSpec,
             scenario_id="test-scenario",
             user_id=1,
             instances=[],

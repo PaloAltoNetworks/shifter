@@ -21,11 +21,20 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+
+# Import runner setup module
+try:
+    from runner import get_runner_config, walkthrough_runner_setup
+
+    RUNNER_AVAILABLE = True
+except ImportError:
+    RUNNER_AVAILABLE = False
+
 
 # Colors for terminal output
 class Colors:
@@ -69,7 +78,7 @@ def subheader(msg: str) -> None:
 def code_block(text: str) -> None:
     """Print a code block with dimmed formatting."""
     print(f"{Colors.DIM}┌{'─' * 58}┐{Colors.END}")
-    for line in text.strip().split('\n'):
+    for line in text.strip().split("\n"):
         print(f"{Colors.DIM}│{Colors.END} {line}")
     print(f"{Colors.DIM}└{'─' * 58}┘{Colors.END}")
 
@@ -131,7 +140,13 @@ def wait_for_user(msg: str) -> None:
         print("Press Enter to continue, or type 'skip' to skip this step")
 
 
-def run_cmd(cmd: list[str], dry_run: bool = False, check: bool = True, capture: bool = False, profile: str = None) -> subprocess.CompletedProcess | None:
+def run_cmd(
+    cmd: list[str],
+    dry_run: bool = False,
+    check: bool = True,
+    capture: bool = False,
+    profile: str = None,
+) -> subprocess.CompletedProcess | None:
     """Run a command, optionally in dry-run mode."""
     # Insert --profile flag for AWS CLI commands
     if profile and cmd[0] == "aws":
@@ -145,13 +160,13 @@ def run_cmd(cmd: list[str], dry_run: bool = False, check: bool = True, capture: 
     info(f"Running: {cmd_str}")
     try:
         if capture:
-            result = subprocess.run(cmd, check=check, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=check, capture_output=True, text=True)  # nosec B603 B607
         else:
-            result = subprocess.run(cmd, check=check, text=True)
+            result = subprocess.run(cmd, check=check, text=True)  # nosec B603 B607
         return result
     except subprocess.CalledProcessError as e:
         error(f"Command failed: {e}")
-        if hasattr(e, 'stderr') and e.stderr:
+        if hasattr(e, "stderr") and e.stderr:
             print(e.stderr)
         if check:
             sys.exit(1)
@@ -163,7 +178,7 @@ def get_aws_account_id(profile: str = None) -> str:
     cmd = ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"]
     if profile:
         cmd = ["aws", "--profile", profile, "sts", "get-caller-identity", "--query", "Account", "--output", "text"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)  # nosec B603 B607
     return result.stdout.strip()
 
 
@@ -208,7 +223,7 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
         info(f"AWS Account ID: {account_id}")
     else:
         account_id = "123456789012"
-        info(f"[DRY-RUN] Would get AWS account ID")
+        info("[DRY-RUN] Would get AWS account ID")
 
     # Generate UUID for uniqueness
     uid = str(uuid.uuid4())
@@ -226,54 +241,98 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     # Step 1: S3 Bucket
     header("Step 1/4: Creating S3 Bucket")
 
-    run_cmd([
-        "aws", "s3api", "create-bucket",
-        "--bucket", bucket_name,
-        "--region", config.region,
-        "--create-bucket-configuration", f"LocationConstraint={config.region}"
-    ], dry_run=dry_run, profile=profile)
+    run_cmd(
+        [
+            "aws",
+            "s3api",
+            "create-bucket",
+            "--bucket",
+            bucket_name,
+            "--region",
+            config.region,
+            "--create-bucket-configuration",
+            f"LocationConstraint={config.region}",
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
 
-    run_cmd([
-        "aws", "s3api", "put-bucket-versioning",
-        "--bucket", bucket_name,
-        "--versioning-configuration", "Status=Enabled"
-    ], dry_run=dry_run, profile=profile)
+    run_cmd(
+        [
+            "aws",
+            "s3api",
+            "put-bucket-versioning",
+            "--bucket",
+            bucket_name,
+            "--versioning-configuration",
+            "Status=Enabled",
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
 
-    run_cmd([
-        "aws", "s3api", "put-bucket-encryption",
-        "--bucket", bucket_name,
-        "--server-side-encryption-configuration",
-        '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
-    ], dry_run=dry_run, profile=profile)
+    run_cmd(
+        [
+            "aws",
+            "s3api",
+            "put-bucket-encryption",
+            "--bucket",
+            bucket_name,
+            "--server-side-encryption-configuration",
+            '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}',
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
 
-    run_cmd([
-        "aws", "s3api", "put-public-access-block",
-        "--bucket", bucket_name,
-        "--public-access-block-configuration",
-        '{"BlockPublicAcls": true, "IgnorePublicAcls": true, "BlockPublicPolicy": true, "RestrictPublicBuckets": true}'
-    ], dry_run=dry_run, profile=profile)
+    run_cmd(
+        [
+            "aws",
+            "s3api",
+            "put-public-access-block",
+            "--bucket",
+            bucket_name,
+            "--public-access-block-configuration",
+            (
+                '{"BlockPublicAcls": true, "IgnorePublicAcls": true, '
+                '"BlockPublicPolicy": true, "RestrictPublicBuckets": true}'
+            ),
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
 
     success("S3 bucket created")
 
     # Step 2: DynamoDB Table
     header("Step 2/4: Creating DynamoDB Table")
 
-    run_cmd([
-        "aws", "dynamodb", "create-table",
-        "--table-name", table_name,
-        "--attribute-definitions", "AttributeName=LockID,AttributeType=S",
-        "--key-schema", "AttributeName=LockID,KeyType=HASH",
-        "--billing-mode", "PAY_PER_REQUEST",
-        "--region", config.region
-    ], dry_run=dry_run, profile=profile)
+    run_cmd(
+        [
+            "aws",
+            "dynamodb",
+            "create-table",
+            "--table-name",
+            table_name,
+            "--attribute-definitions",
+            "AttributeName=LockID,AttributeType=S",
+            "--key-schema",
+            "AttributeName=LockID,KeyType=HASH",
+            "--billing-mode",
+            "PAY_PER_REQUEST",
+            "--region",
+            config.region,
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
 
     if not dry_run:
         info("Waiting for table to be active...")
-        run_cmd([
-            "aws", "dynamodb", "wait", "table-exists",
-            "--table-name", table_name,
-            "--region", config.region
-        ], profile=profile)
+        run_cmd(
+            ["aws", "dynamodb", "wait", "table-exists", "--table-name", table_name, "--region", config.region],
+            profile=profile,
+        )
 
     success("DynamoDB table created")
 
@@ -287,20 +346,41 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     # Audience: sts.amazonaws.com (official AWS STS audience for OIDC)
     # Note: As of July 2024, AWS IAM automatically trusts GitHub's root CAs
     # so thumbprints are no longer required for token.actions.githubusercontent.com
-    result = run_cmd([
-        "aws", "iam", "create-open-id-connect-provider",
-        "--url", "https://token.actions.githubusercontent.com",
-        "--client-id-list", "sts.amazonaws.com",
-        "--tags", f"Key=Name,Value=github-actions-oidc-{config.env}", "Key=Project,Value=shifter"
-    ], dry_run=dry_run, check=False, profile=profile)  # May already exist (EntityAlreadyExists error is OK)
+    result = run_cmd(
+        [
+            "aws",
+            "iam",
+            "create-open-id-connect-provider",
+            "--url",
+            "https://token.actions.githubusercontent.com",
+            "--client-id-list",
+            "sts.amazonaws.com",
+            "--tags",
+            f"Key=Name,Value=github-actions-oidc-{config.env}",
+            "Key=Project,Value=shifter",
+        ],
+        dry_run=dry_run,
+        check=False,
+        profile=profile,
+    )  # May already exist (EntityAlreadyExists error is OK)
 
     # Verify provider exists
     if not dry_run:
-        verify_result = subprocess.run([
-            "aws", "--profile", profile, "iam", "list-open-id-connect-providers",
-            "--query", "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn",
-            "--output", "text"
-        ], capture_output=True, text=True)
+        verify_result = subprocess.run(  # nosec B603 B607
+            [
+                "aws",
+                "--profile",
+                profile,
+                "iam",
+                "list-open-id-connect-providers",
+                "--query",
+                "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn",
+                "--output",
+                "text",
+            ],
+            capture_output=True,
+            text=True,
+        )
 
         if verify_result.returncode != 0 or not verify_result.stdout.strip():
             error("Failed to create or verify OIDC provider")
@@ -314,12 +394,18 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
 
     # Get OIDC ARN
     if not dry_run:
-        cmd = ["aws", "iam", "list-open-id-connect-providers",
-               "--query", "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn",
-               "--output", "text"]
+        cmd = [
+            "aws",
+            "iam",
+            "list-open-id-connect-providers",
+            "--query",
+            "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn",
+            "--output",
+            "text",
+        ]
         if profile:
             cmd = ["aws", "--profile", profile] + cmd[1:]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607
         oidc_arn = result.stdout.strip()
     else:
         oidc_arn = f"arn:aws:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com"
@@ -331,23 +417,37 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     # Source: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
     trust_policy = {
         "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Principal": {"Federated": oidc_arn},
-            "Action": "sts:AssumeRoleWithWebIdentity",
-            "Condition": {
-                "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
-                "StringLike": {"token.actions.githubusercontent.com:sub": f"repo:{config.github_org}/{config.github_repo}:*"}
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Federated": oidc_arn},
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                    "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
+                    "StringLike": {
+                        "token.actions.githubusercontent.com:sub": (f"repo:{config.github_org}/{config.github_repo}:*")
+                    },
+                },
             }
-        }]
+        ],
     }
 
-    run_cmd([
-        "aws", "iam", "create-role",
-        "--role-name", config.role_name,
-        "--assume-role-policy-document", json.dumps(trust_policy),
-        "--tags", f"Key=Name,Value={config.role_name}", "Key=Project,Value=shifter"
-    ], dry_run=dry_run, profile=profile)
+    run_cmd(
+        [
+            "aws",
+            "iam",
+            "create-role",
+            "--role-name",
+            config.role_name,
+            "--assume-role-policy-document",
+            json.dumps(trust_policy),
+            "--tags",
+            f"Key=Name,Value={config.role_name}",
+            "Key=Project,Value=shifter",
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
 
     # Attach policies
     policies = [
@@ -363,28 +463,31 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     ]
 
     for name, actions in policies:
-        policy_doc = {
-            "Version": "2012-10-17",
-            "Statement": [{"Effect": "Allow", "Action": actions, "Resource": "*"}]
-        }
-        run_cmd([
-            "aws", "iam", "put-role-policy",
-            "--role-name", config.role_name,
-            "--policy-name", f"shifter-{config.env}-{name}",
-            "--policy-document", json.dumps(policy_doc)
-        ], dry_run=dry_run, profile=profile)
+        policy_doc = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": actions, "Resource": "*"}]}
+        run_cmd(
+            [
+                "aws",
+                "iam",
+                "put-role-policy",
+                "--role-name",
+                config.role_name,
+                "--policy-name",
+                f"shifter-{config.env}-{name}",
+                "--policy-document",
+                json.dumps(policy_doc),
+            ],
+            dry_run=dry_run,
+            profile=profile,
+        )
 
     success("IAM role and policies created")
 
     # Get role ARN
     if not dry_run:
-        cmd = ["aws", "iam", "get-role",
-               "--role-name", config.role_name,
-               "--query", "Role.Arn",
-               "--output", "text"]
+        cmd = ["aws", "iam", "get-role", "--role-name", config.role_name, "--query", "Role.Arn", "--output", "text"]
         if profile:
             cmd = ["aws", "--profile", profile] + cmd[1:]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607
         role_arn = result.stdout.strip()
     else:
         role_arn = f"arn:aws:iam::{account_id}:role/{config.role_name}"
@@ -418,7 +521,7 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
 
     if not dry_run:
         # Check if gh CLI is available
-        gh_available = subprocess.run(["which", "gh"], capture_output=True).returncode == 0
+        gh_available = subprocess.run(["which", "gh"], capture_output=True).returncode == 0  # nosec B603 B607
 
         if gh_available:
             print(f"\n{Colors.GREEN}✓ GitHub CLI detected{Colors.END}")
@@ -426,9 +529,10 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
 
             if choice == "yes":
                 info(f"Running: gh secret set {secret_name} --repo {github_org}/{github_repo}")
-                result = subprocess.run(
+                result = subprocess.run(  # nosec B603 B607
                     ["gh", "secret", "set", secret_name, "--body", role_arn, "--repo", f"{github_org}/{github_repo}"],
-                    capture_output=True, text=True
+                    capture_output=True,
+                    text=True,
                 )
                 if result.returncode == 0:
                     success("GitHub secret configured via gh CLI")
@@ -531,13 +635,17 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
             if commit_choice == "yes":
                 try:
                     info(f"Adding files: platform/terraform/environments/{env}/")
-                    subprocess.run(["git", "add", f"platform/terraform/environments/{env}/"], check=True, cwd=repo_root)
+                    subprocess.run(["git", "add", f"platform/terraform/environments/{env}/"], check=True, cwd=repo_root)  # nosec B603 B607
 
                     info(f"Committing: Update backend config for {env}")
-                    subprocess.run(["git", "commit", "-m", f"Update backend config for {env}"], check=True, cwd=repo_root)
+                    subprocess.run(  # nosec B603 B607
+                        ["git", "commit", "-m", f"Update backend config for {env}"],
+                        check=True,
+                        cwd=repo_root,
+                    )
 
                     info("Pushing to remote...")
-                    subprocess.run(["git", "push"], check=True, cwd=repo_root)
+                    subprocess.run(["git", "push"], check=True, cwd=repo_root)  # nosec B603 B607
 
                     success("Changes committed and pushed")
                 except subprocess.CalledProcessError as e:
@@ -547,7 +655,11 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
                     sys.exit(1)
             elif commit_choice == "manual":
                 info("You should run:")
-                code_block(f"git add platform/terraform/environments/{env}/\ngit commit -m 'Update backend config for {env}'\ngit push")
+                code_block(
+                    f"git add platform/terraform/environments/{env}/\n"
+                    f"git commit -m 'Update backend config for {env}'\n"
+                    "git push"
+                )
                 wait_for_user("Commit and push the changes, then press Enter.")
 
             success("Backend configuration updated")
@@ -561,7 +673,11 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
 
             if confirm("Commit and push the backend.tf changes now?"):
                 info("You should run:")
-                code_block(f"git add platform/terraform/environments/{env}/\ngit commit -m 'Update backend config for {env}'\ngit push")
+                code_block(
+                    f"git add platform/terraform/environments/{env}/\n"
+                    f"git commit -m 'Update backend config for {env}'\n"
+                    "git push"
+                )
                 wait_for_user("Commit and push the changes, then press Enter.")
 
             success("Backend configuration updated")
@@ -628,9 +744,9 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
             if not dry_run:
                 # Show plan summary
                 print(f"\n{Colors.BOLD}Plan Summary:{Colors.END}")
-                subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)
+                subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)  # nosec B603 B607
 
-                if not confirm(f"\nApply this plan?"):
+                if not confirm("\nApply this plan?"):
                     error(f"Terraform apply for {component} is required")
                     error("All infrastructure components are mandatory for Shifter to function")
                     sys.exit(1)
@@ -648,9 +764,8 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
 
                 # Capture outputs for portal
                 if component == "portal":
-                    result = subprocess.run(
-                        ["terraform", "output", "-json"],
-                        capture_output=True, text=True, check=False
+                    result = subprocess.run(  # nosec B603 B607
+                        ["terraform", "output", "-json"], capture_output=True, text=True, check=False
                     )
                     if result.returncode == 0:
                         outputs = json.loads(result.stdout)
@@ -724,11 +839,11 @@ def walkthrough_cognito_user(outputs: dict, env: str, profile: str, dry_run: boo
 
         subheader("Create admin user")
 
-        cmd = f'''aws cognito-idp admin-create-user \\
+        cmd = f"""aws cognito-idp admin-create-user \\
   --user-pool-id {pool_id} \\
   --username YOUR_EMAIL@example.com \\
   --user-attributes Name=email,Value=YOUR_EMAIL@example.com \\
-  --desired-delivery-mediums EMAIL'''
+  --desired-delivery-mediums EMAIL"""
 
         code_block(cmd)
 
@@ -737,10 +852,10 @@ def walkthrough_cognito_user(outputs: dict, env: str, profile: str, dry_run: boo
         print("Run this to get the user pool ID:")
         code_block("terraform output cognito_user_pool_id")
         print("\nThen create a user with:")
-        code_block(f'''aws cognito-idp admin-create-user \\
+        code_block("""aws cognito-idp admin-create-user \\
   --user-pool-id <POOL_ID> \\
   --username user@example.com \\
-  --user-attributes Name=email,Value=user@example.com''')
+  --user-attributes Name=email,Value=user@example.com""")
 
     if not dry_run:
         if confirm("Create the first user now?"):
@@ -748,13 +863,22 @@ def walkthrough_cognito_user(outputs: dict, env: str, profile: str, dry_run: boo
                 pool_id = outputs["cognito_user_pool_id"]["value"]
                 email = input(f"{Colors.CYAN}Enter email for first user: {Colors.END}").strip()
                 if email:
-                    run_cmd([
-                        "aws", "cognito-idp", "admin-create-user",
-                        "--user-pool-id", pool_id,
-                        "--username", email,
-                        "--user-attributes", f"Name=email,Value={email}",
-                        "--desired-delivery-mediums", "EMAIL"
-                    ], profile=profile)
+                    run_cmd(
+                        [
+                            "aws",
+                            "cognito-idp",
+                            "admin-create-user",
+                            "--user-pool-id",
+                            pool_id,
+                            "--username",
+                            email,
+                            "--user-attributes",
+                            f"Name=email,Value={email}",
+                            "--desired-delivery-mediums",
+                            "EMAIL",
+                        ],
+                        profile=profile,
+                    )
                     success(f"User {email} created - they will receive an email with temporary password")
         else:
             info("You can create users later via AWS Console or CLI")
@@ -797,15 +921,16 @@ def full_deployment(env: str, profile: str, dry_run: bool = False) -> None:
     """Run complete deployment with interactive walkthrough."""
     header(f"Full {env.upper()} Deployment")
 
-    print(f"""
+    print("""
 This will guide you through a complete Shifter deployment:
 
   1. Bootstrap AWS account (S3, DynamoDB, IAM)
   2. Configure GitHub secrets (automated with gh CLI or manual)
   3. Update Terraform backend configuration (automated or manual)
-  4. Deploy infrastructure (Core → Range → Portal)
-  5. Configure DNS and SSL certificate (manual - external DNS)
-  6. Create first user
+  4. Set up GitHub Actions runners (optional - for self-hosted CI/CD)
+  5. Deploy infrastructure (Core → Range → Portal)
+  6. Configure DNS and SSL certificate (manual - external DNS)
+  7. Create first user
 
 Automated steps will ask for confirmation:
   [y] yes - run automatically
@@ -832,23 +957,38 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
     # Phase 3: Backend Configuration
     walkthrough_backend_config(bootstrap_result, dry_run=dry_run)
 
-    # Phase 4: Terraform Deployment
-    if not dry_run:
-        if not confirm("Continue with Terraform deployment?"):
-            print("\nYou can resume later with:")
-            code_block(f"./scripts/bootstrap/deploy.py terraform --env {env} --profile {profile}")
-            return
+    # Phase 4: GitHub Actions Runner Setup (optional)
+    runner_result = None
+    if RUNNER_AVAILABLE:
+        runner_config = get_runner_config(
+            env=env,
+            region=config.region,
+            github_org=config.github_org,
+            github_repo=config.github_repo,
+        )
+        runner_result = walkthrough_runner_setup(runner_config, profile, dry_run=dry_run)
+        if runner_result:
+            # Store app_id for terraform vars if needed
+            info(f"Runner App ID: {runner_result.get('app_id', 'N/A')}")
+    else:
+        warn("Runner module not available - skipping GitHub runner setup")
+
+    # Phase 5: Terraform Deployment
+    if not dry_run and not confirm("Continue with Terraform deployment?"):
+        print("\nYou can resume later with:")
+        code_block(f"./scripts/bootstrap/deploy.py terraform --env {env} --profile {profile}")
+        return
 
     outputs = terraform_deploy(env, profile, dry_run=dry_run)
 
     if not dry_run and outputs:
-        # Phase 5: ACM Validation
+        # Phase 6: ACM Validation
         walkthrough_acm_validation(outputs, dry_run=dry_run)
 
-        # Phase 6: DNS Setup
+        # Phase 7: DNS Setup
         walkthrough_dns_setup(outputs, dry_run=dry_run)
 
-        # Phase 7: First User
+        # Phase 8: First User
         walkthrough_cognito_user(outputs, env, profile, dry_run=dry_run)
 
     # Final Summary
@@ -863,9 +1003,7 @@ def check_dependencies():
         "git": "Git - https://git-scm.com/downloads",
     }
 
-    optional = {
-        "gh": "GitHub CLI - https://cli.github.com/ (recommended for automating GitHub secrets)"
-    }
+    optional = {"gh": "GitHub CLI - https://cli.github.com/ (recommended for automating GitHub secrets)"}
 
     missing_required = []
     missing_optional = []
@@ -908,7 +1046,7 @@ Examples:
 
   # Just run terraform (after bootstrap)
   ./scripts/bootstrap/deploy.py terraform --env prod --profile my-prod-profile
-        """
+        """,
     )
 
     # Check dependencies first

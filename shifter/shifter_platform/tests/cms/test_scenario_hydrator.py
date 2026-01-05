@@ -1,12 +1,12 @@
 """Tests for scenario hydrator.
 
 The hydrator takes a scenario template + agent info and produces
-a fully resolved RangeRequest for Engine consumption.
+a fully resolved RangeSpec for Engine consumption.
 
 Responsibilities:
 - Resolve os_type "from_agent" to actual OS
 - Embed agent details into instances with agent_slot
-- Return consistent RangeRequest structure
+- Return consistent RangeSpec structure
 - Input validation and error handling
 """
 
@@ -14,7 +14,7 @@ import pytest
 from django.contrib.auth import get_user_model
 
 from cms.models import AgentConfig, OperatingSystem
-from shared.schemas import RangeRequest
+from shared.schemas import RangeSpec
 
 User = get_user_model()
 
@@ -64,11 +64,11 @@ class TestHydrateScenario:
     # --- Basic structure ---
 
     def test_returns_range_request(self, user, windows_agent):
-        """hydrate_scenario returns a RangeRequest."""
+        """hydrate_scenario returns a RangeSpec."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        assert isinstance(result, RangeRequest)
+        assert isinstance(result, RangeSpec)
 
     def test_includes_scenario_id(self, user, windows_agent):
         """Result includes scenario_id."""
@@ -100,6 +100,27 @@ class TestHydrateScenario:
         roles = [i.role for i in result.instances]
         assert "attacker" in roles
         assert "victim" in roles
+
+    def test_each_instance_has_uuid(self, user, windows_agent):
+        """Each instance gets a unique UUID."""
+        from cms.scenarios.hydrator import hydrate_scenario
+
+        result = hydrate_scenario("basic", user.id, windows_agent)
+        uuids = [i.uuid for i in result.instances]
+        assert all(uuid is not None for uuid in uuids)
+        assert len(set(uuids)) == len(uuids)  # All unique
+
+    def test_uuid_is_valid_format(self, user, windows_agent):
+        """Instance UUIDs are valid UUID4 format."""
+        import uuid
+
+        from cms.scenarios.hydrator import hydrate_scenario
+
+        result = hydrate_scenario("basic", user.id, windows_agent)
+        for instance in result.instances:
+            # Will raise ValueError if not valid UUID
+            parsed = uuid.UUID(instance.uuid)
+            assert parsed.version == 4
 
     # --- OS resolution from agent ---
 
@@ -238,7 +259,7 @@ class TestHydrateScenario:
     # --- Model serialization ---
 
     def test_model_dump_returns_dict(self, user, windows_agent):
-        """RangeRequest can be serialized to dict."""
+        """RangeSpec can be serialized to dict."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)

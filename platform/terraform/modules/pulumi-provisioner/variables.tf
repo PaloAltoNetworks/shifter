@@ -288,3 +288,12 @@ variable "alarm_email" {
   type        = string
   default     = ""
 }
+
+# ------------------------------------------------------------------------------
+# Messaging (SNS)
+# ------------------------------------------------------------------------------
+
+variable "sns_topic_arn" {
+  description = "ARN of the SNS topic for range event publishing"
+  type        = string
+}

@@ -9,11 +9,11 @@ from .linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 from .xdr_agent_install import XDRAgentInstallPlan
 
 __all__ = [
-    "SetupStep",
     "BootstrapPlan",
     "DCSetupPlan",
     "DomainJoinPlan",
     "LinuxBootstrapPlan",
     "LinuxXDRAgentInstallPlan",
+    "SetupStep",
     "XDRAgentInstallPlan",
 ]

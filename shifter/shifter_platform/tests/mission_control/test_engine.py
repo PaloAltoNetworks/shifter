@@ -1,6 +1,6 @@
 """Tests for Shifter Engine service (ECS Fargate integration)."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -30,24 +30,25 @@ class TestStartProvisioning:
         """When ECS config is incomplete, returns None (local dev fallback)."""
         from engine.ecs import start_provisioning
 
-        result = start_provisioning(range_id=1)
+        result = start_provisioning(range_id=1, user_id=7)
         assert result is None
 
     def test_starts_task_and_returns_arn(self, ecs_settings):
         """Successfully starts ECS task."""
         with (
             override_settings(**ecs_settings),
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("engine.ecs._get_ecs_client") as mock_get_client,
         ):
-            mock_ecs = mock_client.return_value
+            mock_ecs = MagicMock()
             mock_ecs.run_task.return_value = {
                 "tasks": [{"taskArn": "arn:aws:ecs:us-east-2:123456789012:task/test/abc123"}],
                 "failures": [],
             }
+            mock_get_client.return_value = mock_ecs
 
             from engine.ecs import start_provisioning
 
-            result = start_provisioning(range_id=42)
+            result = start_provisioning(range_id=42, user_id=7)
 
             assert result == "arn:aws:ecs:us-east-2:123456789012:task/test/abc123"
             mock_ecs.run_task.assert_called_once()
@@ -57,41 +58,43 @@ class TestStartProvisioning:
             assert call_kwargs["launchType"] == "FARGATE"
             # Check command override
             container_overrides = call_kwargs["overrides"]["containerOverrides"][0]
-            assert container_overrides["command"] == ["provision", "--range-id", "42"]
+            assert container_overrides["command"] == ["range", "provision", "--range-id", "42", "--user-id", "7"]
 
     def test_raises_on_client_error(self, ecs_settings):
         """ClientError from AWS is propagated."""
         with (
             override_settings(**ecs_settings),
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("engine.ecs._get_ecs_client") as mock_get_client,
         ):
-            mock_ecs = mock_client.return_value
+            mock_ecs = MagicMock()
             mock_ecs.run_task.side_effect = ClientError(
                 {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
                 "RunTask",
             )
+            mock_get_client.return_value = mock_ecs
 
             from engine.ecs import start_provisioning
 
             with pytest.raises(ClientError):
-                start_provisioning(range_id=1)
+                start_provisioning(range_id=1, user_id=7)
 
     def test_raises_on_task_start_failure(self, ecs_settings):
         """Raises ClientError when ECS task fails to start."""
         with (
             override_settings(**ecs_settings),
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("engine.ecs._get_ecs_client") as mock_get_client,
         ):
-            mock_ecs = mock_client.return_value
+            mock_ecs = MagicMock()
             mock_ecs.run_task.return_value = {
                 "tasks": [],
                 "failures": [{"reason": "RESOURCE:MEMORY", "arn": "arn:..."}],
             }
+            mock_get_client.return_value = mock_ecs
 
             from engine.ecs import start_provisioning
 
             with pytest.raises(ClientError) as exc_info:
-                start_provisioning(range_id=1)
+                start_provisioning(range_id=1, user_id=7)
             assert "TaskStartFailed" in str(exc_info.value)
 
 
@@ -106,47 +109,49 @@ class TestStartTeardown:
         """When ECS config is incomplete, returns None (local dev fallback)."""
         from engine.ecs import start_teardown
 
-        result = start_teardown(range_id=1)
+        result = start_teardown(range_id=1, user_id=7)
         assert result is None
 
     def test_starts_task_and_returns_arn(self, ecs_settings):
         """Successfully starts ECS teardown task."""
         with (
             override_settings(**ecs_settings),
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("engine.ecs._get_ecs_client") as mock_get_client,
         ):
-            mock_ecs = mock_client.return_value
+            mock_ecs = MagicMock()
             mock_ecs.run_task.return_value = {
                 "tasks": [{"taskArn": "arn:aws:ecs:us-east-2:123456789012:task/test/xyz789"}],
                 "failures": [],
             }
+            mock_get_client.return_value = mock_ecs
 
             from engine.ecs import start_teardown
 
-            result = start_teardown(range_id=99)
+            result = start_teardown(range_id=99, user_id=7)
 
             assert result == "arn:aws:ecs:us-east-2:123456789012:task/test/xyz789"
             mock_ecs.run_task.assert_called_once()
             # Check command override for destroy
             container_overrides = mock_ecs.run_task.call_args.kwargs["overrides"]["containerOverrides"][0]
-            assert container_overrides["command"] == ["destroy", "--range-id", "99"]
+            assert container_overrides["command"] == ["range", "destroy", "--range-id", "99", "--user-id", "7"]
 
     def test_raises_on_client_error(self, ecs_settings):
         """ClientError from AWS is propagated."""
         with (
             override_settings(**ecs_settings),
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("engine.ecs._get_ecs_client") as mock_get_client,
         ):
-            mock_ecs = mock_client.return_value
+            mock_ecs = MagicMock()
             mock_ecs.run_task.side_effect = ClientError(
                 {"Error": {"Code": "ClusterNotFound", "Message": "Cluster not found"}},
                 "RunTask",
             )
+            mock_get_client.return_value = mock_ecs
 
             from engine.ecs import start_teardown
 
             with pytest.raises(ClientError):
-                start_teardown(range_id=1)
+                start_teardown(range_id=1, user_id=7)
 
 
 class TestGetTaskStatus:
@@ -175,9 +180,9 @@ class TestGetTaskStatus:
 
         with (
             override_settings(**ecs_settings),
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("engine.ecs._get_ecs_client") as mock_get_client,
         ):
-            mock_ecs = mock_client.return_value
+            mock_ecs = MagicMock()
             mock_ecs.describe_tasks.return_value = {
                 "tasks": [
                     {
@@ -190,6 +195,7 @@ class TestGetTaskStatus:
                     }
                 ]
             }
+            mock_get_client.return_value = mock_ecs
 
             from engine.ecs import get_task_status
 
@@ -205,10 +211,11 @@ class TestGetTaskStatus:
         """Returns UNKNOWN status when task not found."""
         with (
             override_settings(**ecs_settings),
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("engine.ecs._get_ecs_client") as mock_get_client,
         ):
-            mock_ecs = mock_client.return_value
+            mock_ecs = MagicMock()
             mock_ecs.describe_tasks.return_value = {"tasks": []}
+            mock_get_client.return_value = mock_ecs
 
             from engine.ecs import get_task_status
 
@@ -222,13 +229,14 @@ class TestGetTaskStatus:
         """Returns None when describe_tasks fails."""
         with (
             override_settings(**ecs_settings),
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("engine.ecs._get_ecs_client") as mock_get_client,
         ):
-            mock_ecs = mock_client.return_value
+            mock_ecs = MagicMock()
             mock_ecs.describe_tasks.side_effect = ClientError(
                 {"Error": {"Code": "ClusterNotFound", "Message": "Not found"}},
                 "DescribeTasks",
             )
+            mock_get_client.return_value = mock_ecs
 
             from engine.ecs import get_task_status
 

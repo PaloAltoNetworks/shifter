@@ -1,7 +1,7 @@
 """Scenario hydration for Engine consumption.
 
 Takes a scenario template + agent and produces a fully resolved
-RangeRequest with:
+RangeSpec with:
 - Resolved os_type (from_agent -> actual OS)
 - Embedded agent details for instances with agent_slot
 """
@@ -9,10 +9,11 @@ RangeRequest with:
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import TYPE_CHECKING
 
 from cms.exceptions import CMSError
-from shared.schemas import AgentDetails, DCConfig, InstanceSpec, RangeRequest
+from shared.schemas import AgentDetails, DCConfig, InstanceSpec, RangeSpec
 
 from .loader import load_scenario
 
@@ -26,7 +27,7 @@ def hydrate_scenario(
     scenario_id: str,
     user_id: int,
     agent: AgentConfig | None,
-) -> RangeRequest:
+) -> RangeSpec:
     """Hydrate a scenario template with agent details.
 
     Args:
@@ -35,7 +36,7 @@ def hydrate_scenario(
         agent: The agent to use for victim instances
 
     Returns:
-        RangeRequest with scenario_id, user_id, and hydrated instances
+        RangeSpec with scenario_id, user_id, and hydrated instances
 
     Raises:
         CMSError: If scenario not found or agent is None
@@ -71,7 +72,7 @@ def hydrate_scenario(
         len(instances),
     )
 
-    return RangeRequest(
+    return RangeSpec(
         scenario_id=scenario_id,
         user_id=user_id,
         instances=instances,
@@ -130,6 +131,7 @@ def _hydrate_instance(
         )
 
     return InstanceSpec(
+        uuid=str(uuid.uuid4()),
         role=instance.role,
         os_type=os_type,
         agent=agent_details,

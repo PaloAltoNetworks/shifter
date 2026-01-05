@@ -9,7 +9,6 @@ NGFWProvisionPlan handles post-Pulumi NGFW configuration via SSH:
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pytest
 
@@ -21,7 +20,7 @@ class MockNGFWInstance:
     management_ip: str = "10.1.1.50"
     hostname: str = "ngfw-user-1"
     sls_region: str = "us"
-    auth_key: Optional[str] = None
+    auth_key: str | None = None
 
 
 class TestNGFWProvisionPlanSteps:

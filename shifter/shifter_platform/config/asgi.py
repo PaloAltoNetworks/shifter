@@ -1,7 +1,10 @@
 """
 ASGI config for Shifter platform.
 
-Configures Django Channels for WebSocket support (terminal SSH connections).
+Configures Django Channels for:
+- WebSocket support (terminal SSH connections, range status updates)
+
+Background status processing is handled by SQS workers (run_worker management command).
 """
 
 import os

@@ -17,6 +17,7 @@ from django.contrib.auth import get_user_model
 
 from cms import services
 from cms.models import AgentConfig, OperatingSystem
+from shared.constants import USER_CANNOT_BE_NONE
 
 User = get_user_model()
 
@@ -173,7 +174,7 @@ class TestInitiateUpload:
 
     def test_raises_typeerror_when_user_is_none(self, db):
         """Service raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.initiate_upload(None, "Agent", "agent.msi", 1000)
 
     def test_raises_typeerror_when_user_has_no_id_attribute(self, db):
@@ -528,7 +529,7 @@ class TestCompleteUpload:
 
     def test_raises_typeerror_when_user_is_none(self, db):
         """Service raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.complete_upload(None, "token123", "sha256hash")
 
     def test_raises_typeerror_when_user_has_no_id_attribute(self, db):
@@ -794,7 +795,7 @@ class TestCancelUpload:
 
     def test_raises_typeerror_when_user_is_none(self, db):
         """Service raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.cancel_upload(None, "token123")
 
     def test_raises_typeerror_when_user_has_no_id_attribute(self, db):

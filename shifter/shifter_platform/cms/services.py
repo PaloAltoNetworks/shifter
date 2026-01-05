@@ -47,7 +47,7 @@ def create_agent(user: User, **kwargs: Any) -> Any:
             - filename: Original filename of the agent
             - os_slug: Operating system slug (e.g., 'windows', 'linux-debian')
             - file_size: Size of the agent file in bytes
-            - sha256: SHA256 hash of the agent file
+            - sha256: SHA256 hash (optional, for future server-side compute)
             - upload_method: Optional upload method for logging
 
     Returns:
@@ -1785,7 +1785,7 @@ def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dic
         raise
 
 
-def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
+def complete_upload(user: User, upload_token: str) -> Any:
     """Verify and finalize upload after file has been uploaded to S3.
 
     Verifies the upload token, checks the S3 object exists with correct size,
@@ -1794,15 +1794,13 @@ def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
     Args:
         user: User who initiated the upload
         upload_token: Signed token from initiate_upload
-        sha256: SHA256 hash of the uploaded file (computed client-side)
 
     Returns:
         AgentConfig: The newly created agent record
 
     Raises:
         TypeError: If user is None or invalid type
-        ValueError: If user is unsaved, or upload_token/sha256 is
-            empty
+        ValueError: If user is unsaved or upload_token is empty
         CMSError: If token is invalid/expired, S3 verification fails,
             or size mismatch
     """
@@ -1843,22 +1841,6 @@ def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
             user.id,
         )
         raise ValueError("upload_token cannot be empty")
-
-    # Input validation - sha256
-    if sha256 is None:
-        logger.error(
-            "complete_upload called with None sha256 for user_id=%s",
-            user.id,
-        )
-        raise ValueError("sha256 cannot be None")
-
-    sha256 = sha256.strip()
-    if not sha256:
-        logger.error(
-            "complete_upload called with empty sha256 for user_id=%s",
-            user.id,
-        )
-        raise ValueError("sha256 cannot be empty")
 
     logger.debug("complete_upload called for user_id=%s", user.id)
 
@@ -1910,7 +1892,6 @@ def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
             filename=payload["filename"],
             os_slug=payload["os_slug"],
             file_size=expected_size,
-            sha256=sha256,
             upload_method="presigned",
         )
 

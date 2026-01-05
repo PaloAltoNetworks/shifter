@@ -45,7 +45,7 @@ def create_agent(
     filename: str,
     os_slug: str,
     file_size: int,
-    sha256: str,
+    sha256: str = "",
     upload_method: str | None = None,
 ) -> AgentConfig:
     """Create a new agent record.
@@ -57,7 +57,7 @@ def create_agent(
         filename: Original filename of the agent
         os_slug: Operating system slug (e.g., 'windows', 'linux-debian')
         file_size: Size of the agent file in bytes
-        sha256: SHA256 hash of the agent file
+        sha256: SHA256 hash of the agent file (optional, for future server-side compute)
         upload_method: Optional upload method for logging (e.g., 'presigned')
 
     Returns:

@@ -231,7 +231,7 @@ class DashboardManager {
     }
 
     _isTransitionalState(status) {
-        return ['pending', 'provisioning', 'resuming', 'destroying'].includes(status);
+        return ['pending', 'provisioning', 'resuming'].includes(status);
     }
 
     _updateUI() {
@@ -270,11 +270,6 @@ class DashboardManager {
             case 'resuming':
                 this.provisioningState.style.display = 'block';
                 this._updateProvisioningState('Resuming Range', 'Starting instances...');
-                break;
-
-            case 'destroying':
-                this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Destroying Range', 'Cleaning up resources...');
                 break;
 
             case 'failed':

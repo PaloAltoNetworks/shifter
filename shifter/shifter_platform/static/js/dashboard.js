@@ -26,6 +26,10 @@ class DashboardManager {
         this.reconnectDelay = 1000; // Start with 1 second
         this.agents = []; // Cached agent list with os_slug
 
+        // Provisioning timeout (from Django settings, fallback 60 min)
+        this.provisioningTimeoutMs = options.provisioningTimeoutMs || 60 * 60 * 1000;
+        this.provisioningTimer = null;
+
         // UI Elements
         this.noRangeState = document.getElementById('no-range-state');
         this.provisioningState = document.getElementById('provisioning-state');
@@ -482,6 +486,11 @@ class DashboardManager {
 
         this.statusSocket = new WebSocket(wsUrl);
 
+        // Start provisioning timeout timer
+        this.provisioningTimer = setTimeout(() => {
+            this._handleProvisioningTimeout();
+        }, this.provisioningTimeoutMs);
+
         this.statusSocket.onopen = () => {
             console.log('WebSocket connected for range status');
             this.reconnectAttempts = 0;
@@ -525,6 +534,7 @@ class DashboardManager {
                 // Close socket if we've reached a stable state
                 if (!this._isTransitionalState(newStatus)) {
                     console.log('Range reached stable state, closing WebSocket');
+                    this._clearProvisioningTimer();
                     this._closeStatusSocket();
                 }
             }
@@ -572,6 +582,7 @@ class DashboardManager {
      * Close WebSocket connection cleanly.
      */
     _closeStatusSocket() {
+        this._clearProvisioningTimer();
         if (this.statusSocket) {
             this.statusSocket.onclose = null; // Prevent reconnect attempt
             this.statusSocket.close(1000, 'Client closing');
@@ -579,6 +590,29 @@ class DashboardManager {
         }
         this.reconnectAttempts = 0;
         this.reconnectDelay = 1000;
+    }
+
+    /**
+     * Clear the provisioning timeout timer.
+     */
+    _clearProvisioningTimer() {
+        if (this.provisioningTimer) {
+            clearTimeout(this.provisioningTimer);
+            this.provisioningTimer = null;
+        }
+    }
+
+    /**
+     * Handle provisioning timeout - show failed state.
+     */
+    _handleProvisioningTimeout() {
+        console.error('Provisioning timed out');
+        this._closeStatusSocket();
+        if (this.currentRange) {
+            this.currentRange.status = 'failed';
+            this.currentRange.error_message = 'Provisioning timed out';
+        }
+        this._updateUI();
     }
 
     _initDropdown(dropdown) {

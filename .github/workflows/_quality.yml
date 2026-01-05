@@ -20,10 +20,13 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
       - name: Lint Python
         working-directory: shifter/shifter_platform
         run: |
-          uv sync --group dev
           uv run ruff check .
           uv run ruff format --check .
 

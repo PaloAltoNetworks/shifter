@@ -4,11 +4,9 @@ SSHExecutor uses SSH to execute CLI commands on PAN-OS devices (VM-Series).
 Provides same interface as SSMExecutor for use with SetupOrchestrator.
 """
 
-import io
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # Mock RSA key for tests
 MOCK_PRIVATE_KEY = """-----BEGIN RSA PRIVATE KEY-----
@@ -36,10 +34,14 @@ class TestSSHExecutorImports:
     def test_import_exceptions(self):
         """Exception classes should be importable."""
         from executors.ssh_executor import (
-            SSHExecutorError,
             CommandError,
-            TimeoutError as SSHTimeoutError,
+            SSHExecutorError,
+        )
+        from executors.ssh_executor import (
             ConnectionError as SSHConnectionError,
+        )
+        from executors.ssh_executor import (
+            TimeoutError as SSHTimeoutError,
         )
 
         assert SSHExecutorError is not None
@@ -55,7 +57,7 @@ class TestRunCommandHappyPath:
     @patch("paramiko.SSHClient")
     def test_run_command_success(self, mock_ssh_class, mock_rsa_key):
         """Command succeeds, returns result with stdout/stderr."""
-        from executors.ssh_executor import SSHExecutor, CommandResult
+        from executors.ssh_executor import CommandResult, SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -114,7 +116,7 @@ class TestRunCommandExpectedFailures:
     @patch("paramiko.SSHClient")
     def test_run_command_nonzero_exit_raises(self, mock_ssh_class, mock_rsa_key):
         """Non-zero exit code raises CommandError."""
-        from executors.ssh_executor import SSHExecutor, CommandError
+        from executors.ssh_executor import CommandError, SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -141,9 +143,12 @@ class TestRunCommandExpectedFailures:
     def test_run_command_connection_error_raises(self, mock_ssh_class, mock_rsa_key):
         """SSH connection failure raises ConnectionError."""
         import paramiko
+
+        from executors.ssh_executor import (
+            ConnectionError as SSHConnectionError,
+        )
         from executors.ssh_executor import (
             SSHExecutor,
-            ConnectionError as SSHConnectionError,
         )
 
         mock_client = MagicMock()
@@ -162,12 +167,13 @@ class TestRunCommandExpectedFailures:
     @patch("paramiko.SSHClient")
     def test_run_command_timeout_raises(self, mock_ssh_class, mock_rsa_key):
         """Socket timeout raises TimeoutError."""
-        import socket
-        from executors.ssh_executor import SSHExecutor, TimeoutError as SSHTimeoutError
+
+        from executors.ssh_executor import SSHExecutor
+        from executors.ssh_executor import TimeoutError as SSHTimeoutError
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
-        mock_client.exec_command.side_effect = socket.timeout("timed out")
+        mock_client.exec_command.side_effect = TimeoutError("timed out")
         mock_rsa_key.return_value = MagicMock()
 
         executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY)
@@ -210,6 +216,7 @@ class TestWaitForAgentHappyPath:
     ):
         """SSH becomes available after a few retries."""
         import paramiko
+
         from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
@@ -245,7 +252,9 @@ class TestWaitForAgentExpectedFailures:
     ):
         """SSH never available raises TimeoutError."""
         import paramiko
-        from executors.ssh_executor import SSHExecutor, TimeoutError as SSHTimeoutError
+
+        from executors.ssh_executor import SSHExecutor
+        from executors.ssh_executor import TimeoutError as SSHTimeoutError
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -277,6 +286,7 @@ class TestRebootAndWaitHappyPath:
     ):
         """Reboot PAN-OS device and wait for it to come back."""
         import paramiko
+
         from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()

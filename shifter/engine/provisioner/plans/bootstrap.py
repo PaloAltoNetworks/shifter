@@ -8,13 +8,12 @@ This plan runs before any role-specific plans (DC, victim, etc.)
 Currently Windows-only. Linux support can be added later.
 """
 
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 from .base import SetupStep
 
-
 # PowerShell script to set hostname and reboot
-SET_HOSTNAME_SCRIPT = '''
+SET_HOSTNAME_SCRIPT = """
 $ErrorActionPreference = "Stop"
 $hostname = "{{ hostname }}"
 
@@ -28,10 +27,10 @@ try {
     Write-Host "Error setting hostname: $_"
     exit 1
 }
-'''
+"""
 
 # PowerShell script to configure SSH with public key
-CONFIGURE_SSH_SCRIPT = '''
+CONFIGURE_SSH_SCRIPT = """
 $ErrorActionPreference = "Stop"
 $publicKey = "{{ public_key }}"
 
@@ -53,7 +52,8 @@ try {
         $publicKey | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
 
         # Set proper permissions
-        icacls "$sshDir\\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
+        icacls "$sshDir\\administrators_authorized_keys" /inheritance:r `
+            /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
 
         Write-Host "SSH key authentication configured"
     } else {
@@ -66,7 +66,7 @@ try {
     Write-Host "Error configuring SSH: $_"
     exit 1
 }
-'''
+"""
 
 
 class BootstrapPlan:
@@ -79,7 +79,7 @@ class BootstrapPlan:
     This plan should run before any role-specific plans.
     """
 
-    steps: List[SetupStep] = [
+    steps: ClassVar[list[SetupStep]] = [
         SetupStep(
             name="set_hostname",
             script=SET_HOSTNAME_SCRIPT,
@@ -95,9 +95,9 @@ class BootstrapPlan:
     ]
 
     # No verification step - bootstrap success is implicit if steps complete
-    verify_step: SetupStep = None
+    verify_step: ClassVar[SetupStep | None] = None
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for bootstrap scripts.
 
         Args:

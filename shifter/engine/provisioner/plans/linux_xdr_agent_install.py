@@ -12,13 +12,12 @@ Supports multiple installer formats:
 Based on logic from victim_linux.sh.j2 template.
 """
 
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 from .base import SetupStep
 
-
 # Bash script to download XDR agent from presigned URL
-DOWNLOAD_XDR_SCRIPT = '''#!/bin/bash
+DOWNLOAD_XDR_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
 presigned_url="{{ agent_presigned_url }}"
@@ -38,11 +37,11 @@ else
 fi
 
 exit 0
-'''
+"""
 
 # Bash script to install XDR agent
 # Handles multiple installer formats: .sh, .deb, .rpm, .tar.gz, .zip
-INSTALL_XDR_SCRIPT = '''#!/bin/bash
+INSTALL_XDR_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
 installer_path="/tmp/agent-installer"
@@ -203,10 +202,10 @@ install_agent "$installer_path"
 
 echo "XDR agent installation complete"
 exit 0
-'''
+"""
 
 # Bash script to verify XDR agent is running
-VERIFY_XDR_SCRIPT = '''#!/bin/bash
+VERIFY_XDR_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
 echo "Verifying Cortex XDR agent..."
@@ -239,7 +238,7 @@ fi
 # Agent may still be initializing
 echo "XDR agent process/service not found - agent may still be initializing"
 exit 1
-'''
+"""
 
 
 class LinuxXDRAgentInstallPlan:
@@ -256,7 +255,7 @@ class LinuxXDRAgentInstallPlan:
     - Check XDR process or service is running
     """
 
-    steps: List[SetupStep] = [
+    steps: ClassVar[list[SetupStep]] = [
         SetupStep(
             name="download_xdr_agent",
             script=DOWNLOAD_XDR_SCRIPT,
@@ -269,14 +268,14 @@ class LinuxXDRAgentInstallPlan:
         ),
     ]
 
-    verify_step: SetupStep = SetupStep(
+    verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_xdr_agent",
         script=VERIFY_XDR_SCRIPT,
         timeout_seconds=120,  # 2 min for verification
         is_verification=True,
     )
 
-    def get_context(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def get_context(self, config: dict[str, Any]) -> dict[str, Any]:
         """Get template variables for XDR install scripts.
 
         Args:
@@ -290,8 +289,6 @@ class LinuxXDRAgentInstallPlan:
         """
         url = config.get("agent_presigned_url")
         if not url:
-            raise ValueError(
-                "config missing required key 'agent_presigned_url' for XDR install"
-            )
+            raise ValueError("config missing required key 'agent_presigned_url' for XDR install")
 
         return {"agent_presigned_url": url}

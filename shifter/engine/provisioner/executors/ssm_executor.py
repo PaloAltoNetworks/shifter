@@ -13,7 +13,7 @@ The setup logic is handled by SetupPlan implementations.
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import ClassVar
 
 import boto3
 from botocore.exceptions import ClientError
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Custom exceptions for clear error handling
 class SSMExecutorError(Exception):
     """Base exception for SSM executor errors."""
+
     pass
 
 
@@ -39,22 +40,26 @@ class CommandError(SSMExecutorError):
 
 class TimeoutError(SSMExecutorError):
     """Raised when an operation times out."""
+
     pass
 
 
 class InstanceNotFoundError(SSMExecutorError):
     """Raised when the target instance doesn't exist."""
+
     pass
 
 
 class InstanceTerminatedError(SSMExecutorError):
     """Raised when the instance is terminated."""
+
     pass
 
 
 @dataclass
 class CommandResult:
     """Result of a command execution."""
+
     success: bool
     exit_code: int
     stdout: str
@@ -69,14 +74,14 @@ class SSMExecutor:
     """
 
     # Terminal statuses for SSM commands
-    TERMINAL_STATUSES = {"Success", "Failed", "Cancelled", "TimedOut"}
+    TERMINAL_STATUSES: ClassVar[set[str]] = {"Success", "Failed", "Cancelled", "TimedOut"}
 
     def __init__(
         self,
         ssm_client=None,
         ec2_client=None,
         poll_interval_seconds: int = 5,
-        region: Optional[str] = None,
+        region: str | None = None,
     ):
         """Initialize SSM executor.
 
@@ -136,17 +141,15 @@ class SSMExecutor:
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code == "InvalidInstanceId":
-                raise InstanceNotFoundError(f"Instance {instance_id} not found")
-            raise SSMExecutorError(f"Failed to send command: {e}")
+                raise InstanceNotFoundError(f"Instance {instance_id} not found") from e
+            raise SSMExecutorError(f"Failed to send command: {e}") from e
 
         # Poll for completion
         start_time = time.time()
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
-                raise TimeoutError(
-                    f"Command timed out after {timeout_seconds}s on {instance_id}"
-                )
+                raise TimeoutError(f"Command timed out after {timeout_seconds}s on {instance_id}")
 
             try:
                 result = self._ssm_client.get_command_invocation(
@@ -193,15 +196,11 @@ class SSMExecutor:
                         stderr=stderr,
                     )
                 elif status == "TimedOut":
-                    raise TimeoutError(
-                        f"Command timed out on {instance_id} (SSM timeout)"
-                    )
+                    raise TimeoutError(f"Command timed out on {instance_id} (SSM timeout)")
                 else:  # Failed
                     # Check if it's an instance termination
                     if "not in a valid state" in stderr.lower():
-                        raise InstanceTerminatedError(
-                            f"Instance {instance_id} is not in a valid state"
-                        )
+                        raise InstanceTerminatedError(f"Instance {instance_id} is not in a valid state")
                     raise CommandError(
                         f"Command failed on {instance_id}",
                         exit_code=exit_code,
@@ -233,10 +232,7 @@ class SSMExecutor:
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
-                raise TimeoutError(
-                    f"SSM agent on {instance_id} did not come online "
-                    f"within {timeout_seconds}s"
-                )
+                raise TimeoutError(f"SSM agent on {instance_id} did not come online within {timeout_seconds}s")
 
             # Check instance state first
             if self._ec2_client:
@@ -249,9 +245,7 @@ class SSMExecutor:
                     if statuses:
                         state = statuses[0].get("InstanceState", {}).get("Name", "")
                         if state == "terminated":
-                            raise InstanceTerminatedError(
-                                f"Instance {instance_id} is terminated"
-                            )
+                            raise InstanceTerminatedError(f"Instance {instance_id} is terminated")
                 except ClientError:
                     pass  # Instance might not exist yet
 
@@ -315,7 +309,7 @@ class SSMExecutor:
                     continue
                 raise SSMExecutorError(
                     f"SSM agent on {instance_id} not ready after {max_attempts} attempts: {e}"
-                )
+                ) from e
 
         return False
 
@@ -346,8 +340,8 @@ class SSMExecutor:
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code == "InvalidInstanceID.NotFound":
-                raise InstanceNotFoundError(f"Instance {instance_id} not found")
-            raise SSMExecutorError(f"Failed to reboot instance: {e}")
+                raise InstanceNotFoundError(f"Instance {instance_id} not found") from e
+            raise SSMExecutorError(f"Failed to reboot instance: {e}") from e
 
         # Wait a moment for reboot to initiate
         time.sleep(10)
@@ -359,8 +353,7 @@ class SSMExecutor:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
                 raise TimeoutError(
-                    f"Instance {instance_id} did not come back online "
-                    f"after reboot within {timeout_seconds}s"
+                    f"Instance {instance_id} did not come back online after reboot within {timeout_seconds}s"
                 )
 
             try:
@@ -375,18 +368,12 @@ class SSMExecutor:
                     state = instance_status.get("InstanceState", {}).get("Name", "")
 
                     if state == "terminated":
-                        raise InstanceTerminatedError(
-                            f"Instance {instance_id} was terminated during reboot"
-                        )
+                        raise InstanceTerminatedError(f"Instance {instance_id} was terminated during reboot")
 
                     if state == "running":
                         # Check status checks
-                        instance_check = instance_status.get(
-                            "InstanceStatus", {}
-                        ).get("Status", "")
-                        system_check = instance_status.get(
-                            "SystemStatus", {}
-                        ).get("Status", "")
+                        instance_check = instance_status.get("InstanceStatus", {}).get("Status", "")
+                        system_check = instance_status.get("SystemStatus", {}).get("Status", "")
 
                         if instance_check == "ok" and system_check == "ok":
                             # Now wait for SSM agent ping status

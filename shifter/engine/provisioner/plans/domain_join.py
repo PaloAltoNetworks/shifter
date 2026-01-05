@@ -5,13 +5,12 @@ This plan is executed by the DC after promotion, targeting each victim
 that needs to be domain-joined.
 """
 
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 from .base import SetupStep
 
-
 # PowerShell script to set DNS to point to DC
-SET_DNS_SCRIPT = '''
+SET_DNS_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 Write-Host "Setting DNS to Domain Controller..."
@@ -32,10 +31,10 @@ try {
     Write-Host "Error setting DNS: $_"
     exit 1
 }
-'''
+"""
 
 # PowerShell script to join the domain
-JOIN_DOMAIN_SCRIPT = '''
+JOIN_DOMAIN_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 Write-Host "Joining domain..."
@@ -106,11 +105,11 @@ if ($joined) {
     Write-Host "ERROR: Domain join failed after $joinAttempts attempts"
     exit 1
 }
-'''
+"""
 
 # PowerShell script to verify domain membership
 # Includes retry logic to handle WMI not being ready immediately after reboot
-VERIFY_DOMAIN_JOINED_SCRIPT = '''
+VERIFY_DOMAIN_JOINED_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 Write-Host "Verifying domain membership..."
@@ -160,7 +159,7 @@ if ($verified) {
     Write-Host "Expected domain: $expectedDomain"
     exit 1
 }
-'''
+"""
 
 
 class DomainJoinPlan:
@@ -177,7 +176,7 @@ class DomainJoinPlan:
     - Check that machine's domain matches expected domain
     """
 
-    steps: List[SetupStep] = [
+    steps: ClassVar[list[SetupStep]] = [
         SetupStep(
             name="set_dns",
             script=SET_DNS_SCRIPT,
@@ -191,14 +190,14 @@ class DomainJoinPlan:
         ),
     ]
 
-    verify_step: SetupStep = SetupStep(
+    verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_domain_joined",
         script=VERIFY_DOMAIN_JOINED_SCRIPT,
         timeout_seconds=180,  # 3 min: up to 12 retries with 10s delays
         is_verification=True,
     )
 
-    def get_context(self, dc_config: Dict[str, Any]) -> Dict[str, Any]:
+    def get_context(self, dc_config: dict[str, Any]) -> dict[str, Any]:
         """Get template variables for domain join scripts.
 
         Args:
@@ -215,9 +214,7 @@ class DomainJoinPlan:
 
         for key in required_keys:
             if key not in dc_config or dc_config[key] is None:
-                raise ValueError(
-                    f"dc_config missing required key '{key}' for domain join"
-                )
+                raise ValueError(f"dc_config missing required key '{key}' for domain join")
 
         return {
             "dc_ip": dc_config["dc_ip"],

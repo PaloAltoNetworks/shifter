@@ -5,6 +5,7 @@ Run with: pytest shifter/packer/tests/test_packer.py -v
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -101,24 +102,18 @@ class TestScriptContent:
                     lines = [
                         line
                         for line in content.split("\n")
-                        if pattern.lower() in line
-                        and "=$" not in line
-                        and '=""' not in line
+                        if pattern.lower() in line and "=$" not in line and '=""' not in line
                     ]
-                    assert not any(
-                        "=" in line and not line.strip().startswith("#")
-                        for line in lines
-                    ), f"{script.name} may contain hardcoded secret: {pattern}"
+                    assert not any("=" in line and not line.strip().startswith("#") for line in lines), (
+                        f"{script.name} may contain hardcoded secret: {pattern}"
+                    )
 
     def test_noninteractive_apt(self, all_scripts):
         """Scripts using apt should be non-interactive."""
         for script in all_scripts:
             content = script.read_text()
             if "apt-get install" in content:
-                has_noninteractive = (
-                    "DEBIAN_FRONTEND=noninteractive" in content
-                    or "apt-get install -y" in content
-                )
+                has_noninteractive = "DEBIAN_FRONTEND=noninteractive" in content or "apt-get install -y" in content
                 assert has_noninteractive, f"{script.name} may hang on apt prompts"
 
 
@@ -146,19 +141,21 @@ class TestPackerTemplates:
         assert (PACKER_DIR / "variables.pkr.hcl").exists()
 
     @pytest.mark.skipif(
-        subprocess.run(["which", "packer"], capture_output=True).returncode != 0,
+        shutil.which("packer") is None,
         reason="Packer not installed",
     )
     def test_packer_validate(self):
         """Packer templates should be valid."""
         os.chdir(PACKER_DIR)
+        packer_path = shutil.which("packer")
 
         # Init first
-        subprocess.run(["packer", "init", "."], capture_output=True)
+        # Security context: packer_path from shutil.which() in controlled test environment
+        subprocess.run([packer_path, "init", "."], capture_output=True)  # noqa: S603
 
         # Validate with var-file (no defaults)
-        result = subprocess.run(
-            ["packer", "validate", "-var-file=dev.pkrvars.hcl", "."],
+        result = subprocess.run(  # noqa: S603
+            [packer_path, "validate", "-var-file=dev.pkrvars.hcl", "."],
             capture_output=True,
             text=True,
         )

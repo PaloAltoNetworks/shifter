@@ -13,10 +13,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from executors.ssm_executor import SSMExecutor, CommandResult
+from executors.ssm_executor import CommandResult, SSMExecutor
 from orchestrators.setup_orchestrator import (
-    SetupOrchestrator,
     SetupError,
+    SetupOrchestrator,
     SetupResult,
 )
 from plans.domain_join import DomainJoinPlan

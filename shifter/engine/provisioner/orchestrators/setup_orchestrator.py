@@ -6,14 +6,13 @@ step by step, handling reboots and verification.
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 from executors.ssm_executor import (
-    SSMExecutor,
-    CommandResult,
     CommandError,
-    TimeoutError,
+    SSMExecutor,
     SSMExecutorError,
+    TimeoutError,
 )
 from plans.base import SetupPlan, SetupStep
 
@@ -21,7 +20,7 @@ from plans.base import SetupPlan, SetupStep
 class SetupError(Exception):
     """Raised when setup fails at any step."""
 
-    def __init__(self, message: str, step_name: Optional[str] = None, cause: Optional[Exception] = None):
+    def __init__(self, message: str, step_name: str | None = None, cause: Exception | None = None):
         self.step_name = step_name
         self.cause = cause
         super().__init__(message)
@@ -30,6 +29,7 @@ class SetupError(Exception):
 @dataclass
 class StepResult:
     """Result of executing a single step."""
+
     step_name: str
     success: bool
     stdout: str = ""
@@ -39,9 +39,10 @@ class StepResult:
 @dataclass
 class SetupResult:
     """Result of a complete setup orchestration."""
+
     success: bool
-    step_results: List[StepResult] = field(default_factory=list)
-    verification_result: Optional[StepResult] = None
+    step_results: list[StepResult] = field(default_factory=list)
+    verification_result: StepResult | None = None
 
 
 class SetupOrchestrator:
@@ -70,7 +71,7 @@ class SetupOrchestrator:
         self,
         instance_id: str,
         plan: SetupPlan,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         document_name: str = "AWS-RunPowerShellScript",
     ) -> SetupResult:
         """Execute a setup plan on an instance.
@@ -88,7 +89,7 @@ class SetupOrchestrator:
         Raises:
             SetupError: If any step fails or verification fails
         """
-        step_results: List[StepResult] = []
+        step_results: list[StepResult] = []
 
         # Execute each step in order
         for step in plan.steps:
@@ -110,14 +111,14 @@ class SetupOrchestrator:
                             f"Reboot failed after step '{step.name}': {e}",
                             step_name=step.name,
                             cause=e,
-                        )
+                        ) from e
 
             except (CommandError, TimeoutError, SSMExecutorError) as e:
                 raise SetupError(
                     f"Step '{step.name}' failed: {e}",
                     step_name=step.name,
                     cause=e,
-                )
+                ) from e
 
         # Run verification if defined
         verify_result = None
@@ -129,7 +130,7 @@ class SetupOrchestrator:
                     f"Verification failed: {e}",
                     step_name=plan.verify_step.name,
                     cause=e,
-                )
+                ) from e
 
         return SetupResult(
             success=True,
@@ -141,7 +142,7 @@ class SetupOrchestrator:
         self,
         instance_id: str,
         step: SetupStep,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         document_name: str,
     ) -> StepResult:
         """Execute a single step.
@@ -179,7 +180,7 @@ class SetupOrchestrator:
     def _render_script(
         self,
         script: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         step_name: str,
     ) -> str:
         """Render a script template with context variables.
@@ -201,7 +202,7 @@ class SetupOrchestrator:
         result = script
 
         # Find all {{ variable }} patterns
-        pattern = r'\{\{\s*(\w+)\s*\}\}'
+        pattern = r"\{\{\s*(\w+)\s*\}\}"
         matches = re.findall(pattern, script)
 
         for var_name in matches:
@@ -213,7 +214,7 @@ class SetupOrchestrator:
                 )
             # Replace {{ var }} with the value
             result = re.sub(
-                r'\{\{\s*' + var_name + r'\s*\}\}',
+                r"\{\{\s*" + var_name + r"\s*\}\}",
                 str(context[var_name]),
                 result,
             )

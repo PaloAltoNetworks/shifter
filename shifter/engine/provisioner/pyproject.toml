@@ -39,6 +39,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "pytest-mock",
+    "ruff",
 ]
 
 [tool.ruff]

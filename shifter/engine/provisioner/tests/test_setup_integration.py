@@ -4,20 +4,20 @@ These tests verify that errors propagate correctly through the system
 and would cause Pulumi stack failures.
 """
 
-from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 import pytest
 
 # These imports will fail initially - that's expected for TDD
 from executors.ssm_executor import (
-    SSMExecutor,
-    CommandResult,
     CommandError,
-    TimeoutError,
+    CommandResult,
     InstanceNotFoundError,
+    SSMExecutor,
+    TimeoutError,
 )
-from orchestrators.setup_orchestrator import SetupOrchestrator, SetupError
+from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.base import SetupStep
 from plans.dc_setup import DCSetupPlan
 

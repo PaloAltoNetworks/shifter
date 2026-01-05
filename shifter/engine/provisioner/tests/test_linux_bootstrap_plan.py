@@ -1,7 +1,6 @@
 """Tests for LinuxBootstrapPlan - only meaningful tests."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pytest
 
@@ -10,7 +9,7 @@ from plans.linux_bootstrap import LinuxBootstrapPlan
 
 @dataclass
 class MockLinuxInstance:
-    hostname: Optional[str] = None
+    hostname: str | None = None
     public_key: str = ""
     ssh_user: str = "ubuntu"
 

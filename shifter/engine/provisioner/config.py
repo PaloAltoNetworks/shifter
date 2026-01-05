@@ -13,14 +13,11 @@ import base64
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 import boto3
 import psycopg
 import pulumi
 from cryptography.fernet import Fernet
-
-logger = logging.getLogger(__name__)
 
 from catalog.instances import (
     _get_dc_instance_type,
@@ -28,6 +25,8 @@ from catalog.instances import (
     _get_victim_instance_type,
     _get_windows_instance_type,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def decrypt_field(encrypted_value: str) -> str:
@@ -92,12 +91,12 @@ class InstanceConfig:
     role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
-    agent_id: Optional[int] = None  # Agent config ID for victim instances
-    agent_s3_key: Optional[str] = None  # S3 key for agent installer
-    agent_presigned_url: Optional[str] = None  # Presigned URL for agent download
-    dc_config: Optional[dict] = None  # {"domain_name": "...", "netbios_name": "..."}
+    agent_id: int | None = None  # Agent config ID for victim instances
+    agent_s3_key: str | None = None  # S3 key for agent installer
+    agent_presigned_url: str | None = None  # Presigned URL for agent download
+    dc_config: dict | None = None  # {"domain_name": "...", "netbios_name": "..."}
     join_domain: bool = False  # Whether this instance should join a domain
-    dc_config_param_name: Optional[str] = None  # SSM parameter path for DC config
+    dc_config_param_name: str | None = None  # SSM parameter path for DC config
 
 
 @dataclass
@@ -155,10 +154,9 @@ def get_db_connection() -> psycopg.Connection:
 
 def get_range_from_db(range_id: int) -> dict:
     """Load range configuration from database."""
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT
                     r.id,
                     r.user_id,
@@ -176,28 +174,28 @@ def get_range_from_db(range_id: int) -> dict:
                 LEFT JOIN mission_control_agentconfig dc_a ON r.dc_agent_id = dc_a.id
                 WHERE r.id = %s
                 """,
-                (range_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise ValueError(f"Range {range_id} not found")
+            (range_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Range {range_id} not found")
 
-            return {
-                "id": row[0],
-                "user_id": row[1],
-                "subnet_index": row[2],
-                "agent_id": row[3],
-                "instance_config": row[4],
-                "agent_s3_key": row[5],
-                "agent_os_slug": row[6],
-                "dc_agent_id": row[7],
-                "dc_agent_s3_key": row[8],
-                "ngfw_enabled": row[9],
-                # Strata fields removed - NGFW UI disabled pending UserNGFW implementation
-                "strata_folder_name": "",
-                "strata_pin_id": "",
-                "strata_pin_value": "",
-            }
+        return {
+            "id": row[0],
+            "user_id": row[1],
+            "subnet_index": row[2],
+            "agent_id": row[3],
+            "instance_config": row[4],
+            "agent_s3_key": row[5],
+            "agent_os_slug": row[6],
+            "dc_agent_id": row[7],
+            "dc_agent_s3_key": row[8],
+            "ngfw_enabled": row[9],
+            # Strata fields removed - NGFW UI disabled pending UserNGFW implementation
+            "strata_folder_name": "",
+            "strata_pin_id": "",
+            "strata_pin_value": "",
+        }
 
 
 def load_config() -> RangeConfig:
@@ -222,7 +220,7 @@ def load_config() -> RangeConfig:
     agent_s3_bucket = config.get("agentS3Bucket") or ""
 
     # Helper to generate presigned URL if we have bucket and key
-    def get_presigned_url(s3_key: Optional[str]) -> Optional[str]:
+    def get_presigned_url(s3_key: str | None) -> str | None:
         if agent_s3_bucket and s3_key:
             return generate_presigned_url(agent_s3_bucket, s3_key)
         return None
@@ -232,9 +230,7 @@ def load_config() -> RangeConfig:
     victim_instance_type = os.environ.get("VICTIM_INSTANCE_TYPE")
 
     if not kali_instance_type or not victim_instance_type:
-        raise ValueError(
-            "KALI_INSTANCE_TYPE and VICTIM_INSTANCE_TYPE environment variables are required"
-        )
+        raise ValueError("KALI_INSTANCE_TYPE and VICTIM_INSTANCE_TYPE environment variables are required")
 
     # If no custom config, use default (1 Kali + 1 Victim)
     if not db_instance_config:

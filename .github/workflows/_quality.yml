@@ -64,9 +64,9 @@ jobs:
       - name: Lint Python
         working-directory: shifter/engine/provisioner
         run: |
-          uv sync --group dev
-          uv run ruff check .
-          uv run ruff format --check .
+          uv tool install ruff
+          ruff check .
+          ruff format --check .
 
   packer-lint:
     name: Lint (packer)
@@ -165,9 +165,11 @@ jobs:
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Run Bandit
+        # B404: subprocess import, B603: subprocess call, B607: partial path
+        # Provisioner uses subprocess for Pulumi CLI calls with hardcoded commands
         run: |
           uv tool install bandit
-          bandit -r shifter/engine/provisioner/ --skip B101 --exclude shifter/engine/provisioner/tests,shifter/engine/provisioner/.venv
+          bandit -r shifter/engine/provisioner/ --skip B101,B404,B603,B607 --exclude shifter/engine/provisioner/tests,shifter/engine/provisioner/.venv
 
   packer-sast:
     name: SAST (packer)
@@ -212,7 +214,7 @@ jobs:
       - name: Run Bandit
         working-directory: scripts/check_layer_imports
         run: |
-          uv tool install bandit
+          uv tool install 'bandit[toml]'
           bandit -r . -c pyproject.toml
 
   # ===========================================================================

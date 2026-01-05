@@ -9,7 +9,6 @@ This plan uses AWSExecutor for AWS API calls, not bash scripts.
 """
 
 from dataclasses import dataclass
-from typing import List
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,7 +19,7 @@ class MockGWLBReconcileInstance:
     """Mock instance for testing get_context."""
 
     service_name: str = "com.amazonaws.vpce.us-east-2.vpce-svc-12345"
-    known_endpoint_ids: List[str] = None
+    known_endpoint_ids: list[str] = None
 
     def __post_init__(self):
         if self.known_endpoint_ids is None:

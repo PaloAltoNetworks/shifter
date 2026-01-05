@@ -4,20 +4,19 @@ SSMExecutor is a generic command executor that uses AWS SSM Run Command.
 It has no knowledge of what it's running - just executes scripts and returns results.
 """
 
-import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # These imports will fail initially - that's expected for TDD
 from executors.ssm_executor import (
-    SSMExecutor,
-    SSMExecutorError,
-    CommandResult,
     CommandError,
-    TimeoutError,
+    CommandResult,
     InstanceNotFoundError,
     InstanceTerminatedError,
+    SSMExecutor,
+    SSMExecutorError,
+    TimeoutError,
 )
 
 
@@ -575,9 +574,8 @@ class TestVerifyAgentReadyExpectedFailures:
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
 
-        with patch("time.sleep"):
-            with pytest.raises(SSMExecutorError) as exc_info:
-                executor.verify_agent_ready("i-12345", max_attempts=3)
+        with patch("time.sleep"), pytest.raises(SSMExecutorError) as exc_info:
+            executor.verify_agent_ready("i-12345", max_attempts=3)
 
         assert "not ready after 3 attempts" in str(exc_info.value)
 

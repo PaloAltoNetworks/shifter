@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -90,7 +90,7 @@ def _create_event(
     return {
         "event_type": event_type,
         "event_id": str(uuid4()),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "range_id": range_id,
         "user_id": user_id,
         **kwargs,

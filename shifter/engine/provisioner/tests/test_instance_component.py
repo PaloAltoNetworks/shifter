@@ -753,8 +753,9 @@ class TestRunSetupSignature:
     @pulumi.runtime.test
     def test_run_setup_accepts_dc_ip_parameter(self, temp_templates):
         """run_setup() accepts optional dc_ip parameter."""
-        from components.instance import InstanceComponent
         import inspect
+
+        from components.instance import InstanceComponent
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             component = InstanceComponent(
@@ -788,8 +789,9 @@ class TestRunSetupSignature:
         We verify the method can be called without dc_ip (signature check).
         Actual SSM execution is not tested here - that requires real AWS.
         """
-        from components.instance import InstanceComponent
         import inspect
+
+        from components.instance import InstanceComponent
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             component = InstanceComponent(
@@ -844,8 +846,9 @@ class TestRunDCSetupSignature:
     @pulumi.runtime.test
     def test_run_dc_setup_does_not_accept_domain_members(self, dc_env_vars):
         """run_dc_setup() should NOT have domain_members parameter."""
-        from components.instance import InstanceComponent
         import inspect
+
+        from components.instance import InstanceComponent
 
         with patch.dict(os.environ, dc_env_vars):
             component = InstanceComponent(

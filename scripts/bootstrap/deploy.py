@@ -21,7 +21,7 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import uuid
 from dataclasses import dataclass
@@ -160,9 +160,9 @@ def run_cmd(
     info(f"Running: {cmd_str}")
     try:
         if capture:
-            result = subprocess.run(cmd, check=check, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=check, capture_output=True, text=True)  # nosec B603 B607
         else:
-            result = subprocess.run(cmd, check=check, text=True)
+            result = subprocess.run(cmd, check=check, text=True)  # nosec B603 B607
         return result
     except subprocess.CalledProcessError as e:
         error(f"Command failed: {e}")
@@ -178,7 +178,7 @@ def get_aws_account_id(profile: str = None) -> str:
     cmd = ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"]
     if profile:
         cmd = ["aws", "--profile", profile, "sts", "get-caller-identity", "--query", "Account", "--output", "text"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)  # nosec B603 B607
     return result.stdout.strip()
 
 
@@ -366,7 +366,7 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
 
     # Verify provider exists
     if not dry_run:
-        verify_result = subprocess.run(
+        verify_result = subprocess.run(  # nosec B603 B607
             [
                 "aws",
                 "--profile",
@@ -405,7 +405,7 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
         ]
         if profile:
             cmd = ["aws", "--profile", profile] + cmd[1:]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607
         oidc_arn = result.stdout.strip()
     else:
         oidc_arn = f"arn:aws:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com"
@@ -487,7 +487,7 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
         cmd = ["aws", "iam", "get-role", "--role-name", config.role_name, "--query", "Role.Arn", "--output", "text"]
         if profile:
             cmd = ["aws", "--profile", profile] + cmd[1:]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607
         role_arn = result.stdout.strip()
     else:
         role_arn = f"arn:aws:iam::{account_id}:role/{config.role_name}"
@@ -521,7 +521,7 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
 
     if not dry_run:
         # Check if gh CLI is available
-        gh_available = subprocess.run(["which", "gh"], capture_output=True).returncode == 0
+        gh_available = subprocess.run(["which", "gh"], capture_output=True).returncode == 0  # nosec B603 B607
 
         if gh_available:
             print(f"\n{Colors.GREEN}✓ GitHub CLI detected{Colors.END}")
@@ -529,7 +529,7 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
 
             if choice == "yes":
                 info(f"Running: gh secret set {secret_name} --repo {github_org}/{github_repo}")
-                result = subprocess.run(
+                result = subprocess.run(  # nosec B603 B607
                     ["gh", "secret", "set", secret_name, "--body", role_arn, "--repo", f"{github_org}/{github_repo}"],
                     capture_output=True,
                     text=True,
@@ -635,17 +635,17 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
             if commit_choice == "yes":
                 try:
                     info(f"Adding files: platform/terraform/environments/{env}/")
-                    subprocess.run(["git", "add", f"platform/terraform/environments/{env}/"], check=True, cwd=repo_root)
+                    subprocess.run(["git", "add", f"platform/terraform/environments/{env}/"], check=True, cwd=repo_root)  # nosec B603 B607
 
                     info(f"Committing: Update backend config for {env}")
-                    subprocess.run(
+                    subprocess.run(  # nosec B603 B607
                         ["git", "commit", "-m", f"Update backend config for {env}"],
                         check=True,
                         cwd=repo_root,
                     )
 
                     info("Pushing to remote...")
-                    subprocess.run(["git", "push"], check=True, cwd=repo_root)
+                    subprocess.run(["git", "push"], check=True, cwd=repo_root)  # nosec B603 B607
 
                     success("Changes committed and pushed")
                 except subprocess.CalledProcessError as e:
@@ -744,7 +744,7 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
             if not dry_run:
                 # Show plan summary
                 print(f"\n{Colors.BOLD}Plan Summary:{Colors.END}")
-                subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)
+                subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)  # nosec B603 B607
 
                 if not confirm("\nApply this plan?"):
                     error(f"Terraform apply for {component} is required")
@@ -764,7 +764,7 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
 
                 # Capture outputs for portal
                 if component == "portal":
-                    result = subprocess.run(
+                    result = subprocess.run(  # nosec B603 B607
                         ["terraform", "output", "-json"], capture_output=True, text=True, check=False
                     )
                     if result.returncode == 0:

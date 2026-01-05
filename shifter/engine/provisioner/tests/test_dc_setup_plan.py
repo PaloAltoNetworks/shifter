@@ -4,13 +4,13 @@ DCSetupPlan defines the specific steps to promote a Windows Server
 (with AD DS feature prebaked in AMI) to a Domain Controller.
 """
 
-from unittest.mock import MagicMock
 from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 import pytest
 
-from plans.dc_setup import DCSetupPlan
 from plans.base import SetupStep
+from plans.dc_setup import DCSetupPlan
 
 
 @dataclass

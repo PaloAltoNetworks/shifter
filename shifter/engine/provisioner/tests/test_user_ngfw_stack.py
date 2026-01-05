@@ -4,10 +4,10 @@ UserNGFWStack composes NGFWComponent + GWLBComponent for persistent
 per-user NGFW lifecycle management.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 import pulumi
+import pytest
 
 
 class TestUserNGFWStackComposition:
@@ -158,8 +158,9 @@ class TestUserNGFWStackInterface:
 
     def test_has_required_parameters(self):
         """UserNGFWStack should require essential parameters."""
-        from stacks.user_ngfw_stack import UserNGFWStack
         import inspect
+
+        from stacks.user_ngfw_stack import UserNGFWStack
 
         sig = inspect.signature(UserNGFWStack.__init__)
         params = list(sig.parameters.keys())
@@ -177,21 +178,21 @@ class TestUserNGFWStackOrchestrationMethods:
         from stacks.user_ngfw_stack import UserNGFWStack
 
         assert hasattr(UserNGFWStack, "run_provision")
-        assert callable(getattr(UserNGFWStack, "run_provision"))
+        assert callable(UserNGFWStack.run_provision)
 
     def test_has_run_deprovision_method(self):
         """UserNGFWStack should have run_deprovision method."""
         from stacks.user_ngfw_stack import UserNGFWStack
 
         assert hasattr(UserNGFWStack, "run_deprovision")
-        assert callable(getattr(UserNGFWStack, "run_deprovision"))
+        assert callable(UserNGFWStack.run_deprovision)
 
     def test_has_run_ops_method(self):
         """UserNGFWStack should have run_ops method."""
         from stacks.user_ngfw_stack import UserNGFWStack
 
         assert hasattr(UserNGFWStack, "run_ops")
-        assert callable(getattr(UserNGFWStack, "run_ops"))
+        assert callable(UserNGFWStack.run_ops)
 
 
 class TestUserNGFWStackRunProvision:
@@ -211,8 +212,9 @@ class TestUserNGFWStackRunProvision:
 
     def test_run_provision_accepts_orchestrator(self):
         """run_provision should accept an orchestrator parameter."""
-        from stacks.user_ngfw_stack import UserNGFWStack
         import inspect
+
+        from stacks.user_ngfw_stack import UserNGFWStack
 
         sig = inspect.signature(UserNGFWStack.run_provision)
         params = list(sig.parameters.keys())
@@ -256,8 +258,9 @@ class TestUserNGFWStackRunDeprovision:
 
     def test_run_deprovision_accepts_orchestrator(self):
         """run_deprovision should accept an orchestrator parameter."""
-        from stacks.user_ngfw_stack import UserNGFWStack
         import inspect
+
+        from stacks.user_ngfw_stack import UserNGFWStack
 
         sig = inspect.signature(UserNGFWStack.run_deprovision)
         params = list(sig.parameters.keys())
@@ -301,8 +304,9 @@ class TestUserNGFWStackRunOps:
 
     def test_run_ops_accepts_operation_parameter(self):
         """run_ops should accept an operation parameter."""
-        from stacks.user_ngfw_stack import UserNGFWStack
         import inspect
+
+        from stacks.user_ngfw_stack import UserNGFWStack
 
         sig = inspect.signature(UserNGFWStack.run_ops)
         params = list(sig.parameters.keys())
@@ -310,8 +314,9 @@ class TestUserNGFWStackRunOps:
 
     def test_run_ops_accepts_orchestrator(self):
         """run_ops should accept an orchestrator parameter."""
-        from stacks.user_ngfw_stack import UserNGFWStack
         import inspect
+
+        from stacks.user_ngfw_stack import UserNGFWStack
 
         sig = inspect.signature(UserNGFWStack.run_ops)
         params = list(sig.parameters.keys())

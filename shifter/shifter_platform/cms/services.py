@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from django.utils import timezone
+
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
 from cms.assets.validation import (
@@ -1341,7 +1343,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
 def destroy_range(user: User, range_id: int) -> None:
     """Tear down range.
 
-    Verifies ownership via get_range, updates CMS status to DESTROYING,
+    Fetches RangeInstance, verifies ownership, updates CMS status to DESTROYING,
     then delegates to engine.services.destroy_range with RangeContext.
 
     Args:
@@ -1406,26 +1408,26 @@ def destroy_range(user: User, range_id: int) -> None:
         range_id,
     )
 
-    instance = None
-
+    # Fetch range instance directly and verify ownership
     try:
-        # Get range instance (verifies ownership and captures current
-        # status)
-        instance = get_range(user, range_id)
-        if instance is None:
-            logger.warning(
-                "destroy_range: range not found for user_id=%s, range_id=%s",
-                user.id,
-                range_id,
-            )
-            raise CMSError("Range not found")
-    except (TypeError, ValueError, CMSError):
-        logger.error(
-            "destroy_range: user and range mismatch for user_id=%s, range_id=%s",
+        instance = RangeInstance.objects.get(range_id=range_id)
+    except RangeInstance.DoesNotExist:
+        logger.warning(
+            "destroy_range: range not found for user_id=%s, range_id=%s",
             user.id,
             range_id,
         )
-        raise
+        raise CMSError(f"Range {range_id} not found") from None
+
+    # Verify ownership
+    if instance.user_id != user.id:
+        logger.error(
+            "destroy_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
+            range_id,
+            instance.user_id,
+            user.id,
+        )
+        raise CMSError(f"Range {range_id} not found")
 
     try:
         # Update CMS status to DESTROYING and soft delete immediately
@@ -1433,8 +1435,6 @@ def destroy_range(user: User, range_id: int) -> None:
         instance.status = RangeStatus.DESTROYING.value
         instance.deleted_at = timezone.now()
         instance.save(update_fields=["status", "deleted_at"])
-        if instance.status != RangeStatus.DESTROYING.value:
-            raise CMSError("Range status not updated to DESTROYING")
 
         range_ctx = RangeContext(
             range_id=instance.range_id,

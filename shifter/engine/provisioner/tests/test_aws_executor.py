@@ -7,8 +7,6 @@ interface for the orchestrators to interact with AWS services.
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 class TestAWSExecutorInit:
     """Test AWSExecutor initialization."""
@@ -43,7 +41,7 @@ class TestAWSExecutorInit:
             mock_session = MagicMock()
             mock_boto3.Session.return_value = mock_session
 
-            executor = AWSExecutor(region_name="us-west-2")
+            AWSExecutor(region_name="us-west-2")
 
             mock_boto3.Session.assert_called_once_with(region_name="us-west-2")
 
@@ -109,9 +107,7 @@ class TestAWSExecutorRunCommand:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.describe_instances.return_value = {
-            "Reservations": [{"Instances": [{"InstanceId": "i-12345"}]}]
-        }
+        mock_client.describe_instances.return_value = {"Reservations": [{"Instances": [{"InstanceId": "i-12345"}]}]}
 
         executor = AWSExecutor(session=mock_session)
         result = executor.run_command("ec2", "describe_instances")
@@ -144,6 +140,7 @@ class TestAWSExecutorErrorHandling:
     def test_run_command_client_error_returns_failure(self):
         """run_command returns failure on ClientError."""
         from botocore.exceptions import ClientError
+
         from executors.aws_executor import AWSExecutor
         from executors.base import CommandResult
 
@@ -188,12 +185,13 @@ class TestAWSExecutorProtocolCompliance:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "run_command")
-        assert callable(getattr(AWSExecutor, "run_command"))
+        assert callable(AWSExecutor.run_command)
 
     def test_run_command_signature(self):
         """AWSExecutor.run_command has expected signature."""
-        from executors.aws_executor import AWSExecutor
         import inspect
+
+        from executors.aws_executor import AWSExecutor
 
         sig = inspect.signature(AWSExecutor.run_command)
         param_names = list(sig.parameters.keys())
@@ -252,7 +250,7 @@ class TestAWSExecutorEC2StartInstance:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "start_instance")
-        assert callable(getattr(AWSExecutor, "start_instance"))
+        assert callable(AWSExecutor.start_instance)
 
     def test_start_instance_calls_ec2_start_instances(self):
         """start_instance calls EC2 StartInstances API."""
@@ -279,9 +277,7 @@ class TestAWSExecutorEC2StartInstance:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.start_instances.return_value = {
-            "StartingInstances": [{"InstanceId": "i-12345"}]
-        }
+        mock_client.start_instances.return_value = {"StartingInstances": [{"InstanceId": "i-12345"}]}
 
         executor = AWSExecutor(session=mock_session)
         result = executor.start_instance("i-12345")
@@ -291,6 +287,7 @@ class TestAWSExecutorEC2StartInstance:
     def test_start_instance_handles_error(self):
         """start_instance handles errors gracefully."""
         from botocore.exceptions import ClientError
+
         from executors.aws_executor import AWSExecutor
 
         mock_session = MagicMock()
@@ -316,7 +313,7 @@ class TestAWSExecutorEC2StopInstance:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "stop_instance")
-        assert callable(getattr(AWSExecutor, "stop_instance"))
+        assert callable(AWSExecutor.stop_instance)
 
     def test_stop_instance_calls_ec2_stop_instances(self):
         """stop_instance calls EC2 StopInstances API."""
@@ -343,9 +340,7 @@ class TestAWSExecutorEC2StopInstance:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.stop_instances.return_value = {
-            "StoppingInstances": [{"InstanceId": "i-12345"}]
-        }
+        mock_client.stop_instances.return_value = {"StoppingInstances": [{"InstanceId": "i-12345"}]}
 
         executor = AWSExecutor(session=mock_session)
         result = executor.stop_instance("i-12345")
@@ -361,7 +356,7 @@ class TestAWSExecutorEC2WaitForRunning:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "wait_for_running")
-        assert callable(getattr(AWSExecutor, "wait_for_running"))
+        assert callable(AWSExecutor.wait_for_running)
 
     def test_wait_for_running_uses_waiter(self):
         """wait_for_running uses EC2 waiter."""
@@ -401,6 +396,7 @@ class TestAWSExecutorEC2WaitForRunning:
     def test_wait_for_running_handles_timeout_error(self):
         """wait_for_running handles waiter timeout."""
         from botocore.exceptions import WaiterError
+
         from executors.aws_executor import AWSExecutor
 
         mock_session = MagicMock()
@@ -425,7 +421,7 @@ class TestAWSExecutorEC2WaitForStopped:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "wait_for_stopped")
-        assert callable(getattr(AWSExecutor, "wait_for_stopped"))
+        assert callable(AWSExecutor.wait_for_stopped)
 
     def test_wait_for_stopped_uses_waiter(self):
         """wait_for_stopped uses EC2 waiter."""
@@ -453,7 +449,7 @@ class TestAWSExecutorEC2DescribeInstance:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "describe_instance")
-        assert callable(getattr(AWSExecutor, "describe_instance"))
+        assert callable(AWSExecutor.describe_instance)
 
     def test_describe_instance_calls_describe_instances(self):
         """describe_instance calls EC2 DescribeInstances API."""
@@ -482,7 +478,7 @@ class TestAWSExecutorGWLBRegisterTarget:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "register_target")
-        assert callable(getattr(AWSExecutor, "register_target"))
+        assert callable(AWSExecutor.register_target)
 
     def test_register_target_calls_elbv2_register_targets(self):
         """register_target calls ELBv2 RegisterTargets API."""
@@ -530,7 +526,7 @@ class TestAWSExecutorGWLBDeregisterTarget:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "deregister_target")
-        assert callable(getattr(AWSExecutor, "deregister_target"))
+        assert callable(AWSExecutor.deregister_target)
 
     def test_deregister_target_calls_elbv2_deregister_targets(self):
         """deregister_target calls ELBv2 DeregisterTargets API."""
@@ -559,7 +555,7 @@ class TestAWSExecutorVPCCreateEndpoint:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "create_endpoint")
-        assert callable(getattr(AWSExecutor, "create_endpoint"))
+        assert callable(AWSExecutor.create_endpoint)
 
     def test_create_endpoint_calls_create_vpc_endpoint(self):
         """create_endpoint calls EC2 CreateVpcEndpoint API."""
@@ -590,9 +586,7 @@ class TestAWSExecutorVPCCreateEndpoint:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.create_vpc_endpoint.return_value = {
-            "VpcEndpoint": {"VpcEndpointId": "vpce-12345"}
-        }
+        mock_client.create_vpc_endpoint.return_value = {"VpcEndpoint": {"VpcEndpointId": "vpce-12345"}}
 
         executor = AWSExecutor(session=mock_session)
         executor.create_endpoint(
@@ -613,7 +607,7 @@ class TestAWSExecutorVPCDeleteEndpoint:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "delete_endpoint")
-        assert callable(getattr(AWSExecutor, "delete_endpoint"))
+        assert callable(AWSExecutor.delete_endpoint)
 
     def test_delete_endpoint_calls_delete_vpc_endpoints(self):
         """delete_endpoint calls EC2 DeleteVpcEndpoints API."""
@@ -622,9 +616,7 @@ class TestAWSExecutorVPCDeleteEndpoint:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        mock_client.delete_vpc_endpoints.return_value = {
-            "Unsuccessful": []
-        }
+        mock_client.delete_vpc_endpoints.return_value = {"Unsuccessful": []}
 
         executor = AWSExecutor(session=mock_session)
         result = executor.delete_endpoint("vpce-12345")
@@ -641,7 +633,7 @@ class TestAWSExecutorVPCDescribeEndpoint:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "describe_endpoint")
-        assert callable(getattr(AWSExecutor, "describe_endpoint"))
+        assert callable(AWSExecutor.describe_endpoint)
 
     def test_describe_endpoint_calls_describe_vpc_endpoints(self):
         """describe_endpoint calls EC2 DescribeVpcEndpoints API."""
@@ -669,7 +661,7 @@ class TestAWSExecutorVPCWaitForEndpointAvailable:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "wait_for_endpoint_available")
-        assert callable(getattr(AWSExecutor, "wait_for_endpoint_available"))
+        assert callable(AWSExecutor.wait_for_endpoint_available)
 
     def test_wait_for_endpoint_available_polls_until_available(self):
         """wait_for_endpoint_available polls until endpoint is available."""
@@ -699,7 +691,7 @@ class TestAWSExecutorRouteCreateRoute:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "create_route")
-        assert callable(getattr(AWSExecutor, "create_route"))
+        assert callable(AWSExecutor.create_route)
 
     def test_create_route_calls_ec2_create_route(self):
         """create_route calls EC2 CreateRoute API."""
@@ -733,7 +725,7 @@ class TestAWSExecutorRouteDeleteRoute:
         from executors.aws_executor import AWSExecutor
 
         assert hasattr(AWSExecutor, "delete_route")
-        assert callable(getattr(AWSExecutor, "delete_route"))
+        assert callable(AWSExecutor.delete_route)
 
     def test_delete_route_calls_ec2_delete_route(self):
         """delete_route calls EC2 DeleteRoute API."""

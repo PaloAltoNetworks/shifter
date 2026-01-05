@@ -108,21 +108,7 @@
             </div>
         </div>
         <div class="text-right text-small text-muted">
-            <div>Started: <span id="range-started">--</span></div>
             <div>Agent: <span id="range-agent">--</span></div>
-        </div>
-    </div>
-
-    <!-- NGFW Details (shown when range has linked NGFW) -->
-    <div id="ngfw-details" class="range-details mt-md" style="display: none;">
-        <div class="range-details-header">VM-Series NGFW</div>
-        <div class="range-details-grid">
-            <div class="range-details-item">
-                <span class="range-details-label">Linked NGFW</span>
-                <span class="range-details-value">
-                    <a href="#" id="ngfw-detail-link" class="link">View Details</a>
-                </span>
-            </div>
         </div>
     </div>
 
@@ -187,7 +173,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     const dashboard = new DashboardManager({
         csrfToken: '{{ csrf_token }}',
-        statusUrl: '{% url "mission_control:range_status" %}',
+        rangeUrl: '{% url "mission_control:get_range" %}',
         launchUrl: '{% url "mission_control:launch_range" %}',
         cancelUrl: '{% url "mission_control:cancel_range" %}',
         destroyUrl: '{% url "mission_control:destroy_range" %}',

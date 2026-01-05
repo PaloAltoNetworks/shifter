@@ -1,9 +1,12 @@
 """Tests for cancel_range() in engine/services.py."""
 
 import logging
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
+
+from shared.enums import RangeStatus
+from shared.schemas import RangeContext
 
 
 @pytest.mark.django_db
@@ -11,216 +14,216 @@ class TestCancelRange:
     """Tests for cancel_range() in engine/services.py.
 
     Tests the service contract:
-    - Inputs: range_id (required int)
-    - Outputs: bool (True if cancelled, False otherwise)
-    - Side effects: sets status to DESTROYED, sets destroyed_at timestamp
-    - Errors: none raised (returns False for invalid states)
-    - Logging: DEBUG on entry, INFO on success, WARNING on failure
+    - Inputs: range_ctx (RangeContext, required)
+    - Outputs: None (void function)
+    - Side effects: TBD (resource cleanup)
+    - Errors: TypeError for None/invalid type, ValueError for invalid range_id
+    - Logging: DEBUG on entry, INFO on success, ERROR on validation failures
     """
 
     # -------------------------------------------------------------------------
-    # Outputs - returns bool indicating success
+    # Input validation - range_ctx type
     # -------------------------------------------------------------------------
 
-    def test_returns_true_for_pending_range(self):
-        """Service returns True when cancelling a PENDING range."""
-        from engine.models import Range
+    def test_raises_type_error_for_none_range_ctx(self):
+        """Service raises TypeError when range_ctx is None."""
         from engine.services import cancel_range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.PENDING)
+        with pytest.raises(TypeError, match="cannot be None"):
+            cancel_range(None)
 
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = cancel_range(42)
-            assert result is True
-
-    def test_returns_true_for_provisioning_range(self):
-        """Service returns True when cancelling a PROVISIONING range."""
-        from engine.models import Range
+    def test_raises_type_error_for_invalid_type(self):
+        """Service raises TypeError when range_ctx is not RangeContext."""
         from engine.services import cancel_range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.PROVISIONING)
+        with pytest.raises(TypeError, match="must be RangeContext"):
+            cancel_range(42)  # int instead of RangeContext
 
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = cancel_range(42)
-            assert result is True
-
-    def test_returns_false_when_range_not_found(self):
-        """Service returns False when range doesn't exist."""
-        from engine.models import Range
+    def test_raises_type_error_for_dict(self):
+        """Service raises TypeError when range_ctx is a dict."""
         from engine.services import cancel_range
 
-        with patch.object(Range.objects, "get", side_effect=Range.DoesNotExist):
-            result = cancel_range(999)
-            assert result is False
+        with pytest.raises(TypeError, match="must be RangeContext"):
+            cancel_range({"range_id": 42})
 
-    def test_returns_false_for_ready_range(self):
-        """Service returns False when range is READY (not cancellable)."""
-        from engine.models import Range
+    def test_raises_type_error_for_mock_without_spec(self):
+        """Service raises TypeError when range_ctx is wrong Mock type."""
         from engine.services import cancel_range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        mock_ctx = Mock()  # No spec=RangeContext
+        mock_ctx.range_id = 42
 
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = cancel_range(42)
-            assert result is False
-
-    def test_returns_false_for_destroyed_range(self):
-        """Service returns False when range is already DESTROYED."""
-        from engine.models import Range
-        from engine.services import cancel_range
-
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.DESTROYED)
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = cancel_range(42)
-            assert result is False
+        with pytest.raises(TypeError, match="must be RangeContext"):
+            cancel_range(mock_ctx)
 
     # -------------------------------------------------------------------------
-    # Side effects - status and timestamp updates
+    # Input validation - range_id value (handled by Pydantic)
     # -------------------------------------------------------------------------
 
-    def test_sets_status_to_destroyed(self):
-        """Service sets range status to DESTROYED."""
-        from engine.models import Range
-        from engine.services import cancel_range
+    def test_pydantic_rejects_none_range_id(self):
+        """RangeContext Pydantic validator rejects None range_id."""
+        from pydantic import ValidationError
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.PENDING)
+        with pytest.raises(ValidationError):
+            RangeContext(
+                range_id=None,
+                user_id=1,
+                scenario_id="basic",
+                status=RangeStatus.DESTROYED,
+                instances=[],
+                agent_name="Test Agent",
+            )
 
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            cancel_range(42)
+    def test_pydantic_rejects_negative_range_id(self):
+        """RangeContext Pydantic validator rejects negative range_id."""
+        from pydantic import ValidationError
 
-            assert mock_range.status == Range.Status.DESTROYED
-
-    def test_sets_destroyed_at_timestamp(self):
-        """Service sets destroyed_at timestamp."""
-        from engine.models import Range
-        from engine.services import cancel_range
-
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.PENDING)
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            cancel_range(42)
-
-            assert mock_range.destroyed_at is not None
-
-    def test_saves_status_and_destroyed_at(self):
-        """Service saves both status and destroyed_at fields."""
-        from engine.models import Range
-        from engine.services import cancel_range
-
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.PENDING)
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            cancel_range(42)
-
-            mock_range.save.assert_called_once_with(update_fields=["status", "destroyed_at"])
-
-    def test_does_not_modify_range_when_not_cancellable(self):
-        """Service does not modify range when status is not cancellable."""
-        from engine.models import Range
-        from engine.services import cancel_range
-
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            cancel_range(42)
-
-            mock_range.save.assert_not_called()
+        with pytest.raises(ValidationError):
+            RangeContext(
+                range_id=-1,
+                user_id=1,
+                scenario_id="basic",
+                status=RangeStatus.DESTROYED,
+                instances=[],
+                agent_name="Test Agent",
+            )
 
     # -------------------------------------------------------------------------
-    # Non-cancellable statuses
+    # Success case - returns None
     # -------------------------------------------------------------------------
 
-    @pytest.mark.parametrize(
-        "status",
-        [
-            "READY",
-            "PAUSED",
-            "RESUMING",
-            "DESTROYING",
-            "DESTROYED",
-            "FAILED",
-        ],
-    )
-    def test_returns_false_for_non_cancellable_status(self, status):
-        """Service returns False for ranges not in PENDING or PROVISIONING."""
-        from engine.models import Range
+    def test_returns_none_on_success(self):
+        """Service returns None on successful processing."""
         from engine.services import cancel_range
 
-        mock_range = Mock(spec=Range, id=42, status=getattr(Range.Status, status))
+        range_ctx = RangeContext(
+            range_id=42,
+            user_id=1,
+            scenario_id="basic",
+            status=RangeStatus.DESTROYED,
+            instances=[],
+            agent_name="Test Agent",
+        )
 
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = cancel_range(42)
+        result = cancel_range(range_ctx)
+        assert result is None
 
-            assert result is False
-            mock_range.save.assert_not_called()
+    def test_accepts_valid_range_context(self):
+        """Service accepts valid RangeContext without error."""
+        from engine.services import cancel_range
+
+        range_ctx = RangeContext(
+            range_id=100,
+            user_id=5,
+            scenario_id="ad_attack_lab",
+            status=RangeStatus.DESTROYED,
+            instances=[],
+            agent_name="Windows XDR Agent",
+        )
+
+        # Should not raise
+        cancel_range(range_ctx)
 
     # -------------------------------------------------------------------------
     # Logging - DEBUG on entry
     # -------------------------------------------------------------------------
 
     def test_logs_debug_on_entry(self, caplog):
-        """Service logs debug on entry with range_id."""
-        from engine.models import Range
+        """Service logs debug on entry with range_id, user_id, status."""
         from engine.services import cancel_range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.PENDING)
+        range_ctx = RangeContext(
+            range_id=42,
+            user_id=7,
+            scenario_id="basic",
+            status=RangeStatus.DESTROYED,
+            instances=[],
+            agent_name="Test Agent",
+        )
 
-        with (
-            patch.object(Range.objects, "get", return_value=mock_range),
-            caplog.at_level(logging.DEBUG, logger="engine"),
-        ):
-            cancel_range(42)
+        with caplog.at_level(logging.DEBUG, logger="engine.services"):
+            cancel_range(range_ctx)
 
         assert "42" in caplog.text
+        assert "7" in caplog.text or "user_id" in caplog.text
 
     # -------------------------------------------------------------------------
     # Logging - INFO on success
     # -------------------------------------------------------------------------
 
-    def test_logs_info_when_cancelled(self, caplog):
-        """Service logs info when range is cancelled."""
-        from engine.models import Range
+    def test_logs_info_on_success(self, caplog):
+        """Service logs info when processing completes."""
         from engine.services import cancel_range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.PENDING)
+        range_ctx = RangeContext(
+            range_id=42,
+            user_id=1,
+            scenario_id="basic",
+            status=RangeStatus.DESTROYED,
+            instances=[],
+            agent_name="Test Agent",
+        )
 
-        with (
-            patch.object(Range.objects, "get", return_value=mock_range),
-            caplog.at_level(logging.INFO, logger="engine"),
-        ):
-            cancel_range(42)
+        with caplog.at_level(logging.INFO, logger="engine.services"):
+            cancel_range(range_ctx)
 
-        assert "cancelled" in caplog.text.lower() or "42" in caplog.text
+        assert "42" in caplog.text
+        assert "processed" in caplog.text.lower() or "cancel" in caplog.text.lower()
 
     # -------------------------------------------------------------------------
-    # Logging - WARNING on failure
+    # Logging - ERROR on validation failures
     # -------------------------------------------------------------------------
 
-    def test_logs_warning_when_range_not_found(self, caplog):
-        """Service logs warning when range not found."""
-        from engine.models import Range
+    def test_logs_error_for_none_range_ctx(self, caplog):
+        """Service logs error when range_ctx is None."""
         from engine.services import cancel_range
 
         with (
-            patch.object(Range.objects, "get", side_effect=Range.DoesNotExist),
-            caplog.at_level(logging.WARNING, logger="engine"),
+            caplog.at_level(logging.ERROR, logger="engine.services"),
+            pytest.raises(TypeError),
         ):
-            cancel_range(999)
+            cancel_range(None)
 
-        assert "not found" in caplog.text.lower() or "999" in caplog.text
+        assert "none" in caplog.text.lower()
 
-    def test_logs_warning_when_not_cancellable(self, caplog):
-        """Service logs warning when range is not cancellable."""
-        from engine.models import Range
+    def test_logs_error_for_invalid_type(self, caplog):
+        """Service logs error when range_ctx is invalid type."""
         from engine.services import cancel_range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
-
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
-            caplog.at_level(logging.WARNING, logger="engine"),
+            caplog.at_level(logging.ERROR, logger="engine.services"),
+            pytest.raises(TypeError),
         ):
-            cancel_range(42)
+            cancel_range("not a RangeContext")
 
-        assert "not cancellable" in caplog.text.lower() or "42" in caplog.text
+        assert "invalid" in caplog.text.lower() or "str" in caplog.text
+
+    def test_pydantic_validation_prevents_none_range_id(self):
+        """Pydantic validation prevents None range_id from reaching service."""
+        from pydantic import ValidationError
+
+        # RangeContext validator rejects None before service can log
+        with pytest.raises(ValidationError):
+            RangeContext(
+                range_id=None,
+                user_id=1,
+                scenario_id="basic",
+                status=RangeStatus.DESTROYED,
+                instances=[],
+                agent_name="Test Agent",
+            )
+
+    def test_pydantic_validation_prevents_invalid_range_id(self):
+        """Pydantic validation prevents invalid range_id from reaching service."""
+        from pydantic import ValidationError
+
+        # RangeContext validator rejects negative range_id before service can log
+        with pytest.raises(ValidationError):
+            RangeContext(
+                range_id=-5,
+                user_id=1,
+                scenario_id="basic",
+                status=RangeStatus.DESTROYED,
+                instances=[],
+                agent_name="Test Agent",
+            )

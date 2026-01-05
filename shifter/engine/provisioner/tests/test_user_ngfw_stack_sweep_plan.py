@@ -9,7 +9,6 @@ This plan uses AWSExecutor for AWS API calls, not bash scripts.
 """
 
 from dataclasses import dataclass
-from typing import List, Dict
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,7 +18,7 @@ import pytest
 class MockSweepInstance:
     """Mock instance for testing get_context."""
 
-    instance_ids: List[str] = None
+    instance_ids: list[str] = None
     idle_threshold_minutes: int = 60
 
     def __post_init__(self):

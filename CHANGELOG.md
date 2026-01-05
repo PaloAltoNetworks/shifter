@@ -7,15 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2025-01-04
+
+### Changed
+- GitHub runners replaced with auto-scaling ephemeral runners via terraform-aws-github-runner module
+  - Scale from zero on workflow trigger
+  - EC2 spot instances for cost savings
+  - GitHub App authentication for secure runner registration
+- Added runner-deploy.sh script for runner infrastructure management
+- Added manual-deployment.md documentation for global terraform stacks
+
+
 ## [0.10.1] - 2025-01-02
 
+### Added
+- Cyber range DSL foundation (Shared Schema)
+- Interactive cli app for Shifter AWS account bootstrap and infrastructure deployment
+- Arch as Code foundation: Code and model level service layer boundary violation detection in CI/CD and pre-commit
+- Independent processes consume range status updates
+- Claude develop skill
+- Centralized code coverage reporting
+
+### Changed
+
+- CMS services extraction edge cases and fixes
+- Mission Control re-wire to use services
 - Engine services extraction and implementation (excl pause/resume)
   - NGFW services deferred to upcoming patch
   - Mission Control re-wire deferred to upcoming patch
-- Model migrations
-- Range DSL foundation (Shared Schema)
+- Model migrations to respect service layer separation
 - Redis replication for HA (single-node in dev, replication group in prod)
-- Interactive cli app for account bootstrap and infrastructure deployment
+- SNS/SQS for range status updates with alarms
+- Fault-tolerant fully alarmed range status consumer processes
+- Unit test coverage improvements
+
+### Fixed
+- In-depth help check short circuited by Django middleware
+- Remove dead code from service layer refactoring
+- Frontend tests not included in pre-commit
+- Remove stale Celery references
+- Linting
+- Some tests not called
+- Pre-commit and CI/CD test, lint, quality, and sast coverage
+- SonarQube coverage exclusions
+- Tests for repo utility apps and Architecture as Code tests
 
 ## [0.10.0] - 2025-01-01
 

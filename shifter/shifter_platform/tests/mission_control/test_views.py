@@ -183,7 +183,7 @@ class TestGetUserStorageUsed:
 @pytest.mark.django_db
 class TestUploadLock:
     def test_check_upload_in_progress_false_by_default(self, user):
-        from cms.assets.upload_session import check_upload_in_progress
+        from mission_control.upload_session import check_upload_in_progress
 
         client = get_authenticated_client(user)
         # Access the request through a view to get session
@@ -193,7 +193,7 @@ class TestUploadLock:
         assert check_upload_in_progress(client.session) is False
 
     def test_upload_lock_expires(self, user, settings):
-        from cms.assets.upload_session import UPLOAD_LOCK_TIMEOUT, check_upload_in_progress
+        from mission_control.upload_session import UPLOAD_LOCK_TIMEOUT, check_upload_in_progress
 
         client = get_authenticated_client(user)
         client.get(reverse("mission_control:dashboard"))
@@ -206,58 +206,5 @@ class TestUploadLock:
         assert check_upload_in_progress(client.session) is False
 
 
-@pytest.mark.django_db
-class TestRangeToJson:
-    def test_serializes_range_correctly(self, user):
-        from django.utils import timezone
-        from engine.serialization import range_to_dict
-
-        from cms.models import AgentConfig, OperatingSystem
-        from engine.models import Range
-
-        windows_os = OperatingSystem.objects.get(slug="windows")
-        agent = AgentConfig.objects.create(
-            user=user,
-            os=windows_os,
-            name="Test Agent",
-            s3_key="agents/1/test.msi",
-            original_filename="test.msi",
-            file_size_bytes=1000,
-            sha256_hash="test",
-        )
-
-        now = timezone.now()
-        range_obj = Range.objects.create(
-            user=user,
-            agent=agent,
-            status=Range.Status.READY,
-            chat_url="http://chat.example.com/123",
-            victim_ip="10.0.1.100",  # Should NOT appear in output
-            ready_at=now,
-        )
-
-        result = range_to_dict(range_obj)
-
-        assert result["id"] == range_obj.id
-        assert result["status"] == "ready"
-        assert result["agent_id"] == agent.id
-        assert result["agent_name"] == "Test Agent"
-        assert result["chat_url"] == "http://chat.example.com/123"
-        assert result["error_message"] == ""  # Empty string, not None (model default)
-        assert "victim_ip" not in result  # Security: internal detail not exposed
-
-    def test_handles_null_agent(self, user):
-        from engine.serialization import range_to_dict
-
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            agent=None,
-            status=Range.Status.PROVISIONING,
-        )
-
-        result = range_to_dict(range_obj)
-
-        assert result["agent_id"] is None
-        assert result["agent_name"] is None
+# Note: TestRangeToJson was removed as engine.serialization.range_to_dict no longer exists.
+# Ranges are now serialized via RangeContext.model_dump() directly in views.

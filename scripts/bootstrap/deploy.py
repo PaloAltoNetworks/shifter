@@ -840,9 +840,9 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         os.chdir(tf_dir)
 
         try:
-            # Init
+            # Init with -reconfigure to handle backend changes from bootstrap
             info("Running terraform init...")
-            init_result = run_cmd(["terraform", "init"], dry_run=dry_run)
+            init_result = run_cmd(["terraform", "init", "-reconfigure"], dry_run=dry_run)
             if not dry_run and init_result and init_result.returncode != 0:
                 error(f"Terraform init failed for {component}")
                 error("Check that backend.tf is correctly configured")

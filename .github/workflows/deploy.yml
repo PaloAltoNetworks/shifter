@@ -80,8 +80,11 @@ jobs:
 
           # Only allow skip on PRs targeting dev
           if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]; then
-            # Get last commit message
-            COMMIT_MSG=$(git log -1 --pretty=%B)
+            # Get the actual PR head commit message (not the merge commit)
+            COMMIT_MSG=$(git log ${{ github.event.pull_request.head.sha }} -1 --pretty=%B)
+
+            echo "Checking commit: ${{ github.event.pull_request.head.sha }}"
+            echo "Commit message: $COMMIT_MSG"
 
             # Check commit message for [skip quality]
             if echo "$COMMIT_MSG" | grep -qi "\[skip quality\]"; then

@@ -101,6 +101,11 @@ variable "db_skip_final_snapshot" {
 # EC2
 # ------------------------------------------------------------------------------
 
+variable "ec2_ami_id" {
+  description = "AMI ID for portal EC2 instances (use standard AL2023, not ECS-optimized)"
+  type        = string
+}
+
 variable "ec2_instance_type" {
   description = "EC2 instance type for Django portal"
   type        = string

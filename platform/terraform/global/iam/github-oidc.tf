@@ -592,24 +592,9 @@ resource "aws_iam_policy" "rds" {
         Resource = "*"
       },
       {
-        Sid    = "ElastiCache"
-        Effect = "Allow"
-        Action = [
-          "elasticache:CreateCacheCluster",
-          "elasticache:DeleteCacheCluster",
-          "elasticache:DescribeCacheClusters",
-          "elasticache:ModifyCacheCluster",
-          "elasticache:CreateCacheSubnetGroup",
-          "elasticache:DeleteCacheSubnetGroup",
-          "elasticache:DescribeCacheSubnetGroups",
-          "elasticache:ModifyCacheSubnetGroup",
-          "elasticache:DescribeCacheParameterGroups",
-          "elasticache:DescribeCacheParameters",
-          "elasticache:DescribeEngineDefaultParameters",
-          "elasticache:AddTagsToResource",
-          "elasticache:RemoveTagsFromResource",
-          "elasticache:ListTagsForResource"
-        ]
+        Sid      = "ElastiCache"
+        Effect   = "Allow"
+        Action   = "elasticache:*"
         Resource = "*"
       }
     ]

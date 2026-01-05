@@ -285,6 +285,10 @@ if not FIELD_ENCRYPTION_KEY:
 # TODO: Set via SHIFTER_SUPPORT_EMAIL env var
 SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "support@example.com")
 
+# Provisioning timeout - how long dashboard waits before showing timeout error
+# UI fallback is 60 min if not provided (avoids long range standup issues during testing)
+PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
+
 # ------------------------------------------------------------------------------
 # AWS S3 Configuration
 # ------------------------------------------------------------------------------

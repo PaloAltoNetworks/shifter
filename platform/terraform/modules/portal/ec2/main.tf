@@ -149,7 +149,9 @@ resource "aws_iam_role_policy" "s3_access" {
         Action = [
           "s3:PutObject",
           "s3:GetObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:PutObjectTagging",
+          "s3:GetObjectTagging"
         ]
         Resource = "${var.s3_bucket_arn}/*"
       },

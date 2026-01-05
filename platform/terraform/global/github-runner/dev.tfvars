@@ -1,12 +1,8 @@
-environment = "dev"
-vpc_id      = "vpc-0eb7ca67e9f22929a" # Default VPC
+vpc_id       = "vpc-0eb7ca67e9f22929a"    # Default VPC
+subnet_id    = "subnet-0ab433d27dafbe048" # us-east-2a public subnet
+runner_count = 2
 
 github_org  = "Brad-Edwards"
 github_repo = "shifter"
 
-# GitHub App configuration
-github_app_id = "2594040"
-
-# Runner scaling
-runners_maximum_count = 5
-instance_types        = ["t3.large", "t3.xlarge"]
+# Access via SSM Session Manager - no SSH required

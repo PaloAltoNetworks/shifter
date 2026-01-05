@@ -39,6 +39,8 @@ db_skip_final_snapshot   = true
 # EC2
 # ------------------------------------------------------------------------------
 
+# Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
+ec2_ami_id           = "ami-00e428798e77d38d9"
 ec2_instance_type    = "t3.large"
 ec2_root_volume_size = 30
 

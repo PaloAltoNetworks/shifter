@@ -1105,8 +1105,15 @@ def get_active_range(user: User) -> RangeContext | None:
 
     try:
         # Query for active ranges (non-deleted)
-        # Terminal statuses auto-set deleted_at, so this is sufficient
-        instance = RangeInstance.active.filter(user_id=user.id).order_by("-created_at").first()
+        # Exclude DESTROYING status - user can create new range while old one tears down
+        from shared.enums import RangeStatus
+
+        instance = (
+            RangeInstance.active.filter(user_id=user.id)
+            .exclude(status=RangeStatus.DESTROYING.value)
+            .order_by("-created_at")
+            .first()
+        )
     except TypeError:
         # Re-raise TypeErrors (shouldn't happen but be defensive)
         raise
@@ -1421,9 +1428,11 @@ def destroy_range(user: User, range_id: int) -> None:
         raise
 
     try:
-        # Update CMS status to DESTROYING (CMS is authoritative)
+        # Update CMS status to DESTROYING and soft delete immediately
+        # This allows user to create a new range without waiting for teardown
         instance.status = RangeStatus.DESTROYING.value
-        instance.save(update_fields=["status"])
+        instance.deleted_at = timezone.now()
+        instance.save(update_fields=["status", "deleted_at"])
         if instance.status != RangeStatus.DESTROYING.value:
             raise CMSError("Range status not updated to DESTROYING")
 

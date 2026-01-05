@@ -21,7 +21,9 @@ class MockInstanceComponent:
         self.os_type = os_type
         self.instance_id = pulumi.Output.from_input(instance_id)
         self.private_ip = pulumi.Output.from_input(private_ip)
-        self.ssh_key_secret_arn = pulumi.Output.from_input(f"arn:aws:secretsmanager:us-east-2:123456789:secret:{role}-ssh-key")
+        self.ssh_key_secret_arn = pulumi.Output.from_input(
+            f"arn:aws:secretsmanager:us-east-2:123456789:secret:{role}-ssh-key"
+        )
 
 
 class TestOutputBuildingLogic:
@@ -38,13 +40,15 @@ class TestOutputBuildingLogic:
         # Build outputs the same way __main__.py does
         instances_output = []
         for inst in instances:
-            instances_output.append({
-                "role": inst.role,
-                "os": inst.os_type,
-                "instance_id": inst.instance_id,
-                "private_ip": inst.private_ip,
-                "ssh_key_secret_arn": inst.ssh_key_secret_arn,
-            })
+            instances_output.append(
+                {
+                    "role": inst.role,
+                    "os": inst.os_type,
+                    "instance_id": inst.instance_id,
+                    "private_ip": inst.private_ip,
+                    "ssh_key_secret_arn": inst.ssh_key_secret_arn,
+                }
+            )
 
         assert instances_output[0]["role"] == "attacker"
         assert instances_output[0]["os"] == "kali"
@@ -64,13 +68,15 @@ class TestOutputBuildingLogic:
         # Build outputs the same way __main__.py does (after fix)
         instances_output = []
         for inst in instances:
-            instances_output.append({
-                "role": inst.role,
-                "os": inst.os_type,
-                "instance_id": inst.instance_id,
-                "private_ip": inst.private_ip,
-                "ssh_key_secret_arn": inst.ssh_key_secret_arn,
-            })
+            instances_output.append(
+                {
+                    "role": inst.role,
+                    "os": inst.os_type,
+                    "instance_id": inst.instance_id,
+                    "private_ip": inst.private_ip,
+                    "ssh_key_secret_arn": inst.ssh_key_secret_arn,
+                }
+            )
 
         # DC should be first (created first)
         assert instances_output[0]["role"] == "dc"
@@ -115,10 +121,12 @@ class TestOutputBuildingLogic:
 
         instances_output = []
         for inst in instances:
-            instances_output.append({
-                "role": inst.role,
-                "os": inst.os_type,
-            })
+            instances_output.append(
+                {
+                    "role": inst.role,
+                    "os": inst.os_type,
+                }
+            )
 
         dc_outputs = [o for o in instances_output if o["role"] == "dc"]
         assert len(dc_outputs) == 2, "Should have 2 DC outputs"
@@ -134,10 +142,7 @@ class TestOutputBuildingWithMalformedInstances:
         """Empty instances list should produce empty output."""
         instances = []
 
-        instances_output = [
-            {"role": inst.role, "os": inst.os_type}
-            for inst in instances
-        ]
+        instances_output = [{"role": inst.role, "os": inst.os_type} for inst in instances]
 
         assert instances_output == []
 
@@ -201,12 +206,14 @@ class TestIndexBasedLookupBug:
         # Build output using instance attributes (correct way)
         instances_output = []
         for inst in range_stack_instances:
-            instances_output.append({
-                "role": inst.role,
-                "os": inst.os_type,
-                "instance_id": inst.instance_id,
-                "private_ip": inst.private_ip,
-            })
+            instances_output.append(
+                {
+                    "role": inst.role,
+                    "os": inst.os_type,
+                    "instance_id": inst.instance_id,
+                    "private_ip": inst.private_ip,
+                }
+            )
 
         # Verify DC instance has DC role (not attacker from config[0])
         dc_output = instances_output[0]
@@ -238,12 +245,14 @@ class TestIndexBasedLookupBug:
         buggy_output = []
         for i, inst in enumerate(range_stack_instances):
             inst_config = config_instances[i]  # BUG: wrong index!
-            buggy_output.append({
-                "role": inst_config["role"],  # Gets wrong role
-                "os": inst_config["os_type"],  # Gets wrong os
-                "instance_id": inst.instance_id,
-                "private_ip": inst.private_ip,
-            })
+            buggy_output.append(
+                {
+                    "role": inst_config["role"],  # Gets wrong role
+                    "os": inst_config["os_type"],  # Gets wrong os
+                    "instance_id": inst.instance_id,
+                    "private_ip": inst.private_ip,
+                }
+            )
 
         # This would incorrectly label DC instance as attacker
         assert buggy_output[0]["role"] == "attacker", "Bug: DC gets labeled as attacker"
@@ -252,12 +261,14 @@ class TestIndexBasedLookupBug:
         # CORRECT: use instance attributes
         correct_output = []
         for inst in range_stack_instances:
-            correct_output.append({
-                "role": inst.role,
-                "os": inst.os_type,
-                "instance_id": inst.instance_id,
-                "private_ip": inst.private_ip,
-            })
+            correct_output.append(
+                {
+                    "role": inst.role,
+                    "os": inst.os_type,
+                    "instance_id": inst.instance_id,
+                    "private_ip": inst.private_ip,
+                }
+            )
 
         # Correctly labels DC as DC
         assert correct_output[0]["role"] == "dc"
@@ -267,13 +278,16 @@ class TestIndexBasedLookupBug:
 class TestAllScenarioPermutations:
     """Test all permutations of scenario instance orderings."""
 
-    @pytest.mark.parametrize("creation_order", [
-        # Different possible creation orders
-        [("dc", "windows"), ("attacker", "kali"), ("victim", "windows")],
-        [("attacker", "kali"), ("dc", "windows"), ("victim", "windows")],
-        [("attacker", "kali"), ("victim", "windows"), ("dc", "windows")],
-        [("victim", "windows"), ("attacker", "kali"), ("dc", "windows")],
-    ])
+    @pytest.mark.parametrize(
+        "creation_order",
+        [
+            # Different possible creation orders
+            [("dc", "windows"), ("attacker", "kali"), ("victim", "windows")],
+            [("attacker", "kali"), ("dc", "windows"), ("victim", "windows")],
+            [("attacker", "kali"), ("victim", "windows"), ("dc", "windows")],
+            [("victim", "windows"), ("attacker", "kali"), ("dc", "windows")],
+        ],
+    )
     def test_output_matches_instance_regardless_of_order(self, creation_order):
         """Output role/os should match instance role/os regardless of creation order."""
         instances = [
@@ -283,10 +297,12 @@ class TestAllScenarioPermutations:
 
         instances_output = []
         for inst in instances:
-            instances_output.append({
-                "role": inst.role,
-                "os": inst.os_type,
-            })
+            instances_output.append(
+                {
+                    "role": inst.role,
+                    "os": inst.os_type,
+                }
+            )
 
         # Each output should match its instance
         for i, (role, os_type) in enumerate(creation_order):

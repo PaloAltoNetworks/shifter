@@ -24,7 +24,7 @@ class TestGetSNSClient:
 
         with patch("events.boto3.client") as mock_boto:
             mock_boto.return_value = MagicMock()
-            client = _get_sns_client()
+            _get_sns_client()
 
             mock_boto.assert_called_once_with("sns", region_name="us-west-2")
 
@@ -36,7 +36,7 @@ class TestGetSNSClient:
 
         with patch("events.boto3.client") as mock_boto:
             mock_boto.return_value = MagicMock()
-            client = _get_sns_client()
+            _get_sns_client()
 
             mock_boto.assert_called_once_with("sns", region_name="us-east-2")
 
@@ -53,10 +53,7 @@ class TestGetSNSTopicARN:
 
         from events import _get_sns_topic_arn
 
-        assert (
-            _get_sns_topic_arn()
-            == "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
-        )
+        assert _get_sns_topic_arn() == "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
 
     def test_raises_when_arn_not_set(self, monkeypatch):
         """Raises ValueError when SNS_RANGE_EVENTS_ARN not set."""
@@ -100,10 +97,7 @@ class TestPublishEvent:
             mock_sns.publish.assert_called_once()
             call_kwargs = mock_sns.publish.call_args.kwargs
 
-            assert (
-                call_kwargs["TopicArn"]
-                == "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
-            )
+            assert call_kwargs["TopicArn"] == "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
             assert json.loads(call_kwargs["Message"]) == event
             assert call_kwargs["MessageAttributes"]["event_type"]["StringValue"] == "range.status.updated"
 
@@ -212,9 +206,7 @@ class TestPublishStatusUpdate:
             patch("events._publish_event"),
             caplog.at_level(logging.INFO, logger="events"),
         ):
-            publish_status_update(
-                range_id=42, user_id=1, new_status="provisioning"
-            )
+            publish_status_update(range_id=42, user_id=1, new_status="provisioning")
 
             assert "42" in caplog.text
             assert "provisioning" in caplog.text
@@ -249,9 +241,7 @@ class TestPublishReady:
 
             # Find the provisioned event
             calls = [call[0][0] for call in mock_publish.call_args_list]
-            provisioned_events = [
-                c for c in calls if c.get("event_type") == "range.provisioned"
-            ]
+            provisioned_events = [c for c in calls if c.get("event_type") == "range.provisioned"]
 
             assert len(provisioned_events) == 1
             assert provisioned_events[0]["instances"] == instances
@@ -274,9 +264,7 @@ class TestPublishReady:
 
             # Find the provisioned event
             calls = [call[0][0] for call in mock_publish.call_args_list]
-            provisioned_events = [
-                c for c in calls if c.get("event_type") == "range.provisioned"
-            ]
+            provisioned_events = [c for c in calls if c.get("event_type") == "range.provisioned"]
 
             assert len(provisioned_events) == 1
             event = provisioned_events[0]
@@ -295,9 +283,7 @@ class TestPublishReady:
 
             # Find the provisioned event
             calls = [call[0][0] for call in mock_publish.call_args_list]
-            provisioned_events = [
-                c for c in calls if c.get("event_type") == "range.provisioned"
-            ]
+            provisioned_events = [c for c in calls if c.get("event_type") == "range.provisioned"]
 
             assert len(provisioned_events) == 1
             event = provisioned_events[0]
@@ -324,9 +310,7 @@ class TestPublishFailed:
         from events import publish_failed
 
         with patch("events._publish_event") as mock_publish:
-            publish_failed(
-                range_id=42, user_id=1, error_message="Instance launch failed"
-            )
+            publish_failed(range_id=42, user_id=1, error_message="Instance launch failed")
 
             mock_publish.assert_called_once()
             event = mock_publish.call_args[0][0]
@@ -358,9 +342,7 @@ class TestPublishDestroyed:
             assert mock_publish.call_count >= 1
 
             calls = [call[0][0] for call in mock_publish.call_args_list]
-            destroyed_events = [
-                c for c in calls if c.get("event_type") == "range.destroyed"
-            ]
+            destroyed_events = [c for c in calls if c.get("event_type") == "range.destroyed"]
 
             assert len(destroyed_events) == 1
 

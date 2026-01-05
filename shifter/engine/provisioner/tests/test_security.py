@@ -236,7 +236,7 @@ class TestS3PathEdgeCases:
     def test_unicode_characters(self):
         """Unicode characters should be rejected."""
         assert validate_s3_path("file\u0000null") is False
-        assert validate_s3_path("emoji\U0001F600") is False
+        assert validate_s3_path("emoji\U0001f600") is False
 
     def test_url_encoded_injection(self):
         """URL-encoded injection attempts should be rejected."""

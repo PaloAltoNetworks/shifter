@@ -85,11 +85,8 @@ class TestLoadConfigEdgeCases:
         assert result.range_id == 999999
 
     def test_load_config_many_instances(self, mock_pulumi_config, mocker, mock_boto3_clients):
-        instance_config = [
-            {"role": "attacker", "os": "kali", "instance_type": "t3.small"}
-        ] + [
-            {"role": "victim", "os": "ubuntu", "instance_type": "t3.micro"}
-            for _ in range(10)
+        instance_config = [{"role": "attacker", "os": "kali", "instance_type": "t3.small"}] + [
+            {"role": "victim", "os": "ubuntu", "instance_type": "t3.micro"} for _ in range(10)
         ]
 
         mocker.patch(

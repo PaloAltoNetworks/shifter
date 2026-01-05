@@ -121,9 +121,7 @@ class TestInstanceTypeRoles:
         for name in victim_types:
             instance_type = get_instance_type(name)
             assert instance_type is not None
-            assert (
-                instance_type.requires_agent is True
-            ), f"{name} should require agent"
+            assert instance_type.requires_agent is True, f"{name} should require agent"
 
     def test_attacker_does_not_require_agent(self):
         """Attacker types should NOT require XDR agent."""
@@ -132,9 +130,7 @@ class TestInstanceTypeRoles:
         for name in attacker_types:
             instance_type = get_instance_type(name)
             assert instance_type is not None
-            assert (
-                instance_type.requires_agent is False
-            ), f"{name} should not require agent"
+            assert instance_type.requires_agent is False, f"{name} should not require agent"
 
 
 class TestLookupFunctions:
@@ -206,7 +202,7 @@ class TestLookupFunctions:
         # which includes dc role. Keeping for historical reference.
         attackers = set(get_attacker_types())
         victims = set(get_victim_types())
-        dcs = set(get_dc_types())
+        _dcs = set(get_dc_types())  # Verify function works, not used in legacy test
 
         # Original types should be disjoint
         assert len(attackers & victims) == 0

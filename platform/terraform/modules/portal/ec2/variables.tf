@@ -167,23 +167,11 @@ variable "sqs_queue_urls" {
 }
 
 # ------------------------------------------------------------------------------
-# SSM Deployment Variables
+# Bootstrap Configuration (Parameter Store + Lifecycle Hook)
 # ------------------------------------------------------------------------------
 
-variable "ssm_document_name" {
-  description = "Name of the SSM document for portal deployment"
-  type        = string
-  default     = ""
-}
-
-variable "ssm_document_arn" {
-  description = "ARN of the SSM document for portal deployment (for IAM permissions)"
-  type        = string
-  default     = ""
-}
-
 variable "ssm_parameter_store_prefix" {
-  description = "Parameter Store prefix for deployment config (for IAM permissions)"
+  description = "Parameter Store prefix for deployment config (read by user_data)"
   type        = string
   default     = ""
 }

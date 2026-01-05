@@ -40,5 +40,5 @@ output "log_group_name" {
 
 output "lifecycle_hook_name" {
   description = "Name of the ASG lifecycle hook (empty if not enabled)"
-  value       = var.enable_autoscaling && var.ssm_document_name != "" ? aws_autoscaling_lifecycle_hook.launch[0].name : ""
+  value       = var.enable_autoscaling ? aws_autoscaling_lifecycle_hook.launch[0].name : ""
 }

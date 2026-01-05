@@ -202,13 +202,13 @@ class TestSelectOrCreateStack:
 
     def test_stack_select_failure_creates_new(self, mock_subprocess, mock_env_vars):
         """Non-zero exit should create new stack."""
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         # First call (select) fails, second call (init) succeeds
         def side_effect(*args, **kwargs):
-            cmd = args[0]
+            command = args[0]
             result = MagicMock()
-            if "select" in cmd:
+            if "select" in command:
                 result.returncode = 1
                 result.stderr = "no stack named 'range-42'"
             else:
@@ -235,7 +235,6 @@ class TestSelectOrCreateStack:
         def side_effect(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            cmd = args[0]
             result = MagicMock()
             # First call is select (fails), second is init (succeeds)
             if call_count == 1:  # select
@@ -308,7 +307,7 @@ class TestRunProvision:
 
     def test_run_provision_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """pulumi up success, outputs parsed, events published."""
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         outputs = {
             "subnet_id": "subnet-12345",
@@ -336,9 +335,7 @@ class TestRunProvision:
             _run_provision(42, 7, "range-42", env)
 
             # Verify status update event was published
-            mock_status.assert_called_once_with(
-                range_id=42, user_id=7, new_status="provisioning"
-            )
+            mock_status.assert_called_once_with(range_id=42, user_id=7, new_status="provisioning")
             # Verify ready event was published with instance details
             mock_ready.assert_called_once()
             call_kwargs = mock_ready.call_args[1]
@@ -347,7 +344,7 @@ class TestRunProvision:
 
     def test_run_provision_failure(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """pulumi up failure should raise exception."""
-        mock_run, mock_result = mock_subprocess
+        _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 1
         mock_result.stderr = "Pulumi error: resource creation failed"
 
@@ -359,11 +356,9 @@ class TestRunProvision:
             with pytest.raises(Exception, match="Pulumi up failed"):
                 _run_provision(42, 7, "range-42", env)
 
-    def test_run_provision_publishes_ready_with_all_outputs(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients
-    ):
+    def test_run_provision_publishes_ready_with_all_outputs(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """publish_ready should receive all Pulumi outputs."""
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         outputs = {
             "subnet_id": "subnet-12345",
@@ -400,11 +395,9 @@ class TestRunProvision:
             assert call_kwargs["pulumi_stack"] == "range-42"
             assert len(call_kwargs["instances"]) == 2
 
-    def test_run_provision_ignores_ngfw_outputs(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients
-    ):
+    def test_run_provision_ignores_ngfw_outputs(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """NGFW outputs should be ignored (stored in UserNGFW model, not Range)."""
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         outputs = {
             "subnet_id": "subnet-12345",
@@ -442,12 +435,13 @@ class TestRunProvision:
             assert "ngfw_untrust_ip" not in call_kwargs
             assert "ngfw_trust_ip" not in call_kwargs
 
+
 class TestRunDestroy:
     """Tests for destroy flow."""
 
     def test_run_destroy_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """pulumi destroy + stack rm success."""
-        mock_run, mock_result = mock_subprocess
+        _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
         with patch("main.publish_destroyed") as mock_destroyed:
@@ -462,7 +456,7 @@ class TestRunDestroy:
 
     def test_run_destroy_failure(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """pulumi destroy failure should raise exception."""
-        mock_run, mock_result = mock_subprocess
+        _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 1
         mock_result.stderr = "Destroy failed"
 
@@ -475,6 +469,7 @@ class TestRunDestroy:
 
     def test_run_destroy_stack_removed(self, mock_env_vars, mock_boto3_clients, mocker):
         """Stack should be removed after successful destroy."""
+
         def side_effect(*args, **kwargs):
             result = MagicMock()
             result.returncode = 0
@@ -495,12 +490,13 @@ class TestRunDestroy:
             rm_calls = [c for c in calls if "rm" in str(c[0][0])]
             assert len(rm_calls) == 1
 
+
 class TestRunPulumi:
     """Tests for main run_pulumi function."""
 
     def test_run_pulumi_unknown_operation(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """ValueError for invalid operation."""
-        mock_run, mock_result = mock_subprocess
+        _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
         with patch("main.publish_failed"):
@@ -511,7 +507,7 @@ class TestRunPulumi:
 
     def test_run_pulumi_prod_auto_cleanup(self, mock_subprocess, mocker, mock_boto3_clients):
         """Production failure should trigger auto-destroy."""
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         # Set up environment as prod
         env_vars = {
@@ -546,7 +542,7 @@ class TestRunPulumi:
         with patch("main.publish_failed"), patch("main.publish_status_update"):
             from main import run_pulumi
 
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 run_pulumi("up", 42, 7)
 
             # Verify destroy was attempted after failure
@@ -556,7 +552,7 @@ class TestRunPulumi:
 
     def test_run_pulumi_dev_auto_cleanup(self, mock_subprocess, mocker, mock_boto3_clients):
         """Dev failure should also trigger auto-destroy (same as prod)."""
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         # Set up environment as dev
         env_vars = {
@@ -584,7 +580,7 @@ class TestRunPulumi:
         with patch("main.publish_failed"), patch("main.publish_status_update"):
             from main import run_pulumi
 
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 run_pulumi("up", 42, 7)
 
             # Verify destroy WAS attempted - auto-cleanup now enabled for all environments
@@ -592,11 +588,9 @@ class TestRunPulumi:
             destroy_calls = [c for c in calls if "destroy" in str(c)]
             assert len(destroy_calls) >= 1
 
-    def test_run_pulumi_error_message_truncation(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients
-    ):
+    def test_run_pulumi_error_message_truncation(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """Error messages should be truncated to 1000 chars."""
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         # Create a very long error message
         long_error = "A" * 2000
@@ -617,7 +611,7 @@ class TestRunPulumi:
         with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
             from main import run_pulumi
 
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 run_pulumi("up", 42, 7)
 
             # Verify publish_failed was called with truncated error
@@ -625,11 +619,9 @@ class TestRunPulumi:
             call_kwargs = mock_publish.call_args[1]
             assert len(call_kwargs["error_message"]) <= 1000
 
-    def test_run_pulumi_publishes_failed_event_on_failure(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients
-    ):
+    def test_run_pulumi_publishes_failed_event_on_failure(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """Failure should publish failed event with error_message."""
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         def side_effect(*args, **kwargs):
             cmd = args[0]
@@ -647,7 +639,7 @@ class TestRunPulumi:
         with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
             from main import run_pulumi
 
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 run_pulumi("up", 42, 7)
 
             # Verify failed event was published with correct user_id
@@ -762,9 +754,7 @@ class TestNgfwOperations:
         assert calls[0][0] == (123, "stopping")
         assert calls[1][0][1] == "stopped"
 
-    def test_run_ngfw_operation_failure_sets_failed_status(
-        self, mock_boto3_clients, mock_env_vars_minimal, mocker
-    ):
+    def test_run_ngfw_operation_failure_sets_failed_status(self, mock_boto3_clients, mock_env_vars_minimal, mocker):
         """Failed operation should set status to failed with error message."""
         mock_update = mocker.patch("main.update_ngfw_status")
         mock_executor = MagicMock()
@@ -776,18 +766,16 @@ class TestNgfwOperations:
 
         from main import run_ngfw_operation
 
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             run_ngfw_operation("start", 123, instance_id="i-12345")
 
         # Verify failed status was set
         failed_calls = [c for c in mock_update.call_args_list if c[0][1] == "failed"]
         assert len(failed_calls) == 1
 
-    def test_run_ngfw_add_route_creates_endpoint(
-        self, mock_boto3_clients, mock_env_vars_minimal, mocker
-    ):
+    def test_run_ngfw_add_route_creates_endpoint(self, mock_boto3_clients, mock_env_vars_minimal, mocker):
         """Add-route should use GWLBAddRoutePlan."""
-        mock_update = mocker.patch("main.update_ngfw_status")
+        mocker.patch("main.update_ngfw_status")
         mock_executor = MagicMock()
         mocker.patch("main.AWSExecutor", return_value=mock_executor)
 
@@ -819,7 +807,8 @@ class TestMainEntryPoint:
 
     def test_main_requires_resource_arg(self):
         """Exit with error if no resource argument provided."""
-        result = subprocess.run(
+        # Security: hardcoded command testing CLI behavior
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "main.py"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
@@ -832,7 +821,7 @@ class TestMainEntryPoint:
 
     def test_main_range_missing_range_id_arg(self):
         """Exit with error when --range-id argument is missing."""
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "main.py", "range", "provision"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
@@ -845,7 +834,7 @@ class TestMainEntryPoint:
 
     def test_main_range_missing_user_id_arg(self):
         """Exit with error when --user-id argument is missing."""
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "main.py", "range", "provision", "--range-id", "42"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
@@ -858,7 +847,7 @@ class TestMainEntryPoint:
 
     def test_main_range_invalid_range_id_arg(self):
         """Exit with error when --range-id is not an integer."""
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "main.py", "range", "provision", "--range-id", "not-a-number", "--user-id", "7"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
@@ -871,7 +860,7 @@ class TestMainEntryPoint:
 
     def test_main_invalid_resource(self):
         """Exit with error for invalid resource."""
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "main.py", "invalid_resource"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
@@ -884,7 +873,7 @@ class TestMainEntryPoint:
 
     def test_main_unknown_operation_error(self, mock_env_vars, mock_subprocess, mocker):
         """Unknown operation should raise ValueError from run_pulumi."""
-        mock_run, mock_result = mock_subprocess
+        _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
         with patch("main.publish_failed"):
@@ -899,7 +888,7 @@ class TestNgfwProvisionCLI:
 
     def test_ngfw_provision_requires_user_ngfw_id(self):
         """ngfw provision requires --user-ngfw-id argument."""
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "main.py", "ngfw", "provision"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
@@ -909,9 +898,7 @@ class TestNgfwProvisionCLI:
         assert result.returncode != 0
         assert "--user-ngfw-id" in result.stderr or "required" in result.stderr.lower()
 
-    def test_ngfw_provision_updates_status_to_provisioning(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_provision_updates_status_to_provisioning(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW provision should update status to provisioning."""
         mock_update = mocker.patch("main.update_ngfw_status")
 
@@ -921,12 +908,14 @@ class TestNgfwProvisionCLI:
             result = MagicMock()
             result.returncode = 0
             if "output" in cmd and "--json" in cmd:
-                result.stdout = json.dumps({
-                    "instance_id": "i-ngfw123",
-                    "management_ip": "10.1.4.10",
-                    "dataplane_ip": "10.1.4.11",
-                    "service_name": "com.amazonaws.vpce.svc-123",
-                })
+                result.stdout = json.dumps(
+                    {
+                        "instance_id": "i-ngfw123",
+                        "management_ip": "10.1.4.10",
+                        "dataplane_ip": "10.1.4.11",
+                        "service_name": "com.amazonaws.vpce.svc-123",
+                    }
+                )
             else:
                 result.stdout = ""
             result.stderr = ""
@@ -948,9 +937,7 @@ class TestNgfwProvisionCLI:
         calls = mock_update.call_args_list
         assert calls[0][0] == (123, "provisioning")
 
-    def test_ngfw_provision_runs_pulumi_up(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_provision_runs_pulumi_up(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW provision should run pulumi up."""
         mocker.patch("main.update_ngfw_status")
 
@@ -962,12 +949,14 @@ class TestNgfwProvisionCLI:
             result = MagicMock()
             result.returncode = 0
             if "output" in cmd and "--json" in cmd:
-                result.stdout = json.dumps({
-                    "instance_id": "i-ngfw123",
-                    "management_ip": "10.1.4.10",
-                    "dataplane_ip": "10.1.4.11",
-                    "service_name": "com.amazonaws.vpce.svc-123",
-                })
+                result.stdout = json.dumps(
+                    {
+                        "instance_id": "i-ngfw123",
+                        "management_ip": "10.1.4.10",
+                        "dataplane_ip": "10.1.4.11",
+                        "service_name": "com.amazonaws.vpce.svc-123",
+                    }
+                )
             else:
                 result.stdout = ""
             result.stderr = ""
@@ -988,9 +977,7 @@ class TestNgfwProvisionCLI:
         up_calls = [c for c in pulumi_calls if "up" in c]
         assert len(up_calls) >= 1
 
-    def test_ngfw_provision_saves_outputs_to_db(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_provision_saves_outputs_to_db(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW provision should save Pulumi outputs to database."""
         mock_update = mocker.patch("main.update_ngfw_status")
 
@@ -1029,9 +1016,7 @@ class TestNgfwProvisionCLI:
         assert len(ready_calls) == 1
         assert ready_calls[0][1].get("instance_id") == "i-ngfw123"
 
-    def test_ngfw_provision_runs_post_pulumi_config(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_provision_runs_post_pulumi_config(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW provision should run post-Pulumi configuration via orchestrator."""
         mocker.patch("main.update_ngfw_status")
 
@@ -1040,10 +1025,12 @@ class TestNgfwProvisionCLI:
             result = MagicMock()
             result.returncode = 0
             if "output" in cmd and "--json" in cmd:
-                result.stdout = json.dumps({
-                    "instance_id": "i-ngfw123",
-                    "management_ip": "10.1.4.10",
-                })
+                result.stdout = json.dumps(
+                    {
+                        "instance_id": "i-ngfw123",
+                        "management_ip": "10.1.4.10",
+                    }
+                )
             else:
                 result.stdout = ""
             result.stderr = ""
@@ -1063,9 +1050,7 @@ class TestNgfwProvisionCLI:
         # Verify orchestrator was called for post-Pulumi config
         assert mock_orchestrator.orchestrate.called
 
-    def test_ngfw_provision_failure_sets_failed_status(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_provision_failure_sets_failed_status(self, mock_boto3_clients, mock_env_vars, mocker):
         """Failed NGFW provision should set status to failed."""
         mock_update = mocker.patch("main.update_ngfw_status")
 
@@ -1084,7 +1069,7 @@ class TestNgfwProvisionCLI:
 
         from main import run_ngfw_pulumi
 
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             run_ngfw_pulumi("up", 123)
 
         # Verify status was set to failed
@@ -1101,7 +1086,7 @@ class TestEventPublishing:
         """Provision flow should publish status update events via SNS."""
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
         outputs = {"subnet_id": "subnet-12345", "instances": []}
 
         def side_effect(*args, **kwargs):
@@ -1129,13 +1114,11 @@ class TestEventPublishing:
             assert call_kwargs["range_id"] == 42
             assert call_kwargs["user_id"] == 7
 
-    def test_run_provision_publishes_ready_event(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
-    ):
+    def test_run_provision_publishes_ready_event(self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch):
         """Provision success should publish ready event with instances."""
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
         outputs = {
             "subnet_id": "subnet-12345",
             "instances": [{"role": "attacker", "ip": "10.1.1.10"}],
@@ -1172,7 +1155,7 @@ class TestEventPublishing:
         """Destroy success should publish destroyed event."""
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
-        mock_run, mock_result = mock_subprocess
+        _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
         with patch("main.publish_destroyed") as mock_publish:
@@ -1191,7 +1174,7 @@ class TestEventPublishing:
         """Pulumi failure should publish failed event."""
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
-        mock_run, mock_result = mock_subprocess
+        mock_run, _mock_result = mock_subprocess
 
         def side_effect(*args, **kwargs):
             cmd = args[0]
@@ -1209,7 +1192,7 @@ class TestEventPublishing:
         with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
             from main import run_pulumi
 
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 run_pulumi("up", 42, 7)
 
             # Verify failed event was published with correct user_id
@@ -1223,7 +1206,7 @@ class TestNgfwDeprovisionCLI:
 
     def test_ngfw_deprovision_requires_user_ngfw_id(self):
         """ngfw deprovision requires --user-ngfw-id argument."""
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "main.py", "ngfw", "deprovision"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
@@ -1233,14 +1216,11 @@ class TestNgfwDeprovisionCLI:
         assert result.returncode != 0
         assert "--user-ngfw-id" in result.stderr or "required" in result.stderr.lower()
 
-    def test_ngfw_deprovision_updates_status_to_deprovisioning(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_deprovision_updates_status_to_deprovisioning(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW deprovision should update status to deprovisioning."""
         mock_update = mocker.patch("main.update_ngfw_status")
 
         def side_effect(*args, **kwargs):
-            cmd = args[0]
             result = MagicMock()
             result.returncode = 0
             result.stdout = ""
@@ -1263,9 +1243,7 @@ class TestNgfwDeprovisionCLI:
         calls = mock_update.call_args_list
         assert calls[0][0] == (123, "deprovisioning")
 
-    def test_ngfw_deprovision_runs_license_deactivation_first(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_deprovision_runs_license_deactivation_first(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW deprovision should run license deactivation before Pulumi destroy."""
         mocker.patch("main.update_ngfw_status")
 
@@ -1298,18 +1276,17 @@ class TestNgfwDeprovisionCLI:
         run_ngfw_pulumi("destroy", 123)
 
         # Verify orchestrator (license deactivation) was called before Pulumi destroy
-        destroy_idx = None
-        for i, (caller, cmd) in enumerate(pulumi_calls):
+        destroy_found = False
+        for _i, (_caller, cmd) in enumerate(pulumi_calls):
             if "destroy" in str(cmd):
-                destroy_idx = i
+                destroy_found = True
                 break
 
         # Orchestrator should have been called (for deprovision plan)
         assert len(orchestrator_calls) >= 1
+        assert destroy_found, "Expected destroy command to be called"
 
-    def test_ngfw_deprovision_runs_pulumi_destroy(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_deprovision_runs_pulumi_destroy(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW deprovision should run pulumi destroy."""
         mocker.patch("main.update_ngfw_status")
 
@@ -1339,9 +1316,7 @@ class TestNgfwDeprovisionCLI:
         destroy_calls = [c for c in pulumi_calls if "destroy" in c]
         assert len(destroy_calls) >= 1
 
-    def test_ngfw_deprovision_removes_stack(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_deprovision_removes_stack(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW deprovision should remove the Pulumi stack."""
         mocker.patch("main.update_ngfw_status")
 
@@ -1371,9 +1346,7 @@ class TestNgfwDeprovisionCLI:
         rm_calls = [c for c in pulumi_calls if "rm" in str(c)]
         assert len(rm_calls) >= 1
 
-    def test_ngfw_deprovision_sets_deprovisioned_status(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_deprovision_sets_deprovisioned_status(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW deprovision should set final status to deprovisioned."""
         mock_update = mocker.patch("main.update_ngfw_status")
 

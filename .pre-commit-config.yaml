@@ -36,11 +36,9 @@ repos:
         name: ruff (provisioner)
         args: [--fix]
         files: ^shifter/engine/provisioner/
-        exclude: ^shifter/engine/provisioner/tests/
       - id: ruff-format
         name: ruff-format (provisioner)
         files: ^shifter/engine/provisioner/
-        exclude: ^shifter/engine/provisioner/tests/
       - id: ruff
         name: ruff (packer)
         args: [--fix]

@@ -137,9 +137,7 @@ class TestOpsOrchestratorOrchestrate:
             action: str
             params: dict
 
-        plan = MockOpsPlan(
-            steps=[MockStep(name="test_step", action="test", params={})]
-        )
+        plan = MockOpsPlan(steps=[MockStep(name="test_step", action="test", params={})])
 
         orchestrator = OpsOrchestrator(executor=mock_executor)
         result = orchestrator.orchestrate("target-id", plan, {})

@@ -1,3 +1,46 @@
+[project]
+name = "provisioner"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "Arpeggio>=2.0.3",
+    "attrs>=25.4.0",
+    "asgiref>=3.8.1",
+    "boto3>=1.42.14",
+    "botocore>=1.42.14",
+    "cffi>=2.0.0",
+    "cryptography>=46.0.3",
+    "debugpy>=1.8.19",
+    "dill>=0.4.0",
+    "grpcio>=1.76.0",
+    "Jinja2>=3.1.6",
+    "jmespath>=1.0.1",
+    "paramiko>=4.0.0",
+    "MarkupSafe>=3.0.3",
+    "parver>=0.5",
+    "protobuf>=5.29.5",
+    "psycopg>=3.3.2",
+    "psycopg-binary>=3.3.2",
+    "pulumi>=3.213.0",
+    "pulumi_aws>=7.15.0",
+    "pycparser>=2.23",
+    "python-dateutil>=2.9.0.post0",
+    "PyYAML>=6.0.3",
+    "redis>=5.2.1",
+    "s3transfer>=0.16.0",
+    "semver>=3.0.4",
+    "six>=1.17.0",
+    "typing_extensions>=4.15.0",
+    "urllib3>=2.6.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120

@@ -234,6 +234,7 @@ module "ec2" {
   source = "../../../modules/portal/ec2"
 
   aws_region            = var.aws_region
+  ec2_ami_id            = var.ec2_ami_id
   name_prefix           = local.name_prefix
   vpc_id                = module.vpc.vpc_id
   subnet_id             = module.vpc.private_subnet_ids[0]

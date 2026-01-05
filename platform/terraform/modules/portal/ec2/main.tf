@@ -278,25 +278,6 @@ resource "aws_security_group_rule" "egress_all" {
 }
 
 # ------------------------------------------------------------------------------
-# AMI Lookup
-# ------------------------------------------------------------------------------
-
-data "aws_ami" "amazon_linux_2023" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["al2023-ami-*-x86_64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
-# ------------------------------------------------------------------------------
 # Launch Template (for ASG mode)
 # ------------------------------------------------------------------------------
 
@@ -304,7 +285,7 @@ resource "aws_launch_template" "this" {
   count = var.enable_autoscaling ? 1 : 0
 
   name_prefix   = "${var.name_prefix}-lt-"
-  image_id      = data.aws_ami.amazon_linux_2023.id
+  image_id      = var.ec2_ami_id
   instance_type = var.instance_type
 
   iam_instance_profile {
@@ -490,7 +471,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_low" {
 resource "aws_instance" "this" {
   count = var.enable_autoscaling ? 0 : 1
 
-  ami                    = data.aws_ami.amazon_linux_2023.id
+  ami                    = var.ec2_ami_id
   instance_type          = var.instance_type
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.this.id]

@@ -12,9 +12,7 @@ All AWS resources are created via Pulumi to ensure proper lifecycle management.
 import base64
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional
 
 import pulumi
 import pulumi_aws as aws
@@ -23,12 +21,12 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from jinja2 import Environment, FileSystemLoader
 
 from executors.ssm_executor import SSMExecutor
-from orchestrators.setup_orchestrator import SetupOrchestrator, SetupError
-from plans.domain_join import DomainJoinPlan
-from plans.xdr_agent_install import XDRAgentInstallPlan
+from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.bootstrap import BootstrapPlan
+from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
+from plans.xdr_agent_install import XDRAgentInstallPlan
 
 
 def validate_s3_path(value: str) -> bool:
@@ -98,17 +96,17 @@ class InstanceComponent(pulumi.ComponentResource):
     ssh_key_secret: aws.secretsmanager.Secret
     ssh_key_secret_arn: pulumi.Output[str]
     # DC-specific attributes (None for non-DC instances)
-    dc_config_param: Optional[aws.ssm.Parameter]
-    dc_config_param_name: Optional[str]
-    dsrm_password: Optional[str]  # nosec B105 - generated at runtime, not hardcoded
-    domain_admin_password: Optional[str]  # nosec B105 - generated at runtime
-    domain_name: Optional[str]
-    netbios_name: Optional[str]
-    hostname: Optional[str]
-    public_key: Optional[str]  # Stored for SSM orchestration
-    agent_presigned_url: Optional[str]  # For XDR agent installation on DC
-    ssh_user: Optional[str]  # SSH user for Linux instances (kali, ubuntu, ec2-user)
-    setup_result: Optional[pulumi.Output[bool]]  # Result of DC setup orchestration
+    dc_config_param: aws.ssm.Parameter | None
+    dc_config_param_name: str | None
+    dsrm_password: str | None  # nosec B105 - generated at runtime, not hardcoded
+    domain_admin_password: str | None  # nosec B105 - generated at runtime
+    domain_name: str | None
+    netbios_name: str | None
+    hostname: str | None
+    public_key: str | None  # Stored for SSM orchestration
+    agent_presigned_url: str | None  # For XDR agent installation on DC
+    ssh_user: str | None  # SSH user for Linux instances (kali, ubuntu, ec2-user)
+    setup_result: pulumi.Output[bool] | None  # Result of DC setup orchestration
 
     def __init__(
         self,
@@ -127,10 +125,10 @@ class InstanceComponent(pulumi.ComponentResource):
         agent_s3_bucket: str = "",
         agent_s3_key: str = "",
         agent_presigned_url: str = "",
-        dc_config: Optional[dict] = None,
+        dc_config: dict | None = None,
         join_domain: bool = False,
-        dc_config_param_name: Optional[str] = None,
-        opts: Optional[pulumi.ResourceOptions] = None,
+        dc_config_param_name: str | None = None,
+        opts: pulumi.ResourceOptions | None = None,
     ):
         """Create an EC2 instance for a range.
 
@@ -318,7 +316,7 @@ class InstanceComponent(pulumi.ComponentResource):
 
     def run_dc_setup(
         self,
-        region: Optional[str] = None,
+        region: str | None = None,
     ) -> pulumi.Output[bool]:
         """Run DC setup via SSM Run Command.
 
@@ -344,7 +342,6 @@ class InstanceComponent(pulumi.ComponentResource):
 
         # Store domain config for domain join (captured in closure)
         dc_domain_name = self.domain_name
-        dc_admin_password = self.domain_admin_password
         dc_agent_presigned_url = self.agent_presigned_url
 
         def do_setup(args: tuple) -> bool:
@@ -419,16 +416,12 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
 
                 # Install XDR agent on DC
                 if not dc_agent_presigned_url:
-                    raise SetupError(
-                        "XDR agent URL is required for DC instances but was not provided"
-                    )
+                    raise SetupError("XDR agent URL is required for DC instances but was not provided")
 
                 pulumi.log.info(f"Installing XDR agent on DC {instance_id}...")
 
                 xdr_plan = XDRAgentInstallPlan()
-                context = xdr_plan.get_context({
-                    "agent_presigned_url": dc_agent_presigned_url
-                })
+                context = xdr_plan.get_context({"agent_presigned_url": dc_agent_presigned_url})
 
                 xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, context)
                 if not xdr_result.success:
@@ -443,15 +436,13 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                 raise
 
         # Use apply to run the setup when instance_id and private_ip are resolved
-        self.setup_result = pulumi.Output.all(
-            self.instance_id, self.private_ip
-        ).apply(do_setup)
+        self.setup_result = pulumi.Output.all(self.instance_id, self.private_ip).apply(do_setup)
         return self.setup_result
 
     def run_setup(
         self,
-        region: Optional[str] = None,
-        dc_ip: Optional[str] = None,
+        region: str | None = None,
+        dc_ip: str | None = None,
     ) -> pulumi.Output[bool]:
         """Run setup plan for non-DC instances via SSM Run Command.
 
@@ -523,9 +514,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                     # Kali: hostname + SSH setup (uses LinuxBootstrapPlan with ssh_user='kali')
                     plan = LinuxBootstrapPlan()
                     context = plan.get_context(ctx)
-                    result = orchestrator.orchestrate(
-                        instance_id, plan, context, document_name=document_name
-                    )
+                    result = orchestrator.orchestrate(instance_id, plan, context, document_name=document_name)
                     if not result.success:
                         raise SetupError(f"Kali setup failed: {result.error}")
                     pulumi.log.info(f"Kali setup complete for {instance_id}")
@@ -545,9 +534,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                         # Install XDR agent
                         if instance_agent_url:
                             xdr_plan = LinuxXDRAgentInstallPlan()
-                            xdr_ctx = xdr_plan.get_context({
-                                "agent_presigned_url": instance_agent_url
-                            })
+                            xdr_ctx = xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
                             result = orchestrator.orchestrate(
                                 instance_id, xdr_plan, xdr_ctx, document_name=document_name
                             )
@@ -571,9 +558,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                         # Install XDR agent
                         if instance_agent_url:
                             xdr_plan = XDRAgentInstallPlan()
-                            xdr_ctx = xdr_plan.get_context({
-                                "agent_presigned_url": instance_agent_url
-                            })
+                            xdr_ctx = xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
                             result = orchestrator.orchestrate(
                                 instance_id, xdr_plan, xdr_ctx, document_name=document_name
                             )
@@ -585,21 +570,19 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
 
                         # Domain join (only for Windows victims with join_domain=True)
                         if instance_join_domain and instance_dc_ip:
-                            domain_name = os.environ.get(
-                                "DC_DOMAIN_NAME", "internal.shifter"
-                            )
+                            domain_name = os.environ.get("DC_DOMAIN_NAME", "internal.shifter")
                             domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
 
                             if domain_password:
-                                pulumi.log.info(
-                                    f"Joining domain {domain_name} for {instance_id}..."
-                                )
+                                pulumi.log.info(f"Joining domain {domain_name} for {instance_id}...")
                                 domain_join_plan = DomainJoinPlan()
-                                dj_context = domain_join_plan.get_context({
-                                    "dc_ip": instance_dc_ip,
-                                    "domain_name": domain_name,
-                                    "domain_admin_password": domain_password,
-                                })
+                                dj_context = domain_join_plan.get_context(
+                                    {
+                                        "dc_ip": instance_dc_ip,
+                                        "domain_name": domain_name,
+                                        "domain_admin_password": domain_password,
+                                    }
+                                )
                                 result = orchestrator.orchestrate(
                                     instance_id,
                                     domain_join_plan,
@@ -607,21 +590,13 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                                     document_name=document_name,
                                 )
                                 if not result.success:
-                                    raise SetupError(
-                                        f"Domain join failed for {instance_id}"
-                                    )
-                                pulumi.log.info(
-                                    f"Domain join complete for {instance_id}"
-                                )
+                                    raise SetupError(f"Domain join failed for {instance_id}")
+                                pulumi.log.info(f"Domain join complete for {instance_id}")
                             else:
-                                pulumi.log.warn(
-                                    f"DC_DOMAIN_PASSWORD not set, skipping domain "
-                                    f"join for {instance_id}"
-                                )
+                                pulumi.log.warn(f"DC_DOMAIN_PASSWORD not set, skipping domain join for {instance_id}")
                         elif instance_join_domain:
                             pulumi.log.info(
-                                f"join_domain=True but no dc_ip provided, "
-                                f"skipping domain join for {instance_id}"
+                                f"join_domain=True but no dc_ip provided, skipping domain join for {instance_id}"
                             )
 
                 return True
@@ -631,9 +606,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                 raise
 
         # Use apply to run the setup when instance_id and private_ip are resolved
-        self.setup_result = pulumi.Output.all(
-            self.instance_id, self.private_ip
-        ).apply(do_setup)
+        self.setup_result = pulumi.Output.all(self.instance_id, self.private_ip).apply(do_setup)
         return self.setup_result
 
     def _generate_user_data(
@@ -645,9 +618,9 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         index: int,
         agent_s3_key: str = "",
         agent_presigned_url: str = "",
-        dc_config: Optional[dict] = None,
+        dc_config: dict | None = None,
         join_domain: bool = False,
-        member_dc_config_param_name: Optional[str] = None,
+        member_dc_config_param_name: str | None = None,
     ) -> str:
         """Generate user data script for the instance.
 
@@ -672,10 +645,11 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
             "TEMPLATES_DIR",
             str(Path(__file__).parent.parent / "templates"),
         )
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(
+        # Security: autoescape=False is required - these are shell/PowerShell templates, not HTML.
+        # XSS is not applicable since output goes to EC2 user-data, not web browsers.
+        env = Environment(  # nosec B701
             loader=FileSystemLoader(templates_dir),
-            autoescape=False,
+            autoescape=False,  # noqa: S701
         )
 
         # Validate S3 key if provided (for all victim types)

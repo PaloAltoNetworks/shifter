@@ -1003,8 +1003,8 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_domain_member_depends_on_dc(self, temp_templates, dc_range_config):
         """Domain member (join_domain=True) should have DC in depends_on."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
@@ -1043,8 +1043,8 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_non_domain_member_does_not_depend_on_dc(self, temp_templates, dc_range_config):
         """Non-domain member (join_domain=False) should NOT have DC in depends_on."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
@@ -1078,8 +1078,8 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_join_domain_true_but_no_dc_in_range(self, temp_templates):
         """join_domain=True without DC should not cause error (no DC to depend on)."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -1137,8 +1137,8 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_domain_member_receives_dc_config_param_name(self, temp_templates, dc_range_config):
         """Domain member (join_domain=True) should receive dc_config_param_name."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
@@ -1168,8 +1168,8 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_non_domain_member_does_not_receive_dc_config_param_name(self, temp_templates, dc_range_config):
         """Non-domain member should NOT receive dc_config_param_name."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
@@ -1196,8 +1196,8 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_join_domain_flag_passed_to_instance(self, temp_templates, dc_range_config):
         """join_domain flag should be passed to InstanceComponent."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
@@ -1225,8 +1225,8 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_range_without_dc_domain_member_gets_none(self, temp_templates):
         """Domain member in range without DC should get None for dc_config_param_name."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
@@ -1296,8 +1296,9 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         Domain-joining instances use Output.apply() to pass DC IP, so the call
         happens asynchronously. We verify by checking the source code pattern.
         """
-        from stacks.range_stack import RangeStack
         import inspect
+
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             source = inspect.getsource(RangeStack._run_all_setup)
@@ -1315,8 +1316,8 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         self, temp_templates, dc_range_config
     ):
         """Victims with join_domain=False should NOT receive dc_ip in run_setup()."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         run_setup_calls = []
         original_run_setup = InstanceComponent.run_setup
@@ -1384,9 +1385,10 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         so they execute asynchronously. We verify direct calls for non-joining
         instances and check source code for the apply pattern for joining ones.
         """
-        from stacks.range_stack import RangeStack
-        from components.instance import InstanceComponent
         import inspect
+
+        from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         run_setup_calls = []
         original_run_setup = InstanceComponent.run_setup

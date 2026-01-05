@@ -84,7 +84,7 @@ def get_imports(layer_path: Path) -> dict[str, set[str]]:
     for py_file in layer_path.rglob("*.py"):
         try:
             content = py_file.read_text()
-        except Exception:
+        except Exception:  # nosec B112 - skip unreadable files
             continue
 
         for match in set(IMPORT_PATTERN.findall(content)):

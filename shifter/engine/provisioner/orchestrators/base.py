@@ -5,7 +5,7 @@ and the StepResult dataclass for returning step execution results.
 """
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable, Any, Dict, List
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass
@@ -40,7 +40,7 @@ class Orchestrator(Protocol):
         self,
         instance_id: str,
         plan: Any,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         **kwargs,
     ) -> Any:
         """Execute a plan on the target instance.

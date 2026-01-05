@@ -1536,6 +1536,7 @@ class TestDecryptField:
     def test_decrypt_field_valid_encrypted_value(self, mocker):
         """Valid Fernet-encrypted value should be decrypted."""
         import base64
+
         from cryptography.fernet import Fernet
 
         # Set the encryption key
@@ -1562,6 +1563,7 @@ class TestDecryptField:
     def test_decrypt_field_roundtrip_with_django_encryption(self, mocker):
         """Value encrypted like Django EncryptedCharField should decrypt correctly."""
         import base64
+
         from cryptography.fernet import Fernet
 
         mocker.patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": self.TEST_ENCRYPTION_KEY})

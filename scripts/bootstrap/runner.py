@@ -7,7 +7,7 @@ guides users through the manual registration process.
 This module is called from deploy.py as part of the full deployment flow.
 """
 
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import dataclass
 
 # Import shared utilities from deploy
@@ -52,7 +52,7 @@ def get_runner_instance_ids(config: RunnerConfig) -> list[str]:
         "--output",
         "text",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607
     if result.returncode != 0:
         return []
     return result.stdout.strip().split()

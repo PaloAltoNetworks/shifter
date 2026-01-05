@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from components.network import _cleanup_orphaned_subnet
 
-
 # =============================================================================
 # Unit Tests for _cleanup_orphaned_subnet
 # =============================================================================

@@ -10,7 +10,7 @@ Full implementation will be added as needed.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from orchestrators.base import StepResult
 
@@ -25,7 +25,7 @@ class OpsResult:
     """
 
     success: bool
-    step_results: List[StepResult] = field(default_factory=list)
+    step_results: list[StepResult] = field(default_factory=list)
 
 
 @runtime_checkable
@@ -41,11 +41,10 @@ class OpsStep(Protocol):
 class OpsPlan(Protocol):
     """Protocol for operations plans."""
 
-    steps: List[Any]
+    steps: list[Any]
     name: str
 
-    def get_context(self, target: Any) -> Dict[str, Any]:
-        ...
+    def get_context(self, target: Any) -> dict[str, Any]: ...
 
 
 class OpsOrchestrator:
@@ -76,7 +75,7 @@ class OpsOrchestrator:
         self,
         instance_id: str,
         plan: Any,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         **kwargs: Any,
     ) -> OpsResult:
         """Execute an operations plan.
@@ -90,7 +89,7 @@ class OpsOrchestrator:
         Returns:
             OpsResult with success status and step outputs.
         """
-        step_results: List[StepResult] = []
+        step_results: list[StepResult] = []
 
         # Execute each step in order
         for step in plan.steps:
@@ -107,7 +106,7 @@ class OpsOrchestrator:
         self,
         target_id: str,
         step: Any,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> StepResult:
         """Execute a single operations step.
 

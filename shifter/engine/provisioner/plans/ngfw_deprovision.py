@@ -7,14 +7,13 @@ The license deactivation is critical to avoid license leakage.
 Command: request license deactivate VM-Capacity mode auto
 """
 
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 from .base import SetupStep
 
-
 # License deactivation script
 # Validated PAN-OS CLI command
-DEACTIVATE_LICENSE_SCRIPT = '''
+DEACTIVATE_LICENSE_SCRIPT = """
 #!/bin/bash
 set -e
 
@@ -36,10 +35,10 @@ echo "Note: License deactivation may take up to 60 seconds to complete"
 sleep 10
 
 echo "License deactivation complete"
-'''
+"""
 
 # Verification script to confirm cleanup
-VERIFY_CLEANUP_SCRIPT = '''
+VERIFY_CLEANUP_SCRIPT = """
 #!/bin/bash
 set -e
 
@@ -48,14 +47,16 @@ NGFW_IP="{{ management_ip }}"
 echo "Verifying cleanup on $NGFW_IP..."
 
 # Check if NGFW is still reachable (it may not be if already being terminated)
-if timeout 10 bash -c "echo 'show system info' | ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 admin@$NGFW_IP" 2>/dev/null; then
+if timeout 10 bash -c \
+    "echo 'show system info' | ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 admin@$NGFW_IP" \
+    2>/dev/null; then
     echo "NGFW still reachable - cleanup verification complete"
 else
     echo "NGFW not reachable - may already be terminating"
 fi
 
 exit 0
-'''
+"""
 
 
 class NGFWDeprovisionPlan:
@@ -67,7 +68,7 @@ class NGFWDeprovisionPlan:
     The license deactivation is critical to prevent license leakage.
     """
 
-    steps: List[SetupStep] = [
+    steps: ClassVar[list[SetupStep]] = [
         SetupStep(
             name="deactivate_license",
             script=DEACTIVATE_LICENSE_SCRIPT,
@@ -76,7 +77,7 @@ class NGFWDeprovisionPlan:
         ),
     ]
 
-    verify_step: SetupStep = SetupStep(
+    verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_cleanup",
         script=VERIFY_CLEANUP_SCRIPT,
         timeout_seconds=120,  # 2 min
@@ -84,7 +85,7 @@ class NGFWDeprovisionPlan:
         is_verification=True,
     )
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for deprovision scripts.
 
         Args:

@@ -7,6 +7,7 @@ Provides same interface as SSMExecutor for use with SetupOrchestrator.
 from unittest.mock import MagicMock, patch
 
 import pytest
+from freezegun import freeze_time
 
 # Mock RSA key for tests
 MOCK_PRIVATE_KEY = """-----BEGIN RSA PRIVATE KEY-----
@@ -187,29 +188,28 @@ class TestRunCommandExpectedFailures:
 class TestWaitForAgentHappyPath:
     """Test successful SSH wait scenarios."""
 
+    @freeze_time("2024-01-01", auto_tick_seconds=0)
     @patch("paramiko.RSAKey.from_private_key")
     @patch("paramiko.SSHClient")
-    @patch("time.sleep")
-    @patch("time.time")
-    def test_wait_for_agent_success_immediately(self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key):
+    @patch("executors.ssh_executor.time.sleep")
+    def test_wait_for_agent_success_immediately(self, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH available immediately returns True."""
         from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
         mock_rsa_key.return_value = MagicMock()
-        mock_time.return_value = 0
 
         executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY)
         result = executor.wait_for_agent("10.0.0.1", timeout_seconds=60)
 
         assert result is True
 
+    @freeze_time("2024-01-01", auto_tick_seconds=10)
     @patch("paramiko.RSAKey.from_private_key")
     @patch("paramiko.SSHClient")
-    @patch("time.sleep")
-    @patch("time.time")
-    def test_wait_for_agent_eventually_online(self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key):
+    @patch("executors.ssh_executor.time.sleep")
+    def test_wait_for_agent_eventually_online(self, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH becomes available after a few retries."""
         import paramiko
 
@@ -218,9 +218,6 @@ class TestWaitForAgentHappyPath:
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
         mock_rsa_key.return_value = MagicMock()
-
-        # Simulate time passing
-        mock_time.side_effect = [0, 10, 20, 30]
 
         # First two connects fail, third succeeds
         mock_client.connect.side_effect = [
@@ -239,11 +236,11 @@ class TestWaitForAgentHappyPath:
 class TestWaitForAgentExpectedFailures:
     """Test expected failure scenarios for SSH wait."""
 
+    @freeze_time("2024-01-01", auto_tick_seconds=30)
     @patch("paramiko.RSAKey.from_private_key")
     @patch("paramiko.SSHClient")
-    @patch("time.sleep")
-    @patch("time.time")
-    def test_wait_for_agent_timeout_raises(self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key):
+    @patch("executors.ssh_executor.time.sleep")
+    def test_wait_for_agent_timeout_raises(self, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH never available raises TimeoutError."""
         import paramiko
 
@@ -253,9 +250,6 @@ class TestWaitForAgentExpectedFailures:
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
         mock_rsa_key.return_value = MagicMock()
-
-        # Time passes beyond timeout
-        mock_time.side_effect = [0, 30, 60, 90]
 
         # All connects fail
         mock_client.connect.side_effect = paramiko.SSHException("Connection refused")
@@ -271,11 +265,11 @@ class TestWaitForAgentExpectedFailures:
 class TestRebootAndWaitHappyPath:
     """Test successful reboot scenarios."""
 
+    @freeze_time("2024-01-01", auto_tick_seconds=10)
     @patch("paramiko.RSAKey.from_private_key")
     @patch("paramiko.SSHClient")
-    @patch("time.sleep")
-    @patch("time.time")
-    def test_reboot_and_wait_success(self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key):
+    @patch("executors.ssh_executor.time.sleep")
+    def test_reboot_and_wait_success(self, mock_sleep, mock_ssh_class, mock_rsa_key):
         """Reboot PAN-OS device and wait for it to come back."""
         import paramiko
 
@@ -284,9 +278,6 @@ class TestRebootAndWaitHappyPath:
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
         mock_rsa_key.return_value = MagicMock()
-
-        # Simulate time passing
-        mock_time.side_effect = [0, 10, 70, 80, 90]
 
         mock_stdout = MagicMock()
         mock_stdout.read.return_value = b"Rebooting"

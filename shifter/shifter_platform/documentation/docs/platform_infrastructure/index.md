@@ -26,15 +26,6 @@ platform/
     └── prod/                 # Cortex XDR connector templates (prod)
 ```
 
-## AWS
-
-All resources are in `us-east-2`.
-
-dev account id: `878848911818`
-dev account profile: `panw-shifter-dev-workstation`
-prod account id:
-prod account profile: `dev-workstation-user`
-
 ## Components
 
 | Component | Module | Purpose |

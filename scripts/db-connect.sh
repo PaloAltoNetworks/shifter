@@ -2,7 +2,7 @@
 # Connect to RDS PostgreSQL via SSM port forwarding
 #
 # Prerequisites:
-#   - AWS CLI configured with dev-workstation-user profile
+#   - AWS CLI configured with a prod account profile
 #   - AWS Session Manager plugin installed
 #   - psycopg[binary] or psql installed locally
 #

@@ -176,7 +176,6 @@ def complete_upload(request):
 
     Request body (JSON):
         - upload_token: Token from initiate response
-        - sha256_hash: Client-computed SHA256 of uploaded file
 
     Response (JSON):
         - success: true
@@ -189,10 +188,9 @@ def complete_upload(request):
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
     upload_token = data.get("upload_token", "")
-    sha256 = data.get("sha256_hash", "")
 
     try:
-        agent = cms_complete_upload(request.user, upload_token, sha256)
+        agent = cms_complete_upload(request.user, upload_token)
     except CMSError as e:
         set_upload_in_progress(request.session, False)
         return JsonResponse({"error": str(e)}, status=400)

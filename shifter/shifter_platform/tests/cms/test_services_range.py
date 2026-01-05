@@ -597,6 +597,23 @@ class TestCreateRangeValidation:
         with pytest.raises(CMSError, match="not found"):
             services.create_range(user, "basic", other_agent.id)
 
+    @patch("cms.services.engine_create_range")
+    def test_raises_when_user_already_has_active_range(self, mock_engine, user, windows_agent):
+        """create_range raises CMSError when user has an existing active range."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+
+        # Create existing active range for user
+        mock_engine.return_value = 100
+        services.create_range(user, "basic", windows_agent.id)
+
+        # Verify range was created
+        assert RangeInstance.objects.filter(user_id=user.id).exists()
+
+        # Attempt to create second range should fail
+        with pytest.raises(CMSError, match="already have an active range"):
+            services.create_range(user, "basic", windows_agent.id)
+
 
 @pytest.mark.django_db
 class TestCreateRangeEngineCall:
@@ -604,7 +621,7 @@ class TestCreateRangeEngineCall:
 
     @patch("cms.services.engine_create_range")
     def test_calls_engine_create_range(self, mock_engine, user, windows_agent):
-        """create_range calls engine.create_range with RangeRequest."""
+        """create_range calls engine.create_range with RangeSpec."""
         mock_engine.return_value = 42  # Engine returns range_id
 
         services.create_range(user, "basic", windows_agent.id)
@@ -614,25 +631,25 @@ class TestCreateRangeEngineCall:
 
     @patch("cms.services.engine_create_range")
     def test_engine_receives_range_request(self, mock_engine, user, windows_agent):
-        """Engine receives a RangeRequest with scenario and instances."""
-        from shared.schemas import RangeRequest
+        """Engine receives a RangeSpec with scenario and instances."""
+        from shared.schemas import RangeSpec
 
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
 
-        # Get the RangeRequest passed to engine
+        # Get the RangeSpec passed to engine
         call_args = mock_engine.call_args
         range_request = call_args[0][0]  # First positional arg
 
-        assert isinstance(range_request, RangeRequest)
+        assert isinstance(range_request, RangeSpec)
         assert range_request.scenario_id == "basic"
         assert range_request.user_id == user.id
         assert isinstance(range_request.instances, list)
 
     @patch("cms.services.engine_create_range")
     def test_range_request_has_correct_scenario_id(self, mock_engine, user, windows_agent):
-        """RangeRequest includes the correct scenario_id."""
+        """RangeSpec includes the correct scenario_id."""
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
@@ -642,7 +659,7 @@ class TestCreateRangeEngineCall:
 
     @patch("cms.services.engine_create_range")
     def test_range_request_has_hydrated_instances(self, mock_engine, user, windows_agent):
-        """RangeRequest instances are hydrated with resolved OS and agent."""
+        """RangeSpec instances are hydrated with resolved OS and agent."""
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", windows_agent.id)
@@ -711,22 +728,92 @@ class TestCreateRangeReturn:
     """Tests for create_range() return value."""
 
     @patch("cms.services.engine_create_range")
-    def test_returns_range_id(self, mock_engine, user, windows_agent):
-        """create_range returns the range_id from engine."""
+    def test_returns_range_context(self, mock_engine, user, windows_agent):
+        """create_range returns a RangeContext."""
+        from shared.schemas.range import RangeContext
+
         mock_engine.return_value = 42
 
         result = services.create_range(user, "basic", windows_agent.id)
 
-        assert result == 42
+        assert isinstance(result, RangeContext)
 
     @patch("cms.services.engine_create_range")
-    def test_returns_integer(self, mock_engine, user, windows_agent):
-        """create_range returns an integer range_id."""
-        mock_engine.return_value = 100
+    def test_range_context_has_range_id(self, mock_engine, user, windows_agent):
+        """RangeContext contains the range_id from engine."""
+        mock_engine.return_value = 42
 
         result = services.create_range(user, "basic", windows_agent.id)
 
-        assert isinstance(result, int)
+        assert result.range_id == 42
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_scenario_id(self, mock_engine, user, windows_agent):
+        """RangeContext contains the scenario_id."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert result.scenario_id == "basic"
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_user_id(self, mock_engine, user, windows_agent):
+        """RangeContext contains the user_id."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert result.user_id == user.id
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_agent_name(self, mock_engine, user, windows_agent):
+        """RangeContext contains the agent_name."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert result.agent_name == "Windows Agent"
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_provisioning_status(self, mock_engine, user, windows_agent):
+        """RangeContext has PROVISIONING status (engine invariant on creation)."""
+        from shared.enums import RangeStatus
+
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert result.status == RangeStatus.PROVISIONING
+
+    @patch("cms.services.engine_create_range")
+    def test_range_context_has_instances(self, mock_engine, user, windows_agent):
+        """RangeContext contains instances list."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        assert len(result.instances) == 2  # basic scenario has attacker + victim
+
+    @patch("cms.services.engine_create_range")
+    def test_instances_have_uuids(self, mock_engine, user, windows_agent):
+        """Each instance has a UUID."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        for instance in result.instances:
+            assert instance.uuid is not None
+
+    @patch("cms.services.engine_create_range")
+    def test_instances_have_roles(self, mock_engine, user, windows_agent):
+        """Instances have correct roles from scenario."""
+        mock_engine.return_value = 42
+
+        result = services.create_range(user, "basic", windows_agent.id)
+
+        roles = [i.role for i in result.instances]
+        assert "attacker" in roles
+        assert "victim" in roles
 
 
 @pytest.mark.django_db
@@ -776,7 +863,9 @@ class TestDestroyRange:
         """Service calls get_range to verify ownership."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range) as mock_get,
             patch("cms.services.engine_destroy_range"),
@@ -784,17 +873,44 @@ class TestDestroyRange:
             services.destroy_range(user, 42)
             mock_get.assert_called_once_with(user, 42)
 
-    def test_calls_engine_destroy_with_range_id(self, user):
-        """Service delegates to engine.destroy_range with range_id."""
+    def test_updates_status_to_destroying(self, user):
+        """Service sets status to DESTROYING before calling engine."""
         from cms.models import RangeInstance
+        from shared.enums import RangeStatus
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
+        with (
+            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.engine_destroy_range"),
+        ):
+            services.destroy_range(user, 42)
+
+            # Verify status was set
+            assert mock_range.status == RangeStatus.DESTROYING.value
+            # Verify save was called with update_fields
+            mock_range.save.assert_called_once_with(update_fields=["status"])
+
+    def test_calls_engine_destroy_with_range_context(self, user):
+        """Service passes RangeContext (not range_id) to engine."""
+        from cms.models import RangeInstance
+        from shared.schemas import RangeContext
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_destroy_range") as mock_destroy,
         ):
             services.destroy_range(user, 42)
-            mock_destroy.assert_called_once_with(42)
+
+            # Verify engine was called with RangeContext
+            mock_destroy.assert_called_once()
+            call_arg = mock_destroy.call_args[0][0]
+            assert isinstance(call_arg, RangeContext)
+            assert call_arg.range_id == 42
 
     # -------------------------------------------------------------------------
     # Service returns None (void function)
@@ -804,7 +920,9 @@ class TestDestroyRange:
         """Service returns None on successful destruction."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_destroy_range"),
@@ -820,7 +938,9 @@ class TestDestroyRange:
         """Service logs debug on entry with user_id and range_id."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_destroy_range"),
@@ -834,7 +954,9 @@ class TestDestroyRange:
         """Service logs debug on successful destruction."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_destroy_range"),
@@ -864,7 +986,9 @@ class TestDestroyRange:
         from cms.models import RangeInstance
         from engine import EngineError
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_destroy_range", side_effect=EngineError("No range to destroy")),
@@ -904,7 +1028,9 @@ class TestDestroyRange:
         from cms.models import RangeInstance
         from engine import EngineError
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_destroy_range", side_effect=EngineError("No range to destroy")),
@@ -916,7 +1042,9 @@ class TestDestroyRange:
         """Service propagates unexpected exceptions from engine service."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_destroy_range", side_effect=Exception("DB connection failed")),
@@ -993,21 +1121,24 @@ class TestCancelRange:
 
     Tests SERVICE behavior with mocked dependencies:
     - Validates ownership via get_range
-    - Delegates to engine.orchestration.cancel correctly
+    - Updates status to DESTROYED before calling engine
+    - Passes RangeContext to engine (not range_id)
     - Returns None (void function)
     - Logs all errors from downstream
     - Propagates errors
     """
 
     # -------------------------------------------------------------------------
-    # Service validates ownership and delegates correctly
+    # Service validates ownership and updates status
     # -------------------------------------------------------------------------
 
     def test_gets_range_to_verify_ownership(self, user):
         """Service calls get_range to verify ownership."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range) as mock_get,
             patch("cms.services.engine_cancel_range"),
@@ -1015,17 +1146,44 @@ class TestCancelRange:
             services.cancel_range(user, 42)
             mock_get.assert_called_once_with(user, 42)
 
-    def test_calls_engine_cancel_with_range_id(self, user):
-        """Service delegates to engine.cancel_range with range_id."""
+    def test_updates_status_to_destroyed(self, user):
+        """Service sets status to DESTROYED before calling engine."""
         from cms.models import RangeInstance
+        from shared.enums import RangeStatus
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
+        with (
+            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.engine_cancel_range"),
+        ):
+            services.cancel_range(user, 42)
+
+            # Verify status was set
+            assert mock_range.status == RangeStatus.DESTROYED.value
+            # Verify save was called with update_fields
+            mock_range.save.assert_called_once_with(update_fields=["status"])
+
+    def test_calls_engine_cancel_with_range_context(self, user):
+        """Service passes RangeContext (not range_id) to engine."""
+        from cms.models import RangeInstance
+        from shared.schemas import RangeContext
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_cancel_range") as mock_cancel,
         ):
             services.cancel_range(user, 42)
-            mock_cancel.assert_called_once_with(42)
+
+            # Verify engine was called with RangeContext
+            mock_cancel.assert_called_once()
+            call_arg = mock_cancel.call_args[0][0]
+            assert isinstance(call_arg, RangeContext)
+            assert call_arg.range_id == 42
 
     # -------------------------------------------------------------------------
     # Service returns None (void function)
@@ -1035,7 +1193,9 @@ class TestCancelRange:
         """Service returns None on successful cancellation."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_cancel_range"),
@@ -1051,7 +1211,9 @@ class TestCancelRange:
         """Service logs debug on entry with user_id and range_id."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_cancel_range"),
@@ -1065,7 +1227,9 @@ class TestCancelRange:
         """Service logs debug on successful cancellation."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch("cms.services.engine_cancel_range"),
@@ -1095,10 +1259,15 @@ class TestCancelRange:
         from cms.models import RangeInstance
         from engine import EngineError
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_cancel_range", side_effect=EngineError("Cannot cancel range")),
+            patch(
+                "cms.services.engine_cancel_range",
+                side_effect=EngineError("Cannot cancel range"),
+            ),
             caplog.at_level(logging.ERROR, logger="cms.services"),
             pytest.raises(EngineError),
         ):
@@ -1113,7 +1282,10 @@ class TestCancelRange:
         """Service raises CMSError when range doesn't exist."""
         from cms.exceptions import CMSError
 
-        with patch.object(services, "get_range", side_effect=CMSError("not found")), pytest.raises(CMSError):
+        with (
+            patch.object(services, "get_range", side_effect=CMSError("not found")),
+            pytest.raises(CMSError),
+        ):
             services.cancel_range(user, 999)
 
     def test_raises_cms_error_when_not_owner(self, user):
@@ -1135,10 +1307,15 @@ class TestCancelRange:
         from cms.models import RangeInstance
         from engine import EngineError
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_cancel_range", side_effect=EngineError("Cannot cancel range")),
+            patch(
+                "cms.services.engine_cancel_range",
+                side_effect=EngineError("Cannot cancel range"),
+            ),
             pytest.raises(EngineError, match="Cannot cancel range"),
         ):
             services.cancel_range(user, 42)
@@ -1147,10 +1324,15 @@ class TestCancelRange:
         """Service propagates unexpected exceptions from engine service."""
         from cms.models import RangeInstance
 
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_cancel_range", side_effect=Exception("DB connection failed")),
+            patch(
+                "cms.services.engine_cancel_range",
+                side_effect=Exception("DB connection failed"),
+            ),
             pytest.raises(Exception, match="DB connection failed"),
         ):
             services.cancel_range(user, 42)

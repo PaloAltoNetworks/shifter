@@ -8,7 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from shared.schemas import RangeRequest
+from shared.enums import CANCELLABLE_STATUSES, RangeStatus
+from shared.schemas import RangeContext, RangeSpec
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -24,19 +25,19 @@ class EngineError(Exception):
     pass
 
 
-def create_range(request: RangeRequest) -> int:
+def create_range(request: RangeSpec) -> int:
     """Provision infrastructure for range.
 
     Creates a Range record, allocates subnet, and triggers ECS provisioning.
 
     Args:
-        request: Validated RangeRequest with scenario, user, and instances.
+        request: Validated RangeSpec with scenario, user, and instances.
 
     Returns:
         range_id: The ID of the created range.
 
     Raises:
-        TypeError: If request is not a RangeRequest
+        TypeError: If request is not a RangeSpec
         ValueError: If subnet allocation fails (capacity exhausted)
         User.DoesNotExist: If user_id doesn't map to a Django user
     """
@@ -48,8 +49,8 @@ def create_range(request: RangeRequest) -> int:
     User = get_user_model()
 
     # Validate request type
-    if not isinstance(request, RangeRequest):
-        raise TypeError(f"request must be RangeRequest, got {type(request).__name__}")
+    if not isinstance(request, RangeSpec):
+        raise TypeError(f"request must be RangeSpec, got {type(request).__name__}")
 
     logger.debug(
         "create_range: scenario=%s user_id=%s instances=%d",
@@ -80,7 +81,7 @@ def create_range(request: RangeRequest) -> int:
     )
 
     # Trigger ECS provisioning
-    task_arn = start_provisioning(range_obj.id)
+    task_arn = start_provisioning(range_obj.id, request.user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
@@ -90,14 +91,14 @@ def create_range(request: RangeRequest) -> int:
     return range_obj.id
 
 
-def destroy_range(range_id: int) -> bool:
+def destroy_range(request: RangeContext) -> bool:
     """Tear down range infrastructure.
 
     Sets status to DESTROYING and triggers async ECS teardown.
     Idempotent: returns True if range is already being destroyed.
 
     Args:
-        range_id: The ID of the range to destroy.
+        request: RangeContext with range_id and metadata.
 
     Returns:
         True if range exists and destruction initiated (or already in progress).
@@ -106,31 +107,31 @@ def destroy_range(range_id: int) -> bool:
     from engine.ecs import start_teardown
     from engine.models import Range
 
-    logger.debug("destroy_range: range_id=%s", range_id)
+    logger.debug("destroy_range: range_id=%s", request.range_id)
 
     try:
-        range_obj = Range.objects.get(id=range_id)
+        range_obj = Range.objects.get(id=request.range_id)
     except Range.DoesNotExist:
-        logger.warning("destroy_range: range not found range_id=%s", range_id)
+        logger.warning("destroy_range: range not found range_id=%s", request.range_id)
         return False
 
     # Already destroyed - nothing to do
-    if range_obj.status == Range.Status.DESTROYED:
-        logger.warning("destroy_range: range already destroyed range_id=%s", range_id)
+    if range_obj.status == RangeStatus.DESTROYED:
+        logger.warning("destroy_range: range already destroyed range_id=%s", request.range_id)
         return False
 
     # Already destroying - idempotent success
-    if range_obj.status == Range.Status.DESTROYING:
-        logger.info("destroy_range: range already destroying range_id=%s", range_id)
+    if range_obj.status == RangeStatus.DESTROYING:
+        logger.info("destroy_range: range already destroying range_id=%s", request.range_id)
         return True
 
     # Set status and trigger teardown
-    range_obj.status = Range.Status.DESTROYING
+    range_obj.status = RangeStatus.DESTROYING.value
     range_obj.save(update_fields=["status"])
 
-    logger.info("destroy_range: set status to DESTROYING range_id=%s", range_id)
+    logger.info("destroy_range: set status to DESTROYING range_id=%s", request.range_id)
 
-    task_arn = start_teardown(range_id)
+    task_arn = start_teardown(request.range_id, request.user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
@@ -140,7 +141,7 @@ def destroy_range(range_id: int) -> bool:
     return True
 
 
-def cancel_range(range_id: int) -> bool:
+def cancel_range(range_ctx: RangeContext) -> None:
     """Cancel in-progress provisioning.
 
     Only works for ranges in PENDING or PROVISIONING status.
@@ -151,41 +152,70 @@ def cancel_range(range_id: int) -> bool:
     to abort and clean up. See GitHub issue for tracking.
 
     Args:
-        range_id: The ID of the range to cancel.
+        range_ctx: RangeContext with range_id and metadata.
 
     Returns:
-        True if range was cancelled.
-        False if range not found or not in a cancellable status.
-    """
-    from django.utils import timezone
+        None
 
+    Raises:
+        TypeError: If range_ctx is None or not a RangeContext.
+        ValueError: If range_ctx.range_id is None or negative.
+    """
+    # Input validation
+    if range_ctx is None:
+        logger.error("cancel_range called with None range_ctx")
+        raise TypeError("range_ctx cannot be None")
+
+    if not isinstance(range_ctx, RangeContext):
+        logger.error(
+            "cancel_range called with invalid type: %s",
+            type(range_ctx).__name__,
+        )
+        raise TypeError(f"range_ctx must be RangeContext, got {type(range_ctx).__name__}")
+
+    if range_ctx.range_id is None:
+        logger.error("cancel_range called with None range_id")
+        raise ValueError("range_ctx.range_id cannot be None")
+
+    if not isinstance(range_ctx.range_id, int) or range_ctx.range_id < 0:
+        logger.error(
+            "cancel_range called with invalid range_id: %s",
+            range_ctx.range_id,
+        )
+        raise ValueError("range_ctx.range_id must be a non-negative integer")
+
+    logger.debug(
+        "cancel_range: range_id=%s user_id=%s status=%s",
+        range_ctx.range_id,
+        range_ctx.user_id,
+        range_ctx.status,
+    )
     from engine.models import Range
 
-    logger.debug("cancel_range: range_id=%s", range_id)
+    range_id = range_ctx.range_id
 
     try:
         range_obj = Range.objects.get(id=range_id)
     except Range.DoesNotExist:
         logger.warning("cancel_range: range not found range_id=%s", range_id)
-        return False
+        return
 
-    # Only cancel ranges in early lifecycle
-    if range_obj.status not in Range.CANCELLABLE_STATUSES:
+    if range_ctx.status not in CANCELLABLE_STATUSES:
         logger.warning(
             "cancel_range: range not cancellable range_id=%s status=%s",
             range_id,
-            range_obj.status,
+            range_ctx.status,
         )
-        return False
+        return
 
-    # Mark as destroyed immediately
-    range_obj.status = Range.Status.DESTROYED
-    range_obj.destroyed_at = timezone.now()
-    range_obj.save(update_fields=["status", "destroyed_at"])
+    range_ctx.status = RangeStatus.DESTROYING
+    range_obj.status = Range.Status.DESTROYING
+    range_obj.save(update_fields=["status"])
+
+    # Provisioner will poll for status and destroy when it sees DESTROYING
+    # accept small risk of race condition. TODO: #465
 
     logger.info("cancel_range: cancelled range_id=%s", range_id)
-
-    return True
 
 
 def get_range_status(range_id: int) -> dict[str, Any] | None:

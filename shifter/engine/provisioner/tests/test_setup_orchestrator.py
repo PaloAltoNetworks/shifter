@@ -4,29 +4,31 @@ SetupOrchestrator runs SetupPlans using an SSMExecutor.
 It handles step sequencing, reboots, and verification.
 """
 
-from unittest.mock import MagicMock, call, patch
 from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 import pytest
 
-# These imports will fail initially - that's expected for TDD
-from plans.base import SetupStep, SetupPlan
-from orchestrators.setup_orchestrator import (
-    SetupOrchestrator,
-    SetupError,
-    SetupResult,
-)
 from executors.ssm_executor import (
-    SSMExecutor,
-    CommandResult,
     CommandError,
+    CommandResult,
+    SSMExecutor,
     TimeoutError,
 )
+from orchestrators.setup_orchestrator import (
+    SetupError,
+    SetupOrchestrator,
+    SetupResult,
+)
+
+# These imports will fail initially - that's expected for TDD
+from plans.base import SetupStep
 
 
 @dataclass
 class MockSetupPlan:
     """Mock setup plan for testing."""
+
     steps: list
     verify_step: SetupStep
 
@@ -40,18 +42,14 @@ class TestOrchestrateHappyPath:
     def test_orchestrate_all_steps_succeed(self):
         """All steps pass, verification passes, returns success."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
 
         plan = MockSetupPlan(
             steps=[
                 SetupStep(name="step1", script="echo step1", timeout_seconds=60),
                 SetupStep(name="step2", script="echo step2", timeout_seconds=60),
             ],
-            verify_step=SetupStep(
-                name="verify", script="echo verify", timeout_seconds=30, is_verification=True
-            ),
+            verify_step=SetupStep(name="verify", script="echo verify", timeout_seconds=30, is_verification=True),
         )
 
         orchestrator = SetupOrchestrator(executor=mock_executor)
@@ -69,9 +67,7 @@ class TestOrchestrateHappyPath:
     def test_orchestrate_with_reboot_step(self):
         """Step requires reboot, reboot succeeds, continues to next step."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
         mock_executor.reboot_and_wait.return_value = True
 
         plan = MockSetupPlan(
@@ -106,9 +102,7 @@ class TestOrchestrateHappyPath:
     def test_orchestrate_multiple_reboot_steps(self):
         """Multiple steps require reboots, all handled correctly."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
         mock_executor.reboot_and_wait.return_value = True
 
         plan = MockSetupPlan(
@@ -141,9 +135,7 @@ class TestOrchestrateExpectedFailures:
     def test_orchestrate_first_step_fails_stops(self):
         """First step fails, raises SetupError, no further steps run."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.side_effect = CommandError(
-            "Step failed", exit_code=1, stderr="error"
-        )
+        mock_executor.run_command.side_effect = CommandError("Step failed", exit_code=1, stderr="error")
 
         plan = MockSetupPlan(
             steps=[
@@ -193,9 +185,7 @@ class TestOrchestrateExpectedFailures:
     def test_orchestrate_reboot_fails_stops(self):
         """Step passes but reboot fails, raises SetupError."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
         mock_executor.reboot_and_wait.side_effect = TimeoutError("Reboot timed out")
 
         plan = MockSetupPlan(
@@ -251,9 +241,7 @@ class TestOrchestrateEdgeCases:
     def test_orchestrate_empty_plan_runs_verify(self):
         """No steps in plan, just runs verification."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
 
         plan = MockSetupPlan(
             steps=[],  # Empty steps
@@ -294,16 +282,14 @@ class TestOrchestrateEdgeCases:
     def test_orchestrate_script_special_chars_render(self):
         """Script with special chars ($, {, etc) renders correctly."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
 
         # PowerShell script with special characters
-        powershell_script = '''
+        powershell_script = """
         $Password = ConvertTo-SecureString "{{ password }}" -AsPlainText -Force
         $Cred = New-Object PSCredential("{{ username }}", $Password)
         if ($env:PATH -match "Windows") { Write-Host "OK" }
-        '''
+        """
 
         plan = MockSetupPlan(
             steps=[
@@ -336,9 +322,7 @@ class TestStepExecution:
     def test_step_timeout_passed_to_executor(self):
         """Step timeout is passed to executor correctly."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
 
         plan = MockSetupPlan(
             steps=[
@@ -357,9 +341,7 @@ class TestStepExecution:
     def test_steps_executed_in_order(self):
         """Steps are executed in the order defined in the plan."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
 
         plan = MockSetupPlan(
             steps=[
@@ -415,9 +397,7 @@ class TestRebootTimeout:
     def test_reboot_uses_step_timeout(self):
         """Reboot timeout matches or exceeds step timeout."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
         mock_executor.reboot_and_wait.return_value = True
 
         plan = MockSetupPlan(

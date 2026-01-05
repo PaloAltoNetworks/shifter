@@ -4,13 +4,12 @@ Defines the steps to promote a Windows Server (with AD DS feature prebaked)
 to an Active Directory Domain Controller.
 """
 
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 from .base import SetupStep
 
-
 # PowerShell script to promote server to Domain Controller
-PROMOTE_DC_SCRIPT = '''
+PROMOTE_DC_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 Write-Host "Promoting server to Domain Controller..."
@@ -38,10 +37,10 @@ try {
     Write-Host "Error promoting to Domain Controller: $_"
     exit 1
 }
-'''
+"""
 
 # PowerShell script to verify AD DS is running
-VERIFY_AD_SCRIPT = '''
+VERIFY_AD_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 Write-Host "Verifying AD Domain Services..."
@@ -72,7 +71,7 @@ try {
     Write-Host "AD DS verification failed: $_"
     exit 1
 }
-'''
+"""
 
 
 class DCSetupPlan:
@@ -90,7 +89,7 @@ class DCSetupPlan:
     - Query AD Domain Controller
     """
 
-    steps: List[SetupStep] = [
+    steps: ClassVar[list[SetupStep]] = [
         SetupStep(
             name="promote_to_dc",
             script=PROMOTE_DC_SCRIPT,
@@ -99,14 +98,14 @@ class DCSetupPlan:
         ),
     ]
 
-    verify_step: SetupStep = SetupStep(
+    verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ad_running",
         script=VERIFY_AD_SCRIPT,
         timeout_seconds=600,  # 10 min - generous for post-reboot SSM latency
         is_verification=True,
     )
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for DC setup scripts.
 
         Args:
@@ -129,9 +128,7 @@ class DCSetupPlan:
         for attr in required_attrs:
             value = getattr(instance, attr, None)
             if value is None:
-                raise ValueError(
-                    f"Instance missing required attribute '{attr}' for DC setup"
-                )
+                raise ValueError(f"Instance missing required attribute '{attr}' for DC setup")
             context[attr] = value
 
         return context

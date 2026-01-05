@@ -30,7 +30,7 @@ db_engine_version        = "16"
 db_instance_class        = "db.t3.large"
 db_allocated_storage     = 20
 db_max_allocated_storage = 100
-db_multi_az              = false
+db_multi_az              = true
 db_backup_retention_days = 7
 db_deletion_protection   = true
 db_skip_final_snapshot   = false
@@ -78,8 +78,7 @@ kali_instance_type   = "t3.medium"
 # Autoscaling
 # ------------------------------------------------------------------------------
 
-# Disabled for prod - single instance mode until validated in dev
-enable_autoscaling   = false
+enable_autoscaling   = true
 asg_min_size         = 2
 asg_max_size         = 5
 asg_desired_capacity = 2
@@ -121,6 +120,32 @@ pulumi_container_tag = "latest"
 dc_domain_name = "internal.shifter"
 # nosec B105 - Ephemeral isolated range, not a production credential
 dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
+
+# ------------------------------------------------------------------------------
+# Messaging (SNS/SQS)
+# ------------------------------------------------------------------------------
+
+messaging_consumers                  = ["cms", "engine", "mc"]
+messaging_visibility_timeout_seconds = 60
+messaging_message_retention_seconds  = 86400
+
+# Dead Letter Queue
+messaging_enable_dlq                    = true
+messaging_dlq_max_receive_count         = 3
+messaging_dlq_message_retention_seconds = 1209600 # 14 days
+
+# CloudWatch Alarms
+messaging_enable_alarms               = true
+messaging_alarm_queue_depth_threshold = 100
+messaging_alarm_message_age_threshold = 300 # 5 minutes
+messaging_alarm_dlq_threshold         = 1
+messaging_alarm_actions               = [] # Populated by main.tf from shared SNS topic
+
+# ------------------------------------------------------------------------------
+# Alerting
+# ------------------------------------------------------------------------------
+
+alarm_email = "bedwards@paloaltonetworks.com"
 
 # ------------------------------------------------------------------------------
 # CI Testing (not used by Terraform, extracted by quality.yml workflow)

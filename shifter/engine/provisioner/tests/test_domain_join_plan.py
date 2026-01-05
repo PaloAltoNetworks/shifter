@@ -4,12 +4,10 @@ DomainJoinPlan defines the steps to join a Windows machine to an AD domain.
 This plan is executed by the DC after promotion completes.
 """
 
-from unittest.mock import MagicMock
-
 import pytest
 
-from plans.domain_join import DomainJoinPlan
 from plans.base import SetupStep
+from plans.domain_join import DomainJoinPlan
 
 
 class TestDomainJoinPlanSteps:
@@ -98,11 +96,14 @@ class TestDomainJoinPlanVerification:
 
         script = plan.verify_step.script.lower()
         # Should check domain membership in some way
-        assert any(check in script for check in [
-            "win32_computersystem",
-            "domain",
-            "get-wmiobject",
-        ]), "Verification script should check domain membership"
+        assert any(
+            check in script
+            for check in [
+                "win32_computersystem",
+                "domain",
+                "get-wmiobject",
+            ]
+        ), "Verification script should check domain membership"
 
 
 class TestDomainJoinPlanContext:
@@ -224,12 +225,15 @@ class TestDomainJoinPlanScripts:
         for step in plan.steps:
             script = step.script
             # Should have some form of error handling
-            assert any(handler in script for handler in [
-                "$ErrorActionPreference",
-                "-ErrorAction Stop",
-                "try",
-                "exit 1",
-            ]), f"Step {step.name} should have error handling"
+            assert any(
+                handler in script
+                for handler in [
+                    "$ErrorActionPreference",
+                    "-ErrorAction Stop",
+                    "try",
+                    "exit 1",
+                ]
+            ), f"Step {step.name} should have error handling"
 
     def test_join_script_uses_add_computer(self):
         """Join domain script uses Add-Computer cmdlet."""

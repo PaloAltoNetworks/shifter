@@ -8,8 +8,6 @@ range subnets through the NGFW:
 - VPC Endpoint Service
 """
 
-from typing import List, Optional
-
 import pulumi
 import pulumi_aws as aws
 
@@ -39,10 +37,10 @@ class GWLBComponent(pulumi.ComponentResource):
         self,
         name: str,
         user_id: int,
-        subnet_ids: List[str],
+        subnet_ids: list[str],
         vpc_id: str,
         environment: str = "dev",
-        opts: Optional[pulumi.ResourceOptions] = None,
+        opts: pulumi.ResourceOptions | None = None,
     ):
         """Create GWLB infrastructure.
 

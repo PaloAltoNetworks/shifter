@@ -1,9 +1,9 @@
 terraform {
   backend "s3" {
-    bucket         = "shifter-infra-70b88946-f5a5-45df-9d33-e8c2257158fd"
+    bucket         = "shifter-infra-95c922ca-35ca-4787-9fc6-626a2b04f142"
     key            = "prod/range/terraform.tfstate"
     region         = "us-east-2"
-    dynamodb_table = "shifter-terraform-70b88946-f5a5-45df-9d33-e8c2257158fd"
+    dynamodb_table = "shifter-terraform-95c922ca-35ca-4787-9fc6-626a2b04f142"
     encrypt        = true
   }
 }

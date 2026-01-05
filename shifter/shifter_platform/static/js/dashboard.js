@@ -471,10 +471,11 @@ class DashboardManager {
 
     /**
      * Connect to WebSocket for real-time range status updates.
+     * @param {boolean} isReconnect - Whether this is a reconnect attempt (preserves retry counters)
      */
-    _connectStatusSocket(rangeId) {
-        // Close existing connection if any
-        this._closeStatusSocket();
+    _connectStatusSocket(rangeId, isReconnect = false) {
+        // Close existing connection if any, but preserve retry counters on reconnect
+        this._closeStatusSocket(!isReconnect);
 
         const wsUrl = this._buildWebSocketUrl(rangeId);
         console.log(`Connecting to WebSocket: ${wsUrl}`);
@@ -561,7 +562,7 @@ class DashboardManager {
 
             setTimeout(() => {
                 if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-                    this._connectStatusSocket(rangeId);
+                    this._connectStatusSocket(rangeId, true);
                 }
             }, this.reconnectDelay);
 
@@ -575,16 +576,19 @@ class DashboardManager {
 
     /**
      * Close WebSocket connection cleanly.
+     * @param {boolean} resetRetry - Whether to reset reconnect counters (default true)
      */
-    _closeStatusSocket() {
+    _closeStatusSocket(resetRetry = true) {
         this._clearProvisioningTimer();
         if (this.statusSocket) {
             this.statusSocket.onclose = null; // Prevent reconnect attempt
             this.statusSocket.close(1000, 'Client closing');
             this.statusSocket = null;
         }
-        this.reconnectAttempts = 0;
-        this.reconnectDelay = 1000;
+        if (resetRetry) {
+            this.reconnectAttempts = 0;
+            this.reconnectDelay = 1000;
+        }
     }
 
     /**

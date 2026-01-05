@@ -138,6 +138,25 @@ class TestGetActiveRange:
 
         assert result is None
 
+    def test_excludes_destroying_ranges(self):
+        """Does not return ranges with DESTROYING status (user can create new range)."""
+        from cms.models import RangeInstance
+        from cms.services import get_active_range
+
+        user = MagicMock()
+        user.id = 42
+
+        RangeInstance.objects.create(
+            range_id=6,
+            scenario_id="basic",
+            user_id=42,
+            status=RangeStatus.DESTROYING.value,
+        )
+
+        result = get_active_range(user)
+
+        assert result is None
+
     def test_returns_most_recent_active_range(self):
         """Returns RangeContext for the most recently created active range."""
         from cms.models import RangeInstance
@@ -309,7 +328,7 @@ class TestGetActiveRange:
         mock_instance.status = RangeStatus.READY.value
 
         mock_queryset = MagicMock()
-        mock_queryset.order_by.return_value.first.return_value = mock_instance
+        mock_queryset.exclude.return_value.order_by.return_value.first.return_value = mock_instance
 
         with (
             patch("cms.services.RangeInstance.active") as mock_active,

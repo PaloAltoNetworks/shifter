@@ -860,37 +860,44 @@ class TestDestroyRange:
     # -------------------------------------------------------------------------
 
     def test_gets_range_to_verify_ownership(self, user):
-        """Service calls get_range to verify ownership."""
+        """Service fetches RangeInstance and verifies ownership."""
         from cms.models import RangeInstance
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
         mock_range.save = Mock()
         with (
-            patch.object(services, "get_range", return_value=mock_range) as mock_get,
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range) as mock_get,
             patch("cms.services.engine_destroy_range"),
         ):
             services.destroy_range(user, 42)
-            mock_get.assert_called_once_with(user, 42)
+            mock_get.assert_called_once_with(range_id=42)
 
     def test_updates_status_to_destroying(self, user):
-        """Service sets status to DESTROYING before calling engine."""
+        """Service sets status to DESTROYING and soft deletes before calling engine."""
+        from django.utils import timezone
+
         from cms.models import RangeInstance
         from shared.enums import RangeStatus
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
         mock_range.save = Mock()
+
+        mock_now = timezone.now()
         with (
-            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch("cms.services.engine_destroy_range"),
+            patch("django.utils.timezone.now", return_value=mock_now),
         ):
             services.destroy_range(user, 42)
 
-            # Verify status was set
+            # Verify status was set to DESTROYING
             assert mock_range.status == RangeStatus.DESTROYING.value
-            # Verify save was called with update_fields
-            mock_range.save.assert_called_once_with(update_fields=["status"])
+            # Verify deleted_at was set (soft delete)
+            assert mock_range.deleted_at == mock_now
+            # Verify save was called with both fields
+            mock_range.save.assert_called_once_with(update_fields=["status", "deleted_at"])
 
     def test_calls_engine_destroy_with_range_context(self, user):
         """Service passes RangeContext (not range_id) to engine."""
@@ -901,7 +908,7 @@ class TestDestroyRange:
         mock_range.agent = None
         mock_range.save = Mock()
         with (
-            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch("cms.services.engine_destroy_range") as mock_destroy,
         ):
             services.destroy_range(user, 42)
@@ -924,7 +931,7 @@ class TestDestroyRange:
         mock_range.agent = None
         mock_range.save = Mock()
         with (
-            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch("cms.services.engine_destroy_range"),
         ):
             result = services.destroy_range(user, 42)
@@ -942,7 +949,7 @@ class TestDestroyRange:
         mock_range.agent = None
         mock_range.save = Mock()
         with (
-            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch("cms.services.engine_destroy_range"),
             caplog.at_level(logging.DEBUG, logger="cms.services"),
         ):
@@ -958,7 +965,7 @@ class TestDestroyRange:
         mock_range.agent = None
         mock_range.save = Mock()
         with (
-            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch("cms.services.engine_destroy_range"),
             caplog.at_level(logging.DEBUG, logger="cms.services"),
         ):
@@ -970,16 +977,17 @@ class TestDestroyRange:
     # -------------------------------------------------------------------------
 
     def test_logs_error_when_range_not_found(self, user, caplog):
-        """Service logs error when get_range raises CMSError."""
+        """Service logs warning when RangeInstance not found."""
         from cms.exceptions import CMSError
+        from cms.models import RangeInstance
 
         with (
-            patch.object(services, "get_range", side_effect=CMSError("not found")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
+            patch("cms.services.RangeInstance.objects.get", side_effect=RangeInstance.DoesNotExist),
+            caplog.at_level(logging.WARNING, logger="cms.services"),
             pytest.raises(CMSError),
         ):
             services.destroy_range(user, 999)
-        assert "error" in caplog.text.lower() or "not found" in caplog.text.lower()
+        assert "not found" in caplog.text.lower()
 
     def test_logs_error_when_engine_service_fails(self, user, caplog):
         """Service logs error when engine service raises exception."""
@@ -990,7 +998,7 @@ class TestDestroyRange:
         mock_range.agent = None
         mock_range.save = Mock()
         with (
-            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch("cms.services.engine_destroy_range", side_effect=EngineError("No range to destroy")),
             caplog.at_level(logging.ERROR, logger="cms.services"),
             pytest.raises(EngineError),
@@ -1005,17 +1013,24 @@ class TestDestroyRange:
     def test_raises_cms_error_when_range_not_found(self, user):
         """Service raises CMSError when range doesn't exist."""
         from cms.exceptions import CMSError
+        from cms.models import RangeInstance
 
-        with patch.object(services, "get_range", side_effect=CMSError("not found")), pytest.raises(CMSError):
+        with (
+            patch("cms.services.RangeInstance.objects.get", side_effect=RangeInstance.DoesNotExist),
+            pytest.raises(CMSError, match="Range 999 not found"),
+        ):
             services.destroy_range(user, 999)
 
     def test_raises_cms_error_when_not_owner(self, user):
-        """Service raises CMSError when user doesn't own range (via get_range)."""
+        """Service raises CMSError when user doesn't own range."""
         from cms.exceptions import CMSError
+        from cms.models import RangeInstance
 
+        # Create mock instance owned by different user
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=999, scenario_id="basic")
         with (
-            patch.object(services, "get_range", side_effect=CMSError("access denied")),
-            pytest.raises(CMSError),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            pytest.raises(CMSError, match="Range 42 not found"),
         ):
             services.destroy_range(user, 42)
 
@@ -1032,7 +1047,7 @@ class TestDestroyRange:
         mock_range.agent = None
         mock_range.save = Mock()
         with (
-            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch("cms.services.engine_destroy_range", side_effect=EngineError("No range to destroy")),
             pytest.raises(EngineError, match="No range to destroy"),
         ):
@@ -1046,7 +1061,7 @@ class TestDestroyRange:
         mock_range.agent = None
         mock_range.save = Mock()
         with (
-            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch("cms.services.engine_destroy_range", side_effect=Exception("DB connection failed")),
             pytest.raises(Exception, match="DB connection failed"),
         ):

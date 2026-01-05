@@ -199,6 +199,11 @@ resource "aws_ssm_document" "portal_deploy" {
         description = "Lifecycle action token (empty for CI/CD triggered deploys)"
         default     = ""
       }
+      TargetInstanceId = {
+        type        = "String"
+        description = "Target instance ID from lifecycle event (empty to run on any instance)"
+        default     = ""
+      }
     }
     mainSteps = [
       {
@@ -218,10 +223,17 @@ resource "aws_ssm_document" "portal_deploy" {
             "LIFECYCLE_HOOK_NAME='{{LifecycleHookName}}'",
             "ASG_NAME='{{AutoScalingGroupName}}'",
             "LIFECYCLE_ACTION_TOKEN='{{LifecycleActionToken}}'",
+            "TARGET_INSTANCE_ID='{{TargetInstanceId}}'",
             "",
             "# Get instance ID from metadata",
             "TOKEN=$(curl -s -X PUT \"http://169.254.169.254/latest/api/token\" -H \"X-aws-ec2-metadata-token-ttl-seconds: 21600\")",
             "INSTANCE_ID=$(curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/instance-id)",
+            "",
+            "# Skip if this instance is not the target (for tag-based targeting)",
+            "if [ -n \"$TARGET_INSTANCE_ID\" ] && [ \"$TARGET_INSTANCE_ID\" != \"$INSTANCE_ID\" ]; then",
+            "  echo \"Skipping - this instance ($INSTANCE_ID) is not the target ($TARGET_INSTANCE_ID)\"",
+            "  exit 0",
+            "fi",
             "",
             "echo \"Starting portal deployment on instance $INSTANCE_ID\"",
             "",

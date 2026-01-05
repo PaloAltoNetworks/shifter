@@ -37,3 +37,8 @@ output "log_group_name" {
   description = "Name of the CloudWatch log group for portal containers"
   value       = aws_cloudwatch_log_group.portal.name
 }
+
+output "lifecycle_hook_name" {
+  description = "Name of the ASG lifecycle hook (empty if not enabled)"
+  value       = var.enable_autoscaling && var.ssm_document_name != "" ? aws_autoscaling_lifecycle_hook.launch[0].name : ""
+}

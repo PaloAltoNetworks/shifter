@@ -720,7 +720,9 @@ resource "aws_iam_policy" "ssm_cognito" {
           # Range parameters for DC config
           "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/*/range/*",
           # AMI IDs for Kali, victim, windows, dc
-          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/ami/*"
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/ami/*",
+          # Portal deployment parameters (image tag, config)
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/shifter/*/portal/*"
         ]
       },
       {

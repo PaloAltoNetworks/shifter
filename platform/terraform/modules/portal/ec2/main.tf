@@ -377,7 +377,8 @@ resource "aws_launch_template" "this" {
   tag_specifications {
     resource_type = "instance"
     tags = merge(local.common_tags, {
-      Name = "${var.name_prefix}-ec2"
+      Name        = "${var.name_prefix}-ec2"
+      ShifterRole = "shifter-platform"
     })
   }
 
@@ -550,7 +551,8 @@ resource "aws_instance" "this" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-ec2"
+    Name        = "${var.name_prefix}-ec2"
+    ShifterRole = "shifter-platform"
   })
 
   lifecycle {
@@ -650,8 +652,8 @@ resource "aws_cloudwatch_event_target" "ssm_deploy" {
   role_arn = aws_iam_role.eventbridge_ssm[0].arn
 
   run_command_targets {
-    key    = "InstanceIds"
-    values = ["$.detail.EC2InstanceId"]
+    key    = "tag:ShifterRole"
+    values = ["shifter-platform"]
   }
 
   input_transformer {
@@ -666,7 +668,8 @@ resource "aws_cloudwatch_event_target" "ssm_deploy" {
 {
   "LifecycleHookName": ["<hook_name>"],
   "AutoScalingGroupName": ["<asg_name>"],
-  "LifecycleActionToken": ["<action_token>"]
+  "LifecycleActionToken": ["<action_token>"],
+  "TargetInstanceId": ["<instance_id>"]
 }
 EOF
   }

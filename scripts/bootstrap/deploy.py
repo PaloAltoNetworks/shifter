@@ -487,6 +487,21 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
         error(f"IAM Terraform directory not found: {iam_tf_dir}")
         sys.exit(1)
 
+    # Update the backend config file for this environment with the new bucket/table
+    backend_config_file = iam_tf_dir / f"{config.env}.s3.tfbackend"
+    backend_config_content = f"""bucket         = "{bucket_name}"
+key            = "global/iam/terraform.tfstate"
+region         = "{config.region}"
+dynamodb_table = "{table_name}"
+encrypt        = true
+"""
+    if not dry_run:
+        info(f"Updating backend config: {backend_config_file}")
+        backend_config_file.write_text(backend_config_content)
+        success(f"Backend config updated for {config.env}")
+    else:
+        info(f"[DRY-RUN] Would update {backend_config_file}")
+
     original_dir = os.getcwd()
     os.chdir(iam_tf_dir)
 

@@ -25,6 +25,7 @@ jobs:
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
+      skip_quality: ${{ steps.skip.outputs.skip_quality }}
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +72,21 @@ jobs:
           echo "environment=$ENV" >> $GITHUB_OUTPUT
           echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> $GITHUB_OUTPUT
 
+      - name: Check for skip quality
+        id: skip
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Only allow [skip quality] on PRs to dev branch
+          SKIP="false"
+          if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]; then
+            if echo "$PR_TITLE" | grep -qi "\[skip quality\]"; then
+              SKIP="true"
+              echo "::warning::Skipping quality checks (PR title contains [skip quality])"
+            fi
+          fi
+          echo "skip_quality=$SKIP" >> $GITHUB_OUTPUT
+
   # ============================================================================
   # DEPENDENCY CHAIN: Core -> Range -> Platform
   # Each component waits for its upstream dependency before running
@@ -80,19 +96,21 @@ jobs:
     name: Quality
     needs: changes
     if: |
-      needs.changes.outputs.core == 'true' ||
-      needs.changes.outputs.range == 'true' ||
-      needs.changes.outputs.shifter_engine == 'true' ||
-      needs.changes.outputs.shifter_platform == 'true' ||
-      github.event_name == 'workflow_dispatch'
+      needs.changes.outputs.skip_quality != 'true' &&
+      (needs.changes.outputs.core == 'true' ||
+       needs.changes.outputs.range == 'true' ||
+       needs.changes.outputs.shifter_engine == 'true' ||
+       needs.changes.outputs.shifter_platform == 'true' ||
+       github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/_quality.yml
 
   core:
     name: Core
     needs: [changes, quality]
     if: |
+      always() &&
       (needs.changes.outputs.core == 'true' || github.event_name == 'workflow_dispatch') &&
-      needs.quality.result == 'success'
+      (needs.quality.result == 'success' || needs.quality.result == 'skipped')
     uses: ./.github/workflows/_core.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
@@ -108,7 +126,7 @@ jobs:
       always() &&
       (needs.changes.outputs.range == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
-      needs.quality.result == 'success'
+      (needs.quality.result == 'success' || needs.quality.result == 'skipped')
     uses: ./.github/workflows/_range.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
@@ -124,7 +142,7 @@ jobs:
       always() &&
       (needs.changes.outputs.shifter_engine == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
-      needs.quality.result == 'success'
+      (needs.quality.result == 'success' || needs.quality.result == 'skipped')
     uses: ./.github/workflows/_shifter-engine.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
@@ -141,7 +159,7 @@ jobs:
       (needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&
       (needs.shifter-engine.result == 'success' || needs.shifter-engine.result == 'skipped') &&
-      needs.quality.result == 'success'
+      (needs.quality.result == 'success' || needs.quality.result == 'skipped')
     uses: ./.github/workflows/_shifter-platform.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}

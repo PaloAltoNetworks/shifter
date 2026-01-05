@@ -160,3 +160,31 @@ variable "sqs_queue_urls" {
   description = "Map of consumer name to SQS queue URL for message consumers"
   type        = map(string)
 }
+
+# ------------------------------------------------------------------------------
+# SSM Deployment Variables
+# ------------------------------------------------------------------------------
+
+variable "ssm_document_name" {
+  description = "Name of the SSM document for portal deployment"
+  type        = string
+  default     = ""
+}
+
+variable "ssm_document_arn" {
+  description = "ARN of the SSM document for portal deployment (for IAM permissions)"
+  type        = string
+  default     = ""
+}
+
+variable "ssm_parameter_store_prefix" {
+  description = "Parameter Store prefix for deployment config (for IAM permissions)"
+  type        = string
+  default     = ""
+}
+
+variable "lifecycle_hook_heartbeat_timeout" {
+  description = "Heartbeat timeout for ASG lifecycle hook in seconds (max 7200)"
+  type        = number
+  default     = 600
+}

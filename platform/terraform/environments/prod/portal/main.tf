@@ -227,6 +227,44 @@ module "messaging" {
 }
 
 # ------------------------------------------------------------------------------
+# SSM Deployment (Parameter Store + SSM Document)
+# ------------------------------------------------------------------------------
+
+module "ssm" {
+  source = "../../../modules/portal/ssm"
+
+  environment = var.environment
+  name_prefix = local.name_prefix
+  aws_region  = var.aws_region
+  tags        = var.tags
+
+  # ECR configuration
+  ecr_registry        = split("/", data.terraform_remote_state.foundation.outputs.portal_ecr_url)[0]
+  ecr_repository_name = split("/", data.terraform_remote_state.foundation.outputs.portal_ecr_url)[1]
+
+  # Secrets Manager ARNs
+  db_secret_arn      = module.rds.db_credentials_secret_arn
+  app_secret_arn     = aws_secretsmanager_secret.app.arn
+  cognito_secret_arn = module.cognito.cognito_secret_arn
+
+  # Application configuration
+  domain_name    = var.domain_name
+  s3_bucket_name = var.user_storage_bucket
+
+  # Pulumi provisioner configuration
+  pulumi_ecs_cluster_arn       = module.pulumi_provisioner.ecs_cluster_arn
+  pulumi_task_definition_arn   = module.pulumi_provisioner.task_definition_arn
+  pulumi_ecs_security_group_id = module.pulumi_provisioner.ecs_security_group_id
+  pulumi_private_subnet_ids    = join(",", module.vpc.private_subnet_ids)
+
+  # Messaging configuration
+  sqs_cms_url    = module.messaging.sqs_queue_urls["cms"]
+  sqs_engine_url = module.messaging.sqs_queue_urls["engine"]
+  sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
+  redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
+}
+
+# ------------------------------------------------------------------------------
 # EC2
 # ------------------------------------------------------------------------------
 
@@ -271,6 +309,11 @@ module "ec2" {
   # Messaging
   sqs_queue_arns = values(module.messaging.sqs_queue_arns)
   sqs_queue_urls = module.messaging.sqs_queue_urls
+
+  # SSM deployment (lifecycle hook + EventBridge)
+  ssm_document_name          = module.ssm.document_name
+  ssm_document_arn           = module.ssm.document_arn
+  ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
 
   tags = var.tags
 }

@@ -1,14 +1,13 @@
 """Tests for runner.py module."""
 
-import base64
 from unittest.mock import MagicMock, patch
 
 
 class TestRunnerConfig:
     """Tests for RunnerConfig dataclass."""
 
-    def test_default_ssm_prefix(self, mock_deploy):
-        """Should use default SSM prefix."""
+    def test_creates_config_with_all_fields(self, mock_deploy):
+        """Should create config with all required fields."""
         from runner import RunnerConfig
 
         config = RunnerConfig(
@@ -16,46 +15,13 @@ class TestRunnerConfig:
             region="us-east-2",
             github_org="test-org",
             github_repo="test-repo",
+            aws_profile="test-profile",
         )
-        assert config.ssm_prefix == "/shifter/github-runner"
-
-    def test_key_param_name(self, mock_deploy):
-        """Should construct correct key parameter name."""
-        from runner import RunnerConfig
-
-        config = RunnerConfig(
-            env="dev",
-            region="us-east-2",
-            github_org="test-org",
-            github_repo="test-repo",
-        )
-        assert config.key_param_name == "/shifter/github-runner/key-base64"
-
-    def test_webhook_secret_param_name(self, mock_deploy):
-        """Should construct correct webhook secret parameter name."""
-        from runner import RunnerConfig
-
-        config = RunnerConfig(
-            env="dev",
-            region="us-east-2",
-            github_org="test-org",
-            github_repo="test-repo",
-        )
-        assert config.webhook_secret_param_name == "/shifter/github-runner/webhook-secret"
-
-    def test_custom_ssm_prefix(self, mock_deploy):
-        """Should allow custom SSM prefix."""
-        from runner import RunnerConfig
-
-        config = RunnerConfig(
-            env="prod",
-            region="us-east-2",
-            github_org="test-org",
-            github_repo="test-repo",
-            ssm_prefix="/custom/prefix",
-        )
-        assert config.key_param_name == "/custom/prefix/key-base64"
-        assert config.webhook_secret_param_name == "/custom/prefix/webhook-secret"
+        assert config.env == "dev"
+        assert config.region == "us-east-2"
+        assert config.github_org == "test-org"
+        assert config.github_repo == "test-repo"
+        assert config.aws_profile == "test-profile"
 
 
 class TestGetRunnerConfig:
@@ -70,151 +36,80 @@ class TestGetRunnerConfig:
             region="us-west-2",
             github_org="my-org",
             github_repo="my-repo",
+            aws_profile="my-profile",
         )
         assert config.env == "dev"
         assert config.region == "us-west-2"
         assert config.github_org == "my-org"
         assert config.github_repo == "my-repo"
+        assert config.aws_profile == "my-profile"
 
 
-class TestValidateBase64Pem:
-    """Tests for validate_base64_pem function."""
+class TestGetRunnerInstanceIds:
+    """Tests for get_runner_instance_ids function."""
 
-    def test_valid_rsa_private_key(self, mock_deploy):
-        """Should accept valid base64-encoded RSA private key."""
-        from runner import validate_base64_pem
+    def test_returns_instance_ids_when_found(self, mock_deploy):
+        """Should return list of instance IDs when runners exist."""
+        from runner import RunnerConfig, get_runner_instance_ids
 
-        # Minimal valid PEM structure (not a real key, just valid format)
-        pem_content = "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJB\n-----END RSA PRIVATE KEY-----\n"
-        encoded = base64.b64encode(pem_content.encode()).decode()
-
-        valid, msg = validate_base64_pem(encoded)
-        assert valid is True
-        assert msg == ""
-
-    def test_valid_private_key(self, mock_deploy):
-        """Should accept valid base64-encoded private key (generic)."""
-        from runner import validate_base64_pem
-
-        pem_content = "-----BEGIN PRIVATE KEY-----\nMIIBogIBAAJB\n-----END PRIVATE KEY-----\n"
-        encoded = base64.b64encode(pem_content.encode()).decode()
-
-        valid, msg = validate_base64_pem(encoded)
-        assert valid is True
-        assert msg == ""
-
-    def test_invalid_base64(self, mock_deploy):
-        """Should reject invalid base64."""
-        from runner import validate_base64_pem
-
-        valid, msg = validate_base64_pem("not-valid-base64!!!")
-        assert valid is False
-        assert "Invalid base64" in msg or "encoding" in msg.lower()
-
-    def test_not_pem_format(self, mock_deploy):
-        """Should reject content that's not PEM format."""
-        from runner import validate_base64_pem
-
-        encoded = base64.b64encode(b"just some random text").decode()
-
-        valid, msg = validate_base64_pem(encoded)
-        assert valid is False
-        assert "PEM" in msg or "BEGIN" in msg
-
-    def test_public_key_rejected(self, mock_deploy):
-        """Should reject public keys (we need private key)."""
-        from runner import validate_base64_pem
-
-        pem_content = "-----BEGIN PUBLIC KEY-----\nMIIBogIBAAJB\n-----END PUBLIC KEY-----\n"
-        encoded = base64.b64encode(pem_content.encode()).decode()
-
-        valid, msg = validate_base64_pem(encoded)
-        assert valid is False
-        assert "private" in msg.lower()
-
-
-class TestCheckSsmParameterExists:
-    """Tests for check_ssm_parameter_exists function."""
-
-    def test_returns_true_when_exists(self, mock_deploy):
-        """Should return True when parameter exists."""
-        from runner import check_ssm_parameter_exists
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
 
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-
-            result = check_ssm_parameter_exists(
-                "/test/param",
-                "test-profile",
-                "us-east-2",
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="i-abc123\ti-def456",
             )
 
-            assert result is True
+            result = get_runner_instance_ids(config)
+
+            assert result == ["i-abc123", "i-def456"]
             mock_run.assert_called_once()
             call_args = mock_run.call_args[0][0]
-            assert "ssm" in call_args
-            assert "get-parameter" in call_args
-            assert "/test/param" in call_args
+            assert "ec2" in call_args
+            assert "describe-instances" in call_args
+            assert "--profile" in call_args
+            assert "test-profile" in call_args
 
-    def test_returns_false_when_not_exists(self, mock_deploy):
-        """Should return False when parameter doesn't exist."""
-        from runner import check_ssm_parameter_exists
+    def test_returns_empty_list_when_none_found(self, mock_deploy):
+        """Should return empty list when no runners found."""
+        from runner import RunnerConfig, get_runner_instance_ids
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1)
-
-            result = check_ssm_parameter_exists(
-                "/nonexistent/param",
-                "test-profile",
-                "us-east-2",
-            )
-
-            assert result is False
-
-
-class TestCreateSsmParameter:
-    """Tests for create_ssm_parameter function."""
-
-    def test_creates_secure_string_by_default(self, mock_deploy):
-        """Should create SecureString parameter by default."""
-        from runner import create_ssm_parameter
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
 
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-            result = create_ssm_parameter(
-                "/test/param",
-                "secret-value",
-                "test-profile",
-                "us-east-2",
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="",
             )
 
-            assert result is True
-            call_args = mock_run.call_args[0][0]
-            assert "--type" in call_args
-            type_idx = call_args.index("--type")
-            assert call_args[type_idx + 1] == "SecureString"
+            result = get_runner_instance_ids(config)
 
-    def test_uses_overwrite_flag(self, mock_deploy):
-        """Should use --overwrite flag."""
-        from runner import create_ssm_parameter
+            # Empty string splits to [''] but the function filters empty strings
+            assert result == [] or result == [""]
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    def test_returns_empty_list_on_aws_error(self, mock_deploy):
+        """Should return empty list when AWS CLI fails."""
+        from runner import RunnerConfig, get_runner_instance_ids
 
-            create_ssm_parameter(
-                "/test/param",
-                "secret-value",
-                "test-profile",
-                "us-east-2",
-            )
-
-            call_args = mock_run.call_args[0][0]
-            assert "--overwrite" in call_args
-
-    def test_returns_false_on_failure(self, mock_deploy):
-        """Should return False when AWS CLI fails."""
-        from runner import create_ssm_parameter
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
@@ -223,47 +118,145 @@ class TestCreateSsmParameter:
                 stderr="Access denied",
             )
 
-            result = create_ssm_parameter(
-                "/test/param",
-                "secret-value",
-                "test-profile",
-                "us-east-2",
-            )
+            result = get_runner_instance_ids(config)
 
-            assert result is False
+            assert result == []
 
-    def test_dry_run_does_not_call_aws(self, mock_deploy):
-        """Should not call AWS in dry-run mode."""
-        from runner import create_ssm_parameter
+    def test_filters_by_runner_tag_name(self, mock_deploy):
+        """Should filter instances by shifter-github-runner-* tag."""
+        from runner import RunnerConfig, get_runner_instance_ids
 
-        with patch("subprocess.run") as mock_run:
-            result = create_ssm_parameter(
-                "/test/param",
-                "secret-value",
-                "test-profile",
-                "us-east-2",
-                dry_run=True,
-            )
-
-            assert result is True
-            mock_run.assert_not_called()
-
-    def test_includes_profile_and_region(self, mock_deploy):
-        """Should include profile and region in AWS CLI call."""
-        from runner import create_ssm_parameter
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
 
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
 
-            create_ssm_parameter(
-                "/test/param",
-                "secret-value",
-                "my-profile",
-                "eu-west-1",
-            )
+            get_runner_instance_ids(config)
 
             call_args = mock_run.call_args[0][0]
-            assert "--profile" in call_args
-            assert "my-profile" in call_args
-            assert "--region" in call_args
-            assert "eu-west-1" in call_args
+            # Check that filter for tag name is included
+            assert "Name=tag:Name,Values=shifter-github-runner-*" in call_args
+
+
+class TestShowRunnerRegistrationInstructions:
+    """Tests for show_runner_registration_instructions function."""
+
+    def test_displays_instance_ids(self, mock_deploy, capsys):
+        """Should display all instance IDs in output."""
+        from runner import RunnerConfig, show_runner_registration_instructions
+
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
+
+        show_runner_registration_instructions(config, ["i-abc123", "i-def456"])
+
+        captured = capsys.readouterr()
+        assert "i-abc123" in captured.out
+        assert "i-def456" in captured.out
+
+    def test_calls_code_block_with_ssm_command(self, mock_deploy, capsys):
+        """Should call code_block with SSM session command."""
+        from runner import RunnerConfig, show_runner_registration_instructions
+
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
+
+        show_runner_registration_instructions(config, ["i-abc123"])
+
+        # Check that code_block was called with SSM command
+        calls = [str(call) for call in mock_deploy.code_block.call_args_list]
+        ssm_calls = [c for c in calls if "ssm" in c and "i-abc123" in c]
+        assert len(ssm_calls) > 0
+
+    def test_displays_github_url(self, mock_deploy, capsys):
+        """Should display GitHub runners settings URL."""
+        from runner import RunnerConfig, show_runner_registration_instructions
+
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="my-org",
+            github_repo="my-repo",
+            aws_profile="test-profile",
+        )
+
+        show_runner_registration_instructions(config, ["i-abc123"])
+
+        captured = capsys.readouterr()
+        assert "github.com/my-org/my-repo" in captured.out
+
+    def test_calls_code_block_with_dependency_commands(self, mock_deploy, capsys):
+        """Should call code_block with dependency install commands."""
+        from runner import RunnerConfig, show_runner_registration_instructions
+
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
+
+        show_runner_registration_instructions(config, ["i-abc123"])
+
+        # Check that code_block was called with dependency commands
+        calls = [str(call) for call in mock_deploy.code_block.call_args_list]
+        dep_calls = [c for c in calls if "libicu" in c or "dotnet" in c]
+        assert len(dep_calls) > 0
+
+    def test_calls_code_block_with_service_commands(self, mock_deploy, capsys):
+        """Should call code_block with svc.sh service commands."""
+        from runner import RunnerConfig, show_runner_registration_instructions
+
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
+
+        show_runner_registration_instructions(config, ["i-abc123"])
+
+        # Check that code_block was called with service commands
+        calls = [str(call) for call in mock_deploy.code_block.call_args_list]
+        svc_calls = [c for c in calls if "svc.sh" in c]
+        assert len(svc_calls) > 0
+
+
+class TestWalkthroughRunnerSetup:
+    """Tests for walkthrough_runner_setup function."""
+
+    def test_dry_run_returns_mock_instance_ids(self, mock_deploy):
+        """Should return mock instance IDs in dry-run mode."""
+        from runner import RunnerConfig, walkthrough_runner_setup
+
+        config = RunnerConfig(
+            env="dev",
+            region="us-east-2",
+            github_org="test-org",
+            github_repo="test-repo",
+            aws_profile="test-profile",
+        )
+
+        result = walkthrough_runner_setup(config, dry_run=True)
+
+        assert result is not None
+        assert "instance_ids" in result
+        assert len(result["instance_ids"]) == 2

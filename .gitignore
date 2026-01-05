@@ -340,6 +340,9 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# GitHub Runner Lambda zips (downloaded by terraform module)
+platform/terraform/global/github-runner/*.zip
+
 # QRadar files
 files/*
 *.iso

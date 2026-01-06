@@ -326,8 +326,17 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
         logger.error("No IP address for instance: %s", instance_uuid)
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
+    # Determine SSH username based on OS type
+    os_type = instance.get("os_type", "").lower()
+    if os_type == "kali":
+        username = "kali"
+    elif os_type == "amazon-linux":
+        username = "ec2-user"
+    else:
+        username = "ubuntu"  # Default for ubuntu and other Linux distros
+
     return SSHConnection(
         host=host,
-        username="ubuntu",  # Default, could be enhanced based on OS type
+        username=username,
         private_key=ssh_key,
     )

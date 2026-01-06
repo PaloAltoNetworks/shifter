@@ -30,6 +30,10 @@ class DashboardManager {
         this.provisioningTimeoutMs = options.provisioningTimeoutMs || 60 * 60 * 1000;
         this.provisioningTimer = null;
 
+        // Status polling fallback (catches missed WebSocket updates)
+        this.statusPollInterval = null;
+        this.statusPollDelay = 30000; // 30 seconds
+
         // UI Elements
         this.noRangeState = document.getElementById('no-range-state');
         this.provisioningState = document.getElementById('provisioning-state');
@@ -487,6 +491,9 @@ class DashboardManager {
             this._handleProvisioningTimeout();
         }, this.provisioningTimeoutMs);
 
+        // Start polling fallback for missed WebSocket updates
+        this._startStatusPolling();
+
         this.statusSocket.onopen = () => {
             console.log('WebSocket connected for range status');
             this.reconnectAttempts = 0;
@@ -580,6 +587,7 @@ class DashboardManager {
      */
     _closeStatusSocket(resetRetry = true) {
         this._clearProvisioningTimer();
+        this._stopStatusPolling();
         if (this.statusSocket) {
             this.statusSocket.onclose = null; // Prevent reconnect attempt
             this.statusSocket.close(1000, 'Client closing');
@@ -598,6 +606,46 @@ class DashboardManager {
         if (this.provisioningTimer) {
             clearTimeout(this.provisioningTimer);
             this.provisioningTimer = null;
+        }
+    }
+
+    /**
+     * Start periodic polling for range status as fallback for missed WebSocket updates.
+     * Polling continues even when tab is hidden to ensure status is fresh when user returns.
+     */
+    _startStatusPolling() {
+        // Don't start if already polling
+        if (this.statusPollInterval) return;
+
+        this.statusPollInterval = setInterval(async () => {
+            // Skip if no current range or not in transitional state
+            if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {
+                this._stopStatusPolling();
+                return;
+            }
+
+            const data = await this._fetchJson(this.rangeUrl, 'Status poll failed');
+            if (!data || !data.range) return;
+
+            const polledStatus = data.range.status;
+
+            // If we discovered a stable state via poll (missed WebSocket update)
+            if (!this._isTransitionalState(polledStatus)) {
+                console.log(`Poll detected stable state: ${polledStatus}`);
+                this.currentRange = data.range;
+                this._updateUI();
+                this._closeStatusSocket(); // This also stops polling
+            }
+        }, this.statusPollDelay);
+    }
+
+    /**
+     * Stop periodic status polling.
+     */
+    _stopStatusPolling() {
+        if (this.statusPollInterval) {
+            clearInterval(this.statusPollInterval);
+            this.statusPollInterval = null;
         }
     }
 

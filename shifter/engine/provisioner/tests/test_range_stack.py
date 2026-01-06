@@ -23,13 +23,13 @@ from config import InstanceConfig, RangeConfig
 
 
 @pytest.fixture
-def mock_cleanup_orphaned_subnet():
-    """Mock _cleanup_orphaned_subnet for RangeStack tests.
+def mock_find_free_subnet():
+    """Mock _find_free_subnet for RangeStack tests.
 
-    The cleanup function makes real AWS API calls, which we don't want
+    The subnet finder makes real AWS API calls, which we don't want
     during Pulumi component tests.
     """
-    with patch("components.network._cleanup_orphaned_subnet"):
+    with patch("components.network._find_free_subnet", return_value="10.1.8.0/24"):
         yield
 
 
@@ -61,7 +61,7 @@ class TestRangeStackComposition:
     """Tests for RangeStack component composition."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -76,7 +76,6 @@ class TestRangeStackComposition:
         return RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -134,7 +133,7 @@ class TestRangeStackComposition:
             stack = RangeStack("test-range", config=basic_config)
 
             # The network should use the correct CIDR prefix
-            # 10.1.0.0/16 -> 10.1, with subnet_index=5 -> 10.1.6.0/24
+            # 10.1.0.0/16 -> 10.1
             def check_cidr(cidr):
                 assert cidr.startswith("10.1.")
 
@@ -160,7 +159,7 @@ class TestRangeStackSecurityGroupAssignment:
     """Tests for security group assignment logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -177,7 +176,6 @@ class TestRangeStackSecurityGroupAssignment:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -215,7 +213,6 @@ class TestRangeStackSecurityGroupAssignment:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -253,7 +250,7 @@ class TestRangeStackAmiSelection:
     """Tests for AMI selection logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -270,7 +267,6 @@ class TestRangeStackAmiSelection:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -307,7 +303,6 @@ class TestRangeStackAmiSelection:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -348,7 +343,6 @@ class TestRangeStackAmiSelection:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -386,7 +380,7 @@ class TestRangeStackMultipleInstances:
     """Tests for multiple instance handling and indexing."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -403,7 +397,6 @@ class TestRangeStackMultipleInstances:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -437,7 +430,6 @@ class TestRangeStackMultipleInstances:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="victim", os_type="ubuntu", instance_type="t3.micro"),
@@ -471,7 +463,6 @@ class TestRangeStackMultipleInstances:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -507,7 +498,6 @@ class TestRangeStackMultipleInstances:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],  # Empty!
             vpc_id="vpc-12345",
@@ -535,7 +525,7 @@ class TestRangeStackCidrPrefixExtraction:
     """Tests for CIDR prefix extraction logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -552,7 +542,6 @@ class TestRangeStackCidrPrefixExtraction:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],
             vpc_id="vpc-12345",
@@ -585,7 +574,6 @@ class TestRangeStackCidrPrefixExtraction:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],
             vpc_id="vpc-12345",
@@ -602,7 +590,10 @@ class TestRangeStackCidrPrefixExtraction:
             availability_zone="us-east-2a",
         )
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch("components.network._find_free_subnet", return_value="172.16.8.0/24"),
+        ):
             stack = RangeStack("test-range", config=config)
 
             def check_cidr(cidr):
@@ -618,7 +609,6 @@ class TestRangeStackCidrPrefixExtraction:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],
             vpc_id="vpc-12345",
@@ -635,7 +625,10 @@ class TestRangeStackCidrPrefixExtraction:
             availability_zone="us-east-2a",
         )
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch("components.network._find_free_subnet", return_value="192.168.8.0/24"),
+        ):
             stack = RangeStack("test-range", config=config)
 
             def check_cidr(cidr):
@@ -655,7 +648,7 @@ class TestRangeStackDCDependencyOrdering:
     """
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_dc_setup, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_dc_setup, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -686,7 +679,6 @@ class TestRangeStackDCDependencyOrdering:
         return RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 # Intentionally put victim first to test reordering
@@ -780,7 +772,6 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -836,7 +827,6 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -881,7 +871,6 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=99,
             user_id=1,
-            subnet_index=5,
             environment="prod",
             instances=[
                 InstanceConfig(
@@ -951,7 +940,6 @@ class TestDCInstanceOrdering(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -1094,7 +1082,6 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -1260,7 +1247,6 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -1456,7 +1442,6 @@ class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),

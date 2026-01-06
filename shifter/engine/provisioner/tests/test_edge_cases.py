@@ -50,7 +50,6 @@ class TestLoadConfigEdgeCases:
             return_value={
                 "id": 0,
                 "user_id": 1,
-                "subnet_index": 0,
                 "range_config": {
                     "scenario_id": "basic",
                     "user_id": 1,
@@ -66,7 +65,6 @@ class TestLoadConfigEdgeCases:
         result = load_config()
 
         assert result.range_id == 0
-        assert result.subnet_index == 0
         assert len(result.instances) == 2
 
     def test_load_config_large_range_id(self, mock_pulumi_config, mocker, mock_boto3_clients):
@@ -79,7 +77,6 @@ class TestLoadConfigEdgeCases:
             return_value={
                 "id": 999999,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {"scenario_id": "basic", "user_id": 1, "instances": []},
                 "ngfw_enabled": False,
             },
@@ -99,7 +96,6 @@ class TestLoadConfigEdgeCases:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {"scenario_id": "basic", "user_id": 1, "instances": instances},
                 "ngfw_enabled": False,
             },
@@ -123,7 +119,6 @@ class TestLoadConfigEdgeCases:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {"scenario_id": "basic", "user_id": 1, "instances": instances},
                 "ngfw_enabled": False,
             },
@@ -142,7 +137,6 @@ class TestRangeConfigBoundaryValues:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=0,
             environment="dev",
             instances=[],
             vpc_id="vpc-12345",
@@ -163,7 +157,6 @@ class TestRangeConfigBoundaryValues:
         config = RangeConfig(
             range_id=42,
             user_id=0,
-            subnet_index=0,
             environment="dev",
             instances=[],
             vpc_id="vpc-12345",

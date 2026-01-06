@@ -357,3 +357,127 @@ class TestConnectTerminal:
             connect_terminal(mock_user, 42, "missing-uuid")
 
         assert "error" in caplog.text.lower() or "not found" in caplog.text.lower()
+
+    # -------------------------------------------------------------------------
+    # SSH username based on os_type
+    # -------------------------------------------------------------------------
+
+    def test_uses_kali_username_for_kali_os_type(self):
+        """Service uses 'kali' username when os_type is 'kali'."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "kali-uuid-123",
+            "role": "attacker",
+            "os_type": "kali",
+            "private_ip": "10.1.1.10",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "kali-uuid-123")
+            assert result.username == "kali"
+
+    def test_uses_ubuntu_username_for_ubuntu_os_type(self):
+        """Service uses 'ubuntu' username when os_type is 'ubuntu'."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "ubuntu-uuid-456",
+            "role": "victim",
+            "os_type": "ubuntu",
+            "private_ip": "10.1.1.20",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "ubuntu-uuid-456")
+            assert result.username == "ubuntu"
+
+    def test_uses_ec2_user_username_for_amazon_linux_os_type(self):
+        """Service uses 'ec2-user' username when os_type is 'amazon-linux'."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "al-uuid-789",
+            "role": "victim",
+            "os_type": "amazon-linux",
+            "private_ip": "10.1.1.30",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "al-uuid-789")
+            assert result.username == "ec2-user"
+
+    def test_defaults_to_ubuntu_when_os_type_missing(self):
+        """Service defaults to 'ubuntu' username when os_type is not set."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "no-os-uuid",
+            "role": "victim",
+            "private_ip": "10.1.1.40",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+            # os_type intentionally omitted
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "no-os-uuid")
+            assert result.username == "ubuntu"
+
+    def test_handles_uppercase_os_type(self):
+        """Service handles uppercase os_type values (case-insensitive)."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "upper-uuid",
+            "role": "attacker",
+            "os_type": "KALI",
+            "private_ip": "10.1.1.50",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "upper-uuid")
+            assert result.username == "kali"

@@ -299,7 +299,6 @@ def sample_range_config(sample_instance_config_attacker, sample_instance_config_
     return RangeConfig(
         range_id=42,
         user_id=1,
-        subnet_index=5,
         environment="dev",
         instances=[sample_instance_config_attacker, sample_instance_config_victim],
         vpc_id="vpc-12345",
@@ -323,7 +322,6 @@ def sample_range_config_multi_instance():
     return RangeConfig(
         range_id=99,
         user_id=2,
-        subnet_index=10,
         environment="prod",
         instances=[
             InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -546,14 +544,17 @@ def mock_env_vars_minimal(mocker):
 
 @pytest.fixture
 def sample_db_range_row():
-    """Sample database row for a range with agent."""
+    """Sample database row for a range with instances."""
     return (
         42,  # id
         1,  # user_id
-        5,  # subnet_index
-        1,  # agent_id
-        None,  # instance_config (uses defaults)
-        "agents/xdr-agent.tar.gz",  # agent_s3_key
+        {  # range_config
+            "instances": [
+                {"role": "attacker", "os_type": "kali"},
+                {"role": "victim", "os_type": "ubuntu", "agent": {"s3_key": "agents/xdr-agent.tar.gz"}},
+            ]
+        },
+        False,  # ngfw_enabled
     )
 
 
@@ -563,10 +564,13 @@ def sample_db_range_row_no_agent():
     return (
         43,  # id
         2,  # user_id
-        6,  # subnet_index
-        None,  # agent_id
-        None,  # instance_config
-        None,  # agent_s3_key
+        {  # range_config
+            "instances": [
+                {"role": "attacker", "os_type": "kali"},
+                {"role": "victim", "os_type": "ubuntu"},
+            ]
+        },
+        False,  # ngfw_enabled
     )
 
 
@@ -576,26 +580,14 @@ def sample_db_range_row_custom_config():
     return (
         44,  # id
         3,  # user_id
-        7,  # subnet_index
-        None,  # agent_id (per-instance)
-        [
-            {"role": "attacker", "os": "kali", "instance_type": "t3.medium"},
-            {
-                "role": "victim",
-                "os": "ubuntu",
-                "instance_type": "t3.small",
-                "agent_id": 1,
-                "agent_s3_key": "agents/custom.tar.gz",
-            },
-            {
-                "role": "victim",
-                "os": "windows",
-                "instance_type": "t3.large",
-                "agent_id": 2,
-                "agent_s3_key": "agents/custom.msi",
-            },
-        ],
-        None,  # agent_s3_key (per-instance)
+        {  # range_config
+            "instances": [
+                {"role": "attacker", "os_type": "kali"},
+                {"role": "victim", "os_type": "ubuntu", "agent": {"s3_key": "agents/custom.tar.gz"}},
+                {"role": "victim", "os_type": "windows", "agent": {"s3_key": "agents/custom.msi"}},
+            ]
+        },
+        False,  # ngfw_enabled
     )
 
 

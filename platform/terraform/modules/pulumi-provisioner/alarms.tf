@@ -74,3 +74,31 @@ resource "aws_cloudwatch_metric_alarm" "range_launch_failures" {
     Name = "${var.name_prefix}-range-launch-failures-${var.environment}"
   })
 }
+
+# ------------------------------------------------------------------------------
+# CloudWatch Alarm for Subnet Exhaustion
+# CRITICAL: This indicates the VPC has no free /24 subnets for new ranges.
+# This is user-impacting and likely indicates orphaned subnets or capacity issues.
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "subnet_exhaustion" {
+  count = var.enable_alarms ? 1 : 0
+
+  alarm_name          = "${var.name_prefix}-subnet-exhaustion-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "SubnetExhaustion"
+  namespace           = "Shifter/RangeProvisioning"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "CRITICAL: VPC subnet exhaustion in ${var.environment}. No free /24 subnets available for range provisioning. Users cannot launch new ranges. Investigate immediately for orphaned subnets or capacity issues."
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = var.alarm_email != "" ? [aws_sns_topic.range_launch_failures[0].arn] : []
+
+  tags = merge(local.common_tags, {
+    Name     = "${var.name_prefix}-subnet-exhaustion-${var.environment}"
+    Severity = "critical"
+  })
+}

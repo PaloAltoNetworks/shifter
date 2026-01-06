@@ -4,14 +4,14 @@
  * Handles:
  * - Loading agents for dropdown
  * - Launching ranges
- * - Polling for status updates
+ * - Real-time status updates via WebSocket
  * - Cancel/destroy actions
  */
 
 class DashboardManager {
     constructor(options) {
         this.csrfToken = options.csrfToken;
-        this.statusUrl = options.statusUrl;
+        this.rangeUrl = options.rangeUrl;
         this.launchUrl = options.launchUrl;
         this.cancelUrl = options.cancelUrl;
         this.destroyUrl = options.destroyUrl;
@@ -20,11 +20,19 @@ class DashboardManager {
 
         // State
         this.currentRange = null;
-        this.pollInterval = null;
-        this.pollIntervalMs = 2000; // Poll every 2 seconds
-        this.pollErrorCount = 0;
-        this.maxPollErrors = 5; // Force refresh after 5 consecutive errors
+        this.statusSocket = null;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 1000; // Start with 1 second
         this.agents = []; // Cached agent list with os_slug
+
+        // Provisioning timeout (from Django settings, fallback 60 min)
+        this.provisioningTimeoutMs = options.provisioningTimeoutMs || 60 * 60 * 1000;
+        this.provisioningTimer = null;
+
+        // Status polling fallback (catches missed WebSocket updates)
+        this.statusPollInterval = null;
+        this.statusPollDelay = 30000; // 30 seconds
 
         // UI Elements
         this.noRangeState = document.getElementById('no-range-state');
@@ -75,24 +83,23 @@ class DashboardManager {
      */
     _handleSessionExpired() {
         console.log('Session expired, redirecting to login...');
-        this._stopPolling();
+        this._closeStatusSocket();
         globalThis.location.href = this.loginUrl;
     }
 
     _bindCleanup() {
-        // Clean up polling on page unload to prevent memory leaks
+        // Clean up WebSocket on page unload to prevent memory leaks
         window.addEventListener('beforeunload', () => {
-            this._stopPolling();
+            this._closeStatusSocket();
         });
 
         // Also clean up on visibility change (tab hidden)
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                this._stopPolling();
+                this._closeStatusSocket();
             } else if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-                // Resume polling when tab becomes visible again if in transitional state
-                // Do an immediate status check since state may have changed while hidden
-                this.loadStatus();
+                // Reconnect WebSocket when tab becomes visible again if in transitional state
+                this._connectStatusSocket(this.currentRange.range_id);
             }
         });
     }
@@ -182,7 +189,7 @@ class DashboardManager {
         // Load agents and current status in parallel
         await Promise.all([
             this.loadAgents(),
-            this.loadStatus(),
+            this.loadRange(),
         ]);
     }
 
@@ -212,8 +219,8 @@ class DashboardManager {
         this._populateDcAgentDropdown(this.agents);
     }
 
-    async loadStatus() {
-        const data = await this._fetchJson(this.statusUrl, 'Failed to load status');
+    async loadRange() {
+        const data = await this._fetchJson(this.rangeUrl, 'Failed to load range');
         if (!data) {
             return;
         }
@@ -221,14 +228,14 @@ class DashboardManager {
         this.currentRange = data.range;
         this._updateUI();
 
-        // Start polling if in a transitional state
+        // Connect WebSocket if in a transitional state
         if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-            this._startPolling();
+            this._connectStatusSocket(this.currentRange.range_id);
         }
     }
 
     _isTransitionalState(status) {
-        return ['pending', 'provisioning', 'resuming', 'destroying'].includes(status);
+        return ['pending', 'provisioning', 'resuming'].includes(status);
     }
 
     _updateUI() {
@@ -269,11 +276,6 @@ class DashboardManager {
                 this._updateProvisioningState('Resuming Range', 'Starting instances...');
                 break;
 
-            case 'destroying':
-                this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Destroying Range', 'Cleaning up resources...');
-                break;
-
             case 'failed':
                 if (this.failedState) {
                     this.failedState.style.display = 'block';
@@ -303,28 +305,10 @@ class DashboardManager {
     }
 
     _updateActiveState() {
-        const rangeStarted = document.getElementById('range-started');
         const rangeAgent = document.getElementById('range-agent');
 
-        if (rangeStarted && this.currentRange.ready_at) {
-            rangeStarted.textContent = this._formatDate(this.currentRange.ready_at);
-        }
         if (rangeAgent && this.currentRange.agent_name) {
             rangeAgent.textContent = this.currentRange.agent_name;
-        }
-
-        // Update NGFW details - show link to NGFW detail page if range has linked NGFW
-        const ngfwDetails = document.getElementById('ngfw-details');
-        if (ngfwDetails) {
-            if (this.currentRange.ngfw_id) {
-                ngfwDetails.style.display = 'block';
-                const ngfwLink = document.getElementById('ngfw-detail-link');
-                if (ngfwLink) {
-                    ngfwLink.href = `/mission-control/assets/ngfw/${this.currentRange.ngfw_id}/`;
-                }
-            } else {
-                ngfwDetails.style.display = 'none';
-            }
         }
     }
 
@@ -401,10 +385,12 @@ class DashboardManager {
 
             this.currentRange = data.range;
             this._updateUI();
-            this._startPolling();
+            this._connectStatusSocket(data.range.range_id);
 
         } catch (error) {
             alert(error.message);
+            // Sync UI with CMS state (handles "already has active range" case)
+            await this.loadRange();
             this.launchBtn.disabled = false;
             this.launchBtn.textContent = 'Launch Range';
         }
@@ -422,6 +408,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
+                body: JSON.stringify({ range_id: this.currentRange.range_id }),
             });
 
             const data = await response.json();
@@ -430,7 +417,7 @@ class DashboardManager {
                 throw new Error(data.error || 'Failed to cancel range');
             }
 
-            this._stopPolling();
+            this._closeStatusSocket();
             this.currentRange = null;
             this._updateUI();
 
@@ -451,6 +438,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
+                body: JSON.stringify({ range_id: this.currentRange.range_id }),
             });
 
             const data = await response.json();
@@ -460,7 +448,7 @@ class DashboardManager {
             }
 
             // Range is destroyed immediately - show no-range state
-            this._stopPolling();
+            this._closeStatusSocket();
             this.currentRange = null;
             this._updateUI();
 
@@ -471,23 +459,207 @@ class DashboardManager {
 
     dismissError() {
         // Clear the current range and show no-range state
+        this._closeStatusSocket();
         this.currentRange = null;
         this._updateUI();
     }
 
-    _startPolling() {
-        if (this.pollInterval) return;
-
-        this.pollInterval = setInterval(() => {
-            this._pollStatus();
-        }, this.pollIntervalMs);
+    /**
+     * Build WebSocket URL for range status updates.
+     * Uses wss:// for https:// pages, ws:// for http://.
+     */
+    _buildWebSocketUrl(rangeId) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${window.location.host}/ws/range-status/${rangeId}/`;
     }
 
-    _stopPolling() {
-        if (this.pollInterval) {
-            clearInterval(this.pollInterval);
-            this.pollInterval = null;
+    /**
+     * Connect to WebSocket for real-time range status updates.
+     * @param {boolean} isReconnect - Whether this is a reconnect attempt (preserves retry counters)
+     */
+    _connectStatusSocket(rangeId, isReconnect = false) {
+        // Close existing connection if any, but preserve retry counters on reconnect
+        this._closeStatusSocket(!isReconnect);
+
+        const wsUrl = this._buildWebSocketUrl(rangeId);
+        console.log(`Connecting to WebSocket: ${wsUrl}`);
+
+        this.statusSocket = new WebSocket(wsUrl);
+
+        // Start provisioning timeout timer
+        this.provisioningTimer = setTimeout(() => {
+            this._handleProvisioningTimeout();
+        }, this.provisioningTimeoutMs);
+
+        // Start polling fallback for missed WebSocket updates
+        this._startStatusPolling();
+
+        this.statusSocket.onopen = () => {
+            console.log('WebSocket connected for range status');
+            this.reconnectAttempts = 0;
+            this.reconnectDelay = 1000;
+        };
+
+        this.statusSocket.onmessage = (event) => {
+            this._handleStatusMessage(event);
+        };
+
+        this.statusSocket.onclose = (event) => {
+            this._handleSocketClose(event, rangeId);
+        };
+
+        this.statusSocket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+    }
+
+    /**
+     * Handle incoming WebSocket message with status update.
+     */
+    _handleStatusMessage(event) {
+        try {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'status') {
+                const newStatus = data.status;
+                console.log(`Range status received: ${newStatus}`);
+
+                // Update current range status
+                if (this.currentRange) {
+                    this.currentRange.status = newStatus;
+                    if (data.error_message) {
+                        this.currentRange.error_message = data.error_message;
+                    }
+                }
+
+                this._updateUI();
+
+                // Close socket if we've reached a stable state
+                if (!this._isTransitionalState(newStatus)) {
+                    console.log('Range reached stable state, closing WebSocket');
+                    this._clearProvisioningTimer();
+                    this._closeStatusSocket();
+                }
+            }
+        } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
         }
+    }
+
+    /**
+     * Handle WebSocket close - attempt reconnect if appropriate.
+     */
+    _handleSocketClose(event, rangeId) {
+        console.log(`WebSocket closed: code=${event.code}, reason=${event.reason}`);
+
+        // Don't reconnect if intentionally closed or auth failed
+        if (event.code === 1000 || event.code === 4001 || event.code === 4003) {
+            return;
+        }
+
+        // Don't reconnect if we're no longer in a transitional state
+        if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {
+            return;
+        }
+
+        // Attempt reconnect with exponential backoff
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            console.log(`Reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${this.reconnectDelay}ms`);
+
+            setTimeout(() => {
+                if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
+                    this._connectStatusSocket(rangeId, true);
+                }
+            }, this.reconnectDelay);
+
+            // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+            this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+        } else {
+            console.error('Max reconnect attempts reached, falling back to page reload');
+            globalThis.location.reload();
+        }
+    }
+
+    /**
+     * Close WebSocket connection cleanly.
+     * @param {boolean} resetRetry - Whether to reset reconnect counters (default true)
+     */
+    _closeStatusSocket(resetRetry = true) {
+        this._clearProvisioningTimer();
+        this._stopStatusPolling();
+        if (this.statusSocket) {
+            this.statusSocket.onclose = null; // Prevent reconnect attempt
+            this.statusSocket.close(1000, 'Client closing');
+            this.statusSocket = null;
+        }
+        if (resetRetry) {
+            this.reconnectAttempts = 0;
+            this.reconnectDelay = 1000;
+        }
+    }
+
+    /**
+     * Clear the provisioning timeout timer.
+     */
+    _clearProvisioningTimer() {
+        if (this.provisioningTimer) {
+            clearTimeout(this.provisioningTimer);
+            this.provisioningTimer = null;
+        }
+    }
+
+    /**
+     * Start periodic polling for range status as fallback for missed WebSocket updates.
+     * Polling continues even when tab is hidden to ensure status is fresh when user returns.
+     */
+    _startStatusPolling() {
+        // Don't start if already polling
+        if (this.statusPollInterval) return;
+
+        this.statusPollInterval = setInterval(async () => {
+            // Skip if no current range or not in transitional state
+            if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {
+                this._stopStatusPolling();
+                return;
+            }
+
+            const data = await this._fetchJson(this.rangeUrl, 'Status poll failed');
+            if (!data || !data.range) return;
+
+            const polledStatus = data.range.status;
+
+            // If we discovered a stable state via poll (missed WebSocket update)
+            if (!this._isTransitionalState(polledStatus)) {
+                console.log(`Poll detected stable state: ${polledStatus}`);
+                this.currentRange = data.range;
+                this._updateUI();
+                this._closeStatusSocket(); // This also stops polling
+            }
+        }, this.statusPollDelay);
+    }
+
+    /**
+     * Stop periodic status polling.
+     */
+    _stopStatusPolling() {
+        if (this.statusPollInterval) {
+            clearInterval(this.statusPollInterval);
+            this.statusPollInterval = null;
+        }
+    }
+
+    /**
+     * Handle provisioning timeout - show failed state.
+     */
+    _handleProvisioningTimeout() {
+        console.error('Provisioning timed out');
+        this._closeStatusSocket();
+        if (this.currentRange) {
+            this.currentRange.status = 'failed';
+            this.currentRange.error_message = 'Provisioning timed out';
+        }
+        this._updateUI();
     }
 
     _initDropdown(dropdown) {
@@ -571,82 +743,6 @@ class DashboardManager {
             }
             console.error(errorMessage, error);
             return null;
-        }
-    }
-
-    async _pollStatus() {
-        const response = await this._fetchStatusResponse();
-        if (!response) {
-            return;
-        }
-
-        if (!response.ok) {
-            this._handlePollError(response.status);
-            return;
-        }
-
-        this.pollErrorCount = 0;
-        const data = await response.json();
-        const oldStatus = this._applyRangeUpdate(data.range, true);
-        this._stopPollingIfStable(oldStatus);
-    }
-
-    async _fetchStatusResponse() {
-        try {
-            const response = await fetch(this.statusUrl, {
-                headers: { 'Accept': 'application/json' },
-            });
-
-            if (this._isSessionExpired(response)) {
-                this._handleSessionExpired();
-                return null;
-            }
-
-            return response;
-        } catch (error) {
-            if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-                console.warn('Polling fetch failed, likely session expired');
-                this._handleSessionExpired();
-                return null;
-            }
-            console.error('Polling error:', error);
-            return null;
-        }
-    }
-
-    _handlePollError(status) {
-        console.warn('Polling: response not ok', status);
-        this.pollErrorCount++;
-        if (this.pollErrorCount >= this.maxPollErrors) {
-            console.error('Too many polling errors, reloading page');
-            globalThis.location.reload();
-        }
-    }
-
-    _applyRangeUpdate(range, logTransition) {
-        const oldStatus = this.currentRange?.status;
-        const newStatus = range?.status;
-        this.currentRange = range;
-        this._updateUI();
-
-        if (logTransition && oldStatus !== newStatus) {
-            console.log(`Range status: ${oldStatus} → ${newStatus ?? 'null (no range)'}`);
-        }
-
-        return oldStatus;
-    }
-
-    _stopPollingIfStable(oldStatus) {
-        if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-            return;
-        }
-
-        this._stopPolling();
-
-        if (oldStatus && this.currentRange) {
-            if (oldStatus === 'provisioning' && this.currentRange.status === 'ready') {
-                console.log('Range is ready!');
-            }
         }
     }
 }

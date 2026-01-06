@@ -4,9 +4,8 @@ Tests verify the Orchestrator protocol and StepResult dataclass
 that all orchestrators (Setup, Ops) must implement.
 """
 
-import pytest
-from typing import Protocol, runtime_checkable
 from dataclasses import fields
+from typing import Protocol
 
 
 class TestStepResultDataclass:
@@ -96,12 +95,13 @@ class TestSetupOrchestratorImplementsProtocol:
         from orchestrators.setup_orchestrator import SetupOrchestrator
 
         assert hasattr(SetupOrchestrator, "orchestrate")
-        assert callable(getattr(SetupOrchestrator, "orchestrate"))
+        assert callable(SetupOrchestrator.orchestrate)
 
     def test_setup_orchestrator_orchestrate_accepts_plan(self):
         """SetupOrchestrator.orchestrate accepts plan and context parameters."""
-        from orchestrators.setup_orchestrator import SetupOrchestrator
         import inspect
+
+        from orchestrators.setup_orchestrator import SetupOrchestrator
 
         sig = inspect.signature(SetupOrchestrator.orchestrate)
         param_names = list(sig.parameters.keys())

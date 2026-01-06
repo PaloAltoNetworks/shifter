@@ -11,7 +11,7 @@ class TestStartProvisioning:
     """Tests for start_provisioning() public function.
 
     Contract:
-    - Inputs: range_id (int)
+    - Inputs: range_id (int), user_id (int)
     - Outputs: ECS task ARN (str) if successful, None if ECS not configured
     - Side effects: Calls _start_ecs_task with "provision" command
     - Errors: Propagates errors from _start_ecs_task
@@ -39,20 +39,20 @@ class TestStartProvisioning:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            result = start_provisioning(range_id=42)
+            result = start_provisioning(range_id=42, user_id=7)
 
             assert result == "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
 
     def test_calls_start_ecs_task_with_provision_command(self, settings):
-        """Function calls _start_ecs_task with 'provision' command."""
+        """Function calls _start_ecs_task with range_id, user_id, and 'provision' command."""
         from engine.ecs import start_provisioning
 
         with patch("engine.ecs._start_ecs_task") as mock_start:
             mock_start.return_value = "arn:aws:ecs:task/123"
 
-            start_provisioning(range_id=42)
+            start_provisioning(range_id=42, user_id=7)
 
-            mock_start.assert_called_once_with(42, "provision")
+            mock_start.assert_called_once_with(42, 7, "provision")
 
     # -------------------------------------------------------------------------
     # Configuration - ECS not configured
@@ -66,7 +66,7 @@ class TestStartProvisioning:
         if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
 
-        result = start_provisioning(range_id=42)
+        result = start_provisioning(range_id=42, user_id=7)
 
         assert result is None
 
@@ -79,21 +79,42 @@ class TestStartProvisioning:
         from engine.ecs import start_provisioning
 
         with pytest.raises((TypeError, ValueError)):
-            start_provisioning(range_id=None)
+            start_provisioning(range_id=None, user_id=7)
 
     def test_raises_when_range_id_is_negative(self, settings):
         """Function raises error when range_id is negative."""
         from engine.ecs import start_provisioning
 
         with pytest.raises((TypeError, ValueError)):
-            start_provisioning(range_id=-1)
+            start_provisioning(range_id=-1, user_id=7)
 
     def test_raises_when_range_id_is_string(self, settings):
         """Function raises error when range_id is a string."""
         from engine.ecs import start_provisioning
 
         with pytest.raises((TypeError, ValueError)):
-            start_provisioning(range_id="42")
+            start_provisioning(range_id="42", user_id=7)
+
+    def test_raises_when_user_id_is_none(self, settings):
+        """Function raises error when user_id is None."""
+        from engine.ecs import start_provisioning
+
+        with pytest.raises((TypeError, ValueError)):
+            start_provisioning(range_id=42, user_id=None)
+
+    def test_raises_when_user_id_is_negative(self, settings):
+        """Function raises error when user_id is negative."""
+        from engine.ecs import start_provisioning
+
+        with pytest.raises((TypeError, ValueError)):
+            start_provisioning(range_id=42, user_id=-1)
+
+    def test_raises_when_user_id_is_string(self, settings):
+        """Function raises error when user_id is a string."""
+        from engine.ecs import start_provisioning
+
+        with pytest.raises((TypeError, ValueError)):
+            start_provisioning(range_id=42, user_id="7")
 
     # -------------------------------------------------------------------------
     # Error handling
@@ -118,7 +139,7 @@ class TestStartProvisioning:
             mock_get_client.return_value = mock_ecs
 
             with pytest.raises(ClientError):
-                start_provisioning(range_id=42)
+                start_provisioning(range_id=42, user_id=7)
 
     # -------------------------------------------------------------------------
     # Logging - delegates to _start_ecs_task
@@ -144,6 +165,6 @@ class TestStartProvisioning:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            start_provisioning(range_id=42)
+            start_provisioning(range_id=42, user_id=7)
 
         assert "42" in caplog.text or "provision" in caplog.text.lower()

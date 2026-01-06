@@ -11,14 +11,13 @@ Commands are executed via SSH to the NGFW management interface.
 All PAN-OS CLI commands have been validated against PAN-OS 11.x.
 """
 
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 from .base import SetupStep
 
-
 # SSH wait script - checks if NGFW is ready for SSH commands
 # VM-Series takes ~13 minutes to boot and be ready
-WAIT_SSH_READY_SCRIPT = '''
+WAIT_SSH_READY_SCRIPT = """
 #!/bin/bash
 set -e
 
@@ -29,7 +28,9 @@ ATTEMPT=0
 echo "Waiting for NGFW SSH availability at $NGFW_IP..."
 
 while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-    if timeout 5 bash -c "echo 'show system info' | ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 admin@$NGFW_IP" 2>/dev/null | grep -q "hostname"; then
+    if timeout 5 bash -c \
+        "echo 'show system info' | ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 admin@$NGFW_IP" \
+        2>/dev/null | grep -q "hostname"; then
         echo "NGFW SSH is ready"
         exit 0
     fi
@@ -40,10 +41,10 @@ done
 
 echo "ERROR: NGFW SSH not available after 15 minutes"
 exit 1
-'''
+"""
 
 # Device certificate verification script
-VERIFY_DEVICE_CERT_SCRIPT = '''
+VERIFY_DEVICE_CERT_SCRIPT = """
 #!/bin/bash
 set -e
 
@@ -52,7 +53,9 @@ NGFW_IP="{{ management_ip }}"
 echo "Verifying device certificate on $NGFW_IP..."
 
 # Check device certificate status
-CERT_STATUS=$(echo "show system info" | ssh -o StrictHostKeyChecking=no admin@$NGFW_IP 2>/dev/null | grep -i "device-certificate" || echo "unknown")
+CERT_STATUS=$(echo "show system info" | \
+    ssh -o StrictHostKeyChecking=no admin@$NGFW_IP 2>/dev/null | \
+    grep -i "device-certificate" || echo "unknown")
 
 if echo "$CERT_STATUS" | grep -qi "valid"; then
     echo "Device certificate is valid"
@@ -64,11 +67,11 @@ else
     echo "Device certificate status: $CERT_STATUS"
     exit 0
 fi
-'''
+"""
 
 # Enable cloud logging (Strata Logging Service)
 # Validated PAN-OS CLI commands
-ENABLE_CLOUD_LOGGING_SCRIPT = '''
+ENABLE_CLOUD_LOGGING_SCRIPT = """
 #!/bin/bash
 set -e
 
@@ -88,11 +91,11 @@ exit
 EOF
 
 echo "Cloud logging enabled successfully"
-'''
+"""
 
 # Create log forwarding profile for XDR
 # Validated PAN-OS CLI commands
-CREATE_LOG_FORWARDING_PROFILE_SCRIPT = '''
+CREATE_LOG_FORWARDING_PROFILE_SCRIPT = """
 #!/bin/bash
 set -e
 
@@ -102,18 +105,19 @@ echo "Creating XDR-Forward log forwarding profile on $NGFW_IP..."
 
 cat << 'EOF' | ssh -o StrictHostKeyChecking=no admin@$NGFW_IP
 configure
-set shared log-settings profiles XDR-Forward match-list all-traffic log-type traffic filter "All Logs" send-to-panorama yes
+set shared log-settings profiles XDR-Forward match-list all-traffic \
+    log-type traffic filter "All Logs" send-to-panorama yes
 set shared log-settings profiles XDR-Forward enhanced-application-logging yes
 commit
 exit
 EOF
 
 echo "Log forwarding profile created successfully"
-'''
+"""
 
 # Create security policy with allow-all rule and logging
 # Validated PAN-OS CLI commands
-CREATE_SECURITY_POLICY_SCRIPT = '''
+CREATE_SECURITY_POLICY_SCRIPT = """
 #!/bin/bash
 set -e
 
@@ -123,16 +127,18 @@ echo "Creating security policy on $NGFW_IP..."
 
 cat << 'EOF' | ssh -o StrictHostKeyChecking=no admin@$NGFW_IP
 configure
-set rulebase security rules allow-all from any to any source any destination any application any service any action allow log-end yes log-setting XDR-Forward
+set rulebase security rules allow-all from any to any source any \
+    destination any application any service any action allow \
+    log-end yes log-setting XDR-Forward
 commit
 exit
 EOF
 
 echo "Security policy created successfully"
-'''
+"""
 
 # Verification script to check configuration
-VERIFY_CONFIG_SCRIPT = '''
+VERIFY_CONFIG_SCRIPT = """
 #!/bin/bash
 set -e
 
@@ -160,7 +166,7 @@ fi
 
 echo "Configuration verification complete"
 exit 0
-'''
+"""
 
 
 class NGFWProvisionPlan:
@@ -176,7 +182,7 @@ class NGFWProvisionPlan:
     All commands are executed via SSH to the NGFW management interface.
     """
 
-    steps: List[SetupStep] = [
+    steps: ClassVar[list[SetupStep]] = [
         SetupStep(
             name="wait_ssh_ready",
             script=WAIT_SSH_READY_SCRIPT,
@@ -209,7 +215,7 @@ class NGFWProvisionPlan:
         ),
     ]
 
-    verify_step: SetupStep = SetupStep(
+    verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ngfw_config",
         script=VERIFY_CONFIG_SCRIPT,
         timeout_seconds=300,  # 5 min
@@ -217,7 +223,7 @@ class NGFWProvisionPlan:
         is_verification=True,
     )
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for NGFW provision scripts.
 
         Args:

@@ -4,20 +4,19 @@ SSMExecutor is a generic command executor that uses AWS SSM Run Command.
 It has no knowledge of what it's running - just executes scripts and returns results.
 """
 
-import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # These imports will fail initially - that's expected for TDD
 from executors.ssm_executor import (
-    SSMExecutor,
-    SSMExecutorError,
-    CommandResult,
     CommandError,
-    TimeoutError,
+    CommandResult,
     InstanceNotFoundError,
     InstanceTerminatedError,
+    SSMExecutor,
+    SSMExecutorError,
+    TimeoutError,
 )
 
 
@@ -156,8 +155,11 @@ class TestRunCommandEdgeCases:
         # First call returns InProgress, second indicates termination
         mock_ssm.get_command_invocation.side_effect = [
             {"Status": "InProgress"},
-            {"Status": "Failed", "ResponseCode": -1,
-             "StandardErrorContent": "Instance i-12345 is not in a valid state"},
+            {
+                "Status": "Failed",
+                "ResponseCode": -1,
+                "StandardErrorContent": "Instance i-12345 is not in a valid state",
+            },
         ]
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
@@ -196,9 +198,7 @@ class TestWaitForAgentHappyPath:
         mock_ec2 = MagicMock()
         mock_ec2.describe_instance_status.return_value = {"InstanceStatuses": []}
         mock_ssm.describe_instance_information.return_value = {
-            "InstanceInformationList": [
-                {"InstanceId": "i-12345", "PingStatus": "Online"}
-            ]
+            "InstanceInformationList": [{"InstanceId": "i-12345", "PingStatus": "Online"}]
         }
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
@@ -215,9 +215,7 @@ class TestWaitForAgentHappyPath:
         mock_ssm.describe_instance_information.side_effect = [
             {"InstanceInformationList": []},
             {"InstanceInformationList": []},
-            {"InstanceInformationList": [
-                {"InstanceId": "i-12345", "PingStatus": "Online"}
-            ]},
+            {"InstanceInformationList": [{"InstanceId": "i-12345", "PingStatus": "Online"}]},
         ]
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
@@ -236,9 +234,7 @@ class TestWaitForAgentExpectedFailures:
         mock_ec2 = MagicMock()
         mock_ec2.describe_instance_status.return_value = {"InstanceStatuses": []}
         # Always return empty (agent never registers)
-        mock_ssm.describe_instance_information.return_value = {
-            "InstanceInformationList": []
-        }
+        mock_ssm.describe_instance_information.return_value = {"InstanceInformationList": []}
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
 
@@ -252,13 +248,9 @@ class TestWaitForAgentExpectedFailures:
         mock_ssm = MagicMock()
         mock_ec2 = MagicMock()
 
-        mock_ssm.describe_instance_information.return_value = {
-            "InstanceInformationList": []
-        }
+        mock_ssm.describe_instance_information.return_value = {"InstanceInformationList": []}
         mock_ec2.describe_instance_status.return_value = {
-            "InstanceStatuses": [
-                {"InstanceId": "i-12345", "InstanceState": {"Name": "terminated"}}
-            ]
+            "InstanceStatuses": [{"InstanceId": "i-12345", "InstanceState": {"Name": "terminated"}}]
         }
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
@@ -283,20 +275,23 @@ class TestRebootAndWaitHappyPath:
             # First call - instance is stopping
             {"InstanceStatuses": []},  # No status during reboot
             # Second call - instance is running with status ok
-            {"InstanceStatuses": [
-                {"InstanceId": "i-12345", "InstanceState": {"Name": "running"},
-                 "InstanceStatus": {"Status": "ok"},
-                 "SystemStatus": {"Status": "ok"}}
-            ]},
+            {
+                "InstanceStatuses": [
+                    {
+                        "InstanceId": "i-12345",
+                        "InstanceState": {"Name": "running"},
+                        "InstanceStatus": {"Status": "ok"},
+                        "SystemStatus": {"Status": "ok"},
+                    }
+                ]
+            },
             # Additional calls for wait_for_agent (returns empty instance statuses)
             {"InstanceStatuses": []},
         ]
 
         # SSM agent comes back online
         mock_ssm.describe_instance_information.side_effect = [
-            {"InstanceInformationList": [
-                {"InstanceId": "i-12345", "PingStatus": "Online"}
-            ]},
+            {"InstanceInformationList": [{"InstanceId": "i-12345", "PingStatus": "Online"}]},
         ]
 
         # Readiness probe succeeds
@@ -331,15 +326,16 @@ class TestRebootAndWaitHappyPath:
         mock_ec2.reboot_instances.return_value = {}
         mock_ec2.describe_instance_status.return_value = {
             "InstanceStatuses": [
-                {"InstanceId": "i-12345", "InstanceState": {"Name": "running"},
-                 "InstanceStatus": {"Status": "ok"},
-                 "SystemStatus": {"Status": "ok"}}
+                {
+                    "InstanceId": "i-12345",
+                    "InstanceState": {"Name": "running"},
+                    "InstanceStatus": {"Status": "ok"},
+                    "SystemStatus": {"Status": "ok"},
+                }
             ]
         }
         mock_ssm.describe_instance_information.return_value = {
-            "InstanceInformationList": [
-                {"InstanceId": "i-12345", "PingStatus": "Online"}
-            ]
+            "InstanceInformationList": [{"InstanceId": "i-12345", "PingStatus": "Online"}]
         }
         mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
         mock_ssm.get_command_invocation.return_value = {
@@ -370,12 +366,8 @@ class TestRebootAndWaitExpectedFailures:
 
         mock_ec2.reboot_instances.return_value = {}
         # Instance never comes back to running state
-        mock_ec2.describe_instance_status.return_value = {
-            "InstanceStatuses": []
-        }
-        mock_ssm.describe_instance_information.return_value = {
-            "InstanceInformationList": []
-        }
+        mock_ec2.describe_instance_status.return_value = {"InstanceStatuses": []}
+        mock_ssm.describe_instance_information.return_value = {"InstanceInformationList": []}
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
 
@@ -391,9 +383,7 @@ class TestRebootAndWaitExpectedFailures:
 
         mock_ec2.reboot_instances.return_value = {}
         mock_ec2.describe_instance_status.return_value = {
-            "InstanceStatuses": [
-                {"InstanceId": "i-12345", "InstanceState": {"Name": "terminated"}}
-            ]
+            "InstanceStatuses": [{"InstanceId": "i-12345", "InstanceState": {"Name": "terminated"}}]
         }
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
@@ -412,7 +402,7 @@ class TestSSMExecutorInitialization:
             mock_session_class.return_value = mock_session
             mock_session.client.return_value = MagicMock()
 
-            executor = SSMExecutor(region="us-east-1")
+            SSMExecutor(region="us-east-1")
 
             # Should have created ssm and ec2 clients
             assert mock_session.client.call_count >= 1
@@ -442,8 +432,7 @@ class TestPollingBehavior:
         mock_ssm.get_command_invocation.side_effect = [
             {"Status": "InProgress"},
             {"Status": "InProgress"},
-            {"Status": "Success", "ResponseCode": 0,
-             "StandardOutputContent": "done", "StandardErrorContent": ""},
+            {"Status": "Success", "ResponseCode": 0, "StandardOutputContent": "done", "StandardErrorContent": ""},
         ]
 
         with patch("time.sleep"):
@@ -460,8 +449,7 @@ class TestPollingBehavior:
         mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
         mock_ssm.get_command_invocation.side_effect = [
             {"Status": "InProgress"},
-            {"Status": "Success", "ResponseCode": 0,
-             "StandardOutputContent": "", "StandardErrorContent": ""},
+            {"Status": "Success", "ResponseCode": 0, "StandardOutputContent": "", "StandardErrorContent": ""},
         ]
 
         with patch("time.sleep") as mock_sleep:
@@ -490,9 +478,7 @@ class TestVerifyAgentReadyHappyPath:
         }
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
-        result = executor.verify_agent_ready(
-            "i-12345", document_name="AWS-RunPowerShellScript"
-        )
+        result = executor.verify_agent_ready("i-12345", document_name="AWS-RunPowerShellScript")
 
         assert result is True
         mock_ssm.send_command.assert_called_once()
@@ -575,9 +561,8 @@ class TestVerifyAgentReadyExpectedFailures:
 
         executor = SSMExecutor(ssm_client=mock_ssm, ec2_client=mock_ec2)
 
-        with patch("time.sleep"):
-            with pytest.raises(SSMExecutorError) as exc_info:
-                executor.verify_agent_ready("i-12345", max_attempts=3)
+        with patch("time.sleep"), pytest.raises(SSMExecutorError) as exc_info:
+            executor.verify_agent_ready("i-12345", max_attempts=3)
 
         assert "not ready after 3 attempts" in str(exc_info.value)
 

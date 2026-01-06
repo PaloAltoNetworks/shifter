@@ -36,7 +36,7 @@ class Migration(migrations.Migration):
             name="range_config",
             field=models.JSONField(
                 blank=True,
-                help_text="Full RangeRequest from CMS (scenario_id, user_id, instances)",
+                help_text="Full RangeSpec from CMS (scenario_id, user_id, instances)",
                 null=True,
             ),
         ),

@@ -4,20 +4,20 @@ These tests verify that errors propagate correctly through the system
 and would cause Pulumi stack failures.
 """
 
-from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 import pytest
 
 # These imports will fail initially - that's expected for TDD
 from executors.ssm_executor import (
-    SSMExecutor,
-    CommandResult,
     CommandError,
-    TimeoutError,
+    CommandResult,
     InstanceNotFoundError,
+    SSMExecutor,
+    TimeoutError,
 )
-from orchestrators.setup_orchestrator import SetupOrchestrator, SetupError
+from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.base import SetupStep
 from plans.dc_setup import DCSetupPlan
 
@@ -25,6 +25,7 @@ from plans.dc_setup import DCSetupPlan
 @dataclass
 class MockSetupPlan:
     """Simple mock plan for integration testing."""
+
     steps: list
     verify_step: SetupStep
 
@@ -116,9 +117,7 @@ class TestPulumiIntegration:
         our errors are proper exceptions that would propagate correctly.
         """
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.side_effect = CommandError(
-            "Script failed", exit_code=1, stderr="error"
-        )
+        mock_executor.run_command.side_effect = CommandError("Script failed", exit_code=1, stderr="error")
 
         orchestrator = SetupOrchestrator(executor=mock_executor)
         plan = MockSetupPlan(
@@ -159,12 +158,15 @@ class TestPulumiIntegration:
 
         error_str = str(exc_info.value)
         # Error should contain useful debugging info
-        assert any(info in error_str.lower() for info in [
-            "install",
-            "feature",
-            "failed",
-            "error",
-        ])
+        assert any(
+            info in error_str.lower()
+            for info in [
+                "install",
+                "feature",
+                "failed",
+                "error",
+            ]
+        )
 
 
 class TestDCSetupPlanIntegration:
@@ -173,9 +175,7 @@ class TestDCSetupPlanIntegration:
     def test_dc_plan_with_real_orchestrator(self):
         """DCSetupPlan works correctly with real orchestrator."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
         mock_executor.reboot_and_wait.return_value = True
 
         plan = DCSetupPlan()
@@ -227,12 +227,8 @@ class TestDCSetupPlanIntegration:
     def test_dc_plan_reboot_failure_stops_everything(self):
         """If reboot after install fails, promotion never runs."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(
-            success=True, exit_code=0, stdout="ok", stderr=""
-        )
-        mock_executor.reboot_and_wait.side_effect = TimeoutError(
-            "Instance never came back"
-        )
+        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
+        mock_executor.reboot_and_wait.side_effect = TimeoutError("Instance never came back")
 
         plan = DCSetupPlan()
         orchestrator = SetupOrchestrator(executor=mock_executor)

@@ -11,7 +11,7 @@ class TestStartTeardown:
     """Tests for start_teardown() public function.
 
     Contract:
-    - Inputs: range_id (int)
+    - Inputs: range_id (int), user_id (int)
     - Outputs: ECS task ARN (str) if successful, None if ECS not configured
     - Side effects: Calls _start_ecs_task with "destroy" command
     - Errors: Propagates errors from _start_ecs_task
@@ -39,20 +39,20 @@ class TestStartTeardown:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            result = start_teardown(range_id=42)
+            result = start_teardown(range_id=42, user_id=7)
 
             assert result == "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
 
     def test_calls_start_ecs_task_with_destroy_command(self, settings):
-        """Function calls _start_ecs_task with 'destroy' command."""
+        """Function calls _start_ecs_task with range_id, user_id, and 'destroy' command."""
         from engine.ecs import start_teardown
 
         with patch("engine.ecs._start_ecs_task") as mock_start:
             mock_start.return_value = "arn:aws:ecs:task/123"
 
-            start_teardown(range_id=42)
+            start_teardown(range_id=42, user_id=7)
 
-            mock_start.assert_called_once_with(42, "destroy")
+            mock_start.assert_called_once_with(42, 7, "destroy")
 
     # -------------------------------------------------------------------------
     # Configuration - ECS not configured
@@ -66,7 +66,7 @@ class TestStartTeardown:
         if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
 
-        result = start_teardown(range_id=42)
+        result = start_teardown(range_id=42, user_id=7)
 
         assert result is None
 
@@ -79,21 +79,42 @@ class TestStartTeardown:
         from engine.ecs import start_teardown
 
         with pytest.raises((TypeError, ValueError)):
-            start_teardown(range_id=None)
+            start_teardown(range_id=None, user_id=7)
 
     def test_raises_when_range_id_is_negative(self, settings):
         """Function raises error when range_id is negative."""
         from engine.ecs import start_teardown
 
         with pytest.raises((TypeError, ValueError)):
-            start_teardown(range_id=-1)
+            start_teardown(range_id=-1, user_id=7)
 
     def test_raises_when_range_id_is_string(self, settings):
         """Function raises error when range_id is a string."""
         from engine.ecs import start_teardown
 
         with pytest.raises((TypeError, ValueError)):
-            start_teardown(range_id="42")
+            start_teardown(range_id="42", user_id=7)
+
+    def test_raises_when_user_id_is_none(self, settings):
+        """Function raises error when user_id is None."""
+        from engine.ecs import start_teardown
+
+        with pytest.raises((TypeError, ValueError)):
+            start_teardown(range_id=42, user_id=None)
+
+    def test_raises_when_user_id_is_negative(self, settings):
+        """Function raises error when user_id is negative."""
+        from engine.ecs import start_teardown
+
+        with pytest.raises((TypeError, ValueError)):
+            start_teardown(range_id=42, user_id=-1)
+
+    def test_raises_when_user_id_is_string(self, settings):
+        """Function raises error when user_id is a string."""
+        from engine.ecs import start_teardown
+
+        with pytest.raises((TypeError, ValueError)):
+            start_teardown(range_id=42, user_id="7")
 
     # -------------------------------------------------------------------------
     # Error handling
@@ -118,7 +139,7 @@ class TestStartTeardown:
             mock_get_client.return_value = mock_ecs
 
             with pytest.raises(ClientError):
-                start_teardown(range_id=42)
+                start_teardown(range_id=42, user_id=7)
 
     # -------------------------------------------------------------------------
     # Logging - delegates to _start_ecs_task
@@ -144,6 +165,6 @@ class TestStartTeardown:
             mock_ecs.run_task.return_value = mock_response
             mock_get_client.return_value = mock_ecs
 
-            start_teardown(range_id=42)
+            start_teardown(range_id=42, user_id=7)
 
         assert "42" in caplog.text or "destroy" in caplog.text.lower()

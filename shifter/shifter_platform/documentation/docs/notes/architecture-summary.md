@@ -73,7 +73,7 @@
 ## Packer Images (AMIs via SSM Parameter Store)
 
 - `kali.pkr.hcl` - Kali attacker
-- `ubuntu.pkr.hcl` - Ubuntu victim  
+- `ubuntu.pkr.hcl` - Ubuntu victim
 - `windows.pkr.hcl` - Windows victim/DC
 
 ---

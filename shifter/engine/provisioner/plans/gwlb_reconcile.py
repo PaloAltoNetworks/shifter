@@ -9,7 +9,7 @@ Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -24,7 +24,7 @@ class GWLBReconcileStep:
 
     name: str
     action: str
-    params: List[str] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
 
 
 class GWLBReconcilePlan:
@@ -36,9 +36,9 @@ class GWLBReconcilePlan:
     Uses AWSExecutor methods for AWS API calls.
     """
 
-    name: str = "gwlb_reconcile"
+    name: ClassVar[str] = "gwlb_reconcile"
 
-    steps: List[GWLBReconcileStep] = [
+    steps: ClassVar[list[GWLBReconcileStep]] = [
         GWLBReconcileStep(
             name="describe_endpoints",
             action="describe_endpoints",
@@ -46,7 +46,7 @@ class GWLBReconcilePlan:
         ),
     ]
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get context variables for GWLB reconcile.
 
         Args:

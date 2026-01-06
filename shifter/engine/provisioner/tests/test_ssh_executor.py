@@ -4,11 +4,10 @@ SSHExecutor uses SSH to execute CLI commands on PAN-OS devices (VM-Series).
 Provides same interface as SSMExecutor for use with SetupOrchestrator.
 """
 
-import io
 from unittest.mock import MagicMock, patch
 
 import pytest
-
+from freezegun import freeze_time
 
 # Mock RSA key for tests
 MOCK_PRIVATE_KEY = """-----BEGIN RSA PRIVATE KEY-----
@@ -36,10 +35,14 @@ class TestSSHExecutorImports:
     def test_import_exceptions(self):
         """Exception classes should be importable."""
         from executors.ssh_executor import (
-            SSHExecutorError,
             CommandError,
-            TimeoutError as SSHTimeoutError,
+            SSHExecutorError,
+        )
+        from executors.ssh_executor import (
             ConnectionError as SSHConnectionError,
+        )
+        from executors.ssh_executor import (
+            TimeoutError as SSHTimeoutError,
         )
 
         assert SSHExecutorError is not None
@@ -55,7 +58,7 @@ class TestRunCommandHappyPath:
     @patch("paramiko.SSHClient")
     def test_run_command_success(self, mock_ssh_class, mock_rsa_key):
         """Command succeeds, returns result with stdout/stderr."""
-        from executors.ssh_executor import SSHExecutor, CommandResult
+        from executors.ssh_executor import CommandResult, SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -114,7 +117,7 @@ class TestRunCommandExpectedFailures:
     @patch("paramiko.SSHClient")
     def test_run_command_nonzero_exit_raises(self, mock_ssh_class, mock_rsa_key):
         """Non-zero exit code raises CommandError."""
-        from executors.ssh_executor import SSHExecutor, CommandError
+        from executors.ssh_executor import CommandError, SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
@@ -141,9 +144,12 @@ class TestRunCommandExpectedFailures:
     def test_run_command_connection_error_raises(self, mock_ssh_class, mock_rsa_key):
         """SSH connection failure raises ConnectionError."""
         import paramiko
+
+        from executors.ssh_executor import (
+            ConnectionError as SSHConnectionError,
+        )
         from executors.ssh_executor import (
             SSHExecutor,
-            ConnectionError as SSHConnectionError,
         )
 
         mock_client = MagicMock()
@@ -162,12 +168,13 @@ class TestRunCommandExpectedFailures:
     @patch("paramiko.SSHClient")
     def test_run_command_timeout_raises(self, mock_ssh_class, mock_rsa_key):
         """Socket timeout raises TimeoutError."""
-        import socket
-        from executors.ssh_executor import SSHExecutor, TimeoutError as SSHTimeoutError
+
+        from executors.ssh_executor import SSHExecutor
+        from executors.ssh_executor import TimeoutError as SSHTimeoutError
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
-        mock_client.exec_command.side_effect = socket.timeout("timed out")
+        mock_client.exec_command.side_effect = TimeoutError("timed out")
         mock_rsa_key.return_value = MagicMock()
 
         executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY)
@@ -181,43 +188,36 @@ class TestRunCommandExpectedFailures:
 class TestWaitForAgentHappyPath:
     """Test successful SSH wait scenarios."""
 
+    @freeze_time("2024-01-01", auto_tick_seconds=0)
     @patch("paramiko.RSAKey.from_private_key")
     @patch("paramiko.SSHClient")
-    @patch("time.sleep")
-    @patch("time.time")
-    def test_wait_for_agent_success_immediately(
-        self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
-    ):
+    @patch("executors.ssh_executor.time.sleep")
+    def test_wait_for_agent_success_immediately(self, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH available immediately returns True."""
         from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
         mock_rsa_key.return_value = MagicMock()
-        mock_time.return_value = 0
 
         executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY)
         result = executor.wait_for_agent("10.0.0.1", timeout_seconds=60)
 
         assert result is True
 
+    @freeze_time("2024-01-01", auto_tick_seconds=10)
     @patch("paramiko.RSAKey.from_private_key")
     @patch("paramiko.SSHClient")
-    @patch("time.sleep")
-    @patch("time.time")
-    def test_wait_for_agent_eventually_online(
-        self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
-    ):
+    @patch("executors.ssh_executor.time.sleep")
+    def test_wait_for_agent_eventually_online(self, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH becomes available after a few retries."""
         import paramiko
+
         from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
         mock_rsa_key.return_value = MagicMock()
-
-        # Simulate time passing
-        mock_time.side_effect = [0, 10, 20, 30]
 
         # First two connects fail, third succeeds
         mock_client.connect.side_effect = [
@@ -236,23 +236,20 @@ class TestWaitForAgentHappyPath:
 class TestWaitForAgentExpectedFailures:
     """Test expected failure scenarios for SSH wait."""
 
+    @freeze_time("2024-01-01", auto_tick_seconds=30)
     @patch("paramiko.RSAKey.from_private_key")
     @patch("paramiko.SSHClient")
-    @patch("time.sleep")
-    @patch("time.time")
-    def test_wait_for_agent_timeout_raises(
-        self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
-    ):
+    @patch("executors.ssh_executor.time.sleep")
+    def test_wait_for_agent_timeout_raises(self, mock_sleep, mock_ssh_class, mock_rsa_key):
         """SSH never available raises TimeoutError."""
         import paramiko
-        from executors.ssh_executor import SSHExecutor, TimeoutError as SSHTimeoutError
+
+        from executors.ssh_executor import SSHExecutor
+        from executors.ssh_executor import TimeoutError as SSHTimeoutError
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
         mock_rsa_key.return_value = MagicMock()
-
-        # Time passes beyond timeout
-        mock_time.side_effect = [0, 30, 60, 90]
 
         # All connects fail
         mock_client.connect.side_effect = paramiko.SSHException("Connection refused")
@@ -268,23 +265,19 @@ class TestWaitForAgentExpectedFailures:
 class TestRebootAndWaitHappyPath:
     """Test successful reboot scenarios."""
 
+    @freeze_time("2024-01-01", auto_tick_seconds=10)
     @patch("paramiko.RSAKey.from_private_key")
     @patch("paramiko.SSHClient")
-    @patch("time.sleep")
-    @patch("time.time")
-    def test_reboot_and_wait_success(
-        self, mock_time, mock_sleep, mock_ssh_class, mock_rsa_key
-    ):
+    @patch("executors.ssh_executor.time.sleep")
+    def test_reboot_and_wait_success(self, mock_sleep, mock_ssh_class, mock_rsa_key):
         """Reboot PAN-OS device and wait for it to come back."""
         import paramiko
+
         from executors.ssh_executor import SSHExecutor
 
         mock_client = MagicMock()
         mock_ssh_class.return_value = mock_client
         mock_rsa_key.return_value = MagicMock()
-
-        # Simulate time passing
-        mock_time.side_effect = [0, 10, 70, 80, 90]
 
         mock_stdout = MagicMock()
         mock_stdout.read.return_value = b"Rebooting"

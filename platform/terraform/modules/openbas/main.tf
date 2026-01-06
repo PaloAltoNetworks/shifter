@@ -6,12 +6,12 @@
 # Components:
 # - ECS Fargate service (HA across AZs)
 # - RDS PostgreSQL database
-# - Internal ALB for API/agent access
+# - Target group for Portal ALB routing (/shifter-mirage/bas/*)
 # - Security groups and IAM roles
 #
 # Traffic flow:
-# - Range agents -> Internal ALB -> ECS tasks (port 443)
-# - Portal API calls -> Internal ALB -> ECS tasks (port 8080)
+# - Portal ALB -> VPC Peering -> ECS tasks (port 8080)
+# - Route: /shifter-mirage/bas/* -> OpenBAS target group
 
 # ------------------------------------------------------------------------------
 # Data Sources
@@ -110,7 +110,7 @@ resource "aws_ecs_task_definition" "openbas" {
       environment = [
         {
           name  = "OPENBAS_BASE_URL"
-          value = "https://${var.domain_name}"
+          value = var.base_url
         },
         {
           name  = "OPENBAS_AUTH_LOCAL_ENABLE"
@@ -206,7 +206,6 @@ resource "aws_ecs_service" "openbas" {
   tags = local.common_tags
 
   depends_on = [
-    aws_lb_listener.https,
     aws_db_instance.openbas,
   ]
 

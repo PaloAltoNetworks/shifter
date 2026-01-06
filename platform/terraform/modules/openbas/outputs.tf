@@ -53,43 +53,23 @@ output "ecs_security_group_id" {
   value       = aws_security_group.ecs.id
 }
 
-output "alb_security_group_id" {
-  description = "ID of the ALB security group"
-  value       = aws_security_group.alb.id
-}
-
 output "rds_security_group_id" {
   description = "ID of the RDS security group"
   value       = aws_security_group.rds.id
 }
 
 # ------------------------------------------------------------------------------
-# Load Balancer
+# Target Group (for Portal ALB)
 # ------------------------------------------------------------------------------
 
-output "alb_id" {
-  description = "ID of the Application Load Balancer"
-  value       = aws_lb.openbas.id
-}
-
-output "alb_arn" {
-  description = "ARN of the Application Load Balancer"
-  value       = aws_lb.openbas.arn
-}
-
-output "alb_dns_name" {
-  description = "DNS name of the Application Load Balancer"
-  value       = aws_lb.openbas.dns_name
-}
-
-output "alb_zone_id" {
-  description = "Zone ID of the Application Load Balancer (for Route53 alias)"
-  value       = aws_lb.openbas.zone_id
-}
-
 output "target_group_arn" {
-  description = "ARN of the ALB target group"
+  description = "ARN of the target group (for Portal ALB listener rule)"
   value       = aws_lb_target_group.openbas.arn
+}
+
+output "target_group_name" {
+  description = "Name of the target group"
+  value       = aws_lb_target_group.openbas.name
 }
 
 # ------------------------------------------------------------------------------
@@ -155,31 +135,12 @@ output "storage_bucket_arn" {
 }
 
 # ------------------------------------------------------------------------------
-# Certificate
-# ------------------------------------------------------------------------------
-
-output "certificate_arn" {
-  description = "ARN of the ACM certificate"
-  value       = aws_acm_certificate.openbas.arn
-}
-
-output "certificate_domain_validation_options" {
-  description = "Domain validation options for the ACM certificate"
-  value       = aws_acm_certificate.openbas.domain_validation_options
-}
-
-# ------------------------------------------------------------------------------
 # API Endpoint
 # ------------------------------------------------------------------------------
 
 output "api_endpoint" {
-  description = "HTTPS endpoint for OpenBAS API"
-  value       = "https://${var.domain_name}"
-}
-
-output "internal_endpoint" {
-  description = "Internal ALB endpoint for OpenBAS"
-  value       = "https://${aws_lb.openbas.dns_name}"
+  description = "Base URL for OpenBAS API"
+  value       = var.base_url
 }
 
 # ------------------------------------------------------------------------------

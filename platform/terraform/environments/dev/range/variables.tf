@@ -84,8 +84,8 @@ variable "enable_openbas" {
   default     = false
 }
 
-variable "openbas_domain_name" {
-  description = "Domain name for OpenBAS (for ACM certificate)"
+variable "openbas_base_url" {
+  description = "Base URL for OpenBAS (e.g., https://portal.example.com/shifter-mirage/bas)"
   type        = string
   default     = ""
 }

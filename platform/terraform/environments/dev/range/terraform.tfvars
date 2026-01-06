@@ -44,13 +44,13 @@ vm_series_instance_type = "m5.xlarge"
 enable_ngfw_infrastructure = true
 
 # ------------------------------------------------------------------------------
-# OpenBAS Shared Infrastructure
+# OpenBAS Shared Infrastructure (Shifter Mirage)
 # ------------------------------------------------------------------------------
-# Set enable_openbas = true and configure domain to deploy OpenBAS
-# Requires DNS validation for ACM certificate
+# Set enable_openbas = true to deploy OpenBAS
+# Accessed via Portal ALB at /shifter-mirage/bas/
 
-enable_openbas      = false
-openbas_domain_name = "openbas.dev.shifter.internal" # Update with actual domain
+enable_openbas   = false
+openbas_base_url = "https://dev.shifter.example.com/shifter-mirage/bas" # Update with Portal domain
 
 # ECS sizing (dev defaults - adjust for production)
 openbas_task_cpu      = 1024 # 1 vCPU

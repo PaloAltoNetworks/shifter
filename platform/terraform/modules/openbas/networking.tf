@@ -2,7 +2,7 @@
 #
 # Creates:
 # - Private subnets across AZs for HA deployment
-# - Security groups for ECS tasks and ALB
+# - Security groups for ECS tasks
 # - Route table associations
 
 # ------------------------------------------------------------------------------
@@ -59,15 +59,16 @@ resource "aws_security_group" "ecs" {
   }
 }
 
-# Ingress from ALB
-resource "aws_security_group_rule" "ecs_from_alb" {
-  type                     = "ingress"
-  from_port                = 8080
-  to_port                  = 8080
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.alb.id
-  security_group_id        = aws_security_group.ecs.id
-  description              = "HTTP from ALB"
+# Ingress from Portal ALB (via VPC peering)
+# Portal ALB forwards /shifter-mirage/bas/* to this target group
+resource "aws_security_group_rule" "ecs_from_portal_alb" {
+  type              = "ingress"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  cidr_blocks       = [var.portal_vpc_cidr]
+  security_group_id = aws_security_group.ecs.id
+  description       = "HTTP from Portal ALB (via VPC peering)"
 }
 
 # Egress to RDS
@@ -111,57 +112,6 @@ resource "aws_security_group_rule" "ecs_dns_tcp" {
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.ecs.id
   description       = "DNS TCP"
-}
-
-# ------------------------------------------------------------------------------
-# ALB Security Group
-# ------------------------------------------------------------------------------
-
-resource "aws_security_group" "alb" {
-  name        = "${var.name_prefix}-openbas-alb"
-  description = "Security group for OpenBAS internal ALB"
-  vpc_id      = var.vpc_id
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-openbas-alb-sg"
-  })
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# HTTPS from Range VPC (agent communication)
-resource "aws_security_group_rule" "alb_https_from_range" {
-  type              = "ingress"
-  from_port         = 443
-  to_port           = 443
-  protocol          = "tcp"
-  cidr_blocks       = [var.vpc_cidr]
-  security_group_id = aws_security_group.alb.id
-  description       = "HTTPS from Range VPC (agent communication)"
-}
-
-# HTTPS from Portal VPC (API calls)
-resource "aws_security_group_rule" "alb_https_from_portal" {
-  type              = "ingress"
-  from_port         = 443
-  to_port           = 443
-  protocol          = "tcp"
-  cidr_blocks       = [var.portal_vpc_cidr]
-  security_group_id = aws_security_group.alb.id
-  description       = "HTTPS from Portal VPC (API calls)"
-}
-
-# Egress to ECS tasks
-resource "aws_security_group_rule" "alb_to_ecs" {
-  type                     = "egress"
-  from_port                = 8080
-  to_port                  = 8080
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.ecs.id
-  security_group_id        = aws_security_group.alb.id
-  description              = "HTTP to ECS tasks"
 }
 
 # ------------------------------------------------------------------------------

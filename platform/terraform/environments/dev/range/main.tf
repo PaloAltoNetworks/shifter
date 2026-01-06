@@ -71,7 +71,7 @@ module "openbas" {
   tags                   = var.tags
 
   # OpenBAS configuration
-  domain_name   = var.openbas_domain_name
+  base_url      = var.openbas_base_url
   openbas_image = var.openbas_image
 
   # ECS configuration

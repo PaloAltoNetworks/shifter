@@ -3,7 +3,6 @@
 # Monitoring for:
 # - ECS service health
 # - RDS database metrics
-# - ALB performance
 
 # ------------------------------------------------------------------------------
 # SNS Topic for Alerts
@@ -141,72 +140,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections_high" {
 
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.openbas.identifier
-  }
-
-  tags = local.common_tags
-}
-
-# ------------------------------------------------------------------------------
-# ALB Alarms
-# ------------------------------------------------------------------------------
-
-resource "aws_cloudwatch_metric_alarm" "alb_5xx_errors" {
-  alarm_name          = "${var.name_prefix}-openbas-alb-5xx-errors"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "HTTPCode_Target_5XX_Count"
-  namespace           = "AWS/ApplicationELB"
-  period              = 300
-  statistic           = "Sum"
-  threshold           = 10
-  alarm_description   = "OpenBAS ALB receiving 5xx errors from targets"
-  alarm_actions       = [aws_sns_topic.openbas_alerts.arn]
-  ok_actions          = [aws_sns_topic.openbas_alerts.arn]
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    LoadBalancer = aws_lb.openbas.arn_suffix
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
-  alarm_name          = "${var.name_prefix}-openbas-alb-unhealthy-hosts"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "UnHealthyHostCount"
-  namespace           = "AWS/ApplicationELB"
-  period              = 60
-  statistic           = "Maximum"
-  threshold           = 0
-  alarm_description   = "OpenBAS ALB has unhealthy targets"
-  alarm_actions       = [aws_sns_topic.openbas_alerts.arn]
-  ok_actions          = [aws_sns_topic.openbas_alerts.arn]
-
-  dimensions = {
-    LoadBalancer = aws_lb.openbas.arn_suffix
-    TargetGroup  = aws_lb_target_group.openbas.arn_suffix
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_cloudwatch_metric_alarm" "alb_latency_high" {
-  alarm_name          = "${var.name_prefix}-openbas-alb-latency-high"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 3
-  metric_name         = "TargetResponseTime"
-  namespace           = "AWS/ApplicationELB"
-  period              = 300
-  extended_statistic  = "p99"
-  threshold           = 5 # 5 seconds
-  alarm_description   = "OpenBAS ALB p99 latency is too high"
-  alarm_actions       = [aws_sns_topic.openbas_alerts.arn]
-  ok_actions          = [aws_sns_topic.openbas_alerts.arn]
-
-  dimensions = {
-    LoadBalancer = aws_lb.openbas.arn_suffix
   }
 
   tags = local.common_tags

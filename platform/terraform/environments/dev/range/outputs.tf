@@ -173,7 +173,7 @@ output "ngfw_capacity_sns_topic_arn" {
 }
 
 # ------------------------------------------------------------------------------
-# OpenBAS Shared Infrastructure
+# OpenBAS Shared Infrastructure (Shifter Mirage)
 # ------------------------------------------------------------------------------
 
 output "openbas_enabled" {
@@ -181,19 +181,14 @@ output "openbas_enabled" {
   value       = var.enable_openbas
 }
 
-output "openbas_alb_dns_name" {
-  description = "DNS name of the OpenBAS internal ALB (null if disabled)"
-  value       = var.enable_openbas ? module.openbas[0].alb_dns_name : null
+output "openbas_target_group_arn" {
+  description = "ARN of the OpenBAS target group for Portal ALB (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].target_group_arn : null
 }
 
 output "openbas_api_endpoint" {
-  description = "HTTPS endpoint for OpenBAS API (null if disabled)"
+  description = "Base URL for OpenBAS API (null if disabled)"
   value       = var.enable_openbas ? module.openbas[0].api_endpoint : null
-}
-
-output "openbas_internal_endpoint" {
-  description = "Internal ALB endpoint for OpenBAS (null if disabled)"
-  value       = var.enable_openbas ? module.openbas[0].internal_endpoint : null
 }
 
 output "openbas_db_endpoint" {
@@ -229,9 +224,4 @@ output "openbas_subnet_ids" {
 output "openbas_storage_bucket_id" {
   description = "ID of the OpenBAS S3 storage bucket (null if disabled)"
   value       = var.enable_openbas ? module.openbas[0].storage_bucket_id : null
-}
-
-output "openbas_certificate_domain_validation_options" {
-  description = "Domain validation options for the OpenBAS ACM certificate (null if disabled)"
-  value       = var.enable_openbas ? module.openbas[0].certificate_domain_validation_options : null
 }

@@ -29,8 +29,8 @@ variable "private_route_table_id" {
   type        = string
 }
 
-variable "domain_name" {
-  description = "Domain name for OpenBAS (for ACM certificate)"
+variable "base_url" {
+  description = "Base URL for OpenBAS (e.g., https://portal.example.com/shifter-mirage/bas)"
   type        = string
 }
 
@@ -162,16 +162,4 @@ variable "log_retention_days" {
   description = "CloudWatch log retention in days"
   type        = number
   default     = 30
-}
-
-variable "logs_bucket_name" {
-  description = "S3 bucket name for ALB access logs (optional)"
-  type        = string
-  default     = ""
-}
-
-variable "enable_alb_access_logs" {
-  description = "Enable ALB access logs"
-  type        = bool
-  default     = false
 }

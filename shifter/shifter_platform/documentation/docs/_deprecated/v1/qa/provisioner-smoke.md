@@ -4,18 +4,14 @@
 
 ```bash
 # Dev
-export ENV=dev AWS_PROFILE=panw-shifter-dev-workstation
+export ENV=dev AWS_PROFILE=<dev account profile>
 
 # Prod
-export ENV=prod AWS_PROFILE=dev-workstation-user
+export ENV=prod AWS_PROFILE=<prod account profile>
 ```
 
 ## CLI Checks (Claude)
 
-```bash
-# State machines exist
-aws stepfunctions list-state-machines --profile $AWS_PROFILE --region us-east-2 \
-  --query "stateMachines[?contains(name, '${ENV}-portal')].name" --output table
 
 # Lambda functions exist
 aws lambda list-functions --profile $AWS_PROFILE --region us-east-2 \

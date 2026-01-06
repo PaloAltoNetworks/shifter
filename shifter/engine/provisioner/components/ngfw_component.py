@@ -8,7 +8,6 @@ This component creates the VM-Series NGFW EC2 instance with:
 
 import os
 from pathlib import Path
-from typing import Optional
 
 import pulumi
 import pulumi_aws as aws
@@ -54,8 +53,8 @@ class NGFWComponent(pulumi.ComponentResource):
         bootstrap_bucket: str,
         instance_type: str = "m5.xlarge",
         environment: str = "dev",
-        instance_profile_name: Optional[str] = None,
-        opts: Optional[pulumi.ResourceOptions] = None,
+        instance_profile_name: str | None = None,
+        opts: pulumi.ResourceOptions | None = None,
     ):
         """Create NGFW instance with ENIs and bootstrap config.
 
@@ -177,7 +176,8 @@ class NGFWComponent(pulumi.ComponentResource):
         """
         template_file = templates_dir / "ngfw_init_cfg.txt.j2"
         if template_file.exists():
-            env = Environment(loader=FileSystemLoader(str(templates_dir)))
+            # Security: autoescape not needed - this is PAN-OS config, not HTML.
+            env = Environment(loader=FileSystemLoader(str(templates_dir)))  # nosec B701  # noqa: S701
             template = env.get_template("ngfw_init_cfg.txt.j2")
             return template.render(
                 hostname=hostname,

@@ -11,9 +11,7 @@ class TestLinuxXDRAgentInstallPlanContext:
     def test_get_context_returns_presigned_url(self):
         """get_context returns agent_presigned_url."""
         plan = LinuxXDRAgentInstallPlan()
-        context = plan.get_context({
-            "agent_presigned_url": "https://example.com/agent.sh"
-        })
+        context = plan.get_context({"agent_presigned_url": "https://example.com/agent.sh"})
         assert context["agent_presigned_url"] == "https://example.com/agent.sh"
 
     def test_get_context_missing_url_raises(self):

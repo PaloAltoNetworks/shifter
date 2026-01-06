@@ -41,11 +41,6 @@ PANW SecOps Domain Consultants who need to:
 
 All resources are in `us-east-2`.
 
-| Environment | AWS Profile |
-|-------------|-------------|
-| dev | `panw-shifter-dev-workstation` |
-| prod | `dev-workstation-user` |
-
 ---
 
 ## Platform Elements
@@ -87,3 +82,9 @@ Shifter consists of four major elements:
 - Do NOT add "helpful" extras beyond the request
 - Keep responses focused and concise
 - Write for technical audience (no marketing language)
+
+## Lessons Learned
+
+### Tests: Avoid Micro-Tests with Inline Mocks
+
+Creating many tiny tests each with inline `AsyncMock()`/`MagicMock()` causes OOM (27GB+). Use fixtures for mocks and write integration-style tests instead of one test per assertion.

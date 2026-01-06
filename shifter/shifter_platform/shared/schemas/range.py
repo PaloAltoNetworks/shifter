@@ -23,12 +23,12 @@ class AgentDetails(BaseModel):
     Attributes:
         s3_key: S3 object key where the agent installer is stored.
         filename: Original filename of the agent installer.
-        sha256: SHA256 hash of the agent file for verification.
+        sha256: SHA256 hash of the agent file (optional, for future use).
     """
 
     s3_key: str
     filename: str
-    sha256: str
+    sha256: str = ""
 
 
 class DCConfig(BaseModel):

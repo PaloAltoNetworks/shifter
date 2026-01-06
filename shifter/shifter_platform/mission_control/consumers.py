@@ -136,14 +136,13 @@ class SSHConsumer(AsyncWebsocketConsumer):
     async def _read_ssh_output(self):
         """Background task to read SSH output and send to WebSocket."""
         try:
-            while True:
+            while self.ssh_conn.is_connected:
                 data = await self.ssh_conn.receive()
                 if data:
                     # receive() returns bytes, decode to string for JSON
                     output = data.decode("utf-8", errors="replace")
                     await self.send(text_data=json.dumps({"type": "output", "data": output}))
-                else:
-                    break
+                # Empty bytes just means timeout (no data), keep looping
         except asyncio.CancelledError:
             pass
         except Exception:

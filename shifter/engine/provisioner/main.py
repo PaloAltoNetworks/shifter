@@ -652,6 +652,10 @@ def _run_ngfw_deprovision(user_ngfw_id: int, stack_name: str, env: dict) -> None
 
 
 if __name__ == "__main__":
+    from logging_config import configure_logging
+
+    configure_logging()
+
     import argparse
 
     RANGE_ID_HELP = "Database ID of the range to operate on"

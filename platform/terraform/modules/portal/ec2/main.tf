@@ -149,7 +149,9 @@ resource "aws_iam_role_policy" "s3_access" {
         Action = [
           "s3:PutObject",
           "s3:GetObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:PutObjectTagging",
+          "s3:GetObjectTagging"
         ]
         Resource = "${var.s3_bucket_arn}/*"
       },
@@ -236,6 +238,57 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# IAM policy for reading deployment config from Parameter Store
+resource "aws_iam_role_policy" "ssm_parameter_read" {
+  count = var.ssm_parameter_store_prefix != "" ? 1 : 0
+
+  name = "ssm-parameter-read"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_parameter_store_prefix}/*"
+      }
+    ]
+  })
+}
+
+# IAM policy for ASG lifecycle operations (used by user_data.sh)
+resource "aws_iam_role_policy" "lifecycle_action" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  name = "lifecycle-action"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:CompleteLifecycleAction"
+        ]
+        Resource = aws_autoscaling_group.this[0].arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:DescribeAutoScalingInstances"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "this" {
   name = "${var.name_prefix}-ec2-profile"
   role = aws_iam_role.this.name
@@ -278,25 +331,6 @@ resource "aws_security_group_rule" "egress_all" {
 }
 
 # ------------------------------------------------------------------------------
-# AMI Lookup
-# ------------------------------------------------------------------------------
-
-data "aws_ami" "amazon_linux_2023" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["al2023-ami-*-x86_64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
-# ------------------------------------------------------------------------------
 # Launch Template (for ASG mode)
 # ------------------------------------------------------------------------------
 
@@ -304,7 +338,7 @@ resource "aws_launch_template" "this" {
   count = var.enable_autoscaling ? 1 : 0
 
   name_prefix   = "${var.name_prefix}-lt-"
-  image_id      = data.aws_ami.amazon_linux_2023.id
+  image_id      = var.ec2_ami_id
   instance_type = var.instance_type
 
   iam_instance_profile {
@@ -317,13 +351,11 @@ resource "aws_launch_template" "this" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
-    aws_region         = var.aws_region
-    ecr_repository_url = var.ecr_repository_url
-    log_group_name     = local.log_group_name
-    sqs_cms_url        = lookup(var.sqs_queue_urls, "cms", "")
-    sqs_engine_url     = lookup(var.sqs_queue_urls, "engine", "")
-    sqs_mc_url         = lookup(var.sqs_queue_urls, "mc", "")
-    redis_endpoint     = var.redis_endpoint
+    aws_region                 = var.aws_region
+    ecr_repository_url         = var.ecr_repository_url
+    log_group_name             = local.log_group_name
+    ssm_parameter_store_prefix = var.ssm_parameter_store_prefix
+    lifecycle_hook_name        = "${var.name_prefix}-launch-hook"
   }))
 
   block_device_mappings {
@@ -350,7 +382,8 @@ resource "aws_launch_template" "this" {
   tag_specifications {
     resource_type = "instance"
     tags = merge(local.common_tags, {
-      Name = "${var.name_prefix}-ec2"
+      Name        = "${var.name_prefix}-ec2"
+      ShifterRole = "shifter-platform"
     })
   }
 
@@ -381,7 +414,7 @@ resource "aws_autoscaling_group" "this" {
   vpc_zone_identifier       = var.subnet_ids
   target_group_arns         = [var.target_group_arn]
   health_check_type         = "ELB"
-  health_check_grace_period = 300
+  health_check_grace_period = 900
 
   min_size         = var.asg_min_size
   max_size         = var.asg_max_size
@@ -490,7 +523,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_low" {
 resource "aws_instance" "this" {
   count = var.enable_autoscaling ? 0 : 1
 
-  ami                    = data.aws_ami.amazon_linux_2023.id
+  ami                    = var.ec2_ami_id
   instance_type          = var.instance_type
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.this.id]
@@ -499,13 +532,11 @@ resource "aws_instance" "this" {
   ebs_optimized          = true
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
-    aws_region         = var.aws_region
-    ecr_repository_url = var.ecr_repository_url
-    log_group_name     = local.log_group_name
-    sqs_cms_url        = lookup(var.sqs_queue_urls, "cms", "")
-    sqs_engine_url     = lookup(var.sqs_queue_urls, "engine", "")
-    sqs_mc_url         = lookup(var.sqs_queue_urls, "mc", "")
-    redis_endpoint     = var.redis_endpoint
+    aws_region                 = var.aws_region
+    ecr_repository_url         = var.ecr_repository_url
+    log_group_name             = local.log_group_name
+    ssm_parameter_store_prefix = var.ssm_parameter_store_prefix
+    lifecycle_hook_name        = ""
   }))
 
   root_block_device {
@@ -523,10 +554,25 @@ resource "aws_instance" "this" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-ec2"
+    Name        = "${var.name_prefix}-ec2"
+    ShifterRole = "shifter-platform"
   })
 
   lifecycle {
     ignore_changes = [ami]
   }
+}
+
+# ------------------------------------------------------------------------------
+# ASG Lifecycle Hook (holds instance until user_data completes deployment)
+# ------------------------------------------------------------------------------
+
+resource "aws_autoscaling_lifecycle_hook" "launch" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  name                   = "${var.name_prefix}-launch-hook"
+  autoscaling_group_name = aws_autoscaling_group.this[0].name
+  lifecycle_transition   = "autoscaling:EC2_INSTANCE_LAUNCHING"
+  heartbeat_timeout      = var.lifecycle_hook_heartbeat_timeout
+  default_result         = "ABANDON"
 }

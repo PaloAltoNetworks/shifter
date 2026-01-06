@@ -178,6 +178,7 @@ document.addEventListener('DOMContentLoaded', function() {
         cancelUrl: '{% url "mission_control:cancel_range" %}',
         destroyUrl: '{% url "mission_control:destroy_range" %}',
         agentsUrl: '{% url "mission_control:list_agents" %}',
+        provisioningTimeoutMs: {{ provisioning_timeout_ms }},
         // ngfwConfigsUrl removed - NGFW UI pending UserNGFW views (issue #412)
     });
     dashboard.init();

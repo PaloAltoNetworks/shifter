@@ -14,6 +14,11 @@
     "collectCoverageFrom": [
       "static/js/**/*.js",
       "!**/*.test.js"
+    ],
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "cobertura"
     ]
   },
   "devDependencies": {

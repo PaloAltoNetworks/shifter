@@ -332,6 +332,8 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
         username = "kali"
     elif os_type == "amazon-linux":
         username = "ec2-user"
+    elif os_type == "windows":
+        username = "Administrator"
     else:
         username = "ubuntu"  # Default for ubuntu and other Linux distros
 

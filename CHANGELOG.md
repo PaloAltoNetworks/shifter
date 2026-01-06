@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.3] - 2025-01-04
 
-## Added
-- SSM Documents for Shifter Platform deployment and ASG lifecycle hook
+### Changed
+- user_data for Shifter Platform deployment and ASG lifecycle hook
+
+### Fixed
+- Terminal timeouts, reconnects, and stability issues
+- Range instance username mismatch
 
 ## [0.10.2] - 2025-01-04
 

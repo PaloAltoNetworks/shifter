@@ -73,3 +73,91 @@ variable "enable_ngfw_infrastructure" {
   description = "Enable persistent NGFW infrastructure (subnet, security groups, IAM role)"
   type        = bool
 }
+
+# ------------------------------------------------------------------------------
+# OpenBAS Configuration
+# ------------------------------------------------------------------------------
+
+variable "enable_openbas" {
+  description = "Enable OpenBAS shared infrastructure"
+  type        = bool
+  default     = false
+}
+
+variable "openbas_domain_name" {
+  description = "Domain name for OpenBAS (for ACM certificate)"
+  type        = string
+  default     = ""
+}
+
+variable "openbas_image" {
+  description = "Docker image for OpenBAS"
+  type        = string
+  default     = "openbas/openbas:latest"
+}
+
+variable "openbas_task_cpu" {
+  description = "CPU units for OpenBAS ECS task (1024 = 1 vCPU)"
+  type        = number
+  default     = 1024
+}
+
+variable "openbas_task_memory" {
+  description = "Memory for OpenBAS ECS task in MB"
+  type        = number
+  default     = 4096
+}
+
+variable "openbas_desired_count" {
+  description = "Desired number of OpenBAS ECS tasks"
+  type        = number
+  default     = 2
+}
+
+variable "openbas_enable_autoscaling" {
+  description = "Enable auto scaling for OpenBAS ECS service"
+  type        = bool
+  default     = true
+}
+
+variable "openbas_min_capacity" {
+  description = "Minimum number of OpenBAS ECS tasks"
+  type        = number
+  default     = 2
+}
+
+variable "openbas_max_capacity" {
+  description = "Maximum number of OpenBAS ECS tasks"
+  type        = number
+  default     = 4
+}
+
+variable "openbas_db_instance_class" {
+  description = "RDS instance class for OpenBAS database"
+  type        = string
+  default     = "db.t3.small"
+}
+
+variable "openbas_db_multi_az" {
+  description = "Enable Multi-AZ deployment for OpenBAS RDS"
+  type        = bool
+  default     = true
+}
+
+variable "openbas_db_backup_retention_days" {
+  description = "Backup retention days for OpenBAS RDS"
+  type        = number
+  default     = 7
+}
+
+variable "openbas_db_deletion_protection" {
+  description = "Enable deletion protection for OpenBAS RDS"
+  type        = bool
+  default     = false
+}
+
+variable "openbas_db_skip_final_snapshot" {
+  description = "Skip final snapshot when destroying OpenBAS RDS"
+  type        = bool
+  default     = true
+}

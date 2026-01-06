@@ -171,3 +171,67 @@ output "ngfw_capacity_sns_topic_arn" {
   description = "ARN of the SNS topic for NGFW capacity alerts (null if NGFW infrastructure disabled)"
   value       = module.vpc.ngfw_capacity_sns_topic_arn
 }
+
+# ------------------------------------------------------------------------------
+# OpenBAS Shared Infrastructure
+# ------------------------------------------------------------------------------
+
+output "openbas_enabled" {
+  description = "Whether OpenBAS infrastructure is enabled"
+  value       = var.enable_openbas
+}
+
+output "openbas_alb_dns_name" {
+  description = "DNS name of the OpenBAS internal ALB (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].alb_dns_name : null
+}
+
+output "openbas_api_endpoint" {
+  description = "HTTPS endpoint for OpenBAS API (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].api_endpoint : null
+}
+
+output "openbas_internal_endpoint" {
+  description = "Internal ALB endpoint for OpenBAS (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].internal_endpoint : null
+}
+
+output "openbas_db_endpoint" {
+  description = "Connection endpoint for OpenBAS RDS (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].db_endpoint : null
+}
+
+output "openbas_db_credentials_secret_arn" {
+  description = "ARN of the Secrets Manager secret for OpenBAS DB credentials (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].db_credentials_secret_arn : null
+}
+
+output "openbas_admin_token_secret_arn" {
+  description = "ARN of the Secrets Manager secret for OpenBAS admin token (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].admin_token_secret_arn : null
+}
+
+output "openbas_ecs_cluster_name" {
+  description = "Name of the OpenBAS ECS cluster (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].ecs_cluster_name : null
+}
+
+output "openbas_ecs_service_name" {
+  description = "Name of the OpenBAS ECS service (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].ecs_service_name : null
+}
+
+output "openbas_subnet_ids" {
+  description = "IDs of the OpenBAS subnets (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].subnet_ids : null
+}
+
+output "openbas_storage_bucket_id" {
+  description = "ID of the OpenBAS S3 storage bucket (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].storage_bucket_id : null
+}
+
+output "openbas_certificate_domain_validation_options" {
+  description = "Domain validation options for the OpenBAS ACM certificate (null if disabled)"
+  value       = var.enable_openbas ? module.openbas[0].certificate_domain_validation_options : null
+}

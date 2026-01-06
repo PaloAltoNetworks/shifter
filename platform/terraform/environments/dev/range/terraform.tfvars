@@ -42,3 +42,21 @@ vm_series_instance_type = "m5.xlarge"
 # ------------------------------------------------------------------------------
 
 enable_ngfw_infrastructure = true
+
+# ------------------------------------------------------------------------------
+# OpenBAS Shared Infrastructure
+# ------------------------------------------------------------------------------
+# Set enable_openbas = true and configure domain to deploy OpenBAS
+# Requires DNS validation for ACM certificate
+
+enable_openbas      = false
+openbas_domain_name = "openbas.dev.shifter.internal" # Update with actual domain
+
+# ECS sizing (dev defaults - adjust for production)
+openbas_task_cpu      = 1024 # 1 vCPU
+openbas_task_memory   = 4096 # 4 GB
+openbas_desired_count = 2
+
+# Database sizing (dev defaults)
+openbas_db_instance_class = "db.t3.small"
+openbas_db_multi_az       = true

@@ -5,8 +5,6 @@ This component creates the network infrastructure for a range:
 - Route table association
 """
 
-from typing import Optional
-
 import boto3
 import pulumi
 import pulumi_aws as aws
@@ -42,17 +40,16 @@ def _cleanup_orphaned_subnet(vpc_id: str, cidr_block: str) -> None:
         (tag["Value"] for tag in subnets[0].get("Tags", []) if tag["Key"] == "Name"),
         "unknown",
     )
-    print(f"Found orphaned subnet {subnet_id} ({subnet_name}) with CIDR {cidr_block}")
-    print(f"Deleting orphaned subnet to allow new range creation...")
+    pulumi.log.warn(f"Found orphaned subnet {subnet_id} ({subnet_name}) with CIDR {cidr_block}")
+    pulumi.log.info("Deleting orphaned subnet to allow new range creation...")
 
     try:
         ec2.delete_subnet(SubnetId=subnet_id)
-        print(f"Successfully deleted orphaned subnet {subnet_id}")
+        pulumi.log.info(f"Successfully deleted orphaned subnet {subnet_id}")
     except Exception as e:
         # If deletion fails, let Pulumi handle the error with a clear message
         raise RuntimeError(
-            f"Cannot create subnet {cidr_block}: orphaned subnet {subnet_id} exists "
-            f"and could not be deleted: {e}"
+            f"Cannot create subnet {cidr_block}: orphaned subnet {subnet_id} exists and could not be deleted: {e}"
         ) from e
 
 
@@ -80,7 +77,7 @@ class NetworkComponent(pulumi.ComponentResource):
         route_table_id: str,
         environment: str,
         availability_zone: str,
-        opts: Optional[pulumi.ResourceOptions] = None,
+        opts: pulumi.ResourceOptions | None = None,
     ):
         """Create network infrastructure for a range.
 

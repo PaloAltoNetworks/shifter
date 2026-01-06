@@ -51,9 +51,15 @@ class TestLoadConfigEdgeCases:
                 "id": 0,
                 "user_id": 1,
                 "subnet_index": 0,
-                "agent_id": None,
-                "instance_config": None,
-                "agent_s3_key": None,
+                "range_config": {
+                    "scenario_id": "basic",
+                    "user_id": 1,
+                    "instances": [
+                        {"role": "attacker", "os_type": "kali"},
+                        {"role": "victim", "os_type": "ubuntu"},
+                    ],
+                },
+                "ngfw_enabled": False,
             },
         )
 
@@ -61,7 +67,7 @@ class TestLoadConfigEdgeCases:
 
         assert result.range_id == 0
         assert result.subnet_index == 0
-        assert len(result.instances) == 2  # defaults
+        assert len(result.instances) == 2
 
     def test_load_config_large_range_id(self, mock_pulumi_config, mocker, mock_boto3_clients):
         mock_pulumi_config.require_int.side_effect = lambda key: {
@@ -74,9 +80,8 @@ class TestLoadConfigEdgeCases:
                 "id": 999999,
                 "user_id": 1,
                 "subnet_index": 5,
-                "agent_id": None,
-                "instance_config": None,
-                "agent_s3_key": None,
+                "range_config": {"scenario_id": "basic", "user_id": 1, "instances": []},
+                "ngfw_enabled": False,
             },
         )
 
@@ -85,11 +90,8 @@ class TestLoadConfigEdgeCases:
         assert result.range_id == 999999
 
     def test_load_config_many_instances(self, mock_pulumi_config, mocker, mock_boto3_clients):
-        instance_config = [
-            {"role": "attacker", "os": "kali", "instance_type": "t3.small"}
-        ] + [
-            {"role": "victim", "os": "ubuntu", "instance_type": "t3.micro"}
-            for _ in range(10)
+        instances = [{"role": "attacker", "os_type": "kali"}] + [
+            {"role": "victim", "os_type": "ubuntu"} for _ in range(10)
         ]
 
         mocker.patch(
@@ -98,9 +100,8 @@ class TestLoadConfigEdgeCases:
                 "id": 42,
                 "user_id": 1,
                 "subnet_index": 5,
-                "agent_id": None,
-                "instance_config": instance_config,
-                "agent_s3_key": None,
+                "range_config": {"scenario_id": "basic", "user_id": 1, "instances": instances},
+                "ngfw_enabled": False,
             },
         )
 
@@ -111,10 +112,10 @@ class TestLoadConfigEdgeCases:
         assert sum(1 for i in result.instances if i.role == "victim") == 10
 
     def test_load_config_mixed_os_types(self, mock_pulumi_config, mocker, mock_boto3_clients):
-        instance_config = [
-            {"role": "victim", "os": "ubuntu", "instance_type": "t3.micro"},
-            {"role": "victim", "os": "windows", "instance_type": "t3.medium"},
-            {"role": "victim", "os": "amazon-linux", "instance_type": "t3.small"},
+        instances = [
+            {"role": "victim", "os_type": "ubuntu"},
+            {"role": "victim", "os_type": "windows"},
+            {"role": "victim", "os_type": "amazon-linux"},
         ]
 
         mocker.patch(
@@ -123,9 +124,8 @@ class TestLoadConfigEdgeCases:
                 "id": 42,
                 "user_id": 1,
                 "subnet_index": 5,
-                "agent_id": None,
-                "instance_config": instance_config,
-                "agent_s3_key": None,
+                "range_config": {"scenario_id": "basic", "user_id": 1, "instances": instances},
+                "ngfw_enabled": False,
             },
         )
 
@@ -190,6 +190,5 @@ class TestInstanceConfigBoundaryValues:
             os_type="ubuntu",
             instance_type="t3.micro",
         )
-        assert config.agent_id is None
         assert config.agent_s3_key is None
         assert config.agent_presigned_url is None

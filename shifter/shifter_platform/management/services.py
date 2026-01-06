@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from django.utils import timezone
 
+from shared.constants import USER_CANNOT_BE_NONE
+
 from .models import ActivityLog, UserProfile
 
 if TYPE_CHECKING:
@@ -61,7 +63,7 @@ def get_user_profile(user: User) -> UserProfile:
         ValueError: If user has no primary key (unsaved)
     """
     if user is None:
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
     if user.pk is None:
         raise ValueError("user must have a primary key")
 
@@ -114,7 +116,7 @@ def create_user_profile(user: User) -> None:
         ValueError: If user has no primary key (unsaved)
     """
     if user is None:
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
     if user.pk is None:
         raise ValueError("user must have a primary key")
 
@@ -137,7 +139,7 @@ def save_user_profile(user: User) -> None:
         ValueError: If user has no primary key (unsaved)
     """
     if user is None:
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
     if user.pk is None:
         raise ValueError("user must have a primary key")
 
@@ -161,7 +163,7 @@ def update_cognito_sub(user: User, cognito_sub: str) -> None:
         ValueError: If user has no primary key or cognito_sub is empty
     """
     if user is None:
-        raise TypeError("user cannot be None")
+        raise TypeError(USER_CANNOT_BE_NONE)
     if user.pk is None:
         raise ValueError("user must have a primary key")
     if cognito_sub is None:

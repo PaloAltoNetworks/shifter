@@ -6,7 +6,8 @@
 
 class TerminalManager {
     constructor(options) {
-        this.rangeId = options.rangeId;
+        this.instances = options.instances || [];
+        this.connectionUrls = options.connectionUrls || [];
         this.kaliContainerId = options.kaliContainerId;
         this.victimContainerId = options.victimContainerId;
         this.wsProtocol = options.wsProtocol || 'ws:';
@@ -126,6 +127,21 @@ class TerminalManager {
     }
 
     /**
+     * Find instance by role
+     */
+    _getInstanceByRole(role) {
+        return this.instances.find(inst => inst.role === role);
+    }
+
+    /**
+     * Get terminal URL for an instance UUID
+     */
+    _getTerminalUrl(uuid) {
+        const conn = this.connectionUrls.find(c => c.uuid === uuid);
+        return conn ? conn.terminalUrl : null;
+    }
+
+    /**
      * Connect WebSockets for both terminals
      */
     connectWebSockets() {
@@ -134,10 +150,22 @@ class TerminalManager {
     }
 
     /**
-     * Connect Kali WebSocket
+     * Connect Kali (attacker) WebSocket
      */
     connectKali() {
-        const url = `${this.wsProtocol}//${this.wsHost}/ws/terminal/${this.rangeId}/kali/`;
+        const instance = this._getInstanceByRole('attacker');
+        if (!instance) {
+            console.error('No attacker instance found');
+            this.updateStatus('kali', 'failed');
+            return;
+        }
+        const terminalUrl = this._getTerminalUrl(instance.uuid);
+        if (!terminalUrl) {
+            console.error('No terminal URL found for attacker instance');
+            this.updateStatus('kali', 'failed');
+            return;
+        }
+        const url = `${this.wsProtocol}//${this.wsHost}${terminalUrl}`;
         this.kaliSocket = new WebSocket(url);
 
         this.kaliSocket.onopen = () => {
@@ -174,7 +202,19 @@ class TerminalManager {
      * Connect Victim WebSocket
      */
     connectVictim() {
-        const url = `${this.wsProtocol}//${this.wsHost}/ws/terminal/${this.rangeId}/victim/`;
+        const instance = this._getInstanceByRole('victim');
+        if (!instance) {
+            console.error('No victim instance found');
+            this.updateStatus('victim', 'failed');
+            return;
+        }
+        const terminalUrl = this._getTerminalUrl(instance.uuid);
+        if (!terminalUrl) {
+            console.error('No terminal URL found for victim instance');
+            this.updateStatus('victim', 'failed');
+            return;
+        }
+        const url = `${this.wsProtocol}//${this.wsHost}${terminalUrl}`;
         this.victimSocket = new WebSocket(url);
 
         this.victimSocket.onopen = () => {

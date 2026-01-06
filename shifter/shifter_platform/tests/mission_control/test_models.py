@@ -201,25 +201,19 @@ class TestRange:
     def user(self):
         return User.objects.create_user(username="test@example.com", email="test@example.com")
 
-    def test_str_with_agent(self, user):
-        """__str__ includes agent name when agent exists."""
-        windows_os = OperatingSystem.objects.get(slug="windows")
-        agent = AgentConfig.objects.create(
+    def test_str_with_scenario(self, user):
+        """__str__ includes scenario_id from range_config."""
+        range_obj = Range.objects.create(
             user=user,
-            os=windows_os,
-            name="Test Agent",
-            s3_key="test/key.msi",
-            original_filename="installer.msi",
-            file_size_bytes=1024,
-            sha256_hash="abc123",
+            range_config={"scenario_id": "ad_attack_lab"},
         )
-        range_obj = Range.objects.create(user=user, agent=agent)
-        assert "Test Agent" in str(range_obj)
+        assert "ad_attack_lab" in str(range_obj)
+        assert str(range_obj.id) in str(range_obj)
 
-    def test_str_without_agent(self, user):
-        """__str__ shows 'Unknown Agent' when agent is None."""
-        range_obj = Range.objects.create(user=user, agent=None)
-        assert "Unknown Agent" in str(range_obj)
+    def test_str_without_range_config(self, user):
+        """__str__ shows 'unknown' scenario when range_config is None."""
+        range_obj = Range.objects.create(user=user, range_config=None)
+        assert "unknown" in str(range_obj)
 
     # --- kali_private_ip property tests ---
 

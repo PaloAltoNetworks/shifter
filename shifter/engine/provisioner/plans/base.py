@@ -6,8 +6,8 @@ SetupStep represents a single step in the setup process.
 This is an interface/protocol that specific plans implement.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Protocol, Any, Dict
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 
 @dataclass
@@ -21,6 +21,7 @@ class SetupStep:
         requires_reboot: If True, orchestrator will reboot after this step
         is_verification: If True, this is a check not an action
     """
+
     name: str
     script: str
     timeout_seconds: int = 300
@@ -35,13 +36,13 @@ class SetupPlan(Protocol):
     to define how it should be configured.
     """
 
-    steps: List[SetupStep]
+    steps: list[SetupStep]
     """List of steps to execute in order."""
 
     verify_step: SetupStep
     """Final verification step to confirm setup succeeded."""
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for rendering scripts.
 
         Args:

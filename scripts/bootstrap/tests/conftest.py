@@ -1,9 +1,35 @@
 """Pytest configuration for bootstrap tests."""
 
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+# Get the real repo root to protect it
+_REAL_REPO_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
+
+
+@pytest.fixture(autouse=True)
+def protect_real_files(monkeypatch):
+    """SAFETY: Prevent tests from writing to real repository files.
+
+    This autouse fixture intercepts Path.write_text() calls and raises
+    an error if any test tries to write to the real repository.
+    """
+    original_write_text = Path.write_text
+
+    def safe_write_text(self, *args, **kwargs):
+        resolved = self.resolve()
+        # Block writes to the real repo (but allow writes to /tmp, etc.)
+        if str(resolved).startswith(str(_REAL_REPO_ROOT)):
+            raise RuntimeError(
+                f"TEST SAFETY: Blocked write to real repo file: {resolved}\n"
+                f"Tests must mock get_repo_root() or use tmp_path fixtures."
+            )
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", safe_write_text)
 
 
 @pytest.fixture

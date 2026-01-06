@@ -20,12 +20,22 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+
+# Import runner setup module
+try:
+    from runner import get_runner_config, walkthrough_runner_setup
+
+    RUNNER_AVAILABLE = True
+except ImportError:
+    RUNNER_AVAILABLE = False
+
 
 # Colors for terminal output
 class Colors:
@@ -69,7 +79,7 @@ def subheader(msg: str) -> None:
 def code_block(text: str) -> None:
     """Print a code block with dimmed formatting."""
     print(f"{Colors.DIM}┌{'─' * 58}┐{Colors.END}")
-    for line in text.strip().split('\n'):
+    for line in text.strip().split("\n"):
         print(f"{Colors.DIM}│{Colors.END} {line}")
     print(f"{Colors.DIM}└{'─' * 58}┘{Colors.END}")
 
@@ -131,7 +141,13 @@ def wait_for_user(msg: str) -> None:
         print("Press Enter to continue, or type 'skip' to skip this step")
 
 
-def run_cmd(cmd: list[str], dry_run: bool = False, check: bool = True, capture: bool = False, profile: str = None) -> subprocess.CompletedProcess | None:
+def run_cmd(
+    cmd: list[str],
+    dry_run: bool = False,
+    check: bool = True,
+    capture: bool = False,
+    profile: str = None,
+) -> subprocess.CompletedProcess | None:
     """Run a command, optionally in dry-run mode."""
     # Insert --profile flag for AWS CLI commands
     if profile and cmd[0] == "aws":
@@ -145,13 +161,13 @@ def run_cmd(cmd: list[str], dry_run: bool = False, check: bool = True, capture: 
     info(f"Running: {cmd_str}")
     try:
         if capture:
-            result = subprocess.run(cmd, check=check, capture_output=True, text=True)
+            result = subprocess.run(cmd, check=check, capture_output=True, text=True)  # nosec B603 B607
         else:
-            result = subprocess.run(cmd, check=check, text=True)
+            result = subprocess.run(cmd, check=check, text=True)  # nosec B603 B607
         return result
     except subprocess.CalledProcessError as e:
         error(f"Command failed: {e}")
-        if hasattr(e, 'stderr') and e.stderr:
+        if hasattr(e, "stderr") and e.stderr:
             print(e.stderr)
         if check:
             sys.exit(1)
@@ -163,13 +179,147 @@ def get_aws_account_id(profile: str = None) -> str:
     cmd = ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"]
     if profile:
         cmd = ["aws", "--profile", profile, "sts", "get-caller-identity", "--query", "Account", "--output", "text"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)  # nosec B603 B607
     return result.stdout.strip()
 
 
 def get_repo_root() -> Path:
     """Get the repository root directory."""
     return Path(__file__).parent.parent.parent
+
+
+def s3_bucket_exists(bucket_name: str, profile: str) -> bool:
+    """Check if an S3 bucket exists."""
+    result = subprocess.run(  # nosec B603 B607
+        ["aws", "--profile", profile, "s3api", "head-bucket", "--bucket", bucket_name],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def dynamodb_table_exists(table_name: str, region: str, profile: str) -> bool:
+    """Check if a DynamoDB table exists."""
+    result = subprocess.run(  # nosec B603 B607
+        [
+            "aws",
+            "--profile",
+            profile,
+            "dynamodb",
+            "describe-table",
+            "--table-name",
+            table_name,
+            "--region",
+            region,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def github_secret_exists(secret_name: str, github_org: str, github_repo: str) -> bool:
+    """Check if a GitHub secret exists."""
+    result = subprocess.run(  # nosec B603 B607
+        ["gh", "secret", "list", "--repo", f"{github_org}/{github_repo}"],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout is not None and secret_name in result.stdout
+
+
+def create_s3_bucket(bucket_name: str, region: str, profile: str, dry_run: bool) -> None:
+    """Create and configure an S3 bucket for Terraform state."""
+    run_cmd(
+        [
+            "aws",
+            "s3api",
+            "create-bucket",
+            "--bucket",
+            bucket_name,
+            "--region",
+            region,
+            "--create-bucket-configuration",
+            f"LocationConstraint={region}",
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
+
+    run_cmd(
+        [
+            "aws",
+            "s3api",
+            "put-bucket-versioning",
+            "--bucket",
+            bucket_name,
+            "--versioning-configuration",
+            "Status=Enabled",
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
+
+    run_cmd(
+        [
+            "aws",
+            "s3api",
+            "put-bucket-encryption",
+            "--bucket",
+            bucket_name,
+            "--server-side-encryption-configuration",
+            '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}',
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
+
+    run_cmd(
+        [
+            "aws",
+            "s3api",
+            "put-public-access-block",
+            "--bucket",
+            bucket_name,
+            "--public-access-block-configuration",
+            (
+                '{"BlockPublicAcls": true, "IgnorePublicAcls": true, '
+                '"BlockPublicPolicy": true, "RestrictPublicBuckets": true}'
+            ),
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
+
+
+def create_dynamodb_table(table_name: str, region: str, profile: str, dry_run: bool) -> None:
+    """Create a DynamoDB table for Terraform state locking."""
+    run_cmd(
+        [
+            "aws",
+            "dynamodb",
+            "create-table",
+            "--table-name",
+            table_name,
+            "--attribute-definitions",
+            "AttributeName=LockID,AttributeType=S",
+            "--key-schema",
+            "AttributeName=LockID,KeyType=HASH",
+            "--billing-mode",
+            "PAY_PER_REQUEST",
+            "--region",
+            region,
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
+
+    if not dry_run:
+        info("Waiting for table to be active...")
+        run_cmd(
+            ["aws", "dynamodb", "wait", "table-exists", "--table-name", table_name, "--region", region],
+            profile=profile,
+        )
 
 
 @dataclass
@@ -188,7 +338,13 @@ class BootstrapConfig:
         return "shifter-terraform" if self.env == "prod" else f"shifter-{self.env}-terraform"
 
     @property
+    def bootstrap_role_name(self) -> str:
+        """Temporary bootstrap role - deleted after terraform creates the real one."""
+        return f"github-actions-shifter-{self.env}-bootstrap"
+
+    @property
     def role_name(self) -> str:
+        """Production role managed by Terraform - never touched by this script."""
         return f"github-actions-shifter-{self.env}"
 
     @property
@@ -208,7 +364,7 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
         info(f"AWS Account ID: {account_id}")
     else:
         account_id = "123456789012"
-        info(f"[DRY-RUN] Would get AWS account ID")
+        info("[DRY-RUN] Would get AWS account ID")
 
     # Generate UUID for uniqueness
     uid = str(uuid.uuid4())
@@ -226,103 +382,37 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     # Step 1: S3 Bucket
     header("Step 1/4: Creating S3 Bucket")
 
-    run_cmd([
-        "aws", "s3api", "create-bucket",
-        "--bucket", bucket_name,
-        "--region", config.region,
-        "--create-bucket-configuration", f"LocationConstraint={config.region}"
-    ], dry_run=dry_run, profile=profile)
+    if not dry_run and s3_bucket_exists(bucket_name, profile):
+        warn(f"S3 bucket '{bucket_name}' already exists")
+        if not confirm("Continue using existing bucket?"):
+            error("Cannot continue without S3 bucket for Terraform state")
+            sys.exit(1)
+        info("Using existing bucket")
+    else:
+        create_s3_bucket(bucket_name, config.region, profile, dry_run)
 
-    run_cmd([
-        "aws", "s3api", "put-bucket-versioning",
-        "--bucket", bucket_name,
-        "--versioning-configuration", "Status=Enabled"
-    ], dry_run=dry_run, profile=profile)
-
-    run_cmd([
-        "aws", "s3api", "put-bucket-encryption",
-        "--bucket", bucket_name,
-        "--server-side-encryption-configuration",
-        '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
-    ], dry_run=dry_run, profile=profile)
-
-    run_cmd([
-        "aws", "s3api", "put-public-access-block",
-        "--bucket", bucket_name,
-        "--public-access-block-configuration",
-        '{"BlockPublicAcls": true, "IgnorePublicAcls": true, "BlockPublicPolicy": true, "RestrictPublicBuckets": true}'
-    ], dry_run=dry_run, profile=profile)
-
-    success("S3 bucket created")
+    success("S3 bucket ready")
 
     # Step 2: DynamoDB Table
     header("Step 2/4: Creating DynamoDB Table")
 
-    run_cmd([
-        "aws", "dynamodb", "create-table",
-        "--table-name", table_name,
-        "--attribute-definitions", "AttributeName=LockID,AttributeType=S",
-        "--key-schema", "AttributeName=LockID,KeyType=HASH",
-        "--billing-mode", "PAY_PER_REQUEST",
-        "--region", config.region
-    ], dry_run=dry_run, profile=profile)
-
-    if not dry_run:
-        info("Waiting for table to be active...")
-        run_cmd([
-            "aws", "dynamodb", "wait", "table-exists",
-            "--table-name", table_name,
-            "--region", config.region
-        ], profile=profile)
-
-    success("DynamoDB table created")
-
-    # Step 3: OIDC Provider
-    header("Step 3/4: Creating GitHub OIDC Provider")
-
-    # VERIFIED OFFICIAL VALUES (Brad Edwards, 2026-01-02):
-    # Provider URL: https://token.actions.githubusercontent.com
-    # Source: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
-    # Source: https://aws.amazon.com/blogs/security/use-iam-roles-to-connect-github-actions-to-actions-in-aws/
-    # Audience: sts.amazonaws.com (official AWS STS audience for OIDC)
-    # Note: As of July 2024, AWS IAM automatically trusts GitHub's root CAs
-    # so thumbprints are no longer required for token.actions.githubusercontent.com
-    result = run_cmd([
-        "aws", "iam", "create-open-id-connect-provider",
-        "--url", "https://token.actions.githubusercontent.com",
-        "--client-id-list", "sts.amazonaws.com",
-        "--tags", f"Key=Name,Value=github-actions-oidc-{config.env}", "Key=Project,Value=shifter"
-    ], dry_run=dry_run, check=False, profile=profile)  # May already exist (EntityAlreadyExists error is OK)
-
-    # Verify provider exists
-    if not dry_run:
-        verify_result = subprocess.run([
-            "aws", "--profile", profile, "iam", "list-open-id-connect-providers",
-            "--query", "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn",
-            "--output", "text"
-        ], capture_output=True, text=True)
-
-        if verify_result.returncode != 0 or not verify_result.stdout.strip():
-            error("Failed to create or verify OIDC provider")
-            error("GitHub Actions will not be able to authenticate to AWS")
+    if not dry_run and dynamodb_table_exists(table_name, config.region, profile):
+        warn(f"DynamoDB table '{table_name}' already exists")
+        if not confirm("Continue using existing table?"):
+            error("Cannot continue without DynamoDB table for Terraform state locking")
             sys.exit(1)
-
-    success("OIDC provider ready")
-
-    # Step 4: IAM Role
-    header("Step 4/4: Creating IAM Role and Policies")
-
-    # Get OIDC ARN
-    if not dry_run:
-        cmd = ["aws", "iam", "list-open-id-connect-providers",
-               "--query", "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn",
-               "--output", "text"]
-        if profile:
-            cmd = ["aws", "--profile", profile] + cmd[1:]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        oidc_arn = result.stdout.strip()
+        info("Using existing table")
     else:
-        oidc_arn = f"arn:aws:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com"
+        create_dynamodb_table(table_name, config.region, profile, dry_run)
+
+    success("DynamoDB table ready")
+
+    # Step 3: Bootstrap IAM Role (temporary - will be replaced by Terraform)
+    header("Step 3/4: Creating Bootstrap IAM Role")
+
+    # Construct OIDC ARN - the provider will be created by Terraform, but the ARN format is deterministic
+    # Format: arn:aws:iam::<account_id>:oidc-provider/token.actions.githubusercontent.com
+    oidc_arn = f"arn:aws:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com"
 
     # OIDC Trust Policy for GitHub Actions
     # VERIFIED OFFICIAL VALUES (Brad Edwards, 2026-01-02):
@@ -331,63 +421,174 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     # Source: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
     trust_policy = {
         "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Principal": {"Federated": oidc_arn},
-            "Action": "sts:AssumeRoleWithWebIdentity",
-            "Condition": {
-                "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
-                "StringLike": {"token.actions.githubusercontent.com:sub": f"repo:{config.github_org}/{config.github_repo}:*"}
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Federated": oidc_arn},
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                    "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
+                    "StringLike": {
+                        "token.actions.githubusercontent.com:sub": (f"repo:{config.github_org}/{config.github_repo}:*")
+                    },
+                },
             }
-        }]
+        ],
     }
 
-    run_cmd([
-        "aws", "iam", "create-role",
-        "--role-name", config.role_name,
-        "--assume-role-policy-document", json.dumps(trust_policy),
-        "--tags", f"Key=Name,Value={config.role_name}", "Key=Project,Value=shifter"
-    ], dry_run=dry_run, profile=profile)
+    info(f"Creating temporary bootstrap role: {config.bootstrap_role_name}")
+    info("This role will be deleted after Terraform creates the production role")
 
-    # Attach policies
-    policies = [
-        ("core", ["ecr:*", "s3:*", "dynamodb:*"]),
-        ("vpc", ["ec2:*"]),
-        ("compute", ["ecs:*", "elasticloadbalancing:*", "autoscaling:*"]),
-        ("data", ["rds:*", "elasticache:*"]),
-        ("security", ["iam:*", "kms:*", "secretsmanager:*", "acm:*", "wafv2:*"]),
-        ("serverless", ["lambda:*", "states:*", "events:*", "logs:*", "cloudwatch:*", "sns:*", "sqs:*"]),
-        ("cognito", ["cognito-idp:*", "ssm:*"]),
-        ("network", ["network-firewall:*"]),
-        ("other", ["firehose:*", "budgets:*"]),
-    ]
+    run_cmd(
+        [
+            "aws",
+            "iam",
+            "create-role",
+            "--role-name",
+            config.bootstrap_role_name,
+            "--assume-role-policy-document",
+            json.dumps(trust_policy),
+            "--tags",
+            f"Key=Name,Value={config.bootstrap_role_name}",
+            "Key=Project,Value=shifter",
+            "Key=Purpose,Value=bootstrap-temporary",
+        ],
+        dry_run=dry_run,
+        check=False,  # May already exist
+        profile=profile,
+    )
 
-    for name, actions in policies:
-        policy_doc = {
-            "Version": "2012-10-17",
-            "Statement": [{"Effect": "Allow", "Action": actions, "Resource": "*"}]
-        }
-        run_cmd([
-            "aws", "iam", "put-role-policy",
-            "--role-name", config.role_name,
-            "--policy-name", f"shifter-{config.env}-{name}",
-            "--policy-document", json.dumps(policy_doc)
-        ], dry_run=dry_run, profile=profile)
+    # Attach AdministratorAccess to bootstrap role (temporary, will be deleted)
+    run_cmd(
+        [
+            "aws",
+            "iam",
+            "attach-role-policy",
+            "--role-name",
+            config.bootstrap_role_name,
+            "--policy-arn",
+            "arn:aws:iam::aws:policy/AdministratorAccess",
+        ],
+        dry_run=dry_run,
+        profile=profile,
+    )
 
-    success("IAM role and policies created")
+    success("Bootstrap IAM role created with AdministratorAccess")
 
-    # Get role ARN
+    # Step 4: Run Terraform to create OIDC provider and production IAM role
+    header("Step 4/4: Creating OIDC Provider and IAM Role via Terraform")
+
+    info("Running Terraform to create properly scoped IAM policies...")
+    info("The production role will be: " + config.role_name)
+
+    repo_root = get_repo_root()
+    iam_tf_dir = repo_root / "platform" / "terraform" / "global" / "iam"
+
+    if not iam_tf_dir.exists():
+        error(f"IAM Terraform directory not found: {iam_tf_dir}")
+        sys.exit(1)
+
+    # Update the backend config file for this environment with the new bucket/table
+    backend_config_file = iam_tf_dir / f"{config.env}.s3.tfbackend"
+    backend_config_content = f"""bucket         = "{bucket_name}"
+key            = "global/iam/terraform.tfstate"
+region         = "{config.region}"
+dynamodb_table = "{table_name}"
+encrypt        = true
+"""
     if not dry_run:
-        cmd = ["aws", "iam", "get-role",
-               "--role-name", config.role_name,
-               "--query", "Role.Arn",
-               "--output", "text"]
-        if profile:
-            cmd = ["aws", "--profile", profile] + cmd[1:]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        role_arn = result.stdout.strip()
+        info(f"Updating backend config: {backend_config_file}")
+        backend_config_file.write_text(backend_config_content)
+        success(f"Backend config updated for {config.env}")
     else:
-        role_arn = f"arn:aws:iam::{account_id}:role/{config.role_name}"
+        info(f"[DRY-RUN] Would update {backend_config_file}")
+
+    original_dir = os.getcwd()
+    os.chdir(iam_tf_dir)
+
+    # Set AWS_PROFILE for Terraform (only affects this process and its children)
+    os.environ["AWS_PROFILE"] = profile
+
+    try:
+        # Terraform init with backend config for environment
+        backend_config = f"{config.env}.s3.tfbackend"
+        info(f"Running terraform init with backend config: {backend_config}")
+        run_cmd(
+            ["terraform", "init", "-reconfigure", f"-backend-config={backend_config}"],
+            dry_run=dry_run,
+        )
+
+        # Terraform apply with auto-approve (we already confirmed at start)
+        info(f"Running terraform apply for {config.env}...")
+        tfvars_file = f"{config.env}.tfvars"
+
+        if not dry_run:
+            apply_result = run_cmd(
+                ["terraform", "apply", "-auto-approve", f"-var-file={tfvars_file}"],
+                dry_run=dry_run,
+                check=False,
+            )
+            if apply_result and apply_result.returncode != 0:
+                error("Terraform apply failed for IAM module")
+                error("The bootstrap role is still active - you can retry manually")
+                sys.exit(1)
+        else:
+            run_cmd(["terraform", "plan", f"-var-file={tfvars_file}"], dry_run=dry_run)
+
+        # Get role ARN from terraform output
+        if not dry_run:
+            result = subprocess.run(  # nosec B603 B607
+                ["terraform", "output", "-raw", "github_actions_role_arn"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                error("Failed to get role ARN from Terraform output")
+                sys.exit(1)
+            role_arn = result.stdout.strip()
+            success(f"Production IAM role created: {role_arn}")
+        else:
+            role_arn = f"arn:aws:iam::{account_id}:role/{config.role_name}"
+
+    finally:
+        os.chdir(original_dir)
+
+    # Cleanup: Delete the bootstrap role
+    header("Cleanup: Removing Bootstrap Role")
+
+    info(f"Deleting temporary bootstrap role: {config.bootstrap_role_name}")
+
+    # Detach AdministratorAccess first
+    run_cmd(
+        [
+            "aws",
+            "iam",
+            "detach-role-policy",
+            "--role-name",
+            config.bootstrap_role_name,
+            "--policy-arn",
+            "arn:aws:iam::aws:policy/AdministratorAccess",
+        ],
+        dry_run=dry_run,
+        check=False,
+        profile=profile,
+    )
+
+    # Delete the role
+    run_cmd(
+        [
+            "aws",
+            "iam",
+            "delete-role",
+            "--role-name",
+            config.bootstrap_role_name,
+        ],
+        dry_run=dry_run,
+        check=False,
+        profile=profile,
+    )
+
+    success("Bootstrap role deleted - using Terraform-managed role going forward")
 
     return {
         "bucket_name": bucket_name,
@@ -418,17 +619,25 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
 
     if not dry_run:
         # Check if gh CLI is available
-        gh_available = subprocess.run(["which", "gh"], capture_output=True).returncode == 0
+        gh_available = subprocess.run(["which", "gh"], capture_output=True).returncode == 0  # nosec B603 B607
 
         if gh_available:
             print(f"\n{Colors.GREEN}✓ GitHub CLI detected{Colors.END}")
-            choice = confirm_or_manual("Automatically set this secret using gh CLI?")
+
+            secret_exists = github_secret_exists(secret_name, github_org, github_repo)
+
+            if secret_exists:
+                warn(f"Secret '{secret_name}' already exists in {github_org}/{github_repo}")
+                choice = confirm_or_manual("Overwrite existing secret?")
+            else:
+                choice = confirm_or_manual("Automatically set this secret using gh CLI?")
 
             if choice == "yes":
                 info(f"Running: gh secret set {secret_name} --repo {github_org}/{github_repo}")
-                result = subprocess.run(
+                result = subprocess.run(  # nosec B603 B607
                     ["gh", "secret", "set", secret_name, "--body", role_arn, "--repo", f"{github_org}/{github_repo}"],
-                    capture_output=True, text=True
+                    capture_output=True,
+                    text=True,
                 )
                 if result.returncode == 0:
                     success("GitHub secret configured via gh CLI")
@@ -439,6 +648,9 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
                     error("Try manual method or fix gh authentication")
                     sys.exit(1)
             elif choice == "no":
+                if secret_exists:
+                    info("Keeping existing secret value")
+                    return
                 error("GitHub secret is required for CI/CD to authenticate with AWS")
                 error("Without this, GitHub Actions cannot deploy infrastructure")
                 sys.exit(1)
@@ -458,7 +670,7 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
 
 
 def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) -> None:
-    """Walk user through updating backend.tf files."""
+    """Update backend.tf files with S3 backend configuration."""
     header("Update Terraform Backend Configuration")
 
     bucket = bootstrap_result["bucket_name"]
@@ -468,45 +680,56 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
 
     repo_root = get_repo_root()
 
-    print("Terraform needs to know where to store state.\n")
+    print("Updating backend.tf files with S3 state configuration.\n")
+    print("These files configure where Terraform stores infrastructure state.\n")
 
-    # Generate backend configs
+    # Backend configurations for each component
     # Note: Core uses shifter/{env}/, but portal/range use {env}/ (historical convention)
-    backends = [
-        (f"platform/terraform/environments/{env}/backend.tf", f"shifter/{env}/terraform.tfstate"),
-        (f"platform/terraform/environments/{env}/portal/backend.tf", f"{env}/portal/terraform.tfstate"),
-        (f"platform/terraform/environments/{env}/range/backend.tf", f"{env}/range/terraform.tfstate"),
-    ]
+    # Core needs full provider config in backend.tf; portal/range have it in main.tf
+    files_to_write = []
 
-    # Show what will be written
-    for filepath, state_key in backends:
-        subheader(filepath)
-
-        backend_config = f'''terraform {{
+    # Core backend.tf - needs full terraform block with provider config
+    core_path = f"platform/terraform/environments/{env}/backend.tf"
+    core_config = f'''terraform {{
   backend "s3" {{
     bucket         = "{bucket}"
-    key            = "{state_key}"
+    key            = "shifter/{env}/terraform.tfstate"
     region         = "{region}"
     dynamodb_table = "{table}"
     encrypt        = true
   }}
-}}'''
-        code_block(backend_config)
 
-        full_path = repo_root / filepath
-        if full_path.exists():
-            info(f"File exists at: {full_path}")
-        else:
-            warn(f"File not found: {full_path}")
+  required_version = ">= 1.0"
 
-    if not dry_run:
-        choice = confirm_or_manual("Automatically write these backend.tf files?")
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
 
-        if choice == "yes":
-            # Write the files
-            for filepath, state_key in backends:
-                full_path = repo_root / filepath
-                backend_config = f'''terraform {{
+provider "aws" {{
+  region = var.aws_region
+
+  default_tags {{
+    tags = {{
+      Environment = "{env}"
+      Project     = "shifter"
+      ManagedBy   = "terraform"
+    }}
+  }}
+}}
+'''
+    files_to_write.append((core_path, repo_root / core_path, core_config))
+
+    # Portal and Range backend.tf - just the backend block (provider in main.tf)
+    for component, state_key in [
+        ("portal", f"{env}/portal/terraform.tfstate"),
+        ("range", f"{env}/range/terraform.tfstate"),
+    ]:
+        filepath = f"platform/terraform/environments/{env}/{component}/backend.tf"
+        backend_config = f'''terraform {{
   backend "s3" {{
     bucket         = "{bucket}"
     key            = "{state_key}"
@@ -516,6 +739,20 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
   }}
 }}
 '''
+        files_to_write.append((filepath, repo_root / filepath, backend_config))
+
+    # Show what will be written
+    for filepath, full_path, backend_config in files_to_write:
+        subheader(filepath)
+        code_block(backend_config.strip())
+        if full_path.exists():
+            warn(f"File exists (will be overwritten): {full_path}")
+
+    if not dry_run:
+        choice = confirm_or_manual("Write these backend.tf files?")
+
+        if choice == "yes":
+            for filepath, full_path, backend_config in files_to_write:
                 try:
                     full_path.parent.mkdir(parents=True, exist_ok=True)
                     full_path.write_text(backend_config)
@@ -525,50 +762,66 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
                     error("Cannot continue without backend configuration files")
                     sys.exit(1)
 
-            # Offer to commit and push
-            commit_choice = confirm_or_manual("Commit and push these changes to git?")
-
-            if commit_choice == "yes":
-                try:
-                    info(f"Adding files: platform/terraform/environments/{env}/")
-                    subprocess.run(["git", "add", f"platform/terraform/environments/{env}/"], check=True, cwd=repo_root)
-
-                    info(f"Committing: Update backend config for {env}")
-                    subprocess.run(["git", "commit", "-m", f"Update backend config for {env}"], check=True, cwd=repo_root)
-
-                    info("Pushing to remote...")
-                    subprocess.run(["git", "push"], check=True, cwd=repo_root)
-
-                    success("Changes committed and pushed")
-                except subprocess.CalledProcessError as e:
-                    error(f"Git operation failed: {e}")
-                    error("Backend configuration must be committed before Terraform can use it")
-                    error("Fix git issues or choose manual method to commit later")
-                    sys.exit(1)
-            elif commit_choice == "manual":
-                info("You should run:")
-                code_block(f"git add platform/terraform/environments/{env}/\ngit commit -m 'Update backend config for {env}'\ngit push")
-                wait_for_user("Commit and push the changes, then press Enter.")
-
-            success("Backend configuration updated")
+            success("Backend configuration files updated")
 
         elif choice == "manual":
-            # Manual method
             wait_for_user(
-                "Update the backend.tf files shown above with the new bucket and table names.\n"
-                "You can copy the code blocks directly into each file."
+                "Update the backend.tf files shown above manually.\nYou can copy the content directly into each file."
             )
-
-            if confirm("Commit and push the backend.tf changes now?"):
-                info("You should run:")
-                code_block(f"git add platform/terraform/environments/{env}/\ngit commit -m 'Update backend config for {env}'\ngit push")
-                wait_for_user("Commit and push the changes, then press Enter.")
-
-            success("Backend configuration updated")
+            success("Backend configuration ready")
         else:
             error("Backend configuration is required for Terraform state management")
             error("Without this, Terraform cannot store or track infrastructure state")
             sys.exit(1)
+
+    # Update terraform_remote_state bucket references in portal/main.tf
+    _update_remote_state_references(env, bucket, region, dry_run)
+
+
+def _update_remote_state_references(env: str, bucket: str, region: str, dry_run: bool = False) -> None:
+    """Update terraform_remote_state bucket references in portal/main.tf."""
+    repo_root = get_repo_root()
+    portal_main_tf = repo_root / f"platform/terraform/environments/{env}/portal/main.tf"
+
+    if not portal_main_tf.exists():
+        warn(f"Portal main.tf not found at {portal_main_tf}, skipping remote_state updates")
+        return
+
+    subheader("Update terraform_remote_state References")
+    print("Portal's main.tf contains terraform_remote_state data sources that reference")
+    print("the S3 bucket. These need to be updated with the new bucket name.\n")
+
+    content = portal_main_tf.read_text()
+    original_content = content
+
+    # Find and replace bucket references in terraform_remote_state blocks
+    # Match: bucket = "shifter-*" within config blocks
+    pattern = r'(data\s+"terraform_remote_state".*?config\s*=\s*\{[^}]*bucket\s*=\s*)"[^"]*"'
+
+    def replace_bucket(match):
+        return f'{match.group(1)}"{bucket}"'
+
+    new_content = re.sub(pattern, replace_bucket, content, flags=re.DOTALL)
+
+    if new_content == original_content:
+        info("No terraform_remote_state bucket references found or already up to date")
+        return
+
+    # Show what will change
+    print(f"Will update bucket references in: {portal_main_tf.relative_to(repo_root)}")
+    print("  Old: shifter-*-...-...")
+    print(f"  New: {bucket}\n")
+
+    if not dry_run:
+        if confirm("Update terraform_remote_state bucket references?"):
+            try:
+                portal_main_tf.write_text(new_content)
+                success("Updated terraform_remote_state bucket references")
+            except Exception as e:
+                error(f"Failed to update portal/main.tf: {e}")
+                error("You may need to manually update the bucket references")
+        else:
+            warn("Skipping remote_state updates - you'll need to update them manually")
 
 
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
@@ -609,12 +862,15 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         os.chdir(tf_dir)
 
         try:
-            # Init
+            # Init with -reconfigure (backend config is in backend.tf)
             info("Running terraform init...")
-            init_result = run_cmd(["terraform", "init"], dry_run=dry_run)
+            init_result = run_cmd(
+                ["terraform", "init", "-reconfigure"],
+                dry_run=dry_run,
+            )
             if not dry_run and init_result and init_result.returncode != 0:
                 error(f"Terraform init failed for {component}")
-                error("Check that backend.tf is correctly configured")
+                error("Check that backend.tf exists and is correctly configured")
                 sys.exit(1)
 
             # Plan
@@ -628,9 +884,9 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
             if not dry_run:
                 # Show plan summary
                 print(f"\n{Colors.BOLD}Plan Summary:{Colors.END}")
-                subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)
+                subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)  # nosec B603 B607
 
-                if not confirm(f"\nApply this plan?"):
+                if not confirm("\nApply this plan?"):
                     error(f"Terraform apply for {component} is required")
                     error("All infrastructure components are mandatory for Shifter to function")
                     sys.exit(1)
@@ -648,9 +904,8 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
 
                 # Capture outputs for portal
                 if component == "portal":
-                    result = subprocess.run(
-                        ["terraform", "output", "-json"],
-                        capture_output=True, text=True, check=False
+                    result = subprocess.run(  # nosec B603 B607
+                        ["terraform", "output", "-json"], capture_output=True, text=True, check=False
                     )
                     if result.returncode == 0:
                         outputs = json.loads(result.stdout)
@@ -724,11 +979,11 @@ def walkthrough_cognito_user(outputs: dict, env: str, profile: str, dry_run: boo
 
         subheader("Create admin user")
 
-        cmd = f'''aws cognito-idp admin-create-user \\
+        cmd = f"""aws cognito-idp admin-create-user \\
   --user-pool-id {pool_id} \\
   --username YOUR_EMAIL@example.com \\
   --user-attributes Name=email,Value=YOUR_EMAIL@example.com \\
-  --desired-delivery-mediums EMAIL'''
+  --desired-delivery-mediums EMAIL"""
 
         code_block(cmd)
 
@@ -737,10 +992,10 @@ def walkthrough_cognito_user(outputs: dict, env: str, profile: str, dry_run: boo
         print("Run this to get the user pool ID:")
         code_block("terraform output cognito_user_pool_id")
         print("\nThen create a user with:")
-        code_block(f'''aws cognito-idp admin-create-user \\
+        code_block("""aws cognito-idp admin-create-user \\
   --user-pool-id <POOL_ID> \\
   --username user@example.com \\
-  --user-attributes Name=email,Value=user@example.com''')
+  --user-attributes Name=email,Value=user@example.com""")
 
     if not dry_run:
         if confirm("Create the first user now?"):
@@ -748,13 +1003,22 @@ def walkthrough_cognito_user(outputs: dict, env: str, profile: str, dry_run: boo
                 pool_id = outputs["cognito_user_pool_id"]["value"]
                 email = input(f"{Colors.CYAN}Enter email for first user: {Colors.END}").strip()
                 if email:
-                    run_cmd([
-                        "aws", "cognito-idp", "admin-create-user",
-                        "--user-pool-id", pool_id,
-                        "--username", email,
-                        "--user-attributes", f"Name=email,Value={email}",
-                        "--desired-delivery-mediums", "EMAIL"
-                    ], profile=profile)
+                    run_cmd(
+                        [
+                            "aws",
+                            "cognito-idp",
+                            "admin-create-user",
+                            "--user-pool-id",
+                            pool_id,
+                            "--username",
+                            email,
+                            "--user-attributes",
+                            f"Name=email,Value={email}",
+                            "--desired-delivery-mediums",
+                            "EMAIL",
+                        ],
+                        profile=profile,
+                    )
                     success(f"User {email} created - they will receive an email with temporary password")
         else:
             info("You can create users later via AWS Console or CLI")
@@ -797,15 +1061,16 @@ def full_deployment(env: str, profile: str, dry_run: bool = False) -> None:
     """Run complete deployment with interactive walkthrough."""
     header(f"Full {env.upper()} Deployment")
 
-    print(f"""
+    print("""
 This will guide you through a complete Shifter deployment:
 
   1. Bootstrap AWS account (S3, DynamoDB, IAM)
   2. Configure GitHub secrets (automated with gh CLI or manual)
   3. Update Terraform backend configuration (automated or manual)
-  4. Deploy infrastructure (Core → Range → Portal)
-  5. Configure DNS and SSL certificate (manual - external DNS)
-  6. Create first user
+  4. Set up GitHub Actions runners (optional - for self-hosted CI/CD)
+  5. Deploy infrastructure (Core → Range → Portal)
+  6. Configure DNS and SSL certificate (manual - external DNS)
+  7. Create first user
 
 Automated steps will ask for confirmation:
   [y] yes - run automatically
@@ -832,23 +1097,39 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
     # Phase 3: Backend Configuration
     walkthrough_backend_config(bootstrap_result, dry_run=dry_run)
 
-    # Phase 4: Terraform Deployment
-    if not dry_run:
-        if not confirm("Continue with Terraform deployment?"):
-            print("\nYou can resume later with:")
-            code_block(f"./scripts/bootstrap/deploy.py terraform --env {env} --profile {profile}")
-            return
+    # Phase 4: GitHub Actions Runner Setup (optional)
+    runner_result = None
+    if RUNNER_AVAILABLE:
+        runner_config = get_runner_config(
+            env=env,
+            region=config.region,
+            github_org=config.github_org,
+            github_repo=config.github_repo,
+            aws_profile=profile,
+        )
+        runner_result = walkthrough_runner_setup(runner_config, dry_run=dry_run)
+        if runner_result:
+            # Store app_id for terraform vars if needed
+            info(f"Runner App ID: {runner_result.get('app_id', 'N/A')}")
+    else:
+        warn("Runner module not available - skipping GitHub runner setup")
+
+    # Phase 5: Terraform Deployment
+    if not dry_run and not confirm("Continue with Terraform deployment?"):
+        print("\nYou can resume later with:")
+        code_block(f"./scripts/bootstrap/deploy.py terraform --env {env} --profile {profile}")
+        return
 
     outputs = terraform_deploy(env, profile, dry_run=dry_run)
 
     if not dry_run and outputs:
-        # Phase 5: ACM Validation
+        # Phase 6: ACM Validation
         walkthrough_acm_validation(outputs, dry_run=dry_run)
 
-        # Phase 6: DNS Setup
+        # Phase 7: DNS Setup
         walkthrough_dns_setup(outputs, dry_run=dry_run)
 
-        # Phase 7: First User
+        # Phase 8: First User
         walkthrough_cognito_user(outputs, env, profile, dry_run=dry_run)
 
     # Final Summary
@@ -863,9 +1144,7 @@ def check_dependencies():
         "git": "Git - https://git-scm.com/downloads",
     }
 
-    optional = {
-        "gh": "GitHub CLI - https://cli.github.com/ (recommended for automating GitHub secrets)"
-    }
+    optional = {"gh": "GitHub CLI - https://cli.github.com/ (recommended for automating GitHub secrets)"}
 
     missing_required = []
     missing_optional = []
@@ -908,7 +1187,7 @@ Examples:
 
   # Just run terraform (after bootstrap)
   ./scripts/bootstrap/deploy.py terraform --env prod --profile my-prod-profile
-        """
+        """,
     )
 
     # Check dependencies first

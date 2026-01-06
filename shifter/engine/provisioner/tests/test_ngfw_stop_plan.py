@@ -54,10 +54,7 @@ class TestNGFWStopPlanSteps:
         step_names = [s.name for s in plan.steps]
 
         stop_idx = next(i for i, n in enumerate(step_names) if "stop" in n.lower() and "wait" not in n.lower())
-        wait_idx = next(
-            i for i, n in enumerate(step_names)
-            if "stopped" in n.lower() or ("wait" in n.lower())
-        )
+        wait_idx = next(i for i, n in enumerate(step_names) if "stopped" in n.lower() or ("wait" in n.lower()))
         assert stop_idx < wait_idx
 
     def test_all_steps_have_names(self):

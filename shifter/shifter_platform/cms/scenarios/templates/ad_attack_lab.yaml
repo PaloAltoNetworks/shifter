@@ -13,6 +13,7 @@ instances:
   - role: dc
     os_type: windows
     domain_controller: true
+    agent_slot: primary
     dc_config:
       domain_name: psycho.lab
       netbios_name: PSYCHO

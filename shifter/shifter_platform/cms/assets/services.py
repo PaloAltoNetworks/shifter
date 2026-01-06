@@ -16,14 +16,13 @@ from django.utils import timezone
 from cms.assets.s3 import S3Error
 from cms.assets.s3 import delete_agent as s3_delete
 from cms.models import AgentConfig, OperatingSystem
-from management.models import ActivityLog
+
+# TODO: Layer violation - CMS should not import from management. See GH issue #469
+from management.services import log_activity
+from shared.exceptions import AssetError
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
-
-
-class AssetError(Exception):
-    """Error raised when an asset operation fails."""
 
 
 def get_storage_used(user: User) -> int:
@@ -46,7 +45,7 @@ def create_agent(
     filename: str,
     os_slug: str,
     file_size: int,
-    sha256: str,
+    sha256: str = "",
     upload_method: str | None = None,
 ) -> AgentConfig:
     """Create a new agent record.
@@ -58,7 +57,7 @@ def create_agent(
         filename: Original filename of the agent
         os_slug: Operating system slug (e.g., 'windows', 'linux-debian')
         file_size: Size of the agent file in bytes
-        sha256: SHA256 hash of the agent file
+        sha256: SHA256 hash of the agent file (optional, for future server-side compute)
         upload_method: Optional upload method for logging (e.g., 'presigned')
 
     Returns:
@@ -95,7 +94,7 @@ def create_agent(
         log_metadata["upload_method"] = upload_method
 
     # Log activity
-    ActivityLog.log(
+    log_activity(
         "agent_uploaded",
         user=user,
         **log_metadata,
@@ -127,7 +126,7 @@ def delete_agent(agent: AgentConfig) -> None:
     agent.save(update_fields=["deleted_at"])
 
     # Log activity
-    ActivityLog.log(
+    log_activity(
         "agent_deleted",
         user=agent.user,
         agent_id=agent.id,

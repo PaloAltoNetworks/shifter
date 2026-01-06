@@ -17,6 +17,7 @@ from django.contrib.auth import get_user_model
 
 from cms import services
 from cms.models import AgentConfig, OperatingSystem
+from shared.constants import USER_CANNOT_BE_NONE
 
 User = get_user_model()
 
@@ -93,7 +94,7 @@ class TestGetStorageUsed:
 
     def test_raises_type_error_when_user_is_none(self):
         """Service raises TypeError when user is None."""
-        with pytest.raises(TypeError, match="user cannot be None"):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.get_storage_used(None)
 
     def test_raises_type_error_when_user_invalid_type(self):

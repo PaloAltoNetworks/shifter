@@ -8,13 +8,11 @@ DC instances are created first to ensure domain controllers are available
 before domain member instances that depend on them.
 """
 
-from typing import Optional
-
 import pulumi
 
-from config import InstanceConfig, RangeConfig
 from components.instance import InstanceComponent
 from components.network import NetworkComponent
+from config import InstanceConfig, RangeConfig
 
 
 class RangeStack(pulumi.ComponentResource):
@@ -39,13 +37,13 @@ class RangeStack(pulumi.ComponentResource):
     instances: list[InstanceComponent]
     subnet_id: pulumi.Output[str]
     subnet_cidr: pulumi.Output[str]
-    dc_config_param_name: Optional[str]
+    dc_config_param_name: str | None
 
     def __init__(
         self,
         name: str,
         config: RangeConfig,
-        opts: Optional[pulumi.ResourceOptions] = None,
+        opts: pulumi.ResourceOptions | None = None,
     ):
         """Create a complete range.
 
@@ -93,9 +91,7 @@ class RangeStack(pulumi.ComponentResource):
 
         self.register_outputs(outputs)
 
-    def _run_all_setup(
-        self, dc_components: list[InstanceComponent], config: RangeConfig
-    ) -> None:
+    def _run_all_setup(self, dc_components: list[InstanceComponent], config: RangeConfig) -> None:
         """Run setup for all instances (non-DC first, then DCs).
 
         Args:
@@ -104,12 +100,10 @@ class RangeStack(pulumi.ComponentResource):
         """
         # Run setup for non-DC instances
         other_configs = [inst for inst in config.instances if inst.role != "dc"]
-        for inst_config, instance in zip(other_configs, self.instances[len(dc_components):]):
+        for inst_config, instance in zip(other_configs, self.instances[len(dc_components) :], strict=True):
             # Domain-joining instances get DC's private_ip for domain join
             if inst_config.join_domain and dc_components:
-                dc_components[0].private_ip.apply(
-                    lambda ip, inst=instance: inst.run_setup(dc_ip=ip)
-                )
+                dc_components[0].private_ip.apply(lambda ip, inst=instance: inst.run_setup(dc_ip=ip))
             else:
                 instance.run_setup()
 
@@ -117,9 +111,7 @@ class RangeStack(pulumi.ComponentResource):
         for dc_instance in dc_components:
             dc_instance.run_dc_setup()
 
-    def _create_all_instances(
-        self, name: str, config: RangeConfig
-    ) -> list[InstanceComponent]:
+    def _create_all_instances(self, name: str, config: RangeConfig) -> list[InstanceComponent]:
         """Create all instances (DCs first, then others).
 
         Args:
@@ -176,9 +168,7 @@ class RangeStack(pulumi.ComponentResource):
         Returns:
             Created InstanceComponent.
         """
-        ami_id, security_group_id, index = self._resolve_instance_params(
-            inst_config, config, counters
-        )
+        ami_id, security_group_id, index = self._resolve_instance_params(inst_config, config, counters)
         instance_name = f"{name}-{inst_config.role}-{index}"
 
         # Build kwargs - DC instances have dc_config, others have join_domain

@@ -13,14 +13,11 @@ import base64
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 import boto3
 import psycopg
 import pulumi
 from cryptography.fernet import Fernet
-
-logger = logging.getLogger(__name__)
 
 from catalog.instances import (
     _get_dc_instance_type,
@@ -28,6 +25,8 @@ from catalog.instances import (
     _get_victim_instance_type,
     _get_windows_instance_type,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def decrypt_field(encrypted_value: str) -> str:
@@ -92,12 +91,11 @@ class InstanceConfig:
     role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
-    agent_id: Optional[int] = None  # Agent config ID for victim instances
-    agent_s3_key: Optional[str] = None  # S3 key for agent installer
-    agent_presigned_url: Optional[str] = None  # Presigned URL for agent download
-    dc_config: Optional[dict] = None  # {"domain_name": "...", "netbios_name": "..."}
+    agent_s3_key: str | None = None  # S3 key for agent installer
+    agent_presigned_url: str | None = None  # Presigned URL for agent download
+    dc_config: dict | None = None  # {"domain_name": "...", "netbios_name": "..."}
     join_domain: bool = False  # Whether this instance should join a domain
-    dc_config_param_name: Optional[str] = None  # SSM parameter path for DC config
+    dc_config_param_name: str | None = None  # SSM parameter path for DC config
 
 
 @dataclass
@@ -128,10 +126,6 @@ class RangeConfig:
     ngfw_ami_id: str = ""
     ngfw_instance_type: str = "m5.xlarge"
     ngfw_security_group_id: str = ""
-    # Strata Cloud Manager config (currently disabled - NGFW UI pending UserNGFW implementation)
-    strata_folder_name: str = ""
-    strata_pin_id: str = ""
-    strata_pin_value: str = ""
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -154,50 +148,36 @@ def get_db_connection() -> psycopg.Connection:
 
 
 def get_range_from_db(range_id: int) -> dict:
-    """Load range configuration from database."""
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    """Load range configuration from database.
+
+    Returns range data with the new schema where range_config contains
+    the full RangeSpec (scenario_id, user_id, instances with agent details).
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT
                     r.id,
                     r.user_id,
                     r.subnet_index,
-                    r.agent_id,
-                    r.instance_config,
-                    a.s3_key as agent_s3_key,
-                    os.slug as agent_os_slug,
-                    r.dc_agent_id,
-                    dc_a.s3_key as dc_agent_s3_key,
+                    r.range_config,
                     r.ngfw_id IS NOT NULL as ngfw_enabled
                 FROM mission_control_range r
-                LEFT JOIN mission_control_agentconfig a ON r.agent_id = a.id
-                LEFT JOIN mission_control_operatingsystem os ON a.os_id = os.id
-                LEFT JOIN mission_control_agentconfig dc_a ON r.dc_agent_id = dc_a.id
                 WHERE r.id = %s
                 """,
-                (range_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise ValueError(f"Range {range_id} not found")
+            (range_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Range {range_id} not found")
 
-            return {
-                "id": row[0],
-                "user_id": row[1],
-                "subnet_index": row[2],
-                "agent_id": row[3],
-                "instance_config": row[4],
-                "agent_s3_key": row[5],
-                "agent_os_slug": row[6],
-                "dc_agent_id": row[7],
-                "dc_agent_s3_key": row[8],
-                "ngfw_enabled": row[9],
-                # Strata fields removed - NGFW UI disabled pending UserNGFW implementation
-                "strata_folder_name": "",
-                "strata_pin_id": "",
-                "strata_pin_value": "",
-            }
+        return {
+            "id": row[0],
+            "user_id": row[1],
+            "subnet_index": row[2],
+            "range_config": row[3],  # Full RangeSpec JSON
+            "ngfw_enabled": row[4],
+        }
 
 
 def load_config() -> RangeConfig:
@@ -215,14 +195,15 @@ def load_config() -> RangeConfig:
     # Load range data from database
     range_data = get_range_from_db(range_id)
 
-    # Parse instance_config from database or use defaults
-    db_instance_config = range_data.get("instance_config") or []
+    # Get range_config JSON (contains full RangeSpec from CMS)
+    range_spec = range_data.get("range_config") or {}
+    spec_instances = range_spec.get("instances") or []
 
     # Get agent bucket for presigned URL generation
     agent_s3_bucket = config.get("agentS3Bucket") or ""
 
     # Helper to generate presigned URL if we have bucket and key
-    def get_presigned_url(s3_key: Optional[str]) -> Optional[str]:
+    def get_presigned_url(s3_key: str | None) -> str | None:
         if agent_s3_bucket and s3_key:
             return generate_presigned_url(agent_s3_bucket, s3_key)
         return None
@@ -232,80 +213,39 @@ def load_config() -> RangeConfig:
     victim_instance_type = os.environ.get("VICTIM_INSTANCE_TYPE")
 
     if not kali_instance_type or not victim_instance_type:
-        raise ValueError(
-            "KALI_INSTANCE_TYPE and VICTIM_INSTANCE_TYPE environment variables are required"
-        )
+        raise ValueError("KALI_INSTANCE_TYPE and VICTIM_INSTANCE_TYPE are required")
 
-    # If no custom config, use default (1 Kali + 1 Victim)
-    if not db_instance_config:
-        agent_s3_key = range_data.get("agent_s3_key")
-        # Map agent OS to victim OS type: Windows agent → Windows victim
-        agent_os_slug = range_data.get("agent_os_slug") or ""
-        victim_os_type = "windows" if agent_os_slug == "windows" else "ubuntu"
-        instances = [
+    # Build instances from range_config.instances (new schema)
+    instances = []
+    for inst in spec_instances:
+        role = inst.get("role", "victim")
+        os_type = inst.get("os_type", "ubuntu")
+
+        # Get instance_type from catalog defaults based on role/os
+        if role == "attacker":
+            instance_type = _get_kali_instance_type()
+        elif role == "dc":
+            instance_type = _get_dc_instance_type()
+        elif os_type == "windows":
+            instance_type = _get_windows_instance_type()
+        else:
+            instance_type = _get_victim_instance_type()
+
+        # Get agent s3_key from instance's agent details (new schema)
+        agent_data = inst.get("agent") or {}
+        agent_s3_key = agent_data.get("s3_key")
+
+        instances.append(
             InstanceConfig(
-                role="attacker",
-                os_type="kali",
-                instance_type=kali_instance_type,
-            ),
-            InstanceConfig(
-                role="victim",
-                os_type=victim_os_type,
-                instance_type=victim_instance_type,
-                agent_id=range_data.get("agent_id"),
+                role=role,
+                os_type=os_type,
+                instance_type=instance_type,
                 agent_s3_key=agent_s3_key,
                 agent_presigned_url=get_presigned_url(agent_s3_key),
-            ),
-        ]
-    else:
-        # Parse custom instance configs - use catalog defaults if instance_type not specified
-        instances = []
-        # Get victim agent config from range
-        range_agent_s3_key = range_data.get("agent_s3_key")
-        # Get DC agent config from range (separate agent for DC instances)
-        dc_agent_s3_key = range_data.get("dc_agent_s3_key")
-
-        for inst in db_instance_config:
-            role = inst.get("role", "victim")
-            os_type = inst.get("os_type") or inst.get("os", "ubuntu")
-
-            # Get instance_type from config or use catalog default based on role/os
-            instance_type = inst.get("instance_type")
-            if not instance_type:
-                if role == "attacker":
-                    instance_type = _get_kali_instance_type()
-                elif role == "dc":
-                    instance_type = _get_dc_instance_type()
-                elif os_type == "windows":
-                    instance_type = _get_windows_instance_type()
-                else:
-                    instance_type = _get_victim_instance_type()
-
-            # Get agent key based on role:
-            # - DC instances use dc_agent (separate Windows agent)
-            # - Victim instances use range agent
-            # - Instance-specific config overrides both
-            agent_s3_key = inst.get("agent_s3_key")
-            if not agent_s3_key:
-                if role == "dc":
-                    # DC uses dedicated dc_agent (must be Windows/MSI)
-                    agent_s3_key = dc_agent_s3_key
-                elif role == "victim":
-                    # Victim uses range's victim agent
-                    agent_s3_key = range_agent_s3_key
-
-            instances.append(
-                InstanceConfig(
-                    role=role,
-                    os_type=os_type,
-                    instance_type=instance_type,
-                    agent_id=inst.get("agent_id") or range_data.get("agent_id"),
-                    agent_s3_key=agent_s3_key,
-                    agent_presigned_url=get_presigned_url(agent_s3_key),
-                    dc_config=inst.get("dc_config"),
-                    join_domain=inst.get("join_domain", False),
-                )
+                dc_config=inst.get("dc_config"),
+                join_domain=inst.get("join_domain", False),
             )
+        )
 
     # Get VPC and network configuration from Pulumi config (set via environment)
     return RangeConfig(
@@ -333,8 +273,4 @@ def load_config() -> RangeConfig:
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
         ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
-        # Strata Cloud Manager config (currently disabled - NGFW UI pending UserNGFW implementation)
-        strata_folder_name=range_data.get("strata_folder_name", ""),
-        strata_pin_id=range_data.get("strata_pin_id", ""),
-        strata_pin_value=range_data.get("strata_pin_value", ""),
     )

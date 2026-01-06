@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from components.network import _cleanup_orphaned_subnet
 
-
 # =============================================================================
 # Unit Tests for _cleanup_orphaned_subnet
 # =============================================================================
@@ -111,9 +110,11 @@ class TestCleanupOrphanedSubnetFailures:
             "DeleteSubnet",
         )
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            with pytest.raises(RuntimeError) as exc_info:
-                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+        with (
+            patch("components.network.boto3.client", return_value=mock_ec2),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
 
         assert "subnet-inuse" in str(exc_info.value)
         assert "could not be deleted" in str(exc_info.value)
@@ -143,9 +144,11 @@ class TestCleanupOrphanedSubnetFailures:
             "DeleteSubnet",
         )
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            with pytest.raises(RuntimeError) as exc_info:
-                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+        with (
+            patch("components.network.boto3.client", return_value=mock_ec2),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
 
         assert "subnet-noaccess" in str(exc_info.value)
         assert "UnauthorizedOperation" in str(exc_info.value)
@@ -165,9 +168,11 @@ class TestCleanupOrphanedSubnetFailures:
             "DescribeSubnets",
         )
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            with pytest.raises(ClientError) as exc_info:
-                _cleanup_orphaned_subnet("vpc-invalid", "10.1.5.0/24")
+        with (
+            patch("components.network.boto3.client", return_value=mock_ec2),
+            pytest.raises(ClientError) as exc_info,
+        ):
+            _cleanup_orphaned_subnet("vpc-invalid", "10.1.5.0/24")
 
         assert "InvalidVpcID.NotFound" in str(exc_info.value)
 
@@ -227,9 +232,11 @@ class TestCleanupOrphanedSubnetUnexpected:
             endpoint_url="https://ec2.us-east-2.amazonaws.com"
         )
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            with pytest.raises(EndpointConnectionError):
-                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+        with (
+            patch("components.network.boto3.client", return_value=mock_ec2),
+            pytest.raises(EndpointConnectionError),
+        ):
+            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
 
     def test_empty_vpc_id(self):
         """Empty VPC ID passed - let AWS validate."""

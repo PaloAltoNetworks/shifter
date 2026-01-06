@@ -481,3 +481,27 @@ class TestConnectTerminal:
         ):
             result = connect_terminal(mock_user, 42, "upper-uuid")
             assert result.username == "kali"
+
+    def test_uses_administrator_username_for_windows_os_type(self):
+        """Service uses 'Administrator' username when os_type is 'windows'."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "win-uuid-123",
+            "role": "victim",
+            "os_type": "windows",
+            "private_ip": "10.1.1.60",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "win-uuid-123")
+            assert result.username == "Administrator"

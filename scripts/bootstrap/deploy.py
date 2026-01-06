@@ -20,6 +20,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404
 import sys
@@ -669,7 +670,7 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
 
 
 def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) -> None:
-    """Walk user through updating backend.tf files."""
+    """Update backend.tf files with S3 backend configuration."""
     header("Update Terraform Backend Configuration")
 
     bucket = bootstrap_result["bucket_name"]
@@ -679,22 +680,55 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
 
     repo_root = get_repo_root()
 
-    print("Terraform needs to know where to store state.\n")
+    print("Updating backend.tf files with S3 state configuration.\n")
+    print("These files configure where Terraform stores infrastructure state.\n")
 
-    # Generate backend configs
+    # Backend configurations for each component
     # Note: Core uses shifter/{env}/, but portal/range use {env}/ (historical convention)
-    backends = [
-        (f"platform/terraform/environments/{env}/backend.tf", f"shifter/{env}/terraform.tfstate"),
-        (f"platform/terraform/environments/{env}/portal/backend.tf", f"{env}/portal/terraform.tfstate"),
-        (f"platform/terraform/environments/{env}/range/backend.tf", f"{env}/range/terraform.tfstate"),
-    ]
-
-    # Check for existing files with different content
+    # Core needs full provider config in backend.tf; portal/range have it in main.tf
     files_to_write = []
-    files_with_changes = []
 
-    for filepath, state_key in backends:
-        full_path = repo_root / filepath
+    # Core backend.tf - needs full terraform block with provider config
+    core_path = f"platform/terraform/environments/{env}/backend.tf"
+    core_config = f'''terraform {{
+  backend "s3" {{
+    bucket         = "{bucket}"
+    key            = "shifter/{env}/terraform.tfstate"
+    region         = "{region}"
+    dynamodb_table = "{table}"
+    encrypt        = true
+  }}
+
+  required_version = ">= 1.0"
+
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+
+  default_tags {{
+    tags = {{
+      Environment = "{env}"
+      Project     = "shifter"
+      ManagedBy   = "terraform"
+    }}
+  }}
+}}
+'''
+    files_to_write.append((core_path, repo_root / core_path, core_config))
+
+    # Portal and Range backend.tf - just the backend block (provider in main.tf)
+    for component, state_key in [
+        ("portal", f"{env}/portal/terraform.tfstate"),
+        ("range", f"{env}/range/terraform.tfstate"),
+    ]:
+        filepath = f"platform/terraform/environments/{env}/{component}/backend.tf"
         backend_config = f'''terraform {{
   backend "s3" {{
     bucket         = "{bucket}"
@@ -705,36 +739,20 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
   }}
 }}
 '''
-        files_to_write.append((filepath, full_path, backend_config, state_key))
-
-        if full_path.exists():
-            existing_content = full_path.read_text()
-            if existing_content.strip() != backend_config.strip():
-                files_with_changes.append(filepath)
+        files_to_write.append((filepath, repo_root / filepath, backend_config))
 
     # Show what will be written
-    for filepath, full_path, backend_config, _state_key in files_to_write:
+    for filepath, full_path, backend_config in files_to_write:
         subheader(filepath)
         code_block(backend_config.strip())
-
         if full_path.exists():
-            if filepath in files_with_changes:
-                warn(f"File exists with DIFFERENT content: {full_path}")
-            else:
-                info(f"File exists (content matches): {full_path}")
-        else:
-            warn(f"File not found: {full_path}")
+            warn(f"File exists (will be overwritten): {full_path}")
 
     if not dry_run:
-        if files_with_changes:
-            warn(f"{len(files_with_changes)} file(s) will be OVERWRITTEN with different content")
-            choice = confirm_or_manual("Overwrite existing backend.tf files?")
-        else:
-            choice = confirm_or_manual("Automatically write these backend.tf files?")
+        choice = confirm_or_manual("Write these backend.tf files?")
 
         if choice == "yes":
-            # Write the files
-            for filepath, full_path, backend_config, _state_key in files_to_write:
+            for filepath, full_path, backend_config in files_to_write:
                 try:
                     full_path.parent.mkdir(parents=True, exist_ok=True)
                     full_path.write_text(backend_config)
@@ -744,62 +762,66 @@ def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) ->
                     error("Cannot continue without backend configuration files")
                     sys.exit(1)
 
-            # Offer to commit and push
-            commit_choice = confirm_or_manual("Commit and push these changes to git?")
-
-            if commit_choice == "yes":
-                try:
-                    info(f"Adding files: platform/terraform/environments/{env}/")
-                    subprocess.run(["git", "add", f"platform/terraform/environments/{env}/"], check=True, cwd=repo_root)  # nosec B603 B607
-
-                    info(f"Committing: Update backend config for {env}")
-                    subprocess.run(  # nosec B603 B607
-                        ["git", "commit", "-m", f"Update backend config for {env}"],
-                        check=True,
-                        cwd=repo_root,
-                    )
-
-                    info("Pushing to remote...")
-                    subprocess.run(["git", "push"], check=True, cwd=repo_root)  # nosec B603 B607
-
-                    success("Changes committed and pushed")
-                except subprocess.CalledProcessError as e:
-                    error(f"Git operation failed: {e}")
-                    error("Backend configuration must be committed before Terraform can use it")
-                    error("Fix git issues or choose manual method to commit later")
-                    sys.exit(1)
-            elif commit_choice == "manual":
-                info("You should run:")
-                code_block(
-                    f"git add platform/terraform/environments/{env}/\n"
-                    f"git commit -m 'Update backend config for {env}'\n"
-                    "git push"
-                )
-                wait_for_user("Commit and push the changes, then press Enter.")
-
-            success("Backend configuration updated")
+            success("Backend configuration files updated")
 
         elif choice == "manual":
-            # Manual method
             wait_for_user(
-                "Update the backend.tf files shown above with the new bucket and table names.\n"
-                "You can copy the code blocks directly into each file."
+                "Update the backend.tf files shown above manually.\nYou can copy the content directly into each file."
             )
-
-            if confirm("Commit and push the backend.tf changes now?"):
-                info("You should run:")
-                code_block(
-                    f"git add platform/terraform/environments/{env}/\n"
-                    f"git commit -m 'Update backend config for {env}'\n"
-                    "git push"
-                )
-                wait_for_user("Commit and push the changes, then press Enter.")
-
-            success("Backend configuration updated")
+            success("Backend configuration ready")
         else:
             error("Backend configuration is required for Terraform state management")
             error("Without this, Terraform cannot store or track infrastructure state")
             sys.exit(1)
+
+    # Update terraform_remote_state bucket references in portal/main.tf
+    _update_remote_state_references(env, bucket, region, dry_run)
+
+
+def _update_remote_state_references(env: str, bucket: str, region: str, dry_run: bool = False) -> None:
+    """Update terraform_remote_state bucket references in portal/main.tf."""
+    repo_root = get_repo_root()
+    portal_main_tf = repo_root / f"platform/terraform/environments/{env}/portal/main.tf"
+
+    if not portal_main_tf.exists():
+        warn(f"Portal main.tf not found at {portal_main_tf}, skipping remote_state updates")
+        return
+
+    subheader("Update terraform_remote_state References")
+    print("Portal's main.tf contains terraform_remote_state data sources that reference")
+    print("the S3 bucket. These need to be updated with the new bucket name.\n")
+
+    content = portal_main_tf.read_text()
+    original_content = content
+
+    # Find and replace bucket references in terraform_remote_state blocks
+    # Match: bucket = "shifter-*" within config blocks
+    pattern = r'(data\s+"terraform_remote_state".*?config\s*=\s*\{[^}]*bucket\s*=\s*)"[^"]*"'
+
+    def replace_bucket(match):
+        return f'{match.group(1)}"{bucket}"'
+
+    new_content = re.sub(pattern, replace_bucket, content, flags=re.DOTALL)
+
+    if new_content == original_content:
+        info("No terraform_remote_state bucket references found or already up to date")
+        return
+
+    # Show what will change
+    print(f"Will update bucket references in: {portal_main_tf.relative_to(repo_root)}")
+    print("  Old: shifter-*-...-...")
+    print(f"  New: {bucket}\n")
+
+    if not dry_run:
+        if confirm("Update terraform_remote_state bucket references?"):
+            try:
+                portal_main_tf.write_text(new_content)
+                success("Updated terraform_remote_state bucket references")
+            except Exception as e:
+                error(f"Failed to update portal/main.tf: {e}")
+                error("You may need to manually update the bucket references")
+        else:
+            warn("Skipping remote_state updates - you'll need to update them manually")
 
 
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
@@ -840,12 +862,15 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         os.chdir(tf_dir)
 
         try:
-            # Init with -reconfigure to handle backend changes from bootstrap
+            # Init with -reconfigure (backend config is in backend.tf)
             info("Running terraform init...")
-            init_result = run_cmd(["terraform", "init", "-reconfigure"], dry_run=dry_run)
+            init_result = run_cmd(
+                ["terraform", "init", "-reconfigure"],
+                dry_run=dry_run,
+            )
             if not dry_run and init_result and init_result.returncode != 0:
                 error(f"Terraform init failed for {component}")
-                error("Check that backend.tf is correctly configured")
+                error("Check that backend.tf exists and is correctly configured")
                 sys.exit(1)
 
             # Plan

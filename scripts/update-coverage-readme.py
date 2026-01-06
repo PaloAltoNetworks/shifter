@@ -9,6 +9,7 @@ from pathlib import Path
 # Coverage file locations relative to repo root
 COVERAGE_FILES = {
     "shifter_platform": "shifter/shifter_platform/coverage.xml",
+    "shifter_platform_js": "shifter/shifter_platform/coverage/cobertura-coverage.xml",
     "provisioner": "shifter/engine/provisioner/coverage.xml",
     "packer": "shifter/packer/coverage.xml",
     "bootstrap": "scripts/bootstrap/coverage.xml",

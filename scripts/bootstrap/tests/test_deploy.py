@@ -93,6 +93,8 @@ def mock_repo_root(tmp_path):
     (repo / "platform" / "terraform" / "environments" / "prod").mkdir()
     (repo / "platform" / "terraform" / "environments" / "prod" / "portal").mkdir(parents=True)
     (repo / "platform" / "terraform" / "environments" / "prod" / "range").mkdir(parents=True)
+    # global/iam for bootstrap_account tests
+    (repo / "platform" / "terraform" / "global" / "iam").mkdir(parents=True)
     return repo
 
 
@@ -706,11 +708,13 @@ class TestBootstrapAccount:
     # Happy path - function succeeds
     # ---------------------------------------------------------------------
 
-    def test_creates_s3_bucket_for_terraform_state(self, bootstrap_config, mock_subprocess):
+    def test_creates_s3_bucket_for_terraform_state(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function creates S3 bucket for state storage."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
 
@@ -722,11 +726,13 @@ class TestBootstrapAccount:
             ]
             assert len(s3_calls) > 0
 
-    def test_creates_dynamodb_table_for_state_locking(self, bootstrap_config, mock_subprocess):
+    def test_creates_dynamodb_table_for_state_locking(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function creates DynamoDB table for state locking."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
 
@@ -738,11 +744,13 @@ class TestBootstrapAccount:
             ]
             assert len(dynamo_calls) > 0
 
-    def test_runs_terraform_to_create_oidc_and_role(self, bootstrap_config, mock_subprocess):
+    def test_runs_terraform_to_create_oidc_and_role(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function runs Terraform to create OIDC provider and production IAM role."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
             patch("os.chdir"),
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
@@ -755,11 +763,13 @@ class TestBootstrapAccount:
             ]
             assert len(terraform_calls) > 0
 
-    def test_creates_iam_role_for_github_actions(self, bootstrap_config, mock_subprocess):
+    def test_creates_iam_role_for_github_actions(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function creates IAM role for GitHub Actions."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
 
@@ -771,11 +781,13 @@ class TestBootstrapAccount:
             ]
             assert len(role_calls) > 0
 
-    def test_attaches_admin_policy_to_bootstrap_role(self, bootstrap_config, mock_subprocess):
+    def test_attaches_admin_policy_to_bootstrap_role(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function attaches AdministratorAccess to bootstrap role."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
             patch("os.chdir"),
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
@@ -791,11 +803,13 @@ class TestBootstrapAccount:
             ]
             assert len(policy_calls) > 0
 
-    def test_returns_dict_with_bootstrap_results(self, bootstrap_config, mock_subprocess):
+    def test_returns_dict_with_bootstrap_results(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function returns dictionary with resource ARNs and names."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             result = deploy.bootstrap_account(bootstrap_config, "my-profile")
 
@@ -804,11 +818,13 @@ class TestBootstrapAccount:
             assert "bucket_name" in result
             assert "table_name" in result
 
-    def test_uses_correct_github_org_and_repo_in_trust_policy(self, bootstrap_config, mock_subprocess):
+    def test_uses_correct_github_org_and_repo_in_trust_policy(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function includes correct GitHub org/repo in IAM trust policy."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             bootstrap_config.github_org = "test-org"
             bootstrap_config.github_repo = "test-repo"
@@ -841,11 +857,13 @@ class TestBootstrapAccount:
     # Dry-run mode
     # ---------------------------------------------------------------------
 
-    def test_does_not_create_resources_in_dry_run(self, bootstrap_config):
+    def test_does_not_create_resources_in_dry_run(self, bootstrap_config, mock_repo_root):
         """Function does not execute AWS commands in dry-run mode."""
         with (
             patch("subprocess.run") as mock_run,
             patch("deploy.get_aws_account_id", return_value="123456789012"),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile", dry_run=True)
 
@@ -858,22 +876,26 @@ class TestBootstrapAccount:
     # Error handling
     # ---------------------------------------------------------------------
 
-    def test_exits_when_s3_bucket_creation_fails(self, bootstrap_config):
+    def test_exits_when_s3_bucket_creation_fails(self, bootstrap_config, mock_repo_root):
         """Function exits when S3 bucket creation fails."""
         with (
             patch("subprocess.run") as mock_run,
             patch("deploy.get_aws_account_id", return_value="123456789012"),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             mock_run.side_effect = subprocess.CalledProcessError(returncode=1, cmd=["aws", "s3", "mb"])
 
             with pytest.raises(SystemExit):
                 deploy.bootstrap_account(bootstrap_config, "my-profile")
 
-    def test_exits_when_dynamodb_table_creation_fails(self, bootstrap_config):
+    def test_exits_when_dynamodb_table_creation_fails(self, bootstrap_config, mock_repo_root):
         """Function exits when DynamoDB table creation fails."""
         with (
             patch("subprocess.run") as mock_run,
             patch("deploy.get_aws_account_id", return_value="123456789012"),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             # Succeed for S3, fail for DynamoDB
             def side_effect(cmd, **kwargs):
@@ -886,11 +908,13 @@ class TestBootstrapAccount:
             with pytest.raises(SystemExit):
                 deploy.bootstrap_account(bootstrap_config, "my-profile")
 
-    def test_exits_when_iam_role_creation_fails(self, bootstrap_config):
+    def test_exits_when_iam_role_creation_fails(self, bootstrap_config, mock_repo_root):
         """Function exits when IAM role creation fails."""
         with (
             patch("subprocess.run") as mock_run,
             patch("deploy.get_aws_account_id", return_value="123456789012"),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
             # Succeed for S3 and DynamoDB, fail for IAM
             def side_effect(cmd, **kwargs):
@@ -907,12 +931,14 @@ class TestBootstrapAccount:
     # Profile injection
     # ---------------------------------------------------------------------
 
-    def test_passes_profile_to_all_aws_commands(self, bootstrap_config):
+    def test_passes_profile_to_all_aws_commands(self, bootstrap_config, mock_repo_root):
         """Function passes profile parameter to all AWS CLI calls."""
         with (
             patch("subprocess.run") as mock_run,
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("pathlib.Path.write_text"),
         ):
 
             def run_side_effect(cmd, **kwargs):
@@ -922,7 +948,7 @@ class TestBootstrapAccount:
                     return subprocess.CompletedProcess(
                         args=cmd,
                         returncode=0,
-                        stdout="arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com\n",
+                        stdout=("arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com\n"),
                     )
                 return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="")
 
@@ -1195,28 +1221,6 @@ class TestWalkthroughBackendConfig:
             assert "my-table" in all_content
             assert "us-west-2" in all_content
 
-    def test_commits_and_pushes_when_user_confirms(self, mock_repo_root, mock_stdin_tty, mock_subprocess):
-        """Function commits and pushes changes when user confirms."""
-        bootstrap_result = {
-            "bucket_name": "test-bucket",
-            "table_name": "test-table",
-            "region": "us-east-2",
-            "env": "dev",
-        }
-
-        with (
-            patch("deploy.get_repo_root", return_value=mock_repo_root),
-            patch("deploy.confirm_or_manual", side_effect=["yes", "yes"]),
-            patch("pathlib.Path.write_text"),
-        ):
-            deploy.walkthrough_backend_config(bootstrap_result)
-
-            # Should call git add, commit, push
-            git_calls = [
-                c for c in mock_subprocess.call_args_list if len(c[0]) > 0 and len(c[0][0]) > 0 and c[0][0][0] == "git"
-            ]
-            assert len(git_calls) > 0
-
     # ---------------------------------------------------------------------
     # Error handling
     # ---------------------------------------------------------------------
@@ -1255,26 +1259,6 @@ class TestWalkthroughBackendConfig:
             pytest.raises(SystemExit),
         ):
             deploy.walkthrough_backend_config(bootstrap_result)
-
-    def test_exits_when_git_commit_fails_after_confirmation(self, mock_repo_root, mock_stdin_tty):
-        """Function exits when git commit fails after user confirms."""
-        bootstrap_result = {
-            "bucket_name": "test-bucket",
-            "table_name": "test-table",
-            "region": "us-east-2",
-            "env": "dev",
-        }
-
-        with (
-            patch("deploy.get_repo_root", return_value=mock_repo_root),
-            patch("deploy.confirm_or_manual", side_effect=["yes", "yes"]),
-            patch("pathlib.Path.write_text"),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_run.side_effect = subprocess.CalledProcessError(returncode=1, cmd=["git"])
-
-            with pytest.raises(SystemExit):
-                deploy.walkthrough_backend_config(bootstrap_result)
 
     # ---------------------------------------------------------------------
     # Manual fallback

@@ -80,7 +80,6 @@ class TestGetRangeFromDb:
             mock_cursor.fetchone.return_value = (
                 42,  # id
                 1,  # user_id
-                5,  # subnet_index
                 range_config,  # range_config JSON
                 False,  # ngfw_enabled
             )
@@ -95,7 +94,6 @@ class TestGetRangeFromDb:
 
             assert result["id"] == 42
             assert result["user_id"] == 1
-            assert result["subnet_index"] == 5
             assert result["range_config"] == range_config
             assert result["ngfw_enabled"] is False
 
@@ -121,7 +119,6 @@ class TestGetRangeFromDb:
             mock_cursor.fetchone.return_value = (
                 42,  # id
                 1,  # user_id
-                5,  # subnet_index
                 {"scenario_id": "basic", "user_id": 1, "instances": []},
                 True,  # ngfw_enabled (ngfw_id IS NOT NULL)
             )
@@ -187,7 +184,6 @@ class TestRangeConfigDataclass:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -207,7 +203,6 @@ class TestRangeConfigDataclass:
 
         assert config.range_id == 42
         assert config.user_id == 1
-        assert config.subnet_index == 5
         assert config.environment == "dev"
         assert len(config.instances) == 1
         assert config.vpc_id == "vpc-123"
@@ -217,7 +212,6 @@ class TestRangeConfigDataclass:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],
             vpc_id="vpc-123",
@@ -240,7 +234,6 @@ class TestRangeConfigDataclass:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],
             vpc_id="vpc-123",
@@ -273,7 +266,6 @@ class TestLoadConfigIntegration:
             mock_data = {
                 "id": range_id,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": range_config or {"scenario_id": "basic", "user_id": 1, "instances": []},
                 "ngfw_enabled": ngfw_enabled,
             }
@@ -303,7 +295,6 @@ class TestLoadConfigIntegration:
         assert isinstance(result, RangeConfig)
         assert result.range_id == 42
         assert result.user_id == 1
-        assert result.subnet_index == 5
         assert result.environment == "dev"
         assert result.vpc_id == "vpc-test123"
         assert len(result.instances) == 2
@@ -450,7 +441,6 @@ class TestLoadConfigDCSupport:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {
                     "scenario_id": "ad_lab",
                     "user_id": 1,
@@ -482,7 +472,6 @@ class TestLoadConfigDCSupport:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {
                     "scenario_id": "ad_lab",
                     "user_id": 1,
@@ -511,7 +500,6 @@ class TestInstanceTypeDefaults:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {
                     "scenario_id": "basic",
                     "user_id": 1,
@@ -534,7 +522,6 @@ class TestInstanceTypeDefaults:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {
                     "scenario_id": "basic",
                     "user_id": 1,
@@ -557,7 +544,6 @@ class TestInstanceTypeDefaults:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {
                     "scenario_id": "ad_lab",
                     "user_id": 1,
@@ -584,7 +570,6 @@ class TestLoadConfigNGFW:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "subnet_index": 5,
                 "range_config": {"scenario_id": "basic", "user_id": 1, "instances": []},
                 "ngfw_enabled": True,
             },

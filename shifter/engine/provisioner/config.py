@@ -104,7 +104,6 @@ class RangeConfig:
 
     range_id: int
     user_id: int
-    subnet_index: int
     environment: str
     instances: list[InstanceConfig]
     vpc_id: str
@@ -159,7 +158,6 @@ def get_range_from_db(range_id: int) -> dict:
                 SELECT
                     r.id,
                     r.user_id,
-                    r.subnet_index,
                     r.range_config,
                     r.ngfw_id IS NOT NULL as ngfw_enabled
                 FROM mission_control_range r
@@ -174,9 +172,8 @@ def get_range_from_db(range_id: int) -> dict:
         return {
             "id": row[0],
             "user_id": row[1],
-            "subnet_index": row[2],
-            "range_config": row[3],  # Full RangeSpec JSON
-            "ngfw_enabled": row[4],
+            "range_config": row[2],  # Full RangeSpec JSON
+            "ngfw_enabled": row[3],
         }
 
 
@@ -251,7 +248,6 @@ def load_config() -> RangeConfig:
     return RangeConfig(
         range_id=range_id,
         user_id=range_data["user_id"],
-        subnet_index=range_data["subnet_index"],
         environment=environment,
         instances=instances,
         vpc_id=config.require("rangeVpcId"),

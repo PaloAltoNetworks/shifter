@@ -237,7 +237,6 @@ class RangeStack(pulumi.ComponentResource):
             user_id=config.user_id,
             vpc_id=config.vpc_id,
             cidr_prefix=cidr_prefix,
-            subnet_index=config.subnet_index,
             route_table_id=config.route_table_id,
             environment=config.environment,
             availability_zone=config.availability_zone,

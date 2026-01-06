@@ -30,19 +30,6 @@ def valid_connection_params():
 
 
 @pytest.fixture
-def valid_connection_params_with_options():
-    """Return valid parameters with all optional values specified."""
-    return {
-        "host": "10.0.0.1",
-        "username": "testuser",
-        "private_key": VALID_PRIVATE_KEY,
-        "port": 2222,
-        "term_type": "vt100",
-        "term_size": (120, 40),
-    }
-
-
-@pytest.fixture
 def mock_asyncssh_connection():
     """Return a mock asyncssh connection object."""
     conn = MagicMock()
@@ -63,9 +50,3 @@ def mock_asyncssh_process():
     process.close = MagicMock()
     process.change_terminal_size = MagicMock()
     return process
-
-
-@pytest.fixture
-def mock_private_key():
-    """Return a mock private key object."""
-    return MagicMock()

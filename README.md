@@ -7,18 +7,6 @@
 [![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=vulnerabilities&token=5fd0e92594a03e3defe1c85a402c9258dbfe4681)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
 [![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Brad-Edwards_shifter&metric=sqale_rating&token=5fd0e92594a03e3defe1c85a402c9258dbfe4681)](https://sonarcloud.io/summary/new_code?id=Brad-Edwards_shifter)
 
-## Test Coverage
-
-<!-- COVERAGE-TABLE-START -->
-| Component | Coverage |
-|-----------|----------|
-| shifter_platform | ![90.2%](https://img.shields.io/badge/coverage-90.2%25-brightgreen) |
-| provisioner | ![95.3%](https://img.shields.io/badge/coverage-95.3%25-brightgreen) |
-| packer | ![98.8%](https://img.shields.io/badge/coverage-98.8%25-brightgreen) |
-| bootstrap | ![87.6%](https://img.shields.io/badge/coverage-87.6%25-brightgreen) |
-| check_layer_imports | ![82.4%](https://img.shields.io/badge/coverage-82.4%25-brightgreen) |
-<!-- COVERAGE-TABLE-END -->
-
 # Shifter
 
 Self-service enterprise cyber range platform. Users provision isolated attack environments to run purple, red, and blue team scenarios with telemetry from targets to showcase XDR/XSIAM capabilities.

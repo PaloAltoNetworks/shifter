@@ -47,12 +47,12 @@ class TestAgentDetails:
         with pytest.raises(ValidationError):
             AgentDetails(s3_key="agents/agent.msi", sha256="abc123")
 
-    def test_sha256_is_required(self):
-        """AgentDetails requires sha256 field."""
+    def test_sha256_defaults_to_empty_string(self):
+        """AgentDetails sha256 defaults to empty string when not provided."""
         from shared.schemas.range import AgentDetails
 
-        with pytest.raises(ValidationError):
-            AgentDetails(s3_key="agents/agent.msi", filename="agent.msi")
+        agent = AgentDetails(s3_key="agents/agent.msi", filename="agent.msi")
+        assert agent.sha256 == ""
 
     def test_model_dump_returns_dict(self):
         """AgentDetails.model_dump() returns a dictionary."""

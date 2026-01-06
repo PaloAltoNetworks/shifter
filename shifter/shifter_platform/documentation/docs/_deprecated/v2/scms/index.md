@@ -28,7 +28,7 @@ User-uploaded XDR/XSIAM agent installers.
 | `os` | FK to OperatingSystem |
 | `name` | User-friendly name |
 | `s3_key` | S3 object key for installer file |
-| `sha256_hash` | File integrity |
+| `sha256_hash` | File integrity (optional) |
 
 ## Range Instance Config
 

@@ -26,6 +26,14 @@ class DashboardManager {
         this.reconnectDelay = 1000; // Start with 1 second
         this.agents = []; // Cached agent list with os_slug
 
+        // Provisioning timeout (from Django settings, fallback 60 min)
+        this.provisioningTimeoutMs = options.provisioningTimeoutMs || 60 * 60 * 1000;
+        this.provisioningTimer = null;
+
+        // Status polling fallback (catches missed WebSocket updates)
+        this.statusPollInterval = null;
+        this.statusPollDelay = 30000; // 30 seconds
+
         // UI Elements
         this.noRangeState = document.getElementById('no-range-state');
         this.provisioningState = document.getElementById('provisioning-state');
@@ -227,7 +235,7 @@ class DashboardManager {
     }
 
     _isTransitionalState(status) {
-        return ['pending', 'provisioning', 'resuming', 'destroying'].includes(status);
+        return ['pending', 'provisioning', 'resuming'].includes(status);
     }
 
     _updateUI() {
@@ -266,11 +274,6 @@ class DashboardManager {
             case 'resuming':
                 this.provisioningState.style.display = 'block';
                 this._updateProvisioningState('Resuming Range', 'Starting instances...');
-                break;
-
-            case 'destroying':
-                this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Destroying Range', 'Cleaning up resources...');
                 break;
 
             case 'failed':
@@ -472,15 +475,24 @@ class DashboardManager {
 
     /**
      * Connect to WebSocket for real-time range status updates.
+     * @param {boolean} isReconnect - Whether this is a reconnect attempt (preserves retry counters)
      */
-    _connectStatusSocket(rangeId) {
-        // Close existing connection if any
-        this._closeStatusSocket();
+    _connectStatusSocket(rangeId, isReconnect = false) {
+        // Close existing connection if any, but preserve retry counters on reconnect
+        this._closeStatusSocket(!isReconnect);
 
         const wsUrl = this._buildWebSocketUrl(rangeId);
         console.log(`Connecting to WebSocket: ${wsUrl}`);
 
         this.statusSocket = new WebSocket(wsUrl);
+
+        // Start provisioning timeout timer
+        this.provisioningTimer = setTimeout(() => {
+            this._handleProvisioningTimeout();
+        }, this.provisioningTimeoutMs);
+
+        // Start polling fallback for missed WebSocket updates
+        this._startStatusPolling();
 
         this.statusSocket.onopen = () => {
             console.log('WebSocket connected for range status');
@@ -525,6 +537,7 @@ class DashboardManager {
                 // Close socket if we've reached a stable state
                 if (!this._isTransitionalState(newStatus)) {
                     console.log('Range reached stable state, closing WebSocket');
+                    this._clearProvisioningTimer();
                     this._closeStatusSocket();
                 }
             }
@@ -556,7 +569,7 @@ class DashboardManager {
 
             setTimeout(() => {
                 if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-                    this._connectStatusSocket(rangeId);
+                    this._connectStatusSocket(rangeId, true);
                 }
             }, this.reconnectDelay);
 
@@ -570,15 +583,83 @@ class DashboardManager {
 
     /**
      * Close WebSocket connection cleanly.
+     * @param {boolean} resetRetry - Whether to reset reconnect counters (default true)
      */
-    _closeStatusSocket() {
+    _closeStatusSocket(resetRetry = true) {
+        this._clearProvisioningTimer();
+        this._stopStatusPolling();
         if (this.statusSocket) {
             this.statusSocket.onclose = null; // Prevent reconnect attempt
             this.statusSocket.close(1000, 'Client closing');
             this.statusSocket = null;
         }
-        this.reconnectAttempts = 0;
-        this.reconnectDelay = 1000;
+        if (resetRetry) {
+            this.reconnectAttempts = 0;
+            this.reconnectDelay = 1000;
+        }
+    }
+
+    /**
+     * Clear the provisioning timeout timer.
+     */
+    _clearProvisioningTimer() {
+        if (this.provisioningTimer) {
+            clearTimeout(this.provisioningTimer);
+            this.provisioningTimer = null;
+        }
+    }
+
+    /**
+     * Start periodic polling for range status as fallback for missed WebSocket updates.
+     * Polling continues even when tab is hidden to ensure status is fresh when user returns.
+     */
+    _startStatusPolling() {
+        // Don't start if already polling
+        if (this.statusPollInterval) return;
+
+        this.statusPollInterval = setInterval(async () => {
+            // Skip if no current range or not in transitional state
+            if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {
+                this._stopStatusPolling();
+                return;
+            }
+
+            const data = await this._fetchJson(this.rangeUrl, 'Status poll failed');
+            if (!data || !data.range) return;
+
+            const polledStatus = data.range.status;
+
+            // If we discovered a stable state via poll (missed WebSocket update)
+            if (!this._isTransitionalState(polledStatus)) {
+                console.log(`Poll detected stable state: ${polledStatus}`);
+                this.currentRange = data.range;
+                this._updateUI();
+                this._closeStatusSocket(); // This also stops polling
+            }
+        }, this.statusPollDelay);
+    }
+
+    /**
+     * Stop periodic status polling.
+     */
+    _stopStatusPolling() {
+        if (this.statusPollInterval) {
+            clearInterval(this.statusPollInterval);
+            this.statusPollInterval = null;
+        }
+    }
+
+    /**
+     * Handle provisioning timeout - show failed state.
+     */
+    _handleProvisioningTimeout() {
+        console.error('Provisioning timed out');
+        this._closeStatusSocket();
+        if (this.currentRange) {
+            this.currentRange.status = 'failed';
+            this.currentRange.error_message = 'Provisioning timed out';
+        }
+        this._updateUI();
     }
 
     _initDropdown(dropdown) {

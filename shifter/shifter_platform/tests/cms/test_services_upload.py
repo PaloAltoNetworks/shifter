@@ -406,7 +406,7 @@ class TestCompleteUpload:
     """Tests for complete_upload() service function.
 
     Tests SERVICE behavior with mocked dependencies:
-    - Validates inputs (user, upload_token, sha256)
+    - Validates inputs (user, upload_token)
     - Verifies upload token
     - Verifies S3 object exists
     - Tags S3 object as completed
@@ -434,7 +434,7 @@ class TestCompleteUpload:
             patch("cms.assets.services.create_agent") as mock_create,
         ):
             mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
             mock_verify.assert_called_once_with("token123", user.id)
 
     def test_calls_verify_s3_object_exists_with_s3_key(self, user):
@@ -453,7 +453,7 @@ class TestCompleteUpload:
             patch("cms.assets.services.create_agent") as mock_create,
         ):
             mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
             mock_verify_s3.assert_called_once_with("agents/1/abc_agent.msi")
 
     def test_calls_tag_s3_object_with_completed_tags(self, user):
@@ -472,7 +472,7 @@ class TestCompleteUpload:
             patch("cms.assets.services.create_agent") as mock_create,
         ):
             mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
             mock_tag.assert_called_once_with("agents/1/abc_agent.msi", {"status": "completed"})
 
     def test_calls_create_agent_with_all_params(self, user):
@@ -491,7 +491,7 @@ class TestCompleteUpload:
             patch("cms.assets.services.create_agent") as mock_create,
         ):
             mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
             mock_create.assert_called_once_with(
                 user=user,
                 name="My Agent",
@@ -499,7 +499,6 @@ class TestCompleteUpload:
                 filename="agent.msi",
                 os_slug="windows",
                 file_size=5000,
-                sha256="sha256hash",
                 upload_method="presigned",
             )
 
@@ -521,7 +520,7 @@ class TestCompleteUpload:
             patch("cms.assets.s3.tag_s3_object"),
             patch("cms.assets.services.create_agent", return_value=mock_agent),
         ):
-            result = services.complete_upload(user, "token123", "sha256hash")
+            result = services.complete_upload(user, "token123")
             assert result == mock_agent
             assert result.id == 42
 
@@ -530,53 +529,36 @@ class TestCompleteUpload:
     def test_raises_typeerror_when_user_is_none(self, db):
         """Service raises TypeError when user is None."""
         with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
-            services.complete_upload(None, "token123", "sha256hash")
+            services.complete_upload(None, "token123")
 
     def test_raises_typeerror_when_user_has_no_id_attribute(self, db):
         """Service raises TypeError when user has no id attribute."""
         with pytest.raises(TypeError, match="user must be a User instance"):
-            services.complete_upload("not a user", "token123", "sha256hash")
+            services.complete_upload("not a user", "token123")
 
     def test_raises_valueerror_when_user_id_is_none(self, db):
         """Service raises ValueError when user is unsaved."""
         unsaved_user = Mock()
         unsaved_user.id = None
         with pytest.raises(ValueError, match="user must be saved"):
-            services.complete_upload(unsaved_user, "token123", "sha256hash")
+            services.complete_upload(unsaved_user, "token123")
 
     # --- Input validation - upload_token ---
 
     def test_raises_valueerror_when_upload_token_is_none(self, user):
         """Service raises ValueError when upload_token is None."""
         with pytest.raises(ValueError, match="upload_token cannot be None"):
-            services.complete_upload(user, None, "sha256hash")
+            services.complete_upload(user, None)
 
     def test_raises_valueerror_when_upload_token_is_empty(self, user):
         """Service raises ValueError when upload_token is empty."""
         with pytest.raises(ValueError, match="upload_token cannot be empty"):
-            services.complete_upload(user, "", "sha256hash")
+            services.complete_upload(user, "")
 
     def test_raises_valueerror_when_upload_token_is_whitespace(self, user):
         """Service raises ValueError when upload_token is only whitespace."""
         with pytest.raises(ValueError, match="upload_token cannot be empty"):
-            services.complete_upload(user, "   ", "sha256hash")
-
-    # --- Input validation - sha256 ---
-
-    def test_raises_valueerror_when_sha256_is_none(self, user):
-        """Service raises ValueError when sha256 is None."""
-        with pytest.raises(ValueError, match="sha256 cannot be None"):
-            services.complete_upload(user, "token123", None)
-
-    def test_raises_valueerror_when_sha256_is_empty(self, user):
-        """Service raises ValueError when sha256 is empty."""
-        with pytest.raises(ValueError, match="sha256 cannot be empty"):
-            services.complete_upload(user, "token123", "")
-
-    def test_raises_valueerror_when_sha256_is_whitespace(self, user):
-        """Service raises ValueError when sha256 is only whitespace."""
-        with pytest.raises(ValueError, match="sha256 cannot be empty"):
-            services.complete_upload(user, "token123", "   ")
+            services.complete_upload(user, "   ")
 
     # --- Token verification errors ---
 
@@ -588,7 +570,7 @@ class TestCompleteUpload:
             patch("cms.assets.upload_token.verify_upload_token", side_effect=ValueError("Invalid token")),
             pytest.raises(CMSError, match="Invalid upload token"),
         ):
-            services.complete_upload(user, "bad_token", "sha256hash")
+            services.complete_upload(user, "bad_token")
 
     def test_raises_cmserror_on_expired_token(self, user):
         """Service raises CMSError when token is expired."""
@@ -598,7 +580,7 @@ class TestCompleteUpload:
             patch("cms.assets.upload_token.verify_upload_token", side_effect=ValueError("Token expired")),
             pytest.raises(CMSError, match="Invalid upload token"),
         ):
-            services.complete_upload(user, "expired_token", "sha256hash")
+            services.complete_upload(user, "expired_token")
 
     # --- S3 verification errors ---
 
@@ -619,7 +601,7 @@ class TestCompleteUpload:
             patch("cms.assets.s3.verify_s3_object_exists", side_effect=S3Error("Object not found")),
             pytest.raises(CMSError, match="Upload not found"),
         ):
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
 
     def test_raises_cmserror_when_file_size_mismatch(self, user):
         """Service raises CMSError when S3 object size doesn't match token."""
@@ -637,7 +619,7 @@ class TestCompleteUpload:
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(5000, "etag")),  # Wrong size
             pytest.raises(CMSError, match="size mismatch"),
         ):
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
 
     # --- Logging ---
 
@@ -658,7 +640,7 @@ class TestCompleteUpload:
             caplog.at_level(logging.DEBUG, logger="cms.services"),
         ):
             mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
         assert str(user.id) in caplog.text
 
     def test_logs_debug_on_success(self, user, caplog):
@@ -678,7 +660,7 @@ class TestCompleteUpload:
             caplog.at_level(logging.DEBUG, logger="cms.services"),
         ):
             mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
         assert "42" in caplog.text or "completed" in caplog.text.lower()
 
     def test_logs_error_on_invalid_token(self, user, caplog):
@@ -690,7 +672,7 @@ class TestCompleteUpload:
             caplog.at_level(logging.ERROR, logger="cms.services"),
             pytest.raises(CMSError),
         ):
-            services.complete_upload(user, "bad_token", "sha256hash")
+            services.complete_upload(user, "bad_token")
         assert "error" in caplog.text.lower() or "token" in caplog.text.lower()
 
     def test_logs_error_on_s3_verification_failure(self, user, caplog):
@@ -711,7 +693,7 @@ class TestCompleteUpload:
             caplog.at_level(logging.ERROR, logger="cms.services"),
             pytest.raises(CMSError),
         ):
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
         assert "error" in caplog.text.lower() or "s3" in caplog.text.lower()
 
     # --- Error propagation ---
@@ -722,7 +704,7 @@ class TestCompleteUpload:
             patch("cms.assets.upload_token.verify_upload_token", side_effect=RuntimeError("Unexpected")),
             pytest.raises(RuntimeError, match="Unexpected"),
         ):
-            services.complete_upload(user, "token123", "sha256hash")
+            services.complete_upload(user, "token123")
 
 
 @pytest.mark.django_db

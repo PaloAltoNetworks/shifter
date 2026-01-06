@@ -55,8 +55,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Load profile from .env if not already set
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -f "$REPO_ROOT/.env" ]]; then
+    # shellcheck source=/dev/null
+    source "$REPO_ROOT/.env"
+fi
+
 # Always use dev profile - runners live in dev account
-AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:-panw-shifter-dev-workstation}"
+AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:?PANW_SHIFTER_DEV_PROFILE not set. Check .env file.}"
 
 echo "=========================================="
 echo "GitHub Runner Deploy"

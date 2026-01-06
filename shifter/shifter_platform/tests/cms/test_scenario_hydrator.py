@@ -230,13 +230,14 @@ class TestHydrateScenario:
         assert victim.agent is not None
         assert victim.agent.s3_key == "agents/123/agent.msi"
 
-    def test_ad_attack_lab_dc_has_no_agent(self, user, windows_agent):
-        """DC instance has no agent (no agent_slot)."""
+    def test_ad_attack_lab_dc_has_agent(self, user, windows_agent):
+        """DC instance has agent for XDR monitoring."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("ad_attack_lab", user.id, windows_agent)
         dc = next(i for i in result.instances if i.role == "dc")
-        assert dc.agent is None
+        assert dc.agent is not None
+        assert dc.agent.s3_key == "agents/123/agent.msi"
 
     # --- Error handling ---
 

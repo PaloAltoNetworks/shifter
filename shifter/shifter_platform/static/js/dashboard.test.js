@@ -81,3 +81,125 @@ describe('DashboardManager dropdown initialization', () => {
         expect(window.XdrDropdown.init).toHaveBeenCalledWith(dashboard.scenarioDropdown);
     });
 });
+
+describe('DashboardManager status polling', () => {
+    let dashboard;
+    let fetchMock;
+
+    beforeEach(() => {
+        jest.useFakeTimers();
+
+        document.body.innerHTML = `
+            <div id="no-range-state"></div>
+            <div id="provisioning-state"></div>
+            <div id="active-range-state"></div>
+            <div id="paused-range-state"></div>
+            <div id="failed-state"></div>
+        `;
+
+        fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({ range: { range_id: 42, status: 'provisioning' } }),
+        });
+        global.fetch = fetchMock;
+
+        dashboard = new window.DashboardManager({
+            csrfToken: 'test-csrf-token',
+            rangeUrl: '/range',
+            launchUrl: '/launch',
+            cancelUrl: '/cancel',
+            destroyUrl: '/destroy',
+            agentsUrl: '/agents',
+        });
+
+        dashboard.currentRange = { range_id: 42, status: 'provisioning' };
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
+        dashboard._stopStatusPolling();
+    });
+
+    test('_startStatusPolling creates interval', () => {
+        expect(dashboard.statusPollInterval).toBeNull();
+
+        dashboard._startStatusPolling();
+
+        expect(dashboard.statusPollInterval).not.toBeNull();
+    });
+
+    test('_startStatusPolling does not create multiple intervals', () => {
+        dashboard._startStatusPolling();
+        const firstInterval = dashboard.statusPollInterval;
+
+        dashboard._startStatusPolling();
+
+        expect(dashboard.statusPollInterval).toBe(firstInterval);
+    });
+
+    test('_stopStatusPolling clears interval', () => {
+        dashboard._startStatusPolling();
+        expect(dashboard.statusPollInterval).not.toBeNull();
+
+        dashboard._stopStatusPolling();
+
+        expect(dashboard.statusPollInterval).toBeNull();
+    });
+
+    test('polling fetches range status at interval', async () => {
+        dashboard._startStatusPolling();
+
+        // Advance past the polling interval
+        jest.advanceTimersByTime(30000);
+
+        // Allow promises to resolve
+        await Promise.resolve();
+
+        expect(fetchMock).toHaveBeenCalledWith('/range', {
+            headers: { 'Accept': 'application/json' },
+        });
+    });
+
+    test('polling updates UI when stable state detected', async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({ range: { range_id: 42, status: 'ready' } }),
+        });
+
+        dashboard._startStatusPolling();
+        await jest.advanceTimersByTimeAsync(30000);
+
+        expect(dashboard.currentRange.status).toBe('ready');
+    });
+
+    test('polling stops when stable state detected', async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({ range: { range_id: 42, status: 'ready' } }),
+        });
+
+        dashboard._startStatusPolling();
+        await jest.advanceTimersByTimeAsync(30000);
+
+        expect(dashboard.statusPollInterval).toBeNull();
+    });
+
+    test('polling stops when no current range', async () => {
+        dashboard._startStatusPolling();
+        dashboard.currentRange = null;
+
+        jest.advanceTimersByTime(30000);
+        await Promise.resolve();
+
+        expect(dashboard.statusPollInterval).toBeNull();
+    });
+
+    test('_closeStatusSocket stops polling', () => {
+        dashboard._startStatusPolling();
+        expect(dashboard.statusPollInterval).not.toBeNull();
+
+        dashboard._closeStatusSocket();
+
+        expect(dashboard.statusPollInterval).toBeNull();
+    });
+});

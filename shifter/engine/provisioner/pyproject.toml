@@ -36,6 +36,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "freezegun>=1.5.5",
     "pytest",
     "pytest-cov",
     "pytest-mock",

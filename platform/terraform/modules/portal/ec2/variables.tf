@@ -3,6 +3,11 @@ variable "aws_region" {
   type        = string
 }
 
+variable "ec2_ami_id" {
+  description = "AMI ID for portal EC2 instances (use standard AL2023, not ECS-optimized)"
+  type        = string
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log retention in days"
   type        = number
@@ -159,4 +164,20 @@ variable "sqs_queue_arns" {
 variable "sqs_queue_urls" {
   description = "Map of consumer name to SQS queue URL for message consumers"
   type        = map(string)
+}
+
+# ------------------------------------------------------------------------------
+# Bootstrap Configuration (Parameter Store + Lifecycle Hook)
+# ------------------------------------------------------------------------------
+
+variable "ssm_parameter_store_prefix" {
+  description = "Parameter Store prefix for deployment config (read by user_data)"
+  type        = string
+  default     = ""
+}
+
+variable "lifecycle_hook_heartbeat_timeout" {
+  description = "Heartbeat timeout for ASG lifecycle hook in seconds (max 7200)"
+  type        = number
+  default     = 600
 }

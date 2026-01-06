@@ -9,7 +9,14 @@
 
 set -e
 
-AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:-panw-shifter-dev}"
+# Load profile from .env
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -f "$REPO_ROOT/.env" ]]; then
+    # shellcheck source=/dev/null
+    source "$REPO_ROOT/.env"
+fi
+
+AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:?PANW_SHIFTER_DEV_PROFILE not set. Check .env file.}"
 REGION="us-east-2"
 INSTANCE_NAME="shifter-dev-box"
 

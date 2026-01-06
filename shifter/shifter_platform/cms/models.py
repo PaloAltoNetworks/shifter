@@ -67,13 +67,13 @@ class FileAsset(Asset):
     - s3_key: Full S3 object key
     - original_filename: Original uploaded filename
     - file_size_bytes: File size for quota tracking
-    - sha256_hash: Content hash for integrity/deduplication
+    - sha256_hash: Content hash (optional, for future server-side compute)
     """
 
     s3_key = models.CharField(max_length=500, help_text="S3 object key")
     original_filename = models.CharField(max_length=255)
     file_size_bytes = models.PositiveBigIntegerField()
-    sha256_hash = models.CharField(max_length=64)
+    sha256_hash = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         abstract = True

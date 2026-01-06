@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from django.utils import timezone
+
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
 from cms.assets.validation import (
@@ -47,7 +49,7 @@ def create_agent(user: User, **kwargs: Any) -> Any:
             - filename: Original filename of the agent
             - os_slug: Operating system slug (e.g., 'windows', 'linux-debian')
             - file_size: Size of the agent file in bytes
-            - sha256: SHA256 hash of the agent file
+            - sha256: SHA256 hash (optional, for future server-side compute)
             - upload_method: Optional upload method for logging
 
     Returns:
@@ -1105,8 +1107,15 @@ def get_active_range(user: User) -> RangeContext | None:
 
     try:
         # Query for active ranges (non-deleted)
-        # Terminal statuses auto-set deleted_at, so this is sufficient
-        instance = RangeInstance.active.filter(user_id=user.id).order_by("-created_at").first()
+        # Exclude DESTROYING status - user can create new range while old one tears down
+        from shared.enums import RangeStatus
+
+        instance = (
+            RangeInstance.active.filter(user_id=user.id)
+            .exclude(status=RangeStatus.DESTROYING.value)
+            .order_by("-created_at")
+            .first()
+        )
     except TypeError:
         # Re-raise TypeErrors (shouldn't happen but be defensive)
         raise
@@ -1334,7 +1343,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
 def destroy_range(user: User, range_id: int) -> None:
     """Tear down range.
 
-    Verifies ownership via get_range, updates CMS status to DESTROYING,
+    Fetches RangeInstance, verifies ownership, updates CMS status to DESTROYING,
     then delegates to engine.services.destroy_range with RangeContext.
 
     Args:
@@ -1399,33 +1408,33 @@ def destroy_range(user: User, range_id: int) -> None:
         range_id,
     )
 
-    instance = None
-
+    # Fetch range instance directly and verify ownership
     try:
-        # Get range instance (verifies ownership and captures current
-        # status)
-        instance = get_range(user, range_id)
-        if instance is None:
-            logger.warning(
-                "destroy_range: range not found for user_id=%s, range_id=%s",
-                user.id,
-                range_id,
-            )
-            raise CMSError("Range not found")
-    except (TypeError, ValueError, CMSError):
-        logger.error(
-            "destroy_range: user and range mismatch for user_id=%s, range_id=%s",
+        instance = RangeInstance.objects.get(range_id=range_id)
+    except RangeInstance.DoesNotExist:
+        logger.warning(
+            "destroy_range: range not found for user_id=%s, range_id=%s",
             user.id,
             range_id,
         )
-        raise
+        raise CMSError(f"Range {range_id} not found") from None
+
+    # Verify ownership
+    if instance.user_id != user.id:
+        logger.error(
+            "destroy_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
+            range_id,
+            instance.user_id,
+            user.id,
+        )
+        raise CMSError(f"Range {range_id} not found")
 
     try:
-        # Update CMS status to DESTROYING (CMS is authoritative)
+        # Update CMS status to DESTROYING and soft delete immediately
+        # This allows user to create a new range without waiting for teardown
         instance.status = RangeStatus.DESTROYING.value
-        instance.save(update_fields=["status"])
-        if instance.status != RangeStatus.DESTROYING.value:
-            raise CMSError("Range status not updated to DESTROYING")
+        instance.deleted_at = timezone.now()
+        instance.save(update_fields=["status", "deleted_at"])
 
         range_ctx = RangeContext(
             range_id=instance.range_id,
@@ -1785,7 +1794,7 @@ def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dic
         raise
 
 
-def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
+def complete_upload(user: User, upload_token: str) -> Any:
     """Verify and finalize upload after file has been uploaded to S3.
 
     Verifies the upload token, checks the S3 object exists with correct size,
@@ -1794,15 +1803,13 @@ def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
     Args:
         user: User who initiated the upload
         upload_token: Signed token from initiate_upload
-        sha256: SHA256 hash of the uploaded file (computed client-side)
 
     Returns:
         AgentConfig: The newly created agent record
 
     Raises:
         TypeError: If user is None or invalid type
-        ValueError: If user is unsaved, or upload_token/sha256 is
-            empty
+        ValueError: If user is unsaved or upload_token is empty
         CMSError: If token is invalid/expired, S3 verification fails,
             or size mismatch
     """
@@ -1843,22 +1850,6 @@ def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
             user.id,
         )
         raise ValueError("upload_token cannot be empty")
-
-    # Input validation - sha256
-    if sha256 is None:
-        logger.error(
-            "complete_upload called with None sha256 for user_id=%s",
-            user.id,
-        )
-        raise ValueError("sha256 cannot be None")
-
-    sha256 = sha256.strip()
-    if not sha256:
-        logger.error(
-            "complete_upload called with empty sha256 for user_id=%s",
-            user.id,
-        )
-        raise ValueError("sha256 cannot be empty")
 
     logger.debug("complete_upload called for user_id=%s", user.id)
 
@@ -1910,7 +1901,6 @@ def complete_upload(user: User, upload_token: str, sha256: str) -> Any:
             filename=payload["filename"],
             os_slug=payload["os_slug"],
             file_size=expected_size,
-            sha256=sha256,
             upload_method="presigned",
         )
 

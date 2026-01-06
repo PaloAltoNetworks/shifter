@@ -127,7 +127,7 @@ def _hydrate_instance(
         agent_details = AgentDetails(
             s3_key=agent.s3_key,
             filename=agent.original_filename,
-            sha256=agent.sha256_hash,
+            sha256=agent.sha256_hash or "",
         )
 
     return InstanceSpec(

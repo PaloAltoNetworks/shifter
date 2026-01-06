@@ -29,12 +29,12 @@ GitHub OIDC authentication and IAM roles for CI/CD pipelines.
 cd platform/terraform/global/iam
 
 # Dev environment
-AWS_PROFILE=panw-shifter-dev-workstation terraform init -backend-config=dev.s3.tfbackend
-AWS_PROFILE=panw-shifter-dev-workstation terraform apply -var-file=dev.tfvars
+AWS_PROFILE=<dev account profile> terraform init -backend-config=dev.s3.tfbackend
+AWS_PROFILE=<dev account profile> terraform apply -var-file=dev.tfvars
 
 # Prod environment
-AWS_PROFILE=dev-workstation-user terraform init -backend-config=prod.s3.tfbackend
-AWS_PROFILE=dev-workstation-user terraform apply -var-file=prod.tfvars
+AWS_PROFILE=<prod account profile> terraform init -backend-config=prod.s3.tfbackend
+AWS_PROFILE=<prod account profile> terraform apply -var-file=prod.tfvars
 ```
 
 **After deployment:**
@@ -90,8 +90,8 @@ aws ssm put-parameter --name "/shifter/github-runner/webhook-secret" --value "..
 cd platform/terraform/global/github-runner
 
 # Dev environment
-AWS_PROFILE=panw-shifter-dev-workstation terraform init -backend-config=dev.s3.tfbackend
-AWS_PROFILE=panw-shifter-dev-workstation terraform apply -var-file=dev.tfvars
+AWS_PROFILE=<dev account profile> terraform init -backend-config=dev.s3.tfbackend
+AWS_PROFILE=<dev account profile> terraform apply -var-file=dev.tfvars
 ```
 
 **After deployment:**
@@ -118,8 +118,8 @@ Windows Server 2022 development workstation for remote development work.
 
 ```bash
 cd platform/terraform/global/dev-box
-AWS_PROFILE=panw-shifter-dev-workstation terraform init
-AWS_PROFILE=panw-shifter-dev-workstation terraform apply
+AWS_PROFILE=<dev account profile> terraform init
+AWS_PROFILE=<dev account profile> terraform apply
 ```
 
 **Management:**

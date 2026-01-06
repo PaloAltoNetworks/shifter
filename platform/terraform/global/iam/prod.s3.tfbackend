@@ -1,5 +1,5 @@
-bucket         = "shifter-infra-9fad3e21-51a9-4e09-ae3c-497b31211f6c"
+bucket         = "shifter-infra-bcde96ac-6f9b-4c5a-b6ac-dbd38ec137ff"
 key            = "global/iam/terraform.tfstate"
 region         = "us-east-2"
-dynamodb_table = "shifter-terraform-9fad3e21-51a9-4e09-ae3c-497b31211f6c"
+dynamodb_table = "shifter-terraform-bcde96ac-6f9b-4c5a-b6ac-dbd38ec137ff"
 encrypt        = true

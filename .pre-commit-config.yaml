@@ -226,17 +226,3 @@ repos:
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
-
-  # =============================================================================
-  # STAGE 5: Update coverage in README (runs after all tests)
-  # =============================================================================
-
-  - repo: local
-    hooks:
-      - id: update-coverage-readme
-        name: update coverage (README)
-        entry: python scripts/update-coverage-readme.py
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]

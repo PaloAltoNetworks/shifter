@@ -348,8 +348,18 @@ class TestCreateRange:
             user_id=1,
             scenario_id="test-scenario",
             instances=[
-                InstanceSpec(uuid="uuid-1", role="attacker", os_type="kali"),
-                InstanceSpec(uuid="uuid-2", role="victim", os_type="ubuntu"),
+                InstanceSpec(
+                    name="attacker-kali",
+                    uuid="uuid-1",
+                    role="attacker",
+                    os_type="kali",
+                ),
+                InstanceSpec(
+                    name="victim-ubuntu",
+                    uuid="uuid-2",
+                    role="victim",
+                    os_type="ubuntu",
+                ),
             ],
         )
 

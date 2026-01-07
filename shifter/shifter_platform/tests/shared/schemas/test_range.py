@@ -145,10 +145,11 @@ class TestInstanceSpec:
         assert InstanceSpec is not None
 
     def test_create_with_required_fields(self):
-        """InstanceSpec can be created with role and os_type."""
+        """InstanceSpec can be created with name, role, and os_type."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(role="attacker", os_type="kali")
+        spec = InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
+        assert spec.name == "attacker-kali"
         assert spec.role == "attacker"
         assert spec.os_type == "kali"
 
@@ -156,14 +157,14 @@ class TestInstanceSpec:
         """InstanceSpec uuid field defaults to None."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(role="attacker", os_type="kali")
+        spec = InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
         assert spec.uuid is None
 
     def test_uuid_accepts_string(self):
         """InstanceSpec uuid accepts string value."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(uuid="abc-123", role="attacker", os_type="kali")
+        spec = InstanceSpec(name="attacker-kali", uuid="abc-123", role="attacker", os_type="kali")
         assert spec.uuid == "abc-123"
 
     def test_role_is_required(self):
@@ -171,34 +172,34 @@ class TestInstanceSpec:
         from shared.schemas.range import InstanceSpec
 
         with pytest.raises(ValidationError):
-            InstanceSpec(os_type="kali")
+            InstanceSpec(name="test", os_type="kali")
 
     def test_os_type_is_required(self):
         """InstanceSpec requires os_type field."""
         from shared.schemas.range import InstanceSpec
 
         with pytest.raises(ValidationError):
-            InstanceSpec(role="attacker")
+            InstanceSpec(name="test", role="attacker")
 
     def test_role_validates_allowed_values(self):
         """InstanceSpec role must be attacker, victim, or dc."""
         from shared.schemas.range import InstanceSpec
 
         with pytest.raises(ValidationError):
-            InstanceSpec(role="invalid", os_type="kali")
+            InstanceSpec(name="test", role="invalid", os_type="kali")
 
     def test_os_type_validates_allowed_values(self):
         """InstanceSpec os_type must be kali, ubuntu, or windows."""
         from shared.schemas.range import InstanceSpec
 
         with pytest.raises(ValidationError):
-            InstanceSpec(role="attacker", os_type="invalid")
+            InstanceSpec(name="test", role="attacker", os_type="invalid")
 
     def test_agent_is_optional(self):
         """InstanceSpec agent field defaults to None."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(role="victim", os_type="windows")
+        spec = InstanceSpec(name="victim-windows", role="victim", os_type="windows")
         assert spec.agent is None
 
     def test_agent_accepts_agent_details(self):
@@ -206,7 +207,7 @@ class TestInstanceSpec:
         from shared.schemas.range import AgentDetails, InstanceSpec
 
         agent = AgentDetails(s3_key="agents/agent.msi", filename="agent.msi", sha256="abc123")
-        spec = InstanceSpec(role="victim", os_type="windows", agent=agent)
+        spec = InstanceSpec(name="victim-windows", role="victim", os_type="windows", agent=agent)
         assert spec.agent is not None
         assert spec.agent.s3_key == "agents/agent.msi"
 
@@ -214,7 +215,7 @@ class TestInstanceSpec:
         """InstanceSpec dc_config field defaults to None."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(role="dc", os_type="windows")
+        spec = InstanceSpec(name="dc-windows", role="dc", os_type="windows")
         assert spec.dc_config is None
 
     def test_dc_config_accepts_dc_config(self):
@@ -222,7 +223,7 @@ class TestInstanceSpec:
         from shared.schemas.range import DCConfig, InstanceSpec
 
         dc_config = DCConfig(domain_name="lab.local", netbios_name="LAB")
-        spec = InstanceSpec(role="dc", os_type="windows", dc_config=dc_config)
+        spec = InstanceSpec(name="dc-windows", role="dc", os_type="windows", dc_config=dc_config)
         assert spec.dc_config is not None
         assert spec.dc_config.domain_name == "lab.local"
 
@@ -230,23 +231,24 @@ class TestInstanceSpec:
         """InstanceSpec join_domain defaults to False."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(role="victim", os_type="windows")
+        spec = InstanceSpec(name="victim-windows", role="victim", os_type="windows")
         assert spec.join_domain is False
 
     def test_join_domain_can_be_set_true(self):
         """InstanceSpec join_domain can be set to True."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(role="victim", os_type="windows", join_domain=True)
+        spec = InstanceSpec(name="victim-windows", role="victim", os_type="windows", join_domain=True)
         assert spec.join_domain is True
 
     def test_model_dump_returns_dict(self):
         """InstanceSpec.model_dump() returns a dictionary."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(role="attacker", os_type="kali")
+        spec = InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
         result = spec.model_dump()
         assert isinstance(result, dict)
+        assert result["name"] == "attacker-kali"
         assert result["role"] == "attacker"
         assert result["os_type"] == "kali"
         assert result["agent"] is None
@@ -257,8 +259,14 @@ class TestInstanceSpec:
         """InstanceSpec.model_validate() creates instance from dict."""
         from shared.schemas.range import InstanceSpec
 
-        data = {"role": "victim", "os_type": "ubuntu", "join_domain": False}
+        data = {
+            "name": "victim-ubuntu",
+            "role": "victim",
+            "os_type": "ubuntu",
+            "join_domain": False,
+        }
         spec = InstanceSpec.model_validate(data)
+        assert spec.name == "victim-ubuntu"
         assert spec.role == "victim"
         assert spec.os_type == "ubuntu"
 
@@ -267,9 +275,14 @@ class TestInstanceSpec:
         from shared.schemas.range import InstanceSpec
 
         data = {
+            "name": "victim-windows",
             "role": "victim",
             "os_type": "windows",
-            "agent": {"s3_key": "agents/agent.msi", "filename": "agent.msi", "sha256": "abc"},
+            "agent": {
+                "s3_key": "agents/agent.msi",
+                "filename": "agent.msi",
+                "sha256": "abc",
+            },
         }
         spec = InstanceSpec.model_validate(data)
         assert spec.agent is not None
@@ -289,7 +302,7 @@ class TestRangeSpec:
         """RangeSpec can be created with scenario_id, user_id, and instances."""
         from shared.schemas.range import InstanceSpec, RangeSpec
 
-        instances = [InstanceSpec(role="attacker", os_type="kali")]
+        instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
         request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=instances)
         assert request.scenario_id == "basic-attack"
         assert request.user_id == 1
@@ -299,7 +312,7 @@ class TestRangeSpec:
         """RangeSpec requires scenario_id field."""
         from shared.schemas.range import InstanceSpec, RangeSpec
 
-        instances = [InstanceSpec(role="attacker", os_type="kali")]
+        instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
         with pytest.raises(ValidationError):
             RangeSpec(user_id=1, instances=instances)
 
@@ -307,7 +320,7 @@ class TestRangeSpec:
         """RangeSpec requires user_id field."""
         from shared.schemas.range import InstanceSpec, RangeSpec
 
-        instances = [InstanceSpec(role="attacker", os_type="kali")]
+        instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
         with pytest.raises(ValidationError):
             RangeSpec(scenario_id="basic-attack", instances=instances)
 
@@ -380,8 +393,8 @@ class TestRangeSpec:
         from shared.schemas.range import InstanceSpec, RangeSpec
 
         instances = [
-            InstanceSpec(role="attacker", os_type="kali"),
-            InstanceSpec(role="victim", os_type="windows"),
+            InstanceSpec(name="attacker-kali", role="attacker", os_type="kali"),
+            InstanceSpec(name="victim-windows", role="victim", os_type="windows"),
         ]
         request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=instances)
         assert len(request.instances) == 2
@@ -392,7 +405,7 @@ class TestRangeSpec:
         """RangeSpec.model_dump() returns a dictionary."""
         from shared.schemas.range import InstanceSpec, RangeSpec
 
-        instances = [InstanceSpec(role="attacker", os_type="kali")]
+        instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
         request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=instances)
         result = request.model_dump()
         assert isinstance(result, dict)
@@ -407,7 +420,7 @@ class TestRangeSpec:
         data = {
             "scenario_id": "basic-attack",
             "user_id": 1,
-            "instances": [{"role": "attacker", "os_type": "kali"}],
+            "instances": [{"name": "attacker-kali", "role": "attacker", "os_type": "kali"}],
         }
         request = RangeSpec.model_validate(data)
         assert request.scenario_id == "basic-attack"
@@ -423,8 +436,9 @@ class TestRangeSpec:
             "scenario_id": "advanced-scenario",
             "user_id": 42,
             "instances": [
-                {"role": "attacker", "os_type": "kali"},
+                {"name": "attacker-kali", "role": "attacker", "os_type": "kali"},
                 {
+                    "name": "victim-windows",
                     "role": "victim",
                     "os_type": "windows",
                     "agent": {
@@ -435,9 +449,13 @@ class TestRangeSpec:
                     "join_domain": True,
                 },
                 {
+                    "name": "dc-windows",
                     "role": "dc",
                     "os_type": "windows",
-                    "dc_config": {"domain_name": "lab.local", "netbios_name": "LAB"},
+                    "dc_config": {
+                        "domain_name": "lab.local",
+                        "netbios_name": "LAB",
+                    },
                 },
             ],
         }
@@ -454,6 +472,86 @@ class TestRangeSpec:
 # =============================================================================
 # Projection Tests - RangeContext, InstanceContext, RangeRef
 # =============================================================================
+
+
+class TestInstanceContextBase:
+    """Tests for InstanceContextBase - base projection for all instance types."""
+
+    def test_import_instance_context_base(self):
+        """InstanceContextBase can be imported from shared.schemas.range."""
+        from shared.schemas.range import InstanceContextBase
+
+        assert InstanceContextBase is not None
+
+    def test_create_with_required_fields(self):
+        """InstanceContextBase can be created with role and os_type."""
+        from shared.schemas.range import InstanceContextBase
+
+        ctx = InstanceContextBase(role="attacker", os_type="kali")
+        assert ctx.role == "attacker"
+        assert ctx.os_type == "kali"
+
+    def test_uuid_defaults_to_none(self):
+        """InstanceContextBase uuid field defaults to None."""
+        from shared.schemas.range import InstanceContextBase
+
+        ctx = InstanceContextBase(role="attacker", os_type="kali")
+        assert ctx.uuid is None
+
+    def test_uuid_accepts_string(self):
+        """InstanceContextBase uuid accepts string value."""
+        from shared.schemas.range import InstanceContextBase
+
+        ctx = InstanceContextBase(uuid="abc-123", role="attacker", os_type="kali")
+        assert ctx.uuid == "abc-123"
+
+    def test_role_is_required(self):
+        """InstanceContextBase requires role field."""
+        from shared.schemas.range import InstanceContextBase
+
+        with pytest.raises(ValidationError):
+            InstanceContextBase(os_type="kali")
+
+    def test_os_type_is_required(self):
+        """InstanceContextBase requires os_type field."""
+        from shared.schemas.range import InstanceContextBase
+
+        with pytest.raises(ValidationError):
+            InstanceContextBase(role="attacker")
+
+    def test_role_validates_allowed_values(self):
+        """InstanceContextBase role must be attacker, victim, or dc."""
+        from shared.schemas.range import InstanceContextBase
+
+        with pytest.raises(ValidationError):
+            InstanceContextBase(role="invalid", os_type="kali")
+
+    def test_os_type_validates_allowed_values(self):
+        """InstanceContextBase os_type must be kali, ubuntu, or windows."""
+        from shared.schemas.range import InstanceContextBase
+
+        with pytest.raises(ValidationError):
+            InstanceContextBase(role="attacker", os_type="invalid")
+
+    def test_join_domain_defaults_to_false(self):
+        """InstanceContextBase join_domain defaults to False."""
+        from shared.schemas.range import InstanceContextBase
+
+        ctx = InstanceContextBase(role="victim", os_type="windows")
+        assert ctx.join_domain is False
+
+    def test_join_domain_can_be_set_true(self):
+        """InstanceContextBase join_domain can be set to True."""
+        from shared.schemas.range import InstanceContextBase
+
+        ctx = InstanceContextBase(role="victim", os_type="windows", join_domain=True)
+        assert ctx.join_domain is True
+
+    def test_instance_context_inherits_from_base(self):
+        """InstanceContext inherits from InstanceContextBase."""
+        from shared.schemas.range import InstanceContext, InstanceContextBase
+
+        assert issubclass(InstanceContext, InstanceContextBase)
 
 
 class TestInstanceContext:

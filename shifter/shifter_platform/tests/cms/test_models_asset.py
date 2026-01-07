@@ -208,8 +208,8 @@ class TestCredentialBaseAbstractModel:
 class TestAssetBehavior:
     """Tests for Asset behavior through a concrete implementation.
 
-    Uses cms.Credential as the concrete model since it inherits from
-    CredentialBase which inherits from Asset.
+    Uses cms.AgentConfig as the concrete model since it inherits from
+    FileAsset which inherits from Asset.
     """
 
     @pytest.fixture
@@ -220,92 +220,114 @@ class TestAssetBehavior:
         User = get_user_model()
         return User.objects.create_user(username="test@example.com", email="test@example.com")
 
-    def test_is_deleted_returns_false_when_deleted_at_is_none(self, user):
+    @pytest.fixture
+    def operating_system(self):
+        """Create an operating system for agents."""
+        from cms.models import OperatingSystem
+
+        os, _ = OperatingSystem.objects.get_or_create(
+            slug="windows", defaults={"name": "Windows", "extensions": [".msi"]}
+        )
+        return os
+
+    def test_is_deleted_returns_false_when_deleted_at_is_none(self, user, operating_system):
         """is_deleted should return False when deleted_at is None."""
-        from cms.models import Credential
+        from cms.models import AgentConfig
 
-        credential = Credential.objects.create(
+        agent = AgentConfig.objects.create(
             user=user,
-            name="Test",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D1234567",
+            name="Test Agent",
+            os=operating_system,
+            s3_key="agents/test.msi",
+            original_filename="test.msi",
+            file_size_bytes=1024,
         )
 
-        assert credential.is_deleted is False
+        assert agent.is_deleted is False
 
-    def test_is_deleted_returns_true_when_deleted_at_is_set(self, user):
+    def test_is_deleted_returns_true_when_deleted_at_is_set(self, user, operating_system):
         """is_deleted should return True when deleted_at is set."""
-        from cms.models import Credential
+        from cms.models import AgentConfig
 
-        credential = Credential.objects.create(
+        agent = AgentConfig.objects.create(
             user=user,
-            name="Test",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D1234567",
+            name="Test Agent",
+            os=operating_system,
+            s3_key="agents/test.msi",
+            original_filename="test.msi",
+            file_size_bytes=1024,
             deleted_at=timezone.now(),
         )
 
-        assert credential.is_deleted is True
+        assert agent.is_deleted is True
 
-    def test_active_for_user_excludes_deleted_records(self, user):
+    def test_active_for_user_excludes_deleted_records(self, user, operating_system):
         """active_for_user should exclude soft-deleted records."""
-        from cms.models import Credential
+        from cms.models import AgentConfig
 
-        active = Credential.objects.create(
+        active = AgentConfig.objects.create(
             user=user,
-            name="Active",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D1111111",
+            name="Active Agent",
+            os=operating_system,
+            s3_key="agents/active.msi",
+            original_filename="active.msi",
+            file_size_bytes=1024,
         )
-        Credential.objects.create(
+        AgentConfig.objects.create(
             user=user,
-            name="Deleted",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D2222222",
+            name="Deleted Agent",
+            os=operating_system,
+            s3_key="agents/deleted.msi",
+            original_filename="deleted.msi",
+            file_size_bytes=1024,
             deleted_at=timezone.now(),
         )
 
-        result = list(Credential.active_for_user(user))
+        result = list(AgentConfig.active_for_user(user))
 
         assert len(result) == 1
         assert result[0] == active
 
-    def test_active_for_user_filters_by_user(self, user):
+    def test_active_for_user_filters_by_user(self, user, operating_system):
         """active_for_user should only return records for the specified user."""
         from django.contrib.auth import get_user_model
 
-        from cms.models import Credential
+        from cms.models import AgentConfig
 
         User = get_user_model()
         other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
 
-        Credential.objects.create(
+        AgentConfig.objects.create(
             user=user,
-            name="User Cred",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D1111111",
+            name="User Agent",
+            os=operating_system,
+            s3_key="agents/user.msi",
+            original_filename="user.msi",
+            file_size_bytes=1024,
         )
-        Credential.objects.create(
+        AgentConfig.objects.create(
             user=other_user,
-            name="Other Cred",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D2222222",
+            name="Other Agent",
+            os=operating_system,
+            s3_key="agents/other.msi",
+            original_filename="other.msi",
+            file_size_bytes=1024,
         )
 
-        result = list(Credential.active_for_user(user))
+        result = list(AgentConfig.active_for_user(user))
 
         assert len(result) == 1
-        assert result[0].name == "User Cred"
+        assert result[0].name == "User Agent"
 
 
 # -----------------------------------------------------------------------------
-# Test CredentialBase Behavior Through Concrete Model
+# Test Credential Properties
 # -----------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
-class TestCredentialBaseBehavior:
-    """Tests for CredentialBase behavior through cms.Credential."""
+class TestCredentialProperties:
+    """Tests for Credential model properties (is_expired, expires_soon)."""
 
     @pytest.fixture
     def user(self):
@@ -315,21 +337,32 @@ class TestCredentialBaseBehavior:
         User = get_user_model()
         return User.objects.create_user(username="test@example.com", email="test@example.com")
 
-    def test_is_expired_returns_false_when_expires_at_is_none(self, user):
+    @pytest.fixture
+    def credential_type(self):
+        """Create a credential type."""
+        from cms.models import CredentialType
+
+        return CredentialType.objects.create(
+            name="Deployment Profile",
+            slug="deployment_profile",
+            spec_class="shared.schemas.DeploymentProfileSpec",
+        )
+
+    def test_is_expired_returns_false_when_expires_at_is_none(self, user, credential_type):
         """is_expired should return False when expires_at is None."""
         from cms.models import Credential
 
         credential = Credential.objects.create(
             user=user,
             name="No Expiry",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D1234567",
+            credential_type=credential_type,
+            data={"authcode": "D1234567"},
             expires_at=None,
         )
 
         assert credential.is_expired is False
 
-    def test_is_expired_returns_false_when_not_expired(self, user):
+    def test_is_expired_returns_false_when_not_expired(self, user, credential_type):
         """is_expired should return False when expires_at is in the future."""
         from datetime import timedelta
 
@@ -339,14 +372,14 @@ class TestCredentialBaseBehavior:
         credential = Credential.objects.create(
             user=user,
             name="Future Expiry",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D1234567",
+            credential_type=credential_type,
+            data={"authcode": "D1234567"},
             expires_at=future,
         )
 
         assert credential.is_expired is False
 
-    def test_is_expired_returns_true_when_expired(self, user):
+    def test_is_expired_returns_true_when_expired(self, user, credential_type):
         """is_expired should return True when expires_at is in the past."""
         from datetime import timedelta
 
@@ -356,8 +389,8 @@ class TestCredentialBaseBehavior:
         credential = Credential.objects.create(
             user=user,
             name="Past Expiry",
-            credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-            authcode="D1234567",
+            credential_type=credential_type,
+            data={"authcode": "D1234567"},
             expires_at=past,
         )
 

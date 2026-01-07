@@ -20,6 +20,7 @@ apt-get install -y \
   git \
   curl \
   nano \
-  netcat-openbsd
+  netcat-openbsd \
+  tmux
 
 echo "=== Tools setup complete ==="

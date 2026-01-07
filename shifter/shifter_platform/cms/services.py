@@ -12,9 +12,7 @@ from django.utils import timezone
 
 from cms.assets.services import create_agent as assets_create_agent
 from cms.assets.services import delete_agent as assets_delete_agent
-from cms.assets.validation import (
-    get_allowed_extensions as _get_allowed_extensions,
-)
+from cms.assets.validation import get_allowed_extensions as _get_allowed_extensions
 from cms.exceptions import CMSError
 from cms.models import AgentConfig, RangeInstance
 from engine import cancel_range as engine_cancel_range
@@ -26,7 +24,7 @@ from shared.enums import RangeStatus
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from shared.schemas import RangeContext
+    from shared.schemas import CredentialContext, CredentialRef, RangeContext
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +34,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-def create_agent(user: User, **kwargs: Any) -> Any:
+def create_agent(user: User, **kwargs: Any) -> AgentConfig:
     """Create agent record.
 
     Delegates to cms.assets.services.create_agent() after validating user.
@@ -335,7 +333,7 @@ def list_agents(user: User) -> list[dict[str, Any]]:
         raise
 
 
-def get_agent(user: User, agent_id: int) -> Any:
+def get_agent(user: User, agent_id: int) -> AgentConfig:
     """Get single agent by ID.
 
     Args:
@@ -474,31 +472,33 @@ def get_allowed_extensions() -> list[str]:
 # =============================================================================
 
 
-def create_credential(user: User, credential_type: str, **kwargs: Any) -> Any:
+def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> CredentialRef:
     """Create credential (SCM or deployment profile).
 
     Args:
         user: User who will own the credential
-        credential_type: Type of credential ('scm' or 'deployment_profile')
+        credential_type_slug: Type slug ('scm' or 'deployment_profile')
         **kwargs: Type-specific fields:
             For 'scm':
                 - name: Display name for the credential
                 - scm_folder_name: SCM folder name
                 - scm_pin_id: SCM PIN ID
-                - scm_pin_value: SCM PIN value (encrypted)
+                - scm_pin_value: SCM PIN value (stored in data JSON)
                 - sls_region: SLS region
             For 'deployment_profile':
                 - name: Display name for the credential
-                - authcode: Deployment authcode (encrypted)
+                - authcode: Deployment authcode (stored in data JSON)
 
     Returns:
-        Credential: The newly created credential record
+        CredentialRef: Minimal reference to the created credential
 
     Raises:
         TypeError: If user is None or invalid type
-        ValueError: If user has no ID (unsaved) or credential_type is invalid
+        ValueError: If user has no ID (unsaved) or credential_type_slug is invalid
+        CMSError: If credential type not found
     """
-    from cms.models import Credential
+    from cms.models import Credential, CredentialType
+    from shared.schemas import CredentialRef
 
     # Input validation - user
     if user is None:
@@ -517,67 +517,93 @@ def create_credential(user: User, credential_type: str, **kwargs: Any) -> Any:
         logger.error("create_credential called with unsaved user (id=None)")
         raise ValueError(USER_MUST_BE_SAVED)
 
-    # Input validation - credential_type
-    valid_types = [c[0] for c in Credential.Type.choices]
-    if credential_type is None:
+    # Input validation - credential_type_slug
+    if credential_type_slug is None:
         logger.error(
-            "create_credential called with None credential_type for user_id=%s",
+            "create_credential called with None credential_type_slug for user_id=%s",
             user.id,
         )
-        raise ValueError("credential_type cannot be None")
-
-    if credential_type not in valid_types:
-        logger.error(
-            "create_credential called with invalid credential_type '%s' for user_id=%s",
-            credential_type,
-            user.id,
-        )
-        msg = f"credential_type must be one of {valid_types}, got '{credential_type}'"
-        raise ValueError(msg)
+        raise ValueError("credential_type_slug cannot be None")
 
     logger.debug(
-        "create_credential called for user_id=%s, credential_type=%s",
+        "create_credential called for user_id=%s, credential_type_slug=%s",
         user.id,
-        credential_type,
+        credential_type_slug,
     )
 
     try:
-        # Create credential with provided fields
+        # Get credential type from catalog
+        try:
+            cred_type = CredentialType.objects.get(slug=credential_type_slug)
+        except CredentialType.DoesNotExist:
+            logger.error(
+                "create_credential: credential type '%s' not found for user_id=%s",
+                credential_type_slug,
+                user.id,
+            )
+            raise CMSError(f"Credential type '{credential_type_slug}' not found") from None
+
+        # Extract name and type-specific data
+        name = kwargs.pop("name", None)
+        if not name:
+            raise ValueError("name is required")
+
+        expires_at = kwargs.pop("expires_at", None)
+
+        # Apply defaults for SCM credentials
+        if credential_type_slug == "scm" and not kwargs.get("scm_folder_name"):
+            kwargs["scm_folder_name"] = "All Firewalls"
+
+        # Remaining kwargs go into the data JSON field
+        data = kwargs
+
+        # Create credential
         credential = Credential(
             user=user,
-            credential_type=credential_type,
-            **kwargs,
+            name=name,
+            credential_type=cred_type,
+            data=data,
+            expires_at=expires_at,
         )
+        credential.full_clean()
         credential.save()
 
         logger.debug(
             "create_credential created credential_id=%s, credential_type=%s for user_id=%s",
             credential.id,
-            credential_type,
+            credential_type_slug,
             user.id,
         )
-        return credential
 
+        # Return minimal CredentialRef (no secrets exposed)
+        return CredentialRef(
+            credential_id=credential.id,
+            user_id=user.id,
+            is_deleted=False,
+        )
+
+    except (CMSError, ValueError):
+        raise
     except Exception:
         logger.exception(
-            "Error in create_credential for user_id=%s, credential_type=%s",
+            "Error in create_credential for user_id=%s, credential_type_slug=%s",
             user.id,
-            credential_type,
+            credential_type_slug,
         )
         raise
 
 
-def delete_credential(user: User, credential_id: int) -> None:
+def delete_credential(user: User, credential_id: int) -> CredentialRef:
     """Soft delete credential.
 
-    Verifies ownership via get_credential, then performs soft delete.
+    Verifies ownership, then performs soft delete.
 
     Args:
         user: User requesting deletion
         credential_id: ID of the credential to delete
 
     Returns:
-        None
+        CredentialRef: Reference to the deleted credential
 
     Raises:
         TypeError: If user is None, invalid type, or credential_id is
@@ -586,7 +612,8 @@ def delete_credential(user: User, credential_id: int) -> None:
             invalid
         CMSError: If credential not found or not owned by user
     """
-    from django.utils import timezone
+    from cms.models import Credential
+    from shared.schemas import CredentialRef
 
     # Input validation - user
     if user is None:
@@ -636,12 +663,24 @@ def delete_credential(user: User, credential_id: int) -> None:
     )
 
     try:
-        # Get credential (also verifies ownership and not deleted)
-        credential = get_credential(user, credential_id)
+        # Get credential directly (verify ownership and not deleted)
+        try:
+            credential = Credential.objects.get(
+                id=credential_id,
+                user=user,
+                deleted_at__isnull=True,
+            )
+        except Credential.DoesNotExist:
+            logger.error(
+                "delete_credential: credential_id=%s not found for user_id=%s",
+                credential_id,
+                user.id,
+            )
+            raise CMSError(f"Credential {credential_id} not found") from None
 
         # Soft delete
         credential.deleted_at = timezone.now()
-        credential.save()
+        credential.save(update_fields=["deleted_at"])
 
         logger.debug(
             "delete_credential completed for credential_id=%s, user_id=%s",
@@ -649,6 +688,14 @@ def delete_credential(user: User, credential_id: int) -> None:
             user.id,
         )
 
+        return CredentialRef(
+            credential_id=credential_id,
+            user_id=user.id,
+            is_deleted=True,
+        )
+
+    except CMSError:
+        raise
     except Exception:
         logger.exception(
             "Error in delete_credential for user_id=%s, credential_id=%s",
@@ -658,20 +705,24 @@ def delete_credential(user: User, credential_id: int) -> None:
         raise
 
 
-def list_credentials(user: User) -> list[Any]:
-    """Get user's credentials (includes type).
+def list_credentials(user: User) -> list[CredentialContext]:
+    """Get user's credentials as CredentialContext projections.
+
+    Returns type-specific context objects (SCMCredentialContext or
+    DeploymentProfileContext) that exclude sensitive data like secrets.
 
     Args:
         user: User whose credentials to retrieve
 
     Returns:
-        List of Credential instances belonging to the user
+        List of CredentialContext instances (discriminated union)
 
     Raises:
         TypeError: If user is None or invalid type
         ValueError: If user has no ID (unsaved)
     """
     from cms.models import Credential
+    from shared.schemas import DeploymentProfileContext, SCMCredentialContext
 
     # Input validation
     if user is None:
@@ -693,40 +744,62 @@ def list_credentials(user: User) -> list[Any]:
     logger.debug("list_credentials called for user_id=%s", user.id)
 
     try:
-        result = Credential.active_for_user(user)
-
-        # Validate response from model
-        if result is None:
-            logger.error(
-                "list_credentials: model returned None for user_id=%s",
-                user.id,
+        credentials = (
+            Credential.objects.filter(
+                user=user,
+                deleted_at__isnull=True,
             )
-            raise TypeError("Model returned None instead of iterable")
+            .select_related("credential_type")
+            .order_by("-created_at")
+        )
 
-        # Convert to list (handles QuerySet, tuple, generator)
-        credentials = list(result)
+        # Convert to CredentialContext projections
+        contexts = []
+        for cred in credentials:
+            type_slug = cred.credential_type.slug
 
-        # Validate list contents
-        for item in credentials:
-            if not isinstance(item, Credential):
-                logger.error(
-                    "list_credentials: model returned invalid item type %s for user_id=%s",
-                    type(item).__name__,
-                    user.id,
+            if type_slug == "scm":
+                ctx = SCMCredentialContext(
+                    credential_id=cred.id,
+                    name=cred.name,
+                    user_id=cred.user_id,
+                    created_at=cred.created_at,
+                    expires_at=cred.expires_at,
+                    is_deleted=cred.is_deleted,
+                    scm_folder_name=cred.data.get("scm_folder_name", ""),
+                    scm_pin_id=cred.data.get("scm_pin_id", ""),
+                    sls_region=cred.data.get("sls_region", ""),
                 )
-                msg = f"Model returned list containing {type(item).__name__}, expected Credential"
-                raise TypeError(msg)
+            elif type_slug == "deployment_profile":
+                # Mask authcode for display
+                authcode = cred.data.get("authcode", "")
+                authcode_masked = f"{authcode[:5]}***" if len(authcode) >= 5 else "***"
+                ctx = DeploymentProfileContext(
+                    credential_id=cred.id,
+                    name=cred.name,
+                    user_id=cred.user_id,
+                    created_at=cred.created_at,
+                    expires_at=cred.expires_at,
+                    is_deleted=cred.is_deleted,
+                    authcode_masked=authcode_masked,
+                )
+            else:
+                logger.warning(
+                    "list_credentials: unknown credential type '%s' for credential_id=%s",
+                    type_slug,
+                    cred.id,
+                )
+                continue
+
+            contexts.append(ctx)
 
         logger.debug(
             "list_credentials returning %d credentials for user_id=%s",
-            len(credentials),
+            len(contexts),
             user.id,
         )
-        return credentials
+        return contexts
 
-    except TypeError:
-        # Re-raise TypeErrors (our validation errors)
-        raise
     except Exception:
         logger.exception(
             "Error in list_credentials for user_id=%s",
@@ -735,15 +808,18 @@ def list_credentials(user: User) -> list[Any]:
         raise
 
 
-def get_credential(user: User, credential_id: int) -> Any:
-    """Get single credential by ID.
+def get_credential(user: User, credential_id: int) -> CredentialContext:
+    """Get single credential by ID as CredentialContext projection.
+
+    Returns type-specific context (SCMCredentialContext or
+    DeploymentProfileContext) that excludes sensitive data.
 
     Args:
         user: User requesting the credential
         credential_id: ID of the credential to retrieve
 
     Returns:
-        Credential instance if found and owned by user
+        CredentialContext: Type-specific context projection
 
     Raises:
         TypeError: If user is None, invalid type, or credential_id is
@@ -753,8 +829,8 @@ def get_credential(user: User, credential_id: int) -> Any:
         CMSError: If credential not found, not owned by user, or
             deleted
     """
-    from cms.exceptions import CMSError
     from cms.models import Credential
+    from shared.schemas import DeploymentProfileContext, SCMCredentialContext
 
     # Input validation - user
     if user is None:
@@ -804,59 +880,63 @@ def get_credential(user: User, credential_id: int) -> Any:
     )
 
     try:
-        credential = Credential.objects.get(id=credential_id)
+        cred = Credential.objects.select_related("credential_type").get(
+            id=credential_id,
+            user=user,
+            deleted_at__isnull=True,
+        )
+    except Credential.DoesNotExist:
+        logger.error(
+            "get_credential: credential_id=%s not found for user_id=%s",
+            credential_id,
+            user.id,
+        )
+        raise CMSError(f"Credential {credential_id} not found") from None
 
-        # Validate response from model
-        if credential is None:
+    try:
+        type_slug = cred.credential_type.slug
+
+        if type_slug == "scm":
+            ctx = SCMCredentialContext(
+                credential_id=cred.id,
+                name=cred.name,
+                user_id=cred.user_id,
+                created_at=cred.created_at,
+                expires_at=cred.expires_at,
+                is_deleted=cred.is_deleted,
+                scm_folder_name=cred.data.get("scm_folder_name", ""),
+                scm_pin_id=cred.data.get("scm_pin_id", ""),
+                sls_region=cred.data.get("sls_region", ""),
+            )
+        elif type_slug == "deployment_profile":
+            # Mask authcode for display
+            authcode = cred.data.get("authcode", "")
+            authcode_masked = f"{authcode[:5]}***" if len(authcode) >= 5 else "***"
+            ctx = DeploymentProfileContext(
+                credential_id=cred.id,
+                name=cred.name,
+                user_id=cred.user_id,
+                created_at=cred.created_at,
+                expires_at=cred.expires_at,
+                is_deleted=cred.is_deleted,
+                authcode_masked=authcode_masked,
+            )
+        else:
             logger.error(
-                "get_credential: model returned None for credential_id=%s",
+                "get_credential: unknown credential type '%s' for credential_id=%s",
+                type_slug,
                 credential_id,
             )
-            msg = "Model returned None instead of Credential"
-            raise TypeError(msg)
-
-        if not isinstance(credential, Credential):
-            logger.error(
-                "get_credential: model returned invalid type %s for credential_id=%s",
-                type(credential).__name__,
-                credential_id,
-            )
-            msg = f"Model returned {type(credential).__name__}, expected Credential"
-            raise TypeError(msg)
-
-        # Check ownership
-        if credential.user.id != user.id:
-            logger.error(
-                "get_credential: access denied - credential_id=%s owned by user_id=%s, requested by user_id=%s",
-                credential_id,
-                credential.user.id,
-                user.id,
-            )
-            raise CMSError(f"Credential {credential_id} not found")
-
-        # Check soft deletion
-        if credential.deleted_at is not None:
-            logger.error(
-                "get_credential: credential_id=%s is deleted",
-                credential_id,
-            )
-            raise CMSError(f"Credential {credential_id} not found")
+            raise CMSError(f"Unknown credential type: {type_slug}")
 
         logger.debug(
             "get_credential returning credential_id=%s for user_id=%s",
             credential_id,
             user.id,
         )
-        return credential
+        return ctx
 
-    except Credential.DoesNotExist:
-        logger.error(
-            "get_credential: credential_id=%s not found",
-            credential_id,
-        )
-        raise CMSError(f"Credential {credential_id} not found") from None
-    except (TypeError, CMSError):
-        # Re-raise TypeErrors and CMSErrors
+    except CMSError:
         raise
     except Exception:
         logger.exception(
@@ -872,7 +952,7 @@ def get_credential(user: User, credential_id: int) -> Any:
 # =============================================================================
 
 
-def list_ranges(user: User) -> list[Any]:
+def list_ranges(user: User) -> list[RangeInstance]:
     """Get user's range instances.
 
     Args:
@@ -944,7 +1024,7 @@ def list_ranges(user: User) -> list[Any]:
         raise
 
 
-def get_range(user: User, range_id: int) -> Any:
+def get_range(user: User, range_id: int) -> RangeInstance:
     """Get single range instance by range ID.
 
     Args:
@@ -1794,7 +1874,7 @@ def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dic
         raise
 
 
-def complete_upload(user: User, upload_token: str) -> Any:
+def complete_upload(user: User, upload_token: str) -> AgentConfig:
     """Verify and finalize upload after file has been uploaded to S3.
 
     Verifies the upload token, checks the S3 object exists with correct size,
@@ -2080,7 +2160,7 @@ def get_storage_used(user: User) -> int:
 # =============================================================================
 
 
-def list_scenarios(user: User) -> list[Any]:
+def list_scenarios(user: User) -> list[dict[str, Any]]:
     """Get available scenarios with metadata.
 
     Args:
@@ -2168,7 +2248,7 @@ def get_scenario(scenario_id: str) -> dict[str, Any]:
         raise
 
 
-def validate_scenario_requirements(scenario_id: str, agent: Any) -> None:
+def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) -> None:
     """Validate that an agent meets scenario requirements.
 
     Args:

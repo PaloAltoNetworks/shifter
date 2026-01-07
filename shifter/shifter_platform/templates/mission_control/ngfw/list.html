@@ -1,0 +1,292 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<style>
+    /* NGFW Status badges */
+    .status {
+        display: inline-flex;
+        align-items: center;
+        font-size: 12px;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+    }
+
+    /* Status colors */
+    .status-ready .status-dot,
+    .status-active .status-dot { background: #00d26a; }
+    .status-provisioning .status-dot,
+    .status-starting .status-dot,
+    .status-stopping .status-dot,
+    .status-deprovisioning .status-dot { background: #faad14; animation: pulse 1.5s infinite; }
+    .status-stopped .status-dot { background: #707070; }
+    .status-failed .status-dot { background: #ff4d4f; }
+    .status-not_provisioned .status-dot { background: #484848; }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    /* NGFW cards grid */
+    .ngfw-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 16px;
+    }
+
+    .ngfw-card {
+        background: var(--xdr-surface);
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+        padding: 16px;
+        transition: border-color 0.2s ease;
+    }
+
+    .ngfw-card:hover {
+        border-color: #484848;
+    }
+
+    .ngfw-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 12px;
+    }
+
+    .ngfw-card-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--xdr-text);
+        margin: 0;
+    }
+
+    .ngfw-card-meta {
+        font-size: 12px;
+        color: var(--xdr-text-secondary);
+        margin-top: 4px;
+    }
+
+    .ngfw-card-details {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 16px;
+        margin-bottom: 16px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.02);
+        border-radius: 4px;
+    }
+
+    .ngfw-detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .ngfw-detail-label {
+        font-size: 11px;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+
+    .ngfw-detail-value {
+        font-size: 13px;
+        color: var(--xdr-text);
+        font-family: monospace;
+    }
+
+    .ngfw-detail-value.placeholder {
+        color: var(--xdr-text-secondary);
+        font-style: italic;
+        font-family: inherit;
+    }
+
+    .ngfw-card-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    /* Page header with action button */
+    .page-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 24px;
+    }
+
+    .page-header-content {
+        flex: 1;
+    }
+
+    .page-subtitle {
+        font-size: 14px;
+        color: var(--xdr-text-secondary);
+        margin: 4px 0 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header-row">
+    <div class="page-header-content">
+        <h1 class="page-title">NGFWs</h1>
+        <p class="page-subtitle">Manage your persistent Next-Generation Firewalls for XDR traffic logging</p>
+    </div>
+    <a href="{% url 'mission_control:ngfw_wizard' %}" class="btn btn-primary">
+        Setup NGFW
+    </a>
+</div>
+
+<!-- Messages -->
+{% if messages %}
+<div class="mb-lg">
+    {% for message in messages %}
+    <div class="message message-{{ message.tags }}">
+        {{ message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if ngfws %}
+<!-- NGFW Grid -->
+<div class="ngfw-grid">
+    {% for ngfw in ngfws %}
+    <div class="ngfw-card">
+        <div class="ngfw-card-header">
+            <div>
+                <h3 class="ngfw-card-title">{{ ngfw.name }}</h3>
+                <div class="ngfw-card-meta">
+                    Created {{ ngfw.created_at|date:"M d, Y" }}
+                </div>
+            </div>
+            <div class="status status-{{ ngfw.status }}">
+                <span class="status-dot"></span>
+                <span>{{ ngfw.get_status_display }}</span>
+            </div>
+        </div>
+
+        <div class="ngfw-card-details">
+            <div class="ngfw-detail-item">
+                <span class="ngfw-detail-label">Instance</span>
+                <span class="ngfw-detail-value{% if not ngfw.instance_id %} placeholder{% endif %}">
+                    {{ ngfw.instance_id|default:"Not provisioned" }}
+                </span>
+            </div>
+            <div class="ngfw-detail-item">
+                <span class="ngfw-detail-label">Serial</span>
+                <span class="ngfw-detail-value{% if not ngfw.serial_number %} placeholder{% endif %}">
+                    {{ ngfw.serial_number|default:"Pending" }}
+                </span>
+            </div>
+            <div class="ngfw-detail-item">
+                <span class="ngfw-detail-label">Management IP</span>
+                <span class="ngfw-detail-value{% if not ngfw.management_ip %} placeholder{% endif %}">
+                    {{ ngfw.management_ip|default:"—" }}
+                </span>
+            </div>
+            <div class="ngfw-detail-item">
+                <span class="ngfw-detail-label">XDR</span>
+                <span class="ngfw-detail-value">
+                    {% if ngfw.xdr_configured %}
+                    <span style="color: #00d26a;">Configured</span>
+                    {% else %}
+                    <span class="placeholder">Not configured</span>
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+
+        <div class="ngfw-card-actions">
+            <a href="{% url 'mission_control:ngfw_detail' ngfw.id %}" class="btn btn-secondary btn-small">
+                View Details
+            </a>
+            {% if ngfw.status == 'stopped' or ngfw.status == 'ready' %}
+            <button class="btn btn-primary btn-small" data-action="start" data-ngfw-id="{{ ngfw.id }}">
+                Start
+            </button>
+            {% elif ngfw.status == 'active' %}
+            <button class="btn btn-secondary btn-small" data-action="stop" data-ngfw-id="{{ ngfw.id }}">
+                Stop
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<!-- Empty State -->
+<div class="card">
+    <div class="empty-state">
+        <div class="empty-state-graphic">
+            <div class="empty-state-graphic-arc"></div>
+            <div class="empty-state-graphic-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    <path d="M9 12l2 2 4-4"/>
+                </svg>
+            </div>
+        </div>
+        <h3>No NGFWs configured</h3>
+        <p>Set up a persistent NGFW to enable traffic logging to XDR for your ranges</p>
+        <div style="margin-top: 16px;">
+            <a href="{% url 'mission_control:ngfw_wizard' %}" class="btn btn-primary">
+                Setup NGFW
+            </a>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const csrfToken = '{{ csrf_token }}';
+
+    // Handle start/stop button clicks
+    document.querySelectorAll('[data-action]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const action = this.dataset.action;
+            const ngfwId = this.dataset.ngfwId;
+            const url = action === 'start'
+                ? `/mission-control/api/ngfw/${ngfwId}/start/`
+                : `/mission-control/api/ngfw/${ngfwId}/stop/`;
+
+            btn.disabled = true;
+            btn.textContent = action === 'start' ? 'Starting...' : 'Stopping...';
+
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    btn.disabled = false;
+                    btn.textContent = action === 'start' ? 'Start' : 'Stop';
+                } else {
+                    // Reload page to show updated status
+                    window.location.reload();
+                }
+            })
+            .catch(err => {
+                alert('An error occurred. Please try again.');
+                btn.disabled = false;
+                btn.textContent = action === 'start' ? 'Start' : 'Stop';
+            });
+        });
+    });
+});
+</script>
+{% endblock %}

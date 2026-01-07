@@ -7,8 +7,9 @@ import os
 from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -403,3 +404,458 @@ def list_agents(request):
     """
     agents = cms_list_agents(request.user)
     return JsonResponse({"agents": agents})
+
+
+# -----------------------------------------------------------------------------
+# NGFW Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def ngfw_list(request):
+    """List user's NGFWs."""
+    from cms.models import UserNGFW
+
+    ngfws = UserNGFW.active_for_user(request.user).order_by("-created_at")
+
+    context = {
+        "page_title": "NGFWs",
+        "active_nav": "ngfw",
+        "ngfws": ngfws,
+    }
+    return render(request, "mission_control/ngfw/list.html", context)
+
+
+@login_required
+@require_GET
+def ngfw_detail(request, ngfw_id):
+    """View NGFW details."""
+    from cms.models import UserNGFW
+    from engine.models import Range
+
+    try:
+        ngfw = UserNGFW.active_for_user(request.user).get(id=ngfw_id)
+    except UserNGFW.DoesNotExist:
+        raise Http404("NGFW not found")
+
+    # Get ranges linked to this NGFW (exclude destroyed/failed)
+    linked_ranges = Range.objects.filter(ngfw=ngfw).exclude(
+        status__in=[Range.Status.DESTROYED, Range.Status.FAILED]
+    )
+
+    context = {
+        "page_title": ngfw.name,
+        "active_nav": "ngfw",
+        "ngfw": ngfw,
+        "linked_ranges": linked_ranges,
+    }
+    return render(request, "mission_control/ngfw/detail.html", context)
+
+
+@login_required
+@require_GET
+def ngfw_wizard(request):
+    """NGFW setup wizard."""
+    from cms.models import Credential
+
+    # Get user's credentials
+    scm_credentials = Credential.objects.filter(
+        user=request.user,
+        credential_type=Credential.Type.SCM,
+        deleted_at__isnull=True,
+    ).exclude(
+        expires_at__lt=timezone.now()  # Exclude expired
+    )
+
+    deployment_profiles = Credential.objects.filter(
+        user=request.user,
+        credential_type=Credential.Type.DEPLOYMENT_PROFILE,
+        deleted_at__isnull=True,
+    ).exclude(
+        expires_at__lt=timezone.now()  # Exclude expired
+    )
+
+    context = {
+        "page_title": "Setup NGFW",
+        "active_nav": "ngfw",
+        "scm_credentials": scm_credentials,
+        "deployment_profiles": deployment_profiles,
+    }
+    return render(request, "mission_control/ngfw/wizard.html", context)
+
+
+@login_required
+@require_GET
+def ngfw_deprovision(request, ngfw_id):
+    """NGFW deprovision confirmation page."""
+    from cms.models import UserNGFW
+    from engine.models import Range
+
+    try:
+        ngfw = UserNGFW.active_for_user(request.user).get(id=ngfw_id)
+    except UserNGFW.DoesNotExist:
+        raise Http404("NGFW not found")
+
+    # Get ranges linked to this NGFW (exclude destroyed/failed)
+    linked_ranges = Range.objects.filter(ngfw=ngfw).exclude(
+        status__in=[Range.Status.DESTROYED, Range.Status.FAILED]
+    )
+
+    context = {
+        "page_title": f"Deprovision {ngfw.name}",
+        "active_nav": "ngfw",
+        "ngfw": ngfw,
+        "linked_ranges": linked_ranges,
+    }
+    return render(request, "mission_control/ngfw/deprovision.html", context)
+
+
+# -----------------------------------------------------------------------------
+# NGFW API
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_POST
+def api_ngfw_provision(request):
+    """Provision a new NGFW."""
+    from cms.models import Credential, UserNGFW
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    name = data.get("name", "").strip()
+    deployment_profile_id = data.get("deployment_profile_id")
+    registration_method = data.get("registration_method")
+
+    # Validate required fields
+    if not name:
+        return JsonResponse({"error": "Name is required"}, status=400)
+    if not deployment_profile_id:
+        return JsonResponse({"error": "Deployment profile is required"}, status=400)
+
+    # Validate deployment profile exists and belongs to user
+    if not Credential.objects.filter(
+        id=deployment_profile_id,
+        user=request.user,
+        credential_type=Credential.Type.DEPLOYMENT_PROFILE,
+        deleted_at__isnull=True,
+    ).exists():
+        return JsonResponse({"error": "Invalid deployment profile"}, status=400)
+
+    # Validate registration method
+    if registration_method == "pin":
+        scm_credential_id = data.get("scm_credential_id")
+        if not scm_credential_id:
+            return JsonResponse({"error": "SCM credential is required for PIN method"}, status=400)
+        try:
+            Credential.objects.get(
+                id=scm_credential_id,
+                user=request.user,
+                credential_type=Credential.Type.SCM,
+                deleted_at__isnull=True,
+            )
+        except Credential.DoesNotExist:
+            return JsonResponse({"error": "Invalid SCM credential"}, status=400)
+    elif registration_method == "otp":
+        otp_value = data.get("otp_value", "").strip()
+        otp_folder = data.get("otp_folder", "").strip()
+        if not otp_value or not otp_folder:
+            return JsonResponse({"error": "OTP value and folder are required"}, status=400)
+    else:
+        return JsonResponse({"error": "Invalid registration method"}, status=400)
+
+    # Create NGFW record
+    ngfw = UserNGFW.objects.create(
+        user=request.user,
+        name=name,
+        status=UserNGFW.Status.PROVISIONING,
+    )
+
+    logger.info("NGFW provisioning started: user=%s ngfw_id=%s", request.user.email, ngfw.id)
+
+    return JsonResponse(
+        {
+            "id": ngfw.id,
+            "name": ngfw.name,
+            "status": ngfw.status,
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_GET
+def api_ngfw_list(request):
+    """List user's NGFWs."""
+    from cms.models import UserNGFW
+
+    ngfws = UserNGFW.active_for_user(request.user).order_by("-created_at")
+
+    return JsonResponse({
+        "ngfws": [
+            {
+                "id": n.id,
+                "name": n.name,
+                "status": n.status,
+                "serial_number": n.serial_number,
+                "management_ip": str(n.management_ip) if n.management_ip else None,
+                "xdr_configured": n.xdr_configured,
+                "created_at": n.created_at.isoformat(),
+            }
+            for n in ngfws
+        ]
+    })
+
+
+@login_required
+@require_GET
+def api_ngfw_status(request, ngfw_id):
+    """Get NGFW status."""
+    from cms.models import UserNGFW
+
+    try:
+        ngfw = UserNGFW.active_for_user(request.user).get(id=ngfw_id)
+    except UserNGFW.DoesNotExist:
+        raise Http404("NGFW not found")
+
+    return JsonResponse({
+        "status": ngfw.status,
+        "serial_number": ngfw.serial_number,
+    })
+
+
+@login_required
+@require_POST
+def api_ngfw_start(request, ngfw_id):
+    """Start a stopped NGFW."""
+    from cms.models import UserNGFW
+
+    try:
+        ngfw = UserNGFW.active_for_user(request.user).get(id=ngfw_id)
+    except UserNGFW.DoesNotExist:
+        raise Http404("NGFW not found")
+
+    if ngfw.status not in [UserNGFW.Status.READY, UserNGFW.Status.STOPPED]:
+        return JsonResponse(
+            {"error": f"Cannot start NGFW in '{ngfw.get_status_display()}' status"},
+            status=400,
+        )
+
+    # Update status
+    ngfw.status = UserNGFW.Status.ACTIVE
+    ngfw.last_started_at = timezone.now()
+    ngfw.save(update_fields=["status", "last_started_at"])
+
+    logger.info("NGFW started: user=%s ngfw_id=%s", request.user.email, ngfw_id)
+
+    return JsonResponse({"status": ngfw.status})
+
+
+@login_required
+@require_POST
+def api_ngfw_stop(request, ngfw_id):
+    """Stop an active NGFW."""
+    from cms.models import UserNGFW
+
+    try:
+        ngfw = UserNGFW.active_for_user(request.user).get(id=ngfw_id)
+    except UserNGFW.DoesNotExist:
+        raise Http404("NGFW not found")
+
+    if ngfw.status != UserNGFW.Status.ACTIVE:
+        return JsonResponse(
+            {"error": f"Cannot stop NGFW in '{ngfw.get_status_display()}' status"},
+            status=400,
+        )
+
+    # Update status
+    ngfw.status = UserNGFW.Status.STOPPED
+    ngfw.last_stopped_at = timezone.now()
+    ngfw.save(update_fields=["status", "last_stopped_at"])
+
+    logger.info("NGFW stopped: user=%s ngfw_id=%s", request.user.email, ngfw_id)
+
+    return JsonResponse({"status": ngfw.status})
+
+
+@login_required
+@require_POST
+def api_ngfw_deprovision(request, ngfw_id):
+    """Deprovision an NGFW."""
+    from cms.models import UserNGFW
+
+    try:
+        ngfw = UserNGFW.active_for_user(request.user).get(id=ngfw_id)
+    except UserNGFW.DoesNotExist:
+        raise Http404("NGFW not found")
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    confirm_name = data.get("confirm_name", "").strip()
+    if confirm_name != ngfw.name:
+        return JsonResponse({"error": "Name confirmation does not match"}, status=400)
+
+    # Update status
+    ngfw.status = UserNGFW.Status.DEPROVISIONING
+    ngfw.save(update_fields=["status"])
+
+    logger.info("NGFW deprovisioning started: user=%s ngfw_id=%s", request.user.email, ngfw_id)
+
+    return JsonResponse({"status": ngfw.status})
+
+
+# -----------------------------------------------------------------------------
+# Credential Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def credentials_list(request):
+    """List user's credentials."""
+    from cms.models import Credential
+
+    credentials = Credential.objects.filter(
+        user=request.user,
+        deleted_at__isnull=True,
+    ).order_by("-created_at")
+
+    scm_count = credentials.filter(credential_type=Credential.Type.SCM).count()
+    profile_count = credentials.filter(credential_type=Credential.Type.DEPLOYMENT_PROFILE).count()
+
+    context = {
+        "page_title": "Credentials",
+        "active_nav": "credentials",
+        "credentials": credentials,
+        "scm_count": scm_count,
+        "profile_count": profile_count,
+    }
+    return render(request, "mission_control/credentials/list.html", context)
+
+
+@login_required
+@require_GET
+def credential_detail(request, credential_id):
+    """View credential details."""
+    from cms.models import Credential
+
+    try:
+        credential = Credential.objects.get(
+            id=credential_id,
+            user=request.user,
+            deleted_at__isnull=True,
+        )
+    except Credential.DoesNotExist:
+        raise Http404("Credential not found")
+
+    context = {
+        "page_title": credential.name,
+        "active_nav": "credentials",
+        "credential": credential,
+    }
+    return render(request, "mission_control/credentials/detail.html", context)
+
+
+@login_required
+@require_GET
+def credential_add(request):
+    """Add credential form (unified page with type selector)."""
+    context = {
+        "page_title": "Add Credential",
+        "active_nav": "credentials",
+    }
+    return render(request, "mission_control/credentials/add.html", context)
+
+
+# -----------------------------------------------------------------------------
+# Credential API
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_POST
+def api_credential_create(request):
+    """Create a new credential."""
+    from cms.models import Credential
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    name = data.get("name", "").strip()
+    credential_type = data.get("credential_type")
+    expires_at = data.get("expires_at")
+
+    # Validate required fields
+    if not name:
+        return JsonResponse({"error": "Name is required"}, status=400)
+    if credential_type not in [Credential.Type.SCM, Credential.Type.DEPLOYMENT_PROFILE]:
+        return JsonResponse({"error": "Invalid credential type"}, status=400)
+
+    # Build credential based on type
+    credential = Credential(
+        user=request.user,
+        name=name,
+        credential_type=credential_type,
+    )
+
+    if expires_at:
+        from django.utils.dateparse import parse_date
+        credential.expires_at = parse_date(expires_at)
+
+    if credential_type == Credential.Type.SCM:
+        credential.scm_folder_name = data.get("scm_folder_name", "").strip()
+        credential.scm_pin_id = data.get("scm_pin_id", "").strip()
+        credential.scm_pin_value = data.get("scm_pin_value", "")
+        credential.sls_region = data.get("sls_region", "")
+    else:
+        credential.authcode = data.get("authcode", "")
+
+    try:
+        credential.full_clean()
+        credential.save()
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    logger.info("Credential created: user=%s credential_id=%s type=%s", request.user.email, credential.id, credential_type)
+
+    return JsonResponse(
+        {
+            "id": credential.id,
+            "name": credential.name,
+            "credential_type": credential.credential_type,
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_POST
+def api_credential_delete(request, credential_id):
+    """Soft-delete a credential."""
+    from cms.models import Credential
+
+    try:
+        credential = Credential.objects.get(
+            id=credential_id,
+            user=request.user,
+            deleted_at__isnull=True,
+        )
+    except Credential.DoesNotExist:
+        raise Http404("Credential not found")
+
+    # Soft delete
+    credential.deleted_at = timezone.now()
+    credential.save(update_fields=["deleted_at"])
+
+    logger.info("Credential deleted: user=%s credential_id=%s", request.user.email, credential_id)
+
+    return JsonResponse({"success": True})

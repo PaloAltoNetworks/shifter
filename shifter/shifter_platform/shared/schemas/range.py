@@ -16,6 +16,8 @@ from pydantic import BaseModel, computed_field, field_validator
 
 from shared.enums import RangeStatus
 
+from .base import SpecBase
+
 
 class AgentDetails(BaseModel):
     """Agent file details for instance provisioning.
@@ -43,10 +45,11 @@ class DCConfig(BaseModel):
     netbios_name: str
 
 
-class InstanceSpec(BaseModel):
+class InstanceSpec(SpecBase):
     """Single instance specification.
 
     Attributes:
+        name: User-friendly instance name (inherited from SpecBase).
         uuid: Unique identifier for this instance (assigned during hydration).
         role: Instance role (attacker, victim, or dc).
         os_type: Operating system type (kali, ubuntu, or windows).
@@ -63,14 +66,13 @@ class InstanceSpec(BaseModel):
     join_domain: bool = False
 
 
-class RangeSpec(BaseModel):
-    """Complete specification of a cyber range.
+class RangeSpecBase(SpecBase):
+    """Base specification for all range types.
 
-    This is the kernel of the Range DSL - the canonical representation of what
-    a range IS. Used for creation requests from CMS to Engine, and as the base
-    for projections (views) tailored to specific use cases.
+    Extends SpecBase with fields common to all ranges.
 
     Attributes:
+        name: Optional range name (inherited from SpecBase).
         scenario_id: Identifier of the scenario being deployed.
         user_id: ID of the user who owns this range.
         instances: List of instance specifications for the range.
@@ -97,16 +99,29 @@ class RangeSpec(BaseModel):
         return v
 
 
+class RangeSpec(RangeSpecBase):
+    """Demo range specification.
+
+    Currently the only range type. Future types (ctf, training, etc.)
+    will extend RangeSpecBase with their own discriminator values.
+
+    Attributes:
+        range_type: Discriminator field, always 'demo'.
+    """
+
+    range_type: Literal["demo"] = "demo"
+
+
 # =============================================================================
 # Projections - tailored views of the Range DSL kernel
 # =============================================================================
 
 
-class InstanceContext(BaseModel):
-    """Template-safe projection of an instance.
+class InstanceContextBase(BaseModel):
+    """Base projection for all instance types.
 
-    Excludes agent secrets, keeps only display-relevant fields.
-    Used by Mission Control for rendering templates.
+    Contains fields common to all instance contexts.
+    Type-specific contexts extend this with their own fields.
 
     Attributes:
         uuid: Unique identifier for this instance.
@@ -121,12 +136,31 @@ class InstanceContext(BaseModel):
     join_domain: bool = False
 
 
-class RangeContext(BaseModel):
-    """Template-safe projection of a range.
+class InstanceContext(InstanceContextBase):
+    """Template-safe projection of an instance.
 
-    Used by Mission Control for rendering templates. Excludes:
-    - Agent secrets (s3_key, sha256)
-    - Internal IDs that shouldn't be exposed to frontend
+    Inherits from InstanceContextBase. Excludes agent secrets,
+    keeps only display-relevant fields.
+    Used by Mission Control for rendering templates.
+    """
+
+    pass
+
+
+class InstanceRef(BaseModel):
+    """Minimal instance reference for operations.
+
+    Stub - not yet implemented. Instances are currently accessed via parent Range.
+    """
+
+    pass
+
+
+class RangeContextBase(BaseModel):
+    """Base projection for all range types.
+
+    Contains fields common to all range contexts.
+    Type-specific contexts extend this with their own fields.
 
     Attributes:
         range_id: Unique identifier of the range.
@@ -190,6 +224,19 @@ class RangeContext(BaseModel):
     def is_active(self) -> bool:
         """True if range is not in a terminal state."""
         return not self.is_terminal
+
+
+class RangeContext(RangeContextBase):
+    """Demo range projection for templates.
+
+    Inherits from RangeContextBase. Excludes agent secrets (s3_key, sha256).
+    Used by Mission Control for rendering templates.
+
+    Attributes:
+        range_type: Discriminator field, always 'demo'.
+    """
+
+    range_type: Literal["demo"] = "demo"
 
 
 class RangeRef(BaseModel):

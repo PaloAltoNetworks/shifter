@@ -131,6 +131,7 @@ def _hydrate_instance(
         )
 
     return InstanceSpec(
+        name=f"{instance.role}-{os_type}",
         uuid=str(uuid.uuid4()),
         role=instance.role,
         os_type=os_type,

@@ -57,12 +57,27 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
           aws-region: us-east-2
 
-      - name: Share AMI with prod account
+      - name: Share AMI and snapshots with prod account
         run: |
+          # Share the AMI
           aws ec2 modify-image-attribute \
             --image-id "$DEV_AMI_ID" \
             --launch-permission "Add=[{UserId=$PROD_ACCOUNT_ID}]"
-          echo "- **Shared with prod account:** $PROD_ACCOUNT_ID" >> $GITHUB_STEP_SUMMARY
+
+          # Get and share all snapshots associated with the AMI
+          SNAPSHOT_IDS=$(aws ec2 describe-images --image-ids "$DEV_AMI_ID" \
+            --query 'Images[0].BlockDeviceMappings[*].Ebs.SnapshotId' --output text)
+          for SNAPSHOT_ID in $SNAPSHOT_IDS; do
+            if [ "$SNAPSHOT_ID" != "None" ] && [ -n "$SNAPSHOT_ID" ]; then
+              aws ec2 modify-snapshot-attribute \
+                --snapshot-id "$SNAPSHOT_ID" \
+                --attribute createVolumePermission \
+                --operation-type add \
+                --user-ids "$PROD_ACCOUNT_ID"
+              echo "- **Shared snapshot:** $SNAPSHOT_ID" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "- **Shared AMI with prod account:** $PROD_ACCOUNT_ID" >> $GITHUB_STEP_SUMMARY
 
       - name: Configure AWS credentials (prod) for copy
         uses: aws-actions/configure-aws-credentials@v4

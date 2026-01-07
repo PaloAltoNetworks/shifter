@@ -3,10 +3,13 @@
 Infrastructure lifecycle models for Shifter platform.
 
 - Range: User's cyber range instance with provisioned infrastructure
+- NGFW: User's Next-Generation Firewall with AWS resources
 """
 
 from django.conf import settings
 from django.db import models, transaction
+
+from shared.enums import NGFWStatus
 
 
 class Range(models.Model):
@@ -29,7 +32,7 @@ class Range(models.Model):
         help_text="User ID from CMS (may differ from Django user.id)",
     )
     ngfw = models.ForeignKey(
-        "cms.UserNGFW",
+        "cms.NGFW",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -285,3 +288,130 @@ class Range(models.Model):
         if not victims:
             return None
         return victims[0].get("private_ip")
+
+
+class NGFW(models.Model):
+    """Engine's NGFW instance with AWS infrastructure state.
+
+    Engine owns infrastructure lifecycle - AWS resources, IPs, Pulumi stack.
+    CMS owns the logical asset - what the user asked for.
+
+    cms_ngfw_id correlates this to CMS's NGFW model (not FK - layer separation).
+    Status updates are published via events for CMS to sync.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = NGFWStatus.PENDING.value, "Pending"
+        PROVISIONING = NGFWStatus.PROVISIONING.value, "Provisioning"
+        READY = NGFWStatus.READY.value, "Ready"
+        STARTING = NGFWStatus.STARTING.value, "Starting"
+        ACTIVE = NGFWStatus.ACTIVE.value, "Active"
+        STOPPING = NGFWStatus.STOPPING.value, "Stopping"
+        STOPPED = NGFWStatus.STOPPED.value, "Stopped"
+        DEPROVISIONING = NGFWStatus.DEPROVISIONING.value, "Deprovisioning"
+        DEPROVISIONED = NGFWStatus.DEPROVISIONED.value, "Deprovisioned"
+        FAILED = NGFWStatus.FAILED.value, "Failed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="engine_ngfws",
+    )
+
+    # Correlation to CMS (IntegerField, not FK - layer separation)
+    cms_ngfw_id = models.PositiveIntegerField(
+        unique=True,
+        help_text="CMS NGFW.id for correlation (not FK)",
+    )
+
+    # Lifecycle status
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    error_message = models.TextField(blank=True, default="")
+
+    # Hydrated configuration from CMS (credentials, registration method, etc.)
+    ngfw_config = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Full NGFWProvisionRequest from CMS",
+    )
+
+    # AWS Resources - NGFW EC2
+    instance_id = models.CharField(max_length=32, blank=True, default="")
+    mgmt_eni_id = models.CharField(max_length=32, blank=True, default="")
+    data_eni_id = models.CharField(max_length=32, blank=True, default="")
+    management_ip = models.GenericIPAddressField(null=True, blank=True)
+    dataplane_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    # AWS Resources - GWLB
+    gwlb_arn = models.CharField(max_length=256, blank=True, default="")
+    target_group_arn = models.CharField(max_length=256, blank=True, default="")
+    gwlb_service_name = models.CharField(max_length=256, blank=True, default="")
+
+    # PAN-OS Info (populated after provisioning)
+    serial_number = models.CharField(max_length=32, blank=True, default="")
+    device_cert_status = models.CharField(max_length=32, blank=True, default="")
+    xdr_configured = models.BooleanField(default=False)
+
+    # Pulumi tracking
+    pulumi_stack = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Pulumi stack name for this NGFW",
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    provisioned_at = models.DateTimeField(null=True, blank=True)
+    last_started_at = models.DateTimeField(null=True, blank=True)
+    last_stopped_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "NGFW"
+        verbose_name_plural = "NGFWs"
+
+    def __str__(self):
+        return f"NGFW {self.id} (CMS:{self.cms_ngfw_id}) - {self.status}"
+
+    @property
+    def is_active(self) -> bool:
+        """Return True if NGFW is in an active/usable state."""
+        return self.status in (self.Status.READY, self.Status.ACTIVE, self.Status.STOPPED)
+
+    @property
+    def is_terminal(self) -> bool:
+        """Return True if NGFW has reached a final state."""
+        return self.status in (self.Status.DEPROVISIONED, self.Status.FAILED)
+
+    @property
+    def is_runnable(self) -> bool:
+        """Return True if NGFW can be started/stopped."""
+        return self.status in (self.Status.READY, self.Status.ACTIVE, self.Status.STOPPED)
+
+    @classmethod
+    def get_active_for_user(cls, user):
+        """Return the user's active NGFW, or None."""
+        return cls.objects.filter(
+            user=user,
+            status__in=[
+                cls.Status.PENDING,
+                cls.Status.PROVISIONING,
+                cls.Status.READY,
+                cls.Status.STARTING,
+                cls.Status.ACTIVE,
+                cls.Status.STOPPING,
+                cls.Status.STOPPED,
+            ],
+        ).first()
+
+    @classmethod
+    def get_by_cms_id(cls, cms_ngfw_id: int):
+        """Get Engine NGFW by CMS correlation ID."""
+        return cls.objects.filter(cms_ngfw_id=cms_ngfw_id).first()

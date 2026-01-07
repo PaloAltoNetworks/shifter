@@ -304,7 +304,7 @@ class TestRange:
 
     # --- NGFW fields tests ---
     # Note: Old per-range NGFW fields (ngfw_enabled, ngfw_instance_id, ngfw_untrust_ip, ngfw_trust_ip)
-    # were removed in favor of the UserNGFW model with Range.ngfw FK (issue #412)
+    # were removed in favor of the NGFW model with Range.ngfw FK (issue #412)
 
     def test_ngfw_defaults_to_none(self, user):
         """ngfw FK defaults to None."""

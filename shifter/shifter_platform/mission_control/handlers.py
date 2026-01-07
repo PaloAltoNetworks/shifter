@@ -69,6 +69,10 @@ def process_range_event(message: str | dict) -> None:
     new_status = event.get("new_status")
     error_message = event.get("error_message")
 
+    if not isinstance(range_id, int):
+        logger.warning("Invalid range_id type: %s", type(range_id))
+        return
+
     channel_layer = get_channel_layer()
     group_name = range_event_group(range_id)
 

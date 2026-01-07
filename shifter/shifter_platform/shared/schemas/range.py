@@ -207,19 +207,19 @@ class RangeContextBase(BaseModel):
             raise ValueError("user_id must be a positive integer")
         return v
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_ready(self) -> bool:
         """True if range is ready for use (terminal available)."""
         return self.status == RangeStatus.READY
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_terminal(self) -> bool:
         """True if range is in a terminal state (destroyed or failed)."""
         return self.status in (RangeStatus.DESTROYED, RangeStatus.FAILED)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_active(self) -> bool:
         """True if range is not in a terminal state."""

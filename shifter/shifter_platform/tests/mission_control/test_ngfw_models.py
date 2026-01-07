@@ -1,14 +1,14 @@
 """Unit tests for NGFW-related models.
 
 Tests for:
-- UserNGFW (decoupled from credentials)
+- NGFW (decoupled from credentials)
 - Range.ngfw FK relationship
 
 These tests focus on edge cases and subtle bugs:
 - Status transitions
 - Query filtering logic
 
-Note: UserNGFW no longer has FK relationships to credential models.
+Note: NGFW no longer has FK relationships to credential models.
 Credentials are managed by CMS (see tests/cms/test_models.py).
 """
 
@@ -16,20 +16,20 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from cms.models import UserNGFW
+from cms.models import NGFW
 from engine.models import Range
 
 User = get_user_model()
 
 
-# --- UserNGFW Tests ---
+# --- NGFW Tests ---
 
 
 @pytest.mark.django_db
-class TestUserNGFW:
-    """Tests for UserNGFW model.
+class TestNGFW:
+    """Tests for NGFW model.
 
-    Note: UserNGFW no longer has credential FKs. Credentials are managed by CMS
+    Note: NGFW no longer has credential FKs. Credentials are managed by CMS
     and passed as hydrated config values at provisioning time.
     """
 
@@ -38,28 +38,28 @@ class TestUserNGFW:
         return User.objects.create_user(username="test@example.com", email="test@example.com")
 
     def test_create_with_required_fields(self, user):
-        """UserNGFW can be created with just user and name."""
-        ngfw = UserNGFW.objects.create(
+        """NGFW can be created with just user and name."""
+        ngfw = NGFW.objects.create(
             user=user,
             name="My NGFW",
         )
         assert ngfw.pk is not None
-        assert ngfw.status == UserNGFW.Status.NOT_PROVISIONED
+        assert ngfw.status == NGFW.Status.NOT_PROVISIONED
 
     def test_no_credential_fks(self, user):
-        """UserNGFW should not have credential FK fields (decoupled architecture)."""
-        ngfw = UserNGFW(user=user, name="Test")
+        """NGFW should not have credential FK fields (decoupled architecture)."""
+        ngfw = NGFW(user=user, name="Test")
         assert not hasattr(ngfw, "deployment_profile")
         assert not hasattr(ngfw, "scm_credential")
 
     def test_str_returns_name(self, user):
         """__str__ returns the NGFW name."""
-        ngfw = UserNGFW(user=user, name="Test NGFW")
+        ngfw = NGFW(user=user, name="Test NGFW")
         assert str(ngfw) == "Test NGFW"
 
     def test_default_status_is_not_provisioned(self, user):
         """Default status is NOT_PROVISIONED."""
-        ngfw = UserNGFW.objects.create(user=user, name="New NGFW")
+        ngfw = NGFW.objects.create(user=user, name="New NGFW")
         assert ngfw.status == "not_provisioned"
 
     def test_all_status_choices_valid(self, user):
@@ -76,7 +76,7 @@ class TestUserNGFW:
             "failed",
         ]
         for status in valid_statuses:
-            ngfw = UserNGFW.objects.create(
+            ngfw = NGFW.objects.create(
                 user=user,
                 name=f"NGFW {status}",
                 status=status,
@@ -86,25 +86,25 @@ class TestUserNGFW:
 
     def test_user_cascade_deletes_ngfw(self, user):
         """Deleting user cascades to delete their NGFWs."""
-        ngfw = UserNGFW.objects.create(user=user, name="User's NGFW")
+        ngfw = NGFW.objects.create(user=user, name="User's NGFW")
         ngfw_pk = ngfw.pk
 
         user.delete()
 
-        assert not UserNGFW.objects.filter(pk=ngfw_pk).exists()
+        assert not NGFW.objects.filter(pk=ngfw_pk).exists()
 
     # --- active_for_user tests ---
 
     def test_active_for_user_excludes_deleted(self, user):
         """active_for_user excludes soft-deleted NGFWs."""
-        active = UserNGFW.objects.create(user=user, name="Active NGFW")
-        UserNGFW.objects.create(
+        active = NGFW.objects.create(user=user, name="Active NGFW")
+        NGFW.objects.create(
             user=user,
             name="Deleted NGFW",
             deleted_at=timezone.now(),
         )
 
-        result = list(UserNGFW.active_for_user(user))
+        result = list(NGFW.active_for_user(user))
         assert len(result) == 1
         assert result[0] == active
 
@@ -112,10 +112,10 @@ class TestUserNGFW:
         """active_for_user only returns NGFWs for specified user."""
         other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
 
-        UserNGFW.objects.create(user=user, name="My NGFW")
-        UserNGFW.objects.create(user=other_user, name="Other NGFW")
+        NGFW.objects.create(user=user, name="My NGFW")
+        NGFW.objects.create(user=other_user, name="Other NGFW")
 
-        result = list(UserNGFW.active_for_user(user))
+        result = list(NGFW.active_for_user(user))
         assert len(result) == 1
         assert result[0].name == "My NGFW"
 
@@ -133,7 +133,7 @@ class TestRangeNGFWRelationship:
 
     @pytest.fixture
     def ngfw(self, user):
-        return UserNGFW.objects.create(user=user, name="Test NGFW")
+        return NGFW.objects.create(user=user, name="Test NGFW")
 
     def test_range_ngfw_nullable(self, user):
         """Range.ngfw can be null (no NGFW attached)."""
@@ -141,7 +141,7 @@ class TestRangeNGFWRelationship:
         assert range_obj.ngfw is None
 
     def test_range_ngfw_can_be_set(self, user, ngfw):
-        """Range.ngfw can reference a UserNGFW."""
+        """Range.ngfw can reference a NGFW."""
         range_obj = Range.objects.create(user=user, ngfw=ngfw)
         assert range_obj.ngfw == ngfw
 

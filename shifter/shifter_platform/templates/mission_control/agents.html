@@ -103,7 +103,7 @@
         </div>
         <div class="form-group">
             <label class="form-label" for="agent-file">Installer File</label>
-            <input type="file" class="form-input" id="agent-file" name="file" accept=".msi,.zip,.tar.gz,.tgz,.deb,.rpm,application/x-msi,application/zip,application/gzip,application/x-gzip,application/vnd.debian.binary-package,application/x-debian-package,application/x-rpm" required>
+            <input type="file" class="form-input" id="agent-file" name="file" accept=".msi,.zip,.gz,.tgz,.tar.gz,.deb,.rpm,application/zip,application/x-zip-compressed,application/gzip,application/x-gzip,application/octet-stream" required>
             <p class="text-small text-muted mt-sm">
                 Supported formats: {{ allowed_extensions }} (max 2GB per file, 5GB total)
             </p>

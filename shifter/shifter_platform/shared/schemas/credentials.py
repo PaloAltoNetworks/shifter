@@ -125,7 +125,7 @@ class CredentialContextBase(BaseModel):
             raise ValueError("user_id must be a positive integer")
         return v
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_expired(self) -> bool:
         """True if credential has expired."""
@@ -133,7 +133,7 @@ class CredentialContextBase(BaseModel):
             return False
         return datetime.now(self.expires_at.tzinfo) > self.expires_at
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def expires_soon(self) -> bool:
         """True if credential expires within 30 days."""

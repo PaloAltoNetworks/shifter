@@ -9,6 +9,7 @@ App types: os, ngfw, agent, other.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Discriminator, field_validator
@@ -47,11 +48,30 @@ class NGFWAppSpec(AppSpecBase):
     """Specification for creating an NGFW app.
 
     Attributes:
-        name: User-friendly app name (inherited).
+        name: User-friendly app name (required for NGFW).
         app_type: Discriminator field, always 'ngfw'.
+        deployment_profile_id: ID of deployment profile credential.
+        registration_method: Either "pin" or "otp".
+        scm_credential_id: Required if registration_method is "pin".
+        otp_value: Required if registration_method is "otp".
+        otp_folder: Required if registration_method is "otp".
     """
 
+    name: str  # Required for NGFW
     app_type: Literal["ngfw"] = "ngfw"
+    deployment_profile_id: int
+    registration_method: Literal["pin", "otp"]
+    scm_credential_id: int | None = None
+    otp_value: str | None = None
+    otp_folder: str | None = None
+
+    @field_validator("deployment_profile_id")
+    @classmethod
+    def deployment_profile_id_positive(cls, v: int) -> int:
+        """Validate deployment_profile_id is a positive integer."""
+        if v <= 0:
+            raise ValueError("deployment_profile_id must be a positive integer")
+        return v
 
 
 class AgentAppSpec(AppSpecBase):
@@ -117,11 +137,22 @@ class OSAppContext(AppContextBase):
 class NGFWAppContext(AppContextBase):
     """NGFW app projection for templates.
 
+    Contains fields needed for NGFW display in Mission Control.
+    AWS infrastructure details are owned by Engine, not exposed here.
+
     Attributes:
         app_type: Discriminator field, always 'ngfw'.
+        status: NGFW lifecycle status (synced from Engine via events).
+        created_at: When NGFW was created in CMS.
     """
 
     app_type: Literal["ngfw"] = "ngfw"
+    status: str
+    created_at: datetime
+
+    def get_status_display(self) -> str:
+        """Human-readable status for templates."""
+        return self.status.replace("_", " ").title()
 
 
 class AgentAppContext(AppContextBase):
@@ -170,3 +201,64 @@ class AppRef(BaseModel):
         if v <= 0:
             raise ValueError("app_id must be a positive integer")
         return v
+
+
+# =============================================================================
+# NGFW-specific References
+# =============================================================================
+
+
+class NGFWAppRef(BaseModel):
+    """Minimal NGFW reference for operations.
+
+    Contains only the identifiers needed to reference an NGFW.
+    Used for provision/deprovision operations and status checks.
+
+    Attributes:
+        ngfw_id: Unique identifier of the NGFW.
+        user_id: ID of the user who owns this NGFW.
+        is_deleted: Whether this NGFW has been soft-deleted.
+    """
+
+    ngfw_id: int
+    user_id: int
+    is_deleted: bool = False
+
+    @field_validator("ngfw_id")
+    @classmethod
+    def ngfw_id_positive(cls, v: int) -> int:
+        """Validate ngfw_id is a positive integer."""
+        if v <= 0:
+            raise ValueError("ngfw_id must be a positive integer")
+        return v
+
+    @field_validator("user_id")
+    @classmethod
+    def user_id_positive(cls, v: int) -> int:
+        """Validate user_id is a positive integer."""
+        if v <= 0:
+            raise ValueError("user_id must be a positive integer")
+        return v
+
+
+class LinkedRangeContext(BaseModel):
+    """Range linked to an NGFW (for deprovision warnings).
+
+    Attributes:
+        range_id: ID of the linked range.
+        status: Range status.
+        created_at: When the range was created.
+    """
+
+    range_id: int
+    status: str
+    created_at: datetime
+
+    @property
+    def id(self) -> int:
+        """Alias for range_id for template compatibility."""
+        return self.range_id
+
+    def get_status_display(self) -> str:
+        """Human-readable status for templates."""
+        return self.status.replace("_", " ").title()

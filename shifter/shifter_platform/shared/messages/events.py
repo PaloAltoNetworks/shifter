@@ -12,13 +12,18 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from shared.enums import RangeStatus
+from shared.enums import NGFWStatus, RangeStatus
 
-# Event type constants
+# Event type constants - Range
 EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
 EVENT_TYPE_PROVISIONED = "range.provisioned"
 EVENT_TYPE_DESTROYED = "range.destroyed"
 EVENT_TYPE_CANCELLED = "range.cancelled"
+
+# Event type constants - NGFW
+EVENT_TYPE_NGFW_STATUS_UPDATED = "ngfw.status.updated"
+EVENT_TYPE_NGFW_PROVISIONED = "ngfw.provisioned"
+EVENT_TYPE_NGFW_DESTROYED = "ngfw.destroyed"
 
 
 class BaseEvent(BaseModel):
@@ -70,4 +75,51 @@ class RangeCancelledEvent(BaseEvent):
     """Event published when a range provisioning is cancelled."""
 
     range_id: int
+    user_id: int
+
+
+# =============================================================================
+# NGFW Events
+# =============================================================================
+
+
+class NGFWStatusUpdatedEvent(BaseEvent):
+    """Event published when an NGFW's status changes.
+
+    Published by the provisioner during lifecycle transitions.
+    Consumed by:
+    - Engine: Updates NGFW model status
+    - CMS: Updates NGFW model status
+    - Mission Control: Pushes to browser WebSocket
+    """
+
+    ngfw_id: int  # Engine's NGFW.id
+    cms_ngfw_id: int  # CMS's NGFW.id for correlation
+    user_id: int
+    new_status: NGFWStatus
+    error_message: str | None = None
+
+
+class NGFWProvisionedEvent(BaseEvent):
+    """Event published when an NGFW is fully provisioned.
+
+    Contains AWS resource details populated by the provisioner.
+    """
+
+    ngfw_id: int
+    cms_ngfw_id: int
+    user_id: int
+    instance_id: str
+    management_ip: str
+    dataplane_ip: str
+    service_name: str
+    gwlb_arn: str
+    target_group_arn: str
+
+
+class NGFWDestroyedEvent(BaseEvent):
+    """Event published when an NGFW is fully destroyed."""
+
+    ngfw_id: int
+    cms_ngfw_id: int
     user_id: int

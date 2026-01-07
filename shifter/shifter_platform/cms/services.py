@@ -24,7 +24,10 @@ from shared.enums import RangeStatus
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from shared.schemas import CredentialContext, CredentialRef, RangeContext
+    from cms.models import NGFW
+    from shared.schemas.app import LinkedRangeContext, NGFWAppContext, NGFWAppRef
+    from shared.schemas.credentials import CredentialContext, CredentialRef
+    from shared.schemas.range import RangeContext
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +98,9 @@ def create_agent(user: User, **kwargs: Any) -> AgentConfig:
                 type(agent).__name__,
                 user.id,
             )
-            msg = f"Assets service returned {type(agent).__name__}, expected AgentConfig"
+            msg = (
+                f"Assets service returned {type(agent).__name__}, expected AgentConfig"
+            )
             raise TypeError(msg)
 
         logger.debug(
@@ -299,7 +304,10 @@ def list_agents(user: User) -> list[dict[str, Any]]:
                     user.id,
                 )
                 raise TypeError("agent.file_size_mb must be number")
-            if not isinstance(agent_dict["original_filename"], str) or not agent_dict["original_filename"]:
+            if (
+                not isinstance(agent_dict["original_filename"], str)
+                or not agent_dict["original_filename"]
+            ):
                 logger.error(
                     "list_agents: agent.original_filename is not non-empty str for user_id=%s",
                     user.id,
@@ -472,7 +480,9 @@ def get_allowed_extensions() -> list[str]:
 # =============================================================================
 
 
-def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> CredentialRef:
+def create_credential(
+    user: User, credential_type_slug: str, **kwargs: Any
+) -> CredentialRef:
     """Create credential (SCM or deployment profile).
 
     Args:
@@ -541,7 +551,9 @@ def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> C
                 credential_type_slug,
                 user.id,
             )
-            raise CMSError(f"Credential type '{credential_type_slug}' not found") from None
+            raise CMSError(
+                f"Credential type '{credential_type_slug}' not found"
+            ) from None
 
         # Extract name and type-specific data
         name = kwargs.pop("name", None)
@@ -722,7 +734,10 @@ def list_credentials(user: User) -> list[CredentialContext]:
         ValueError: If user has no ID (unsaved)
     """
     from cms.models import Credential
-    from shared.schemas import DeploymentProfileContext, SCMCredentialContext
+    from shared.schemas import (
+        DeploymentProfileContext,
+        SCMCredentialContext,
+    )
 
     # Input validation
     if user is None:
@@ -754,10 +769,11 @@ def list_credentials(user: User) -> list[CredentialContext]:
         )
 
         # Convert to CredentialContext projections
-        contexts = []
+        contexts: list[CredentialContext] = []
         for cred in credentials:
             type_slug = cred.credential_type.slug
 
+            ctx: SCMCredentialContext | DeploymentProfileContext
             if type_slug == "scm":
                 ctx = SCMCredentialContext(
                     credential_id=cred.id,
@@ -896,6 +912,7 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
     try:
         type_slug = cred.credential_type.slug
 
+        ctx: SCMCredentialContext | DeploymentProfileContext
         if type_slug == "scm":
             ctx = SCMCredentialContext(
                 credential_id=cred.id,
@@ -1245,7 +1262,9 @@ def get_active_range(user: User) -> RangeContext | None:
         return None
 
 
-def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False) -> RangeContext:
+def create_range(
+    user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False
+) -> RangeContext:
     """Validate, hydrate, and trigger range provisioning.
 
     CMS validates scenario and agent requirements, hydrates the scenario
@@ -1683,7 +1702,9 @@ def resume_range(user: User, range_id: int) -> None:
 # =============================================================================
 
 
-def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dict[str, Any]:
+def initiate_upload(
+    user: User, name: str, filename: str, file_size: int
+) -> dict[str, Any]:
     """Validate and generate presigned URL for direct S3 upload.
 
     Validates user quota, file extension, and generates all components needed
@@ -2319,3 +2340,459 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
         "validate_scenario_requirements: validation passed for scenario_id=%s",
         scenario_id,
     )
+
+
+# =============================================================================
+# NGFWs
+# =============================================================================
+
+
+def _ngfw_to_context(ngfw: NGFW) -> NGFWAppContext:
+    """Convert NGFW model to NGFWAppContext projection.
+
+    Internal helper - do not call from outside cms.services.
+    AWS infrastructure details are owned by Engine, not exposed here.
+    """
+    from shared.schemas.app import NGFWAppContext
+
+    return NGFWAppContext(
+        app_id=ngfw.id,
+        name=ngfw.name,
+        app_type="ngfw",
+        status=ngfw.status,
+        created_at=ngfw.created_at,
+    )
+
+
+def _validate_ngfw_user(user: User) -> None:
+    """Validate user for NGFW operations.
+
+    Internal helper - raises TypeError or ValueError on invalid input.
+    """
+    if user is None:
+        logger.error("NGFW operation called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id") or user.id is None:
+        logger.error("NGFW operation called with unsaved user")
+        raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _validate_ngfw_id(ngfw_id: int) -> None:
+    """Validate ngfw_id for NGFW operations.
+
+    Internal helper - raises TypeError or ValueError on invalid input.
+    """
+    if ngfw_id is None:
+        raise TypeError("ngfw_id cannot be None")
+    if not isinstance(ngfw_id, int):
+        raise TypeError(f"ngfw_id must be an int, got {type(ngfw_id).__name__}")
+    if ngfw_id <= 0:
+        raise ValueError("ngfw_id must be a positive integer")
+
+
+def list_ngfws(user: User) -> list[NGFWAppContext]:
+    """Get user's NGFWs as NGFWAppContext projections.
+
+    Args:
+        user: User whose NGFWs to retrieve
+
+    Returns:
+        List of NGFWAppContext instances ordered by created_at desc
+
+    Raises:
+        TypeError: If user is None or invalid type
+        ValueError: If user has no ID (unsaved)
+    """
+    from cms.models import NGFW
+
+    _validate_ngfw_user(user)
+    logger.debug("list_ngfws called for user_id=%s", user.id)
+
+    ngfws = NGFW.objects.filter(user=user, deleted_at__isnull=True).order_by(
+        "-created_at"
+    )
+    return [_ngfw_to_context(n) for n in ngfws]
+
+
+def get_ngfw(user: User, ngfw_id: int) -> NGFWAppContext:
+    """Get single NGFW by ID as NGFWAppContext projection.
+
+    Args:
+        user: User requesting the NGFW
+        ngfw_id: ID of the NGFW to retrieve
+
+    Returns:
+        NGFWAppContext projection
+
+    Raises:
+        TypeError: If user is None, invalid type, or ngfw_id is invalid type
+        ValueError: If user has no ID (unsaved) or ngfw_id is invalid
+        CMSError: If NGFW not found or not owned by user
+    """
+    from cms.models import NGFW
+
+    _validate_ngfw_user(user)
+    _validate_ngfw_id(ngfw_id)
+    logger.debug("get_ngfw called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
+
+    try:
+        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
+    except NGFW.DoesNotExist:
+        logger.error("get_ngfw: NGFW id=%s not found for user_id=%s", ngfw_id, user.id)
+        raise CMSError("NGFW not found") from None
+    return _ngfw_to_context(ngfw)
+
+
+def get_ngfw_linked_ranges(user: User, ngfw_id: int) -> list[LinkedRangeContext]:
+    """Get ranges linked to an NGFW.
+
+    Used by deprovision confirmation to show affected ranges.
+
+    Args:
+        user: User requesting the data
+        ngfw_id: ID of the NGFW
+
+    Returns:
+        List of LinkedRangeContext for active ranges using this NGFW
+
+    Raises:
+        TypeError: If user is None, invalid type, or ngfw_id is invalid type
+        ValueError: If user has no ID (unsaved) or ngfw_id is invalid
+        CMSError: If NGFW not found or not owned by user
+    """
+    from engine.models import Range
+    from shared.schemas.app import LinkedRangeContext
+
+    _validate_ngfw_user(user)
+    _validate_ngfw_id(ngfw_id)
+    logger.debug(
+        "get_ngfw_linked_ranges called for user_id=%s, ngfw_id=%s", user.id, ngfw_id
+    )
+
+    # Verify NGFW exists and user owns it (raises CMSError if not)
+    get_ngfw(user, ngfw_id)
+
+    # Find active ranges linked to this NGFW
+    # Active means: pending, provisioning, ready, paused, or resuming (not destroyed/failed)
+    active_statuses = [
+        RangeStatus.PENDING.value,
+        RangeStatus.PROVISIONING.value,
+        RangeStatus.READY.value,
+        RangeStatus.PAUSED.value,
+        RangeStatus.RESUMING.value,
+    ]
+    ranges = Range.objects.filter(
+        ngfw_id=ngfw_id,
+        status__in=active_statuses,
+    ).order_by("-created_at")
+
+    return [
+        LinkedRangeContext(
+            range_id=r.id,
+            status=r.status,
+            created_at=r.created_at,
+        )
+        for r in ranges
+    ]
+
+
+def create_ngfw(
+    user: User,
+    name: str,
+    deployment_profile_id: int,
+    registration_method: str,
+    scm_credential_id: int | None = None,
+    otp_value: str | None = None,
+    otp_folder: str | None = None,
+) -> NGFWAppRef:
+    """Create a new NGFW.
+
+    Validates credentials, creates NGFW record, and triggers provisioning.
+
+    Args:
+        user: User requesting provisioning
+        name: Display name for the NGFW
+        deployment_profile_id: ID of deployment profile credential
+        registration_method: Either "pin" or "otp"
+        scm_credential_id: Required if registration_method is "pin"
+        otp_value: Required if registration_method is "otp"
+        otp_folder: Required if registration_method is "otp"
+
+    Returns:
+        NGFWAppRef with ngfw_id for status polling
+
+    Raises:
+        TypeError: If user is None or parameter types are invalid
+        ValueError: If required fields missing or invalid values
+        CMSError: If credential validation fails
+    """
+    from cms.models import NGFW, Credential
+    from shared.schemas.app import NGFWAppRef
+
+    _validate_ngfw_user(user)
+
+    # Validate name
+    if not name or not name.strip():
+        raise ValueError("name is required")
+    name = name.strip()
+
+    # Validate deployment_profile_id
+    if not deployment_profile_id:
+        raise ValueError("deployment_profile_id is required")
+    try:
+        deployment_profile = Credential.objects.select_related("credential_type").get(
+            id=deployment_profile_id,
+            user=user,
+            deleted_at__isnull=True,
+        )
+        if deployment_profile.credential_type.slug != "deployment_profile":
+            raise CMSError(
+                "deployment_profile_id must reference a deployment profile credential"
+            )
+    except Credential.DoesNotExist:
+        raise CMSError("Deployment profile not found") from None
+
+    # Validate registration_method
+    if registration_method not in ("pin", "otp"):
+        raise ValueError("registration_method must be 'pin' or 'otp'")
+
+    # Validate registration-specific fields
+    if registration_method == "pin":
+        if not scm_credential_id:
+            raise ValueError("scm_credential_id is required for PIN registration")
+        # Validate SCM credential exists and is owned by user
+        try:
+            scm_credential = Credential.objects.select_related("credential_type").get(
+                id=scm_credential_id,
+                user=user,
+                deleted_at__isnull=True,
+            )
+            if scm_credential.credential_type.slug != "scm":
+                raise CMSError("scm_credential_id must reference an SCM credential")
+        except Credential.DoesNotExist:
+            raise CMSError("SCM credential not found") from None
+    else:  # otp
+        if not otp_value or not otp_folder:
+            raise ValueError(
+                "otp_value and otp_folder are required for OTP registration"
+            )
+
+    logger.debug(
+        "create_ngfw called for user_id=%s, name=%s, method=%s",
+        user.id,
+        name,
+        registration_method,
+    )
+
+    # Create NGFW record with PROVISIONING status
+    ngfw = NGFW.objects.create(
+        user=user,
+        name=name,
+        status=NGFW.Status.PROVISIONING,
+    )
+
+    logger.info("create_ngfw: created NGFW id=%s for user_id=%s", ngfw.id, user.id)
+
+    # Hydrate NGFW with credential data and trigger Engine provisioning
+    from cms.scenarios.hydrator import hydrate_ngfw
+    from engine import create_ngfw as engine_create_ngfw
+
+    scm_cred = scm_credential if registration_method == "pin" else None
+    ngfw_request = hydrate_ngfw(
+        ngfw=ngfw,
+        deployment_profile=deployment_profile,
+        registration_method=registration_method,  # type: ignore[arg-type]
+        scm_credential=scm_cred,
+        otp_value=otp_value,
+        otp_folder=otp_folder,
+    )
+
+    engine_create_ngfw(ngfw_request)
+
+    return NGFWAppRef(
+        ngfw_id=ngfw.id,
+        user_id=user.id,
+        is_deleted=False,
+    )
+
+
+def start_ngfw(user: User, ngfw_id: int) -> NGFWAppContext:
+    """Start a stopped NGFW.
+
+    Args:
+        user: User requesting start
+        ngfw_id: ID of the NGFW to start
+
+    Returns:
+        Updated NGFWAppContext with new status
+
+    Raises:
+        TypeError: If user is None or ngfw_id is invalid type
+        ValueError: If user has no ID or ngfw_id is invalid
+        CMSError: If NGFW not found, not owned by user, or invalid status
+    """
+    from cms.models import NGFW
+
+    _validate_ngfw_user(user)
+    _validate_ngfw_id(ngfw_id)
+    logger.debug("start_ngfw called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
+
+    try:
+        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
+    except NGFW.DoesNotExist:
+        logger.error(
+            "start_ngfw: NGFW id=%s not found for user_id=%s", ngfw_id, user.id
+        )
+        raise CMSError("NGFW not found") from None
+
+    # Validate status allows starting
+    if ngfw.status not in (NGFW.Status.READY, NGFW.Status.STOPPED):
+        logger.error(
+            "start_ngfw: NGFW id=%s has status=%s, cannot start",
+            ngfw_id,
+            ngfw.status,
+        )
+        raise CMSError(f"Cannot start NGFW with status '{ngfw.status}'")
+
+    # Update status
+    ngfw.status = NGFW.Status.ACTIVE
+    ngfw.last_started_at = timezone.now()
+    ngfw.save(update_fields=["status", "last_started_at"])
+
+    logger.info("start_ngfw: started NGFW id=%s", ngfw_id)
+    return _ngfw_to_context(ngfw)
+
+
+def stop_ngfw(user: User, ngfw_id: int) -> NGFWAppContext:
+    """Stop an active NGFW.
+
+    Args:
+        user: User requesting stop
+        ngfw_id: ID of the NGFW to stop
+
+    Returns:
+        Updated NGFWAppContext with new status
+
+    Raises:
+        TypeError: If user is None or ngfw_id is invalid type
+        ValueError: If user has no ID or ngfw_id is invalid
+        CMSError: If NGFW not found, not owned by user, or invalid status
+    """
+    from cms.models import NGFW
+
+    _validate_ngfw_user(user)
+    _validate_ngfw_id(ngfw_id)
+    logger.debug("stop_ngfw called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
+
+    try:
+        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
+    except NGFW.DoesNotExist:
+        logger.error("stop_ngfw: NGFW id=%s not found for user_id=%s", ngfw_id, user.id)
+        raise CMSError("NGFW not found") from None
+
+    # Validate status allows stopping
+    if ngfw.status != NGFW.Status.ACTIVE:
+        logger.error(
+            "stop_ngfw: NGFW id=%s has status=%s, cannot stop",
+            ngfw_id,
+            ngfw.status,
+        )
+        raise CMSError(f"Cannot stop NGFW with status '{ngfw.status}'")
+
+    # Update status
+    ngfw.status = NGFW.Status.STOPPED
+    ngfw.last_stopped_at = timezone.now()
+    ngfw.save(update_fields=["status", "last_stopped_at"])
+
+    logger.info("stop_ngfw: stopped NGFW id=%s", ngfw_id)
+    return _ngfw_to_context(ngfw)
+
+
+def deprovision_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
+    """Deprovision an NGFW.
+
+    Requires name confirmation to prevent accidental deprovisioning.
+
+    Args:
+        user: User requesting deprovisioning
+        ngfw_id: ID of the NGFW to deprovision
+        confirm_name: Must match NGFW name exactly
+
+    Returns:
+        NGFWAppRef indicating deprovisioning started
+
+    Raises:
+        TypeError: If user is None or parameter types are invalid
+        ValueError: If confirm_name doesn't match or parameters invalid
+        CMSError: If NGFW not found or not owned by user
+    """
+    from cms.models import NGFW
+    from shared.schemas.app import NGFWAppRef
+
+    _validate_ngfw_user(user)
+    _validate_ngfw_id(ngfw_id)
+    logger.debug("deprovision_ngfw called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
+
+    try:
+        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
+    except NGFW.DoesNotExist:
+        logger.error(
+            "deprovision_ngfw: NGFW id=%s not found for user_id=%s", ngfw_id, user.id
+        )
+        raise CMSError("NGFW not found") from None
+
+    # Validate name confirmation
+    if confirm_name != ngfw.name:
+        logger.error(
+            "deprovision_ngfw: name mismatch for NGFW id=%s (expected=%s, got=%s)",
+            ngfw_id,
+            ngfw.name,
+            confirm_name,
+        )
+        raise ValueError("Name confirmation does not match")
+
+    # Update status to deprovisioning
+    ngfw.status = NGFW.Status.DEPROVISIONING
+    ngfw.save(update_fields=["status"])
+
+    logger.info("deprovision_ngfw: started deprovisioning NGFW id=%s", ngfw_id)
+
+    return NGFWAppRef(
+        ngfw_id=ngfw.id,
+        user_id=user.id,
+        is_deleted=False,
+    )
+
+
+def get_ngfw_status(user: User, ngfw_id: int) -> dict[str, str | None]:
+    """Get NGFW status for polling.
+
+    Args:
+        user: User requesting status
+        ngfw_id: ID of the NGFW
+
+    Returns:
+        Dict with 'status' key
+
+    Raises:
+        TypeError: If user is None or ngfw_id is invalid type
+        ValueError: If user has no ID or ngfw_id is invalid
+        CMSError: If NGFW not found or not owned by user
+    """
+    from cms.models import NGFW
+
+    _validate_ngfw_user(user)
+    _validate_ngfw_id(ngfw_id)
+    logger.debug("get_ngfw_status called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
+
+    try:
+        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
+    except NGFW.DoesNotExist:
+        logger.error(
+            "get_ngfw_status: NGFW id=%s not found for user_id=%s", ngfw_id, user.id
+        )
+        raise CMSError("NGFW not found") from None
+
+    return {
+        "status": ngfw.status,
+    }

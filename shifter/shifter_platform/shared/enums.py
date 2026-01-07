@@ -58,6 +58,49 @@ CANCELLABLE_STATUSES: set[RangeStatus] = {
 }
 
 
+class NGFWStatus(str, Enum):
+    """NGFW lifecycle status.
+
+    Used by both CMS (NGFW.status) and Engine (NGFW.status)
+    to track NGFW state throughout its lifecycle.
+    """
+
+    PENDING = "pending"
+    PROVISIONING = "provisioning"
+    READY = "ready"
+    STARTING = "starting"
+    ACTIVE = "active"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    DEPROVISIONING = "deprovisioning"
+    DEPROVISIONED = "deprovisioned"
+    FAILED = "failed"
+
+
+# NGFW status groupings for lifecycle queries
+NGFW_ACTIVE_STATUSES: set[NGFWStatus] = {
+    NGFWStatus.PENDING,
+    NGFWStatus.PROVISIONING,
+    NGFWStatus.READY,
+    NGFWStatus.STARTING,
+    NGFWStatus.ACTIVE,
+    NGFWStatus.STOPPING,
+    NGFWStatus.STOPPED,
+    NGFWStatus.DEPROVISIONING,
+}
+
+NGFW_TERMINAL_STATUSES: set[NGFWStatus] = {
+    NGFWStatus.DEPROVISIONED,
+    NGFWStatus.FAILED,
+}
+
+NGFW_RUNNABLE_STATUSES: set[NGFWStatus] = {
+    NGFWStatus.READY,
+    NGFWStatus.ACTIVE,
+    NGFWStatus.STOPPED,
+}
+
+
 class WebSocketCloseCode(int, Enum):
     """WebSocket close codes for Shifter consumers.
 

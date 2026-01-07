@@ -29,6 +29,7 @@ Usage:
 
 import json
 import sys
+from typing import Any
 
 from django.apps import apps
 from django.core.management.base import BaseCommand
@@ -113,9 +114,9 @@ class Command(BaseCommand):
         if stats["violations"] > 0:
             sys.exit(1)
 
-    def analyze_fks(self) -> dict:
+    def analyze_fks(self) -> dict[str, list[dict[str, Any]]]:
         """Analyze all FK relationships across layers."""
-        results = {layer: [] for layer in ALL_LAYERS}
+        results: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
 
         for layer in ALL_LAYERS:
             try:
@@ -133,7 +134,12 @@ class Command(BaseCommand):
                     if not hasattr(field, "related_model") or not field.related_model:
                         continue
 
-                    related_app = field.related_model._meta.app_label
+                    # Skip self-referential string relations
+                    related_model = field.related_model
+                    if isinstance(related_model, str):
+                        continue
+
+                    related_app = related_model._meta.app_label
 
                     # Skip allowed external apps
                     if related_app in ALLOWED_EXTERNAL_APPS:
@@ -148,7 +154,7 @@ class Command(BaseCommand):
                         "model": model.__name__,
                         "field": field.name,
                         "field_type": type(field).__name__,
-                        "references": f"{related_layer}.{field.related_model.__name__}",
+                        "references": f"{related_layer}.{related_model.__name__}",
                         "to_layer": related_layer,
                         "is_violation": is_violation(layer, related_layer),
                     }
@@ -156,9 +162,11 @@ class Command(BaseCommand):
 
         return results
 
-    def compute_stats(self, results: dict) -> dict:
+    def compute_stats(
+        self, results: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, Any]:
         """Compute summary statistics."""
-        stats = {
+        stats: dict[str, Any] = {
             "total_cross_layer_fks": 0,
             "violations": 0,
             "clean_layers": [],

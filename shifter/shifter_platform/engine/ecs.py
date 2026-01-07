@@ -176,7 +176,7 @@ def _start_ngfw_ecs_task(ngfw_id: int, command: list[str]) -> str | None:
     """Start an ECS Fargate task for NGFW operations.
 
     Args:
-        ngfw_id: Database ID of the UserNGFW
+        ngfw_id: Database ID of the NGFW
         command: Command list to run (e.g., ["ngfw", "provision", "--user-ngfw-id", "42"])
 
     Returns:
@@ -265,7 +265,7 @@ def _validate_ngfw_id(ngfw_id: int) -> None:
     """Validate ngfw_id parameter.
 
     Args:
-        ngfw_id: Database ID of the UserNGFW
+        ngfw_id: Database ID of the NGFW
 
     Raises:
         TypeError: If ngfw_id is None or wrong type
@@ -284,7 +284,7 @@ def start_ngfw_provisioning(ngfw_id: int) -> str | None:
     """Start provisioning an NGFW via ECS Fargate.
 
     Args:
-        ngfw_id: Database ID of the UserNGFW to provision
+        ngfw_id: Database ID of the NGFW to provision
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
@@ -304,7 +304,7 @@ def start_ngfw_teardown(ngfw_id: int) -> str | None:
     """Start teardown/deprovision of an NGFW via ECS Fargate.
 
     Args:
-        ngfw_id: Database ID of the UserNGFW to deprovision
+        ngfw_id: Database ID of the NGFW to deprovision
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured

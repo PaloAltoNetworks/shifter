@@ -402,28 +402,6 @@
         color: var(--xdr-text-secondary);
         margin: 0 0 24px;
     }
-
-    .serial-display {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid var(--xdr-border);
-        border-radius: 4px;
-        padding: 16px;
-        margin-bottom: 24px;
-    }
-
-    .serial-label {
-        font-size: 11px;
-        color: var(--xdr-text-secondary);
-        text-transform: uppercase;
-        margin: 0 0 4px;
-    }
-
-    .serial-value {
-        font-size: 18px;
-        font-family: monospace;
-        color: #00d26a;
-        margin: 0;
-    }
 </style>
 {% endblock %}
 
@@ -484,7 +462,7 @@
                     <div class="xdr-dropdown-panel">
                         <ul class="xdr-dropdown-items" id="profile-items">
                             {% for profile in deployment_profiles %}
-                            <li class="xdr-dropdown-item" data-value="{{ profile.id }}" data-name="{{ profile.name }}">
+                            <li class="xdr-dropdown-item" data-value="{{ profile.credential_id }}" data-name="{{ profile.name }}">
                                 <span class="item-label">{{ profile.name }}</span>
                             </li>
                             {% empty %}
@@ -558,7 +536,7 @@
                         <div class="xdr-dropdown-panel">
                             <ul class="xdr-dropdown-items" id="scm-items">
                                 {% for cred in scm_credentials %}
-                                <li class="xdr-dropdown-item" data-value="{{ cred.id }}" data-name="{{ cred.name }}" data-folder="{{ cred.scm_folder_name }}" data-region="{{ cred.sls_region }}">
+                                <li class="xdr-dropdown-item" data-value="{{ cred.credential_id }}" data-name="{{ cred.name }}" data-folder="{{ cred.scm_folder_name }}" data-region="{{ cred.sls_region }}">
                                     <span class="item-label">{{ cred.name }}</span>
                                     <span class="item-description">{{ cred.scm_folder_name }}</span>
                                 </li>
@@ -727,20 +705,8 @@
                 <div class="success-icon">&#10003;</div>
                 <h2 class="success-title">NGFW Provisioned Successfully!</h2>
                 <p class="success-subtitle">
-                    Your NGFW is ready. Complete the XDR configuration to enable traffic logging.
+                    Your NGFW is ready and can now be used with your ranges.
                 </p>
-
-                <div class="serial-display">
-                    <p class="serial-label">Serial Number</p>
-                    <p class="serial-value" id="ngfw-serial">—</p>
-                </div>
-
-                <div class="warning-callout">
-                    <p class="warning-callout-text">
-                        <strong>Final Step:</strong> Add this NGFW to XDR:<br>
-                        XDR Console &rarr; Settings &rarr; Data Sources &rarr; NGFW &rarr; Add Instance &rarr; Select the serial number above
-                    </p>
-                </div>
 
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     <a href="{% url 'mission_control:ngfw_list' %}" class="btn btn-secondary">Back to NGFWs</a>
@@ -992,7 +958,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 if (data.status === 'ready' || data.status === 'active') {
                     // Success!
-                    showSuccess(data.serial_number || 'Pending');
+                    showSuccess();
                 } else if (data.status === 'failed') {
                     alert('Provisioning failed. Please check the NGFW details for more information.');
                     window.location.href = '/mission-control/ngfw/' + ngfwId + '/';
@@ -1010,16 +976,15 @@ document.addEventListener('DOMContentLoaded', function() {
         check();
     }
 
-    function showSuccess(serialNumber) {
+    function showSuccess() {
         document.getElementById('provisioning-progress').style.display = 'none';
         document.getElementById('success-state').style.display = 'block';
-        document.getElementById('ngfw-serial').textContent = serialNumber;
     }
 
     // Debug helper - call from console: debugShowSuccess() or debugGoToStep(4)
     window.debugShowSuccess = function() {
         goToStep(4);
-        showSuccess('007958000123456');
+        showSuccess();
     };
     window.debugGoToStep = goToStep;
 

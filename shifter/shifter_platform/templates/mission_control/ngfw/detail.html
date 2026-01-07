@@ -1,0 +1,546 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<style>
+    /* Back link */
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+        margin-bottom: 16px;
+    }
+
+    .back-link:hover {
+        color: var(--xdr-text);
+        text-decoration: none;
+    }
+
+    /* Status badges */
+    .status {
+        display: inline-flex;
+        align-items: center;
+        font-size: 13px;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+    }
+
+    .status-ready .status-dot,
+    .status-active .status-dot { background: #00d26a; }
+    .status-provisioning .status-dot,
+    .status-starting .status-dot,
+    .status-stopping .status-dot,
+    .status-deprovisioning .status-dot { background: #faad14; animation: pulse 1.5s infinite; }
+    .status-stopped .status-dot { background: #707070; }
+    .status-failed .status-dot { background: #ff4d4f; }
+    .status-not_provisioned .status-dot { background: #484848; }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    /* Page header with actions */
+    .page-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 24px;
+    }
+
+    .page-header-content {
+        flex: 1;
+    }
+
+    .page-header-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .page-subtitle {
+        font-size: 14px;
+        color: var(--xdr-text-secondary);
+        margin: 8px 0 0;
+    }
+
+    /* Section cards */
+    .section-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+        margin: 0 0 16px;
+    }
+
+    /* Details grid */
+    .details-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+
+    .detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .detail-label {
+        font-size: 11px;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+
+    .detail-value {
+        font-size: 14px;
+        color: var(--xdr-text);
+    }
+
+    .detail-value.mono {
+        font-family: monospace;
+    }
+
+    .detail-value.placeholder {
+        color: var(--xdr-text-secondary);
+        font-style: italic;
+    }
+
+    .detail-value.success {
+        color: #00d26a;
+    }
+
+    .detail-value.warning {
+        color: #faad14;
+    }
+
+    .detail-value.error {
+        color: #ff4d4f;
+    }
+
+    /* AWS Resources section */
+    .resource-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+    }
+
+    @media (max-width: 800px) {
+        .resource-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .resource-card {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+        padding: 16px;
+    }
+
+    .resource-card-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--xdr-text);
+        margin: 0 0 12px;
+    }
+
+    /* Linked ranges table */
+    .ranges-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .ranges-table th,
+    .ranges-table td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--xdr-border);
+    }
+
+    .ranges-table th {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+
+    .ranges-table td {
+        font-size: 13px;
+        color: var(--xdr-text);
+    }
+
+    .ranges-table tbody tr:hover {
+        background: var(--xdr-hover);
+    }
+
+    /* XDR Configuration callout */
+    .xdr-callout {
+        background: rgba(0, 210, 106, 0.08);
+        border: 1px solid rgba(0, 210, 106, 0.3);
+        border-radius: 4px;
+        padding: 16px;
+        margin-top: 16px;
+    }
+
+    .xdr-callout.warning {
+        background: rgba(250, 173, 20, 0.08);
+        border-color: rgba(250, 173, 20, 0.3);
+    }
+
+    .xdr-callout-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--xdr-text);
+        margin: 0 0 8px;
+    }
+
+    .xdr-callout-text {
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+        margin: 0;
+    }
+
+    .xdr-callout ol {
+        margin: 8px 0 0;
+        padding-left: 20px;
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+    }
+
+    .xdr-callout li {
+        margin-bottom: 4px;
+    }
+
+    .xdr-callout code {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 12px;
+    }
+
+    /* Danger zone */
+    .danger-zone {
+        border-color: rgba(255, 77, 79, 0.3);
+    }
+
+    .danger-zone .card-title {
+        color: #ff4d4f;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{% url 'mission_control:ngfw_list' %}" class="back-link">
+    <span>&larr;</span> Back to NGFWs
+</a>
+
+<div class="page-header-row">
+    <div class="page-header-content">
+        <h1 class="page-title">{{ ngfw.name }}</h1>
+        <div class="page-subtitle">
+            <div class="status status-{{ ngfw.status }}">
+                <span class="status-dot"></span>
+                <span>{{ ngfw.get_status_display }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="page-header-actions">
+        {% if ngfw.status == 'stopped' or ngfw.status == 'ready' %}
+        <button class="btn btn-primary" id="start-btn">Start</button>
+        {% elif ngfw.status == 'active' %}
+        <button class="btn btn-secondary" id="stop-btn">Stop</button>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Overview Section -->
+<div class="card">
+    <h2 class="section-title">Overview</h2>
+    <div class="details-grid">
+        <div class="detail-item">
+            <span class="detail-label">Name</span>
+            <span class="detail-value">{{ ngfw.name }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Status</span>
+            <span class="detail-value">{{ ngfw.get_status_display }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Created</span>
+            <span class="detail-value">{{ ngfw.created_at|date:"M d, Y H:i" }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Provisioned</span>
+            <span class="detail-value{% if not ngfw.provisioned_at %} placeholder{% endif %}">
+                {% if ngfw.provisioned_at %}
+                {{ ngfw.provisioned_at|date:"M d, Y H:i" }}
+                {% else %}
+                Not provisioned
+                {% endif %}
+            </span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Last Started</span>
+            <span class="detail-value{% if not ngfw.last_started_at %} placeholder{% endif %}">
+                {% if ngfw.last_started_at %}
+                {{ ngfw.last_started_at|date:"M d, Y H:i" }}
+                {% else %}
+                Never
+                {% endif %}
+            </span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Last Stopped</span>
+            <span class="detail-value{% if not ngfw.last_stopped_at %} placeholder{% endif %}">
+                {% if ngfw.last_stopped_at %}
+                {{ ngfw.last_stopped_at|date:"M d, Y H:i" }}
+                {% else %}
+                Never
+                {% endif %}
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- PAN-OS Information -->
+<div class="card">
+    <h2 class="section-title">PAN-OS Information</h2>
+    <div class="details-grid">
+        <div class="detail-item">
+            <span class="detail-label">Serial Number</span>
+            <span class="detail-value mono{% if not ngfw.serial_number %} placeholder{% endif %}">
+                {{ ngfw.serial_number|default:"Pending" }}
+            </span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Device Certificate</span>
+            <span class="detail-value{% if ngfw.device_cert_status == 'valid' %} success{% elif not ngfw.device_cert_status %} placeholder{% else %} warning{% endif %}">
+                {{ ngfw.device_cert_status|default:"Pending"|capfirst }}
+            </span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">XDR Logging</span>
+            {% if ngfw.xdr_configured %}
+            <span class="detail-value success">Configured</span>
+            {% else %}
+            <span class="detail-value warning">Not configured</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if ngfw.serial_number and not ngfw.xdr_configured %}
+    <div class="xdr-callout warning">
+        <h4 class="xdr-callout-title">XDR Configuration Required</h4>
+        <p class="xdr-callout-text">
+            Complete the manual XDR configuration to enable traffic logging:
+        </p>
+        <ol>
+            <li>Open <strong>XDR Console</strong> &rarr; Settings &rarr; Data Sources &rarr; NGFW</li>
+            <li>Click <strong>Add Instance</strong></li>
+            <li>Select serial number: <code>{{ ngfw.serial_number }}</code></li>
+            <li>Complete the wizard</li>
+        </ol>
+    </div>
+    {% elif ngfw.xdr_configured %}
+    <div class="xdr-callout">
+        <h4 class="xdr-callout-title">XDR Logging Active</h4>
+        <p class="xdr-callout-text">
+            This NGFW is configured to send traffic logs to XDR. All ranges using this NGFW will have their traffic visible in the XDR console.
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- AWS Resources -->
+<div class="card">
+    <h2 class="section-title">AWS Resources</h2>
+    <div class="resource-grid">
+        <div class="resource-card">
+            <h3 class="resource-card-title">EC2 Instance</h3>
+            <div class="details-grid">
+                <div class="detail-item">
+                    <span class="detail-label">Instance ID</span>
+                    <span class="detail-value mono{% if not ngfw.instance_id %} placeholder{% endif %}">
+                        {{ ngfw.instance_id|default:"Not created" }}
+                    </span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Management IP</span>
+                    <span class="detail-value mono{% if not ngfw.management_ip %} placeholder{% endif %}">
+                        {{ ngfw.management_ip|default:"—" }}
+                    </span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Management ENI</span>
+                    <span class="detail-value mono{% if not ngfw.mgmt_eni_id %} placeholder{% endif %}">
+                        {{ ngfw.mgmt_eni_id|default:"—" }}
+                    </span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Dataplane IP</span>
+                    <span class="detail-value mono{% if not ngfw.dataplane_ip %} placeholder{% endif %}">
+                        {{ ngfw.dataplane_ip|default:"—" }}
+                    </span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Data ENI</span>
+                    <span class="detail-value mono{% if not ngfw.data_eni_id %} placeholder{% endif %}">
+                        {{ ngfw.data_eni_id|default:"—" }}
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <div class="resource-card">
+            <h3 class="resource-card-title">Gateway Load Balancer</h3>
+            <div class="details-grid">
+                <div class="detail-item" style="grid-column: 1 / -1;">
+                    <span class="detail-label">GWLB ARN</span>
+                    <span class="detail-value mono{% if not ngfw.gwlb_arn %} placeholder{% endif %}" style="word-break: break-all; font-size: 11px;">
+                        {{ ngfw.gwlb_arn|default:"Not created" }}
+                    </span>
+                </div>
+                <div class="detail-item" style="grid-column: 1 / -1;">
+                    <span class="detail-label">Target Group ARN</span>
+                    <span class="detail-value mono{% if not ngfw.target_group_arn %} placeholder{% endif %}" style="word-break: break-all; font-size: 11px;">
+                        {{ ngfw.target_group_arn|default:"—" }}
+                    </span>
+                </div>
+                <div class="detail-item" style="grid-column: 1 / -1;">
+                    <span class="detail-label">VPC Endpoint Service</span>
+                    <span class="detail-value mono{% if not ngfw.gwlb_service_name %} placeholder{% endif %}" style="word-break: break-all; font-size: 11px;">
+                        {{ ngfw.gwlb_service_name|default:"—" }}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Linked Ranges -->
+<div class="card">
+    <h2 class="section-title">Linked Ranges</h2>
+    {% if linked_ranges %}
+    <table class="ranges-table">
+        <thead>
+            <tr>
+                <th>Range ID</th>
+                <th>Status</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for range in linked_ranges %}
+            <tr>
+                <td>{{ range.id }}</td>
+                <td>
+                    <div class="status status-{{ range.status }}">
+                        <span class="status-dot"></span>
+                        <span>{{ range.get_status_display }}</span>
+                    </div>
+                </td>
+                <td>{{ range.created_at|date:"M d, Y H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--xdr-text-secondary); margin: 0;">
+        No ranges are currently using this NGFW.
+    </p>
+    {% endif %}
+</div>
+
+<!-- Danger Zone -->
+<div class="card danger-zone">
+    <h2 class="card-title">Danger Zone</h2>
+    <p style="color: var(--xdr-text-secondary); margin: 0 0 16px; font-size: 13px;">
+        Deprovisioning will destroy this NGFW and deactivate its license. Credits will be returned to your pool.
+        {% if linked_ranges %}
+        <strong style="color: #ff4d4f;">Warning: {{ linked_ranges|length }} range(s) are currently using this NGFW.</strong>
+        {% endif %}
+    </p>
+    <a href="{% url 'mission_control:ngfw_deprovision' ngfw.id %}" class="btn btn-danger btn-small">
+        Deprovision NGFW
+    </a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const csrfToken = '{{ csrf_token }}';
+    const ngfwId = {{ ngfw.id }};
+
+    const startBtn = document.getElementById('start-btn');
+    const stopBtn = document.getElementById('stop-btn');
+
+    if (startBtn) {
+        startBtn.addEventListener('click', function() {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Starting...';
+
+            fetch(`/mission-control/api/ngfw/${ngfwId}/start/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    startBtn.disabled = false;
+                    startBtn.textContent = 'Start';
+                } else {
+                    window.location.reload();
+                }
+            })
+            .catch(err => {
+                alert('An error occurred. Please try again.');
+                startBtn.disabled = false;
+                startBtn.textContent = 'Start';
+            });
+        });
+    }
+
+    if (stopBtn) {
+        stopBtn.addEventListener('click', function() {
+            stopBtn.disabled = true;
+            stopBtn.textContent = 'Stopping...';
+
+            fetch(`/mission-control/api/ngfw/${ngfwId}/stop/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    stopBtn.disabled = false;
+                    stopBtn.textContent = 'Stop';
+                } else {
+                    window.location.reload();
+                }
+            })
+            .catch(err => {
+                alert('An error occurred. Please try again.');
+                stopBtn.disabled = false;
+                stopBtn.textContent = 'Stop';
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

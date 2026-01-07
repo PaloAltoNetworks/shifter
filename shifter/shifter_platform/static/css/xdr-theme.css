@@ -245,9 +245,19 @@ body.xdr-dark-theme {
     margin-right: 8px;
 }
 
-.status-online .status-dot { background: #00d26a; }
+.status-online .status-dot,
+.status-active .status-dot { background: #00d26a; }
 .status-offline .status-dot { background: #707070; }
 .status-error .status-dot { background: #ff4d4f; }
+.status-provisioning .status-dot {
+    background: #faad14;
+    animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
 
 /* Empty State */
 .empty-state {

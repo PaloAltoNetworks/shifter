@@ -1,9 +1,12 @@
 """WebSocket consumers for terminal SSH connections and range status updates."""
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import json
 import logging
+from typing import Any
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -23,12 +26,12 @@ class SSHConsumer(AsyncWebsocketConsumer):
     URL pattern: ws/terminal/<instance_uuid>/
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.instance_uuid: str | None = None
         self.range_id: int | None = None
-        self.ssh_conn = None
-        self._read_task = None
+        self.ssh_conn: Any = None
+        self._read_task: asyncio.Task[None] | None = None
 
     async def connect(self):
         """Handle WebSocket connection request."""
@@ -206,7 +209,7 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
     URL pattern: ws/range-status/<range_id>/
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.range_id: int | None = None
         self.group_name: str | None = None

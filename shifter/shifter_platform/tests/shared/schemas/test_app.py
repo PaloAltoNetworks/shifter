@@ -1,5 +1,7 @@
 """Tests for App DSL schemas."""
 
+from datetime import UTC
+
 import pytest
 from pydantic import ValidationError
 
@@ -87,8 +89,55 @@ class TestNGFWAppSpec:
         """NGFWAppSpec has app_type='ngfw' by default."""
         from shared.schemas.app import NGFWAppSpec
 
-        spec = NGFWAppSpec()
+        spec = NGFWAppSpec(
+            name="Test NGFW",
+            deployment_profile_id=1,
+            registration_method="pin",
+        )
         assert spec.app_type == "ngfw"
+
+    def test_required_fields(self):
+        """NGFWAppSpec requires name, deployment_profile_id, registration_method."""
+        import pytest
+        from pydantic import ValidationError
+
+        from shared.schemas.app import NGFWAppSpec
+
+        with pytest.raises(ValidationError) as exc_info:
+            NGFWAppSpec()
+        errors = exc_info.value.errors()
+        error_fields = {e["loc"][0] for e in errors}
+        assert "name" in error_fields
+        assert "deployment_profile_id" in error_fields
+        assert "registration_method" in error_fields
+
+    def test_deployment_profile_id_positive(self):
+        """NGFWAppSpec deployment_profile_id must be positive."""
+        import pytest
+        from pydantic import ValidationError
+
+        from shared.schemas.app import NGFWAppSpec
+
+        with pytest.raises(ValidationError):
+            NGFWAppSpec(
+                name="Test NGFW",
+                deployment_profile_id=0,
+                registration_method="pin",
+            )
+
+    def test_registration_method_literal(self):
+        """NGFWAppSpec registration_method must be 'pin' or 'otp'."""
+        import pytest
+        from pydantic import ValidationError
+
+        from shared.schemas.app import NGFWAppSpec
+
+        with pytest.raises(ValidationError):
+            NGFWAppSpec(
+                name="Test NGFW",
+                deployment_profile_id=1,
+                registration_method="invalid",
+            )
 
     def test_inherits_from_app_spec_base(self):
         """NGFWAppSpec inherits from AppSpecBase."""
@@ -229,10 +278,45 @@ class TestNGFWAppContext:
 
     def test_default_app_type(self):
         """NGFWAppContext has app_type='ngfw' by default."""
+        from datetime import datetime
+
         from shared.schemas.app import NGFWAppContext
 
-        ctx = NGFWAppContext(app_id=1, name="VM-Series")
+        ctx = NGFWAppContext(
+            app_id=1,
+            name="VM-Series",
+            status="active",
+            created_at=datetime.now(UTC),
+        )
         assert ctx.app_type == "ngfw"
+
+    def test_required_fields(self):
+        """NGFWAppContext requires status and created_at in addition to base fields."""
+        import pytest
+        from pydantic import ValidationError
+
+        from shared.schemas.app import NGFWAppContext
+
+        with pytest.raises(ValidationError) as exc_info:
+            NGFWAppContext(app_id=1, name="VM-Series")
+        errors = exc_info.value.errors()
+        error_fields = {e["loc"][0] for e in errors}
+        assert "status" in error_fields
+        assert "created_at" in error_fields
+
+    def test_get_status_display(self):
+        """NGFWAppContext get_status_display formats status for display."""
+        from datetime import datetime
+
+        from shared.schemas.app import NGFWAppContext
+
+        ctx = NGFWAppContext(
+            app_id=1,
+            name="VM-Series",
+            status="not_provisioned",
+            created_at=datetime.now(UTC),
+        )
+        assert ctx.get_status_display() == "Not Provisioned"
 
     def test_inherits_from_app_context_base(self):
         """NGFWAppContext inherits from AppContextBase."""
@@ -315,12 +399,20 @@ class TestAppContext:
 
     def test_routes_to_ngfw_app_context(self):
         """AppContext routes to NGFWAppContext based on app_type."""
+        from datetime import datetime
+
         from pydantic import TypeAdapter
 
         from shared.schemas.app import AppContext, NGFWAppContext
 
         adapter = TypeAdapter(AppContext)
-        data = {"app_id": 1, "name": "VM-Series", "app_type": "ngfw"}
+        data = {
+            "app_id": 1,
+            "name": "VM-Series",
+            "app_type": "ngfw",
+            "status": "active",
+            "created_at": datetime.now(UTC).isoformat(),
+        }
         result = adapter.validate_python(data)
         assert isinstance(result, NGFWAppContext)
         assert result.app_type == "ngfw"
@@ -390,6 +482,99 @@ class TestAppRef:
 
 
 # =============================================================================
+# NGFWAppRef Tests
+# =============================================================================
+
+
+class TestNGFWAppRef:
+    """Tests for NGFWAppRef - minimal NGFW reference."""
+
+    def test_import(self):
+        """NGFWAppRef can be imported."""
+        from shared.schemas.app import NGFWAppRef
+
+        assert NGFWAppRef is not None
+
+    def test_create_with_required_fields(self):
+        """NGFWAppRef can be created with required fields."""
+        from shared.schemas.app import NGFWAppRef
+
+        ref = NGFWAppRef(ngfw_id=42, user_id=1)
+        assert ref.ngfw_id == 42
+        assert ref.user_id == 1
+        assert ref.is_deleted is False
+
+    def test_ngfw_id_must_be_positive(self):
+        """NGFWAppRef rejects non-positive ngfw_id."""
+        from shared.schemas.app import NGFWAppRef
+
+        with pytest.raises(ValidationError):
+            NGFWAppRef(ngfw_id=0, user_id=1)
+
+    def test_user_id_must_be_positive(self):
+        """NGFWAppRef rejects non-positive user_id."""
+        from shared.schemas.app import NGFWAppRef
+
+        with pytest.raises(ValidationError):
+            NGFWAppRef(ngfw_id=1, user_id=0)
+
+
+# =============================================================================
+# LinkedRangeContext Tests
+# =============================================================================
+
+
+class TestLinkedRangeContext:
+    """Tests for LinkedRangeContext - range linked to an NGFW."""
+
+    def test_import(self):
+        """LinkedRangeContext can be imported."""
+        from shared.schemas.app import LinkedRangeContext
+
+        assert LinkedRangeContext is not None
+
+    def test_create_with_required_fields(self):
+        """LinkedRangeContext can be created with required fields."""
+        from datetime import datetime
+
+        from shared.schemas.app import LinkedRangeContext
+
+        ctx = LinkedRangeContext(
+            range_id=42,
+            status="active",
+            created_at=datetime.now(UTC),
+        )
+        assert ctx.range_id == 42
+        assert ctx.status == "active"
+
+    def test_id_property_returns_range_id(self):
+        """LinkedRangeContext.id returns range_id for template compatibility."""
+        from datetime import datetime
+
+        from shared.schemas.app import LinkedRangeContext
+
+        ctx = LinkedRangeContext(
+            range_id=42,
+            status="active",
+            created_at=datetime.now(UTC),
+        )
+        assert ctx.id == 42
+
+    def test_get_status_display(self):
+        """LinkedRangeContext.get_status_display formats status for display."""
+        from datetime import datetime
+
+        from shared.schemas.app import LinkedRangeContext
+
+        ctx = LinkedRangeContext(
+            range_id=42,
+            status="not_provisioned",
+            created_at=datetime.now(UTC),
+        )
+        assert ctx.get_status_display() == "Not Provisioned"
+
+
+# =============================================================================
 # Package Export Tests
 # =============================================================================
 
@@ -406,7 +591,9 @@ class TestPackageExports:
             AppContextBase,
             AppRef,
             AppSpecBase,
+            LinkedRangeContext,
             NGFWAppContext,
+            NGFWAppRef,
             NGFWAppSpec,
             OSAppContext,
             OSAppSpec,
@@ -426,3 +613,5 @@ class TestPackageExports:
         assert OtherAppContext is not None
         assert AppContext is not None
         assert AppRef is not None
+        assert NGFWAppRef is not None
+        assert LinkedRangeContext is not None

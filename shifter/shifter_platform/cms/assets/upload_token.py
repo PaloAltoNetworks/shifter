@@ -50,8 +50,12 @@ def generate_upload_token(
     payload_json = json.dumps(payload, separators=(",", ":"))
     payload_b64 = base64.urlsafe_b64encode(payload_json.encode()).decode()
 
+    secret_key = settings.SECRET_KEY
+    if secret_key is None:
+        raise RuntimeError("SECRET_KEY is not configured")
+
     signature = hmac.new(
-        settings.SECRET_KEY.encode(),
+        secret_key.encode(),
         payload_b64.encode(),
         hashlib.sha256,
     ).hexdigest()
@@ -78,8 +82,12 @@ def verify_upload_token(token: str, user_id: int) -> dict:
     except ValueError as err:
         raise ValueError("Invalid token format") from err
 
+    secret_key = settings.SECRET_KEY
+    if secret_key is None:
+        raise RuntimeError("SECRET_KEY is not configured")
+
     expected_sig = hmac.new(
-        settings.SECRET_KEY.encode(),
+        secret_key.encode(),
         payload_b64.encode(),
         hashlib.sha256,
     ).hexdigest()

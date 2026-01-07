@@ -120,6 +120,30 @@ jobs:
           uv run ruff format --check .
 
   # ===========================================================================
+  # Type Checking (non-blocking quality gate)
+  # ===========================================================================
+
+  shifter-platform-typecheck:
+    name: Type Check (shifter_platform)
+    runs-on: self-hosted
+    continue-on-error: true  # Non-blocking - quality signal only
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
+      - name: Run mypy
+        working-directory: shifter/shifter_platform
+        run: |
+          uv run mypy . --no-error-summary || true
+          echo "::notice::Type checking complete - see above for any type errors"
+
+  # ===========================================================================
   # Architecture as Code
   # ===========================================================================
 

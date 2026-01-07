@@ -6,6 +6,7 @@ Infrastructure lifecycle for Shifter platform.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from shared.enums import CANCELLABLE_STATUSES, RangeStatus
@@ -342,3 +343,69 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
         username=username,
         private_key=ssh_key,
     )
+
+
+def create_ngfw(request: Mapping[str, Any]) -> int:
+    """Provision NGFW infrastructure.
+
+    Creates an Engine NGFW record and triggers ECS provisioning.
+    Engine owns infrastructure state; CMS owns the logical asset.
+
+    Args:
+        request: Hydrated NGFW provision request dict from CMS.
+            Required keys: ngfw_id (CMS's ID), user_id, name.
+            Contains hydrated credentials for provisioner.
+
+    Returns:
+        engine_ngfw_id: The ID of the created Engine NGFW record.
+
+    Raises:
+        ValueError: If required fields are missing.
+        User.DoesNotExist: If user_id doesn't map to a Django user.
+    """
+    from django.contrib.auth import get_user_model
+
+    from engine.ecs import start_ngfw_provisioning
+    from engine.models import NGFW
+
+    User = get_user_model()
+
+    # Validate required fields
+    cms_ngfw_id = request.get("ngfw_id")
+    user_id = request.get("user_id")
+
+    if not isinstance(cms_ngfw_id, int):
+        raise ValueError(f"ngfw_id required (got {type(cms_ngfw_id).__name__})")
+    if not isinstance(user_id, int):
+        raise ValueError(f"user_id required (got {type(user_id).__name__})")
+
+    logger.debug(
+        "create_ngfw: cms_ngfw_id=%s user_id=%s",
+        cms_ngfw_id,
+        user_id,
+    )
+
+    # Get Django user for FK
+    user = User.objects.get(id=user_id)
+
+    # Create Engine NGFW with full config from CMS
+    ngfw = NGFW.objects.create(
+        user=user,
+        cms_ngfw_id=cms_ngfw_id,
+        status=NGFW.Status.PROVISIONING,
+        ngfw_config=dict(request),  # Store full hydrated request
+    )
+
+    logger.info(
+        "create_ngfw: created engine_ngfw_id=%s cms_ngfw_id=%s",
+        ngfw.id,
+        cms_ngfw_id,
+    )
+
+    # Trigger ECS provisioning with Engine NGFW ID
+    task_arn = start_ngfw_provisioning(ngfw.id)
+
+    if task_arn:
+        logger.info("create_ngfw: started ECS task=%s", task_arn)
+
+    return ngfw.id

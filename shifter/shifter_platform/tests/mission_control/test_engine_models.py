@@ -1,6 +1,6 @@
 """Tests for Engine models.
 
-These tests verify that Range and UserNGFW models are properly located
+These tests verify that Range and NGFW models are properly located
 in engine.models as per the architecture documentation.
 """
 
@@ -173,10 +173,10 @@ class TestRangeModel:
 
 
 @pytest.mark.django_db
-class TestUserNGFWModel:
-    """Tests for UserNGFW model in cms.models.
+class TestNGFWModel:
+    """Tests for NGFW model in cms.models.
 
-    Note: UserNGFW was moved from engine.models to cms.models as part of
+    Note: NGFW was moved from engine.models to cms.models as part of
     the architecture refactor to enforce clean layer boundaries.
     """
 
@@ -188,29 +188,29 @@ class TestUserNGFWModel:
         )
 
     # -------------------------------------------------------------------------
-    # Import tests - UserNGFW should be importable from cms.models
+    # Import tests - NGFW should be importable from cms.models
     # -------------------------------------------------------------------------
 
     def test_userngfw_importable_from_engine(self):
-        """UserNGFW model can be imported from cms.models."""
-        from cms.models import UserNGFW
+        """NGFW model can be imported from cms.models."""
+        from cms.models import NGFW
 
-        assert UserNGFW is not None
+        assert NGFW is not None
 
     def test_userngfw_status_enum_exists(self):
-        """UserNGFW.Status enum exists with expected values."""
-        from cms.models import UserNGFW
+        """NGFW.Status enum exists with expected values."""
+        from cms.models import NGFW
 
-        assert hasattr(UserNGFW, "Status")
-        assert UserNGFW.Status.NOT_PROVISIONED == "not_provisioned"
-        assert UserNGFW.Status.PROVISIONING == "provisioning"
-        assert UserNGFW.Status.READY == "ready"
-        assert UserNGFW.Status.STARTING == "starting"
-        assert UserNGFW.Status.ACTIVE == "active"
-        assert UserNGFW.Status.STOPPING == "stopping"
-        assert UserNGFW.Status.STOPPED == "stopped"
-        assert UserNGFW.Status.DEPROVISIONING == "deprovisioning"
-        assert UserNGFW.Status.FAILED == "failed"
+        assert hasattr(NGFW, "Status")
+        assert NGFW.Status.NOT_PROVISIONED == "not_provisioned"
+        assert NGFW.Status.PROVISIONING == "provisioning"
+        assert NGFW.Status.READY == "ready"
+        assert NGFW.Status.STARTING == "starting"
+        assert NGFW.Status.ACTIVE == "active"
+        assert NGFW.Status.STOPPING == "stopping"
+        assert NGFW.Status.STOPPED == "stopped"
+        assert NGFW.Status.DEPROVISIONING == "deprovisioning"
+        assert NGFW.Status.FAILED == "failed"
 
     # -------------------------------------------------------------------------
     # Model method tests
@@ -220,47 +220,47 @@ class TestUserNGFWModel:
         """active_for_user excludes soft-deleted NGFWs."""
         from django.utils import timezone
 
-        from cms.models import UserNGFW
+        from cms.models import NGFW
 
-        active_ngfw = UserNGFW.objects.create(user=user, name="Active NGFW")
-        UserNGFW.objects.create(
+        active_ngfw = NGFW.objects.create(user=user, name="Active NGFW")
+        NGFW.objects.create(
             user=user,
             name="Deleted NGFW",
             deleted_at=timezone.now(),
         )
 
-        result = list(UserNGFW.active_for_user(user))
+        result = list(NGFW.active_for_user(user))
         assert len(result) == 1
         assert result[0] == active_ngfw
 
     def test_active_for_user_filters_by_user(self, user):
         """active_for_user only returns NGFWs for specified user."""
-        from cms.models import UserNGFW
+        from cms.models import NGFW
 
         other_user = User.objects.create_user(
             username="other@example.com",
             email="other@example.com",
         )
 
-        my_ngfw = UserNGFW.objects.create(user=user, name="My NGFW")
-        UserNGFW.objects.create(user=other_user, name="Other NGFW")
+        my_ngfw = NGFW.objects.create(user=user, name="My NGFW")
+        NGFW.objects.create(user=other_user, name="Other NGFW")
 
-        result = list(UserNGFW.active_for_user(user))
+        result = list(NGFW.active_for_user(user))
         assert len(result) == 1
         assert result[0] == my_ngfw
 
     def test_default_status_is_not_provisioned(self, user):
         """Default status is NOT_PROVISIONED."""
-        from cms.models import UserNGFW
+        from cms.models import NGFW
 
-        ngfw = UserNGFW.objects.create(user=user, name="New NGFW")
-        assert ngfw.status == UserNGFW.Status.NOT_PROVISIONED
+        ngfw = NGFW.objects.create(user=user, name="New NGFW")
+        assert ngfw.status == NGFW.Status.NOT_PROVISIONED
 
     def test_str_returns_name(self, user):
         """__str__ returns the NGFW name."""
-        from cms.models import UserNGFW
+        from cms.models import NGFW
 
-        ngfw = UserNGFW(user=user, name="Test NGFW")
+        ngfw = NGFW(user=user, name="Test NGFW")
         assert str(ngfw) == "Test NGFW"
 
 

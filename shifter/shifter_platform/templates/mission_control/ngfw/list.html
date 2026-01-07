@@ -56,7 +56,7 @@
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
     }
 
     .ngfw-card-title {
@@ -70,40 +70,6 @@
         font-size: 12px;
         color: var(--xdr-text-secondary);
         margin-top: 4px;
-    }
-
-    .ngfw-card-details {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px 16px;
-        margin-bottom: 16px;
-        padding: 12px;
-        background: rgba(255, 255, 255, 0.02);
-        border-radius: 4px;
-    }
-
-    .ngfw-detail-item {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-
-    .ngfw-detail-label {
-        font-size: 11px;
-        color: var(--xdr-text-secondary);
-        text-transform: uppercase;
-    }
-
-    .ngfw-detail-value {
-        font-size: 13px;
-        color: var(--xdr-text);
-        font-family: monospace;
-    }
-
-    .ngfw-detail-value.placeholder {
-        color: var(--xdr-text-secondary);
-        font-style: italic;
-        font-family: inherit;
     }
 
     .ngfw-card-actions {
@@ -172,47 +138,16 @@
             </div>
         </div>
 
-        <div class="ngfw-card-details">
-            <div class="ngfw-detail-item">
-                <span class="ngfw-detail-label">Instance</span>
-                <span class="ngfw-detail-value{% if not ngfw.instance_id %} placeholder{% endif %}">
-                    {{ ngfw.instance_id|default:"Not provisioned" }}
-                </span>
-            </div>
-            <div class="ngfw-detail-item">
-                <span class="ngfw-detail-label">Serial</span>
-                <span class="ngfw-detail-value{% if not ngfw.serial_number %} placeholder{% endif %}">
-                    {{ ngfw.serial_number|default:"Pending" }}
-                </span>
-            </div>
-            <div class="ngfw-detail-item">
-                <span class="ngfw-detail-label">Management IP</span>
-                <span class="ngfw-detail-value{% if not ngfw.management_ip %} placeholder{% endif %}">
-                    {{ ngfw.management_ip|default:"—" }}
-                </span>
-            </div>
-            <div class="ngfw-detail-item">
-                <span class="ngfw-detail-label">XDR</span>
-                <span class="ngfw-detail-value">
-                    {% if ngfw.xdr_configured %}
-                    <span style="color: #00d26a;">Configured</span>
-                    {% else %}
-                    <span class="placeholder">Not configured</span>
-                    {% endif %}
-                </span>
-            </div>
-        </div>
-
         <div class="ngfw-card-actions">
-            <a href="{% url 'mission_control:ngfw_detail' ngfw.id %}" class="btn btn-secondary btn-small">
+            <a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}" class="btn btn-secondary btn-small">
                 View Details
             </a>
             {% if ngfw.status == 'stopped' or ngfw.status == 'ready' %}
-            <button class="btn btn-primary btn-small" data-action="start" data-ngfw-id="{{ ngfw.id }}">
+            <button class="btn btn-primary btn-small" data-action="start" data-ngfw-id="{{ ngfw.app_id }}">
                 Start
             </button>
             {% elif ngfw.status == 'active' %}
-            <button class="btn btn-secondary btn-small" data-action="stop" data-ngfw-id="{{ ngfw.id }}">
+            <button class="btn btn-secondary btn-small" data-action="stop" data-ngfw-id="{{ ngfw.app_id }}">
                 Stop
             </button>
             {% endif %}

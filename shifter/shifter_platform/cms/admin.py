@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from cms.models import AgentConfig, OperatingSystem, UserNGFW
+from cms.models import NGFW, AgentConfig, OperatingSystem
 
 
 @admin.register(OperatingSystem)
@@ -28,8 +28,8 @@ class AgentConfigAdmin(admin.ModelAdmin):
     readonly_fields = ("s3_key", "sha256_hash", "file_size_bytes", "created_at")
 
 
-@admin.register(UserNGFW)
-class UserNGFWAdmin(admin.ModelAdmin):
+@admin.register(NGFW)
+class NGFWAdmin(admin.ModelAdmin):
     list_display = ("name", "user", "status", "serial_number", "created_at", "deleted_at")
     list_filter = ("status", "deleted_at", "created_at")
     search_fields = ("name", "user__email", "serial_number", "instance_id")

@@ -3,17 +3,20 @@
 The hydrator takes a scenario template + agent info and produces
 a fully resolved RangeSpec for Engine consumption.
 
+Also tests NGFW hydration which extracts credential data for Engine.
+
 Responsibilities:
 - Resolve os_type "from_agent" to actual OS
 - Embed agent details into instances with agent_slot
 - Return consistent RangeSpec structure
+- Extract NGFW credential data into plain dict
 - Input validation and error handling
 """
 
 import pytest
 from django.contrib.auth import get_user_model
 
-from cms.models import AgentConfig, OperatingSystem
+from cms.models import NGFW, AgentConfig, Credential, CredentialType, OperatingSystem
 from shared.schemas import RangeSpec
 
 User = get_user_model()
@@ -297,3 +300,357 @@ class TestHydrateScenarioLogging:
         # s3_key and sha256 should not appear in logs
         assert "agents/123/agent.msi" not in caplog.text
         assert "abc123def456" not in caplog.text
+
+
+# =============================================================================
+# NGFW Hydration Tests
+# =============================================================================
+
+
+@pytest.fixture
+def deployment_profile_type(db):
+    """Create deployment profile credential type."""
+    return CredentialType.objects.create(
+        name="Deployment Profile",
+        slug="deployment_profile",
+        spec_class="shared.schemas.DeploymentProfileSpec",
+    )
+
+
+@pytest.fixture
+def scm_credential_type(db):
+    """Create SCM credential type."""
+    return CredentialType.objects.create(
+        name="SCM Credential",
+        slug="scm",
+        spec_class="shared.schemas.SCMCredentialSpec",
+    )
+
+
+@pytest.fixture
+def deployment_profile(user, deployment_profile_type, db):
+    """Create a deployment profile credential for testing."""
+    return Credential.objects.create(
+        user=user,
+        name="Test Deployment Profile",
+        credential_type=deployment_profile_type,
+        data={"authcode": "D1234567"},
+    )
+
+
+@pytest.fixture
+def scm_credential(user, scm_credential_type, db):
+    """Create an SCM credential for testing."""
+    return Credential.objects.create(
+        user=user,
+        name="Test SCM Credential",
+        credential_type=scm_credential_type,
+        data={
+            "scm_folder_name": "test-folder",
+            "scm_pin_id": "pin-123",
+            "scm_pin_value": "secret-pin-value",
+            "sls_region": "americas",
+        },
+    )
+
+
+@pytest.fixture
+def ngfw(user, db):
+    """Create an NGFW for testing."""
+    return NGFW.objects.create(
+        user=user,
+        name="Test NGFW",
+        status=NGFW.Status.PROVISIONING,
+    )
+
+
+@pytest.mark.django_db
+class TestHydrateNgfw:
+    """Tests for hydrate_ngfw() function.
+
+    hydrate_ngfw extracts credential data from Credential models
+    and packages into a plain dict for Engine consumption.
+    """
+
+    # --- PIN registration happy path ---
+
+    def test_returns_ngfw_provision_request_for_pin(
+        self, ngfw, deployment_profile, scm_credential
+    ):
+        """hydrate_ngfw returns NGFWProvisionRequest dict for PIN registration."""
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        result = hydrate_ngfw(
+            ngfw=ngfw,
+            deployment_profile=deployment_profile,
+            registration_method="pin",
+            scm_credential=scm_credential,
+        )
+
+        assert isinstance(result, dict)
+        assert result["ngfw_id"] == ngfw.id
+        assert result["user_id"] == ngfw.user_id
+        assert result["name"] == "Test NGFW"
+        assert result["registration_method"] == "pin"
+
+    def test_extracts_authcode_from_deployment_profile(
+        self, ngfw, deployment_profile, scm_credential
+    ):
+        """authcode is extracted from deployment_profile.data."""
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        result = hydrate_ngfw(
+            ngfw=ngfw,
+            deployment_profile=deployment_profile,
+            registration_method="pin",
+            scm_credential=scm_credential,
+        )
+
+        assert result["authcode"] == "D1234567"
+
+    def test_extracts_scm_fields_for_pin(
+        self, ngfw, deployment_profile, scm_credential
+    ):
+        """SCM fields are extracted from scm_credential.data."""
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        result = hydrate_ngfw(
+            ngfw=ngfw,
+            deployment_profile=deployment_profile,
+            registration_method="pin",
+            scm_credential=scm_credential,
+        )
+
+        assert result["scm_folder_name"] == "test-folder"
+        assert result["scm_pin_id"] == "pin-123"
+        assert result["scm_pin_value"] == "secret-pin-value"
+        assert result["sls_region"] == "americas"
+
+    def test_otp_fields_are_none_for_pin(
+        self, ngfw, deployment_profile, scm_credential
+    ):
+        """OTP fields are None when using PIN registration."""
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        result = hydrate_ngfw(
+            ngfw=ngfw,
+            deployment_profile=deployment_profile,
+            registration_method="pin",
+            scm_credential=scm_credential,
+        )
+
+        assert result["otp_value"] is None
+        assert result["otp_folder"] is None
+
+    # --- OTP registration happy path ---
+
+    def test_returns_ngfw_provision_request_for_otp(self, ngfw, deployment_profile):
+        """hydrate_ngfw returns NGFWProvisionRequest dict for OTP registration."""
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        result = hydrate_ngfw(
+            ngfw=ngfw,
+            deployment_profile=deployment_profile,
+            registration_method="otp",
+            otp_value="OTP123456",
+            otp_folder="my-otp-folder",
+        )
+
+        assert isinstance(result, dict)
+        assert result["ngfw_id"] == ngfw.id
+        assert result["registration_method"] == "otp"
+
+    def test_extracts_otp_fields(self, ngfw, deployment_profile):
+        """OTP fields are extracted from parameters."""
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        result = hydrate_ngfw(
+            ngfw=ngfw,
+            deployment_profile=deployment_profile,
+            registration_method="otp",
+            otp_value="OTP123456",
+            otp_folder="my-otp-folder",
+        )
+
+        assert result["otp_value"] == "OTP123456"
+        assert result["otp_folder"] == "my-otp-folder"
+
+    def test_scm_fields_are_none_for_otp(self, ngfw, deployment_profile):
+        """SCM fields are None when using OTP registration."""
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        result = hydrate_ngfw(
+            ngfw=ngfw,
+            deployment_profile=deployment_profile,
+            registration_method="otp",
+            otp_value="OTP123456",
+            otp_folder="my-otp-folder",
+        )
+
+        assert result["scm_folder_name"] is None
+        assert result["scm_pin_id"] is None
+        assert result["scm_pin_value"] is None
+        assert result["sls_region"] is None
+
+    # --- Error handling ---
+
+    def test_raises_when_authcode_missing(self, ngfw, deployment_profile_type, user):
+        """Raises CMSError when deployment profile is missing authcode."""
+        from cms.exceptions import CMSError
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        # Create profile without authcode
+        bad_profile = Credential.objects.create(
+            user=user,
+            name="Bad Profile",
+            credential_type=deployment_profile_type,
+            data={},  # No authcode
+        )
+
+        with pytest.raises(CMSError, match="authcode"):
+            hydrate_ngfw(
+                ngfw=ngfw,
+                deployment_profile=bad_profile,
+                registration_method="otp",
+                otp_value="OTP123",
+                otp_folder="folder",
+            )
+
+    def test_raises_when_scm_credential_missing_for_pin(
+        self, ngfw, deployment_profile
+    ):
+        """Raises CMSError when PIN registration lacks SCM credential."""
+        from cms.exceptions import CMSError
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        with pytest.raises(CMSError, match="SCM credential required"):
+            hydrate_ngfw(
+                ngfw=ngfw,
+                deployment_profile=deployment_profile,
+                registration_method="pin",
+                scm_credential=None,  # Missing!
+            )
+
+    def test_raises_when_scm_fields_missing(
+        self, ngfw, deployment_profile, scm_credential_type, user
+    ):
+        """Raises CMSError when SCM credential is missing required fields."""
+        from cms.exceptions import CMSError
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        # Create SCM credential missing some fields
+        bad_scm = Credential.objects.create(
+            user=user,
+            name="Bad SCM",
+            credential_type=scm_credential_type,
+            data={"scm_folder_name": "folder"},  # Missing pin_id and pin_value
+        )
+
+        with pytest.raises(CMSError, match="missing required fields"):
+            hydrate_ngfw(
+                ngfw=ngfw,
+                deployment_profile=deployment_profile,
+                registration_method="pin",
+                scm_credential=bad_scm,
+            )
+
+    def test_raises_when_otp_value_missing(self, ngfw, deployment_profile):
+        """Raises CMSError when OTP registration lacks otp_value."""
+        from cms.exceptions import CMSError
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        with pytest.raises(CMSError, match="OTP value and folder required"):
+            hydrate_ngfw(
+                ngfw=ngfw,
+                deployment_profile=deployment_profile,
+                registration_method="otp",
+                otp_value=None,  # Missing!
+                otp_folder="folder",
+            )
+
+    def test_raises_when_otp_folder_missing(self, ngfw, deployment_profile):
+        """Raises CMSError when OTP registration lacks otp_folder."""
+        from cms.exceptions import CMSError
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        with pytest.raises(CMSError, match="OTP value and folder required"):
+            hydrate_ngfw(
+                ngfw=ngfw,
+                deployment_profile=deployment_profile,
+                registration_method="otp",
+                otp_value="OTP123",
+                otp_folder=None,  # Missing!
+            )
+
+    # --- Optional fields ---
+
+    def test_sls_region_is_optional(
+        self, ngfw, deployment_profile, scm_credential_type, user
+    ):
+        """sls_region is optional in SCM credential."""
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        # Create SCM credential without sls_region
+        scm_no_region = Credential.objects.create(
+            user=user,
+            name="SCM No Region",
+            credential_type=scm_credential_type,
+            data={
+                "scm_folder_name": "folder",
+                "scm_pin_id": "pin-id",
+                "scm_pin_value": "pin-value",
+                # No sls_region
+            },
+        )
+
+        result = hydrate_ngfw(
+            ngfw=ngfw,
+            deployment_profile=deployment_profile,
+            registration_method="pin",
+            scm_credential=scm_no_region,
+        )
+
+        assert result["sls_region"] is None
+
+
+@pytest.mark.django_db
+class TestHydrateNgfwLogging:
+    """Tests for hydrate_ngfw logging behavior."""
+
+    def test_logs_debug_on_success(
+        self, ngfw, deployment_profile, scm_credential, caplog
+    ):
+        """Logs debug on successful hydration."""
+        import logging
+
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        with caplog.at_level(logging.DEBUG, logger="cms.scenarios.hydrator"):
+            hydrate_ngfw(
+                ngfw=ngfw,
+                deployment_profile=deployment_profile,
+                registration_method="pin",
+                scm_credential=scm_credential,
+            )
+
+        assert str(ngfw.id) in caplog.text or "hydrate_ngfw" in caplog.text
+
+    def test_does_not_log_secrets(
+        self, ngfw, deployment_profile, scm_credential, caplog
+    ):
+        """Does not log authcode or PIN values."""
+        import logging
+
+        from cms.scenarios.hydrator import hydrate_ngfw
+
+        with caplog.at_level(logging.DEBUG, logger="cms.scenarios.hydrator"):
+            hydrate_ngfw(
+                ngfw=ngfw,
+                deployment_profile=deployment_profile,
+                registration_method="pin",
+                scm_credential=scm_credential,
+            )
+
+        # Secrets should not appear in logs
+        assert "D1234567" not in caplog.text  # authcode
+        assert "secret-pin-value" not in caplog.text  # PIN value

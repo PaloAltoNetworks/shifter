@@ -11,7 +11,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from cms.models import Credential, UserNGFW
+from cms.models import NGFW, Credential, CredentialType
 from engine.models import Range
 
 User = get_user_model()
@@ -43,67 +43,77 @@ def user2(db):
 
 
 @pytest.fixture
-def deployment_profile(user, db):
-    """Create a deployment profile credential for testing."""
-    return Credential.objects.create(
-        user=user,
-        name="Test Deployment Profile",
-        credential_type=Credential.Type.DEPLOYMENT_PROFILE,
-        authcode="D1234567",
+def deployment_profile_type(db):
+    """Create deployment profile credential type."""
+    return CredentialType.objects.create(
+        name="Deployment Profile",
+        slug="deployment_profile",
+        spec_class="shared.schemas.DeploymentProfileSpec",
     )
 
 
 @pytest.fixture
-def scm_credential(user, db):
+def scm_credential_type(db):
+    """Create SCM credential type."""
+    return CredentialType.objects.create(
+        name="SCM Credential",
+        slug="scm",
+        spec_class="shared.schemas.SCMCredentialSpec",
+    )
+
+
+@pytest.fixture
+def deployment_profile(user, deployment_profile_type, db):
+    """Create a deployment profile credential for testing."""
+    return Credential.objects.create(
+        user=user,
+        name="Test Deployment Profile",
+        credential_type=deployment_profile_type,
+        data={"authcode": "D1234567"},
+    )
+
+
+@pytest.fixture
+def scm_credential(user, scm_credential_type, db):
     """Create an SCM credential for testing."""
     return Credential.objects.create(
         user=user,
         name="Test SCM Credential",
-        credential_type=Credential.Type.SCM,
-        scm_folder_name="test-folder",
-        scm_pin_id="pin-123",
-        scm_pin_value="secret-pin-value",
-        sls_region="americas",
+        credential_type=scm_credential_type,
+        data={
+            "scm_folder_name": "test-folder",
+            "scm_pin_id": "pin-123",
+            "scm_pin_value": "secret-pin-value",
+            "sls_region": "americas",
+        },
     )
 
 
 @pytest.fixture
 def user_ngfw(user, db):
-    """Create a UserNGFW for testing.
+    """Create a NGFW for testing.
 
-    Note: UserNGFW no longer has credential FKs. Credentials are managed by CMS
+    Note: NGFW no longer has credential FKs. Credentials are managed by CMS
     and passed as hydrated config values at provisioning time.
     """
-    return UserNGFW.objects.create(
+    return NGFW.objects.create(
         user=user,
         name="Test NGFW",
-        status=UserNGFW.Status.READY,
+        status=NGFW.Status.READY,
     )
 
 
 @pytest.fixture
 def provisioned_ngfw(user, db):
-    """Create a fully provisioned UserNGFW with AWS resources.
+    """Create a fully provisioned NGFW.
 
-    Note: UserNGFW no longer has credential FKs. Credentials are managed by CMS
-    and passed as hydrated config values at provisioning time.
+    Note: CMS NGFW only tracks logical asset state (name, status, ngfw_spec).
+    AWS resources and infrastructure details are owned by Engine NGFW.
     """
-    return UserNGFW.objects.create(
+    return NGFW.objects.create(
         user=user,
         name="Provisioned NGFW",
-        status=UserNGFW.Status.ACTIVE,
-        instance_id="i-1234567890abcdef0",
-        mgmt_eni_id="eni-mgmt123",
-        data_eni_id="eni-data456",
-        management_ip="10.0.1.100",
-        dataplane_ip="10.0.2.100",
-        gwlb_arn="arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/gwy/test-gwlb/abc123",
-        target_group_arn="arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/test-tg/def456",
-        gwlb_service_name="com.amazonaws.vpce.us-east-1.vpce-svc-abc123",
-        serial_number="001234567890",
-        device_cert_status="valid",
-        xdr_configured=True,
-        provisioned_at=timezone.now(),
+        status=NGFW.Status.ACTIVE,
     )
 
 
@@ -156,7 +166,7 @@ class TestNGFWListView:
         ngfws = list(response.context["ngfws"])
         assert len(ngfws) == 1
         # Verify status is accessible and correct
-        assert ngfws[0].status == UserNGFW.Status.READY
+        assert ngfws[0].status == NGFW.Status.READY
         assert ngfws[0].get_status_display() == "Ready"
 
     def test_excludes_deleted_ngfws(self, user, user_ngfw, db):
@@ -174,17 +184,17 @@ class TestNGFWListView:
     def test_excludes_other_users_ngfws(self, user, user2, db):
         """User should only see their own NGFWs, not other users'."""
         # Create NGFW for user1 (the requesting user)
-        UserNGFW.objects.create(
+        NGFW.objects.create(
             user=user,
             name="User1 NGFW",
-            status=UserNGFW.Status.READY,
+            status=NGFW.Status.READY,
         )
 
         # Create NGFW for user2
-        UserNGFW.objects.create(
+        NGFW.objects.create(
             user=user2,
             name="User2 NGFW",
-            status=UserNGFW.Status.READY,
+            status=NGFW.Status.READY,
         )
 
         client = get_authenticated_client(user)
@@ -195,7 +205,7 @@ class TestNGFWListView:
         ngfws = list(response.context["ngfws"])
         assert len(ngfws) == 1
         assert ngfws[0].name == "User1 NGFW"
-        assert ngfws[0].user_id == user.id
+        # Note: NGFWAppContext doesn't expose user_id - isolation verified by name
 
 
 # -----------------------------------------------------------------------------
@@ -222,17 +232,17 @@ class TestNGFWDetailView:
         """Non-existent NGFW ID should return 404."""
         client = get_authenticated_client(user)
         # Use dynamic non-existent ID instead of magic number
-        max_id = UserNGFW.objects.order_by("-id").values_list("id", flat=True).first() or 0
+        max_id = NGFW.objects.order_by("-id").values_list("id", flat=True).first() or 0
         nonexistent_id = max_id + 1
         response = client.get(reverse("mission_control:ngfw_detail", args=[nonexistent_id]))
         assert response.status_code == 404
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to view another user's NGFW."""
-        other_ngfw = UserNGFW.objects.create(
+        other_ngfw = NGFW.objects.create(
             user=user2,
             name="Other User NGFW",
-            status=UserNGFW.Status.READY,
+            status=NGFW.Status.READY,
         )
 
         client = get_authenticated_client(user)
@@ -247,7 +257,7 @@ class TestNGFWDetailView:
         assert response.status_code == 200
         assert response.context["page_title"] == "Test NGFW"
         assert response.context["active_nav"] == "ngfw"
-        assert response.context["ngfw"].id == user_ngfw.id
+        assert response.context["ngfw"].app_id == user_ngfw.id
 
     def test_shows_aws_resources(self, user, provisioned_ngfw, db):
         """AWS resource info should be displayed."""
@@ -270,22 +280,9 @@ class TestNGFWDetailView:
 
     def test_shows_linked_ranges(self, user, provisioned_ngfw, db):
         """Ranges linked to this NGFW should be displayed."""
-        from cms.models import AgentConfig, OperatingSystem
-
-        # Create an agent and range linked to this NGFW
-        windows_os = OperatingSystem.objects.get(slug="windows")
-        agent = AgentConfig.objects.create(
-            user=user,
-            os=windows_os,
-            name="Test Agent",
-            s3_key="agents/1/test.msi",
-            original_filename="test.msi",
-            file_size_bytes=1000,
-            sha256_hash="test",
-        )
+        # Create a range linked to this NGFW
         Range.objects.create(
             user=user,
-            agent=agent,
             ngfw=provisioned_ngfw,
             status=Range.Status.READY,
         )
@@ -344,17 +341,19 @@ class TestNGFWWizardView:
         assert len(response.context["deployment_profiles"]) == 1
         assert response.context["deployment_profiles"][0].name == "Test Deployment Profile"
 
-    def test_excludes_expired_credentials(self, user, db):
+    def test_excludes_expired_credentials(self, user, scm_credential_type, db):
         """Expired credentials should not be listed."""
         # Create expired SCM credential
         Credential.objects.create(
             user=user,
             name="Expired Credential",
-            credential_type=Credential.Type.SCM,
-            scm_folder_name="expired-folder",
-            scm_pin_id="pin-expired",
-            scm_pin_value="expired-value",
-            sls_region="americas",
+            credential_type=scm_credential_type,
+            data={
+                "scm_folder_name": "expired-folder",
+                "scm_pin_id": "pin-expired",
+                "scm_pin_value": "expired-value",
+                "sls_region": "americas",
+            },
             expires_at=timezone.now() - timezone.timedelta(days=1),
         )
 
@@ -393,29 +392,16 @@ class TestNGFWDeprovisionView:
         response = client.get(reverse("mission_control:ngfw_deprovision", args=[user_ngfw.id]))
 
         assert response.status_code == 200
-        assert response.context["ngfw"].id == user_ngfw.id
+        assert response.context["ngfw"].app_id == user_ngfw.id
         content = response.content.decode()
         # Warning text should appear
         assert "deactivate" in content.lower() or "deprovision" in content.lower()
 
     def test_shows_linked_ranges_warning(self, user, provisioned_ngfw, db):
         """Warning should show linked ranges."""
-        from cms.models import AgentConfig, OperatingSystem
-
         # Create a range linked to this NGFW
-        windows_os = OperatingSystem.objects.get(slug="windows")
-        agent = AgentConfig.objects.create(
-            user=user,
-            os=windows_os,
-            name="Test Agent",
-            s3_key="agents/1/test.msi",
-            original_filename="test.msi",
-            file_size_bytes=1000,
-            sha256_hash="test",
-        )
         Range.objects.create(
             user=user,
-            agent=agent,
             ngfw=provisioned_ngfw,
             status=Range.Status.READY,
         )
@@ -428,10 +414,10 @@ class TestNGFWDeprovisionView:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to deprovision another user's NGFW."""
-        other_ngfw = UserNGFW.objects.create(
+        other_ngfw = NGFW.objects.create(
             user=user2,
             name="Other User NGFW",
-            status=UserNGFW.Status.READY,
+            status=NGFW.Status.READY,
         )
 
         client = get_authenticated_client(user)
@@ -504,7 +490,7 @@ class TestNGFWProvisionAPI:
         assert response.status_code == 400
 
     def test_creates_ngfw_record(self, user, deployment_profile, db):
-        """Valid request should create a UserNGFW record and return its ID."""
+        """Valid request should create a NGFW record and return its ID."""
         client = get_authenticated_client(user)
         response = client.post(
             reverse("mission_control:api_ngfw_provision"),
@@ -521,8 +507,8 @@ class TestNGFWProvisionAPI:
         assert response.status_code == 201
 
         # Verify database record was created
-        assert UserNGFW.objects.filter(name="New NGFW", user=user).exists()
-        ngfw = UserNGFW.objects.get(name="New NGFW", user=user)
+        assert NGFW.objects.filter(name="New NGFW", user=user).exists()
+        ngfw = NGFW.objects.get(name="New NGFW", user=user)
 
         # Verify response contains correct data
         data = response.json()
@@ -534,7 +520,7 @@ class TestNGFWProvisionAPI:
     def test_creates_with_pin_method(self, user, deployment_profile, scm_credential, db):
         """Can provision using PIN method with validated SCM credential.
 
-        Note: UserNGFW no longer stores credential FKs. CMS manages credentials
+        Note: NGFW no longer stores credential FKs. CMS manages credentials
         and passes hydrated config to Engine at provisioning time.
         """
         client = get_authenticated_client(user)
@@ -549,9 +535,9 @@ class TestNGFWProvisionAPI:
             content_type="application/json",
         )
         assert response.status_code == 201
-        ngfw = UserNGFW.objects.get(name="PIN NGFW")
+        ngfw = NGFW.objects.get(name="PIN NGFW")
         assert ngfw.user == user
-        assert ngfw.status == UserNGFW.Status.PROVISIONING
+        assert ngfw.status == NGFW.Status.PROVISIONING
 
     def test_400_for_invalid_deployment_profile_id(self, user, db):
         """Invalid deployment_profile_id should return 400."""
@@ -641,17 +627,17 @@ class TestNGFWListAPI:
     def test_excludes_other_users_ngfws(self, user, user2, db):
         """Should not return other user's NGFWs."""
         # Create NGFW for user1
-        UserNGFW.objects.create(
+        NGFW.objects.create(
             user=user,
             name="User1 NGFW",
-            status=UserNGFW.Status.READY,
+            status=NGFW.Status.READY,
         )
 
         # Create NGFW for user2
-        UserNGFW.objects.create(
+        NGFW.objects.create(
             user=user2,
             name="User2 NGFW",
-            status=UserNGFW.Status.READY,
+            status=NGFW.Status.READY,
         )
 
         client = get_authenticated_client(user)
@@ -702,10 +688,10 @@ class TestNGFWStatusAPI:
 
     def test_returns_provisioning_progress(self, user, db):
         """Should return progress for provisioning NGFWs."""
-        ngfw = UserNGFW.objects.create(
+        ngfw = NGFW.objects.create(
             user=user,
             name="Provisioning NGFW",
-            status=UserNGFW.Status.PROVISIONING,
+            status=NGFW.Status.PROVISIONING,
         )
 
         client = get_authenticated_client(user)
@@ -717,10 +703,10 @@ class TestNGFWStatusAPI:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not see another user's NGFW status."""
-        other_ngfw = UserNGFW.objects.create(
+        other_ngfw = NGFW.objects.create(
             user=user2,
             name="Other NGFW",
-            status=UserNGFW.Status.READY,
+            status=NGFW.Status.READY,
         )
 
         client = get_authenticated_client(user)
@@ -750,10 +736,10 @@ class TestNGFWStartAPI:
 
     def test_starts_stopped_ngfw(self, user, db):
         """Should start a stopped NGFW - transitions to running state."""
-        ngfw = UserNGFW.objects.create(
+        ngfw = NGFW.objects.create(
             user=user,
             name="Stopped NGFW",
-            status=UserNGFW.Status.STOPPED,
+            status=NGFW.Status.STOPPED,
             instance_id="i-123456",
         )
 
@@ -763,10 +749,10 @@ class TestNGFWStartAPI:
         assert response.status_code == 200
         ngfw.refresh_from_db()
         # Status should be ACTIVE (sync implementation) or STARTING (async implementation)
-        assert ngfw.status in [UserNGFW.Status.ACTIVE, UserNGFW.Status.STARTING]
+        assert ngfw.status in [NGFW.Status.ACTIVE, NGFW.Status.STARTING]
         # For sync implementation, verify final state
-        if ngfw.status == UserNGFW.Status.ACTIVE:
-            assert ngfw.status != UserNGFW.Status.STOPPED  # Not still stopped
+        if ngfw.status == NGFW.Status.ACTIVE:
+            assert ngfw.status != NGFW.Status.STOPPED  # Not still stopped
 
     def test_starts_ready_ngfw(self, user, user_ngfw, db):
         """Should start a ready NGFW - transitions to running state."""
@@ -776,7 +762,7 @@ class TestNGFWStartAPI:
         assert response.status_code == 200
         user_ngfw.refresh_from_db()
         # Status should be ACTIVE (sync implementation) or STARTING (async implementation)
-        assert user_ngfw.status in [UserNGFW.Status.ACTIVE, UserNGFW.Status.STARTING]
+        assert user_ngfw.status in [NGFW.Status.ACTIVE, NGFW.Status.STARTING]
 
     def test_400_for_already_active(self, user, provisioned_ngfw, db):
         """Starting an already active NGFW should return 400."""
@@ -789,10 +775,10 @@ class TestNGFWStartAPI:
 
     def test_400_for_provisioning_ngfw(self, user, db):
         """Cannot start an NGFW that is still provisioning."""
-        ngfw = UserNGFW.objects.create(
+        ngfw = NGFW.objects.create(
             user=user,
             name="Provisioning NGFW",
-            status=UserNGFW.Status.PROVISIONING,
+            status=NGFW.Status.PROVISIONING,
         )
 
         client = get_authenticated_client(user)
@@ -804,10 +790,10 @@ class TestNGFWStartAPI:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to start another user's NGFW."""
-        other_ngfw = UserNGFW.objects.create(
+        other_ngfw = NGFW.objects.create(
             user=user2,
             name="Other NGFW",
-            status=UserNGFW.Status.STOPPED,
+            status=NGFW.Status.STOPPED,
         )
 
         client = get_authenticated_client(user)
@@ -843,16 +829,16 @@ class TestNGFWStopAPI:
         assert response.status_code == 200
         provisioned_ngfw.refresh_from_db()
         # Status should be STOPPED (sync implementation) or STOPPING (async implementation)
-        assert provisioned_ngfw.status in [UserNGFW.Status.STOPPED, UserNGFW.Status.STOPPING]
+        assert provisioned_ngfw.status in [NGFW.Status.STOPPED, NGFW.Status.STOPPING]
         # Verify it's no longer ACTIVE
-        assert provisioned_ngfw.status != UserNGFW.Status.ACTIVE
+        assert provisioned_ngfw.status != NGFW.Status.ACTIVE
 
     def test_400_for_already_stopped(self, user, db):
         """Stopping an already stopped NGFW should return 400."""
-        ngfw = UserNGFW.objects.create(
+        ngfw = NGFW.objects.create(
             user=user,
             name="Stopped NGFW",
-            status=UserNGFW.Status.STOPPED,
+            status=NGFW.Status.STOPPED,
         )
 
         client = get_authenticated_client(user)
@@ -864,10 +850,10 @@ class TestNGFWStopAPI:
 
     def test_400_for_provisioning_ngfw(self, user, db):
         """Cannot stop an NGFW that is still provisioning."""
-        ngfw = UserNGFW.objects.create(
+        ngfw = NGFW.objects.create(
             user=user,
             name="Provisioning NGFW",
-            status=UserNGFW.Status.PROVISIONING,
+            status=NGFW.Status.PROVISIONING,
         )
 
         client = get_authenticated_client(user)
@@ -879,10 +865,10 @@ class TestNGFWStopAPI:
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to stop another user's NGFW."""
-        other_ngfw = UserNGFW.objects.create(
+        other_ngfw = NGFW.objects.create(
             user=user2,
             name="Other NGFW",
-            status=UserNGFW.Status.ACTIVE,
+            status=NGFW.Status.ACTIVE,
         )
 
         client = get_authenticated_client(user)
@@ -948,14 +934,14 @@ class TestNGFWDeprovisionAPI:
 
         assert response.status_code == 200
         user_ngfw.refresh_from_db()
-        assert user_ngfw.status == UserNGFW.Status.DEPROVISIONING
+        assert user_ngfw.status == NGFW.Status.DEPROVISIONING
 
     def test_404_for_other_users_ngfw(self, user, user2, db):
         """User should not be able to deprovision another user's NGFW."""
-        other_ngfw = UserNGFW.objects.create(
+        other_ngfw = NGFW.objects.create(
             user=user2,
             name="Other NGFW",
-            status=UserNGFW.Status.READY,
+            status=NGFW.Status.READY,
         )
 
         client = get_authenticated_client(user)

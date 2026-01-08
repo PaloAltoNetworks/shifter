@@ -289,3 +289,95 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
                 }
             )
         )
+
+
+class NGFWStatusConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for real-time NGFW status updates.
+
+    Pushes status updates to browser during NGFW provisioning.
+    Uses "hydrate on connect, stream deltas" pattern.
+    Designed for long provisioning cycles (up to 40 minutes).
+
+    URL pattern: ws/ngfw-status/<ngfw_id>/
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.ngfw_id: int | None = None
+        self.group_name: str | None = None
+
+    async def connect(self):
+        """Handle WebSocket connection - join NGFW group and send initial state."""
+        from cms.services import get_ngfw as cms_get_ngfw
+        from shared.channels.groups import ngfw_event_group
+        from shared.exceptions import CMSError
+
+        # Verify authentication
+        user = self.scope.get("user")
+        if not user or isinstance(user, AnonymousUser):
+            logger.warning("Unauthenticated WebSocket connection attempt to NGFW status")
+            await self.close(code=WebSocketCloseCode.NOT_AUTHENTICATED)
+            return
+
+        # Get ngfw_id from URL (this is the CMS NGFW ID)
+        self.ngfw_id = int(self.scope["url_route"]["kwargs"]["ngfw_id"])
+        self.group_name = ngfw_event_group(self.ngfw_id)
+
+        # Verify user owns this NGFW via CMS (handles ownership check)
+        try:
+            ngfw = await sync_to_async(cms_get_ngfw)(user, self.ngfw_id)
+        except CMSError:
+            logger.warning(
+                "NGFW %s not found or not owned by user %s",
+                self.ngfw_id,
+                user.id,
+            )
+            await self.close(code=WebSocketCloseCode.NOT_FOUND)
+            return
+
+        # Join the NGFW group
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+
+        # Accept the connection
+        await self.accept()
+
+        # Hydrate: send current status immediately
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "status",
+                    "ngfw_id": self.ngfw_id,
+                    "status": ngfw.status,
+                }
+            )
+        )
+
+        logger.info("NGFW status WebSocket connected for NGFW %s", self.ngfw_id)
+
+    async def disconnect(self, close_code):
+        """Handle WebSocket disconnection - leave NGFW group."""
+        if self.group_name:
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+        logger.info(
+            "NGFW status WebSocket disconnected for NGFW %s (code: %s)",
+            self.ngfw_id,
+            close_code,
+        )
+
+    async def ngfw_status(self, event):
+        """Handle NGFW status update from channel layer.
+
+        Called when a status update is broadcast to the NGFW group.
+        """
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "status",
+                    "ngfw_id": event.get("ngfw_id"),
+                    "status": event.get("new_status"),
+                    "error_message": event.get("error_message"),
+                }
+            )
+        )

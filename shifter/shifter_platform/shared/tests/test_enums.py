@@ -1,79 +1,79 @@
 """Tests for shared.enums module."""
 
 
-class TestRangeStatus:
-    """Tests for RangeStatus enum."""
+class TestResourceStatus:
+    """Tests for ResourceStatus enum."""
 
     # ---------------------------------------------------------------------
     # Enum values - correct set of statuses
     # ---------------------------------------------------------------------
 
     def test_has_pending_status(self):
-        """RangeStatus has PENDING value."""
-        from shared.enums import RangeStatus
+        """ResourceStatus has PENDING value."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.PENDING == "pending"
+        assert ResourceStatus.PENDING == "pending"
 
     def test_has_provisioning_status(self):
-        """RangeStatus has PROVISIONING value."""
-        from shared.enums import RangeStatus
+        """ResourceStatus has PROVISIONING value."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.PROVISIONING == "provisioning"
+        assert ResourceStatus.PROVISIONING == "provisioning"
 
     def test_has_ready_status(self):
-        """RangeStatus has READY value."""
-        from shared.enums import RangeStatus
+        """ResourceStatus has READY value."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.READY == "ready"
+        assert ResourceStatus.READY == "ready"
 
     def test_has_paused_status(self):
-        """RangeStatus has PAUSED value."""
-        from shared.enums import RangeStatus
+        """ResourceStatus has PAUSED value."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.PAUSED == "paused"
+        assert ResourceStatus.PAUSED == "paused"
 
     def test_has_resuming_status(self):
-        """RangeStatus has RESUMING value."""
-        from shared.enums import RangeStatus
+        """ResourceStatus has RESUMING value."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.RESUMING == "resuming"
+        assert ResourceStatus.RESUMING == "resuming"
 
     def test_has_destroying_status(self):
-        """RangeStatus has DESTROYING value."""
-        from shared.enums import RangeStatus
+        """ResourceStatus has DESTROYING value."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.DESTROYING == "destroying"
+        assert ResourceStatus.DESTROYING == "destroying"
 
     def test_has_destroyed_status(self):
-        """RangeStatus has DESTROYED value."""
-        from shared.enums import RangeStatus
+        """ResourceStatus has DESTROYED value."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.DESTROYED == "destroyed"
+        assert ResourceStatus.DESTROYED == "destroyed"
 
     def test_has_failed_status(self):
-        """RangeStatus has FAILED value."""
-        from shared.enums import RangeStatus
+        """ResourceStatus has FAILED value."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.FAILED == "failed"
+        assert ResourceStatus.FAILED == "failed"
 
     # ---------------------------------------------------------------------
     # String behavior - enum is str subclass
     # ---------------------------------------------------------------------
 
     def test_is_string_enum(self):
-        """RangeStatus values are strings for JSON serialization."""
-        from shared.enums import RangeStatus
+        """ResourceStatus values are strings for JSON serialization."""
+        from shared.enums import ResourceStatus
 
-        assert isinstance(RangeStatus.PENDING, str)
+        assert isinstance(ResourceStatus.PENDING, str)
         # Value is the string "pending", direct comparison works
-        assert RangeStatus.PENDING.value == "pending"
+        assert ResourceStatus.PENDING.value == "pending"
 
     def test_string_comparison(self):
-        """RangeStatus can be compared directly with strings."""
-        from shared.enums import RangeStatus
+        """ResourceStatus can be compared directly with strings."""
+        from shared.enums import ResourceStatus
 
-        assert RangeStatus.READY == "ready"
-        assert RangeStatus.READY == "ready"
+        assert ResourceStatus.READY == "ready"
+        assert ResourceStatus.READY == "ready"
 
     # ---------------------------------------------------------------------
     # Status groupings - lifecycle categories
@@ -81,34 +81,34 @@ class TestRangeStatus:
 
     def test_active_statuses_group(self):
         """ACTIVE_STATUSES contains non-terminal states."""
-        from shared.enums import ACTIVE_STATUSES, RangeStatus
+        from shared.enums import ACTIVE_STATUSES, ResourceStatus
 
         expected = {
-            RangeStatus.PENDING,
-            RangeStatus.PROVISIONING,
-            RangeStatus.READY,
-            RangeStatus.PAUSED,
-            RangeStatus.RESUMING,
-            RangeStatus.DESTROYING,
+            ResourceStatus.PENDING,
+            ResourceStatus.PROVISIONING,
+            ResourceStatus.READY,
+            ResourceStatus.PAUSED,
+            ResourceStatus.RESUMING,
+            ResourceStatus.DESTROYING,
         }
         assert expected == ACTIVE_STATUSES
 
     def test_terminal_statuses_group(self):
         """TERMINAL_STATUSES contains end states."""
-        from shared.enums import TERMINAL_STATUSES, RangeStatus
+        from shared.enums import TERMINAL_STATUSES, ResourceStatus
 
         expected = {
-            RangeStatus.DESTROYED,
-            RangeStatus.FAILED,
+            ResourceStatus.DESTROYED,
+            ResourceStatus.FAILED,
         }
         assert expected == TERMINAL_STATUSES
 
     def test_cancellable_statuses_group(self):
         """CANCELLABLE_STATUSES contains states that can be cancelled."""
-        from shared.enums import CANCELLABLE_STATUSES, RangeStatus
+        from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
 
         expected = {
-            RangeStatus.PENDING,
-            RangeStatus.PROVISIONING,
+            ResourceStatus.PENDING,
+            ResourceStatus.PROVISIONING,
         }
         assert expected == CANCELLABLE_STATUSES

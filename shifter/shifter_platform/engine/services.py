@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from shared.enums import CANCELLABLE_STATUSES, RangeStatus
+from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
 from shared.schemas import InstanceSpec, RangeContext, RangeSpec
 
 if TYPE_CHECKING:
@@ -116,17 +116,21 @@ def destroy_range(request: RangeContext) -> bool:
         return False
 
     # Already destroyed - nothing to do
-    if range_obj.status == RangeStatus.DESTROYED:
-        logger.warning("destroy_range: range already destroyed range_id=%s", request.range_id)
+    if range_obj.status == ResourceStatus.DESTROYED:
+        logger.warning(
+            "destroy_range: range already destroyed range_id=%s", request.range_id
+        )
         return False
 
     # Already destroying - idempotent success
-    if range_obj.status == RangeStatus.DESTROYING:
-        logger.info("destroy_range: range already destroying range_id=%s", request.range_id)
+    if range_obj.status == ResourceStatus.DESTROYING:
+        logger.info(
+            "destroy_range: range already destroying range_id=%s", request.range_id
+        )
         return True
 
     # Set status and trigger teardown
-    range_obj.status = RangeStatus.DESTROYING.value
+    range_obj.status = ResourceStatus.DESTROYING.value
     range_obj.save(update_fields=["status"])
 
     logger.info("destroy_range: set status to DESTROYING range_id=%s", request.range_id)
@@ -171,7 +175,9 @@ def cancel_range(range_ctx: RangeContext) -> None:
             "cancel_range called with invalid type: %s",
             type(range_ctx).__name__,
         )
-        raise TypeError(f"range_ctx must be RangeContext, got {type(range_ctx).__name__}")
+        raise TypeError(
+            f"range_ctx must be RangeContext, got {type(range_ctx).__name__}"
+        )
 
     if range_ctx.range_id is None:
         logger.error("cancel_range called with None range_id")
@@ -208,7 +214,7 @@ def cancel_range(range_ctx: RangeContext) -> None:
         )
         return
 
-    range_ctx.status = RangeStatus.DESTROYING
+    range_ctx.status = ResourceStatus.DESTROYING
     range_obj.status = Range.Status.DESTROYING
     range_obj.save(update_fields=["status"])
 
@@ -242,7 +248,9 @@ def get_range_status(range_id: int) -> dict[str, Any] | None:
         "status": range_obj.status,
         "error_message": range_obj.error_message,
         "instances": range_obj.provisioned_instances or [],
-        "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
+        "created_at": (
+            range_obj.created_at.isoformat() if range_obj.created_at else None
+        ),
         "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
     }
 
@@ -287,7 +295,9 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
-    logger.debug("connect_terminal: range_id=%s instance_uuid=%s", range_id, instance_uuid)
+    logger.debug(
+        "connect_terminal: range_id=%s instance_uuid=%s", range_id, instance_uuid
+    )
 
     # Fetch range
     try:
@@ -298,18 +308,24 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
 
     # Verify ownership
     if range_obj.user.id != user.id:
-        logger.error("Permission denied: user=%s does not own range=%s", user.id, range_id)
+        logger.error(
+            "Permission denied: user=%s does not own range=%s", user.id, range_id
+        )
         raise PermissionError("User does not own this range")
 
     # Verify range is ready
     if range_obj.status != Range.Status.READY:
-        logger.error("Range not ready: range_id=%s status=%s", range_id, range_obj.status)
+        logger.error(
+            "Range not ready: range_id=%s status=%s", range_id, range_obj.status
+        )
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
     # Find instance by UUID
     instance = range_obj.get_instance_by_uuid(instance_uuid)
     if instance is None:
-        logger.error("Instance not found: range_id=%s instance_uuid=%s", range_id, instance_uuid)
+        logger.error(
+            "Instance not found: range_id=%s instance_uuid=%s", range_id, instance_uuid
+        )
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     # Get SSH key from secrets

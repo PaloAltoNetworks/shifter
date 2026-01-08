@@ -70,7 +70,7 @@ class TestSecretsService:
 
 
 @pytest.mark.django_db
-class TestGetRangeStatus:
+class TestGetResourceStatus:
     """Tests for get_range_status() in engine/services.py.
 
     Tests SERVICE behavior with mocked model layer:
@@ -248,7 +248,9 @@ class TestGetRangeStatus:
         from engine.models import Range
 
         with (
-            patch.object(Range.objects, "get", side_effect=RuntimeError("DB connection failed")),
+            patch.object(
+                Range.objects, "get", side_effect=RuntimeError("DB connection failed")
+            ),
             pytest.raises(RuntimeError),
         ):
             get_range_status(42)
@@ -307,7 +309,9 @@ class TestGetRangeStatus:
         from engine.models import Range
 
         with (
-            patch.object(Range.objects, "get", side_effect=ValueError("invalid literal")),
+            patch.object(
+                Range.objects, "get", side_effect=ValueError("invalid literal")
+            ),
             pytest.raises(ValueError),
         ):
             get_range_status("not-an-id")
@@ -380,7 +384,9 @@ class TestCreateRange:
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
+            patch.object(
+                Range.objects, "create", return_value=mock_range
+            ) as mock_create,
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
         ):
@@ -403,7 +409,9 @@ class TestCreateRange:
         with (
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch.object(Range, "allocate_subnet_index", return_value=5) as mock_allocate,
+            patch.object(
+                Range, "allocate_subnet_index", return_value=5
+            ) as mock_allocate,
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
         ):
             create_range(valid_range_spec)
@@ -424,7 +432,9 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test") as mock_start,
+            patch(
+                "engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"
+            ) as mock_start,
         ):
             create_range(valid_range_spec)
             mock_start.assert_called_once_with(42, 1)
@@ -517,7 +527,11 @@ class TestCreateRange:
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", side_effect=ValueError("No subnets available")),
+            patch.object(
+                Range,
+                "allocate_subnet_index",
+                side_effect=ValueError("No subnets available"),
+            ),
             pytest.raises(ValueError, match="No subnets available"),
         ):
             create_range(valid_range_spec)
@@ -536,7 +550,9 @@ class TestCreateRange:
         with (
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", side_effect=DatabaseError("DB error")),
+            patch.object(
+                Range.objects, "create", side_effect=DatabaseError("DB error")
+            ),
             pytest.raises(DatabaseError),
         ):
             create_range(valid_range_spec)
@@ -559,7 +575,10 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch(
                 "engine.ecs.start_provisioning",
-                side_effect=ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "RunTask"),
+                side_effect=ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+                    "RunTask",
+                ),
             ),
             pytest.raises(ClientError),
         ):
@@ -610,14 +629,14 @@ class TestDestroyRange:
     @pytest.fixture
     def range_context(self):
         """Return a valid RangeContext for testing."""
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
         from shared.schemas import RangeContext
 
         return RangeContext(
             range_id=42,
             user_id=1,
             scenario_id="test-scenario",
-            status=RangeStatus.READY,
+            status=ResourceStatus.READY,
             instances=[],
         )
 
@@ -629,7 +648,7 @@ class TestDestroyRange:
         """Service sets Range status to DESTROYING."""
         from engine import destroy_range
         from engine.models import Range
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
 
         mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
 
@@ -638,7 +657,7 @@ class TestDestroyRange:
             patch("engine.ecs.start_teardown", return_value="arn:aws:ecs:test"),
         ):
             destroy_range(range_context)
-            assert mock_range.status == RangeStatus.DESTROYING.value
+            assert mock_range.status == ResourceStatus.DESTROYING.value
             mock_range.save.assert_called()
 
     def test_calls_range_get_with_range_id(self, range_context):
@@ -664,7 +683,9 @@ class TestDestroyRange:
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range),
-            patch("engine.ecs.start_teardown", return_value="arn:aws:ecs:test") as mock_teardown,
+            patch(
+                "engine.ecs.start_teardown", return_value="arn:aws:ecs:test"
+            ) as mock_teardown,
         ):
             destroy_range(range_context)
             mock_teardown.assert_called_once_with(42, 1)
@@ -724,9 +745,9 @@ class TestDestroyRange:
         """Service returns False when range already destroyed."""
         from engine import destroy_range
         from engine.models import Range
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
 
-        mock_range = Mock(spec=Range, id=42, status=RangeStatus.DESTROYED)
+        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.DESTROYED)
 
         with (
             caplog.at_level(logging.WARNING, logger="engine"),
@@ -740,9 +761,9 @@ class TestDestroyRange:
         """Service returns True (idempotent) when range already being destroyed."""
         from engine import destroy_range
         from engine.models import Range
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
 
-        mock_range = Mock(spec=Range, id=42, status=RangeStatus.DESTROYING)
+        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.DESTROYING)
 
         with (
             caplog.at_level(logging.INFO, logger="engine"),
@@ -769,7 +790,10 @@ class TestDestroyRange:
             patch.object(Range.objects, "get", return_value=mock_range),
             patch(
                 "engine.ecs.start_teardown",
-                side_effect=ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "RunTask"),
+                side_effect=ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+                    "RunTask",
+                ),
             ),
             pytest.raises(ClientError),
         ):
@@ -794,42 +818,42 @@ class TestCancelRange:
     @pytest.fixture
     def pending_range_context(self):
         """Return a RangeContext for a pending range."""
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
         from shared.schemas import RangeContext
 
         return RangeContext(
             range_id=42,
             user_id=1,
             scenario_id="test-scenario",
-            status=RangeStatus.PENDING,
+            status=ResourceStatus.PENDING,
             instances=[],
         )
 
     @pytest.fixture
     def provisioning_range_context(self):
         """Return a RangeContext for a provisioning range."""
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
         from shared.schemas import RangeContext
 
         return RangeContext(
             range_id=42,
             user_id=1,
             scenario_id="test-scenario",
-            status=RangeStatus.PROVISIONING,
+            status=ResourceStatus.PROVISIONING,
             instances=[],
         )
 
     @pytest.fixture
     def ready_range_context(self):
         """Return a RangeContext for a ready range (not cancellable)."""
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
         from shared.schemas import RangeContext
 
         return RangeContext(
             range_id=42,
             user_id=1,
             scenario_id="test-scenario",
-            status=RangeStatus.READY,
+            status=ResourceStatus.READY,
             instances=[],
         )
 
@@ -929,7 +953,9 @@ class TestCancelRange:
             assert result is None
         assert "not found" in caplog.text.lower()
 
-    def test_returns_silently_when_range_not_cancellable(self, ready_range_context, caplog):
+    def test_returns_silently_when_range_not_cancellable(
+        self, ready_range_context, caplog
+    ):
         """Service returns silently and logs warning when range is not cancellable."""
         from engine import cancel_range
         from engine.models import Range

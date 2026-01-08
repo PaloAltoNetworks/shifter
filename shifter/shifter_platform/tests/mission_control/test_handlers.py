@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 
 @pytest.mark.django_db
@@ -27,7 +27,9 @@ class TestProcessEvent:
             )
         }
 
-        with patch("mission_control.handlers.process_range_event") as mock_range_handler:
+        with patch(
+            "mission_control.handlers.process_range_event"
+        ) as mock_range_handler:
             process_event(message)
             mock_range_handler.assert_called_once_with(message)
 
@@ -172,7 +174,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 1,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -198,7 +200,7 @@ class TestProcessRangeEvent:
             sent_message = args[1]
             assert sent_message["type"] == "range.status"
             assert sent_message["range_id"] == 1
-            assert sent_message["new_status"] == RangeStatus.PROVISIONING.value
+            assert sent_message["new_status"] == ResourceStatus.PROVISIONING.value
 
     def test_broadcasts_error_message_when_present(self):
         """Handler includes error_message in broadcast when present."""
@@ -209,7 +211,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 2,
-                    "new_status": RangeStatus.FAILED.value,
+                    "new_status": ResourceStatus.FAILED.value,
                     "user_id": 42,
                     "error_message": "Subnet exhausted",
                 }
@@ -236,7 +238,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 3,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
                 }
             )
@@ -293,7 +295,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 5,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -367,7 +369,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 123,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
                 }
             )
@@ -396,7 +398,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 6,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )

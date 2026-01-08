@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 from shared.schemas import RangeContext
 
 
@@ -69,7 +69,7 @@ class TestCancelRange:
                 range_id=None,
                 user_id=1,
                 scenario_id="basic",
-                status=RangeStatus.DESTROYED,
+                status=ResourceStatus.DESTROYED,
                 instances=[],
                 agent_name="Test Agent",
             )
@@ -83,7 +83,7 @@ class TestCancelRange:
                 range_id=-1,
                 user_id=1,
                 scenario_id="basic",
-                status=RangeStatus.DESTROYED,
+                status=ResourceStatus.DESTROYED,
                 instances=[],
                 agent_name="Test Agent",
             )
@@ -100,7 +100,7 @@ class TestCancelRange:
             range_id=42,
             user_id=1,
             scenario_id="basic",
-            status=RangeStatus.DESTROYED,
+            status=ResourceStatus.DESTROYED,
             instances=[],
             agent_name="Test Agent",
         )
@@ -116,7 +116,7 @@ class TestCancelRange:
             range_id=100,
             user_id=5,
             scenario_id="ad_attack_lab",
-            status=RangeStatus.DESTROYED,
+            status=ResourceStatus.DESTROYED,
             instances=[],
             agent_name="Windows XDR Agent",
         )
@@ -136,7 +136,7 @@ class TestCancelRange:
             range_id=42,
             user_id=7,
             scenario_id="basic",
-            status=RangeStatus.DESTROYED,
+            status=ResourceStatus.DESTROYED,
             instances=[],
             agent_name="Test Agent",
         )
@@ -159,7 +159,7 @@ class TestCancelRange:
             range_id=42,
             user_id=1,
             scenario_id="basic",
-            status=RangeStatus.DESTROYED,
+            status=ResourceStatus.DESTROYED,
             instances=[],
             agent_name="Test Agent",
         )
@@ -208,7 +208,7 @@ class TestCancelRange:
                 range_id=None,
                 user_id=1,
                 scenario_id="basic",
-                status=RangeStatus.DESTROYED,
+                status=ResourceStatus.DESTROYED,
                 instances=[],
                 agent_name="Test Agent",
             )
@@ -223,7 +223,7 @@ class TestCancelRange:
                 range_id=-5,
                 user_id=1,
                 scenario_id="basic",
-                status=RangeStatus.DESTROYED,
+                status=ResourceStatus.DESTROYED,
                 instances=[],
                 agent_name="Test Agent",
             )

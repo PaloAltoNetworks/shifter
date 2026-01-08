@@ -12,39 +12,16 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import TYPE_CHECKING, Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from cms.exceptions import CMSError
-from shared.schemas import AgentDetails, DCConfig, InstanceSpec, RangeSpec
+from shared.schemas import AgentDetails, DCConfig, InstanceSpec, NGFWAppSpec, RangeSpec
 
 from .loader import load_scenario
 
 if TYPE_CHECKING:
     from cms.models import NGFW, AgentConfig, Credential
     from cms.scenarios.schema import InstanceConfig
-
-
-class NGFWProvisionRequest(TypedDict):
-    """Plain dict for Engine NGFW provisioning.
-
-    Engine doesn't have access to Pydantic schemas, so we pass a plain dict.
-    This TypedDict documents the expected structure.
-    """
-
-    ngfw_id: int
-    user_id: int
-    name: str
-    registration_method: Literal["pin", "otp"]
-    # Deployment profile data
-    authcode: str
-    # PIN registration fields (present if registration_method == "pin")
-    scm_folder_name: str | None
-    scm_pin_id: str | None
-    scm_pin_value: str | None
-    sls_region: str | None
-    # OTP registration fields (present if registration_method == "otp")
-    otp_value: str | None
-    otp_folder: str | None
 
 logger = logging.getLogger(__name__)
 
@@ -174,11 +151,11 @@ def hydrate_ngfw(
     scm_credential: Credential | None = None,
     otp_value: str | None = None,
     otp_folder: str | None = None,
-) -> NGFWProvisionRequest:
+) -> InstanceSpec:
     """Hydrate NGFW with credential data for Engine provisioning.
 
     Extracts actual credential values from Credential models and packages
-    them into a plain dict that Engine can consume without Pydantic.
+    them into an InstanceSpec with nested NGFWAppSpec for Engine.
 
     Args:
         ngfw: The NGFW model instance to provision
@@ -189,7 +166,7 @@ def hydrate_ngfw(
         otp_folder: OTP folder (required if registration_method="otp")
 
     Returns:
-        NGFWProvisionRequest dict with all credential data extracted
+        InstanceSpec with hydrated NGFWAppSpec for Engine consumption
 
     Raises:
         CMSError: If required credentials are missing or invalid
@@ -237,11 +214,16 @@ def hydrate_ngfw(
         registration_method,
     )
 
-    return NGFWProvisionRequest(
-        ngfw_id=ngfw.id,
-        user_id=ngfw.user_id,
+    # Create hydrated NGFWAppSpec with actual credential values
+    ngfw_app = NGFWAppSpec(
         name=ngfw.name,
         registration_method=registration_method,
+        # Input fields (IDs) - optional for hydrated spec
+        deployment_profile_id=deployment_profile.id,
+        scm_credential_id=scm_credential.id if scm_credential else None,
+        # Hydrated fields (actual values)
+        ngfw_id=ngfw.id,
+        user_id=ngfw.user_id,
         authcode=authcode,
         scm_folder_name=scm_folder_name,
         scm_pin_id=scm_pin_id,
@@ -249,4 +231,13 @@ def hydrate_ngfw(
         sls_region=sls_region,
         otp_value=otp_value if registration_method == "otp" else None,
         otp_folder=otp_folder if registration_method == "otp" else None,
+    )
+
+    # Return InstanceSpec with nested NGFWAppSpec
+    return InstanceSpec(
+        name=ngfw.name,
+        uuid=str(uuid.uuid4()),
+        role="ngfw",
+        os_type="panos",
+        ngfw_app=ngfw_app,
     )

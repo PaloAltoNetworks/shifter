@@ -52,6 +52,12 @@ class TestEngineExports:
 
         assert callable(connect_terminal)
 
+    def test_exports_create_ngfw(self):
+        """create_ngfw should be importable from engine."""
+        from engine import create_ngfw
+
+        assert callable(create_ngfw)
+
     def test_all_exports_match_declared(self):
         """__all__ should match actual exports."""
         import engine
@@ -60,6 +66,7 @@ class TestEngineExports:
             "EngineError",
             "cancel_range",
             "connect_terminal",
+            "create_ngfw",
             "create_range",
             "destroy_range",
             "get_range_status",

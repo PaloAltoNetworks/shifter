@@ -30,8 +30,9 @@ class AgentConfigAdmin(admin.ModelAdmin):
 
 @admin.register(NGFW)
 class NGFWAdmin(admin.ModelAdmin):
-    list_display = ("name", "user", "status", "serial_number", "created_at", "deleted_at")
+    # NOTE: serial_number, instance_id are on Engine NGFW model, not CMS NGFW
+    list_display = ("name", "user", "status", "created_at", "deleted_at")
     list_filter = ("status", "deleted_at", "created_at")
-    search_fields = ("name", "user__email", "serial_number", "instance_id")
+    search_fields = ("name", "user__email")
     raw_id_fields = ("user",)
     readonly_fields = ("created_at",)

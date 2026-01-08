@@ -10,13 +10,16 @@ incoming requests against them.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, computed_field, field_validator
 
 from shared.enums import RangeStatus
 
 from .base import SpecBase
+
+if TYPE_CHECKING:
+    from .app import NGFWAppSpec
 
 
 class AgentDetails(BaseModel):
@@ -48,22 +51,27 @@ class DCConfig(BaseModel):
 class InstanceSpec(SpecBase):
     """Single instance specification.
 
+    Supports both Range instances (attacker, victim, dc) and NGFW instances.
+    For NGFW instances, the ngfw_app field contains the hydrated NGFW spec.
+
     Attributes:
         name: User-friendly instance name (inherited from SpecBase).
         uuid: Unique identifier for this instance (assigned during hydration).
-        role: Instance role (attacker, victim, or dc).
-        os_type: Operating system type (kali, ubuntu, or windows).
+        role: Instance role (attacker, victim, dc, or ngfw).
+        os_type: Operating system type (kali, ubuntu, windows, or panos).
         agent: Optional agent details for agent installation.
         dc_config: Optional domain controller configuration.
         join_domain: Whether instance should join the domain (default False).
+        ngfw_app: Optional NGFW app spec for NGFW instances.
     """
 
     uuid: str | None = None
-    role: Literal["attacker", "victim", "dc"]
-    os_type: Literal["kali", "ubuntu", "windows"]
+    role: Literal["attacker", "victim", "dc", "ngfw"]
+    os_type: Literal["kali", "ubuntu", "windows", "panos"]
     agent: AgentDetails | None = None
     dc_config: DCConfig | None = None
     join_domain: bool = False
+    ngfw_app: NGFWAppSpec | None = None
 
 
 class RangeSpecBase(SpecBase):
@@ -270,3 +278,15 @@ class RangeRef(BaseModel):
         if v <= 0:
             raise ValueError("user_id must be a positive integer")
         return v
+
+
+# Rebuild InstanceSpec to resolve forward reference to NGFWAppSpec
+# This must be done after NGFWAppSpec is importable
+def _rebuild_instance_spec() -> None:
+    """Rebuild InstanceSpec model to resolve NGFWAppSpec forward reference."""
+    from .app import NGFWAppSpec  # noqa: F401
+
+    InstanceSpec.model_rebuild()
+
+
+_rebuild_instance_spec()

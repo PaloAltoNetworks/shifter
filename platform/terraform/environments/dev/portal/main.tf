@@ -262,6 +262,9 @@ module "ssm" {
   sqs_engine_url = module.messaging.sqs_queue_urls["engine"]
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
   redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
+
+  # Logging level (DEBUG for dev, INFO for prod)
+  log_level = var.log_level
 }
 
 # ------------------------------------------------------------------------------

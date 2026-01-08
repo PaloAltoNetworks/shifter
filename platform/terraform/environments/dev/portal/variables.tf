@@ -233,6 +233,16 @@ variable "redis_enable_replication" {
 }
 
 # ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+
+variable "log_level" {
+  description = "Django log level (DEBUG, INFO, WARNING, ERROR). Use DEBUG in dev for detailed event tracing."
+  type        = string
+  default     = "INFO"
+}
+
+# ------------------------------------------------------------------------------
 # Log Aggregation
 # ------------------------------------------------------------------------------
 

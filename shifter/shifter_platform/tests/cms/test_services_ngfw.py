@@ -16,13 +16,16 @@ from django.contrib.auth import get_user_model
 from cms import services
 from cms.exceptions import CMSError
 from cms.models import NGFW, Credential, CredentialType
+from shared.enums import InstanceStatus
 
 User = get_user_model()
 
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(username="test@example.com", email="test@example.com")
+    return User.objects.create_user(
+        username="test@example.com", email="test@example.com"
+    )
 
 
 @pytest.fixture
@@ -93,7 +96,7 @@ class TestCreateNgfw:
 
         ngfw = NGFW.objects.get(user=user)
         assert ngfw.name == "My NGFW"
-        assert ngfw.status == NGFW.Status.PROVISIONING
+        assert ngfw.status == InstanceStatus.PROVISIONING.value
 
     def test_returns_ngfw_app_ref(self, user, deployment_profile, scm_credential):
         """create_ngfw returns NGFWAppRef with ngfw_id."""
@@ -124,10 +127,12 @@ class TestCreateNgfw:
 
             mock_engine.assert_called_once()
             hydrated = mock_engine.call_args[0][0]
-            # Verify hydration extracted credential data
-            assert hydrated["authcode"] == "D1234567"
-            assert hydrated["scm_folder_name"] == "test-folder"
-            assert hydrated["registration_method"] == "pin"
+            # Verify hydration: InstanceSpec with nested NGFWAppSpec
+            assert hydrated.role == "ngfw"
+            assert hydrated.ngfw_app is not None
+            assert hydrated.ngfw_app.authcode == "D1234567"
+            assert hydrated.ngfw_app.scm_folder_name == "test-folder"
+            assert hydrated.ngfw_app.registration_method == "pin"
 
     # -------------------------------------------------------------------------
     # Happy path - OTP registration

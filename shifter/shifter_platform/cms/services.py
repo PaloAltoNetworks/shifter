@@ -19,7 +19,7 @@ from engine import cancel_range as engine_cancel_range
 from engine import create_range as engine_create_range
 from engine import destroy_range as engine_destroy_range
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
-from shared.enums import RangeStatus
+from shared.enums import InstanceStatus, RangeStatus
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -2359,7 +2359,6 @@ def _ngfw_to_context(ngfw: NGFW) -> NGFWAppContext:
         app_id=ngfw.id,
         name=ngfw.name,
         app_type="ngfw",
-        status=ngfw.status,
         created_at=ngfw.created_at,
     )
 
@@ -2557,6 +2556,7 @@ def create_ngfw(
         raise ValueError("registration_method must be 'pin' or 'otp'")
 
     # Validate registration-specific fields
+    scm_credential = None  # Initialize outside if-block
     if registration_method == "pin":
         if not scm_credential_id:
             raise ValueError("scm_credential_id is required for PIN registration")
@@ -2588,7 +2588,7 @@ def create_ngfw(
     ngfw = NGFW.objects.create(
         user=user,
         name=name,
-        status=NGFW.Status.PROVISIONING,
+        status=InstanceStatus.PROVISIONING.value,
     )
 
     logger.info("create_ngfw: created NGFW id=%s for user_id=%s", ngfw.id, user.id)
@@ -2597,17 +2597,20 @@ def create_ngfw(
     from cms.scenarios.hydrator import hydrate_ngfw
     from engine import create_ngfw as engine_create_ngfw
 
-    scm_cred = scm_credential if registration_method == "pin" else None
-    ngfw_request = hydrate_ngfw(
+    ngfw_instance_spec = hydrate_ngfw(
         ngfw=ngfw,
         deployment_profile=deployment_profile,
         registration_method=registration_method,  # type: ignore[arg-type]
-        scm_credential=scm_cred,
+        scm_credential=scm_credential,
         otp_value=otp_value,
         otp_folder=otp_folder,
     )
 
-    engine_create_ngfw(ngfw_request)
+    # Store the hydrated spec for audit/debugging (like RangeInstance.range_spec)
+    ngfw.ngfw_spec = ngfw_instance_spec.model_dump(mode="json")
+    ngfw.save(update_fields=["ngfw_spec"])
+
+    engine_create_ngfw(ngfw_instance_spec)
 
     return NGFWAppRef(
         ngfw_id=ngfw.id,
@@ -2616,99 +2619,7 @@ def create_ngfw(
     )
 
 
-def start_ngfw(user: User, ngfw_id: int) -> NGFWAppContext:
-    """Start a stopped NGFW.
-
-    Args:
-        user: User requesting start
-        ngfw_id: ID of the NGFW to start
-
-    Returns:
-        Updated NGFWAppContext with new status
-
-    Raises:
-        TypeError: If user is None or ngfw_id is invalid type
-        ValueError: If user has no ID or ngfw_id is invalid
-        CMSError: If NGFW not found, not owned by user, or invalid status
-    """
-    from cms.models import NGFW
-
-    _validate_ngfw_user(user)
-    _validate_ngfw_id(ngfw_id)
-    logger.debug("start_ngfw called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
-
-    try:
-        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
-    except NGFW.DoesNotExist:
-        logger.error(
-            "start_ngfw: NGFW id=%s not found for user_id=%s", ngfw_id, user.id
-        )
-        raise CMSError("NGFW not found") from None
-
-    # Validate status allows starting
-    if ngfw.status not in (NGFW.Status.READY, NGFW.Status.STOPPED):
-        logger.error(
-            "start_ngfw: NGFW id=%s has status=%s, cannot start",
-            ngfw_id,
-            ngfw.status,
-        )
-        raise CMSError(f"Cannot start NGFW with status '{ngfw.status}'")
-
-    # Update status
-    ngfw.status = NGFW.Status.ACTIVE
-    ngfw.last_started_at = timezone.now()
-    ngfw.save(update_fields=["status", "last_started_at"])
-
-    logger.info("start_ngfw: started NGFW id=%s", ngfw_id)
-    return _ngfw_to_context(ngfw)
-
-
-def stop_ngfw(user: User, ngfw_id: int) -> NGFWAppContext:
-    """Stop an active NGFW.
-
-    Args:
-        user: User requesting stop
-        ngfw_id: ID of the NGFW to stop
-
-    Returns:
-        Updated NGFWAppContext with new status
-
-    Raises:
-        TypeError: If user is None or ngfw_id is invalid type
-        ValueError: If user has no ID or ngfw_id is invalid
-        CMSError: If NGFW not found, not owned by user, or invalid status
-    """
-    from cms.models import NGFW
-
-    _validate_ngfw_user(user)
-    _validate_ngfw_id(ngfw_id)
-    logger.debug("stop_ngfw called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
-
-    try:
-        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
-    except NGFW.DoesNotExist:
-        logger.error("stop_ngfw: NGFW id=%s not found for user_id=%s", ngfw_id, user.id)
-        raise CMSError("NGFW not found") from None
-
-    # Validate status allows stopping
-    if ngfw.status != NGFW.Status.ACTIVE:
-        logger.error(
-            "stop_ngfw: NGFW id=%s has status=%s, cannot stop",
-            ngfw_id,
-            ngfw.status,
-        )
-        raise CMSError(f"Cannot stop NGFW with status '{ngfw.status}'")
-
-    # Update status
-    ngfw.status = NGFW.Status.STOPPED
-    ngfw.last_stopped_at = timezone.now()
-    ngfw.save(update_fields=["status", "last_stopped_at"])
-
-    logger.info("stop_ngfw: stopped NGFW id=%s", ngfw_id)
-    return _ngfw_to_context(ngfw)
-
-
-def deprovision_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
+def destroy_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
     """Deprovision an NGFW.
 
     Requires name confirmation to prevent accidental deprovisioning.
@@ -2752,7 +2663,7 @@ def deprovision_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
         raise ValueError("Name confirmation does not match")
 
     # Update status to deprovisioning
-    ngfw.status = NGFW.Status.DEPROVISIONING
+    ngfw.status = InstanceStatus.DEPROVISIONING.value
     ngfw.save(update_fields=["status"])
 
     logger.info("deprovision_ngfw: started deprovisioning NGFW id=%s", ngfw_id)
@@ -2762,37 +2673,3 @@ def deprovision_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
         user_id=user.id,
         is_deleted=False,
     )
-
-
-def get_ngfw_status(user: User, ngfw_id: int) -> dict[str, str | None]:
-    """Get NGFW status for polling.
-
-    Args:
-        user: User requesting status
-        ngfw_id: ID of the NGFW
-
-    Returns:
-        Dict with 'status' key
-
-    Raises:
-        TypeError: If user is None or ngfw_id is invalid type
-        ValueError: If user has no ID or ngfw_id is invalid
-        CMSError: If NGFW not found or not owned by user
-    """
-    from cms.models import NGFW
-
-    _validate_ngfw_user(user)
-    _validate_ngfw_id(ngfw_id)
-    logger.debug("get_ngfw_status called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
-
-    try:
-        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
-    except NGFW.DoesNotExist:
-        logger.error(
-            "get_ngfw_status: NGFW id=%s not found for user_id=%s", ngfw_id, user.id
-        )
-        raise CMSError("NGFW not found") from None
-
-    return {
-        "status": ngfw.status,
-    }

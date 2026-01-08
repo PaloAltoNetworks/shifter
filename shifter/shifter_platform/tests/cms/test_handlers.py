@@ -2,10 +2,96 @@
 
 import json
 import logging
+from unittest.mock import patch
 
 import pytest
 
 from shared.enums import RangeStatus
+
+
+@pytest.mark.django_db
+class TestProcessEvent:
+    """Tests for process_event dispatcher."""
+
+    def test_routes_range_events_to_range_handler(self):
+        """Dispatcher routes range.* events to process_range_event."""
+        from cms.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "range_id": 1,
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with patch("cms.handlers.process_range_event") as mock_range_handler:
+            process_event(message)
+            mock_range_handler.assert_called_once_with(message)
+
+    def test_routes_ngfw_events_to_ngfw_handler(self):
+        """Dispatcher routes ngfw.* events to process_ngfw_event."""
+        from cms.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "ngfw.status.updated",
+                    "ngfw_id": 1,
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler:
+            process_event(message)
+            mock_ngfw_handler.assert_called_once_with(message)
+
+    def test_ignores_unknown_event_types(self, caplog):
+        """Dispatcher ignores events with unknown event_type prefix."""
+        from cms.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "unknown.event",
+                    "some_id": 1,
+                }
+            )
+        }
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="cms.handlers"),
+            patch("cms.handlers.process_range_event") as mock_range_handler,
+            patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
+        ):
+            process_event(message)
+            mock_range_handler.assert_not_called()
+            mock_ngfw_handler.assert_not_called()
+            assert "Ignoring unknown event_type" in caplog.text
+
+    def test_handles_missing_event_type(self, caplog):
+        """Dispatcher handles messages without event_type gracefully."""
+        from cms.handlers import process_event
+
+        message = {"Message": json.dumps({"range_id": 1})}
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="cms.handlers"),
+            patch("cms.handlers.process_range_event") as mock_range_handler,
+            patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
+        ):
+            process_event(message)
+            mock_range_handler.assert_not_called()
+            mock_ngfw_handler.assert_not_called()
+
+    def test_dispatcher_is_callable(self):
+        """Dispatcher is a callable function."""
+        from cms.handlers import process_event
+
+        assert callable(process_event)
 
 
 @pytest.mark.django_db

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from django.contrib.auth.models import AnonymousUser
 
-from shared.enums import RangeStatus, WebSocketCloseCode
+from shared.enums import ResourceStatus, WebSocketCloseCode
 
 
 @pytest.fixture
@@ -60,7 +60,9 @@ class TestRangeStatusConsumerConnect:
 
         await consumer.connect()
 
-        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_AUTHENTICATED)
+        consumer.close.assert_awaited_once_with(
+            code=WebSocketCloseCode.NOT_AUTHENTICATED
+        )
         consumer.accept.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -79,7 +81,7 @@ class TestRangeStatusConsumerConnect:
     async def test_accepts_and_hydrates_on_success(self, consumer, authenticated_scope):
         """Successful connect accepts WebSocket and sends initial status."""
         consumer.scope = authenticated_scope
-        mock_range = MagicMock(status=RangeStatus.READY.value)
+        mock_range = MagicMock(status=ResourceStatus.READY.value)
 
         with patch("cms.get_range", return_value=mock_range):
             await consumer.connect()
@@ -95,7 +97,7 @@ class TestRangeStatusConsumerConnect:
         message = json.loads(consumer.send.call_args[1]["text_data"])
         assert message["type"] == "status"
         assert message["range_id"] == 42
-        assert message["status"] == RangeStatus.READY.value
+        assert message["status"] == ResourceStatus.READY.value
 
 
 class TestRangeStatusConsumerDisconnect:
@@ -109,7 +111,9 @@ class TestRangeStatusConsumerDisconnect:
 
         await consumer.disconnect(close_code=1000)
 
-        consumer.channel_layer.group_discard.assert_awaited_once_with("range_status_42", "test-channel")
+        consumer.channel_layer.group_discard.assert_awaited_once_with(
+            "range_status_42", "test-channel"
+        )
 
     @pytest.mark.asyncio
     async def test_handles_disconnect_without_connect(self, consumer):
@@ -132,7 +136,7 @@ class TestRangeStatusConsumerRangeStatus:
         event = {
             "type": "range_status",
             "range_id": 42,
-            "new_status": RangeStatus.READY.value,
+            "new_status": ResourceStatus.READY.value,
             "error_message": None,
         }
         await consumer.range_status(event)
@@ -142,7 +146,7 @@ class TestRangeStatusConsumerRangeStatus:
         assert message == {
             "type": "status",
             "range_id": 42,
-            "status": RangeStatus.READY.value,
+            "status": ResourceStatus.READY.value,
             "error_message": None,
         }
 
@@ -154,11 +158,11 @@ class TestRangeStatusConsumerRangeStatus:
         event = {
             "type": "range_status",
             "range_id": 42,
-            "new_status": RangeStatus.FAILED.value,
+            "new_status": ResourceStatus.FAILED.value,
             "error_message": "EC2 limit exceeded",
         }
         await consumer.range_status(event)
 
         message = json.loads(consumer.send.call_args[1]["text_data"])
-        assert message["status"] == RangeStatus.FAILED.value
+        assert message["status"] == ResourceStatus.FAILED.value
         assert message["error_message"] == "EC2 limit exceeded"

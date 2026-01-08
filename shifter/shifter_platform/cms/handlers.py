@@ -8,8 +8,10 @@ from __future__ import annotations
 import json
 import logging
 
+from django.utils import timezone
+
 from cms.models import NGFW, RangeInstance
-from shared.enums import InstanceStatus, RangeStatus
+from shared.enums import ResourceStatus, TERMINAL_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +97,7 @@ def process_range_event(message: str | dict) -> None:
     event_id = event.get("event_id", "unknown")
 
     try:
-        RangeStatus(new_status)
+        ResourceStatus(new_status)
     except ValueError:
         logger.error("Invalid status value: %s (range_id=%s)", new_status, range_id)
         return
@@ -171,11 +173,20 @@ def process_ngfw_event(message: str | dict) -> None:
     new_status = event.get("new_status")
     event_id = event.get("event_id", "unknown")
 
+    # CMS only cares about terminal statuses - marks NGFW as deleted
     try:
-        InstanceStatus(new_status)
+        status = ResourceStatus(new_status)
     except ValueError:
         logger.error(
             "Invalid NGFW status value: %s (cms_ngfw_id=%s)", new_status, cms_ngfw_id
+        )
+        return
+
+    if status not in TERMINAL_STATUSES:
+        logger.debug(
+            "Ignoring non-terminal status: cms_ngfw_id=%s status=%s",
+            cms_ngfw_id,
+            new_status,
         )
         return
 
@@ -194,19 +205,17 @@ def process_ngfw_event(message: str | dict) -> None:
         )
         return
 
-    previous_status = ngfw.status
-    ngfw.status = new_status
+    ngfw.deleted_at = timezone.now()
 
     try:
-        ngfw.save(update_fields=["status"])
+        ngfw.save(update_fields=["deleted_at"])
     except Exception:
         logger.exception("DB error saving CMS NGFW: cms_ngfw_id=%s", cms_ngfw_id)
         return
 
     logger.info(
-        "CMS updated NGFW: cms_ngfw_id=%s status=%s->%s event_id=%s",
+        "CMS marked NGFW deleted: cms_ngfw_id=%s status=%s event_id=%s",
         cms_ngfw_id,
-        previous_status,
         new_status,
         event_id,
     )

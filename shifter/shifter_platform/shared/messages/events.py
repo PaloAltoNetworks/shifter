@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from shared.enums import InstanceStatus, RangeStatus
+from shared.enums import InstanceStatus, ResourceStatus
 
 # Event type constants - Range
 EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
@@ -49,7 +49,7 @@ class RangeStatusUpdatedEvent(BaseEvent):
 
     range_id: int
     user_id: int
-    new_status: RangeStatus
+    new_status: ResourceStatus
     error_message: str | None = None
 
 

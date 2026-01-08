@@ -47,17 +47,17 @@ class TestRangeModel:
 
     def test_terminal_statuses_defined(self):
         """shared.enums.TERMINAL_STATUSES contains terminal states."""
-        from shared.enums import TERMINAL_STATUSES, RangeStatus
+        from shared.enums import TERMINAL_STATUSES, ResourceStatus
 
-        assert RangeStatus.DESTROYED in TERMINAL_STATUSES
-        assert RangeStatus.FAILED in TERMINAL_STATUSES
+        assert ResourceStatus.DESTROYED in TERMINAL_STATUSES
+        assert ResourceStatus.FAILED in TERMINAL_STATUSES
 
     def test_cancellable_statuses_defined(self):
         """shared.enums.CANCELLABLE_STATUSES contains cancellable states."""
-        from shared.enums import CANCELLABLE_STATUSES, RangeStatus
+        from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
 
-        assert RangeStatus.PENDING in CANCELLABLE_STATUSES
-        assert RangeStatus.PROVISIONING in CANCELLABLE_STATUSES
+        assert ResourceStatus.PENDING in CANCELLABLE_STATUSES
+        assert ResourceStatus.PROVISIONING in CANCELLABLE_STATUSES
 
     # -------------------------------------------------------------------------
     # Model method tests

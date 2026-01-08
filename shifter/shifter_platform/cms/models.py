@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from shared.enums import RequestType
+from shared.enums import RequestType, ResourceStatus, TERMINAL_STATUSES
 
 # CredentialBase is defined locally below (migrated from mission_control)
 
@@ -78,6 +79,61 @@ class CatalogBase(models.Model):
         spec_class = self.get_spec_class()
         validated = spec_class.model_validate(data)
         return validated.model_dump()
+
+
+class EntityBase(models.Model):
+    """Abstract base for concrete entities in ranges (Instance, App).
+
+    Entities represent materialized "things" that exist in provisioned ranges.
+    Each entity has a UUID primary key for correlation across CMS, Engine,
+    and events.
+
+    The UUID is auto-generated on first save and included in specs sent to Engine.
+    Status tracks lifecycle and automatically soft-deletes on terminal states.
+
+    Attributes:
+        id: UUID primary key (auto-generated).
+        status: Lifecycle status (pending, provisioning, ready, etc.).
+        created_at: When this entity was created.
+        deleted_at: Soft delete timestamp (None = active).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    status = models.CharField(
+        max_length=20,
+        default=ResourceStatus.PENDING.value,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def is_deleted(self):
+        """Return True if this entity has been soft-deleted."""
+        return self.deleted_at is not None
+
+    def save(self, *args, **kwargs):
+        """Save with terminal status invariant enforcement.
+
+        When status is set to a terminal value (DESTROYED, FAILED),
+        deleted_at is automatically set if not already set.
+        """
+        # Auto-set deleted_at for terminal statuses
+        try:
+            status_enum = ResourceStatus(self.status)
+            if status_enum in TERMINAL_STATUSES and not self.deleted_at:
+                self.deleted_at = timezone.now()
+                # If update_fields specified, ensure deleted_at is included
+                update_fields = kwargs.get("update_fields")
+                if update_fields is not None and "deleted_at" not in update_fields:
+                    kwargs["update_fields"] = list(update_fields) + ["deleted_at"]
+        except ValueError:
+            pass  # Invalid status, let save proceed and fail validation elsewhere
+
+        super().save(*args, **kwargs)
 
 
 class Asset(models.Model):
@@ -368,32 +424,40 @@ class InstanceType(CatalogBase):
         verbose_name_plural = "Instance Types"
 
 
-class Instance(models.Model):
-    """Instance definition.
+class Instance(EntityBase):
+    """Instance definition - a concrete compute resource in a range.
 
     Stores instance config with type-specific data in a JSON field.
     Validation is delegated to Pydantic spec classes referenced by InstanceType.
 
+    Inherits from EntityBase:
+        id: UUID primary key (auto-generated, used for event correlation).
+        status: Lifecycle status (pending, provisioning, ready, etc.).
+        created_at: When this instance was created.
+        deleted_at: Soft delete timestamp (auto-set on terminal status).
+
     Attributes:
+        request: FK to Request (provides user context).
         name: User-friendly name for this instance.
         instance_type: FK to InstanceType catalog.
         data: Type-specific fields as JSON (validated by spec_class).
-        created_at: When this instance was created.
-        deleted_at: Soft delete timestamp (None = active).
     """
 
+    request = models.ForeignKey(
+        "Request",
+        on_delete=models.CASCADE,
+        related_name="instances",
+    )
     name = models.CharField(max_length=100, help_text="User-friendly name")
     instance_type = models.ForeignKey(
         InstanceType,
         on_delete=models.PROTECT,
-        related_name="instances",
+        related_name="instance_configs",
     )
     data = models.JSONField(
         default=dict,
         help_text="Type-specific instance data (validated by spec_class)",
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -401,12 +465,7 @@ class Instance(models.Model):
         verbose_name_plural = "Instances"
 
     def __str__(self):
-        return self.name
-
-    @property
-    def is_deleted(self):
-        """Return True if this instance has been soft-deleted."""
-        return self.deleted_at is not None
+        return f"{self.name} ({self.id})"
 
 
 # -----------------------------------------------------------------------------
@@ -436,18 +495,23 @@ class AppType(CatalogBase):
         verbose_name_plural = "App Types"
 
 
-class App(models.Model):
-    """App definition tied to instances.
+class App(EntityBase):
+    """App definition - a concrete application running on an instance.
 
     Stores app config with type-specific data in a JSON field.
     Validation is delegated to Pydantic spec classes referenced by AppType.
 
+    Inherits from EntityBase:
+        id: UUID primary key (auto-generated, used for event correlation).
+        status: Lifecycle status (pending, provisioning, ready, etc.).
+        created_at: When this app was created.
+        deleted_at: Soft delete timestamp (auto-set on terminal status).
+
     Attributes:
         name: User-friendly name for this app.
         app_type: FK to AppType catalog.
+        instance: Parent Instance this app runs on.
         data: Type-specific fields as JSON (validated by spec_class).
-        created_at: When this app was created.
-        deleted_at: Soft delete timestamp (None = active).
     """
 
     name = models.CharField(max_length=100, help_text="User-friendly name")
@@ -456,12 +520,18 @@ class App(models.Model):
         on_delete=models.PROTECT,
         related_name="apps",
     )
+    instance = models.ForeignKey(
+        Instance,
+        on_delete=models.CASCADE,
+        related_name="apps",
+        null=True,
+        blank=True,
+        help_text="Parent instance this app runs on",
+    )
     data = models.JSONField(
         default=dict,
         help_text="Type-specific app data (validated by spec_class)",
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -469,12 +539,7 @@ class App(models.Model):
         verbose_name_plural = "Apps"
 
     def __str__(self):
-        return self.name
-
-    @property
-    def is_deleted(self):
-        """Return True if this app has been soft-deleted."""
-        return self.deleted_at is not None
+        return f"{self.name} ({self.id})"
 
 
 # -----------------------------------------------------------------------------

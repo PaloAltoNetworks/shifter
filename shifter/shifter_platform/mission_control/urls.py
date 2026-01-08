@@ -26,12 +26,12 @@ urlpatterns = [
     # NGFW views
     path("ngfw/", views.ngfw_list, name="ngfw_list"),
     path("ngfw/setup/", views.ngfw_wizard, name="ngfw_wizard"),
-    path("ngfw/<int:ngfw_id>/", views.ngfw_detail, name="ngfw_detail"),
-    path("ngfw/<int:ngfw_id>/deprovision/", views.ngfw_deprovision, name="ngfw_deprovision"),
+    path("ngfw/<uuid:app_id>/", views.ngfw_detail, name="ngfw_detail"),
+    path("ngfw/<uuid:app_id>/deprovision/", views.ngfw_deprovision, name="ngfw_deprovision"),
     # NGFW API
     path("api/ngfw/", views.api_ngfw_create, name="api_ngfw_create"),
     path("api/ngfw/list/", views.api_ngfw_list, name="api_ngfw_list"),
-    path("api/ngfw/<int:ngfw_id>/destroy/", views.api_ngfw_destroy, name="api_ngfw_destroy"),
+    path("api/ngfw/<uuid:app_id>/destroy/", views.api_ngfw_destroy, name="api_ngfw_destroy"),
     # Credential views
     path("credentials/", views.credentials_list, name="credentials_list"),
     path("credentials/add/", views.credential_add, name="credential_add"),

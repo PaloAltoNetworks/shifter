@@ -10,11 +10,10 @@ import logging
 
 from django.utils import timezone
 
-from engine.models import NGFW, Range
+from engine.models import App, Instance, Range
 from shared.enums import ResourceStatus
 from shared.messages.events import (
-    EVENT_TYPE_NGFW_PROVISIONED,
-    EVENT_TYPE_NGFW_STATUS_UPDATED,
+    EVENT_TYPE_NGFW,
     EVENT_TYPE_PROVISIONED,
     EVENT_TYPE_STATUS_UPDATED,
 )
@@ -245,11 +244,13 @@ def _handle_provisioned(event: dict) -> None:
 
 
 def process_ngfw_event(message: str | dict) -> None:
-    """Process NGFW event from SNS/SQS - updates Engine NGFW model.
+    """Process unified NGFW event from SNS/SQS.
 
-    This handler consumes NGFW events published by the Engine provisioner:
-    - ngfw.status.updated: Updates status and timestamps
-    - ngfw.provisioned: Updates AWS resource IDs from provisioner
+    Updates both Instance and App models based on the event:
+    - Looks up Instance by instance_id (UUID)
+    - Looks up App by app_id (UUID)
+    - Updates status on both if provided
+    - Merges event state into Instance.state
 
     Args:
         message: SNS-wrapped message containing NGFW event data.
@@ -258,153 +259,138 @@ def process_ngfw_event(message: str | dict) -> None:
         None. Errors are logged and handled gracefully.
     """
     event = parse_sns_message(message)
-
     event_type = event.get("event_type")
 
-    if event_type == EVENT_TYPE_NGFW_STATUS_UPDATED:
-        _handle_ngfw_status_updated(event)
-    elif event_type == EVENT_TYPE_NGFW_PROVISIONED:
-        _handle_ngfw_provisioned(event)
-    else:
+    if event_type != EVENT_TYPE_NGFW:
         logger.debug("Ignoring NGFW event_type=%s", event_type)
-
-
-def _handle_ngfw_status_updated(event: dict) -> None:
-    """Handle ngfw.status.updated event - update status and timestamps.
-
-    Args:
-        event: Event payload with ngfw_id, user_id, new_status, error_message.
-    """
-    ngfw_id = event.get("ngfw_id")  # Engine's NGFW.id
-    user_id = event.get("user_id")
-    new_status = event.get("new_status")
-    error_message = event.get("error_message")
-    event_id = event.get("event_id", "unknown")
-
-    try:
-        ngfw = NGFW.objects.get(id=ngfw_id)
-    except NGFW.DoesNotExist:
-        logger.warning("NGFW not found: ngfw_id=%s", ngfw_id)
         return
 
-    if ngfw.user_id != user_id:
-        logger.error(
-            "user_id mismatch: message=%s, ngfw=%s (ngfw_id=%s)",
-            user_id,
-            ngfw.user_id,
-            ngfw_id,
+    _handle_ngfw_event(event)
+
+
+def _get_ngfw_models(
+    instance_id: str, app_id: str, event_id: str
+) -> tuple[Instance, App] | None:
+    """Look up Instance and App by UUID, logging warnings if not found."""
+    try:
+        instance = Instance.objects.get(uuid=instance_id)
+    except Instance.DoesNotExist:
+        logger.warning(
+            "Instance not found: instance_id=%s event_id=%s", instance_id, event_id
+        )
+        return None
+
+    try:
+        app = App.objects.get(uuid=app_id)
+    except App.DoesNotExist:
+        logger.warning("App not found: app_id=%s event_id=%s", app_id, event_id)
+        return None
+
+    return instance, app
+
+
+def _handle_ngfw_event(event: dict) -> None:
+    """Handle unified ngfw.event - update Instance and App.
+
+    Args:
+        event: Event payload with request_id, instance_id, app_id, status, state.
+    """
+    event_id = event.get("event_id", "unknown")
+    instance_id = event.get("instance_id")
+    app_id = event.get("app_id")
+    status = event.get("status")
+    state = event.get("state")
+
+    # Validate required fields
+    if not instance_id or not app_id:
+        logger.warning(
+            "NGFW event missing required fields: instance_id=%s app_id=%s event_id=%s",
+            instance_id,
+            app_id,
+            event_id,
         )
         return
 
-    previous_status = ngfw.status
-    ngfw.status = new_status
-    update_fields = ["status"]
-
-    if new_status == ResourceStatus.READY.value:
-        if not ngfw.provisioned_at:
-            ngfw.provisioned_at = timezone.now()
-            update_fields.append("provisioned_at")
-
-        ngfw.last_started_at = timezone.now()
-        update_fields.append("last_started_at")
-
-    if new_status == ResourceStatus.PAUSED.value:
-        ngfw.last_stopped_at = timezone.now()
-        update_fields.append("last_stopped_at")
-
-    if new_status == ResourceStatus.FAILED.value and error_message:
-        ngfw.error_message = error_message
-        update_fields.append("error_message")
-
-    try:
-        ngfw.save(update_fields=update_fields)
-    except Exception:
-        logger.exception("DB error saving NGFW: ngfw_id=%s", ngfw_id)
+    # Look up models
+    models = _get_ngfw_models(instance_id, app_id, event_id)
+    if not models:
         return
+    instance, app = models
+
+    previous_instance_status = instance.status
+    previous_app_status = app.status
+
+    # Update Instance
+    instance_update_fields = _update_ngfw_instance(instance, status, state)
+    if instance_update_fields:
+        try:
+            instance.save(update_fields=instance_update_fields)
+        except Exception:
+            logger.exception(
+                "DB error saving Instance: instance_id=%s event_id=%s",
+                instance_id,
+                event_id,
+            )
+            return
+
+    # Update App
+    app_update_fields = _update_ngfw_app(app, status)
+    if app_update_fields:
+        try:
+            app.save(update_fields=app_update_fields)
+        except Exception:
+            logger.exception(
+                "DB error saving App: app_id=%s event_id=%s", app_id, event_id
+            )
+            return
 
     logger.info(
-        "Engine updated NGFW: ngfw_id=%s status=%s->%s event_id=%s",
-        ngfw_id,
-        previous_status,
-        new_status,
+        "Engine processed NGFW event: instance_id=%s (%s->%s) app_id=%s (%s->%s) "
+        "state_keys=%s event_id=%s",
+        instance_id,
+        previous_instance_status,
+        status or previous_instance_status,
+        app_id,
+        previous_app_status,
+        status or previous_app_status,
+        list(state.keys()) if state else [],
         event_id,
     )
 
 
-def _handle_ngfw_provisioned(event: dict) -> None:
-    """Handle ngfw.provisioned event - populate AWS resource IDs.
-
-    Updates the NGFW model with AWS resource details from the provisioner:
-    instance_id, management_ip, dataplane_ip, GWLB resources, etc.
-
-    Args:
-        event: Event payload with ngfw_id, user_id, and AWS resource details.
-    """
-    ngfw_id = event.get("ngfw_id")
-    user_id = event.get("user_id")
-    event_id = event.get("event_id", "unknown")
-
-    try:
-        ngfw = NGFW.objects.get(id=ngfw_id)
-    except NGFW.DoesNotExist:
-        logger.warning("NGFW not found for provisioned event: ngfw_id=%s", ngfw_id)
-        return
-
-    if ngfw.user_id != user_id:
-        logger.error(
-            "user_id mismatch in NGFW provisioned event: message=%s, ngfw=%s (ngfw_id=%s)",
-            user_id,
-            ngfw.user_id,
-            ngfw_id,
-        )
-        return
-
+def _update_ngfw_instance(
+    instance: Instance, status: str | None, state: dict | None
+) -> list[str]:
+    """Update Instance fields and return list of fields to save."""
     update_fields = []
 
-    # AWS EC2 resources
-    if instance_id := event.get("instance_id"):
-        ngfw.instance_id = instance_id
-        update_fields.append("instance_id")
+    if status:
+        instance.status = status
+        update_fields.append("status")
 
-    if management_ip := event.get("management_ip"):
-        ngfw.management_ip = management_ip
-        update_fields.append("management_ip")
+        if status == ResourceStatus.DESTROYED.value:
+            instance.destroyed_at = timezone.now()
+            update_fields.append("destroyed_at")
 
-    if dataplane_ip := event.get("dataplane_ip"):
-        ngfw.dataplane_ip = dataplane_ip
-        update_fields.append("dataplane_ip")
+    if state:
+        current_state = instance.state or {}
+        current_state.update(state)
+        instance.state = current_state
+        update_fields.append("state")
 
-    # GWLB resources
-    if gwlb_arn := event.get("gwlb_arn"):
-        ngfw.gwlb_arn = gwlb_arn
-        update_fields.append("gwlb_arn")
+    return update_fields
 
-    if target_group_arn := event.get("target_group_arn"):
-        ngfw.target_group_arn = target_group_arn
-        update_fields.append("target_group_arn")
 
-    if service_name := event.get("service_name"):
-        ngfw.gwlb_service_name = service_name
-        update_fields.append("gwlb_service_name")
+def _update_ngfw_app(app: App, status: str | None) -> list[str]:
+    """Update App fields and return list of fields to save."""
+    update_fields = []
 
-    # Pulumi tracking
-    if pulumi_stack := event.get("pulumi_stack"):
-        ngfw.pulumi_stack = pulumi_stack
-        update_fields.append("pulumi_stack")
+    if status:
+        app.status = status
+        update_fields.append("status")
 
-    if not update_fields:
-        logger.debug("No fields to update for ngfw.provisioned: ngfw_id=%s", ngfw_id)
-        return
+        if status == ResourceStatus.DESTROYED.value:
+            app.destroyed_at = timezone.now()
+            update_fields.append("destroyed_at")
 
-    try:
-        ngfw.save(update_fields=update_fields)
-    except Exception:
-        logger.exception("DB error saving NGFW provisioned data: ngfw_id=%s", ngfw_id)
-        return
-
-    logger.info(
-        "Engine updated NGFW provisioned: ngfw_id=%s fields=%s event_id=%s",
-        ngfw_id,
-        update_fields,
-        event_id,
-    )
+    return update_fields

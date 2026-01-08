@@ -32,7 +32,6 @@ from cms import list_scenarios as cms_list_scenarios
 from cms.services import create_ngfw as cms_create_ngfw
 from cms.services import destroy_ngfw as cms_destroy_ngfw
 from cms.services import get_ngfw as cms_get_ngfw
-from cms.services import get_ngfw_linked_ranges as cms_get_ngfw_linked_ranges
 from mission_control.upload_session import (
     check_upload_in_progress,
     set_upload_in_progress,
@@ -460,21 +459,18 @@ def ngfw_list(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_GET
-def ngfw_detail(request: HttpRequest, ngfw_id: int) -> HttpResponse:
+def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
     """View NGFW details."""
     user = _get_user(request)
     try:
-        ngfw = cms_get_ngfw(user, ngfw_id)
+        ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
         raise Http404(_NGFW_NOT_FOUND) from None
-
-    linked_ranges = cms_get_ngfw_linked_ranges(user, ngfw_id)
 
     context = {
         "page_title": ngfw.name,
         "active_nav": "ngfw",
         "ngfw": ngfw,
-        "linked_ranges": linked_ranges,
     }
     return render(request, "mission_control/ngfw/detail.html", context)
 
@@ -506,21 +502,18 @@ def ngfw_wizard(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_GET
-def ngfw_deprovision(request: HttpRequest, ngfw_id: int) -> HttpResponse:
+def ngfw_deprovision(request: HttpRequest, app_id: str) -> HttpResponse:
     """NGFW deprovision confirmation page."""
     user = _get_user(request)
     try:
-        ngfw = cms_get_ngfw(user, ngfw_id)
+        ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
         raise Http404(_NGFW_NOT_FOUND) from None
-
-    linked_ranges = cms_get_ngfw_linked_ranges(user, ngfw_id)
 
     context = {
         "page_title": f"Deprovision {ngfw.name}",
         "active_nav": "ngfw",
         "ngfw": ngfw,
-        "linked_ranges": linked_ranges,
     }
     return render(request, "mission_control/ngfw/deprovision.html", context)
 
@@ -569,13 +562,13 @@ def api_ngfw_create(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"error": str(e)}, status=400)
 
     logger.info(
-        "NGFW provisioning started: user=%s ngfw_id=%s",
+        "NGFW provisioning started: user=%s app_id=%s",
         user.email,
-        ngfw_ref.ngfw_id,
+        ngfw_ref.app_id,
     )
 
     return JsonResponse(
-        {"id": ngfw_ref.ngfw_id, "name": name, "status": "provisioning"},
+        {"id": str(ngfw_ref.app_id), "name": name, "status": "provisioning"},
         status=201,
     )
 
@@ -589,7 +582,7 @@ def api_ngfw_list(request: HttpRequest) -> JsonResponse:
         {
             "ngfws": [
                 {
-                    "id": n.app_id,
+                    "id": str(n.app_id),
                     "name": n.name,
                     "status": n.status,
                     "created_at": n.created_at.isoformat(),
@@ -602,7 +595,7 @@ def api_ngfw_list(request: HttpRequest) -> JsonResponse:
 
 @login_required
 @require_POST
-def api_ngfw_destroy(request: HttpRequest, ngfw_id: int) -> JsonResponse:
+def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
     """Destroy an NGFW."""
     user = _get_user(request)
     try:
@@ -612,8 +605,9 @@ def api_ngfw_destroy(request: HttpRequest, ngfw_id: int) -> JsonResponse:
 
     confirm_name = data.get("confirm_name", "").strip()
 
+    # TODO: Update destroy_ngfw to accept UUID
     try:
-        cms_destroy_ngfw(user, ngfw_id, confirm_name)
+        cms_destroy_ngfw(user, app_id, confirm_name)  # type: ignore[arg-type]
     except CMSError as e:
         if "not found" in str(e).lower():
             raise Http404(_NGFW_NOT_FOUND) from None
@@ -621,7 +615,7 @@ def api_ngfw_destroy(request: HttpRequest, ngfw_id: int) -> JsonResponse:
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-    logger.info("NGFW deprovisioning started: user=%s ngfw_id=%s", user.email, ngfw_id)
+    logger.info("NGFW deprovisioning started: user=%s app_id=%s", user.email, app_id)
     return JsonResponse({"status": "deprovisioning"})
 
 

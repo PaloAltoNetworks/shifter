@@ -29,12 +29,9 @@ urlpatterns = [
     path("ngfw/<int:ngfw_id>/", views.ngfw_detail, name="ngfw_detail"),
     path("ngfw/<int:ngfw_id>/deprovision/", views.ngfw_deprovision, name="ngfw_deprovision"),
     # NGFW API
-    path("api/ngfw/", views.api_ngfw_provision, name="api_ngfw_provision"),
+    path("api/ngfw/", views.api_ngfw_create, name="api_ngfw_create"),
     path("api/ngfw/list/", views.api_ngfw_list, name="api_ngfw_list"),
-    path("api/ngfw/<int:ngfw_id>/status/", views.api_ngfw_status, name="api_ngfw_status"),
-    path("api/ngfw/<int:ngfw_id>/start/", views.api_ngfw_start, name="api_ngfw_start"),
-    path("api/ngfw/<int:ngfw_id>/stop/", views.api_ngfw_stop, name="api_ngfw_stop"),
-    path("api/ngfw/<int:ngfw_id>/deprovision/", views.api_ngfw_deprovision, name="api_ngfw_deprovision"),
+    path("api/ngfw/<int:ngfw_id>/destroy/", views.api_ngfw_destroy, name="api_ngfw_destroy"),
     # Credential views
     path("credentials/", views.credentials_list, name="credentials_list"),
     path("credentials/add/", views.credential_add, name="credential_add"),

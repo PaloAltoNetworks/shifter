@@ -199,7 +199,9 @@ class OperatingSystem(models.Model):
 
     slug = models.SlugField(max_length=50, unique=True)
     name = models.CharField(max_length=100)
-    extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
+    extensions = models.JSONField(
+        default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])"
+    )
 
     class Meta:
         ordering = ["name"]
@@ -532,10 +534,6 @@ class NGFW(Asset):
         on_delete=models.CASCADE,
         related_name="ngfws",
     )
-
-    # Status synced from Engine via events (uses shared.enums.NGFWStatus values)
-    status = models.CharField(max_length=20, default="pending")
-
     # Hydrated configuration sent to Engine (credentials, registration method, etc.)
     ngfw_spec = models.JSONField(null=True, blank=True)
 

@@ -33,3 +33,17 @@ def user_event_group(user_id: int) -> str:
         Channel group name in format "user_{user_id}".
     """
     return f"user_{user_id}"
+
+
+def ngfw_event_group(ngfw_id: int) -> str:
+    """Get the channel group name for a specific NGFW.
+
+    Used for subscribing to status updates for a specific NGFW.
+
+    Args:
+        ngfw_id: The ID of the NGFW (CMS NGFW.id).
+
+    Returns:
+        Channel group name in format "ngfw_status_{ngfw_id}".
+    """
+    return f"ngfw_status_{ngfw_id}"

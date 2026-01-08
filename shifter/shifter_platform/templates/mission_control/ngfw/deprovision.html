@@ -181,7 +181,7 @@
 {% endblock %}
 
 {% block content %}
-<a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}" class="back-link">
+<a href="{% url 'mission_control:ngfw_detail' ngfw.id %}" class="back-link">
     <span>&larr;</span> Back to {{ ngfw.name }}
 </a>
 
@@ -251,7 +251,7 @@
         </div>
 
         <div class="action-buttons">
-            <a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}" class="btn btn-secondary">Cancel</a>
+            <a href="{% url 'mission_control:ngfw_detail' ngfw.id %}" class="btn btn-secondary">Cancel</a>
             <button type="button" class="btn btn-danger" id="deprovision-btn" disabled>
                 Deprovision NGFW
             </button>
@@ -264,7 +264,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const csrfToken = '{{ csrf_token }}';
-    const ngfwId = {{ ngfw.app_id }};
+    const ngfwId = {{ ngfw.id }};
     const ngfwName = '{{ ngfw.name|escapejs }}';
 
     const confirmInput = document.getElementById('confirm-input');
@@ -285,7 +285,7 @@ document.addEventListener('DOMContentLoaded', function() {
         deprovisionBtn.disabled = true;
         deprovisionBtn.textContent = 'Deprovisioning...';
 
-        fetch(`/mission-control/api/ngfw/${ngfwId}/deprovision/`, {
+        fetch(`/mission-control/api/ngfw/${ngfwId}/destroy/`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

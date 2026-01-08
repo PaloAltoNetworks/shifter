@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from shared.enums import NGFWStatus, RangeStatus
+from shared.enums import InstanceStatus, RangeStatus
 
 # Event type constants - Range
 EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
@@ -96,7 +96,7 @@ class NGFWStatusUpdatedEvent(BaseEvent):
     ngfw_id: int  # Engine's NGFW.id
     cms_ngfw_id: int  # CMS's NGFW.id for correlation
     user_id: int
-    new_status: NGFWStatus
+    new_status: InstanceStatus
     error_message: str | None = None
 
 

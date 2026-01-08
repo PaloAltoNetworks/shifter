@@ -249,6 +249,7 @@ body.xdr-dark-theme {
 .status-active .status-dot { background: #00d26a; }
 .status-offline .status-dot { background: #707070; }
 .status-error .status-dot { background: #ff4d4f; }
+
 .status-provisioning .status-dot {
     background: #faad14;
     animation: pulse-dot 1.5s infinite;

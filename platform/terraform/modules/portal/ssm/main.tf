@@ -171,6 +171,15 @@ resource "aws_ssm_parameter" "redis_endpoint" {
   tags = local.common_tags
 }
 
+resource "aws_ssm_parameter" "log_level" {
+  name        = "${local.ps_prefix}/log-level"
+  description = "Django log level (DEBUG for dev, INFO for prod)"
+  type        = "String"
+  value       = var.log_level
+
+  tags = local.common_tags
+}
+
 # ------------------------------------------------------------------------------
 # SSM Document - Portal Deployment
 # ------------------------------------------------------------------------------
@@ -288,6 +297,7 @@ resource "aws_ssm_document" "portal_deploy" {
             "SQS_ENGINE_URL=$(get_param \"$PS_PREFIX/sqs-engine-url\")",
             "SQS_MC_URL=$(get_param \"$PS_PREFIX/sqs-mc-url\")",
             "REDIS_ENDPOINT=$(get_param \"$PS_PREFIX/redis-endpoint\")",
+            "LOG_LEVEL=$(get_param \"$PS_PREFIX/log-level\")",
             "",
             "IMAGE=\"$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG\"",
             "echo \"Deploying image: $IMAGE\"",
@@ -310,6 +320,7 @@ resource "aws_ssm_document" "portal_deploy" {
             "COMMON_ENV=\"$COMMON_ENV -e SQS_CMS_URL=$SQS_CMS_URL\"",
             "COMMON_ENV=\"$COMMON_ENV -e SQS_ENGINE_URL=$SQS_ENGINE_URL\"",
             "COMMON_ENV=\"$COMMON_ENV -e SQS_MC_URL=$SQS_MC_URL\"",
+            "COMMON_ENV=\"$COMMON_ENV -e LOG_LEVEL=$LOG_LEVEL\"",
             "",
             "# Add Redis if configured",
             "if [ -n \"$REDIS_ENDPOINT\" ]; then",

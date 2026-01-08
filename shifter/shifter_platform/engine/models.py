@@ -9,7 +9,7 @@ Infrastructure lifecycle models for Shifter platform.
 from django.conf import settings
 from django.db import models, transaction
 
-from shared.enums import NGFWStatus
+from shared.enums import InstanceStatus
 
 
 class Range(models.Model):
@@ -25,20 +25,16 @@ class Range(models.Model):
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges"
+    )
     cms_user_id = models.PositiveIntegerField(
         null=True,
         blank=True,
         help_text="User ID from CMS (may differ from Django user.id)",
     )
-    ngfw = models.ForeignKey(
-        "cms.NGFW",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="ranges",
-        help_text="Persistent NGFW instance for this range",
-    )
+    # NOTE: Range.ngfw FK removed - Engine NGFW model is standalone
+    # GWLB endpoint linking is done via gwlb_endpoint_id below
     gwlb_endpoint_id = models.CharField(
         max_length=32,
         blank=True,
@@ -52,22 +48,46 @@ class Range(models.Model):
         db_index=True,
     )
     # AWS resource IDs (populated by provisioner Lambda)
-    subnet_id = models.CharField(max_length=50, blank=True, default="", help_text="AWS subnet ID (e.g., subnet-abc123)")
-    subnet_cidr = models.CharField(max_length=18, blank=True, default="", help_text="Subnet CIDR (e.g., 10.1.5.0/24)")
-    subnet_index = models.PositiveIntegerField(null=True, blank=True, help_text="Unique index for CIDR allocation")
+    subnet_id = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="AWS subnet ID (e.g., subnet-abc123)",
+    )
+    subnet_cidr = models.CharField(
+        max_length=18,
+        blank=True,
+        default="",
+        help_text="Subnet CIDR (e.g., 10.1.5.0/24)",
+    )
+    subnet_index = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Unique index for CIDR allocation"
+    )
     victim_ip = models.GenericIPAddressField(null=True, blank=True)
     victim_instance_id = models.CharField(
-        max_length=50, blank=True, default="", help_text="EC2 instance ID (e.g., i-abc123)"
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="EC2 instance ID (e.g., i-abc123)",
     )
     kali_ip = models.GenericIPAddressField(null=True, blank=True)
     kali_instance_id = models.CharField(
-        max_length=50, blank=True, default="", help_text="Kali EC2 instance ID (e.g., i-abc123)"
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="Kali EC2 instance ID (e.g., i-abc123)",
     )
     kali_ssh_key_secret_arn = models.CharField(
-        max_length=500, blank=True, default="", help_text="Secrets Manager ARN for Kali SSH private key"
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Secrets Manager ARN for Kali SSH private key",
     )
     victim_ssh_key_secret_arn = models.CharField(
-        max_length=500, blank=True, default="", help_text="Secrets Manager ARN for Victim SSH private key"
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Secrets Manager ARN for Victim SSH private key",
     )
     chat_url = models.URLField(max_length=500, blank=True, default="")
 
@@ -113,7 +133,11 @@ class Range(models.Model):
         db_table = "mission_control_range"
 
     def __str__(self):
-        scenario = self.range_config.get("scenario_id", "unknown") if self.range_config else "unknown"
+        scenario = (
+            self.range_config.get("scenario_id", "unknown")
+            if self.range_config
+            else "unknown"
+        )
         return f"Range {self.id} ({scenario}) - {self.status}"
 
     @property
@@ -301,16 +325,16 @@ class NGFW(models.Model):
     """
 
     class Status(models.TextChoices):
-        PENDING = NGFWStatus.PENDING.value, "Pending"
-        PROVISIONING = NGFWStatus.PROVISIONING.value, "Provisioning"
-        READY = NGFWStatus.READY.value, "Ready"
-        STARTING = NGFWStatus.STARTING.value, "Starting"
-        ACTIVE = NGFWStatus.ACTIVE.value, "Active"
-        STOPPING = NGFWStatus.STOPPING.value, "Stopping"
-        STOPPED = NGFWStatus.STOPPED.value, "Stopped"
-        DEPROVISIONING = NGFWStatus.DEPROVISIONING.value, "Deprovisioning"
-        DEPROVISIONED = NGFWStatus.DEPROVISIONED.value, "Deprovisioned"
-        FAILED = NGFWStatus.FAILED.value, "Failed"
+        PENDING = InstanceStatus.PENDING.value, "Pending"
+        PROVISIONING = InstanceStatus.PROVISIONING.value, "Provisioning"
+        READY = InstanceStatus.READY.value, "Ready"
+        STARTING = InstanceStatus.STARTING.value, "Starting"
+        ACTIVE = InstanceStatus.ACTIVE.value, "Active"
+        STOPPING = InstanceStatus.STOPPING.value, "Stopping"
+        STOPPED = InstanceStatus.STOPPED.value, "Stopped"
+        DEPROVISIONING = InstanceStatus.DEPROVISIONING.value, "Deprovisioning"
+        DEPROVISIONED = InstanceStatus.DEPROVISIONED.value, "Deprovisioned"
+        FAILED = InstanceStatus.FAILED.value, "Failed"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -337,7 +361,7 @@ class NGFW(models.Model):
     ngfw_config = models.JSONField(
         null=True,
         blank=True,
-        help_text="Full NGFWProvisionRequest from CMS",
+        help_text="Full InstanceSpec with nested NGFWAppSpec from CMS",
     )
 
     # AWS Resources - NGFW EC2
@@ -383,7 +407,11 @@ class NGFW(models.Model):
     @property
     def is_active(self) -> bool:
         """Return True if NGFW is in an active/usable state."""
-        return self.status in (self.Status.READY, self.Status.ACTIVE, self.Status.STOPPED)
+        return self.status in (
+            self.Status.READY,
+            self.Status.ACTIVE,
+            self.Status.STOPPED,
+        )
 
     @property
     def is_terminal(self) -> bool:
@@ -393,7 +421,11 @@ class NGFW(models.Model):
     @property
     def is_runnable(self) -> bool:
         """Return True if NGFW can be started/stopped."""
-        return self.status in (self.Status.READY, self.Status.ACTIVE, self.Status.STOPPED)
+        return self.status in (
+            self.Status.READY,
+            self.Status.ACTIVE,
+            self.Status.STOPPED,
+        )
 
     @classmethod
     def get_active_for_user(cls, user):

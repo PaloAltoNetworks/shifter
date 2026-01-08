@@ -30,12 +30,9 @@ from cms import list_credentials as cms_list_credentials
 from cms import list_ngfws as cms_list_ngfws
 from cms import list_scenarios as cms_list_scenarios
 from cms.services import create_ngfw as cms_create_ngfw
-from cms.services import deprovision_ngfw as cms_deprovision_ngfw
+from cms.services import destroy_ngfw as cms_destroy_ngfw
 from cms.services import get_ngfw as cms_get_ngfw
 from cms.services import get_ngfw_linked_ranges as cms_get_ngfw_linked_ranges
-from cms.services import get_ngfw_status as cms_get_ngfw_status
-from cms.services import start_ngfw as cms_start_ngfw
-from cms.services import stop_ngfw as cms_stop_ngfw
 from mission_control.upload_session import (
     check_upload_in_progress,
     set_upload_in_progress,
@@ -535,8 +532,8 @@ def ngfw_deprovision(request: HttpRequest, ngfw_id: int) -> HttpResponse:
 
 @login_required
 @require_POST
-def api_ngfw_provision(request: HttpRequest) -> JsonResponse:
-    """Provision a new NGFW."""
+def api_ngfw_create(request: HttpRequest) -> JsonResponse:
+    """Create a new NGFW."""
     user = _get_user(request)
     try:
         data = json.loads(request.body)
@@ -604,52 +601,9 @@ def api_ngfw_list(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
-@require_GET
-def api_ngfw_status(request: HttpRequest, ngfw_id: int) -> JsonResponse:
-    """Get NGFW status."""
-    try:
-        status_data = cms_get_ngfw_status(_get_user(request), ngfw_id)
-    except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
-    return JsonResponse(status_data)
-
-
-@login_required
 @require_POST
-def api_ngfw_start(request: HttpRequest, ngfw_id: int) -> JsonResponse:
-    """Start a stopped NGFW."""
-    user = _get_user(request)
-    try:
-        ngfw = cms_start_ngfw(user, ngfw_id)
-    except CMSError as e:
-        if "not found" in str(e).lower():
-            raise Http404(_NGFW_NOT_FOUND) from None
-        return JsonResponse({"error": str(e)}, status=400)
-
-    logger.info("NGFW started: user=%s ngfw_id=%s", user.email, ngfw_id)
-    return JsonResponse({"status": ngfw.status})
-
-
-@login_required
-@require_POST
-def api_ngfw_stop(request: HttpRequest, ngfw_id: int) -> JsonResponse:
-    """Stop an active NGFW."""
-    user = _get_user(request)
-    try:
-        ngfw = cms_stop_ngfw(user, ngfw_id)
-    except CMSError as e:
-        if "not found" in str(e).lower():
-            raise Http404(_NGFW_NOT_FOUND) from None
-        return JsonResponse({"error": str(e)}, status=400)
-
-    logger.info("NGFW stopped: user=%s ngfw_id=%s", user.email, ngfw_id)
-    return JsonResponse({"status": ngfw.status})
-
-
-@login_required
-@require_POST
-def api_ngfw_deprovision(request: HttpRequest, ngfw_id: int) -> JsonResponse:
-    """Deprovision an NGFW."""
+def api_ngfw_destroy(request: HttpRequest, ngfw_id: int) -> JsonResponse:
+    """Destroy an NGFW."""
     user = _get_user(request)
     try:
         data = json.loads(request.body)
@@ -659,7 +613,7 @@ def api_ngfw_deprovision(request: HttpRequest, ngfw_id: int) -> JsonResponse:
     confirm_name = data.get("confirm_name", "").strip()
 
     try:
-        cms_deprovision_ngfw(user, ngfw_id, confirm_name)
+        cms_destroy_ngfw(user, ngfw_id, confirm_name)
     except CMSError as e:
         if "not found" in str(e).lower():
             raise Http404(_NGFW_NOT_FOUND) from None
@@ -667,9 +621,7 @@ def api_ngfw_deprovision(request: HttpRequest, ngfw_id: int) -> JsonResponse:
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-    logger.info(
-        "NGFW deprovisioning started: user=%s ngfw_id=%s", user.email, ngfw_id
-    )
+    logger.info("NGFW deprovisioning started: user=%s ngfw_id=%s", user.email, ngfw_id)
     return JsonResponse({"status": "deprovisioning"})
 
 

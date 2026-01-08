@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Keep things very simple
 - Don't re-invent the wheel
 - Use proven, solid technologies when possible
+- Never jump ahead of the user. Doing so ALWAYS results in incorrect or incomplete code, requiring significant rework. If you have observations, suggestions, or a question, ask the user first.. 
+- If the user makes a specific request, answer or execute it. Do not infer doing more or different.
 
 Research and recommend sound architecture and design patterns. Do not implement anti-patterns just to be consistent with the codebase.
 

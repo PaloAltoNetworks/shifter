@@ -20,6 +20,15 @@ class ResourceType(str, Enum):
     NGFW = "ngfw"
 
 
+class RequestType(str, Enum):
+    """Type of provisioning request.
+
+    Used by Request models to categorize what is being requested.
+    """
+
+    NGFW = "ngfw"
+
+
 class ResourceStatus(str, Enum):
     """Resource lifecycle status.
 

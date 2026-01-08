@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from shared.enums import InstanceStatus, ResourceStatus
+from shared.enums import ResourceStatus
 
 # Event type constants - Range
 EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
@@ -21,9 +21,7 @@ EVENT_TYPE_DESTROYED = "range.destroyed"
 EVENT_TYPE_CANCELLED = "range.cancelled"
 
 # Event type constants - NGFW
-EVENT_TYPE_NGFW_STATUS_UPDATED = "ngfw.status.updated"
-EVENT_TYPE_NGFW_PROVISIONED = "ngfw.provisioned"
-EVENT_TYPE_NGFW_DESTROYED = "ngfw.destroyed"
+EVENT_TYPE_NGFW = "ngfw.event"
 
 
 class BaseEvent(BaseModel):
@@ -83,43 +81,23 @@ class RangeCancelledEvent(BaseEvent):
 # =============================================================================
 
 
-class NGFWStatusUpdatedEvent(BaseEvent):
-    """Event published when an NGFW's status changes.
+class NGFWEvent(BaseEvent):
+    """Unified event for NGFW lifecycle changes.
 
-    Published by the provisioner during lifecycle transitions.
+    Published by the provisioner during NGFW lifecycle transitions.
     Consumed by:
-    - Engine: Updates NGFW model status
+    - Engine: Updates NGFW/Instantiation status
     - CMS: Updates NGFW model status
     - Mission Control: Pushes to browser WebSocket
+
+    The state dict contains context-specific data such as:
+    - Provisioned: instance_id, management_ip, dataplane_ip, service_name, etc.
+    - Destroyed: (typically empty)
+    - Failed: error_message
     """
 
-    ngfw_id: int  # Engine's NGFW.id
-    cms_ngfw_id: int  # CMS's NGFW.id for correlation
-    user_id: int
-    new_status: InstanceStatus
-    error_message: str | None = None
-
-
-class NGFWProvisionedEvent(BaseEvent):
-    """Event published when an NGFW is fully provisioned.
-
-    Contains AWS resource details populated by the provisioner.
-    """
-
-    ngfw_id: int
-    cms_ngfw_id: int
-    user_id: int
-    instance_id: str
-    management_ip: str
-    dataplane_ip: str
-    service_name: str
-    gwlb_arn: str
-    target_group_arn: str
-
-
-class NGFWDestroyedEvent(BaseEvent):
-    """Event published when an NGFW is fully destroyed."""
-
-    ngfw_id: int
-    cms_ngfw_id: int
-    user_id: int
+    request_id: UUID
+    instance_id: UUID
+    app_id: UUID
+    status: ResourceStatus | None = None
+    state: dict[str, Any] | None = None

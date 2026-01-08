@@ -2347,19 +2347,23 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
 # =============================================================================
 
 
-def _ngfw_to_context(ngfw: NGFW) -> NGFWAppContext:
-    """Convert NGFW model to NGFWAppContext projection.
+def _app_to_ngfw_context(app: App) -> NGFWAppContext:
+    """Convert App model to NGFWAppContext projection.
 
     Internal helper - do not call from outside cms.services.
     AWS infrastructure details are owned by Engine, not exposed here.
+
+    Args:
+        app: App model with instance relationship loaded.
     """
     from shared.schemas.app import NGFWAppContext
 
     return NGFWAppContext(
-        app_id=ngfw.id,
-        name=ngfw.name,
-        app_type="ngfw",
-        created_at=ngfw.created_at,
+        app_id=app.id,
+        instance_id=app.instance.id,
+        name=app.name,
+        status=app.status,
+        created_at=app.created_at,
     )
 
 
@@ -2376,17 +2380,27 @@ def _validate_ngfw_user(user: User) -> None:
         raise ValueError(USER_MUST_BE_SAVED)
 
 
-def _validate_ngfw_id(ngfw_id: int) -> None:
-    """Validate ngfw_id for NGFW operations.
+def _validate_app_id(app_id: UUID | str) -> UUID:
+    """Validate app_id for NGFW operations.
 
     Internal helper - raises TypeError or ValueError on invalid input.
+
+    Args:
+        app_id: UUID or string representation of UUID.
+
+    Returns:
+        Validated UUID.
     """
-    if ngfw_id is None:
-        raise TypeError("ngfw_id cannot be None")
-    if not isinstance(ngfw_id, int):
-        raise TypeError(f"ngfw_id must be an int, got {type(ngfw_id).__name__}")
-    if ngfw_id <= 0:
-        raise ValueError("ngfw_id must be a positive integer")
+    if app_id is None:
+        raise TypeError("app_id cannot be None")
+    if isinstance(app_id, str):
+        try:
+            return UUID(app_id)
+        except ValueError:
+            raise ValueError(f"app_id must be a valid UUID, got '{app_id}'") from None
+    if isinstance(app_id, UUID):
+        return app_id
+    raise TypeError(f"app_id must be a UUID or string, got {type(app_id).__name__}")
 
 
 def list_ngfws(user: User) -> list[NGFWAppContext]:
@@ -2402,97 +2416,52 @@ def list_ngfws(user: User) -> list[NGFWAppContext]:
         TypeError: If user is None or invalid type
         ValueError: If user has no ID (unsaved)
     """
-    from cms.models import NGFW
+    from cms.models import App
 
     _validate_ngfw_user(user)
     logger.debug("list_ngfws called for user_id=%s", user.id)
 
-    ngfws = NGFW.objects.filter(user=user, deleted_at__isnull=True).order_by(
-        "-created_at"
-    )
-    return [_ngfw_to_context(n) for n in ngfws]
+    apps = App.objects.filter(
+        instance__request__user=user,
+        app_type__slug="panw-ngfw",
+        deleted_at__isnull=True,
+    ).select_related("instance").order_by("-created_at")
+
+    return [_app_to_ngfw_context(app) for app in apps]
 
 
-def get_ngfw(user: User, ngfw_id: int) -> NGFWAppContext:
-    """Get single NGFW by ID as NGFWAppContext projection.
+def get_ngfw(user: User, app_id: UUID | str) -> NGFWAppContext:
+    """Get single NGFW by App UUID as NGFWAppContext projection.
 
     Args:
         user: User requesting the NGFW
-        ngfw_id: ID of the NGFW to retrieve
+        app_id: UUID of the App to retrieve
 
     Returns:
         NGFWAppContext projection
 
     Raises:
-        TypeError: If user is None, invalid type, or ngfw_id is invalid type
-        ValueError: If user has no ID (unsaved) or ngfw_id is invalid
+        TypeError: If user is None, invalid type, or app_id is invalid type
+        ValueError: If user has no ID (unsaved) or app_id is invalid
         CMSError: If NGFW not found or not owned by user
     """
-    from cms.models import NGFW
+    from cms.models import App
 
     _validate_ngfw_user(user)
-    _validate_ngfw_id(ngfw_id)
-    logger.debug("get_ngfw called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
+    validated_app_id = _validate_app_id(app_id)
+    logger.debug("get_ngfw called for user_id=%s, app_id=%s", user.id, validated_app_id)
 
     try:
-        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
-    except NGFW.DoesNotExist:
-        logger.error("get_ngfw: NGFW id=%s not found for user_id=%s", ngfw_id, user.id)
-        raise CMSError("NGFW not found") from None
-    return _ngfw_to_context(ngfw)
-
-
-def get_ngfw_linked_ranges(user: User, ngfw_id: int) -> list[LinkedRangeContext]:
-    """Get ranges linked to an NGFW.
-
-    Used by deprovision confirmation to show affected ranges.
-
-    Args:
-        user: User requesting the data
-        ngfw_id: ID of the NGFW
-
-    Returns:
-        List of LinkedRangeContext for active ranges using this NGFW
-
-    Raises:
-        TypeError: If user is None, invalid type, or ngfw_id is invalid type
-        ValueError: If user has no ID (unsaved) or ngfw_id is invalid
-        CMSError: If NGFW not found or not owned by user
-    """
-    from engine.models import Range
-    from shared.schemas.app import LinkedRangeContext
-
-    _validate_ngfw_user(user)
-    _validate_ngfw_id(ngfw_id)
-    logger.debug(
-        "get_ngfw_linked_ranges called for user_id=%s, ngfw_id=%s", user.id, ngfw_id
-    )
-
-    # Verify NGFW exists and user owns it (raises CMSError if not)
-    get_ngfw(user, ngfw_id)
-
-    # Find active ranges linked to this NGFW
-    # Active means: pending, provisioning, ready, paused, or resuming (not destroyed/failed)
-    active_statuses = [
-        ResourceStatus.PENDING.value,
-        ResourceStatus.PROVISIONING.value,
-        ResourceStatus.READY.value,
-        ResourceStatus.PAUSED.value,
-        ResourceStatus.RESUMING.value,
-    ]
-    ranges = Range.objects.filter(
-        ngfw_id=ngfw_id,
-        status__in=active_statuses,
-    ).order_by("-created_at")
-
-    return [
-        LinkedRangeContext(
-            range_id=r.id,
-            status=r.status,
-            created_at=r.created_at,
+        app = App.objects.select_related("instance", "instance__request").get(
+            id=validated_app_id,
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
         )
-        for r in ranges
-    ]
+    except App.DoesNotExist:
+        logger.error("get_ngfw: App id=%s not found for user_id=%s", app_id, user.id)
+        raise CMSError("NGFW not found") from None
+    return _app_to_ngfw_context(app)
 
 
 def create_ngfw(
@@ -2525,7 +2494,7 @@ def create_ngfw(
         ValueError: If required fields missing or invalid values
         CMSError: If credential validation fails
     """
-    from cms.models import NGFW, Credential
+    from cms.models import Credential
     from shared.schemas.app import NGFWAppRef
 
     _validate_ngfw_user(user)
@@ -2586,33 +2555,59 @@ def create_ngfw(
 
     from uuid import uuid4
 
-    from cms.models import Request
+    from cms.models import App, AppType, Instance, InstanceType, Request
     from cms.scenarios.hydrator import hydrate_ngfw
     from engine import create_ngfw as engine_create_ngfw
+    from shared.enums import RequestType, ResourceStatus
     from shared.schemas import RequestSpec
 
     # Create Request record first
     request_id = uuid4()
     request = Request.objects.create(
         request_id=request_id,
+        request_type=RequestType.NGFW.value,
         user=user,
     )
 
     logger.info("create_ngfw: created Request id=%s for user_id=%s", request_id, user.id)
 
-    # Create NGFW record with PROVISIONING status, linked to request
-    ngfw = NGFW.objects.create(
-        user=user,
-        name=name,
-        status=ACTIVE_STATUSES[NGFWStatus.PROVISIONING.value],
+    # Look up catalog types for NGFW
+    instance_type = InstanceType.objects.get(slug="panw-ngfw")
+    app_type = AppType.objects.get(slug="panw-ngfw")
+
+    # Create Instance (UUID auto-generated by EntityBase)
+    instance = Instance.objects.create(
         request=request,
+        name=name,
+        instance_type=instance_type,
+        status=ResourceStatus.PROVISIONING.value,
     )
 
-    logger.info("create_ngfw: created NGFW id=%s for user_id=%s", ngfw.id, user.id)
+    logger.info(
+        "create_ngfw: created Instance id=%s for user_id=%s",
+        instance.id,
+        user.id,
+    )
+
+    # Create App linked to Instance (UUID auto-generated by EntityBase)
+    app = App.objects.create(
+        name=name,
+        app_type=app_type,
+        instance=instance,
+        status=ResourceStatus.PROVISIONING.value,
+    )
+
+    logger.info(
+        "create_ngfw: created App id=%s for instance_id=%s",
+        app.id,
+        instance.id,
+    )
 
     # Hydrate NGFW with credential data
     ngfw_instance_spec = hydrate_ngfw(
-        ngfw=ngfw,
+        instance=instance,
+        app=app,
+        request=request,
         deployment_profile=deployment_profile,
         registration_method=registration_method,  # type: ignore[arg-type]
         scm_credential=scm_credential,
@@ -2627,15 +2622,15 @@ def create_ngfw(
         items=[ngfw_instance_spec],
     )
 
-    # Store the hydrated spec for audit/debugging (like RangeInstance.range_spec)
-    ngfw.ngfw_spec = ngfw_instance_spec.model_dump(mode="json")
-    ngfw.save(update_fields=["ngfw_spec"])
+    # Store the hydrated spec for audit/debugging
+    instance.data = ngfw_instance_spec.model_dump(mode="json")
+    instance.save(update_fields=["data"])
 
     engine_create_ngfw(request_spec)
 
     return NGFWAppRef(
-        ngfw_id=ngfw.id,
-        user_id=user.id,
+        app_id=app.id,
+        instance_id=instance.id,
         is_deleted=False,
     )
 
@@ -2684,7 +2679,7 @@ def destroy_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
         raise ValueError("Name confirmation does not match")
 
     # Update status to deprovisioning
-    ngfw.status = TERMINAL_STATUSES[]
+    ngfw.status = ResourceStatus.DESTROYING.value
     ngfw.save(update_fields=["status"])
 
     # Call engine to tear down infrastructure

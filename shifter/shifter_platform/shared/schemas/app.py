@@ -45,33 +45,78 @@ class OSAppSpec(AppSpecBase):
 
 
 class NGFWAppSpec(AppSpecBase):
-    """Specification for creating an NGFW app.
+    """Specification for creating and provisioning an NGFW app.
 
-    Attributes:
+    This schema serves dual purposes:
+    1. Input from Mission Control (with credential IDs)
+    2. Hydrated spec for Engine (with actual credential values)
+
+    Input Fields (from Mission Control):
         name: User-friendly app name (required for NGFW).
         app_type: Discriminator field, always 'ngfw'.
         deployment_profile_id: ID of deployment profile credential.
         registration_method: Either "pin" or "otp".
         scm_credential_id: Required if registration_method is "pin".
-        otp_value: Required if registration_method is "otp".
-        otp_folder: Required if registration_method is "otp".
+
+    Hydrated Fields (populated by hydrator for Engine):
+        ngfw_id: CMS NGFW.id for correlation.
+        user_id: User who owns this NGFW.
+        authcode: PAN-OS auth code from deployment profile.
+        scm_folder_name: SCM folder name (for PIN registration).
+        scm_pin_id: SCM PIN ID (for PIN registration).
+        scm_pin_value: SCM PIN value/secret (for PIN registration).
+        sls_region: Strata Logging Service region (for PIN registration).
+        otp_value: One-time password value (for OTP registration).
+        otp_folder: OTP folder path (for OTP registration).
     """
 
     name: str  # Required for NGFW
     app_type: Literal["ngfw"] = "ngfw"
-    deployment_profile_id: int
     registration_method: Literal["pin", "otp"]
+
+    # Input fields (credential IDs from Mission Control)
+    deployment_profile_id: int | None = None
     scm_credential_id: int | None = None
+
+    # Hydrated fields (actual values populated by hydrator for Engine)
+    ngfw_id: int | None = None
+    user_id: int | None = None
+    authcode: str | None = None
+    scm_folder_name: str | None = None
+    scm_pin_id: str | None = None
+    scm_pin_value: str | None = None
+    sls_region: str | None = None
     otp_value: str | None = None
     otp_folder: str | None = None
 
     @field_validator("deployment_profile_id")
     @classmethod
-    def deployment_profile_id_positive(cls, v: int) -> int:
-        """Validate deployment_profile_id is a positive integer."""
-        if v <= 0:
+    def deployment_profile_id_positive(cls, v: int | None) -> int | None:
+        """Validate deployment_profile_id is a positive integer if provided."""
+        if v is not None and v <= 0:
             raise ValueError("deployment_profile_id must be a positive integer")
         return v
+
+    @field_validator("ngfw_id")
+    @classmethod
+    def ngfw_id_positive(cls, v: int | None) -> int | None:
+        """Validate ngfw_id is a positive integer if provided."""
+        if v is not None and v <= 0:
+            raise ValueError("ngfw_id must be a positive integer")
+        return v
+
+    @field_validator("user_id")
+    @classmethod
+    def user_id_positive(cls, v: int | None) -> int | None:
+        """Validate user_id is a positive integer if provided."""
+        if v is not None and v <= 0:
+            raise ValueError("user_id must be a positive integer")
+        return v
+
+    @property
+    def is_hydrated(self) -> bool:
+        """Return True if this spec has been hydrated with credential values."""
+        return self.ngfw_id is not None and self.authcode is not None
 
 
 class AgentAppSpec(AppSpecBase):

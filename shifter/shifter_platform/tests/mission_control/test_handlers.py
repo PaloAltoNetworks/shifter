@@ -1,11 +1,98 @@
 """Tests for Mission Control handlers."""
 
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from shared.enums import RangeStatus
+
+
+@pytest.mark.django_db
+class TestProcessEvent:
+    """Tests for process_event dispatcher."""
+
+    def test_routes_range_events_to_range_handler(self):
+        """Dispatcher routes range.* events to process_range_event."""
+        from mission_control.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "range_id": 1,
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with patch("mission_control.handlers.process_range_event") as mock_range_handler:
+            process_event(message)
+            mock_range_handler.assert_called_once_with(message)
+
+    def test_routes_ngfw_events_to_ngfw_handler(self):
+        """Dispatcher routes ngfw.* events to process_ngfw_event."""
+        from mission_control.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "ngfw.status.updated",
+                    "ngfw_id": 1,
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler:
+            process_event(message)
+            mock_ngfw_handler.assert_called_once_with(message)
+
+    def test_ignores_unknown_event_types(self):
+        """Dispatcher ignores events with unknown event_type prefix."""
+        from mission_control.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "unknown.event",
+                    "some_id": 1,
+                }
+            )
+        }
+
+        with (
+            patch("mission_control.handlers.process_range_event") as mock_range_handler,
+            patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler,
+            patch("mission_control.handlers.logger") as mock_logger,
+        ):
+            process_event(message)
+            mock_range_handler.assert_not_called()
+            mock_ngfw_handler.assert_not_called()
+            mock_logger.debug.assert_called_once()
+            assert "unknown" in str(mock_logger.debug.call_args)
+
+    def test_handles_missing_event_type(self, caplog):
+        """Dispatcher handles messages without event_type gracefully."""
+        from mission_control.handlers import process_event
+
+        message = {"Message": json.dumps({"range_id": 1})}
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="mission_control.handlers"),
+            patch("mission_control.handlers.process_range_event") as mock_range_handler,
+            patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler,
+        ):
+            process_event(message)
+            mock_range_handler.assert_not_called()
+            mock_ngfw_handler.assert_not_called()
+
+    def test_dispatcher_is_callable(self):
+        """Dispatcher is a callable function."""
+        from mission_control.handlers import process_event
+
+        assert callable(process_event)
 
 
 @pytest.mark.django_db

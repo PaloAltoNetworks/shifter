@@ -139,18 +139,9 @@
         </div>
 
         <div class="ngfw-card-actions">
-            <a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}" class="btn btn-secondary btn-small">
+            <a href="{% url 'mission_control:ngfw_detail' ngfw.id %}" class="btn btn-secondary btn-small">
                 View Details
             </a>
-            {% if ngfw.status == 'stopped' or ngfw.status == 'ready' %}
-            <button class="btn btn-primary btn-small" data-action="start" data-ngfw-id="{{ ngfw.app_id }}">
-                Start
-            </button>
-            {% elif ngfw.status == 'active' %}
-            <button class="btn btn-secondary btn-small" data-action="stop" data-ngfw-id="{{ ngfw.app_id }}">
-                Stop
-            </button>
-            {% endif %}
         </div>
     </div>
     {% endfor %}
@@ -180,48 +171,3 @@
 {% endif %}
 {% endblock %}
 
-{% block extra_js %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const csrfToken = '{{ csrf_token }}';
-
-    // Handle start/stop button clicks
-    document.querySelectorAll('[data-action]').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            const action = this.dataset.action;
-            const ngfwId = this.dataset.ngfwId;
-            const url = action === 'start'
-                ? `/mission-control/api/ngfw/${ngfwId}/start/`
-                : `/mission-control/api/ngfw/${ngfwId}/stop/`;
-
-            btn.disabled = true;
-            btn.textContent = action === 'start' ? 'Starting...' : 'Stopping...';
-
-            fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert(data.error);
-                    btn.disabled = false;
-                    btn.textContent = action === 'start' ? 'Start' : 'Stop';
-                } else {
-                    // Reload page to show updated status
-                    window.location.reload();
-                }
-            })
-            .catch(err => {
-                alert('An error occurred. Please try again.');
-                btn.disabled = false;
-                btn.textContent = action === 'start' ? 'Start' : 'Stop';
-            });
-        });
-    });
-});
-</script>
-{% endblock %}

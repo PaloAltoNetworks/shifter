@@ -5,7 +5,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 echo "=== Installing Apache with PHP ==="
-apt-get install -y apache2 libapache2-mod-php php php-mysql
+apt-get install -y apache2 libapache2-mod-php php php-mysqli
 
 echo "=== Installing MySQL 8.0 ==="
 apt-get install -y mysql-server

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from django.utils import timezone
 
@@ -19,13 +20,13 @@ from engine import cancel_range as engine_cancel_range
 from engine import create_range as engine_create_range
 from engine import destroy_range as engine_destroy_range
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
-from shared.enums import ACTIVE_STATUSES, TERMINAL_STATUSES, ResourceStatus
+from shared.enums import ResourceStatus
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from cms.models import NGFW
-    from shared.schemas.app import LinkedRangeContext, NGFWAppContext, NGFWAppRef
+    from cms.models import App
+    from shared.schemas.app import NGFWAppContext, NGFWAppRef
     from shared.schemas.credentials import CredentialContext, CredentialRef
     from shared.schemas.range import RangeContext
 
@@ -98,9 +99,7 @@ def create_agent(user: User, **kwargs: Any) -> AgentConfig:
                 type(agent).__name__,
                 user.id,
             )
-            msg = (
-                f"Assets service returned {type(agent).__name__}, expected AgentConfig"
-            )
+            msg = f"Assets service returned {type(agent).__name__}, expected AgentConfig"
             raise TypeError(msg)
 
         logger.debug(
@@ -304,10 +303,7 @@ def list_agents(user: User) -> list[dict[str, Any]]:
                     user.id,
                 )
                 raise TypeError("agent.file_size_mb must be number")
-            if (
-                not isinstance(agent_dict["original_filename"], str)
-                or not agent_dict["original_filename"]
-            ):
+            if not isinstance(agent_dict["original_filename"], str) or not agent_dict["original_filename"]:
                 logger.error(
                     "list_agents: agent.original_filename is not non-empty str for user_id=%s",
                     user.id,
@@ -480,9 +476,7 @@ def get_allowed_extensions() -> list[str]:
 # =============================================================================
 
 
-def create_credential(
-    user: User, credential_type_slug: str, **kwargs: Any
-) -> CredentialRef:
+def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> CredentialRef:
     """Create credential (SCM or deployment profile).
 
     Args:
@@ -551,9 +545,7 @@ def create_credential(
                 credential_type_slug,
                 user.id,
             )
-            raise CMSError(
-                f"Credential type '{credential_type_slug}' not found"
-            ) from None
+            raise CMSError(f"Credential type '{credential_type_slug}' not found") from None
 
         # Extract name and type-specific data
         name = kwargs.pop("name", None)
@@ -1262,9 +1254,7 @@ def get_active_range(user: User) -> RangeContext | None:
         return None
 
 
-def create_range(
-    user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False
-) -> RangeContext:
+def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False) -> RangeContext:
     """Validate, hydrate, and trigger range provisioning.
 
     CMS validates scenario and agent requirements, hydrates the scenario
@@ -1702,9 +1692,7 @@ def resume_range(user: User, range_id: int) -> None:
 # =============================================================================
 
 
-def initiate_upload(
-    user: User, name: str, filename: str, file_size: int
-) -> dict[str, Any]:
+def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dict[str, Any]:
     """Validate and generate presigned URL for direct S3 upload.
 
     Validates user quota, file extension, and generates all components needed
@@ -2421,11 +2409,15 @@ def list_ngfws(user: User) -> list[NGFWAppContext]:
     _validate_ngfw_user(user)
     logger.debug("list_ngfws called for user_id=%s", user.id)
 
-    apps = App.objects.filter(
-        instance__request__user=user,
-        app_type__slug="panw-ngfw",
-        deleted_at__isnull=True,
-    ).select_related("instance").order_by("-created_at")
+    apps = (
+        App.objects.filter(
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
+        )
+        .select_related("instance")
+        .order_by("-created_at")
+    )
 
     return [_app_to_ngfw_context(app) for app in apps]
 
@@ -2514,9 +2506,7 @@ def create_ngfw(
             deleted_at__isnull=True,
         )
         if deployment_profile.credential_type.slug != "deployment_profile":
-            raise CMSError(
-                "deployment_profile_id must reference a deployment profile credential"
-            )
+            raise CMSError("deployment_profile_id must reference a deployment profile credential")
     except Credential.DoesNotExist:
         raise CMSError("Deployment profile not found") from None
 
@@ -2542,9 +2532,7 @@ def create_ngfw(
             raise CMSError("SCM credential not found") from None
     else:  # otp
         if not otp_value or not otp_folder:
-            raise ValueError(
-                "otp_value and otp_folder are required for OTP registration"
-            )
+            raise ValueError("otp_value and otp_folder are required for OTP registration")
 
     logger.debug(
         "create_ngfw called for user_id=%s, name=%s, method=%s",
@@ -2635,14 +2623,14 @@ def create_ngfw(
     )
 
 
-def destroy_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
+def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRef:
     """Deprovision an NGFW.
 
     Requires name confirmation to prevent accidental deprovisioning.
 
     Args:
         user: User requesting deprovisioning
-        ngfw_id: ID of the NGFW to deprovision
+        app_id: UUID of the App to deprovision
         confirm_name: Must match NGFW name exactly
 
     Returns:
@@ -2653,45 +2641,60 @@ def destroy_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
         ValueError: If confirm_name doesn't match or parameters invalid
         CMSError: If NGFW not found or not owned by user
     """
-    from cms.models import NGFW
+    from django.utils import timezone
+
+    from cms.models import App
+    from engine import services as engine_services
     from shared.schemas.app import NGFWAppRef
 
     _validate_ngfw_user(user)
-    _validate_ngfw_id(ngfw_id)
-    logger.debug("deprovision_ngfw called for user_id=%s, ngfw_id=%s", user.id, ngfw_id)
+    validated_app_id = _validate_app_id(app_id)
+    logger.debug("destroy_ngfw called for user_id=%s, app_id=%s", user.id, validated_app_id)
 
     try:
-        ngfw = NGFW.objects.get(id=ngfw_id, user=user, deleted_at__isnull=True)
-    except NGFW.DoesNotExist:
-        logger.error(
-            "deprovision_ngfw: NGFW id=%s not found for user_id=%s", ngfw_id, user.id
+        app = App.objects.select_related("instance", "instance__request").get(
+            id=validated_app_id,
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
         )
+    except App.DoesNotExist:
+        logger.error("destroy_ngfw: App id=%s not found for user_id=%s", app_id, user.id)
         raise CMSError("NGFW not found") from None
 
     # Validate name confirmation
-    if confirm_name != ngfw.name:
+    if confirm_name != app.name:
         logger.error(
-            "deprovision_ngfw: name mismatch for NGFW id=%s (expected=%s, got=%s)",
-            ngfw_id,
-            ngfw.name,
+            "destroy_ngfw: name mismatch for App id=%s (expected=%s, got=%s)",
+            app_id,
+            app.name,
             confirm_name,
         )
         raise ValueError("Name confirmation does not match")
 
-    # Update status to deprovisioning
-    ngfw.status = ResourceStatus.DESTROYING.value
-    ngfw.save(update_fields=["status"])
+    # Update status to deprovisioning for both App and Instance
+    now = timezone.now()
+    app.status = ResourceStatus.DESTROYING.value
+    app.deleted_at = now
+    app.save(update_fields=["status", "deleted_at"])
 
-    # Call engine to tear down infrastructure
-    if ngfw.request:
-        from engine import services as engine_services
+    instance = app.instance
+    instance.status = ResourceStatus.DESTROYING.value
+    instance.deleted_at = now
+    instance.save(update_fields=["status", "deleted_at"])
 
-        engine_services.destroy_ngfw(ngfw.request.request_id)
+    # Call engine to tear down infrastructure using request_id
+    request_id = instance.request.request_id
+    engine_services.destroy_ngfw(request_id)
 
-    logger.info("deprovision_ngfw: started deprovisioning NGFW id=%s", ngfw_id)
+    logger.info(
+        "destroy_ngfw: started deprovisioning App id=%s, request_id=%s",
+        app_id,
+        request_id,
+    )
 
     return NGFWAppRef(
-        ngfw_id=ngfw.id,
-        user_id=user.id,
-        is_deleted=False,
+        app_id=app.id,
+        instance_id=instance.id,
+        is_deleted=True,
     )

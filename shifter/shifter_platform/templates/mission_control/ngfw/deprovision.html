@@ -264,7 +264,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const csrfToken = '{{ csrf_token }}';
-    const ngfwId = {{ ngfw.app_id }};
+    const ngfwId = '{{ ngfw.app_id }}';
     const ngfwName = '{{ ngfw.name|escapejs }}';
 
     const confirmInput = document.getElementById('confirm-input');

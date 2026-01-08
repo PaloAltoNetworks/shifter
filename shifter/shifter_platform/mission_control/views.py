@@ -159,9 +159,7 @@ def initiate_upload(request):
     # Check for concurrent upload (session-level lock)
     if check_upload_in_progress(request.session):
         return JsonResponse(
-            {
-                "error": "An upload is already in progress. Please wait for it to complete."
-            },
+            {"error": "An upload is already in progress. Please wait for it to complete."},
             status=409,
         )
 
@@ -482,14 +480,8 @@ def ngfw_wizard(request: HttpRequest) -> HttpResponse:
     credentials = cms_list_credentials(request.user)
 
     # Filter by type and exclude expired (is_expired computed field)
-    scm_credentials = [
-        c for c in credentials if c.credential_type == "scm" and not c.is_expired
-    ]
-    deployment_profiles = [
-        c
-        for c in credentials
-        if c.credential_type == "deployment_profile" and not c.is_expired
-    ]
+    scm_credentials = [c for c in credentials if c.credential_type == "scm" and not c.is_expired]
+    deployment_profiles = [c for c in credentials if c.credential_type == "deployment_profile" and not c.is_expired]
 
     context = {
         "page_title": "Setup NGFW",
@@ -605,9 +597,8 @@ def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
 
     confirm_name = data.get("confirm_name", "").strip()
 
-    # TODO: Update destroy_ngfw to accept UUID
     try:
-        cms_destroy_ngfw(user, app_id, confirm_name)  # type: ignore[arg-type]
+        cms_destroy_ngfw(user, app_id, confirm_name)
     except CMSError as e:
         if "not found" in str(e).lower():
             raise Http404(_NGFW_NOT_FOUND) from None
@@ -631,9 +622,7 @@ def credentials_list(request):
     credentials = cms_list_credentials(request.user)
 
     scm_count = sum(1 for c in credentials if c.credential_type == "scm")
-    profile_count = sum(
-        1 for c in credentials if c.credential_type == "deployment_profile"
-    )
+    profile_count = sum(1 for c in credentials if c.credential_type == "deployment_profile")
 
     context = {
         "page_title": "Credentials",
@@ -706,9 +695,7 @@ def api_credential_create(request):
     data["user_id"] = request.user.id
 
     # Select spec class based on type
-    spec_class = (
-        SCMCredentialSpec if credential_type_slug == "scm" else DeploymentProfileSpec
-    )
+    spec_class = SCMCredentialSpec if credential_type_slug == "scm" else DeploymentProfileSpec
 
     # Validate with Pydantic spec
     try:

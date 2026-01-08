@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 from shared.schemas import RangeContext
 
 
@@ -16,7 +16,7 @@ def make_range_ctx(range_id: int = 42, user_id: int = 7) -> RangeContext:
         user_id=user_id,
         scenario_id="basic",
         agent_name="Test Agent",
-        status=RangeStatus.READY,
+        status=ResourceStatus.READY,
         instances=[],
     )
 
@@ -105,7 +105,7 @@ class TestDestroyRange:
         ):
             destroy_range(range_ctx)
 
-            assert mock_range.status == RangeStatus.DESTROYING.value
+            assert mock_range.status == ResourceStatus.DESTROYING.value
             mock_range.save.assert_any_call(update_fields=["status"])
 
     def test_calls_start_teardown_with_range_id_and_user_id_from_context(self):
@@ -141,7 +141,9 @@ class TestDestroyRange:
             destroy_range(range_ctx)
 
             assert mock_range.step_function_execution_arn == task_arn
-            mock_range.save.assert_any_call(update_fields=["step_function_execution_arn"])
+            mock_range.save.assert_any_call(
+                update_fields=["step_function_execution_arn"]
+            )
 
     def test_does_not_store_task_arn_when_none(self):
         """Service does not save ARN field when start_teardown returns None."""
@@ -221,7 +223,7 @@ class TestDestroyRange:
             result = destroy_range(range_ctx)
 
             assert result is True
-            assert mock_range.status == RangeStatus.DESTROYING.value
+            assert mock_range.status == ResourceStatus.DESTROYING.value
 
     # -------------------------------------------------------------------------
     # Logging - DEBUG on entry

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, computed_field, field_validator
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 from .base import SpecBase
 
@@ -187,7 +187,7 @@ class RangeContextBase(BaseModel):
     range_id: int
     scenario_id: str
     user_id: int
-    status: RangeStatus
+    status: ResourceStatus
     instances: list[InstanceContext]
     agent_name: str | None = None
 
@@ -219,13 +219,13 @@ class RangeContextBase(BaseModel):
     @property
     def is_ready(self) -> bool:
         """True if range is ready for use (terminal available)."""
-        return self.status == RangeStatus.READY
+        return self.status == ResourceStatus.READY
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_terminal(self) -> bool:
         """True if range is in a terminal state (destroyed or failed)."""
-        return self.status in (RangeStatus.DESTROYED, RangeStatus.FAILED)
+        return self.status in (ResourceStatus.DESTROYED, ResourceStatus.FAILED)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -261,7 +261,7 @@ class RangeRef(BaseModel):
 
     range_id: int
     user_id: int
-    status: RangeStatus
+    status: ResourceStatus
 
     @field_validator("range_id")
     @classmethod

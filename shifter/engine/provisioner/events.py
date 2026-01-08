@@ -39,36 +39,19 @@ import boto3
 logger = logging.getLogger(__name__)
 
 # TODO: #641 shared package
-# Range event type constants (matching shared.messages.events)
+# Resource event type constants (matching shared.messages.events)
 EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
 EVENT_TYPE_PROVISIONED = "range.provisioned"
 EVENT_TYPE_DESTROYED = "range.destroyed"
 EVENT_TYPE_CANCELLED = "range.cancelled"
 
-# Range status constants (matching shared.enums.RangeStatus)
+# Resource status constants (matching shared.enums.ResourceStatus)
 STATUS_PENDING = "pending"
 STATUS_PROVISIONING = "provisioning"
 STATUS_READY = "ready"
 STATUS_FAILED = "failed"
 STATUS_DESTROYING = "destroying"
 STATUS_DESTROYED = "destroyed"
-
-# NGFW event type constants (matching shared.messages.events)
-EVENT_TYPE_NGFW_STATUS_UPDATED = "ngfw.status.updated"
-EVENT_TYPE_NGFW_PROVISIONED = "ngfw.provisioned"
-EVENT_TYPE_NGFW_DESTROYED = "ngfw.destroyed"
-
-# NGFW status constants (matching shared.enums.NGFWStatus)
-NGFW_STATUS_PENDING = "pending"
-NGFW_STATUS_PROVISIONING = "provisioning"
-NGFW_STATUS_READY = "ready"
-NGFW_STATUS_STARTING = "starting"
-NGFW_STATUS_ACTIVE = "active"
-NGFW_STATUS_STOPPING = "stopping"
-NGFW_STATUS_STOPPED = "stopped"
-NGFW_STATUS_DEPROVISIONING = "deprovisioning"
-NGFW_STATUS_DEPROVISIONED = "deprovisioned"
-NGFW_STATUS_FAILED = "failed"
 
 
 def _get_sns_client():
@@ -316,7 +299,7 @@ def _create_ngfw_event(
     Args:
         event_type: Type of event (e.g., "ngfw.status.updated")
         ngfw_id: ID of the NGFW in Engine database
-        cms_ngfw_id: ID of the NGFW in CMS database
+        cms_ngfw_id: ID of the NGFW Instance in CMS database
         user_id: ID of the user who owns the NGFW
         **kwargs: Additional event-specific data
 
@@ -345,7 +328,7 @@ def publish_ngfw_status_update(
 
     Args:
         ngfw_id: ID of the NGFW in Engine database
-        cms_ngfw_id: ID of the NGFW in CMS database
+        cms_ngfw_id: ID of the NGFW Instance in CMS database
         user_id: ID of the user who owns the NGFW
         new_status: New status value
         error_message: Optional error message for failure events

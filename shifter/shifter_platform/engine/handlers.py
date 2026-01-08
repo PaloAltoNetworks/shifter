@@ -11,7 +11,7 @@ import logging
 from django.utils import timezone
 
 from engine.models import NGFW, Range
-from shared.enums import InstanceStatus, RangeStatus
+from shared.enums import ResourceStatus
 from shared.messages.events import (
     EVENT_TYPE_NGFW_PROVISIONED,
     EVENT_TYPE_NGFW_STATUS_UPDATED,
@@ -126,15 +126,15 @@ def _handle_status_updated(event: dict) -> None:
     range_obj.status = new_status
     update_fields = ["status"]
 
-    if new_status == RangeStatus.READY.value:
+    if new_status == ResourceStatus.READY.value:
         range_obj.ready_at = timezone.now()
         update_fields.append("ready_at")
 
-    if new_status == RangeStatus.FAILED.value and error_message:
+    if new_status == ResourceStatus.FAILED.value and error_message:
         range_obj.error_message = error_message
         update_fields.append("error_message")
 
-    if new_status == RangeStatus.DESTROYED.value:
+    if new_status == ResourceStatus.DESTROYED.value:
         range_obj.destroyed_at = timezone.now()
         update_fields.append("destroyed_at")
 
@@ -300,19 +300,19 @@ def _handle_ngfw_status_updated(event: dict) -> None:
     ngfw.status = new_status
     update_fields = ["status"]
 
-    if new_status == InstanceStatus.READY.value:
-        ngfw.provisioned_at = timezone.now()
-        update_fields.append("provisioned_at")
+    if new_status == ResourceStatus.READY.value:
+        if not ngfw.provisioned_at:
+            ngfw.provisioned_at = timezone.now()
+            update_fields.append("provisioned_at")
 
-    if new_status == InstanceStatus.ACTIVE.value:
         ngfw.last_started_at = timezone.now()
         update_fields.append("last_started_at")
 
-    if new_status == InstanceStatus.STOPPED.value:
+    if new_status == ResourceStatus.PAUSED.value:
         ngfw.last_stopped_at = timezone.now()
         update_fields.append("last_stopped_at")
 
-    if new_status == InstanceStatus.FAILED.value and error_message:
+    if new_status == ResourceStatus.FAILED.value and error_message:
         ngfw.error_message = error_message
         update_fields.append("error_message")
 

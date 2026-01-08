@@ -48,6 +48,7 @@ from .range import (
     RangeSpec,
     RangeSpecBase,
 )
+from .request import RequestSpec
 
 __all__ = [
     "AgentAppContext",
@@ -87,6 +88,7 @@ __all__ = [
     "RangeRef",
     "RangeSpec",
     "RangeSpecBase",
+    "RequestSpec",
     "SCMCredentialContext",
     "SCMCredentialSpec",
     "SpecBase",

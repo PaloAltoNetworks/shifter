@@ -8,7 +8,7 @@ import pytest
 
 
 @pytest.mark.django_db
-class TestGetRangeStatus:
+class TestGetResourceStatus:
     """Tests for get_range_status() in engine/services.py.
 
     Tests the service contract:

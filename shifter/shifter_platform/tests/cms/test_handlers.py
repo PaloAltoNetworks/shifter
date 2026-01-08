@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 
 @pytest.mark.django_db
@@ -172,7 +172,7 @@ class TestProcessRangeEvent:
             range_id=1,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         # SNS-wrapped message
@@ -181,7 +181,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 1,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -190,7 +190,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         instance = RangeInstance.objects.get(range_id=1)
-        assert instance.status == RangeStatus.PROVISIONING.value
+        assert instance.status == ResourceStatus.PROVISIONING.value
 
     def test_handles_ready_status(self):
         """Handler correctly handles READY status."""
@@ -201,7 +201,7 @@ class TestProcessRangeEvent:
             range_id=2,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
         )
 
         message = {
@@ -209,7 +209,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 2,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
                 }
             )
@@ -218,7 +218,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         instance = RangeInstance.objects.get(range_id=2)
-        assert instance.status == RangeStatus.READY.value
+        assert instance.status == ResourceStatus.READY.value
 
     def test_handles_terminal_status_sets_deleted_at(self):
         """Handler sets deleted_at when status is terminal (DESTROYED)."""
@@ -229,7 +229,7 @@ class TestProcessRangeEvent:
             range_id=3,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.DESTROYING.value,
+            status=ResourceStatus.DESTROYING.value,
         )
 
         message = {
@@ -237,7 +237,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 3,
-                    "new_status": RangeStatus.DESTROYED.value,
+                    "new_status": ResourceStatus.DESTROYED.value,
                     "user_id": 42,
                 }
             )
@@ -246,7 +246,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         instance = RangeInstance.objects.get(range_id=3)
-        assert instance.status == RangeStatus.DESTROYED.value
+        assert instance.status == ResourceStatus.DESTROYED.value
         assert instance.deleted_at is not None
 
     # ---------------------------------------------------------------------
@@ -262,7 +262,7 @@ class TestProcessRangeEvent:
             range_id=4,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -282,7 +282,7 @@ class TestProcessRangeEvent:
 
         # Status should be unchanged
         instance = RangeInstance.objects.get(range_id=4)
-        assert instance.status == RangeStatus.PENDING.value
+        assert instance.status == ResourceStatus.PENDING.value
 
     # ---------------------------------------------------------------------
     # Error handling - missing data
@@ -297,7 +297,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 999,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
                 }
             )
@@ -318,7 +318,7 @@ class TestProcessRangeEvent:
             range_id=5,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -326,7 +326,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 5,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 999,  # Wrong user
                 }
             )
@@ -341,10 +341,10 @@ class TestProcessRangeEvent:
 
         # Status should be unchanged
         instance = RangeInstance.objects.get(range_id=5)
-        assert instance.status == RangeStatus.PENDING.value
+        assert instance.status == ResourceStatus.PENDING.value
 
     def test_rejects_invalid_status_value(self, caplog):
-        """Handler logs error and returns when status is not a valid RangeStatus."""
+        """Handler logs error and returns when status is not a valid ResourceStatus."""
         from cms.handlers import process_range_event
         from cms.models import RangeInstance
 
@@ -352,7 +352,7 @@ class TestProcessRangeEvent:
             range_id=50,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -374,7 +374,7 @@ class TestProcessRangeEvent:
 
         # Status should be unchanged
         instance = RangeInstance.objects.get(range_id=50)
-        assert instance.status == RangeStatus.PENDING.value
+        assert instance.status == ResourceStatus.PENDING.value
 
     # ---------------------------------------------------------------------
     # Error handling - database failures
@@ -391,7 +391,7 @@ class TestProcessRangeEvent:
             range_id=6,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -399,7 +399,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 6,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -427,7 +427,7 @@ class TestProcessRangeEvent:
             range_id=7,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -435,7 +435,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 7,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -492,7 +492,7 @@ class TestProcessRangeEvent:
             range_id=8,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         # Minimal SNS message - no error_message
@@ -501,7 +501,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 8,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -510,4 +510,4 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         instance = RangeInstance.objects.get(range_id=8)
-        assert instance.status == RangeStatus.PROVISIONING.value
+        assert instance.status == ResourceStatus.PROVISIONING.value

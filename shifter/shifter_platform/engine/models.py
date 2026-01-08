@@ -11,7 +11,7 @@ Infrastructure lifecycle models for Shifter platform.
 from django.conf import settings
 from django.db import models, transaction
 
-from shared.enums import InstanceStatus, RequestType
+from shared.enums import RequestType, ResourceStatus
 
 
 class Request(models.Model):
@@ -487,16 +487,16 @@ class NGFW(models.Model):
     """
 
     class Status(models.TextChoices):
-        PENDING = InstanceStatus.PENDING.value, "Pending"
-        PROVISIONING = InstanceStatus.PROVISIONING.value, "Provisioning"
-        READY = InstanceStatus.READY.value, "Ready"
-        STARTING = InstanceStatus.STARTING.value, "Starting"
-        ACTIVE = InstanceStatus.ACTIVE.value, "Active"
-        STOPPING = InstanceStatus.STOPPING.value, "Stopping"
-        STOPPED = InstanceStatus.STOPPED.value, "Stopped"
-        DEPROVISIONING = InstanceStatus.DEPROVISIONING.value, "Deprovisioning"
-        DEPROVISIONED = InstanceStatus.DEPROVISIONED.value, "Deprovisioned"
-        FAILED = InstanceStatus.FAILED.value, "Failed"
+        PENDING = "pending", "Pending"
+        PROVISIONING = "provisioning", "Provisioning"
+        READY = "ready", "Ready"
+        STARTING = "starting", "Starting"
+        ACTIVE = "active", "Active"
+        STOPPING = "stopping", "Stopping"
+        STOPPED = "stopped", "Stopped"
+        DEPROVISIONING = "deprovisioning", "Deprovisioning"
+        DEPROVISIONED = "deprovisioned", "Deprovisioned"
+        FAILED = "failed", "Failed"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

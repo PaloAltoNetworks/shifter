@@ -12,6 +12,8 @@ from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
 from shared.schemas import InstanceSpec, RangeContext, RangeSpec
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from django.contrib.auth.models import User
 
     from engine.ssh import SSHConnection
@@ -360,71 +362,85 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     )
 
 
-def create_ngfw(request: InstanceSpec) -> int:
+def create_ngfw(request_spec: "RequestSpec") -> "UUID":
     """Provision NGFW infrastructure.
 
-    Creates an Engine NGFW record and triggers ECS provisioning.
-    Engine owns infrastructure state; CMS owns the logical asset.
+    Interprets the RequestSpec into Engine models (Request, Instance, App),
+    then triggers ECS provisioning.
 
     Args:
-        request: InstanceSpec with nested NGFWAppSpec from CMS hydrator.
-            Must have role="ngfw" and ngfw_app populated with hydrated credentials.
+        request_spec: RequestSpec containing an NGFW InstanceSpec item.
+            The InstanceSpec must have role="ngfw" and ngfw_app populated
+            with hydrated credentials.
 
     Returns:
-        engine_ngfw_id: The ID of the created Engine NGFW record.
+        The request_id UUID for correlation with CMS.
 
     Raises:
-        ValueError: If request is not a valid NGFW InstanceSpec.
+        TypeError: If request_spec is not a RequestSpec.
+        ValueError: If request_spec or its NGFW item is invalid.
         User.DoesNotExist: If user_id doesn't map to a Django user.
     """
-    from django.contrib.auth import get_user_model
-
     from engine.ecs import start_ngfw_provisioning
-    from engine.models import NGFW
+    from engine.interpreter import interpret
 
-    User = get_user_model()
+    # Validate NGFW-specific requirements before interpreting
+    ngfw_instance = None
+    for item in request_spec.items:
+        if hasattr(item, "role") and item.role == "ngfw":
+            ngfw_instance = item
+            break
 
-    # Validate this is an NGFW InstanceSpec with hydrated NGFWAppSpec
-    if not isinstance(request, InstanceSpec):
-        raise ValueError(f"Expected InstanceSpec, got {type(request).__name__}")
-    if request.role != "ngfw":
-        raise ValueError(f"Expected role='ngfw', got role='{request.role}'")
-    if request.ngfw_app is None:
+    if ngfw_instance is None:
+        raise ValueError("RequestSpec must contain an NGFW InstanceSpec")
+    if ngfw_instance.ngfw_app is None:
         raise ValueError("ngfw_app is required for NGFW provisioning")
-    if not request.ngfw_app.is_hydrated:
+    if not ngfw_instance.ngfw_app.is_hydrated:
         raise ValueError("ngfw_app must be hydrated with credential values")
 
-    # Extract IDs from the hydrated NGFWAppSpec
-    cms_ngfw_id = request.ngfw_app.ngfw_id
-    user_id = request.ngfw_app.user_id
-
-    logger.debug(
-        "create_ngfw: cms_ngfw_id=%s user_id=%s",
-        cms_ngfw_id,
-        user_id,
-    )
-
-    # Get Django user for FK
-    user = User.objects.get(id=user_id)
-
-    # Create Engine NGFW with full config from CMS
-    ngfw = NGFW.objects.create(
-        user=user,
-        cms_ngfw_id=cms_ngfw_id,
-        status=NGFW.Status.PROVISIONING,
-        ngfw_config=request.model_dump(mode="json"),  # Store full InstanceSpec
-    )
+    # Interpret spec into models
+    request = interpret(request_spec)
 
     logger.info(
-        "create_ngfw: created engine_ngfw_id=%s cms_ngfw_id=%s",
-        ngfw.id,
-        cms_ngfw_id,
+        "create_ngfw: interpreted request_id=%s",
+        request_spec.request_id,
     )
 
-    # Trigger ECS provisioning with Engine NGFW ID
-    task_arn = start_ngfw_provisioning(ngfw.id)
+    # Get the NGFW instance for provisioning
+    ngfw_instance = request.instance_instantiations.filter(role="ngfw").first()
+
+    if ngfw_instance:
+        # Trigger ECS provisioning with Instance UUID
+        task_arn = start_ngfw_provisioning(ngfw_instance.uuid)
+
+        if task_arn:
+            logger.info(
+                "create_ngfw: started ECS task=%s for instance=%s",
+                task_arn,
+                ngfw_instance.uuid,
+            )
+
+    return request.request_id
+
+
+def destroy_ngfw(request_id: "UUID") -> bool:
+    """Tear down NGFW infrastructure.
+
+    Triggers ECS teardown for the NGFW associated with the request.
+
+    Args:
+        request_id: UUID of the request containing the NGFW to destroy.
+
+    Returns:
+        True if teardown initiated, False if request not found.
+    """
+    from engine.ecs import start_ngfw_teardown
+
+    logger.debug("destroy_ngfw: request_id=%s", request_id)
+
+    task_arn = start_ngfw_teardown(request_id)
 
     if task_arn:
-        logger.info("create_ngfw: started ECS task=%s", task_arn)
+        logger.info("destroy_ngfw: started ECS task=%s for request=%s", task_arn, request_id)
 
-    return ngfw.id
+    return task_arn is not None

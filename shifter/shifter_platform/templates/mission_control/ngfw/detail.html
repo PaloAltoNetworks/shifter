@@ -243,7 +243,7 @@
         <strong style="color: #ff4d4f;">Warning: {{ linked_ranges|length }} range(s) are currently using this NGFW.</strong>
         {% endif %}
     </p>
-    <a href="{% url 'mission_control:ngfw_deprovision' ngfw.id %}" class="btn btn-danger btn-small">
+    <a href="{% url 'mission_control:ngfw_deprovision' ngfw.app_id %}" class="btn btn-danger btn-small">
         Deprovision NGFW
     </a>
 </div>

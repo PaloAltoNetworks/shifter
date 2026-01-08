@@ -8,6 +8,8 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from shared.enums import RequestType
+
 # CredentialBase is defined locally below (migrated from mission_control)
 
 logger = logging.getLogger(__name__)
@@ -531,6 +533,11 @@ class Request(models.Model):
     """
 
     request_id = models.UUIDField(unique=True, db_index=True)
+    request_type = models.CharField(
+        max_length=20,
+        choices=[(t.value, t.name) for t in RequestType],
+        db_index=True,
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

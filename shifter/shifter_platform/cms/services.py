@@ -2687,6 +2687,12 @@ def destroy_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
     ngfw.status = TERMINAL_STATUSES[]
     ngfw.save(update_fields=["status"])
 
+    # Call engine to tear down infrastructure
+    if ngfw.request:
+        from engine import services as engine_services
+
+        engine_services.destroy_ngfw(ngfw.request.request_id)
+
     logger.info("deprovision_ngfw: started deprovisioning NGFW id=%s", ngfw_id)
 
     return NGFWAppRef(

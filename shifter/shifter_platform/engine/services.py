@@ -426,21 +426,38 @@ def create_ngfw(request_spec: "RequestSpec") -> "UUID":
 def destroy_ngfw(request_id: "UUID") -> bool:
     """Tear down NGFW infrastructure.
 
-    Triggers ECS teardown for the NGFW associated with the request.
+    Looks up the NGFW Instance by request_id and triggers ECS teardown.
 
     Args:
         request_id: UUID of the request containing the NGFW to destroy.
 
     Returns:
-        True if teardown initiated, False if request not found.
+        True if teardown initiated, False if request/instance not found.
     """
     from engine.ecs import start_ngfw_teardown
+    from engine.models import Instance, Request
 
     logger.debug("destroy_ngfw: request_id=%s", request_id)
 
-    task_arn = start_ngfw_teardown(request_id)
+    # Look up the request and its NGFW instance
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("destroy_ngfw: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("destroy_ngfw: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    task_arn = start_ngfw_teardown(ngfw_instance.uuid)
 
     if task_arn:
-        logger.info("destroy_ngfw: started ECS task=%s for request=%s", task_arn, request_id)
+        logger.info(
+            "destroy_ngfw: started ECS task=%s for instance=%s",
+            task_arn,
+            ngfw_instance.uuid,
+        )
 
     return task_arn is not None

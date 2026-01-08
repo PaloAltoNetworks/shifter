@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Discriminator, field_validator
 
@@ -59,7 +60,8 @@ class NGFWAppSpec(AppSpecBase):
         scm_credential_id: Required if registration_method is "pin".
 
     Hydrated Fields (populated by hydrator for Engine):
-        ngfw_id: CMS NGFW.id for correlation.
+        instance_id: CMS Instance UUID for event correlation.
+        app_id: CMS App UUID for event correlation.
         user_id: User who owns this NGFW.
         authcode: PAN-OS auth code from deployment profile.
         scm_folder_name: SCM folder name (for PIN registration).
@@ -79,7 +81,8 @@ class NGFWAppSpec(AppSpecBase):
     scm_credential_id: int | None = None
 
     # Hydrated fields (actual values populated by hydrator for Engine)
-    ngfw_id: int | None = None
+    instance_id: UUID | None = None
+    app_id: UUID | None = None
     user_id: int | None = None
     authcode: str | None = None
     scm_folder_name: str | None = None
@@ -97,14 +100,6 @@ class NGFWAppSpec(AppSpecBase):
             raise ValueError("deployment_profile_id must be a positive integer")
         return v
 
-    @field_validator("ngfw_id")
-    @classmethod
-    def ngfw_id_positive(cls, v: int | None) -> int | None:
-        """Validate ngfw_id is a positive integer if provided."""
-        if v is not None and v <= 0:
-            raise ValueError("ngfw_id must be a positive integer")
-        return v
-
     @field_validator("user_id")
     @classmethod
     def user_id_positive(cls, v: int | None) -> int | None:
@@ -116,7 +111,7 @@ class NGFWAppSpec(AppSpecBase):
     @property
     def is_hydrated(self) -> bool:
         """Return True if this spec has been hydrated with credential values."""
-        return self.ngfw_id is not None and self.authcode is not None
+        return self.app_id is not None and self.authcode is not None
 
 
 class AgentAppSpec(AppSpecBase):
@@ -179,18 +174,27 @@ class OSAppContext(AppContextBase):
     app_type: Literal["os"] = "os"
 
 
-class NGFWAppContext(AppContextBase):
+class NGFWAppContext(BaseModel):
     """NGFW app projection for templates.
 
     Contains fields needed for NGFW display in Mission Control.
     AWS infrastructure details are owned by Engine, not exposed here.
 
+    Note: Does not inherit from AppContextBase because NGFW uses UUID primary key
+    while other app types use int. This is an intentional design decision.
+
     Attributes:
+        app_id: UUID of the CMS App record.
+        instance_id: UUID of the CMS Instance record (for correlation).
+        name: User-friendly NGFW name.
         app_type: Discriminator field, always 'ngfw'.
         status: NGFW lifecycle status (synced from Engine via events).
         created_at: When NGFW was created in CMS.
     """
 
+    app_id: UUID
+    instance_id: UUID
+    name: str
     app_type: Literal["ngfw"] = "ngfw"
     status: str
     created_at: datetime
@@ -260,30 +264,14 @@ class NGFWAppRef(BaseModel):
     Used for provision/deprovision operations and status checks.
 
     Attributes:
-        ngfw_id: Unique identifier of the NGFW.
-        user_id: ID of the user who owns this NGFW.
+        app_id: UUID of the CMS App record.
+        instance_id: UUID of the CMS Instance record.
         is_deleted: Whether this NGFW has been soft-deleted.
     """
 
-    ngfw_id: int
-    user_id: int
+    app_id: UUID
+    instance_id: UUID
     is_deleted: bool = False
-
-    @field_validator("ngfw_id")
-    @classmethod
-    def ngfw_id_positive(cls, v: int) -> int:
-        """Validate ngfw_id is a positive integer."""
-        if v <= 0:
-            raise ValueError("ngfw_id must be a positive integer")
-        return v
-
-    @field_validator("user_id")
-    @classmethod
-    def user_id_positive(cls, v: int) -> int:
-        """Validate user_id is a positive integer."""
-        if v <= 0:
-            raise ValueError("user_id must be a positive integer")
-        return v
 
 
 class LinkedRangeContext(BaseModel):

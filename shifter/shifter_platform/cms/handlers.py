@@ -8,10 +8,9 @@ from __future__ import annotations
 import json
 import logging
 
-from django.utils import timezone
-
-from cms.models import NGFW, RangeInstance
-from shared.enums import ResourceStatus, TERMINAL_STATUSES
+from cms.models import App, Instance, RangeInstance
+from shared.enums import ResourceStatus
+from shared.messages.events import EVENT_TYPE_NGFW
 
 logger = logging.getLogger(__name__)
 
@@ -141,81 +140,110 @@ def process_range_event(message: str | dict) -> None:
 
 
 def process_ngfw_event(message: str | dict) -> None:
-    """Process NGFW event from SNS/SQS - updates CMS NGFW.status.
+    """Process unified NGFW event from SNS/SQS.
 
-    This handler consumes NGFW status events published by the Engine
-    provisioner and updates the CMS NGFW model accordingly.
+    Updates CMS Instance and App models based on the event:
+    - Looks up Instance by instance_id (UUID)
+    - Looks up App by app_id (UUID)
+    - Updates status on both if provided
+    - EntityBase.save() auto-sets deleted_at on terminal status
 
     Args:
         message: SNS-wrapped message containing NGFW event data.
-            Expected event format:
-            {
-                "event_type": "ngfw.status.updated",
-                "ngfw_id": int,  # Engine's NGFW.id
-                "cms_ngfw_id": int,  # CMS's NGFW.id for correlation
-                "user_id": int,
-                "new_status": str,
-                "error_message": str | None
-            }
 
     Returns:
         None. Errors are logged and handled gracefully.
     """
     event = parse_sns_message(message)
-
     event_type = event.get("event_type")
-    if event_type != "ngfw.status.updated":
+
+    if event_type != EVENT_TYPE_NGFW:
         logger.debug("Ignoring NGFW event_type=%s", event_type)
         return
 
-    cms_ngfw_id = event.get("cms_ngfw_id")  # CMS's NGFW.id
-    user_id = event.get("user_id")
-    new_status = event.get("new_status")
+    _handle_ngfw_event(event)
+
+
+def _handle_ngfw_event(event: dict) -> None:
+    """Handle unified ngfw.event - update CMS Instance and App status.
+
+    Args:
+        event: Event payload with instance_id, app_id, status.
+    """
     event_id = event.get("event_id", "unknown")
+    instance_id = event.get("instance_id")
+    app_id = event.get("app_id")
+    status = event.get("status")
 
-    # CMS only cares about terminal statuses - marks NGFW as deleted
-    try:
-        status = ResourceStatus(new_status)
-    except ValueError:
-        logger.error(
-            "Invalid NGFW status value: %s (cms_ngfw_id=%s)", new_status, cms_ngfw_id
+    # Validate required fields
+    if not instance_id or not app_id:
+        logger.warning(
+            "NGFW event missing required fields: "
+            "instance_id=%s app_id=%s event_id=%s",
+            instance_id,
+            app_id,
+            event_id,
         )
         return
 
-    if status not in TERMINAL_STATUSES:
-        logger.debug(
-            "Ignoring non-terminal status: cms_ngfw_id=%s status=%s",
-            cms_ngfw_id,
-            new_status,
-        )
-        return
+    # Validate status if provided
+    if status:
+        try:
+            ResourceStatus(status)
+        except ValueError:
+            logger.error(
+                "Invalid status value: %s event_id=%s", status, event_id
+            )
+            return
 
+    # Look up and update Instance
     try:
-        ngfw = NGFW.objects.get(id=cms_ngfw_id)
-    except NGFW.DoesNotExist:
-        logger.warning("CMS NGFW not found: cms_ngfw_id=%s", cms_ngfw_id)
-        return
-
-    if ngfw.user_id != user_id:
-        logger.error(
-            "user_id mismatch: message=%s, ngfw=%s (cms_ngfw_id=%s)",
-            user_id,
-            ngfw.user_id,
-            cms_ngfw_id,
+        instance = Instance.objects.get(id=instance_id)
+        previous_instance_status = instance.status
+        if status:
+            instance.status = status
+            instance.save(update_fields=["status"])
+    except Instance.DoesNotExist:
+        logger.warning(
+            "CMS Instance not found: instance_id=%s event_id=%s",
+            instance_id,
+            event_id,
         )
-        return
-
-    ngfw.deleted_at = timezone.now()
-
-    try:
-        ngfw.save(update_fields=["deleted_at"])
+        previous_instance_status = None
     except Exception:
-        logger.exception("DB error saving CMS NGFW: cms_ngfw_id=%s", cms_ngfw_id)
+        logger.exception(
+            "DB error saving CMS Instance: instance_id=%s event_id=%s",
+            instance_id,
+            event_id,
+        )
+        return
+
+    # Look up and update App
+    try:
+        app = App.objects.get(id=app_id)
+        previous_app_status = app.status
+        if status:
+            app.status = status
+            app.save(update_fields=["status"])
+    except App.DoesNotExist:
+        logger.warning(
+            "CMS App not found: app_id=%s event_id=%s", app_id, event_id
+        )
+        previous_app_status = None
+    except Exception:
+        logger.exception(
+            "DB error saving CMS App: app_id=%s event_id=%s", app_id, event_id
+        )
         return
 
     logger.info(
-        "CMS marked NGFW deleted: cms_ngfw_id=%s status=%s event_id=%s",
-        cms_ngfw_id,
-        new_status,
+        "CMS processed NGFW event: instance_id=%s (%s->%s) "
+        "app_id=%s (%s->%s) event_id=%s",
+        instance_id,
+        previous_instance_status,
+        status or previous_instance_status,
+        app_id,
+        previous_app_status,
+        status or previous_app_status,
         event_id,
     )

@@ -20,7 +20,7 @@ from shared.schemas import AgentDetails, DCConfig, InstanceSpec, NGFWAppSpec, Ra
 from .loader import load_scenario
 
 if TYPE_CHECKING:
-    from cms.models import NGFW, AgentConfig, Credential
+    from cms.models import AgentConfig, App, Credential, Instance, Request
     from cms.scenarios.schema import InstanceConfig
 
 logger = logging.getLogger(__name__)
@@ -145,7 +145,9 @@ def _hydrate_instance(
 
 
 def hydrate_ngfw(
-    ngfw: NGFW,
+    instance: Instance,
+    app: App,
+    request: Request,
     deployment_profile: Credential,
     registration_method: Literal["pin", "otp"],
     scm_credential: Credential | None = None,
@@ -158,18 +160,20 @@ def hydrate_ngfw(
     them into an InstanceSpec with nested NGFWAppSpec for Engine.
 
     Args:
-        ngfw: The NGFW model instance to provision
-        deployment_profile: Deployment profile credential with authcode
-        registration_method: Either "pin" or "otp"
-        scm_credential: SCM credential (required if registration_method="pin")
-        otp_value: OTP value (required if registration_method="otp")
-        otp_folder: OTP folder (required if registration_method="otp")
+        instance: CMS Instance model (provides UUID for event correlation).
+        app: CMS App model (provides UUID for event correlation).
+        request: CMS Request model (provides user context).
+        deployment_profile: Deployment profile credential with authcode.
+        registration_method: Either "pin" or "otp".
+        scm_credential: SCM credential (required if registration_method="pin").
+        otp_value: OTP value (required if registration_method="otp").
+        otp_folder: OTP folder (required if registration_method="otp").
 
     Returns:
-        InstanceSpec with hydrated NGFWAppSpec for Engine consumption
+        InstanceSpec with hydrated NGFWAppSpec for Engine consumption.
 
     Raises:
-        CMSError: If required credentials are missing or invalid
+        CMSError: If required credentials are missing or invalid.
     """
     # Validate deployment profile has authcode
     authcode = deployment_profile.data.get("authcode")
@@ -209,21 +213,23 @@ def hydrate_ngfw(
         raise CMSError("OTP value and folder required for OTP registration")
 
     logger.debug(
-        "hydrate_ngfw: ngfw_id=%s, method=%s",
-        ngfw.id,
+        "hydrate_ngfw: instance_id=%s, app_id=%s, method=%s",
+        instance.id,
+        app.id,
         registration_method,
     )
 
     # Create hydrated NGFWAppSpec with actual credential values
     ngfw_app = NGFWAppSpec(
-        name=ngfw.name,
+        name=app.name,
         registration_method=registration_method,
         # Input fields (IDs) - optional for hydrated spec
         deployment_profile_id=deployment_profile.id,
         scm_credential_id=scm_credential.id if scm_credential else None,
         # Hydrated fields (actual values)
-        ngfw_id=ngfw.id,
-        user_id=ngfw.user_id,
+        instance_id=instance.id,
+        app_id=app.id,
+        user_id=request.user_id,
         authcode=authcode,
         scm_folder_name=scm_folder_name,
         scm_pin_id=scm_pin_id,
@@ -235,8 +241,8 @@ def hydrate_ngfw(
 
     # Return InstanceSpec with nested NGFWAppSpec
     return InstanceSpec(
-        name=ngfw.name,
-        uuid=str(uuid.uuid4()),
+        name=app.name,
+        uuid=str(instance.id),
         role="ngfw",
         os_type="panos",
         ngfw_app=ngfw_app,

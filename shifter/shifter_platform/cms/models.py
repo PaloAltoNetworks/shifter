@@ -513,6 +513,47 @@ class AgentConfig(FileAsset):
 
 
 # -----------------------------------------------------------------------------
+# Request Tracking
+# -----------------------------------------------------------------------------
+
+
+class Request(models.Model):
+    """Provisioning request container.
+
+    Groups items requested together while allowing independent lifecycles.
+    Maps 1:1 with RequestSpec schema.
+
+    Attributes:
+        request_id: UUID identifier for this request (correlation key).
+        user: User who made the request.
+        created_at: When the request was created.
+        deleted_at: Soft delete timestamp (None = active).
+    """
+
+    request_id = models.UUIDField(unique=True, db_index=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="requests",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Request"
+        verbose_name_plural = "Requests"
+
+    def __str__(self):
+        return f"Request {self.request_id}"
+
+    @property
+    def is_deleted(self):
+        """Return True if this request has been soft-deleted."""
+        return self.deleted_at is not None
+
+
+# -----------------------------------------------------------------------------
 # Range Instance Tracking
 # -----------------------------------------------------------------------------
 
@@ -533,6 +574,13 @@ class NGFW(Asset):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="ngfws",
+    )
+    request = models.ForeignKey(
+        Request,
+        on_delete=models.CASCADE,
+        related_name="ngfws",
+        null=True,
+        blank=True,
     )
     # Hydrated configuration sent to Engine (credentials, registration method, etc.)
     ngfw_spec = models.JSONField(null=True, blank=True)

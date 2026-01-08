@@ -19,7 +19,7 @@ from engine import cancel_range as engine_cancel_range
 from engine import create_range as engine_create_range
 from engine import destroy_range as engine_destroy_range
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
-from shared.enums import InstanceStatus, RangeStatus
+from shared.enums import ACTIVE_STATUSES, TERMINAL_STATUSES, ResourceStatus
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -1205,11 +1205,11 @@ def get_active_range(user: User) -> RangeContext | None:
     try:
         # Query for active ranges (non-deleted)
         # Exclude DESTROYING status - user can create new range while old one tears down
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
 
         instance = (
             RangeInstance.active.filter(user_id=user.id)
-            .exclude(status=RangeStatus.DESTROYING.value)
+            .exclude(status=ResourceStatus.DESTROYING.value)
             .order_by("-created_at")
             .first()
         )
@@ -1227,7 +1227,7 @@ def get_active_range(user: User) -> RangeContext | None:
             instance.status,
             user.id,
         )
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
         from shared.schemas import InstanceContext
 
         # Get instance data from stored range_spec
@@ -1250,7 +1250,7 @@ def get_active_range(user: User) -> RangeContext | None:
             range_id=instance.range_id,
             scenario_id=instance.scenario_id,
             user_id=instance.user_id,
-            status=RangeStatus(instance.status),
+            status=ResourceStatus(instance.status),
             instances=instance_contexts,
             agent_name=agent_name,
         )
@@ -1409,7 +1409,7 @@ def create_range(
 
         # 7. Return RangeContext projection with instances
         # Engine always sets PROVISIONING status on creation
-        from shared.enums import RangeStatus
+        from shared.enums import ResourceStatus
         from shared.schemas import InstanceContext, RangeContext
 
         instance_contexts = [
@@ -1426,7 +1426,7 @@ def create_range(
             range_id=range_id,
             scenario_id=scenario,
             user_id=user.id,
-            status=RangeStatus.PROVISIONING,
+            status=ResourceStatus.PROVISIONING,
             instances=instance_contexts,
             agent_name=agent.name,
         )
@@ -1531,7 +1531,7 @@ def destroy_range(user: User, range_id: int) -> None:
     try:
         # Update CMS status to DESTROYING and soft delete immediately
         # This allows user to create a new range without waiting for teardown
-        instance.status = RangeStatus.DESTROYING.value
+        instance.status = ResourceStatus.DESTROYING.value
         instance.deleted_at = timezone.now()
         instance.save(update_fields=["status", "deleted_at"])
 
@@ -1539,7 +1539,7 @@ def destroy_range(user: User, range_id: int) -> None:
             range_id=instance.range_id,
             scenario_id=instance.scenario_id,
             user_id=instance.user_id,
-            status=RangeStatus(instance.status),
+            status=ResourceStatus(instance.status),
             instances=[],
             agent_name=instance.agent.name if instance.agent else None,
         )
@@ -1655,16 +1655,16 @@ def cancel_range(user: User, range_id: int) -> None:
     try:
         # Update CMS status to DESTROYED (CMS is authoritative)
         # save() triggers invariant: terminal status auto-sets deleted_at
-        instance.status = RangeStatus.DESTROYED.value
+        instance.status = ResourceStatus.DESTROYED.value
         instance.save(update_fields=["status"])
-        if instance.status != RangeStatus.DESTROYED.value:
+        if instance.status != ResourceStatus.DESTROYED.value:
             raise CMSError("Range status not updated to DESTROYED")
 
         range_ctx = RangeContext(
             range_id=instance.range_id,
             scenario_id=instance.scenario_id,
             user_id=instance.user_id,
-            status=RangeStatus(instance.status),
+            status=ResourceStatus(instance.status),
             instances=[],
             agent_name=instance.agent.name if instance.agent else None,
         )
@@ -2474,11 +2474,11 @@ def get_ngfw_linked_ranges(user: User, ngfw_id: int) -> list[LinkedRangeContext]
     # Find active ranges linked to this NGFW
     # Active means: pending, provisioning, ready, paused, or resuming (not destroyed/failed)
     active_statuses = [
-        RangeStatus.PENDING.value,
-        RangeStatus.PROVISIONING.value,
-        RangeStatus.READY.value,
-        RangeStatus.PAUSED.value,
-        RangeStatus.RESUMING.value,
+        ResourceStatus.PENDING.value,
+        ResourceStatus.PROVISIONING.value,
+        ResourceStatus.READY.value,
+        ResourceStatus.PAUSED.value,
+        ResourceStatus.RESUMING.value,
     ]
     ranges = Range.objects.filter(
         ngfw_id=ngfw_id,
@@ -2584,19 +2584,33 @@ def create_ngfw(
         registration_method,
     )
 
-    # Create NGFW record with PROVISIONING status
+    from uuid import uuid4
+
+    from cms.models import Request
+    from cms.scenarios.hydrator import hydrate_ngfw
+    from engine import create_ngfw as engine_create_ngfw
+    from shared.schemas import RequestSpec
+
+    # Create Request record first
+    request_id = uuid4()
+    request = Request.objects.create(
+        request_id=request_id,
+        user=user,
+    )
+
+    logger.info("create_ngfw: created Request id=%s for user_id=%s", request_id, user.id)
+
+    # Create NGFW record with PROVISIONING status, linked to request
     ngfw = NGFW.objects.create(
         user=user,
         name=name,
-        status=InstanceStatus.PROVISIONING.value,
+        status=ACTIVE_STATUSES[NGFWStatus.PROVISIONING.value],
+        request=request,
     )
 
     logger.info("create_ngfw: created NGFW id=%s for user_id=%s", ngfw.id, user.id)
 
-    # Hydrate NGFW with credential data and trigger Engine provisioning
-    from cms.scenarios.hydrator import hydrate_ngfw
-    from engine import create_ngfw as engine_create_ngfw
-
+    # Hydrate NGFW with credential data
     ngfw_instance_spec = hydrate_ngfw(
         ngfw=ngfw,
         deployment_profile=deployment_profile,
@@ -2606,11 +2620,18 @@ def create_ngfw(
         otp_folder=otp_folder,
     )
 
+    # Wrap in RequestSpec
+    request_spec = RequestSpec(
+        request_id=request_id,
+        user_id=user.id,
+        items=[ngfw_instance_spec],
+    )
+
     # Store the hydrated spec for audit/debugging (like RangeInstance.range_spec)
     ngfw.ngfw_spec = ngfw_instance_spec.model_dump(mode="json")
     ngfw.save(update_fields=["ngfw_spec"])
 
-    engine_create_ngfw(ngfw_instance_spec)
+    engine_create_ngfw(request_spec)
 
     return NGFWAppRef(
         ngfw_id=ngfw.id,
@@ -2663,7 +2684,7 @@ def destroy_ngfw(user: User, ngfw_id: int, confirm_name: str) -> NGFWAppRef:
         raise ValueError("Name confirmation does not match")
 
     # Update status to deprovisioning
-    ngfw.status = InstanceStatus.DEPROVISIONING.value
+    ngfw.status = TERMINAL_STATUSES[]
     ngfw.save(update_fields=["status"])
 
     logger.info("deprovision_ngfw: started deprovisioning NGFW id=%s", ngfw_id)

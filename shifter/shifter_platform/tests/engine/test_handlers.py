@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from django.contrib.auth import get_user_model
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 User = get_user_model()
 
@@ -178,7 +178,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -186,7 +186,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": user.id,
                 }
             )
@@ -195,7 +195,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         range_obj.refresh_from_db()
-        assert range_obj.status == RangeStatus.PROVISIONING.value
+        assert range_obj.status == ResourceStatus.PROVISIONING.value
 
     def test_sets_ready_at_on_ready_status(self, user):
         """Handler sets ready_at when transitioning to READY."""
@@ -204,7 +204,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
         )
         assert range_obj.ready_at is None
 
@@ -213,7 +213,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": user.id,
                 }
             )
@@ -222,7 +222,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         range_obj.refresh_from_db()
-        assert range_obj.status == RangeStatus.READY.value
+        assert range_obj.status == ResourceStatus.READY.value
         assert range_obj.ready_at is not None
 
     def test_sets_destroyed_at_on_destroyed_status(self, user):
@@ -232,7 +232,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.DESTROYING.value,
+            status=ResourceStatus.DESTROYING.value,
         )
         assert range_obj.destroyed_at is None
 
@@ -241,7 +241,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.DESTROYED.value,
+                    "new_status": ResourceStatus.DESTROYED.value,
                     "user_id": user.id,
                 }
             )
@@ -250,7 +250,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         range_obj.refresh_from_db()
-        assert range_obj.status == RangeStatus.DESTROYED.value
+        assert range_obj.status == ResourceStatus.DESTROYED.value
         assert range_obj.destroyed_at is not None
 
     def test_stores_error_message_on_failed_status(self, user):
@@ -260,7 +260,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
         )
 
         message = {
@@ -268,7 +268,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.FAILED.value,
+                    "new_status": ResourceStatus.FAILED.value,
                     "user_id": user.id,
                     "error_message": "Subnet exhausted",
                 }
@@ -278,7 +278,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         range_obj.refresh_from_db()
-        assert range_obj.status == RangeStatus.FAILED.value
+        assert range_obj.status == ResourceStatus.FAILED.value
         assert range_obj.error_message == "Subnet exhausted"
 
     # ---------------------------------------------------------------------
@@ -292,7 +292,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -312,7 +312,7 @@ class TestProcessRangeEvent:
 
         # Status should be unchanged
         range_obj.refresh_from_db()
-        assert range_obj.status == RangeStatus.PENDING.value
+        assert range_obj.status == ResourceStatus.PENDING.value
 
     # ---------------------------------------------------------------------
     # Error handling - missing data
@@ -327,7 +327,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": 999999,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
                 }
             )
@@ -346,7 +346,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -354,7 +354,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 999999,  # Wrong user
                 }
             )
@@ -368,7 +368,7 @@ class TestProcessRangeEvent:
 
         # Status should be unchanged
         range_obj.refresh_from_db()
-        assert range_obj.status == RangeStatus.PENDING.value
+        assert range_obj.status == ResourceStatus.PENDING.value
 
     # ---------------------------------------------------------------------
     # Error handling - database failures
@@ -381,7 +381,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -389,7 +389,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": user.id,
                 }
             )
@@ -415,7 +415,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         message = {
@@ -423,7 +423,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": user.id,
                 }
             )
@@ -478,7 +478,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PENDING.value,
+            status=ResourceStatus.PENDING.value,
         )
 
         # Minimal SNS message - no error_message
@@ -487,7 +487,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": user.id,
                 }
             )
@@ -496,7 +496,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         range_obj.refresh_from_db()
-        assert range_obj.status == RangeStatus.PROVISIONING.value
+        assert range_obj.status == ResourceStatus.PROVISIONING.value
 
     def test_failed_without_error_message(self, user):
         """Handler handles FAILED status even without error_message."""
@@ -505,7 +505,7 @@ class TestProcessRangeEvent:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
         )
 
         message = {
@@ -513,7 +513,7 @@ class TestProcessRangeEvent:
                 {
                     "event_type": "range.status.updated",
                     "range_id": range_obj.id,
-                    "new_status": RangeStatus.FAILED.value,
+                    "new_status": ResourceStatus.FAILED.value,
                     "user_id": user.id,
                     # No error_message
                 }
@@ -523,7 +523,7 @@ class TestProcessRangeEvent:
         process_range_event(message)
 
         range_obj.refresh_from_db()
-        assert range_obj.status == RangeStatus.FAILED.value
+        assert range_obj.status == ResourceStatus.FAILED.value
         assert range_obj.error_message == ""  # Default empty string
 
 
@@ -542,12 +542,16 @@ class TestHandleProvisioned:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
             range_config={
                 "scenario_id": "basic",
                 "user_id": user.id,
                 "instances": [
-                    {"uuid": "uuid-attacker-123", "role": "attacker", "os_type": "kali"},
+                    {
+                        "uuid": "uuid-attacker-123",
+                        "role": "attacker",
+                        "os_type": "kali",
+                    },
                     {"uuid": "uuid-victim-456", "role": "victim", "os_type": "ubuntu"},
                 ],
             },
@@ -589,13 +593,20 @@ class TestHandleProvisioned:
         assert len(range_obj.provisioned_instances) == 2
 
         # Check that UUIDs from range_config are merged with provisioner data
-        attacker = next(i for i in range_obj.provisioned_instances if i["role"] == "attacker")
+        attacker = next(
+            i for i in range_obj.provisioned_instances if i["role"] == "attacker"
+        )
         assert attacker["uuid"] == "uuid-attacker-123"
         assert attacker["instance_id"] == "i-attacker123"
         assert attacker["private_ip"] == "10.1.2.10"
-        assert attacker["ssh_key_secret_arn"] == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key-attacker"
+        assert (
+            attacker["ssh_key_secret_arn"]
+            == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key-attacker"
+        )
 
-        victim = next(i for i in range_obj.provisioned_instances if i["role"] == "victim")
+        victim = next(
+            i for i in range_obj.provisioned_instances if i["role"] == "victim"
+        )
         assert victim["uuid"] == "uuid-victim-456"
         assert victim["instance_id"] == "i-victim456"
         assert victim["private_ip"] == "10.1.2.20"
@@ -612,7 +623,7 @@ class TestHandleProvisioned:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
             range_config=None,  # No range_config
         )
 
@@ -651,12 +662,16 @@ class TestHandleProvisioned:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
             range_config={
                 "scenario_id": "basic",
                 "user_id": user.id,
                 "instances": [
-                    {"uuid": "uuid-attacker-123", "role": "attacker", "os_type": "kali"},
+                    {
+                        "uuid": "uuid-attacker-123",
+                        "role": "attacker",
+                        "os_type": "kali",
+                    },
                 ],
             },
         )
@@ -687,7 +702,10 @@ class TestHandleProvisioned:
         instance = range_obj.get_instance_by_uuid("uuid-attacker-123")
         assert instance is not None
         assert instance["private_ip"] == "10.1.2.10"
-        assert instance["ssh_key_secret_arn"] == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key"
+        assert (
+            instance["ssh_key_secret_arn"]
+            == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key"
+        )
 
     # ---------------------------------------------------------------------
     # Error handling
@@ -721,7 +739,7 @@ class TestHandleProvisioned:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
         )
 
         message = {
@@ -751,8 +769,12 @@ class TestHandleProvisioned:
 
         range_obj = Range.objects.create(
             user=user,
-            status=RangeStatus.PROVISIONING.value,
-            range_config={"instances": [{"uuid": "uuid-123", "role": "attacker", "os_type": "kali"}]},
+            status=ResourceStatus.PROVISIONING.value,
+            range_config={
+                "instances": [
+                    {"uuid": "uuid-123", "role": "attacker", "os_type": "kali"}
+                ]
+            },
         )
 
         message = {
@@ -762,7 +784,12 @@ class TestHandleProvisioned:
                     "range_id": range_obj.id,
                     "user_id": user.id,
                     "instances": [
-                        {"role": "attacker", "os": "kali", "instance_id": "i-123", "private_ip": "10.1.2.10"},
+                        {
+                            "role": "attacker",
+                            "os": "kali",
+                            "instance_id": "i-123",
+                            "private_ip": "10.1.2.10",
+                        },
                     ],
                 }
             )

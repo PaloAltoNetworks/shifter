@@ -7,7 +7,7 @@ import pytest
 from django.utils import timezone
 
 from shared.constants import USER_CANNOT_BE_NONE
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 
 @pytest.mark.django_db
@@ -32,7 +32,7 @@ class TestGetActiveRange:
             range_id=1,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
         )
 
         result = get_active_range(user)
@@ -41,7 +41,7 @@ class TestGetActiveRange:
         assert isinstance(result, RangeContext)
         assert result.range_id == 1
         assert result.user_id == 42
-        assert result.status == RangeStatus.READY
+        assert result.status == ResourceStatus.READY
 
     def test_returns_provisioning_range(self):
         """Returns RangeContext for range in PROVISIONING status."""
@@ -55,14 +55,14 @@ class TestGetActiveRange:
             range_id=2,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
         )
 
         result = get_active_range(user)
 
         assert result is not None
         assert result.range_id == 2
-        assert result.status == RangeStatus.PROVISIONING
+        assert result.status == ResourceStatus.PROVISIONING
 
     def test_returns_none_when_no_ranges(self):
         """Returns None when user has no ranges."""
@@ -92,7 +92,7 @@ class TestGetActiveRange:
             range_id=3,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
             deleted_at=timezone.now(),
         )
 
@@ -112,7 +112,7 @@ class TestGetActiveRange:
             range_id=4,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.DESTROYED.value,
+            status=ResourceStatus.DESTROYED.value,
         )
 
         result = get_active_range(user)
@@ -131,7 +131,7 @@ class TestGetActiveRange:
             range_id=5,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.FAILED.value,
+            status=ResourceStatus.FAILED.value,
         )
 
         result = get_active_range(user)
@@ -150,7 +150,7 @@ class TestGetActiveRange:
             range_id=6,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.DESTROYING.value,
+            status=ResourceStatus.DESTROYING.value,
         )
 
         result = get_active_range(user)
@@ -170,13 +170,13 @@ class TestGetActiveRange:
             range_id=10,
             scenario_id="old",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
         )
         RangeInstance.objects.create(
             range_id=11,
             scenario_id="new",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
         )
 
         result = get_active_range(user)
@@ -219,7 +219,7 @@ class TestGetActiveRange:
             range_id=20,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
         )
 
         with caplog.at_level(logging.DEBUG, logger="cms.services"):
@@ -247,7 +247,10 @@ class TestGetActiveRange:
         """Logs ERROR when user is None."""
         from cms.services import get_active_range
 
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises(TypeError):
+        with (
+            caplog.at_level(logging.ERROR, logger="cms.services"),
+            pytest.raises(TypeError),
+        ):
             get_active_range(None)
 
         assert "get_active_range called with None" in caplog.text
@@ -256,7 +259,10 @@ class TestGetActiveRange:
         """Logs ERROR when user is invalid type."""
         from cms.services import get_active_range
 
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises(TypeError):
+        with (
+            caplog.at_level(logging.ERROR, logger="cms.services"),
+            pytest.raises(TypeError),
+        ):
             get_active_range("not a user")
 
         assert "get_active_range called with invalid user type" in caplog.text
@@ -325,10 +331,12 @@ class TestGetActiveRange:
         mock_instance = MagicMock()
         mock_instance.range_id = 0  # Invalid: must be positive
         mock_instance.user_id = 42
-        mock_instance.status = RangeStatus.READY.value
+        mock_instance.status = ResourceStatus.READY.value
 
         mock_queryset = MagicMock()
-        mock_queryset.exclude.return_value.order_by.return_value.first.return_value = mock_instance
+        mock_queryset.exclude.return_value.order_by.return_value.first.return_value = (
+            mock_instance
+        )
 
         with (
             patch("cms.services.RangeInstance.active") as mock_active,

@@ -20,11 +20,11 @@ class ResourceType(str, Enum):
     NGFW = "ngfw"
 
 
-class RangeStatus(str, Enum):
-    """Range lifecycle status.
+class ResourceStatus(str, Enum):
+    """Resource lifecycle status.
 
-    Used by both CMS (RangeInstance.status) and Engine (Range.status)
-    to track range state throughout its lifecycle.
+    Used by both CMS (Resource.status) and Engine (Resource.status)
+    to track resource state throughout its lifecycle.
     """
 
     PENDING = "pending"
@@ -38,23 +38,23 @@ class RangeStatus(str, Enum):
 
 
 # Status groupings for lifecycle queries
-ACTIVE_STATUSES: set[RangeStatus] = {
-    RangeStatus.PENDING,
-    RangeStatus.PROVISIONING,
-    RangeStatus.READY,
-    RangeStatus.PAUSED,
-    RangeStatus.RESUMING,
-    RangeStatus.DESTROYING,
+ACTIVE_STATUSES: set[ResourceStatus] = {
+    ResourceStatus.PENDING,
+    ResourceStatus.PROVISIONING,
+    ResourceStatus.READY,
+    ResourceStatus.PAUSED,
+    ResourceStatus.RESUMING,
+    ResourceStatus.DESTROYING,
 }
 
-TERMINAL_STATUSES: set[RangeStatus] = {
-    RangeStatus.DESTROYED,
-    RangeStatus.FAILED,
+TERMINAL_STATUSES: set[ResourceStatus] = {
+    ResourceStatus.DESTROYED,
+    ResourceStatus.FAILED,
 }
 
-CANCELLABLE_STATUSES: set[RangeStatus] = {
-    RangeStatus.PENDING,
-    RangeStatus.PROVISIONING,
+CANCELLABLE_STATUSES: set[ResourceStatus] = {
+    ResourceStatus.PENDING,
+    ResourceStatus.PROVISIONING,
 }
 
 

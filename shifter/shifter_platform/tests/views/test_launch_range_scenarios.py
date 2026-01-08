@@ -16,7 +16,7 @@ from django.test import Client
 from django.urls import reverse
 
 from cms.models import AgentConfig, OperatingSystem
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 User = get_user_model()
 
@@ -72,7 +72,7 @@ def mock_range_context():
         range_id=42,
         scenario_id="basic",
         user_id=1,
-        status=RangeStatus.PROVISIONING,
+        status=ResourceStatus.PROVISIONING,
         instances=[
             InstanceContext(role="attacker", os_type="kali"),
             InstanceContext(role="victim", os_type="windows"),
@@ -155,7 +155,9 @@ class TestLaunchRangeInputValidation:
 class TestLaunchRangeScenarioValidation:
     """Tests for scenario validation in launch_range view."""
 
-    def test_accepts_basic_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
+    def test_accepts_basic_scenario(
+        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
+    ):
         """View accepts 'basic' scenario."""
         with patch(
             "mission_control.views.cms_create_range",
@@ -169,7 +171,9 @@ class TestLaunchRangeScenarioValidation:
             )
             assert response.status_code == 200
 
-    def test_accepts_ad_attack_lab_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
+    def test_accepts_ad_attack_lab_scenario(
+        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
+    ):
         """View accepts 'ad_attack_lab' scenario."""
         with patch(
             "mission_control.views.cms_create_range",
@@ -225,7 +229,9 @@ class TestLaunchRangeScenarioValidation:
             # If CMS is being used, ad_attack_lab should be invalid
             assert response.status_code == 400
 
-    def test_defaults_to_basic_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
+    def test_defaults_to_basic_scenario(
+        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
+    ):
         """View defaults to 'basic' scenario when not specified."""
         with patch(
             "mission_control.views.cms_create_range",
@@ -365,7 +371,9 @@ class TestLaunchRangeSuccess:
 class TestLaunchRangeErrorHandling:
     """Tests for error handling in launch_range view."""
 
-    def test_returns_400_on_cms_error(self, client, windows_agent, mock_cms_list_scenarios):
+    def test_returns_400_on_cms_error(
+        self, client, windows_agent, mock_cms_list_scenarios
+    ):
         """View returns 400 when cms_create_range raises CMSError."""
         from cms.exceptions import CMSError
 
@@ -383,7 +391,9 @@ class TestLaunchRangeErrorHandling:
             assert response.status_code == 400
             assert response.json()["error"] == "Agent not found"
 
-    def test_cms_error_message_passed_to_response(self, client, windows_agent, mock_cms_list_scenarios):
+    def test_cms_error_message_passed_to_response(
+        self, client, windows_agent, mock_cms_list_scenarios
+    ):
         """CMSError message is included in error response."""
         from cms.exceptions import CMSError
 

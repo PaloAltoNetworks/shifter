@@ -650,6 +650,94 @@ class TestRunPulumi:
             assert "error_message" in call_kwargs
 
 
+class TestGetNgfwFromDb:
+    """Tests for get_ngfw_from_db() function."""
+
+    def test_get_ngfw_from_db_returns_ngfw_data(self, mock_boto3_clients, mock_env_vars_minimal):
+        """Returns NGFW record as dict with expected fields."""
+        with patch("main.get_db_connection") as mock_get_conn:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (
+                42,  # id
+                100,  # cms_ngfw_id
+                5,  # user_id
+                '{"name": "test-ngfw", "registration_method": "pin"}',  # ngfw_config JSON
+                "pending",  # status
+            )
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_get_conn.return_value = mock_conn
+
+            from main import get_ngfw_from_db
+
+            result = get_ngfw_from_db(42)
+
+            assert result["id"] == 42
+            assert result["cms_ngfw_id"] == 100
+            assert result["user_id"] == 5
+            assert result["config"]["name"] == "test-ngfw"
+            assert result["status"] == "pending"
+
+    def test_get_ngfw_from_db_queries_engine_ngfw_table(self, mock_boto3_clients, mock_env_vars_minimal):
+        """Queries the engine_ngfw table."""
+        with patch("main.get_db_connection") as mock_get_conn:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (42, 100, 5, "{}", "pending")
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_get_conn.return_value = mock_conn
+
+            from main import get_ngfw_from_db
+
+            get_ngfw_from_db(42)
+
+            # Verify correct table is queried
+            sql_call = mock_cursor.execute.call_args
+            assert "engine_ngfw" in sql_call[0][0]
+            assert sql_call[0][1] == (42,)
+
+    def test_get_ngfw_from_db_raises_when_not_found(self, mock_boto3_clients, mock_env_vars_minimal):
+        """Raises ValueError when NGFW not found."""
+        with patch("main.get_db_connection") as mock_get_conn:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = None
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_get_conn.return_value = mock_conn
+
+            from main import get_ngfw_from_db
+
+            with pytest.raises(ValueError, match="NGFW not found"):
+                get_ngfw_from_db(999)
+
+    def test_get_ngfw_from_db_handles_null_config(self, mock_boto3_clients, mock_env_vars_minimal):
+        """Handles NULL ngfw_config gracefully."""
+        with patch("main.get_db_connection") as mock_get_conn:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (42, 100, 5, None, "pending")
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_get_conn.return_value = mock_conn
+
+            from main import get_ngfw_from_db
+
+            result = get_ngfw_from_db(42)
+
+            assert result["config"] == {}
+
+
 class TestUpdateNgfwStatus:
     """Tests for NGFW status update function."""
 
@@ -668,13 +756,13 @@ class TestUpdateNgfwStatus:
 
             update_ngfw_status(123, "starting")
 
-            # Verify SQL was executed on mission_control_userngfw table
+            # Verify SQL was executed on engine_ngfw table (fixed from mission_control_userngfw)
             mock_cursor.execute.assert_called_once()
             sql_call = mock_cursor.execute.call_args
-            assert "mission_control_userngfw" in sql_call[0][0]
+            assert "engine_ngfw" in sql_call[0][0]
             assert "status = %s" in sql_call[0][0]
             assert sql_call[0][1][0] == "starting"
-            assert sql_call[0][1][-1] == 123  # user_ngfw_id
+            assert sql_call[0][1][-1] == 123  # ngfw_id
 
     def test_update_ngfw_status_with_kwargs(self, mock_boto3_clients, mock_env_vars_minimal):
         """Updates status + additional fields."""
@@ -885,6 +973,20 @@ class TestMainEntryPoint:
 
 class TestNgfwProvisionCLI:
     """Tests for NGFW provision CLI command."""
+
+    @pytest.fixture(autouse=True)
+    def mock_get_ngfw_from_db(self, mocker):
+        """Mock get_ngfw_from_db for all tests in this class."""
+        return mocker.patch(
+            "main.get_ngfw_from_db",
+            return_value={
+                "id": 123,
+                "cms_ngfw_id": 456,
+                "user_id": 1,
+                "config": {},
+                "status": "pending",
+            },
+        )
 
     def test_ngfw_provision_requires_user_ngfw_id(self):
         """ngfw provision requires --user-ngfw-id argument."""
@@ -1203,6 +1305,20 @@ class TestEventPublishing:
 
 class TestNgfwDeprovisionCLI:
     """Tests for NGFW deprovision CLI command."""
+
+    @pytest.fixture(autouse=True)
+    def mock_get_ngfw_from_db(self, mocker):
+        """Mock get_ngfw_from_db for all tests in this class."""
+        return mocker.patch(
+            "main.get_ngfw_from_db",
+            return_value={
+                "id": 123,
+                "cms_ngfw_id": 456,
+                "user_id": 1,
+                "config": {},
+                "status": "ready",
+            },
+        )
 
     def test_ngfw_deprovision_requires_user_ngfw_id(self):
         """ngfw deprovision requires --user-ngfw-id argument."""

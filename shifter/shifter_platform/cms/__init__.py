@@ -42,7 +42,6 @@ __all__ = [
     "get_credential",
     "get_ngfw",
     "get_ngfw_linked_ranges",
-    "get_ngfw_status",
     "get_range",
     "get_scenario",
     "get_storage_used",
@@ -54,7 +53,5 @@ __all__ = [
     "list_scenarios",
     "pause_range",
     "resume_range",
-    "start_ngfw",
-    "stop_ngfw",
     "validate_scenario_requirements",
 ]

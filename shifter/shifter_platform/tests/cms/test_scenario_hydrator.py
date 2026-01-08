@@ -9,7 +9,7 @@ Responsibilities:
 - Resolve os_type "from_agent" to actual OS
 - Embed agent details into instances with agent_slot
 - Return consistent RangeSpec structure
-- Extract NGFW credential data into plain dict
+- Extract NGFW credential data into InstanceSpec with nested NGFWAppSpec
 - Input validation and error handling
 """
 
@@ -357,10 +357,12 @@ def scm_credential(user, scm_credential_type, db):
 @pytest.fixture
 def ngfw(user, db):
     """Create an NGFW for testing."""
+    from shared.enums import InstanceStatus
+
     return NGFW.objects.create(
         user=user,
         name="Test NGFW",
-        status=NGFW.Status.PROVISIONING,
+        status=InstanceStatus.PROVISIONING.value,
     )
 
 
@@ -369,16 +371,17 @@ class TestHydrateNgfw:
     """Tests for hydrate_ngfw() function.
 
     hydrate_ngfw extracts credential data from Credential models
-    and packages into a plain dict for Engine consumption.
+    and packages into an InstanceSpec with nested NGFWAppSpec for Engine.
     """
 
     # --- PIN registration happy path ---
 
-    def test_returns_ngfw_provision_request_for_pin(
+    def test_returns_instance_spec_for_pin(
         self, ngfw, deployment_profile, scm_credential
     ):
-        """hydrate_ngfw returns NGFWProvisionRequest dict for PIN registration."""
+        """hydrate_ngfw returns InstanceSpec with nested NGFWAppSpec for PIN registration."""
         from cms.scenarios.hydrator import hydrate_ngfw
+        from shared.schemas import InstanceSpec
 
         result = hydrate_ngfw(
             ngfw=ngfw,
@@ -387,11 +390,13 @@ class TestHydrateNgfw:
             scm_credential=scm_credential,
         )
 
-        assert isinstance(result, dict)
-        assert result["ngfw_id"] == ngfw.id
-        assert result["user_id"] == ngfw.user_id
-        assert result["name"] == "Test NGFW"
-        assert result["registration_method"] == "pin"
+        assert isinstance(result, InstanceSpec)
+        assert result.role == "ngfw"
+        assert result.ngfw_app is not None
+        assert result.ngfw_app.ngfw_id == ngfw.id
+        assert result.ngfw_app.user_id == ngfw.user_id
+        assert result.ngfw_app.name == "Test NGFW"
+        assert result.ngfw_app.registration_method == "pin"
 
     def test_extracts_authcode_from_deployment_profile(
         self, ngfw, deployment_profile, scm_credential
@@ -406,7 +411,7 @@ class TestHydrateNgfw:
             scm_credential=scm_credential,
         )
 
-        assert result["authcode"] == "D1234567"
+        assert result.ngfw_app.authcode == "D1234567"
 
     def test_extracts_scm_fields_for_pin(
         self, ngfw, deployment_profile, scm_credential
@@ -421,10 +426,10 @@ class TestHydrateNgfw:
             scm_credential=scm_credential,
         )
 
-        assert result["scm_folder_name"] == "test-folder"
-        assert result["scm_pin_id"] == "pin-123"
-        assert result["scm_pin_value"] == "secret-pin-value"
-        assert result["sls_region"] == "americas"
+        assert result.ngfw_app.scm_folder_name == "test-folder"
+        assert result.ngfw_app.scm_pin_id == "pin-123"
+        assert result.ngfw_app.scm_pin_value == "secret-pin-value"
+        assert result.ngfw_app.sls_region == "americas"
 
     def test_otp_fields_are_none_for_pin(
         self, ngfw, deployment_profile, scm_credential
@@ -439,14 +444,15 @@ class TestHydrateNgfw:
             scm_credential=scm_credential,
         )
 
-        assert result["otp_value"] is None
-        assert result["otp_folder"] is None
+        assert result.ngfw_app.otp_value is None
+        assert result.ngfw_app.otp_folder is None
 
     # --- OTP registration happy path ---
 
-    def test_returns_ngfw_provision_request_for_otp(self, ngfw, deployment_profile):
-        """hydrate_ngfw returns NGFWProvisionRequest dict for OTP registration."""
+    def test_returns_instance_spec_for_otp(self, ngfw, deployment_profile):
+        """hydrate_ngfw returns InstanceSpec for OTP registration."""
         from cms.scenarios.hydrator import hydrate_ngfw
+        from shared.schemas import InstanceSpec
 
         result = hydrate_ngfw(
             ngfw=ngfw,
@@ -456,9 +462,9 @@ class TestHydrateNgfw:
             otp_folder="my-otp-folder",
         )
 
-        assert isinstance(result, dict)
-        assert result["ngfw_id"] == ngfw.id
-        assert result["registration_method"] == "otp"
+        assert isinstance(result, InstanceSpec)
+        assert result.ngfw_app.ngfw_id == ngfw.id
+        assert result.ngfw_app.registration_method == "otp"
 
     def test_extracts_otp_fields(self, ngfw, deployment_profile):
         """OTP fields are extracted from parameters."""
@@ -472,8 +478,8 @@ class TestHydrateNgfw:
             otp_folder="my-otp-folder",
         )
 
-        assert result["otp_value"] == "OTP123456"
-        assert result["otp_folder"] == "my-otp-folder"
+        assert result.ngfw_app.otp_value == "OTP123456"
+        assert result.ngfw_app.otp_folder == "my-otp-folder"
 
     def test_scm_fields_are_none_for_otp(self, ngfw, deployment_profile):
         """SCM fields are None when using OTP registration."""
@@ -487,10 +493,10 @@ class TestHydrateNgfw:
             otp_folder="my-otp-folder",
         )
 
-        assert result["scm_folder_name"] is None
-        assert result["scm_pin_id"] is None
-        assert result["scm_pin_value"] is None
-        assert result["sls_region"] is None
+        assert result.ngfw_app.scm_folder_name is None
+        assert result.ngfw_app.scm_pin_id is None
+        assert result.ngfw_app.scm_pin_value is None
+        assert result.ngfw_app.sls_region is None
 
     # --- Error handling ---
 
@@ -516,9 +522,7 @@ class TestHydrateNgfw:
                 otp_folder="folder",
             )
 
-    def test_raises_when_scm_credential_missing_for_pin(
-        self, ngfw, deployment_profile
-    ):
+    def test_raises_when_scm_credential_missing_for_pin(self, ngfw, deployment_profile):
         """Raises CMSError when PIN registration lacks SCM credential."""
         from cms.exceptions import CMSError
         from cms.scenarios.hydrator import hydrate_ngfw
@@ -610,7 +614,7 @@ class TestHydrateNgfw:
             scm_credential=scm_no_region,
         )
 
-        assert result["sls_region"] is None
+        assert result.ngfw_app.sls_region is None
 
 
 @pytest.mark.django_db

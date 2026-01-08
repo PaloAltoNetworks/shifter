@@ -6,11 +6,10 @@ Infrastructure lifecycle for Shifter platform.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from shared.enums import CANCELLABLE_STATUSES, RangeStatus
-from shared.schemas import RangeContext, RangeSpec
+from shared.schemas import InstanceSpec, RangeContext, RangeSpec
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -345,22 +344,21 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     )
 
 
-def create_ngfw(request: Mapping[str, Any]) -> int:
+def create_ngfw(request: InstanceSpec) -> int:
     """Provision NGFW infrastructure.
 
     Creates an Engine NGFW record and triggers ECS provisioning.
     Engine owns infrastructure state; CMS owns the logical asset.
 
     Args:
-        request: Hydrated NGFW provision request dict from CMS.
-            Required keys: ngfw_id (CMS's ID), user_id, name.
-            Contains hydrated credentials for provisioner.
+        request: InstanceSpec with nested NGFWAppSpec from CMS hydrator.
+            Must have role="ngfw" and ngfw_app populated with hydrated credentials.
 
     Returns:
         engine_ngfw_id: The ID of the created Engine NGFW record.
 
     Raises:
-        ValueError: If required fields are missing.
+        ValueError: If request is not a valid NGFW InstanceSpec.
         User.DoesNotExist: If user_id doesn't map to a Django user.
     """
     from django.contrib.auth import get_user_model
@@ -370,14 +368,19 @@ def create_ngfw(request: Mapping[str, Any]) -> int:
 
     User = get_user_model()
 
-    # Validate required fields
-    cms_ngfw_id = request.get("ngfw_id")
-    user_id = request.get("user_id")
+    # Validate this is an NGFW InstanceSpec with hydrated NGFWAppSpec
+    if not isinstance(request, InstanceSpec):
+        raise ValueError(f"Expected InstanceSpec, got {type(request).__name__}")
+    if request.role != "ngfw":
+        raise ValueError(f"Expected role='ngfw', got role='{request.role}'")
+    if request.ngfw_app is None:
+        raise ValueError("ngfw_app is required for NGFW provisioning")
+    if not request.ngfw_app.is_hydrated:
+        raise ValueError("ngfw_app must be hydrated with credential values")
 
-    if not isinstance(cms_ngfw_id, int):
-        raise ValueError(f"ngfw_id required (got {type(cms_ngfw_id).__name__})")
-    if not isinstance(user_id, int):
-        raise ValueError(f"user_id required (got {type(user_id).__name__})")
+    # Extract IDs from the hydrated NGFWAppSpec
+    cms_ngfw_id = request.ngfw_app.ngfw_id
+    user_id = request.ngfw_app.user_id
 
     logger.debug(
         "create_ngfw: cms_ngfw_id=%s user_id=%s",
@@ -393,7 +396,7 @@ def create_ngfw(request: Mapping[str, Any]) -> int:
         user=user,
         cms_ngfw_id=cms_ngfw_id,
         status=NGFW.Status.PROVISIONING,
-        ngfw_config=dict(request),  # Store full hydrated request
+        ngfw_config=request.model_dump(mode="json"),  # Store full InstanceSpec
     )
 
     logger.info(

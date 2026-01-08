@@ -179,13 +179,6 @@
             </div>
         </div>
     </div>
-    <div class="page-header-actions">
-        {% if ngfw.status == 'stopped' or ngfw.status == 'ready' %}
-        <button class="btn btn-primary" id="start-btn">Start</button>
-        {% elif ngfw.status == 'active' %}
-        <button class="btn btn-secondary" id="stop-btn">Stop</button>
-        {% endif %}
-    </div>
 </div>
 
 <!-- Overview Section -->
@@ -250,80 +243,9 @@
         <strong style="color: #ff4d4f;">Warning: {{ linked_ranges|length }} range(s) are currently using this NGFW.</strong>
         {% endif %}
     </p>
-    <a href="{% url 'mission_control:ngfw_deprovision' ngfw.app_id %}" class="btn btn-danger btn-small">
+    <a href="{% url 'mission_control:ngfw_deprovision' ngfw.id %}" class="btn btn-danger btn-small">
         Deprovision NGFW
     </a>
 </div>
 {% endblock %}
 
-{% block extra_js %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const csrfToken = '{{ csrf_token }}';
-    const ngfwId = {{ ngfw.app_id }};
-
-    const startBtn = document.getElementById('start-btn');
-    const stopBtn = document.getElementById('stop-btn');
-
-    if (startBtn) {
-        startBtn.addEventListener('click', function() {
-            startBtn.disabled = true;
-            startBtn.textContent = 'Starting...';
-
-            fetch(`/mission-control/api/ngfw/${ngfwId}/start/`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert(data.error);
-                    startBtn.disabled = false;
-                    startBtn.textContent = 'Start';
-                } else {
-                    window.location.reload();
-                }
-            })
-            .catch(err => {
-                alert('An error occurred. Please try again.');
-                startBtn.disabled = false;
-                startBtn.textContent = 'Start';
-            });
-        });
-    }
-
-    if (stopBtn) {
-        stopBtn.addEventListener('click', function() {
-            stopBtn.disabled = true;
-            stopBtn.textContent = 'Stopping...';
-
-            fetch(`/mission-control/api/ngfw/${ngfwId}/stop/`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert(data.error);
-                    stopBtn.disabled = false;
-                    stopBtn.textContent = 'Stop';
-                } else {
-                    window.location.reload();
-                }
-            })
-            .catch(err => {
-                alert('An error occurred. Please try again.');
-                stopBtn.disabled = false;
-                stopBtn.textContent = 'Stop';
-            });
-        });
-    }
-});
-</script>
-{% endblock %}

@@ -2,6 +2,8 @@
 
 Infrastructure lifecycle models for Shifter platform.
 
+- Request: Provisioning request container (1:1 with RequestSpec)
+- Instantiation: Abstract base for materialized specs
 - Range: User's cyber range instance with provisioned infrastructure
 - NGFW: User's Next-Generation Firewall with AWS resources
 """
@@ -9,7 +11,167 @@ Infrastructure lifecycle models for Shifter platform.
 from django.conf import settings
 from django.db import models, transaction
 
-from shared.enums import InstanceStatus
+from shared.enums import InstanceStatus, RequestType
+
+
+class Request(models.Model):
+    """Provisioning request container.
+
+    Groups items requested together while allowing independent lifecycles.
+    Maps 1:1 with RequestSpec schema.
+
+    Engine owns its own Request record - separate from CMS's Request.
+    Correlation is via request_id UUID.
+
+    Attributes:
+        request_id: UUID identifier for this request (correlation key).
+        user: User who made the request.
+        created_at: When the request was created.
+    """
+
+    request_id = models.UUIDField(unique=True, db_index=True)
+    request_type = models.CharField(
+        max_length=20,
+        choices=[(t.value, t.name) for t in RequestType],
+        db_index=True,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="engine_requests",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Request"
+        verbose_name_plural = "Requests"
+
+    def __str__(self):
+        return f"Request {self.request_id}"
+
+
+class Instantiation(models.Model):
+    """Abstract base for any materialized spec.
+
+    Provides common fields for tracking lifecycle of specs that have been
+    interpreted into concrete infrastructure or behavior.
+
+    Attributes:
+        uuid: The UUID from the spec being instantiated (instance uuid, range uuid,
+            app uuid, etc). This is the correlation key for events, WebSocket
+            subscriptions, and linking to Terraform/Pulumi outputs.
+        request: The request that spawned this instantiation.
+        spec: The hydrated spec JSON (what was asked for).
+        status: Current lifecycle status.
+        created_at: When this was instantiated.
+        deleted_at: When removal was requested (soft delete).
+        destroyed_at: When infrastructure was actually torn down.
+    """
+
+    uuid = models.UUIDField(unique=True, db_index=True, help_text="UUID from the spec")
+    request = models.ForeignKey(
+        Request,
+        on_delete=models.CASCADE,
+        related_name="%(class)s_instantiations",
+        null=True,
+        blank=True,
+    )
+    spec = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Hydrated spec JSON from CMS (what was asked for)",
+    )
+    state = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Infrastructure state (resource IDs, IPs, etc.)",
+    )
+    status = models.CharField(max_length=20, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    destroyed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def is_deleted(self) -> bool:
+        """Return True if removal has been requested."""
+        return self.deleted_at is not None
+
+    @property
+    def is_destroyed(self) -> bool:
+        """Return True if infrastructure has been torn down."""
+        return self.destroyed_at is not None
+
+
+class Instance(Instantiation):
+    """Materialized InstanceSpec - compute resource.
+
+    Represents an EC2 instance, container, or other compute unit.
+    Apps run on Instances (1:N relationship).
+
+    Attributes:
+        role: Instance role from InstanceSpec (attacker, victim, dc, ngfw).
+        os_type: Operating system type (kali, ubuntu, windows, panos).
+    """
+
+    class Role(models.TextChoices):
+        ATTACKER = "attacker", "Attacker"
+        VICTIM = "victim", "Victim"
+        DC = "dc", "Domain Controller"
+        NGFW = "ngfw", "NGFW"
+
+    class OSType(models.TextChoices):
+        KALI = "kali", "Kali Linux"
+        UBUNTU = "ubuntu", "Ubuntu"
+        WINDOWS = "windows", "Windows"
+        PANOS = "panos", "PAN-OS"
+
+    role = models.CharField(max_length=20, choices=Role.choices, db_index=True)
+    os_type = models.CharField(max_length=20, choices=OSType.choices)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Instance"
+        verbose_name_plural = "Instances"
+
+    def __str__(self):
+        return f"Instance {self.uuid} ({self.role}/{self.os_type})"
+
+
+class App(Instantiation):
+    """Materialized AppSpec - application running on compute.
+
+    Represents an app (NGFW, Agent, OS, Other) that runs on an Instance.
+    Child of Instance - mirrors the spec nesting.
+
+    Attributes:
+        app_type: App type discriminator (os, ngfw, agent, other).
+        instance: Parent Instance this App runs on.
+    """
+
+    class AppType(models.TextChoices):
+        OS = "os", "OS"
+        NGFW = "ngfw", "NGFW"
+        AGENT = "agent", "Agent"
+        OTHER = "other", "Other"
+
+    app_type = models.CharField(max_length=20, choices=AppType.choices, db_index=True)
+    instance = models.ForeignKey(
+        Instance,
+        on_delete=models.CASCADE,
+        related_name="apps",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "App"
+        verbose_name_plural = "Apps"
+
+    def __str__(self):
+        return f"App {self.uuid} ({self.app_type})"
 
 
 class Range(models.Model):

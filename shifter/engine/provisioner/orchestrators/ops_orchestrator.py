@@ -111,20 +111,25 @@ class OpsOrchestrator:
         """Execute a single operations step.
 
         Args:
-            target_id: Target instance or resource ID.
-            step: Step to execute.
-            context: Template variables.
+            target_id: Target instance or resource ID (for logging/reference).
+            step: Step to execute with action and params attributes.
+            context: Dict containing parameter values for the action.
 
         Returns:
             StepResult with step output.
         """
-        # Execute via the executor
-        # The step's action and params determine what gets executed
-        result = self.executor.run_command(
-            target=target_id,
-            action=getattr(step, "action", ""),
-            params=getattr(step, "params", {}),
-        )
+        action = getattr(step, "action", "")
+
+        # Use execute_action() for AWSExecutor to dispatch to specific methods
+        if hasattr(self.executor, "execute_action"):
+            result = self.executor.execute_action(action, context)
+        else:
+            # Fallback for other executors (SSMExecutor, etc.)
+            result = self.executor.run_command(
+                target=target_id,
+                action=action,
+                params=getattr(step, "params", {}),
+            )
 
         return StepResult(
             step_name=step.name,

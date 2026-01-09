@@ -821,8 +821,11 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock the orchestrator for post-Pulumi config
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
 
         # Mock AWSExecutor for GWLB setup
@@ -873,8 +876,11 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
 
         # Mock AWSExecutor for GWLB setup
@@ -923,8 +929,11 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
 
         # Mock AWSExecutor for GWLB setup
@@ -971,8 +980,11 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
 
         # Mock AWSExecutor for GWLB setup
@@ -1018,8 +1030,11 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
 
         # Mock AWSExecutor for GWLB setup
@@ -1043,9 +1058,7 @@ class TestNgfwProvisionCLI:
             target_id="i-ngfw123",
         )
 
-    def test_ngfw_provision_fails_on_gwlb_setup_failure(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_provision_fails_on_gwlb_setup_failure(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW provision should fail if GWLB setup fails."""
         mocker.patch("main.update_instance_state")
         mocker.patch("main.publish_ngfw_event")
@@ -1075,15 +1088,16 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan (succeeds)
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
 
         # Mock AWSExecutor - register_target fails
         mock_aws_executor = MagicMock()
-        mock_aws_executor.register_target.return_value = MagicMock(
-            success=False, stderr="Target group not found"
-        )
+        mock_aws_executor.register_target.return_value = MagicMock(success=False, stderr="Target group not found")
         mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
 
         from main import run_ngfw_pulumi
@@ -1091,9 +1105,7 @@ class TestNgfwProvisionCLI:
         with pytest.raises(RuntimeError, match="GWLB setup step"):
             run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
 
-    def test_ngfw_provision_fails_on_missing_target_group_arn(
-        self, mock_boto3_clients, mock_env_vars, mocker
-    ):
+    def test_ngfw_provision_fails_on_missing_target_group_arn(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW provision should fail if target_group_arn is missing from outputs."""
         mocker.patch("main.update_instance_state")
         mocker.patch("main.publish_ngfw_event")
@@ -1123,8 +1135,11 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan (succeeds)
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
 
         # Mock AWSExecutor (created before validation)
@@ -1498,3 +1513,276 @@ class TestNgfwDeprovisionCLI:
         # Verify final status is destroyed
         final_call = mock_update.call_args_list[-1]
         assert final_call[0][1] == "destroyed"
+
+
+# =============================================================================
+# Serial Number Parsing Tests
+# =============================================================================
+
+
+class TestParseSerialNumber:
+    """Tests for parse_serial_number helper function."""
+
+    def test_extracts_serial_from_system_info(self):
+        """parse_serial_number extracts serial from PAN-OS show system info output."""
+        from main import parse_serial_number
+
+        system_info = """hostname: PA-VM
+serial: 007200001267
+software-version: 11.1.0
+"""
+        serial = parse_serial_number(system_info)
+        assert serial == "007200001267"
+
+    def test_extracts_serial_case_insensitive(self):
+        """parse_serial_number handles case variations."""
+        from main import parse_serial_number
+
+        # PAN-OS output typically has lowercase "serial:" but test variations
+        system_info = "SERIAL: ABC123DEF456"
+        serial = parse_serial_number(system_info)
+        assert serial == "ABC123DEF456"
+
+    def test_extracts_serial_with_extra_whitespace(self):
+        """parse_serial_number handles extra whitespace."""
+        from main import parse_serial_number
+
+        system_info = "serial:   007200001267   "
+        serial = parse_serial_number(system_info)
+        assert serial == "007200001267"
+
+    def test_returns_none_when_not_found(self):
+        """parse_serial_number returns None when serial not in output."""
+        from main import parse_serial_number
+
+        system_info = """hostname: PA-VM
+software-version: 11.1.0
+"""
+        serial = parse_serial_number(system_info)
+        assert serial is None
+
+    def test_returns_none_for_unknown_placeholder(self):
+        """parse_serial_number returns None for 'unknown' placeholder."""
+        from main import parse_serial_number
+
+        system_info = "serial: unknown"
+        serial = parse_serial_number(system_info)
+        assert serial is None
+
+    def test_returns_none_for_none_placeholder(self):
+        """parse_serial_number returns None for 'none' placeholder."""
+        from main import parse_serial_number
+
+        system_info = "serial: none"
+        serial = parse_serial_number(system_info)
+        assert serial is None
+
+    def test_returns_none_for_empty_output(self):
+        """parse_serial_number returns None for empty output."""
+        from main import parse_serial_number
+
+        serial = parse_serial_number("")
+        assert serial is None
+
+    def test_handles_multiline_panos_output(self):
+        """parse_serial_number works with full PAN-OS system info output."""
+        from main import parse_serial_number
+
+        # Simulated PAN-OS show system info output
+        system_info = """hostname: fw-demo-001
+serial: 007200001267
+ip-address: 10.1.4.10
+mac-address: 0a:1b:2c:3d:4e:5f
+time: Fri Jan 10 12:34:56 2025
+uptime: 0 days, 2:15:30
+family: vm
+model: PA-VM
+sw-version: 11.1.0
+operational-mode: normal
+management-address: 10.1.4.10/24
+"""
+        serial = parse_serial_number(system_info)
+        assert serial == "007200001267"
+
+
+class TestNgfwProvisionSerialNumber:
+    """Tests for serial number extraction during NGFW provisioning."""
+
+    TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
+
+    @pytest.fixture(autouse=True)
+    def mock_get_ngfw_data(self, mocker):
+        """Mock get_ngfw_data_by_request_id for all tests."""
+        return mocker.patch(
+            "main.get_ngfw_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "instance_id": "inst-uuid-123",
+                "app_id": "app-uuid-456",
+                "spec": {"role": "ngfw", "ngfw_app": {"type": "ngfw"}},
+                "app_spec": {
+                    "scm_pin_id": "pin-123",
+                    "scm_pin_value": "secret-pin",
+                    "scm_folder_name": "shifter",
+                    "authcode": "AUTH123",
+                },
+                "state": {},
+                "status": "pending",
+            },
+        )
+
+    def test_ngfw_provision_extracts_serial_number(self, mock_boto3_clients, mock_env_vars, mocker):
+        """NGFW provision should extract serial number from verify_device_cert step."""
+        mock_update = mocker.patch("main.update_instance_state")
+        mocker.patch("main.publish_ngfw_event")
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "dataplane_ip": "10.1.4.11",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def subprocess_side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=subprocess_side_effect)
+
+        # Mock SSH executor
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        # Mock orchestrator with step_results containing serial number
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "hostname: PA-VM\nserial: 007200001267\n"
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(
+            success=True,
+            step_results=[mock_step_result],
+        )
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock AWSExecutor for GWLB setup
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
+
+        # Verify serial_number was saved to state
+        ready_calls = [c for c in mock_update.call_args_list if c[0][1] == "ready"]
+        assert len(ready_calls) == 1
+        assert ready_calls[0][1].get("serial_number") == "007200001267"
+
+    def test_ngfw_provision_includes_serial_in_event(self, mock_boto3_clients, mock_env_vars, mocker):
+        """NGFW provision should include serial_number in ready event."""
+        mocker.patch("main.update_instance_state")
+        mock_publish = mocker.patch("main.publish_ngfw_event")
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def subprocess_side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=subprocess_side_effect)
+
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        # Mock orchestrator with step_results containing serial number
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: ABC123XYZ789"
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(
+            success=True,
+            step_results=[mock_step_result],
+        )
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
+
+        # Find the ready event call
+        ready_calls = [c for c in mock_publish.call_args_list if c[1].get("status") == "ready"]
+        assert len(ready_calls) == 1
+        assert ready_calls[0][1].get("serial_number") == "ABC123XYZ789"
+
+    def test_ngfw_provision_fails_without_serial_number(self, mock_boto3_clients, mock_env_vars, mocker):
+        """NGFW provision should fail if serial number cannot be extracted."""
+        mocker.patch("main.update_instance_state")
+        mocker.patch("main.publish_ngfw_event")
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def subprocess_side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=subprocess_side_effect)
+
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        # Mock orchestrator with step_results but NO serial number in output
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "hostname: PA-VM\n"  # No serial line
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(
+            success=True,
+            step_results=[mock_step_result],
+        )
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        from main import run_ngfw_pulumi
+
+        with pytest.raises(RuntimeError, match="serial number not found"):
+            run_ngfw_pulumi("up", self.TEST_REQUEST_ID)

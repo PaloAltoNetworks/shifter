@@ -194,6 +194,14 @@
             <span class="detail-value">{{ ngfw.get_status_display }}</span>
         </div>
         <div class="detail-item">
+            <span class="detail-label">Serial Number</span>
+            {% if ngfw.serial_number %}
+            <span class="detail-value mono">{{ ngfw.serial_number }}</span>
+            {% else %}
+            <span class="detail-value placeholder">Pending provisioning</span>
+            {% endif %}
+        </div>
+        <div class="detail-item">
             <span class="detail-label">Created</span>
             <span class="detail-value">{{ ngfw.created_at|date:"M d, Y H:i" }}</span>
         </div>

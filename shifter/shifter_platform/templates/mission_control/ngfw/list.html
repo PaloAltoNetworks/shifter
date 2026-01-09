@@ -129,6 +129,9 @@
             <div>
                 <h3 class="ngfw-card-title">{{ ngfw.name }}</h3>
                 <div class="ngfw-card-meta">
+                    {% if ngfw.serial_number %}
+                    Serial: {{ ngfw.serial_number }} &bull;
+                    {% endif %}
                     Created {{ ngfw.created_at|date:"M d, Y" }}
                 </div>
             </div>

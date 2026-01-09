@@ -2353,6 +2353,7 @@ def _app_to_ngfw_context(app: App) -> NGFWAppContext:
         name=app.name,
         status=app.status,
         created_at=app.created_at,
+        serial_number=app.data.get("serial_number"),
     )
 
 

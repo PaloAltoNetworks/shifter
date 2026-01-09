@@ -167,13 +167,16 @@ def process_ngfw_event(message: str | dict) -> None:
 def _handle_ngfw_event(event: dict) -> None:
     """Handle unified ngfw.event - update CMS Instance and App status.
 
+    Also stores serial_number in App.data when provided (on ready events).
+
     Args:
-        event: Event payload with instance_id, app_id, status.
+        event: Event payload with instance_id, app_id, status, serial_number.
     """
     event_id = event.get("event_id", "unknown")
     instance_id = event.get("instance_id")
     app_id = event.get("app_id")
     status = event.get("status")
+    serial_number = event.get("serial_number")
 
     # Validate required fields
     if not instance_id or not app_id:
@@ -219,9 +222,19 @@ def _handle_ngfw_event(event: dict) -> None:
     try:
         app = App.objects.get(id=app_id)
         previous_app_status = app.status
+        update_fields = []
+
         if status:
             app.status = status
-            app.save(update_fields=["status"])
+            update_fields.append("status")
+
+        # Store serial_number in App.data when provided (typically on ready events)
+        if serial_number:
+            app.data = {**app.data, "serial_number": serial_number}
+            update_fields.append("data")
+
+        if update_fields:
+            app.save(update_fields=update_fields)
     except App.DoesNotExist:
         logger.warning("CMS App not found: app_id=%s event_id=%s", app_id, event_id)
         previous_app_status = None
@@ -230,12 +243,13 @@ def _handle_ngfw_event(event: dict) -> None:
         return
 
     logger.info(
-        "CMS processed NGFW event: instance_id=%s (%s->%s) app_id=%s (%s->%s) event_id=%s",
+        "CMS processed NGFW event: instance_id=%s (%s->%s) app_id=%s (%s->%s) serial=%s event_id=%s",
         instance_id,
         previous_instance_status,
         status or previous_instance_status,
         app_id,
         previous_app_status,
         status or previous_app_status,
+        serial_number or "N/A",
         event_id,
     )

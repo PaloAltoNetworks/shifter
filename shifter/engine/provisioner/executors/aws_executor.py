@@ -111,6 +111,73 @@ class AWSExecutor:
             )
 
     # =========================================================================
+    # Action Dispatcher (for OpsOrchestrator integration)
+    # =========================================================================
+
+    def execute_action(self, action: str, context: dict[str, Any]) -> CommandResult:
+        """Execute a named action using context parameters.
+
+        This method provides the interface for OpsOrchestrator to dispatch
+        operations to specific AWSExecutor methods based on the action name.
+
+        Args:
+            action: The action name (e.g., "start_instance", "stop_instance").
+            context: Dict containing parameters for the action.
+
+        Returns:
+            CommandResult from the specific action method.
+
+        Raises:
+            ValueError: If the action is unknown.
+        """
+        # Map action names to methods and their required context keys
+        action_map = {
+            # EC2 operations
+            "start_instance": (self.start_instance, ["instance_id"]),
+            "stop_instance": (self.stop_instance, ["instance_id"]),
+            "wait_for_running": (self.wait_for_running, ["instance_id"]),
+            "wait_for_stopped": (self.wait_for_stopped, ["instance_id"]),
+            "describe_instance": (self.describe_instance, ["instance_id"]),
+            # GWLB operations
+            "register_target": (self.register_target, ["target_group_arn", "target_id"]),
+            "deregister_target": (self.deregister_target, ["target_group_arn", "target_id"]),
+            "wait_for_target_healthy": (
+                self.wait_for_target_healthy,
+                ["target_group_arn", "target_id"],
+            ),
+            # VPC endpoint operations
+            "create_endpoint": (self.create_endpoint, ["vpc_id", "service_name", "subnet_ids"]),
+            "delete_endpoint": (self.delete_endpoint, ["endpoint_id"]),
+            "describe_endpoint": (self.describe_endpoint, ["endpoint_id"]),
+            "wait_for_endpoint_available": (self.wait_for_endpoint_available, ["endpoint_id"]),
+            # Route operations
+            "create_route": (self.create_route, ["route_table_id", "destination", "endpoint_id"]),
+            "delete_route": (self.delete_route, ["route_table_id", "destination"]),
+        }
+
+        if action not in action_map:
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"Unknown action: {action}",
+            )
+
+        method, param_keys = action_map[action]
+
+        # Extract parameters from context
+        params = {}
+        for key in param_keys:
+            if key not in context:
+                return CommandResult(
+                    success=False,
+                    stdout="",
+                    stderr=f"Missing required parameter '{key}' for action '{action}'",
+                )
+            params[key] = context[key]
+
+        return method(**params)
+
+    # =========================================================================
     # EC2 Operations
     # =========================================================================
 

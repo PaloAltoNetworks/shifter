@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from cms.models import NGFW, AgentConfig, OperatingSystem
+from cms.models import AgentConfig, OperatingSystem
 
 
 @admin.register(OperatingSystem)
@@ -26,13 +26,3 @@ class AgentConfigAdmin(admin.ModelAdmin):
     search_fields = ("name", "user__email", "original_filename")
     raw_id_fields = ("user",)
     readonly_fields = ("s3_key", "sha256_hash", "file_size_bytes", "created_at")
-
-
-@admin.register(NGFW)
-class NGFWAdmin(admin.ModelAdmin):
-    # NOTE: serial_number, instance_id are on Engine NGFW model, not CMS NGFW
-    list_display = ("name", "user", "status", "created_at", "deleted_at")
-    list_filter = ("status", "deleted_at", "created_at")
-    search_fields = ("name", "user__email")
-    raw_id_fields = ("user",)
-    readonly_fields = ("created_at",)

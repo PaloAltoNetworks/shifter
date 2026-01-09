@@ -59,9 +59,7 @@ def ready_range_context():
         scenario_id="test-scenario",
         user_id=1,
         status=ResourceStatus.READY,
-        instances=[
-            InstanceContext(uuid="test-uuid-1234", role="attacker", os_type="kali")
-        ],
+        instances=[InstanceContext(uuid="test-uuid-1234", role="attacker", os_type="kali")],
     )
 
 
@@ -75,9 +73,7 @@ class TestSSHConsumerConnect:
 
         await consumer.connect()
 
-        consumer.close.assert_awaited_once_with(
-            code=WebSocketCloseCode.NOT_AUTHENTICATED
-        )
+        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_AUTHENTICATED)
 
     @pytest.mark.asyncio
     async def test_rejects_missing_instance_uuid(self, consumer):
@@ -121,9 +117,7 @@ class TestSSHConsumerConnect:
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
 
     @pytest.mark.asyncio
-    async def test_rejects_when_instance_not_in_range(
-        self, consumer, authenticated_scope
-    ):
+    async def test_rejects_when_instance_not_in_range(self, consumer, authenticated_scope):
         """Instance UUID not in range returns NOT_FOUND."""
         consumer.scope = authenticated_scope
         range_ctx = RangeContext(
@@ -131,9 +125,7 @@ class TestSSHConsumerConnect:
             scenario_id="test",
             user_id=1,
             status=ResourceStatus.READY,
-            instances=[
-                InstanceContext(uuid="different-uuid", role="attacker", os_type="kali")
-            ],
+            instances=[InstanceContext(uuid="different-uuid", role="attacker", os_type="kali")],
         )
 
         with patch("cms.get_active_range", return_value=range_ctx):
@@ -142,9 +134,7 @@ class TestSSHConsumerConnect:
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
 
     @pytest.mark.asyncio
-    async def test_rejects_on_ssh_connection_failure(
-        self, consumer, authenticated_scope, ready_range_context
-    ):
+    async def test_rejects_on_ssh_connection_failure(self, consumer, authenticated_scope, ready_range_context):
         """SSH connection failure returns SSH_CONNECTION_FAILED."""
         consumer.scope = authenticated_scope
         mock_ssh = AsyncMock()
@@ -156,14 +146,10 @@ class TestSSHConsumerConnect:
         ):
             await consumer.connect()
 
-        consumer.close.assert_awaited_once_with(
-            code=WebSocketCloseCode.SSH_CONNECTION_FAILED
-        )
+        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.SSH_CONNECTION_FAILED)
 
     @pytest.mark.asyncio
-    async def test_accepts_on_successful_connect(
-        self, consumer, authenticated_scope, ready_range_context
-    ):
+    async def test_accepts_on_successful_connect(self, consumer, authenticated_scope, ready_range_context):
         """Successful connection accepts WebSocket and starts read task."""
         consumer.scope = authenticated_scope
         mock_ssh = AsyncMock()
@@ -228,9 +214,7 @@ class TestSSHConsumerReceive:
         mock_ssh = AsyncMock()
         consumer.ssh_conn = mock_ssh
 
-        await consumer.receive(
-            text_data=json.dumps({"type": "input", "data": "ls -la\n"})
-        )
+        await consumer.receive(text_data=json.dumps({"type": "input", "data": "ls -la\n"}))
 
         mock_ssh.send.assert_awaited_once_with(b"ls -la\n")
 
@@ -240,9 +224,7 @@ class TestSSHConsumerReceive:
         mock_ssh = AsyncMock()
         consumer.ssh_conn = mock_ssh
 
-        await consumer.receive(
-            text_data=json.dumps({"type": "resize", "cols": 120, "rows": 40})
-        )
+        await consumer.receive(text_data=json.dumps({"type": "resize", "cols": 120, "rows": 40}))
 
         mock_ssh.resize.assert_awaited_once_with(120, 40)
 

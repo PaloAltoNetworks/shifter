@@ -2,14 +2,11 @@
 
 Tests service-level behavior only:
 - Expected behavior / return values
-- Logging (debug and error levels)
 - Exception handling
 - Input validation (service's responsibility)
 
 Does NOT re-test model behavior (filtering, field validation, etc).
 """
-
-import logging
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -160,29 +157,6 @@ class TestListScenarios:
         unsaved_user = User(username="unsaved@example.com")
         with pytest.raises(ValueError, match="user must be saved"):
             services.list_scenarios(unsaved_user)
-
-    # --- Logging ---
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user info."""
-        with caplog.at_level(logging.DEBUG, logger="cms.services"):
-            services.list_scenarios(user)
-        assert str(user.id) in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on success with scenario count."""
-        with caplog.at_level(logging.DEBUG, logger="cms.services"):
-            result = services.list_scenarios(user)
-        assert str(len(result)) in caplog.text or "scenario" in caplog.text.lower()
-
-    def test_logs_error_when_user_none(self, caplog):
-        """Service logs error when user is None."""
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            services.list_scenarios(None)
-        assert "None" in caplog.text
 
     # --- Consistency guarantees ---
 

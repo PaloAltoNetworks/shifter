@@ -156,6 +156,12 @@ messaging_alarm_actions               = [] # Populated by main.tf from shared SN
 alarm_email = "bedwards@paloaltonetworks.com"
 
 # ------------------------------------------------------------------------------
+# Bedrock Logging
+# ------------------------------------------------------------------------------
+
+enable_bedrock_logging = true
+
+# ------------------------------------------------------------------------------
 # CI Testing (not used by Terraform, extracted by quality.yml workflow)
 # ------------------------------------------------------------------------------
 

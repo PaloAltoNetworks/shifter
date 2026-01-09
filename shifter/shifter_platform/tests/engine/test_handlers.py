@@ -593,20 +593,13 @@ class TestHandleProvisioned:
         assert len(range_obj.provisioned_instances) == 2
 
         # Check that UUIDs from range_config are merged with provisioner data
-        attacker = next(
-            i for i in range_obj.provisioned_instances if i["role"] == "attacker"
-        )
+        attacker = next(i for i in range_obj.provisioned_instances if i["role"] == "attacker")
         assert attacker["uuid"] == "uuid-attacker-123"
         assert attacker["instance_id"] == "i-attacker123"
         assert attacker["private_ip"] == "10.1.2.10"
-        assert (
-            attacker["ssh_key_secret_arn"]
-            == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key-attacker"
-        )
+        assert attacker["ssh_key_secret_arn"] == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key-attacker"
 
-        victim = next(
-            i for i in range_obj.provisioned_instances if i["role"] == "victim"
-        )
+        victim = next(i for i in range_obj.provisioned_instances if i["role"] == "victim")
         assert victim["uuid"] == "uuid-victim-456"
         assert victim["instance_id"] == "i-victim456"
         assert victim["private_ip"] == "10.1.2.20"
@@ -702,10 +695,7 @@ class TestHandleProvisioned:
         instance = range_obj.get_instance_by_uuid("uuid-attacker-123")
         assert instance is not None
         assert instance["private_ip"] == "10.1.2.10"
-        assert (
-            instance["ssh_key_secret_arn"]
-            == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key"
-        )
+        assert instance["ssh_key_secret_arn"] == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key"
 
     # ---------------------------------------------------------------------
     # Error handling
@@ -770,11 +760,7 @@ class TestHandleProvisioned:
         range_obj = Range.objects.create(
             user=user,
             status=ResourceStatus.PROVISIONING.value,
-            range_config={
-                "instances": [
-                    {"uuid": "uuid-123", "role": "attacker", "os_type": "kali"}
-                ]
-            },
+            range_config={"instances": [{"uuid": "uuid-123", "role": "attacker", "os_type": "kali"}]},
         )
 
         message = {

@@ -31,6 +31,10 @@ class UserNGFWStack(pulumi.ComponentResource):
         ngfw_security_group_id: str,
         ami_id: str,
         bootstrap_bucket: str,
+        scm_pin_id: str,
+        scm_pin_value: str,
+        scm_folder_name: str,
+        authcode: str,
         instance_type: str = "m5.xlarge",
         environment: str = "dev",
         instance_profile_name: str | None = None,
@@ -46,6 +50,10 @@ class UserNGFWStack(pulumi.ComponentResource):
             ngfw_security_group_id: Security group ID for NGFW
             ami_id: VM-Series AMI ID
             bootstrap_bucket: S3 bucket for bootstrap configuration
+            scm_pin_id: SCM auto-registration PIN ID
+            scm_pin_value: SCM auto-registration PIN value
+            scm_folder_name: SCM folder name (dgname)
+            authcode: VM-Series authcode for licensing
             instance_type: EC2 instance type (default: m5.xlarge)
             environment: Environment name for tagging
             instance_profile_name: IAM instance profile name (optional)
@@ -63,6 +71,10 @@ class UserNGFWStack(pulumi.ComponentResource):
             security_group_id=ngfw_security_group_id,
             ami_id=ami_id,
             bootstrap_bucket=bootstrap_bucket,
+            scm_pin_id=scm_pin_id,
+            scm_pin_value=scm_pin_value,
+            scm_folder_name=scm_folder_name,
+            authcode=authcode,
             instance_type=instance_type,
             environment=environment,
             instance_profile_name=instance_profile_name,

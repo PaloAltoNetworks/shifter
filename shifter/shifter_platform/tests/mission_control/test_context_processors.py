@@ -112,9 +112,7 @@ class TestActiveRangeContextProcessor:
         mock_request = MagicMock()
         mock_request.user.is_authenticated = False
 
-        with patch(
-            "mission_control.context_processors.get_active_range"
-        ) as mock_get_active_range:
+        with patch("mission_control.context_processors.get_active_range") as mock_get_active_range:
             active_range(mock_request)
 
         mock_get_active_range.assert_not_called()

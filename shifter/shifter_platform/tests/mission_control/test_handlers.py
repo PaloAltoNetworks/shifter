@@ -27,9 +27,7 @@ class TestProcessEvent:
             )
         }
 
-        with patch(
-            "mission_control.handlers.process_range_event"
-        ) as mock_range_handler:
+        with patch("mission_control.handlers.process_range_event") as mock_range_handler:
             process_event(message)
             mock_range_handler.assert_called_once_with(message)
 

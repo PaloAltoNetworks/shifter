@@ -35,14 +35,10 @@ def process_event(message: str | dict) -> None:
     event_id = event.get("event_id", "unknown")
 
     if event_type.startswith("range."):
-        logger.debug(
-            "Routing to range handler: event_type=%s event_id=%s", event_type, event_id
-        )
+        logger.debug("Routing to range handler: event_type=%s event_id=%s", event_type, event_id)
         process_range_event(message)
     elif event_type.startswith("ngfw."):
-        logger.debug(
-            "Routing to NGFW handler: event_type=%s event_id=%s", event_type, event_id
-        )
+        logger.debug("Routing to NGFW handler: event_type=%s event_id=%s", event_type, event_id)
         process_ngfw_event(message)
     else:
         logger.debug("Ignoring unknown event_type=%s event_id=%s", event_type, event_id)
@@ -105,6 +101,10 @@ def _handle_status_updated(event: dict) -> None:
     new_status = event.get("new_status")
     error_message = event.get("error_message")
     event_id = event.get("event_id", "unknown")
+
+    if range_id is None or new_status is None:
+        logger.warning("Missing range_id or new_status in event")
+        return
 
     try:
         range_obj = Range.objects.get(id=range_id)
@@ -169,6 +169,10 @@ def _handle_provisioned(event: dict) -> None:
     subnet_cidr = event.get("subnet_cidr")
     pulumi_stack = event.get("pulumi_stack")
     event_id = event.get("event_id", "unknown")
+
+    if range_id is None:
+        logger.warning("Missing range_id in provisioned event")
+        return
 
     try:
         range_obj = Range.objects.get(id=range_id)
@@ -268,16 +272,12 @@ def process_ngfw_event(message: str | dict) -> None:
     _handle_ngfw_event(event)
 
 
-def _get_ngfw_models(
-    instance_id: str, app_id: str, event_id: str
-) -> tuple[Instance, App] | None:
+def _get_ngfw_models(instance_id: str, app_id: str, event_id: str) -> tuple[Instance, App] | None:
     """Look up Instance and App by UUID, logging warnings if not found."""
     try:
         instance = Instance.objects.get(uuid=instance_id)
     except Instance.DoesNotExist:
-        logger.warning(
-            "Instance not found: instance_id=%s event_id=%s", instance_id, event_id
-        )
+        logger.warning("Instance not found: instance_id=%s event_id=%s", instance_id, event_id)
         return None
 
     try:
@@ -339,14 +339,11 @@ def _handle_ngfw_event(event: dict) -> None:
         try:
             app.save(update_fields=app_update_fields)
         except Exception:
-            logger.exception(
-                "DB error saving App: app_id=%s event_id=%s", app_id, event_id
-            )
+            logger.exception("DB error saving App: app_id=%s event_id=%s", app_id, event_id)
             return
 
     logger.info(
-        "Engine processed NGFW event: instance_id=%s (%s->%s) app_id=%s (%s->%s) "
-        "state_keys=%s event_id=%s",
+        "Engine processed NGFW event: instance_id=%s (%s->%s) app_id=%s (%s->%s) state_keys=%s event_id=%s",
         instance_id,
         previous_instance_status,
         status or previous_instance_status,
@@ -358,9 +355,7 @@ def _handle_ngfw_event(event: dict) -> None:
     )
 
 
-def _update_ngfw_instance(
-    instance: Instance, status: str | None, state: dict | None
-) -> list[str]:
+def _update_ngfw_instance(instance: Instance, status: str | None, state: dict | None) -> list[str]:
     """Update Instance fields and return list of fields to save."""
     update_fields = []
 

@@ -16,14 +16,14 @@ import boto3
 import psycopg
 
 from events import (
-    NGFW_STATUS_DEPROVISIONING,
-    NGFW_STATUS_PROVISIONING,
+    STATUS_DESTROYED,
+    STATUS_DESTROYING,
+    STATUS_FAILED,
+    STATUS_PROVISIONING,
+    STATUS_READY,
     publish_destroyed,
     publish_failed,
-    publish_ngfw_destroyed,
-    publish_ngfw_failed,
-    publish_ngfw_ready,
-    publish_ngfw_status_update,
+    publish_ngfw_event,
     publish_ready,
     publish_status_update,
 )
@@ -90,70 +90,108 @@ def update_range_status(range_id: int, status: str, **kwargs) -> None:
         conn.commit()
 
 
-def update_ngfw_status(ngfw_id: int, status: str, **kwargs) -> None:
-    """Update NGFW status in Engine database.
+def get_ngfw_data_by_request_id(request_id: str) -> dict:
+    """Read NGFW request and instance data from Engine database.
 
-    Note: This updates the Engine's own NGFW table, not Mission Control's.
-    Status events are published to SNS for fan-out to CMS/Engine handlers.
-
-    Args:
-        ngfw_id: The ID of the Engine NGFW record to update.
-        status: New status value (e.g., 'provisioning', 'ready', 'failed').
-        **kwargs: Additional fields to update (e.g., provisioned_at, error_message).
-    """
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            updates = ["status = %s", "updated_at = NOW()"]
-            values: list = [status]
-
-            for key, value in kwargs.items():
-                if value is not None:
-                    # Handle special SQL expressions
-                    if value == "NOW()":
-                        updates.append(f"{key} = NOW()")
-                    else:
-                        updates.append(f"{key} = %s")
-                        values.append(value)
-
-            values.append(ngfw_id)
-            # Security: Column names in 'updates' are from hardcoded kwargs keys in calling code,
-            # not user input. Values are parameterized via %s placeholders.
-            sql = f"UPDATE engine_ngfw SET {', '.join(updates)} WHERE id = %s"  # nosec B608  # noqa: S608
-            cur.execute(sql, values)
-        conn.commit()
-
-
-def get_ngfw_from_db(ngfw_id: int) -> dict:
-    """Read NGFW record from Engine database.
+    Queries engine_request joined with engine_instance and engine_app
+    to get all correlation IDs and instance data needed for provisioning.
 
     Args:
-        ngfw_id: The Engine NGFW ID.
+        request_id: UUID string of the Request.
 
     Returns:
-        Dictionary with NGFW data including cms_ngfw_id and user_id.
+        Dictionary with:
+            - request_id: UUID string of the Request
+            - instance_id: UUID string of the Instance
+            - app_id: UUID string of the App (NGFW)
+            - spec: JSON dict from Instance.spec
+            - app_spec: JSON dict from App.spec (contains hydrated credentials)
+            - state: JSON dict from Instance.state (Pulumi outputs, etc.)
+            - status: Current Instance status
 
     Raises:
-        ValueError: If NGFW not found.
+        ValueError: If Request or NGFW Instance not found.
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-                SELECT id, cms_ngfw_id, user_id, ngfw_config, status
-                FROM engine_ngfw
-                WHERE id = %s
-                """,
-            (ngfw_id,),
+            SELECT
+                r.request_id,
+                i.uuid AS instance_id,
+                a.uuid AS app_id,
+                i.spec,
+                a.spec AS app_spec,
+                i.state,
+                i.status
+            FROM engine_request r
+            JOIN engine_instance i ON i.request_id = r.id
+            LEFT JOIN engine_app a ON a.instance_id = i.id
+            WHERE r.request_id = %s
+              AND i.role = 'ngfw'
+            """,
+            (request_id,),
         )
         row = cur.fetchone()
         if not row:
-            raise ValueError(f"NGFW not found in Engine database: {ngfw_id}")
+            raise ValueError(f"NGFW request not found: {request_id}")
         return {
-            "id": row[0],
-            "cms_ngfw_id": row[1],
-            "user_id": row[2],
-            "config": json.loads(row[3]) if row[3] else {},
-            "status": row[4],
+            "request_id": str(row[0]),
+            "instance_id": str(row[1]),
+            "app_id": str(row[2]) if row[2] else None,
+            "spec": row[3] if row[3] else {},
+            "app_spec": row[4] if row[4] else {},
+            "state": row[5] if row[5] else {},
+            "status": row[6],
         }
+
+
+def update_instance_state(request_id: str, status: str, **state_updates) -> None:
+    """Update NGFW Instance status and state in Engine database.
+
+    Updates the engine_instance record for the NGFW instance associated
+    with the given request_id.
+
+    Args:
+        request_id: UUID string of the Request.
+        status: New status value (e.g., 'provisioning', 'ready', 'failed').
+        **state_updates: Key-value pairs to merge into Instance.state JSON.
+            Common keys: ec2_instance_id, management_ip, dataplane_ip,
+            service_name, gwlb_arn, target_group_arn, pulumi_stack, error_message.
+    """
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # First get the instance id and current state
+            cur.execute(
+                """
+                SELECT i.id, i.state
+                FROM engine_request r
+                JOIN engine_instance i ON i.request_id = r.id
+                WHERE r.request_id = %s
+                  AND i.role = 'ngfw'
+                """,
+                (request_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"NGFW instance not found for request: {request_id}")
+
+            instance_id = row[0]
+            current_state = row[1] if row[1] else {}
+
+            # Merge state updates into current state
+            if state_updates:
+                current_state.update(state_updates)
+
+            # Update instance with new status and merged state
+            cur.execute(
+                """
+                UPDATE engine_instance
+                SET status = %s, state = %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (status, json.dumps(current_state), instance_id),
+            )
+        conn.commit()
 
 
 def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
@@ -396,7 +434,7 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
     publish_destroyed(range_id=range_id, user_id=user_id)
 
 
-def run_ngfw_operation(operation: str, ngfw_id: int, **kwargs) -> None:
+def run_ngfw_operation(operation: str, request_id: str, **kwargs) -> None:
     """Run NGFW runtime operation (start/stop/route management).
 
     Note: Runtime operations update the local DB directly without SNS events
@@ -404,8 +442,8 @@ def run_ngfw_operation(operation: str, ngfw_id: int, **kwargs) -> None:
 
     Args:
         operation: Operation name (start, stop, add-route, remove-route).
-        ngfw_id: The ID of the Engine NGFW record.
-        **kwargs: Operation-specific parameters (instance_id, subnet_id, etc.).
+        request_id: UUID string of the Request.
+        **kwargs: Operation-specific parameters (ec2_instance_id, subnet_id, etc.).
 
     Raises:
         ValueError: If unknown operation.
@@ -423,7 +461,7 @@ def run_ngfw_operation(operation: str, ngfw_id: int, **kwargs) -> None:
         raise ValueError(f"Unknown operation: {operation}")
 
     in_progress_status, success_status = status_map[operation]
-    update_ngfw_status(ngfw_id, in_progress_status)
+    update_instance_state(request_id, in_progress_status)
 
     try:
         # Create executor and orchestrator
@@ -461,38 +499,33 @@ def run_ngfw_operation(operation: str, ngfw_id: int, **kwargs) -> None:
         if not result.success:
             raise RuntimeError(f"Operation {operation} failed")
 
-        # Update success status with timestamp if applicable
-        extra_kwargs = {}
-        if operation == "start":
-            extra_kwargs["last_started_at"] = "NOW()"
-        elif operation == "stop":
-            extra_kwargs["last_stopped_at"] = "NOW()"
-
-        update_ngfw_status(ngfw_id, success_status, **extra_kwargs)
+        update_instance_state(request_id, success_status)
 
     except Exception as e:
         error_msg = str(e)[:1000]
-        update_ngfw_status(ngfw_id, "failed", error_message=error_msg)
+        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
         raise
 
 
-def run_ngfw_pulumi(operation: str, ngfw_id: int) -> None:
+def run_ngfw_pulumi(operation: str, request_id: str) -> None:
     """Run NGFW Pulumi operation (provision or deprovision).
 
     Args:
         operation: Either 'up' (provision) or 'destroy' (deprovision).
-        ngfw_id: The ID of the Engine NGFW record.
+        request_id: UUID string of the Request.
 
     Raises:
-        ValueError: If unknown operation or NGFW not found.
+        ValueError: If unknown operation or Request not found.
         Exception: If the Pulumi operation fails.
     """
-    # Get NGFW data from database (needed for cms_ngfw_id and user_id for events)
-    ngfw_data = get_ngfw_from_db(ngfw_id)
-    cms_ngfw_id = ngfw_data["cms_ngfw_id"]
-    user_id = ngfw_data["user_id"]
+    # Get NGFW data from database (needed for correlation IDs and credentials)
+    ngfw_data = get_ngfw_data_by_request_id(request_id)
+    instance_id = ngfw_data["instance_id"]
+    app_id = ngfw_data["app_id"]
+    app_spec = ngfw_data.get("app_spec", {})
 
-    stack_name = f"ngfw-{ngfw_id}"
+    # Use request_id for stack naming (deterministic from UUID)
+    stack_name = f"ngfw-{request_id}"
     env = os.environ.copy()
     # Security: Empty passphrase is intentional - we use AWS KMS via PULUMI_SECRETS_PROVIDER.
     env["PULUMI_CONFIG_PASSPHRASE"] = ""  # nosec B105
@@ -501,13 +534,13 @@ def run_ngfw_pulumi(operation: str, ngfw_id: int) -> None:
         # Select or create stack with proper secrets provider
         _select_or_create_stack(stack_name, env)
 
-        # Set NGFW stack configuration from environment
-        _set_ngfw_stack_config(env, ngfw_id)
+        # Set NGFW stack configuration from environment and app_spec credentials
+        _set_ngfw_stack_config(env, request_id, app_spec)
 
         if operation == "up":
-            _run_ngfw_provision(ngfw_id, cms_ngfw_id, user_id, stack_name, env)
+            _run_ngfw_provision(request_id, instance_id, app_id, stack_name, env)
         elif operation == "destroy":
-            _run_ngfw_deprovision(ngfw_id, cms_ngfw_id, user_id, stack_name, env)
+            _run_ngfw_deprovision(request_id, instance_id, app_id, stack_name, env)
         else:
             raise ValueError(f"Unknown operation: {operation}")
 
@@ -526,25 +559,31 @@ def run_ngfw_pulumi(operation: str, ngfw_id: int) -> None:
             )
 
         # Update local DB and emit failure event
-        update_ngfw_status(ngfw_id, "failed", error_message=error_msg)
-        publish_ngfw_failed(
-            ngfw_id=ngfw_id,
-            cms_ngfw_id=cms_ngfw_id,
-            user_id=user_id,
-            error_message=error_msg,
+        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_id,
+            app_id=app_id,
+            status=STATUS_FAILED,
+            state={"error_message": error_msg},
         )
         raise
 
 
-def _set_ngfw_stack_config(env: dict, ngfw_id: int) -> None:
-    """Set Pulumi stack configuration for NGFW from environment variables.
+def _set_ngfw_stack_config(env: dict, request_id: str, app_spec: dict) -> None:
+    """Set Pulumi stack configuration for NGFW from environment and app_spec.
+
+    Infrastructure config (VPC, subnet, AMI, etc.) comes from environment variables.
+    Credential config (PIN, authcode, folder) comes from app_spec (hydrated by CMS).
 
     Args:
         env: Environment dictionary for subprocess.
-        ngfw_id: The Engine NGFW ID to configure.
+        request_id: UUID string of the Request.
+        app_spec: Hydrated NGFWAppSpec dict containing credentials.
     """
+    # Infrastructure config from environment (same for all NGFWs)
     config_values = {
-        "ngfwId": str(ngfw_id),
+        "requestId": request_id,
         "environment": os.environ.get("ENVIRONMENT", "dev"),
         "ngfwVpcId": os.environ.get("NGFW_VPC_ID", ""),
         "ngfwSubnetId": os.environ.get("NGFW_SUBNET_ID", ""),
@@ -553,6 +592,12 @@ def _set_ngfw_stack_config(env: dict, ngfw_id: int) -> None:
         "bootstrapBucket": os.environ.get("NGFW_BOOTSTRAP_BUCKET", ""),
         "ngfwInstanceType": os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
         "ngfwInstanceProfileName": os.environ.get("NGFW_INSTANCE_PROFILE_NAME", ""),
+        # Credential config from app_spec (per-NGFW, hydrated by CMS)
+        "scmPinId": app_spec.get("scm_pin_id", ""),
+        "scmPinValue": app_spec.get("scm_pin_value", ""),
+        "scmFolderName": app_spec.get("scm_folder_name", ""),
+        "authcode": app_spec.get("authcode", ""),
+        "userId": str(app_spec.get("user_id", "")),
     }
 
     for key, value in config_values.items():
@@ -572,23 +617,23 @@ def _set_ngfw_stack_config(env: dict, ngfw_id: int) -> None:
             )
 
 
-def _run_ngfw_provision(ngfw_id: int, cms_ngfw_id: int, user_id: int, stack_name: str, env: dict) -> None:
+def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
     """Run Pulumi up to provision the NGFW, then run post-Pulumi configuration.
 
     Args:
-        ngfw_id: The Engine NGFW ID being provisioned.
-        cms_ngfw_id: The CMS NGFW ID for event correlation.
-        user_id: The Django user ID who owns this NGFW.
+        request_id: UUID string of the Request.
+        instance_id: UUID string of the Instance.
+        app_id: UUID string of the App (NGFW).
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
     # Update local DB and emit provisioning status event
-    update_ngfw_status(ngfw_id, "provisioning")
-    publish_ngfw_status_update(
-        ngfw_id=ngfw_id,
-        cms_ngfw_id=cms_ngfw_id,
-        user_id=user_id,
-        new_status=NGFW_STATUS_PROVISIONING,
+    update_instance_state(request_id, STATUS_PROVISIONING)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status=STATUS_PROVISIONING,
     )
     logger.info("Running pulumi up for NGFW...")
 
@@ -630,7 +675,7 @@ def _run_ngfw_provision(ngfw_id: int, cms_ngfw_id: int, user_id: int, stack_name
         pass
 
     context = NGFWContext()
-    context.instance_id = output_data.get("instance_id")
+    context.ec2_instance_id = output_data.get("instance_id")
     context.management_ip = output_data.get("management_ip")
     context.dataplane_ip = output_data.get("dataplane_ip")
     context.service_name = output_data.get("service_name")
@@ -646,51 +691,52 @@ def _run_ngfw_provision(ngfw_id: int, cms_ngfw_id: int, user_id: int, stack_name
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
 
+    # Build state dict with all outputs
+    state = {
+        "ec2_instance_id": output_data.get("instance_id"),
+        "management_ip": output_data.get("management_ip"),
+        "dataplane_ip": output_data.get("dataplane_ip"),
+        "service_name": output_data.get("service_name"),
+        "gwlb_arn": output_data.get("gwlb_arn"),
+        "target_group_arn": output_data.get("target_group_arn"),
+        "pulumi_stack": stack_name,
+    }
+
     # Update local DB with provisioned resources
-    update_ngfw_status(
-        ngfw_id,
-        "ready",
-        instance_id=output_data.get("instance_id"),
-        management_ip=output_data.get("management_ip"),
-        dataplane_ip=output_data.get("dataplane_ip"),
-        service_name=output_data.get("service_name"),
-        gwlb_arn=output_data.get("gwlb_arn"),
-        pulumi_stack=stack_name,
-        provisioned_at="NOW()",
-    )
+    update_instance_state(request_id, STATUS_READY, **state)
 
     # Emit ready event with resource details for CMS/Engine handlers
-    publish_ngfw_ready(
-        ngfw_id=ngfw_id,
-        cms_ngfw_id=cms_ngfw_id,
-        user_id=user_id,
-        instance_id=output_data.get("instance_id", ""),
-        management_ip=output_data.get("management_ip", ""),
-        dataplane_ip=output_data.get("dataplane_ip", ""),
-        service_name=output_data.get("service_name", ""),
-        gwlb_arn=output_data.get("gwlb_arn", ""),
-        target_group_arn=output_data.get("target_group_arn", ""),
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status=STATUS_READY,
+        state=state,
     )
 
 
-def _run_ngfw_deprovision(ngfw_id: int, cms_ngfw_id: int, user_id: int, stack_name: str, env: dict) -> None:
+def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
     """Run license deactivation then Pulumi destroy for NGFW.
 
     Args:
-        ngfw_id: The Engine NGFW ID being deprovisioned.
-        cms_ngfw_id: The CMS NGFW ID for event correlation.
-        user_id: The Django user ID who owns this NGFW.
+        request_id: UUID string of the Request.
+        instance_id: UUID string of the Instance.
+        app_id: UUID string of the App (NGFW).
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
-    # Update local DB and emit deprovisioning status event
-    update_ngfw_status(ngfw_id, "deprovisioning")
-    publish_ngfw_status_update(
-        ngfw_id=ngfw_id,
-        cms_ngfw_id=cms_ngfw_id,
-        user_id=user_id,
-        new_status=NGFW_STATUS_DEPROVISIONING,
+    # Update local DB and emit destroying status event
+    update_instance_state(request_id, STATUS_DESTROYING)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status=STATUS_DESTROYING,
     )
+
+    # Get current instance state for management_ip needed by license deactivation
+    ngfw_data = get_ngfw_data_by_request_id(request_id)
+    current_state = ngfw_data.get("state", {})
 
     # Run pre-destroy license deactivation
     logger.info("Running NGFW license deactivation...")
@@ -702,16 +748,19 @@ def _run_ngfw_deprovision(ngfw_id: int, cms_ngfw_id: int, user_id: int, stack_na
 
     deprovision_plan = NGFWDeprovisionPlan()
 
-    # Create minimal context - the plan will look up the NGFW by ID
+    # Create context with management_ip from stored state
     class NGFWContext:
         pass
 
     context = NGFWContext()
-    context.ngfw_id = ngfw_id
+    context.management_ip = current_state.get("management_ip")
 
-    deprovision_result = orchestrator.orchestrate(deprovision_plan, context)
-    if not deprovision_result.success:
-        logger.warning("License deactivation failed, proceeding with destroy anyway")
+    if context.management_ip:
+        deprovision_result = orchestrator.orchestrate(deprovision_plan, context)
+        if not deprovision_result.success:
+            logger.warning("License deactivation failed, proceeding with destroy anyway")
+    else:
+        logger.warning("No management_ip in state, skipping license deactivation")
 
     # Run Pulumi destroy
     logger.info("Running pulumi destroy for NGFW...")
@@ -741,12 +790,13 @@ def _run_ngfw_deprovision(ngfw_id: int, cms_ngfw_id: int, user_id: int, stack_na
         capture_output=True,
     )
 
-    # Update local DB and emit deprovisioned event
-    update_ngfw_status(ngfw_id, "deprovisioned", deprovisioned_at="NOW()")
-    publish_ngfw_destroyed(
-        ngfw_id=ngfw_id,
-        cms_ngfw_id=cms_ngfw_id,
-        user_id=user_id,
+    # Update local DB and emit destroyed event
+    update_instance_state(request_id, STATUS_DESTROYED)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status=STATUS_DESTROYED,
     )
 
 
@@ -787,18 +837,25 @@ if __name__ == "__main__":
     ngfw_parser = subparsers.add_parser("ngfw", help="NGFW runtime operations")
     ngfw_parser.add_argument(
         "operation",
-        choices=["provision", "deprovision", "start", "stop", "add-route", "remove-route"],
+        choices=[
+            "provision",
+            "deprovision",
+            "start",
+            "stop",
+            "add-route",
+            "remove-route",
+        ],
         help="NGFW operation to perform",
     )
     ngfw_parser.add_argument(
-        "--user-ngfw-id",
-        type=int,
+        "--request-id",
+        type=str,
         required=True,
-        dest="ngfw_id",
-        help="Engine NGFW ID (kept as --user-ngfw-id for backwards compat)",
+        dest="request_id",
+        help="UUID of the Request for this NGFW",
     )
     ngfw_parser.add_argument(
-        "--instance-id",
+        "--ec2-instance-id",
         type=str,
         help="EC2 instance ID (for start/stop)",
     )
@@ -832,19 +889,19 @@ if __name__ == "__main__":
 
     # Handle resource-based dispatch
     if args.resource == "ngfw":
-        logger.info(f"Starting NGFW {args.operation} for ngfw_id={args.ngfw_id}")
+        logger.info(f"Starting NGFW {args.operation} for request_id={args.request_id}")
         logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
         # Pulumi operations vs runtime operations
         if args.operation in ("provision", "deprovision"):
             # Map to Pulumi operations
             pulumi_op = "up" if args.operation == "provision" else "destroy"
-            run_ngfw_pulumi(pulumi_op, args.ngfw_id)
+            run_ngfw_pulumi(pulumi_op, args.request_id)
         else:
             # Runtime operations (start, stop, add-route, remove-route)
             kwargs = {}
-            if args.instance_id:
-                kwargs["instance_id"] = args.instance_id
+            if args.ec2_instance_id:
+                kwargs["ec2_instance_id"] = args.ec2_instance_id
             if args.subnet_id:
                 kwargs["subnet_id"] = args.subnet_id
             if args.service_name:
@@ -856,9 +913,9 @@ if __name__ == "__main__":
             if args.endpoint_id:
                 kwargs["endpoint_id"] = args.endpoint_id
 
-            run_ngfw_operation(args.operation, args.ngfw_id, **kwargs)
+            run_ngfw_operation(args.operation, args.request_id, **kwargs)
 
-        logger.info(f"Completed NGFW {args.operation} for ngfw_id={args.ngfw_id}")
+        logger.info(f"Completed NGFW {args.operation} for request_id={args.request_id}")
 
     elif args.resource == "range":
         # Handle range operations

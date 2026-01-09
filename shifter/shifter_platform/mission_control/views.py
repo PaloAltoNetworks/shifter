@@ -9,6 +9,7 @@ from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
@@ -718,6 +719,12 @@ def api_credential_create(request):
         )
     except (CMSError, ValueError) as e:
         return JsonResponse({"error": str(e)}, status=400)
+    except ValidationError as e:
+        # Django constraint violations (e.g., duplicate name)
+        msg = e.message_dict.get("__all__", [str(e)])[0] if hasattr(e, "message_dict") else str(e)
+        if "unique_active_credential_name_per_user" in msg:
+            msg = "A credential with this name already exists"
+        return JsonResponse({"error": msg}, status=400)
 
     logger.info(
         "Credential created: user=%s credential_id=%s type=%s",

@@ -2346,6 +2346,7 @@ def _app_to_ngfw_context(app: App) -> NGFWAppContext:
     """
     from shared.schemas.app import NGFWAppContext
 
+    assert app.instance is not None, "App must have an instance"
     return NGFWAppContext(
         app_id=app.id,
         instance_id=app.instance.id,
@@ -2679,6 +2680,7 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
     app.save(update_fields=["status", "deleted_at"])
 
     instance = app.instance
+    assert instance is not None, "App must have an instance"
     instance.status = ResourceStatus.DESTROYING.value
     instance.deleted_at = now
     instance.save(update_fields=["status", "deleted_at"])

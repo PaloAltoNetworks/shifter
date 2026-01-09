@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.5] - 2025-01-08
+
+### Added
+- NGFW create/destroy flow and UI
+- Extended DSL and initial DSL interpreter implementation for NGFW flows
+
+### Changed
+- NGFW models and services refactored to use schemas
 ## [0.10.4] - 2025-01-06
 
 ### Fixed

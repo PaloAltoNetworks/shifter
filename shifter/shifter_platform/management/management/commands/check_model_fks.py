@@ -162,9 +162,7 @@ class Command(BaseCommand):
 
         return results
 
-    def compute_stats(
-        self, results: dict[str, list[dict[str, Any]]]
-    ) -> dict[str, Any]:
+    def compute_stats(self, results: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         """Compute summary statistics."""
         stats: dict[str, Any] = {
             "total_cross_layer_fks": 0,

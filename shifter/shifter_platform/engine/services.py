@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
-from shared.schemas import InstanceSpec, RangeContext, RangeSpec
+from shared.schemas import InstanceSpec, RangeContext, RangeSpec, RequestSpec
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -119,16 +119,12 @@ def destroy_range(request: RangeContext) -> bool:
 
     # Already destroyed - nothing to do
     if range_obj.status == ResourceStatus.DESTROYED:
-        logger.warning(
-            "destroy_range: range already destroyed range_id=%s", request.range_id
-        )
+        logger.warning("destroy_range: range already destroyed range_id=%s", request.range_id)
         return False
 
     # Already destroying - idempotent success
     if range_obj.status == ResourceStatus.DESTROYING:
-        logger.info(
-            "destroy_range: range already destroying range_id=%s", request.range_id
-        )
+        logger.info("destroy_range: range already destroying range_id=%s", request.range_id)
         return True
 
     # Set status and trigger teardown
@@ -177,9 +173,7 @@ def cancel_range(range_ctx: RangeContext) -> None:
             "cancel_range called with invalid type: %s",
             type(range_ctx).__name__,
         )
-        raise TypeError(
-            f"range_ctx must be RangeContext, got {type(range_ctx).__name__}"
-        )
+        raise TypeError(f"range_ctx must be RangeContext, got {type(range_ctx).__name__}")
 
     if range_ctx.range_id is None:
         logger.error("cancel_range called with None range_id")
@@ -250,9 +244,7 @@ def get_range_status(range_id: int) -> dict[str, Any] | None:
         "status": range_obj.status,
         "error_message": range_obj.error_message,
         "instances": range_obj.provisioned_instances or [],
-        "created_at": (
-            range_obj.created_at.isoformat() if range_obj.created_at else None
-        ),
+        "created_at": (range_obj.created_at.isoformat() if range_obj.created_at else None),
         "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
     }
 
@@ -297,9 +289,7 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
-    logger.debug(
-        "connect_terminal: range_id=%s instance_uuid=%s", range_id, instance_uuid
-    )
+    logger.debug("connect_terminal: range_id=%s instance_uuid=%s", range_id, instance_uuid)
 
     # Fetch range
     try:
@@ -310,24 +300,18 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
 
     # Verify ownership
     if range_obj.user.id != user.id:
-        logger.error(
-            "Permission denied: user=%s does not own range=%s", user.id, range_id
-        )
+        logger.error("Permission denied: user=%s does not own range=%s", user.id, range_id)
         raise PermissionError("User does not own this range")
 
     # Verify range is ready
     if range_obj.status != Range.Status.READY:
-        logger.error(
-            "Range not ready: range_id=%s status=%s", range_id, range_obj.status
-        )
+        logger.error("Range not ready: range_id=%s status=%s", range_id, range_obj.status)
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
     # Find instance by UUID
     instance = range_obj.get_instance_by_uuid(instance_uuid)
     if instance is None:
-        logger.error(
-            "Instance not found: range_id=%s instance_uuid=%s", range_id, instance_uuid
-        )
+        logger.error("Instance not found: range_id=%s instance_uuid=%s", range_id, instance_uuid)
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     # Get SSH key from secrets
@@ -362,7 +346,7 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     )
 
 
-def create_ngfw(request_spec: "RequestSpec") -> "UUID":
+def create_ngfw(request_spec: RequestSpec) -> UUID:
     """Provision NGFW infrastructure.
 
     Interprets the RequestSpec into Engine models (Request, Instance, App),
@@ -385,17 +369,17 @@ def create_ngfw(request_spec: "RequestSpec") -> "UUID":
     from engine.interpreter import interpret
 
     # Validate NGFW-specific requirements before interpreting
-    ngfw_instance = None
+    ngfw_spec: InstanceSpec | None = None
     for item in request_spec.items:
-        if hasattr(item, "role") and item.role == "ngfw":
-            ngfw_instance = item
+        if isinstance(item, InstanceSpec) and item.role == "ngfw":
+            ngfw_spec = item
             break
 
-    if ngfw_instance is None:
+    if ngfw_spec is None:
         raise ValueError("RequestSpec must contain an NGFW InstanceSpec")
-    if ngfw_instance.ngfw_app is None:
+    if ngfw_spec.ngfw_app is None:
         raise ValueError("ngfw_app is required for NGFW provisioning")
-    if not ngfw_instance.ngfw_app.is_hydrated:
+    if not ngfw_spec.ngfw_app.is_hydrated:
         raise ValueError("ngfw_app must be hydrated with credential values")
 
     # Interpret spec into models
@@ -410,20 +394,20 @@ def create_ngfw(request_spec: "RequestSpec") -> "UUID":
     ngfw_instance = request.instance_instantiations.filter(role="ngfw").first()
 
     if ngfw_instance:
-        # Trigger ECS provisioning with Instance UUID
-        task_arn = start_ngfw_provisioning(ngfw_instance.uuid)
+        # Trigger ECS provisioning with Request UUID
+        task_arn = start_ngfw_provisioning(request.request_id)
 
         if task_arn:
             logger.info(
-                "create_ngfw: started ECS task=%s for instance=%s",
+                "create_ngfw: started ECS task=%s for request=%s",
                 task_arn,
-                ngfw_instance.uuid,
+                request.request_id,
             )
 
     return request.request_id
 
 
-def destroy_ngfw(request_id: "UUID") -> bool:
+def destroy_ngfw(request_id: UUID) -> bool:
     """Tear down NGFW infrastructure.
 
     Looks up the NGFW Instance by request_id and triggers ECS teardown.
@@ -451,13 +435,13 @@ def destroy_ngfw(request_id: "UUID") -> bool:
         logger.warning("destroy_ngfw: no NGFW instance found for request_id=%s", request_id)
         return False
 
-    task_arn = start_ngfw_teardown(ngfw_instance.uuid)
+    task_arn = start_ngfw_teardown(request_id)
 
     if task_arn:
         logger.info(
-            "destroy_ngfw: started ECS task=%s for instance=%s",
+            "destroy_ngfw: started ECS task=%s for request=%s",
             task_arn,
-            ngfw_instance.uuid,
+            request_id,
         )
 
     return task_arn is not None

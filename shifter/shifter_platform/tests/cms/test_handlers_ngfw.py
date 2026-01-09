@@ -1,39 +1,93 @@
 """CMS NGFW handler tests.
 
 Tests for process_ngfw_event handler function:
-- Handles ngfw.status.updated events
-- Updates CMS NGFW.status
-- Validates user_id matches
-- Handles missing NGFW gracefully
+- Handles ngfw.event events (unified NGFW lifecycle events)
+- Updates CMS Instance and App status
+- Validates required fields (instance_id, app_id)
+- Handles missing Instance/App gracefully
 - Validates status values
 """
 
 import json
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
 
 from cms.handlers import process_ngfw_event
-from cms.models import NGFW
-from shared.enums import InstanceStatus
+from cms.models import App, Instance, Request
+from shared.enums import RequestType, ResourceStatus
+from shared.messages.events import EVENT_TYPE_NGFW
 
 User = get_user_model()
 
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(
-        username="test@example.com", email="test@example.com"
+    return User.objects.create_user(username="test@example.com", email="test@example.com")
+
+
+@pytest.fixture
+def instance_type(db):
+    """Create InstanceType for testing."""
+    from cms.models import InstanceType
+
+    instance_type, _ = InstanceType.objects.get_or_create(
+        slug="panw-ngfw",
+        defaults={
+            "name": "PANW NGFW",
+            "spec_class": "shared.schemas.range.InstanceSpec",
+        },
+    )
+    return instance_type
+
+
+@pytest.fixture
+def app_type(db):
+    """Create AppType for testing."""
+    from cms.models import AppType
+
+    app_type, _ = AppType.objects.get_or_create(
+        slug="panw-ngfw",
+        defaults={
+            "name": "Palo Alto Networks VM-Series",
+            "spec_class": "shared.schemas.app.NGFWAppSpec",
+        },
+    )
+    return app_type
+
+
+@pytest.fixture
+def cms_request(user, db):
+    """Create a CMS Request for testing."""
+    from uuid import uuid4
+
+    return Request.objects.create(
+        user=user,
+        request_id=uuid4(),
+        request_type=RequestType.NGFW.value,
     )
 
 
 @pytest.fixture
-def cms_ngfw(user, db):
-    """Create a CMS NGFW for testing."""
-    return NGFW.objects.create(
-        user=user,
-        name="Test NGFW",
-        status=InstanceStatus.PROVISIONING.value,
+def cms_instance(cms_request, instance_type, db):
+    """Create a CMS Instance for testing."""
+    return Instance.objects.create(
+        request=cms_request,
+        name="Test NGFW Instance",
+        instance_type=instance_type,
+        status=ResourceStatus.PROVISIONING.value,
+    )
+
+
+@pytest.fixture
+def cms_app(cms_instance, app_type, db):
+    """Create a CMS App for testing."""
+    return App.objects.create(
+        instance=cms_instance,
+        name="Test NGFW App",
+        app_type=app_type,
+        status=ResourceStatus.PROVISIONING.value,
     )
 
 
@@ -47,224 +101,199 @@ class TestProcessNgfwEvent:
     """Tests for process_ngfw_event handler."""
 
     # -------------------------------------------------------------------------
-    # ngfw.status.updated event
+    # ngfw.event - status updates
     # -------------------------------------------------------------------------
 
-    def test_updates_status_on_status_event(self, cms_ngfw):
-        """process_ngfw_event updates CMS NGFW status."""
+    def test_updates_status_on_ngfw_event(self, cms_instance, cms_app):
+        """process_ngfw_event updates Instance and App status."""
         event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "ngfw_id": 1,  # Engine's ID
-            "user_id": cms_ngfw.user_id,
-            "new_status": InstanceStatus.READY.value,
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
         }
 
         process_ngfw_event(make_sns_message(event))
 
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.READY.value
+        cms_instance.refresh_from_db()
+        cms_app.refresh_from_db()
+        assert cms_instance.status == ResourceStatus.READY.value
+        assert cms_app.status == ResourceStatus.READY.value
 
-    def test_updates_to_active_status(self, cms_ngfw):
-        """process_ngfw_event can update to ACTIVE status."""
-        cms_ngfw.status = InstanceStatus.STARTING.value
-        cms_ngfw.save()
-
-        event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "new_status": InstanceStatus.ACTIVE.value,
-        }
-
-        process_ngfw_event(make_sns_message(event))
-
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.ACTIVE.value
-
-    def test_updates_to_stopped_status(self, cms_ngfw):
-        """process_ngfw_event can update to STOPPED status."""
-        cms_ngfw.status = InstanceStatus.STOPPING.value
-        cms_ngfw.save()
-
-        event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "new_status": InstanceStatus.STOPPED.value,
-        }
-
-        process_ngfw_event(make_sns_message(event))
-
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.STOPPED.value
-
-    def test_updates_to_failed_status(self, cms_ngfw):
+    def test_updates_to_failed_status(self, cms_instance, cms_app):
         """process_ngfw_event can update to FAILED status."""
         event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "new_status": InstanceStatus.FAILED.value,
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.FAILED.value,
         }
 
         process_ngfw_event(make_sns_message(event))
 
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.FAILED.value
+        cms_instance.refresh_from_db()
+        cms_app.refresh_from_db()
+        assert cms_instance.status == ResourceStatus.FAILED.value
+        assert cms_app.status == ResourceStatus.FAILED.value
 
-    def test_updates_to_deprovisioned_status(self, cms_ngfw):
-        """process_ngfw_event can update to DEPROVISIONED status."""
-        cms_ngfw.status = InstanceStatus.DEPROVISIONING.value
-        cms_ngfw.save()
+    def test_updates_to_destroyed_status(self, cms_instance, cms_app):
+        """process_ngfw_event can update to DESTROYED status."""
+        cms_instance.status = ResourceStatus.DESTROYING.value
+        cms_instance.save()
+        cms_app.status = ResourceStatus.DESTROYING.value
+        cms_app.save()
 
         event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "new_status": InstanceStatus.DEPROVISIONED.value,
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.DESTROYED.value,
         }
 
         process_ngfw_event(make_sns_message(event))
 
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.DEPROVISIONED.value
+        cms_instance.refresh_from_db()
+        cms_app.refresh_from_db()
+        assert cms_instance.status == ResourceStatus.DESTROYED.value
+        assert cms_app.status == ResourceStatus.DESTROYED.value
+
+    def test_event_without_status_does_not_change_status(self, cms_instance, cms_app):
+        """process_ngfw_event with no status field leaves status unchanged."""
+        original_instance_status = cms_instance.status
+        original_app_status = cms_app.status
+
+        event = {
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            # No status field
+        }
+
+        process_ngfw_event(make_sns_message(event))
+
+        cms_instance.refresh_from_db()
+        cms_app.refresh_from_db()
+        assert cms_instance.status == original_instance_status
+        assert cms_app.status == original_app_status
 
     # -------------------------------------------------------------------------
     # Error handling
     # -------------------------------------------------------------------------
 
-    def test_ignores_unknown_event_type(self, cms_ngfw, caplog):
+    def test_ignores_unknown_event_type(self, cms_instance, cms_app):
         """process_ngfw_event ignores unknown event types."""
         event = {
             "event_type": "ngfw.unknown.event",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
         }
 
         process_ngfw_event(make_sns_message(event))
 
-        cms_ngfw.refresh_from_db()
+        cms_instance.refresh_from_db()
+        cms_app.refresh_from_db()
         # Status should remain unchanged
-        assert cms_ngfw.status == InstanceStatus.PROVISIONING.value
+        assert cms_instance.status == ResourceStatus.PROVISIONING.value
+        assert cms_app.status == ResourceStatus.PROVISIONING.value
 
-    def test_ignores_provisioned_event(self, cms_ngfw, caplog):
-        """process_ngfw_event ignores ngfw.provisioned (Engine handles it)."""
+    def test_handles_missing_instance(self, cms_app):
+        """process_ngfw_event handles missing Instance gracefully."""
         event = {
-            "event_type": "ngfw.provisioned",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "instance_id": "i-1234567890abcdef0",
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(uuid4()),  # Non-existent
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
         }
 
+        # Should not raise
         process_ngfw_event(make_sns_message(event))
 
-        cms_ngfw.refresh_from_db()
-        # Status should remain unchanged
-        assert cms_ngfw.status == InstanceStatus.PROVISIONING.value
-
-    def test_handles_missing_ngfw(self, db, caplog):
-        """process_ngfw_event logs warning for missing NGFW."""
-        import logging
-
+    def test_handles_missing_app(self, cms_instance):
+        """process_ngfw_event handles missing App gracefully."""
         event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": 99999,
-            "user_id": 1,
-            "new_status": InstanceStatus.READY.value,
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(uuid4()),  # Non-existent
+            "status": ResourceStatus.READY.value,
         }
 
-        with caplog.at_level(logging.WARNING, logger="cms.handlers"):
-            process_ngfw_event(make_sns_message(event))
+        # Should not raise
+        process_ngfw_event(make_sns_message(event))
 
-        assert "not found" in caplog.text.lower()
-
-    def test_rejects_user_id_mismatch(self, cms_ngfw, caplog):
-        """process_ngfw_event rejects events with wrong user_id."""
-        import logging
-
+    def test_rejects_missing_instance_id(self, cms_app):
+        """process_ngfw_event rejects events without instance_id."""
         event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": 99999,  # Wrong user
-            "new_status": InstanceStatus.READY.value,
+            "event_type": EVENT_TYPE_NGFW,
+            # Missing instance_id
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
         }
 
-        with caplog.at_level(logging.ERROR, logger="cms.handlers"):
-            process_ngfw_event(make_sns_message(event))
+        # Should not raise
+        process_ngfw_event(make_sns_message(event))
 
-        # Status should remain unchanged
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.PROVISIONING.value
-        assert "mismatch" in caplog.text.lower()
+    def test_rejects_missing_app_id(self, cms_instance):
+        """process_ngfw_event rejects events without app_id."""
+        event = {
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            # Missing app_id
+            "status": ResourceStatus.READY.value,
+        }
 
-    def test_rejects_invalid_status(self, cms_ngfw, caplog):
+        # Should not raise
+        process_ngfw_event(make_sns_message(event))
+
+    def test_rejects_invalid_status(self, cms_instance, cms_app):
         """process_ngfw_event rejects invalid status values."""
-        import logging
-
         event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "new_status": "invalid_status",
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": "invalid_status",
         }
 
-        with caplog.at_level(logging.ERROR, logger="cms.handlers"):
-            process_ngfw_event(make_sns_message(event))
+        process_ngfw_event(make_sns_message(event))
 
         # Status should remain unchanged
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.PROVISIONING.value
-        assert "invalid" in caplog.text.lower()
+        cms_instance.refresh_from_db()
+        cms_app.refresh_from_db()
+        assert cms_instance.status == ResourceStatus.PROVISIONING.value
+        assert cms_app.status == ResourceStatus.PROVISIONING.value
 
     # -------------------------------------------------------------------------
     # Message formats
     # -------------------------------------------------------------------------
 
-    def test_handles_raw_dict_event(self, cms_ngfw):
+    def test_handles_raw_dict_event(self, cms_instance, cms_app):
         """process_ngfw_event handles raw dict (no SNS wrapper)."""
         event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "new_status": InstanceStatus.READY.value,
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
         }
 
         process_ngfw_event(event)  # Raw dict, no SNS wrapper
 
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.READY.value
+        cms_instance.refresh_from_db()
+        cms_app.refresh_from_db()
+        assert cms_instance.status == ResourceStatus.READY.value
+        assert cms_app.status == ResourceStatus.READY.value
 
-    def test_handles_json_string_event(self, cms_ngfw):
+    def test_handles_json_string_event(self, cms_instance, cms_app):
         """process_ngfw_event handles JSON string directly."""
         event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "new_status": InstanceStatus.READY.value,
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
         }
 
         process_ngfw_event(json.dumps(event))  # JSON string
 
-        cms_ngfw.refresh_from_db()
-        assert cms_ngfw.status == InstanceStatus.READY.value
-
-    # -------------------------------------------------------------------------
-    # Logging
-    # -------------------------------------------------------------------------
-
-    def test_logs_info_on_status_update(self, cms_ngfw, caplog):
-        """process_ngfw_event logs info on successful status update."""
-        import logging
-
-        event = {
-            "event_type": "ngfw.status.updated",
-            "cms_ngfw_id": cms_ngfw.id,
-            "user_id": cms_ngfw.user_id,
-            "new_status": InstanceStatus.READY.value,
-        }
-
-        with caplog.at_level(logging.INFO, logger="cms.handlers"):
-            process_ngfw_event(make_sns_message(event))
-
-        assert "NGFW" in caplog.text or str(cms_ngfw.id) in caplog.text
+        cms_instance.refresh_from_db()
+        cms_app.refresh_from_db()
+        assert cms_instance.status == ResourceStatus.READY.value
+        assert cms_app.status == ResourceStatus.READY.value

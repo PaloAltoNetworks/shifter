@@ -60,9 +60,7 @@ class TestRangeStatusConsumerConnect:
 
         await consumer.connect()
 
-        consumer.close.assert_awaited_once_with(
-            code=WebSocketCloseCode.NOT_AUTHENTICATED
-        )
+        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_AUTHENTICATED)
         consumer.accept.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -111,9 +109,7 @@ class TestRangeStatusConsumerDisconnect:
 
         await consumer.disconnect(close_code=1000)
 
-        consumer.channel_layer.group_discard.assert_awaited_once_with(
-            "range_status_42", "test-channel"
-        )
+        consumer.channel_layer.group_discard.assert_awaited_once_with("range_status_42", "test-channel")
 
     @pytest.mark.asyncio
     async def test_handles_disconnect_without_connect(self, consumer):

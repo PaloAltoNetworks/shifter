@@ -3,6 +3,7 @@
 import uuid
 
 import django.db.models.deletion
+from django.conf import settings
 from django.db import migrations, models
 
 
@@ -41,9 +42,47 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("cms", "0015_ngfw_model"),
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
+        # Create Request model (needed by Instance FK)
+        migrations.CreateModel(
+            name="Request",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("request_id", models.UUIDField(db_index=True, unique=True)),
+                (
+                    "request_type",
+                    models.CharField(
+                        choices=[("ngfw", "NGFW")], db_index=True, max_length=20
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("deleted_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="requests",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "Request",
+                "verbose_name_plural": "Requests",
+                "ordering": ["-created_at"],
+            },
+        ),
         # Remove old Instance table and recreate with UUID PK
         migrations.DeleteModel(
             name="Instance",

@@ -295,6 +295,7 @@ def publish_ngfw_event(
     instance_id: str,
     app_id: str,
     status: str,
+    serial_number: str | None = None,
 ) -> None:
     """Publish a lightweight NGFW lifecycle notification.
 
@@ -307,6 +308,7 @@ def publish_ngfw_event(
         instance_id: UUID of the instantiation (Instantiation.id)
         app_id: UUID of the CMS app (NGFW.app_id)
         status: ResourceStatus value (e.g., "provisioning", "ready", "failed", "destroyed")
+        serial_number: PAN-OS serial number (included in "ready" events for CSP registration)
     """
     event = {
         "event_type": EVENT_TYPE_NGFW,
@@ -318,12 +320,17 @@ def publish_ngfw_event(
         "status": status,
     }
 
+    # Include serial_number only when provided (typically on "ready" events)
+    if serial_number:
+        event["serial_number"] = serial_number
+
     logger.info(
-        "Publishing NGFW event: request_id=%s instance_id=%s app_id=%s status=%s",
+        "Publishing NGFW event: request_id=%s instance_id=%s app_id=%s status=%s serial=%s",
         request_id,
         instance_id,
         app_id,
         status,
+        serial_number or "N/A",
     )
 
     _publish_event(event)

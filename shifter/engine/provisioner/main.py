@@ -10,6 +10,7 @@ It handles:
 import json
 import logging
 import os
+import shutil
 import subprocess  # nosec B404 - subprocess used for Pulumi CLI calls with hardcoded commands
 
 import boto3
@@ -33,6 +34,14 @@ from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupOrchestrator
 
 logger = logging.getLogger(__name__)
+
+
+def _get_pulumi_path() -> str:
+    """Get the full path to the pulumi executable."""
+    path = shutil.which("pulumi")
+    if not path:
+        raise RuntimeError("pulumi executable not found in PATH")
+    return path
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -144,6 +153,38 @@ def get_ngfw_data_by_request_id(request_id: str) -> dict:
             "state": row[5] if row[5] else {},
             "status": row[6],
         }
+
+
+def parse_serial_number(system_info_output: str) -> str | None:
+    """Extract serial number from PAN-OS 'show system info' output.
+
+    PAN-OS format includes a line like:
+        serial: 007200001267
+
+    Args:
+        system_info_output: stdout from 'show system info' command.
+
+    Returns:
+        Serial number string if found and valid, None otherwise.
+        Returns None for placeholder values like "unknown" or empty strings.
+    """
+    import re
+
+    # Match "serial:" followed by the serial number value
+    match = re.search(r"serial:\s*(\S+)", system_info_output, re.IGNORECASE)
+    if not match:
+        logger.warning("Serial number not found in system info output")
+        return None
+
+    serial = match.group(1).strip()
+
+    # Reject placeholder/invalid values
+    if not serial or serial.lower() in ("unknown", "none", "n/a", ""):
+        logger.warning("Serial number is placeholder value: %s", serial)
+        return None
+
+    logger.info("Extracted NGFW serial number: %s", serial)
+    return serial
 
 
 def update_instance_state(request_id: str, status: str, **state_updates) -> None:
@@ -318,7 +359,7 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
 
     result = subprocess.run(  # noqa: S603
         [
-            "pulumi",
+            _get_pulumi_path(),
             "stack",
             "init",
             stack_name,
@@ -448,9 +489,9 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
     # Engine already set status to DESTROYING before launching ECS task
     logger.info("Running pulumi destroy...")
 
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         [
-            "pulumi",
+            _get_pulumi_path(),
             "destroy",
             "--yes",
             "--non-interactive",
@@ -486,18 +527,21 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
 def run_ngfw_operation(operation: str, request_id: str, **kwargs) -> None:
     """Run NGFW runtime operation (start/stop/route management).
 
-    Note: Runtime operations update the local DB directly without SNS events
-    since they are quick operations that don't require the event-driven flow.
+    Retrieves EC2 instance ID from the Instance.state (populated during Pulumi
+    provisioning), executes the operation plan, and publishes events for status
+    updates.
 
     Args:
         operation: Operation name (start, stop, add-route, remove-route).
         request_id: UUID string of the Request.
-        **kwargs: Operation-specific parameters (ec2_instance_id, subnet_id, etc.).
+        **kwargs: Operation-specific parameters (overrides for context).
 
     Raises:
-        ValueError: If unknown operation.
+        ValueError: If unknown operation or EC2 instance ID not found.
         Exception: If operation fails.
     """
+    from events import publish_ngfw_event
+
     # Status transitions for each operation
     status_map = {
         "start": ("starting", "active"),
@@ -509,8 +553,27 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs) -> None:
     if operation not in status_map:
         raise ValueError(f"Unknown operation: {operation}")
 
+    # Get NGFW data from database including state with EC2 instance ID
+    ngfw_data = get_ngfw_data_by_request_id(request_id)
+    instance_uuid = ngfw_data["instance_id"]  # Our UUID, not AWS instance ID
+    app_id = ngfw_data["app_id"]
+    state = ngfw_data.get("state", {})
+
+    # EC2 instance ID is stored in state after Pulumi provisioning
+    ec2_instance_id = state.get("ec2_instance_id")
+    if not ec2_instance_id:
+        raise ValueError(f"EC2 instance ID not found in state for request: {request_id}")
+
     in_progress_status, success_status = status_map[operation]
+
+    # Update DB and publish event for in-progress status
     update_instance_state(request_id, in_progress_status)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_uuid,
+        app_id=app_id,
+        status=in_progress_status,
+    )
 
     try:
         # Create executor and orchestrator
@@ -534,25 +597,46 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs) -> None:
         plan_class = getattr(module, class_name)
         plan = plan_class()
 
-        # Create context object with kwargs as attributes
-        class Context:
-            pass
+        # Build context dict with EC2 instance ID and any additional kwargs
+        # Note: Plans use "instance_id" for the EC2 instance ID parameter
+        context = {
+            "instance_id": ec2_instance_id,
+            **kwargs,
+        }
 
-        context = Context()
-        for key, value in kwargs.items():
-            setattr(context, key, value)
-
-        # Execute the plan
-        result = orchestrator.orchestrate(plan, context)
+        # Execute the plan - orchestrate(target_id, plan, context)
+        result = orchestrator.orchestrate(ec2_instance_id, plan, context)
 
         if not result.success:
+            # Log step errors for debugging
+            for step_result in result.step_results:
+                if not step_result.success:
+                    logger.error(
+                        "NGFW %s step %s failed: %s",
+                        operation,
+                        step_result.step_name,
+                        step_result.stderr,
+                    )
             raise RuntimeError(f"Operation {operation} failed")
 
+        # Update DB and publish event for success status
         update_instance_state(request_id, success_status)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=success_status,
+        )
 
     except Exception as e:
         error_msg = str(e)[:1000]
         update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_FAILED,
+        )
         raise
 
 
@@ -665,9 +749,7 @@ def _set_ngfw_stack_config(env: dict, request_id: str, app_spec: dict) -> None:
             )
 
 
-def _run_ngfw_provision(
-    request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict
-) -> None:
+def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
     """Run Pulumi up to provision the NGFW, then run post-Pulumi configuration.
 
     Args:
@@ -764,6 +846,16 @@ def _run_ngfw_provision(
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
 
+    # Extract serial number from verify_device_cert step output
+    serial_number = None
+    for step_result in provision_result.step_results:
+        if step_result.step_name == "verify_device_cert":
+            serial_number = parse_serial_number(step_result.stdout)
+            break
+
+    if not serial_number:
+        raise RuntimeError("NGFW serial number not found - CSP registration may have failed")
+
     # Run GWLB setup (register target, wait for healthy)
     # This uses AWSExecutor directly since GWLBSetupPlan expects AWS API calls
     logger.info("Running GWLB target registration...")
@@ -806,6 +898,7 @@ def _run_ngfw_provision(
         "target_group_arn": output_data.get("target_group_arn"),
         "ssh_key_secret_arn": ssh_key_secret_arn,
         "pulumi_stack": stack_name,
+        "serial_number": serial_number,
     }
 
     # Update local DB with provisioned resources
@@ -813,17 +906,17 @@ def _run_ngfw_provision(
 
     # Emit ready event notification for CMS/Engine handlers
     # Note: Full state is already in DB - this is just a notification
+    # Serial number included so consumers can verify CSP registration
     publish_ngfw_event(
         request_id=request_id,
         instance_id=instance_id,
         app_id=app_id,
         status=STATUS_READY,
+        serial_number=serial_number,
     )
 
 
-def _run_ngfw_deprovision(
-    request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict
-) -> None:
+def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
     """Run license deactivation then Pulumi destroy for NGFW.
 
     Args:
@@ -879,23 +972,18 @@ def _run_ngfw_deprovision(
                 context=context,
             )
             if not deprovision_result.success:
-                logger.warning(
-                    "License deactivation failed, proceeding with destroy anyway"
-                )
+                logger.warning("License deactivation failed, proceeding with destroy anyway")
         except Exception as e:
             logger.warning(f"License deactivation error: {e}, proceeding with destroy")
     else:
-        logger.warning(
-            "Missing management_ip or ssh_key_secret_arn in state, "
-            "skipping license deactivation"
-        )
+        logger.warning("Missing management_ip or ssh_key_secret_arn in state, skipping license deactivation")
 
     # Run Pulumi destroy
     logger.info("Running pulumi destroy for NGFW...")
 
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         [
-            "pulumi",
+            _get_pulumi_path(),
             "destroy",
             "--yes",
             "--non-interactive",
@@ -943,12 +1031,8 @@ if __name__ == "__main__":
 
     RANGE_ID_HELP = "Database ID of the range to operate on"
 
-    parser = argparse.ArgumentParser(
-        description="Shifter Engine for provisioning cyber ranges and NGFW operations"
-    )
-    subparsers = parser.add_subparsers(
-        dest="resource", required=True, help="Resource type"
-    )
+    parser = argparse.ArgumentParser(description="Shifter Engine for provisioning cyber ranges and NGFW operations")
+    subparsers = parser.add_subparsers(dest="resource", required=True, help="Resource type")
 
     # Range operations - backward compatible with: provision --range-id 42
     # Also supports: range provision --range-id 42

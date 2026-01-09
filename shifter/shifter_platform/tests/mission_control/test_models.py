@@ -302,14 +302,9 @@ class TestRange:
         )
         assert range_obj.victim_private_ip == "10.1.5.20"
 
-    # --- NGFW fields tests ---
-    # Note: Old per-range NGFW fields (ngfw_enabled, ngfw_instance_id, ngfw_untrust_ip, ngfw_trust_ip)
-    # were removed in favor of the NGFW model with Range.ngfw FK (issue #412)
-
-    def test_ngfw_defaults_to_none(self, user):
-        """ngfw FK defaults to None."""
-        range_obj = Range.objects.create(user=user)
-        assert range_obj.ngfw is None
+    # --- NGFW/GWLB fields tests ---
+    # Note: Range.ngfw FK was removed - NGFW is now independent (CMS Instance/App).
+    # Range links to NGFW via gwlb_endpoint_id for GWLB integration.
 
     def test_gwlb_endpoint_id_defaults_to_empty(self, user):
         """gwlb_endpoint_id defaults to empty string."""

@@ -414,8 +414,8 @@ class TestPublishNgfwEvent:
             assert "event_id" in event
             assert "timestamp" in event
 
-    def test_publishes_ngfw_event_with_state_dict(self, mock_sns_env):
-        """Publishes event with state dict for resource details."""
+    def test_publishes_ngfw_event_with_serial_number(self, mock_sns_env):
+        """Publishes ready event with serial_number."""
         from events import publish_ngfw_event
 
         with patch("events._publish_event") as mock_publish:
@@ -424,19 +424,15 @@ class TestPublishNgfwEvent:
                 instance_id="660e8400-e29b-41d4-a716-446655440001",
                 app_id="770e8400-e29b-41d4-a716-446655440002",
                 status="ready",
-                state={
-                    "ec2_instance_id": "i-abc123",
-                    "management_ip": "10.0.1.10",
-                    "dataplane_ip": "10.0.2.10",
-                },
+                serial_number="007951000123456",
             )
 
             event = mock_publish.call_args[0][0]
-            assert event["state"]["ec2_instance_id"] == "i-abc123"
-            assert event["state"]["management_ip"] == "10.0.1.10"
+            assert event["status"] == "ready"
+            assert event["serial_number"] == "007951000123456"
 
-    def test_publishes_ngfw_event_with_error_in_state(self, mock_sns_env):
-        """Publishes failed event with error_message in state."""
+    def test_publishes_ngfw_event_without_serial_number(self, mock_sns_env):
+        """Publishes event without serial_number (e.g., for failed status)."""
         from events import publish_ngfw_event
 
         with patch("events._publish_event") as mock_publish:
@@ -445,9 +441,8 @@ class TestPublishNgfwEvent:
                 instance_id="660e8400-e29b-41d4-a716-446655440001",
                 app_id="770e8400-e29b-41d4-a716-446655440002",
                 status="failed",
-                state={"error_message": "Pulumi stack failed"},
             )
 
             event = mock_publish.call_args[0][0]
             assert event["status"] == "failed"
-            assert event["state"]["error_message"] == "Pulumi stack failed"
+            assert "serial_number" not in event

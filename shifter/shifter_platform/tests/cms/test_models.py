@@ -38,26 +38,32 @@ def other_user(db):
 
 @pytest.fixture
 def credential_type(db):
-    """Create a deployment profile credential type."""
+    """Get or create a deployment profile credential type."""
     from cms.models import CredentialType
 
-    return CredentialType.objects.create(
-        name="Deployment Profile",
+    cred_type, _ = CredentialType.objects.get_or_create(
         slug="deployment_profile",
-        spec_class="shared.schemas.DeploymentProfileSpec",
+        defaults={
+            "name": "Deployment Profile",
+            "spec_class": "shared.schemas.DeploymentProfileSpec",
+        },
     )
+    return cred_type
 
 
 @pytest.fixture
 def scm_credential_type(db):
-    """Create an SCM credential type."""
+    """Get or create an SCM credential type."""
     from cms.models import CredentialType
 
-    return CredentialType.objects.create(
-        name="SCM Credential",
+    cred_type, _ = CredentialType.objects.get_or_create(
         slug="scm",
-        spec_class="shared.schemas.SCMCredentialSpec",
+        defaults={
+            "name": "SCM Credential",
+            "spec_class": "shared.schemas.SCMCredentialSpec",
+        },
     )
+    return cred_type
 
 
 # -----------------------------------------------------------------------------
@@ -399,13 +405,21 @@ class TestCredentialRelationships:
 class TestCredentialType:
     """Tests for CredentialType model."""
 
-    def test_slug_unique(self, credential_type):
+    def test_slug_unique(self, db):
         """CredentialType slug must be unique."""
         from cms.models import CredentialType
 
+        # Create a unique credential type first
+        CredentialType.objects.create(
+            name="Unique Test Type",
+            slug="unique_test_slug",
+            spec_class="shared.schemas.DeploymentProfileSpec",
+        )
+
+        # Try to create another with the same slug
         with pytest.raises(IntegrityError):
             CredentialType.objects.create(
-                name="Another Profile",
-                slug="deployment_profile",  # Duplicate slug
+                name="Another Test Type",
+                slug="unique_test_slug",  # Duplicate slug
                 spec_class="shared.schemas.DeploymentProfileSpec",
             )

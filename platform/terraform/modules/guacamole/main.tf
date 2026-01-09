@@ -111,7 +111,7 @@ resource "aws_service_discovery_service" "guacd" {
   }
 
   health_check_custom_config {
-    failure_threshold = 1
+    failure_threshold = 3
   }
 
   tags = local.common_tags

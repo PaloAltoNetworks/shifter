@@ -192,7 +192,7 @@ resource "aws_ecs_service" "guacamole_client" {
   }
 
   depends_on = [
-    aws_lb_listener.https,
+    aws_lb_listener_rule.guacamole,
     aws_ecs_service.guacd
   ]
 }

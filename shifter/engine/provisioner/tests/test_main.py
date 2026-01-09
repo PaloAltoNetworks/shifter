@@ -805,6 +805,7 @@ class TestNgfwProvisionCLI:
                         "management_ip": "10.1.4.10",
                         "dataplane_ip": "10.1.4.11",
                         "service_name": "com.amazonaws.vpce.svc-123",
+                        "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
                     }
                 )
             else:
@@ -814,11 +815,14 @@ class TestNgfwProvisionCLI:
 
         mocker.patch("subprocess.run", side_effect=side_effect)
 
+        # Mock SSH executor for post-Pulumi config
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         # Mock the orchestrator for post-Pulumi config
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 
@@ -847,6 +851,7 @@ class TestNgfwProvisionCLI:
                         "management_ip": "10.1.4.10",
                         "dataplane_ip": "10.1.4.11",
                         "service_name": "com.amazonaws.vpce.svc-123",
+                        "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
                     }
                 )
             else:
@@ -856,10 +861,13 @@ class TestNgfwProvisionCLI:
 
         mocker.patch("subprocess.run", side_effect=side_effect)
 
+        # Mock SSH executor for post-Pulumi config
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 
@@ -880,6 +888,7 @@ class TestNgfwProvisionCLI:
             "dataplane_ip": "10.1.4.11",
             "service_name": "com.amazonaws.vpce.svc-123",
             "gwlb_arn": "arn:aws:elasticloadbalancing:us-east-2:123:loadbalancer/gwy/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
         }
 
         def side_effect(*args, **kwargs):
@@ -895,10 +904,13 @@ class TestNgfwProvisionCLI:
 
         mocker.patch("subprocess.run", side_effect=side_effect)
 
+        # Mock SSH executor for post-Pulumi config
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 
@@ -923,6 +935,7 @@ class TestNgfwProvisionCLI:
                     {
                         "instance_id": "i-ngfw123",
                         "management_ip": "10.1.4.10",
+                        "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
                     }
                 )
             else:
@@ -932,10 +945,13 @@ class TestNgfwProvisionCLI:
 
         mocker.patch("subprocess.run", side_effect=side_effect)
 
+        # Mock SSH executor for post-Pulumi config
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 
@@ -1111,7 +1127,10 @@ class TestNgfwDeprovisionCLI:
                 "instance_id": "660e8400-e29b-41d4-a716-446655440001",
                 "app_id": "770e8400-e29b-41d4-a716-446655440002",
                 "spec": {},
-                "state": {"management_ip": "10.1.4.10"},
+                "state": {
+                    "management_ip": "10.1.4.10",
+                    "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ssh",
+                },
                 "status": "ready",
             },
         )
@@ -1142,11 +1161,14 @@ class TestNgfwDeprovisionCLI:
 
         mocker.patch("subprocess.run", side_effect=side_effect)
 
+        # Mock SSH executor for pre-destroy license deactivation
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         # Mock orchestrator for pre-destroy license deactivation
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 
@@ -1175,6 +1197,10 @@ class TestNgfwDeprovisionCLI:
 
         mocker.patch("subprocess.run", side_effect=subprocess_side_effect)
 
+        # Mock SSH executor for pre-destroy license deactivation
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         mock_orchestrator = MagicMock()
 
         def orchestrator_side_effect(*args, **kwargs):
@@ -1183,7 +1209,6 @@ class TestNgfwDeprovisionCLI:
 
         mock_orchestrator.orchestrate.side_effect = orchestrator_side_effect
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 
@@ -1218,10 +1243,13 @@ class TestNgfwDeprovisionCLI:
 
         mocker.patch("subprocess.run", side_effect=side_effect)
 
+        # Mock SSH executor for pre-destroy license deactivation
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 
@@ -1249,10 +1277,13 @@ class TestNgfwDeprovisionCLI:
 
         mocker.patch("subprocess.run", side_effect=side_effect)
 
+        # Mock SSH executor for pre-destroy license deactivation
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 
@@ -1276,10 +1307,13 @@ class TestNgfwDeprovisionCLI:
 
         mocker.patch("subprocess.run", side_effect=side_effect)
 
+        # Mock SSH executor for pre-destroy license deactivation
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
-        mocker.patch("main.AWSExecutor")
 
         from main import run_ngfw_pulumi
 

@@ -199,3 +199,36 @@ variable "secrets_recovery_window_days" {
   description = "Recovery window in days for Secrets Manager (0 for immediate deletion)"
   type        = number
 }
+
+# ------------------------------------------------------------------------------
+# OIDC/Cognito Authentication
+# ------------------------------------------------------------------------------
+
+variable "enable_oidc" {
+  description = "Enable OpenID Connect authentication via Cognito"
+  type        = bool
+}
+
+variable "cognito_user_pool_id" {
+  description = "Cognito user pool ID (required when enable_oidc = true)"
+  type        = string
+  default     = ""
+}
+
+variable "cognito_domain" {
+  description = "Cognito hosted UI domain (full URL, e.g., https://xxx.auth.us-east-2.amazoncognito.com)"
+  type        = string
+  default     = ""
+}
+
+variable "aws_region" {
+  description = "AWS region (required for constructing Cognito endpoints)"
+  type        = string
+  default     = "us-east-2"
+}
+
+variable "domain_name" {
+  description = "Portal domain name (for constructing Guacamole redirect URI)"
+  type        = string
+  default     = ""
+}

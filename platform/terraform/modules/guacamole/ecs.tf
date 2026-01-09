@@ -38,13 +38,8 @@ resource "aws_ecs_task_definition" "guacd" {
       }
     }
 
-    healthCheck = {
-      command     = ["CMD-SHELL", "nc -z localhost 4822 || exit 1"]
-      interval    = 30
-      timeout     = 5
-      retries     = 3
-      startPeriod = 60
-    }
+    # Health check removed - official guacd image lacks netcat
+    # See GitHub issue for investigation of alternative health check
   }])
 
   tags = merge(local.common_tags, {

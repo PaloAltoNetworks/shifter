@@ -111,7 +111,7 @@ class NGFWComponent(pulumi.ComponentResource):
         )
 
         # Generate bootstrap init-cfg.txt from template
-        bootstrap_prefix = f"ngfw/{user_id}"
+        bootstrap_prefix = f"bootstrap/ngfw/{user_id}"
         hostname = f"ngfw-user-{user_id}"
 
         templates_dir = _get_templates_dir()

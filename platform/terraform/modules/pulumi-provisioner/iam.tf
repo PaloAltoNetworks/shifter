@@ -130,6 +130,20 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Resource = "*"
       },
       {
+        # Network interface operations for NGFW ENI creation
+        # - CreateNetworkInterface for mgmt and data ENIs
+        # - ModifyNetworkInterfaceAttribute for source_dest_check=False on data ENI
+        # - DeleteNetworkInterface for cleanup
+        Sid    = "EC2NetworkInterfaceOperations"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateNetworkInterface",
+          "ec2:DeleteNetworkInterface",
+          "ec2:ModifyNetworkInterfaceAttribute"
+        ]
+        Resource = "*"
+      },
+      {
         # Permissions based on Terraform AWS provider vpc_subnet.go:
         # - CreateSubnet, DescribeSubnets, DeleteSubnet for lifecycle
         # Note: CreateTags is in EC2InstanceOperations and applies to all EC2 resources
@@ -248,6 +262,104 @@ resource "aws_iam_role_policy" "s3_agent" {
         var.agent_s3_bucket_arn,
         "${var.agent_s3_bucket_arn}/*"
       ]
+    }]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Task Role Policy - Gateway Load Balancer (GWLB)
+# ------------------------------------------------------------------------------
+# Provisioner creates GWLB infrastructure for NGFW traffic steering:
+# - Gateway Load Balancer
+# - Target groups with GENEVE protocol
+# - Listeners
+
+resource "aws_iam_role_policy" "gwlb" {
+  name = "gwlb-provisioning"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "GWLBOperations"
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:CreateLoadBalancer",
+          "elasticloadbalancing:DeleteLoadBalancer",
+          "elasticloadbalancing:CreateTargetGroup",
+          "elasticloadbalancing:DeleteTargetGroup",
+          "elasticloadbalancing:CreateListener",
+          "elasticloadbalancing:DeleteListener",
+          "elasticloadbalancing:RegisterTargets",
+          "elasticloadbalancing:DeregisterTargets",
+          "elasticloadbalancing:ModifyLoadBalancerAttributes",
+          "elasticloadbalancing:ModifyTargetGroup",
+          "elasticloadbalancing:ModifyTargetGroupAttributes",
+          "elasticloadbalancing:AddTags",
+          "elasticloadbalancing:RemoveTags"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "GWLBDescribe"
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:Describe*"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Task Role Policy - VPC Endpoint Service
+# ------------------------------------------------------------------------------
+# Provisioner creates VPC Endpoint Services for GWLB connectivity from ranges.
+
+resource "aws_iam_role_policy" "vpc_endpoint_service" {
+  name = "vpc-endpoint-service"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ec2:CreateVpcEndpointServiceConfiguration",
+        "ec2:DeleteVpcEndpointServiceConfigurations",
+        "ec2:ModifyVpcEndpointServiceConfiguration",
+        "ec2:ModifyVpcEndpointServicePermissions",
+        "ec2:DescribeVpcEndpointServiceConfigurations",
+        "ec2:DescribeVpcEndpointServicePermissions",
+        "ec2:AcceptVpcEndpointConnections",
+        "ec2:RejectVpcEndpointConnections"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Task Role Policy - S3 Bootstrap Write
+# ------------------------------------------------------------------------------
+# Provisioner needs write access to bootstrap/* prefix for NGFW init-cfg.txt,
+# authcodes, and other bootstrap configuration files.
+
+resource "aws_iam_role_policy" "s3_bootstrap" {
+  name = "s3-bootstrap-write"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ]
+      Resource = "${var.agent_s3_bucket_arn}/bootstrap/*"
     }]
   })
 }

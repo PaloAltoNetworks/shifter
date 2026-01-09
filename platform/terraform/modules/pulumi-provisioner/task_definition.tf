@@ -46,6 +46,10 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "NGFW_AMI_ID", value = var.ngfw_ami_id },
       { name = "NGFW_INSTANCE_TYPE", value = var.ngfw_instance_type },
       { name = "NGFW_SECURITY_GROUP_ID", value = var.ngfw_security_group_id },
+      { name = "NGFW_VPC_ID", value = var.range_vpc_id },
+      { name = "NGFW_SUBNET_ID", value = var.ngfw_subnet_id },
+      { name = "NGFW_BOOTSTRAP_BUCKET", value = var.agent_s3_bucket },
+      { name = "NGFW_INSTANCE_PROFILE_NAME", value = var.ngfw_instance_profile_name },
       # Messaging (SNS for range events)
       { name = "SNS_RANGE_EVENTS_ARN", value = var.sns_topic_arn },
     ]

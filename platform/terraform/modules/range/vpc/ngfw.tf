@@ -192,7 +192,7 @@ resource "aws_iam_role_policy" "ngfw_instance_s3" {
         Action = [
           "s3:GetObject"
         ]
-        Resource = "arn:aws:s3:::${var.agent_s3_bucket}/ngfw-bootstrap/*"
+        Resource = "arn:aws:s3:::${var.agent_s3_bucket}/bootstrap/ngfw/*"
       }
     ]
   })

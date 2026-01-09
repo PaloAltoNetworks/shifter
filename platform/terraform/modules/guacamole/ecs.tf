@@ -7,6 +7,42 @@
 # - Auto scaling for both services
 
 # ------------------------------------------------------------------------------
+# Local Variables for Container Configuration
+# ------------------------------------------------------------------------------
+
+locals {
+  # Base environment variables for guacamole-client
+  guacamole_base_env = [
+    # Guacd connection via service discovery
+    { name = "GUACD_HOSTNAME", value = "guacd.guacamole.${var.environment}.internal" },
+    { name = "GUACD_PORT", value = "4822" },
+
+    # PostgreSQL connection
+    { name = "POSTGRESQL_HOSTNAME", value = aws_db_instance.guacamole.address },
+    { name = "POSTGRESQL_PORT", value = tostring(aws_db_instance.guacamole.port) },
+    { name = "POSTGRESQL_DATABASE", value = "guacamole" },
+
+    # Auto-create schema and default admin on first startup
+    { name = "POSTGRESQL_AUTO_CREATE_ACCOUNTS", value = "true" },
+  ]
+
+  # OIDC environment variables (only when enabled)
+  # Uses local values computed in cognito.tf from the Cognito app client
+  guacamole_oidc_env = var.enable_oidc ? [
+    { name = "OPENID_AUTHORIZATION_ENDPOINT", value = local.oidc_authorization_endpoint },
+    { name = "OPENID_JWKS_ENDPOINT", value = local.oidc_jwks_endpoint },
+    { name = "OPENID_ISSUER", value = local.oidc_issuer_url },
+    { name = "OPENID_CLIENT_ID", value = local.oidc_client_id },
+    { name = "OPENID_REDIRECT_URI", value = local.oidc_redirect_uri },
+    { name = "OPENID_SCOPE", value = "openid email profile" },
+    { name = "OPENID_USERNAME_CLAIM_TYPE", value = "email" },
+  ] : []
+
+  # Combined environment variables
+  guacamole_environment = concat(local.guacamole_base_env, local.guacamole_oidc_env)
+}
+
+# ------------------------------------------------------------------------------
 # Guacd Task Definition
 # ------------------------------------------------------------------------------
 
@@ -105,19 +141,7 @@ resource "aws_ecs_task_definition" "guacamole_client" {
       protocol      = "tcp"
     }]
 
-    environment = [
-      # Guacd connection via service discovery
-      { name = "GUACD_HOSTNAME", value = "guacd.guacamole.${var.environment}.internal" },
-      { name = "GUACD_PORT", value = "4822" },
-
-      # PostgreSQL connection
-      { name = "POSTGRESQL_HOSTNAME", value = aws_db_instance.guacamole.address },
-      { name = "POSTGRESQL_PORT", value = tostring(aws_db_instance.guacamole.port) },
-      { name = "POSTGRESQL_DATABASE", value = "guacamole" },
-
-      # Auto-create schema and default admin on first startup
-      { name = "POSTGRESQL_AUTO_CREATE_ACCOUNTS", value = "true" },
-    ]
+    environment = local.guacamole_environment
 
     secrets = [
       {

@@ -392,6 +392,11 @@ variable "guacamole_secrets_recovery_window_days" {
   type        = number
 }
 
+variable "guacamole_enable_oidc" {
+  description = "Enable OIDC/Cognito authentication for Guacamole"
+  type        = bool
+}
+
 # ------------------------------------------------------------------------------
 # CI Testing
 # ------------------------------------------------------------------------------

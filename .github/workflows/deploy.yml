@@ -51,6 +51,7 @@ jobs:
               - '.github/workflows/deploy.yml'
             shifter_platform:
               - 'platform/terraform/modules/portal/**'
+              - 'platform/terraform/modules/guacamole/**'
               - 'platform/terraform/environments/*/portal/**'
               - 'shifter/**'
               - '.github/workflows/_shifter-platform.yml'

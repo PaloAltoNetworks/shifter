@@ -127,6 +127,32 @@ class RangeConfig:
     ngfw_security_group_id: str = ""
 
 
+@dataclass
+class NGFWConfig:
+    """Configuration for NGFW (UserNGFWStack) provisioning.
+
+    Infrastructure config comes from Pulumi config (set from environment).
+    Credential config comes from Pulumi config (set from app_spec in DB).
+    """
+
+    request_id: str
+    user_id: int
+    environment: str
+    # Infrastructure
+    vpc_id: str
+    subnet_id: str
+    security_group_id: str
+    ami_id: str
+    bootstrap_bucket: str
+    instance_type: str
+    instance_profile_name: str
+    # Credentials (from app_spec)
+    scm_pin_id: str
+    scm_pin_value: str
+    scm_folder_name: str
+    authcode: str
+
+
 def get_db_connection() -> psycopg.Connection:
     """Get database connection using RDS IAM auth."""
     client = boto3.client("rds")
@@ -269,4 +295,35 @@ def load_config() -> RangeConfig:
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
         ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+    )
+
+
+def load_ngfw_config() -> NGFWConfig:
+    """Load NGFW configuration from Pulumi config.
+
+    All values are set by _set_ngfw_stack_config() in main.py before pulumi up.
+    Infrastructure values come from environment, credentials from app_spec.
+
+    Returns:
+        NGFWConfig: Complete configuration for NGFW provisioning.
+    """
+    config = pulumi.Config()
+
+    return NGFWConfig(
+        request_id=config.require("requestId"),
+        user_id=config.require_int("userId"),
+        environment=config.require("environment"),
+        # Infrastructure
+        vpc_id=config.require("ngfwVpcId"),
+        subnet_id=config.require("ngfwSubnetId"),
+        security_group_id=config.require("ngfwSecurityGroupId"),
+        ami_id=config.require("ngfwAmiId"),
+        bootstrap_bucket=config.require("bootstrapBucket"),
+        instance_type=config.get("ngfwInstanceType") or "m5.xlarge",
+        instance_profile_name=config.get("ngfwInstanceProfileName") or "",
+        # Credentials (secrets - use require_secret for sensitive values)
+        scm_pin_id=config.require("scmPinId"),
+        scm_pin_value=config.require("scmPinValue"),
+        scm_folder_name=config.require("scmFolderName"),
+        authcode=config.require("authcode"),
     )

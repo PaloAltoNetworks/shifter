@@ -55,13 +55,66 @@ jobs:
               body: `#### Terraform Plan - Platform (${{ inputs.environment }})\n<details><summary>Show Plan</summary>\n\n\`\`\`terraform\n${plan.substring(0, 60000)}\n\`\`\`\n\n</details>`
             });
 
-  apply:
-    name: Apply (${{ inputs.environment }})
+  push-guacamole-images:
+    name: Push Guacamole Images (${{ inputs.environment }})
     runs-on: self-hosted
     needs: plan
     if: |
       always() &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      (github.event_name != 'pull_request' || inputs.environment == 'dev')
+    env:
+      GUACD_REPO: ${{ inputs.is_dev && 'shifter-dev-guacd' || 'shifter-guacd' }}
+      GUACAMOLE_CLIENT_REPO: ${{ inputs.is_dev && 'shifter-dev-guacamole-client' || 'shifter-guacamole-client' }}
+      GUACAMOLE_VERSION: "1.5.5"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Push guacd image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          # Check if image already exists
+          if aws ecr describe-images --repository-name "$GUACD_REPO" --image-ids imageTag="${GUACAMOLE_VERSION}" 2>/dev/null; then
+            echo "Image $GUACD_REPO:$GUACAMOLE_VERSION already exists, skipping"
+          else
+            echo "Pulling and pushing guacd:$GUACAMOLE_VERSION"
+            docker pull guacamole/guacd:${GUACAMOLE_VERSION}
+            docker tag guacamole/guacd:${GUACAMOLE_VERSION} ${ECR_REGISTRY}/${GUACD_REPO}:${GUACAMOLE_VERSION}
+            docker tag guacamole/guacd:${GUACAMOLE_VERSION} ${ECR_REGISTRY}/${GUACD_REPO}:latest
+            docker push ${ECR_REGISTRY}/${GUACD_REPO}:${GUACAMOLE_VERSION}
+            docker push ${ECR_REGISTRY}/${GUACD_REPO}:latest
+          fi
+      - name: Push guacamole-client image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          # Check if image already exists
+          if aws ecr describe-images --repository-name "$GUACAMOLE_CLIENT_REPO" --image-ids imageTag="${GUACAMOLE_VERSION}" 2>/dev/null; then
+            echo "Image $GUACAMOLE_CLIENT_REPO:$GUACAMOLE_VERSION already exists, skipping"
+          else
+            echo "Pulling and pushing guacamole:$GUACAMOLE_VERSION"
+            docker pull guacamole/guacamole:${GUACAMOLE_VERSION}
+            docker tag guacamole/guacamole:${GUACAMOLE_VERSION} ${ECR_REGISTRY}/${GUACAMOLE_CLIENT_REPO}:${GUACAMOLE_VERSION}
+            docker tag guacamole/guacamole:${GUACAMOLE_VERSION} ${ECR_REGISTRY}/${GUACAMOLE_CLIENT_REPO}:latest
+            docker push ${ECR_REGISTRY}/${GUACAMOLE_CLIENT_REPO}:${GUACAMOLE_VERSION}
+            docker push ${ECR_REGISTRY}/${GUACAMOLE_CLIENT_REPO}:latest
+          fi
+
+  apply:
+    name: Apply (${{ inputs.environment }})
+    runs-on: self-hosted
+    needs: [plan, push-guacamole-images]
+    if: |
+      always() &&
+      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      (needs.push-guacamole-images.result == 'success' || needs.push-guacamole-images.result == 'skipped') &&
       (github.event_name != 'pull_request' || inputs.environment == 'dev')
     defaults:
       run:

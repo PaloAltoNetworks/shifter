@@ -339,14 +339,17 @@ class TestCredentialProperties:
 
     @pytest.fixture
     def credential_type(self):
-        """Create a credential type."""
+        """Get or create a credential type."""
         from cms.models import CredentialType
 
-        return CredentialType.objects.create(
-            name="Deployment Profile",
+        cred_type, _ = CredentialType.objects.get_or_create(
             slug="deployment_profile",
-            spec_class="shared.schemas.DeploymentProfileSpec",
+            defaults={
+                "name": "Deployment Profile",
+                "spec_class": "shared.schemas.DeploymentProfileSpec",
+            },
         )
+        return cred_type
 
     def test_is_expired_returns_false_when_expires_at_is_none(self, user, credential_type):
         """is_expired should return False when expires_at is None."""

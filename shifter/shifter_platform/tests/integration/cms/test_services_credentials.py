@@ -40,22 +40,28 @@ def other_user(db):
 
 @pytest.fixture
 def scm_credential_type(db):
-    """Create SCM credential type."""
-    return CredentialType.objects.create(
-        name="SCM Credential",
+    """Get or create SCM credential type."""
+    cred_type, _ = CredentialType.objects.get_or_create(
         slug="scm",
-        spec_class="shared.schemas.SCMCredentialSpec",
+        defaults={
+            "name": "SCM Credential",
+            "spec_class": "shared.schemas.SCMCredentialSpec",
+        },
     )
+    return cred_type
 
 
 @pytest.fixture
 def deployment_profile_type(db):
-    """Create deployment profile credential type."""
-    return CredentialType.objects.create(
-        name="Deployment Profile",
+    """Get or create deployment profile credential type."""
+    cred_type, _ = CredentialType.objects.get_or_create(
         slug="deployment_profile",
-        spec_class="shared.schemas.DeploymentProfileSpec",
+        defaults={
+            "name": "Deployment Profile",
+            "spec_class": "shared.schemas.DeploymentProfileSpec",
+        },
     )
+    return cred_type
 
 
 @pytest.fixture

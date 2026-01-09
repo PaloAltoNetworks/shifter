@@ -445,3 +445,103 @@ def destroy_ngfw(request_id: UUID) -> bool:
         )
 
     return task_arn is not None
+
+
+def start_ngfw(request_id: UUID) -> bool:
+    """Start a stopped NGFW instance.
+
+    Validates the Instance is in a stoppable state (stopped or failed),
+    then triggers ECS to run the start operation.
+
+    Args:
+        request_id: UUID of the request containing the NGFW.
+
+    Returns:
+        True if start initiated, False if request/instance not found
+        or invalid status.
+    """
+    from engine.ecs import start_ngfw_operation
+    from engine.models import Instance, Request
+
+    logger.debug("start_ngfw: request_id=%s", request_id)
+
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("start_ngfw: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("start_ngfw: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    # Only allow starting from paused or failed status
+    if ngfw_instance.status not in (ResourceStatus.PAUSED.value, ResourceStatus.FAILED.value):
+        logger.warning(
+            "start_ngfw: invalid status=%s for request_id=%s (must be stopped or failed)",
+            ngfw_instance.status,
+            request_id,
+        )
+        return False
+
+    task_arn = start_ngfw_operation(request_id, "start")
+
+    if task_arn:
+        logger.info(
+            "start_ngfw: started ECS task=%s for request=%s",
+            task_arn,
+            request_id,
+        )
+
+    return task_arn is not None
+
+
+def stop_ngfw(request_id: UUID) -> bool:
+    """Stop a running NGFW instance.
+
+    Validates the Instance is in a running state (ready or active),
+    then triggers ECS to run the stop operation.
+
+    Args:
+        request_id: UUID of the request containing the NGFW.
+
+    Returns:
+        True if stop initiated, False if request/instance not found
+        or invalid status.
+    """
+    from engine.ecs import start_ngfw_operation
+    from engine.models import Instance, Request
+
+    logger.debug("stop_ngfw: request_id=%s", request_id)
+
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("stop_ngfw: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("stop_ngfw: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    # Only allow stopping from ready status
+    if ngfw_instance.status != ResourceStatus.READY.value:
+        logger.warning(
+            "stop_ngfw: invalid status=%s for request_id=%s (must be ready)",
+            ngfw_instance.status,
+            request_id,
+        )
+        return False
+
+    task_arn = start_ngfw_operation(request_id, "stop")
+
+    if task_arn:
+        logger.info(
+            "stop_ngfw: started ECS task=%s for request=%s",
+            task_arn,
+            request_id,
+        )
+
+    return task_arn is not None

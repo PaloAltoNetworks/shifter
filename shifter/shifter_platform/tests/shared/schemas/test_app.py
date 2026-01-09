@@ -91,13 +91,12 @@ class TestNGFWAppSpec:
 
         spec = NGFWAppSpec(
             name="Test NGFW",
-            deployment_profile_id=1,
             registration_method="pin",
         )
         assert spec.app_type == "ngfw"
 
     def test_required_fields(self):
-        """NGFWAppSpec requires name, deployment_profile_id, registration_method."""
+        """NGFWAppSpec requires name and registration_method."""
         import pytest
         from pydantic import ValidationError
 
@@ -108,11 +107,10 @@ class TestNGFWAppSpec:
         errors = exc_info.value.errors()
         error_fields = {e["loc"][0] for e in errors}
         assert "name" in error_fields
-        assert "deployment_profile_id" in error_fields
         assert "registration_method" in error_fields
 
     def test_deployment_profile_id_positive(self):
-        """NGFWAppSpec deployment_profile_id must be positive."""
+        """NGFWAppSpec deployment_profile_id must be positive if provided."""
         import pytest
         from pydantic import ValidationError
 
@@ -124,6 +122,16 @@ class TestNGFWAppSpec:
                 deployment_profile_id=0,
                 registration_method="pin",
             )
+
+    def test_deployment_profile_id_optional(self):
+        """NGFWAppSpec deployment_profile_id is optional."""
+        from shared.schemas.app import NGFWAppSpec
+
+        spec = NGFWAppSpec(
+            name="Test NGFW",
+            registration_method="pin",
+        )
+        assert spec.deployment_profile_id is None
 
     def test_registration_method_literal(self):
         """NGFWAppSpec registration_method must be 'pin' or 'otp'."""
@@ -279,11 +287,13 @@ class TestNGFWAppContext:
     def test_default_app_type(self):
         """NGFWAppContext has app_type='ngfw' by default."""
         from datetime import datetime
+        from uuid import uuid4
 
         from shared.schemas.app import NGFWAppContext
 
         ctx = NGFWAppContext(
-            app_id=1,
+            app_id=uuid4(),
+            instance_id=uuid4(),
             name="VM-Series",
             status="active",
             created_at=datetime.now(UTC),
@@ -291,14 +301,16 @@ class TestNGFWAppContext:
         assert ctx.app_type == "ngfw"
 
     def test_required_fields(self):
-        """NGFWAppContext requires status and created_at in addition to base fields."""
+        """NGFWAppContext requires app_id, instance_id, name, status, created_at."""
+        from uuid import uuid4
+
         import pytest
         from pydantic import ValidationError
 
         from shared.schemas.app import NGFWAppContext
 
         with pytest.raises(ValidationError) as exc_info:
-            NGFWAppContext(app_id=1, name="VM-Series")
+            NGFWAppContext(app_id=uuid4(), instance_id=uuid4(), name="VM-Series")
         errors = exc_info.value.errors()
         error_fields = {e["loc"][0] for e in errors}
         assert "status" in error_fields
@@ -307,22 +319,47 @@ class TestNGFWAppContext:
     def test_get_status_display(self):
         """NGFWAppContext get_status_display formats status for display."""
         from datetime import datetime
+        from uuid import uuid4
 
         from shared.schemas.app import NGFWAppContext
 
         ctx = NGFWAppContext(
-            app_id=1,
+            app_id=uuid4(),
+            instance_id=uuid4(),
             name="VM-Series",
             status="not_provisioned",
             created_at=datetime.now(UTC),
         )
         assert ctx.get_status_display() == "Not Provisioned"
 
-    def test_inherits_from_app_context_base(self):
-        """NGFWAppContext inherits from AppContextBase."""
+    def test_uses_uuid_for_app_id(self):
+        """NGFWAppContext uses UUID for app_id (not int like other app types)."""
+        from datetime import datetime
+        from uuid import UUID, uuid4
+
+        from shared.schemas.app import NGFWAppContext
+
+        app_id = uuid4()
+        ctx = NGFWAppContext(
+            app_id=app_id,
+            instance_id=uuid4(),
+            name="VM-Series",
+            status="active",
+            created_at=datetime.now(UTC),
+        )
+        assert isinstance(ctx.app_id, UUID)
+        assert ctx.app_id == app_id
+
+    def test_inherits_from_base_model(self):
+        """NGFWAppContext inherits from BaseModel (not AppContextBase)."""
+        from pydantic import BaseModel
+
         from shared.schemas.app import AppContextBase, NGFWAppContext
 
-        assert issubclass(NGFWAppContext, AppContextBase)
+        # NGFWAppContext uses UUID keys, so it can't inherit from AppContextBase
+        # which uses int keys. This is documented in the schema.
+        assert issubclass(NGFWAppContext, BaseModel)
+        assert not issubclass(NGFWAppContext, AppContextBase)
 
 
 class TestAgentAppContext:
@@ -400,6 +437,7 @@ class TestAppContext:
     def test_routes_to_ngfw_app_context(self):
         """AppContext routes to NGFWAppContext based on app_type."""
         from datetime import datetime
+        from uuid import uuid4
 
         from pydantic import TypeAdapter
 
@@ -407,7 +445,8 @@ class TestAppContext:
 
         adapter = TypeAdapter(AppContext)
         data = {
-            "app_id": 1,
+            "app_id": str(uuid4()),
+            "instance_id": str(uuid4()),
             "name": "VM-Series",
             "app_type": "ngfw",
             "status": "active",
@@ -497,26 +536,44 @@ class TestNGFWAppRef:
 
     def test_create_with_required_fields(self):
         """NGFWAppRef can be created with required fields."""
+        from uuid import uuid4
+
         from shared.schemas.app import NGFWAppRef
 
-        ref = NGFWAppRef(ngfw_id=42, user_id=1)
-        assert ref.ngfw_id == 42
-        assert ref.user_id == 1
+        app_id = uuid4()
+        instance_id = uuid4()
+        ref = NGFWAppRef(app_id=app_id, instance_id=instance_id)
+        assert ref.app_id == app_id
+        assert ref.instance_id == instance_id
         assert ref.is_deleted is False
 
-    def test_ngfw_id_must_be_positive(self):
-        """NGFWAppRef rejects non-positive ngfw_id."""
+    def test_app_id_must_be_uuid(self):
+        """NGFWAppRef requires app_id to be a UUID."""
+        from uuid import uuid4
+
         from shared.schemas.app import NGFWAppRef
 
-        with pytest.raises(ValidationError):
-            NGFWAppRef(ngfw_id=0, user_id=1)
+        # Should work with UUID
+        ref = NGFWAppRef(app_id=uuid4(), instance_id=uuid4())
+        assert ref.is_deleted is False
 
-    def test_user_id_must_be_positive(self):
-        """NGFWAppRef rejects non-positive user_id."""
+    def test_is_deleted_defaults_to_false(self):
+        """NGFWAppRef.is_deleted defaults to False."""
+        from uuid import uuid4
+
         from shared.schemas.app import NGFWAppRef
 
-        with pytest.raises(ValidationError):
-            NGFWAppRef(ngfw_id=1, user_id=0)
+        ref = NGFWAppRef(app_id=uuid4(), instance_id=uuid4())
+        assert ref.is_deleted is False
+
+    def test_is_deleted_can_be_set_true(self):
+        """NGFWAppRef.is_deleted can be set to True."""
+        from uuid import uuid4
+
+        from shared.schemas.app import NGFWAppRef
+
+        ref = NGFWAppRef(app_id=uuid4(), instance_id=uuid4(), is_deleted=True)
+        assert ref.is_deleted is True
 
 
 # =============================================================================

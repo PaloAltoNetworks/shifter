@@ -1,48 +1,4 @@
 # ------------------------------------------------------------------------------
-# ALB Security Group
-# ------------------------------------------------------------------------------
-
-resource "aws_security_group" "alb" {
-  name        = "${var.name_prefix}-guacamole-alb-sg"
-  description = "Security group for Guacamole ALB"
-  vpc_id      = var.vpc_id
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-guacamole-alb-sg"
-  })
-}
-
-resource "aws_security_group_rule" "alb_http_ingress" {
-  type              = "ingress"
-  from_port         = 80
-  to_port           = 80
-  protocol          = "tcp"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.alb.id
-  description       = "HTTP from internet (redirects to HTTPS)"
-}
-
-resource "aws_security_group_rule" "alb_https_ingress" {
-  type              = "ingress"
-  from_port         = 443
-  to_port           = 443
-  protocol          = "tcp"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.alb.id
-  description       = "HTTPS from internet"
-}
-
-resource "aws_security_group_rule" "alb_egress" {
-  type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.alb.id
-  description       = "Allow all outbound"
-}
-
-# ------------------------------------------------------------------------------
 # Guacamole Client Security Group
 # ------------------------------------------------------------------------------
 
@@ -56,15 +12,15 @@ resource "aws_security_group" "guacamole_client" {
   })
 }
 
-# Ingress from ALB on port 8080 (Guacamole web interface)
+# Ingress from Portal ALB on port 8080 (Guacamole web interface)
 resource "aws_security_group_rule" "guacamole_client_from_alb" {
   type                     = "ingress"
   from_port                = 8080
   to_port                  = 8080
   protocol                 = "tcp"
-  source_security_group_id = aws_security_group.alb.id
+  source_security_group_id = var.alb_security_group_id
   security_group_id        = aws_security_group.guacamole_client.id
-  description              = "HTTP from ALB"
+  description              = "HTTP from Portal ALB"
 }
 
 # Egress to guacd on port 4822
@@ -152,7 +108,7 @@ resource "aws_security_group_rule" "guacd_rdp_egress" {
   from_port         = 3389
   to_port           = 3389
   protocol          = "tcp"
-  cidr_blocks       = ["0.0.0.0/0"]
+  cidr_blocks       = [var.range_vpc_cidr]
   security_group_id = aws_security_group.guacd.id
   description       = "RDP to range instances"
 }
@@ -163,7 +119,7 @@ resource "aws_security_group_rule" "guacd_vnc_egress" {
   from_port         = 5900
   to_port           = 5910
   protocol          = "tcp"
-  cidr_blocks       = ["0.0.0.0/0"]
+  cidr_blocks       = [var.range_vpc_cidr]
   security_group_id = aws_security_group.guacd.id
   description       = "VNC to range instances"
 }
@@ -174,7 +130,7 @@ resource "aws_security_group_rule" "guacd_ssh_egress" {
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
-  cidr_blocks       = ["0.0.0.0/0"]
+  cidr_blocks       = [var.range_vpc_cidr]
   security_group_id = aws_security_group.guacd.id
   description       = "SSH to range instances"
 }

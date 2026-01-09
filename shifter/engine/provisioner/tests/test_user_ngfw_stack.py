@@ -34,9 +34,14 @@ class TestUserNGFWStackComposition:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
         assert stack is not None
 
@@ -49,9 +54,14 @@ class TestUserNGFWStackComposition:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
         assert hasattr(stack, "ngfw")
 
@@ -64,9 +74,14 @@ class TestUserNGFWStackComposition:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
         assert hasattr(stack, "gwlb")
 
@@ -95,9 +110,14 @@ class TestUserNGFWStackOutputs:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
         assert hasattr(stack, "instance_id")
 
@@ -110,9 +130,14 @@ class TestUserNGFWStackOutputs:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
         assert hasattr(stack, "management_ip")
 
@@ -125,9 +150,14 @@ class TestUserNGFWStackOutputs:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
         assert hasattr(stack, "service_name")
 
@@ -140,9 +170,14 @@ class TestUserNGFWStackOutputs:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
         assert hasattr(stack, "target_group_arn")
 
@@ -229,9 +264,14 @@ class TestUserNGFWStackRunProvision:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
 
         mock_orchestrator = MagicMock()
@@ -275,9 +315,14 @@ class TestUserNGFWStackRunDeprovision:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
 
         mock_orchestrator = MagicMock()
@@ -331,9 +376,14 @@ class TestUserNGFWStackRunOps:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
 
         mock_orchestrator = MagicMock()
@@ -351,9 +401,14 @@ class TestUserNGFWStackRunOps:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
 
         mock_orchestrator = MagicMock()
@@ -371,9 +426,14 @@ class TestUserNGFWStackRunOps:
             user_id=123,
             vpc_id="vpc-12345",
             ngfw_subnet_id="subnet-ngfw",
-            ngfw_security_group_id="sg-ngfw",
+            ngfw_mgmt_security_group_id="sg-mgmt",
+            ngfw_data_security_group_id="sg-data",
             ami_id="ami-12345",
             bootstrap_bucket="test-bucket",
+            scm_pin_id="pin-123",
+            scm_pin_value="pin-value-456",
+            scm_folder_name="test-folder",
+            authcode="I1234567",
         )
 
         mock_orchestrator = MagicMock()

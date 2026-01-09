@@ -294,19 +294,19 @@ def publish_ngfw_event(
     request_id: str,
     instance_id: str,
     app_id: str,
-    status: str | None = None,
-    state: dict[str, Any] | None = None,
+    status: str,
 ) -> None:
-    """Publish a unified NGFW lifecycle event.
+    """Publish a lightweight NGFW lifecycle notification.
+
+    This is a notification-only event. All state is written directly to the
+    database by the provisioner. Consumers should query the database if they
+    need full state details.
 
     Args:
         request_id: UUID of the provisioning request (RequestSpec.id)
         instance_id: UUID of the instantiation (Instantiation.id)
         app_id: UUID of the CMS app (NGFW.app_id)
-        status: Optional ResourceStatus value (e.g., "provisioning", "ready", "failed")
-        state: Optional dict with context-specific data such as:
-            - ec2_instance_id, management_ip, dataplane_ip (when provisioned)
-            - error_message (when failed)
+        status: ResourceStatus value (e.g., "provisioning", "ready", "failed", "destroyed")
     """
     event = {
         "event_type": EVENT_TYPE_NGFW,
@@ -316,7 +316,6 @@ def publish_ngfw_event(
         "instance_id": instance_id,
         "app_id": app_id,
         "status": status,
-        "state": state,
     }
 
     logger.info(

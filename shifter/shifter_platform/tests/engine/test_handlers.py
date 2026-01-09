@@ -12,6 +12,14 @@ from shared.enums import ResourceStatus
 User = get_user_model()
 
 
+def log_contains(caplog, message: str) -> bool:
+    """Check if any log record contains the given message.
+
+    Works with both plain text and JSON structured logging.
+    """
+    return any(message in record.message for record in caplog.records)
+
+
 @pytest.mark.django_db
 class TestProcessEvent:
     """Tests for process_event dispatcher."""
@@ -73,7 +81,7 @@ class TestProcessEvent:
             process_event(message)
             mock_range_handler.assert_not_called()
             mock_ngfw_handler.assert_not_called()
-            assert "Ignoring unknown event_type" in caplog.text
+            assert log_contains(caplog, "Ignoring unknown event_type")
 
     def test_handles_missing_event_type(self, caplog):
         """Dispatcher handles messages without event_type gracefully."""
@@ -308,7 +316,7 @@ class TestProcessRangeEvent:
         with caplog.at_level(logging.DEBUG, logger="engine.handlers"):
             process_range_event(message)
 
-        assert "Ignoring event_type" in caplog.text
+        assert log_contains(caplog, "Ignoring event_type")
 
         # Status should be unchanged
         range_obj.refresh_from_db()
@@ -336,8 +344,8 @@ class TestProcessRangeEvent:
         with caplog.at_level(logging.WARNING, logger="engine.handlers"):
             process_range_event(message)
 
-        assert "Range not found" in caplog.text
-        assert "999999" in caplog.text
+        assert log_contains(caplog, "Range not found")
+        assert log_contains(caplog, "999999")
 
     def test_handles_user_id_mismatch(self, user, caplog):
         """Handler logs error when user_id doesn't match Range."""
@@ -363,8 +371,8 @@ class TestProcessRangeEvent:
         with caplog.at_level(logging.ERROR, logger="engine.handlers"):
             process_range_event(message)
 
-        assert "user_id mismatch" in caplog.text
-        assert "999999" in caplog.text
+        assert log_contains(caplog, "user_id mismatch")
+        assert log_contains(caplog, "999999")
 
         # Status should be unchanged
         range_obj.refresh_from_db()
@@ -401,8 +409,8 @@ class TestProcessRangeEvent:
         ):
             process_range_event(message)
 
-        assert "DB error saving Range" in caplog.text
-        assert f"range_id={range_obj.id}" in caplog.text
+        assert log_contains(caplog, "DB error saving Range")
+        assert log_contains(caplog, f"range_id={range_obj.id}")
 
     # ---------------------------------------------------------------------
     # Logging - success
@@ -432,10 +440,10 @@ class TestProcessRangeEvent:
         with caplog.at_level(logging.INFO, logger="engine.handlers"):
             process_range_event(message)
 
-        assert "Engine updated Range" in caplog.text
-        assert f"range_id={range_obj.id}" in caplog.text
-        assert "pending" in caplog.text
-        assert "provisioning" in caplog.text
+        assert log_contains(caplog, "Engine updated Range")
+        assert log_contains(caplog, f"range_id={range_obj.id}")
+        assert log_contains(caplog, "pending")
+        assert log_contains(caplog, "provisioning")
 
     def test_logs_debug_on_event_ignore(self, caplog):
         """Handler logs DEBUG when ignoring non-status events."""
@@ -454,8 +462,8 @@ class TestProcessRangeEvent:
         with caplog.at_level(logging.DEBUG, logger="engine.handlers"):
             process_range_event(message)
 
-        assert "Ignoring event_type" in caplog.text
-        assert "range.destroyed" in caplog.text
+        assert log_contains(caplog, "Ignoring event_type")
+        assert log_contains(caplog, "range.destroyed")
 
     # ---------------------------------------------------------------------
     # Handler is callable
@@ -719,8 +727,8 @@ class TestHandleProvisioned:
         with caplog.at_level(logging.WARNING, logger="engine.handlers"):
             process_range_event(message)
 
-        assert "Range not found for provisioned event" in caplog.text
-        assert "999999" in caplog.text
+        assert log_contains(caplog, "Range not found for provisioned event")
+        assert log_contains(caplog, "999999")
 
     def test_handles_user_id_mismatch(self, user, caplog):
         """Handler logs error when user_id doesn't match Range."""
@@ -746,7 +754,7 @@ class TestHandleProvisioned:
         with caplog.at_level(logging.ERROR, logger="engine.handlers"):
             process_range_event(message)
 
-        assert "user_id mismatch in provisioned event" in caplog.text
+        assert log_contains(caplog, "user_id mismatch in provisioned event")
 
         # provisioned_instances should be unchanged
         range_obj.refresh_from_db()
@@ -760,7 +768,11 @@ class TestHandleProvisioned:
         range_obj = Range.objects.create(
             user=user,
             status=ResourceStatus.PROVISIONING.value,
-            range_config={"instances": [{"uuid": "uuid-123", "role": "attacker", "os_type": "kali"}]},
+            range_config={
+                "instances": [
+                    {"uuid": "uuid-123", "role": "attacker", "os_type": "kali"}
+                ]
+            },
         )
 
         message = {
@@ -784,6 +796,6 @@ class TestHandleProvisioned:
         with caplog.at_level(logging.INFO, logger="engine.handlers"):
             process_range_event(message)
 
-        assert "Engine updated provisioned_instances" in caplog.text
-        assert f"range_id={range_obj.id}" in caplog.text
-        assert "instances=1" in caplog.text
+        assert log_contains(caplog, "Engine updated provisioned_instances")
+        assert log_contains(caplog, f"range_id={range_obj.id}")
+        assert log_contains(caplog, "instances=1")

@@ -180,8 +180,8 @@ class NGFWAppContext(BaseModel):
     Contains fields needed for NGFW display in Mission Control.
     AWS infrastructure details are owned by Engine, not exposed here.
 
-    Note: Does not inherit from AppContextBase because NGFW uses UUID primary key
-    while other app types use int. This is an intentional design decision.
+    Note: Does not inherit from AppContextBase because NGFW uses UUID primary
+    key while other app types use int. This is an intentional design decision.
 
     Attributes:
         app_id: UUID of the CMS App record.
@@ -190,6 +190,7 @@ class NGFWAppContext(BaseModel):
         app_type: Discriminator field, always 'ngfw'.
         status: NGFW lifecycle status (synced from Engine via events).
         created_at: When NGFW was created in CMS.
+        serial_number: PAN-OS serial number (set after provisioning completes).
     """
 
     app_id: UUID
@@ -198,6 +199,7 @@ class NGFWAppContext(BaseModel):
     app_type: Literal["ngfw"] = "ngfw"
     status: str
     created_at: datetime
+    serial_number: str | None = None
 
     def get_status_display(self) -> str:
         """Human-readable status for templates."""

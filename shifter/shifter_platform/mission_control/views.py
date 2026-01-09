@@ -579,6 +579,7 @@ def api_ngfw_list(request: HttpRequest) -> JsonResponse:
                     "name": n.name,
                     "status": n.status,
                     "created_at": n.created_at.isoformat(),
+                    "serial_number": n.serial_number,
                 }
                 for n in ngfws
             ]

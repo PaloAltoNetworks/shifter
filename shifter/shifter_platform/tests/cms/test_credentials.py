@@ -8,26 +8,32 @@ from django.utils import timezone
 
 @pytest.fixture
 def scm_credential_type(db):
-    """Create SCM credential type."""
+    """Get or create SCM credential type."""
     from cms.models import CredentialType
 
-    return CredentialType.objects.create(
-        name="SCM Registration",
+    cred_type, _ = CredentialType.objects.get_or_create(
         slug="scm",
-        spec_class="shared.schemas.SCMCredentialSpec",
+        defaults={
+            "name": "SCM Registration",
+            "spec_class": "shared.schemas.SCMCredentialSpec",
+        },
     )
+    return cred_type
 
 
 @pytest.fixture
 def deployment_profile_type(db):
-    """Create deployment profile credential type."""
+    """Get or create deployment profile credential type."""
     from cms.models import CredentialType
 
-    return CredentialType.objects.create(
-        name="NGFW Deployment Profile",
+    cred_type, _ = CredentialType.objects.get_or_create(
         slug="deployment_profile",
-        spec_class="shared.schemas.DeploymentProfileSpec",
+        defaults={
+            "name": "NGFW Deployment Profile",
+            "spec_class": "shared.schemas.DeploymentProfileSpec",
+        },
     )
+    return cred_type
 
 
 @pytest.mark.django_db

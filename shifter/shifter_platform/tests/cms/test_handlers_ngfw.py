@@ -297,3 +297,75 @@ class TestProcessNgfwEvent:
         cms_app.refresh_from_db()
         assert cms_instance.status == ResourceStatus.READY.value
         assert cms_app.status == ResourceStatus.READY.value
+
+    # -------------------------------------------------------------------------
+    # Serial number handling
+    # -------------------------------------------------------------------------
+
+    def test_stores_serial_number_in_app_data(self, cms_instance, cms_app):
+        """process_ngfw_event stores serial_number in App.data."""
+        event = {
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
+            "serial_number": "007951000123456",
+        }
+
+        process_ngfw_event(make_sns_message(event))
+
+        cms_app.refresh_from_db()
+        assert cms_app.data.get("serial_number") == "007951000123456"
+
+    def test_serial_number_not_stored_when_not_provided(self, cms_instance, cms_app):
+        """process_ngfw_event does not add serial_number when not in event."""
+        event = {
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
+            # No serial_number field
+        }
+
+        process_ngfw_event(make_sns_message(event))
+
+        cms_app.refresh_from_db()
+        assert "serial_number" not in cms_app.data
+
+    def test_serial_number_preserves_existing_app_data(self, cms_instance, cms_app):
+        """process_ngfw_event preserves existing App.data when adding serial."""
+        # Pre-populate App.data with existing values
+        cms_app.data = {"existing_key": "existing_value"}
+        cms_app.save()
+
+        event = {
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            "status": ResourceStatus.READY.value,
+            "serial_number": "007951000123456",
+        }
+
+        process_ngfw_event(make_sns_message(event))
+
+        cms_app.refresh_from_db()
+        assert cms_app.data.get("existing_key") == "existing_value"
+        assert cms_app.data.get("serial_number") == "007951000123456"
+
+    def test_serial_number_stored_without_status_update(self, cms_instance, cms_app):
+        """process_ngfw_event can store serial_number even without status."""
+        original_status = cms_app.status
+
+        event = {
+            "event_type": EVENT_TYPE_NGFW,
+            "instance_id": str(cms_instance.id),
+            "app_id": str(cms_app.id),
+            # No status field - only serial_number
+            "serial_number": "007951000123456",
+        }
+
+        process_ngfw_event(make_sns_message(event))
+
+        cms_app.refresh_from_db()
+        assert cms_app.status == original_status  # Status unchanged
+        assert cms_app.data.get("serial_number") == "007951000123456"

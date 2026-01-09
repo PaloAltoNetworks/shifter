@@ -281,7 +281,14 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
     logger.info(f"Creating new stack with secrets provider: {secrets_provider}")
 
     result = subprocess.run(  # noqa: S603
-        ["pulumi", "stack", "init", stack_name, "--secrets-provider", secrets_provider],  # noqa: S607
+        [
+            "pulumi",
+            "stack",
+            "init",
+            stack_name,
+            "--secrets-provider",
+            secrets_provider,
+        ],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
@@ -406,7 +413,13 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
     logger.info("Running pulumi destroy...")
 
     result = subprocess.run(
-        ["pulumi", "destroy", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
+        [
+            "pulumi",
+            "destroy",
+            "--yes",
+            "--non-interactive",
+            "--skip-preview",
+        ],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
@@ -617,7 +630,9 @@ def _set_ngfw_stack_config(env: dict, request_id: str, app_spec: dict) -> None:
             )
 
 
-def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
+def _run_ngfw_provision(
+    request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict
+) -> None:
     """Run Pulumi up to provision the NGFW, then run post-Pulumi configuration.
 
     Args:
@@ -715,7 +730,9 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     )
 
 
-def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
+def _run_ngfw_deprovision(
+    request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict
+) -> None:
     """Run license deactivation then Pulumi destroy for NGFW.
 
     Args:
@@ -758,7 +775,9 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
     if context.management_ip:
         deprovision_result = orchestrator.orchestrate(deprovision_plan, context)
         if not deprovision_result.success:
-            logger.warning("License deactivation failed, proceeding with destroy anyway")
+            logger.warning(
+                "License deactivation failed, proceeding with destroy anyway"
+            )
     else:
         logger.warning("No management_ip in state, skipping license deactivation")
 
@@ -766,7 +785,13 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
     logger.info("Running pulumi destroy for NGFW...")
 
     result = subprocess.run(
-        ["pulumi", "destroy", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
+        [
+            "pulumi",
+            "destroy",
+            "--yes",
+            "--non-interactive",
+            "--skip-preview",
+        ],  # noqa: S607
         cwd="/app",
         env=env,
         capture_output=True,
@@ -809,8 +834,12 @@ if __name__ == "__main__":
 
     RANGE_ID_HELP = "Database ID of the range to operate on"
 
-    parser = argparse.ArgumentParser(description="Shifter Engine for provisioning cyber ranges and NGFW operations")
-    subparsers = parser.add_subparsers(dest="resource", required=True, help="Resource type")
+    parser = argparse.ArgumentParser(
+        description="Shifter Engine for provisioning cyber ranges and NGFW operations"
+    )
+    subparsers = parser.add_subparsers(
+        dest="resource", required=True, help="Resource type"
+    )
 
     # Range operations - backward compatible with: provision --range-id 42
     # Also supports: range provision --range-id 42

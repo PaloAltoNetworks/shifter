@@ -36,6 +36,25 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
+variable "range_vpc_cidr" {
+  description = "CIDR block of the Range VPC (for guacd egress rules)"
+  type        = string
+}
+
+# ------------------------------------------------------------------------------
+# Shared ALB (Portal ALB)
+# ------------------------------------------------------------------------------
+
+variable "alb_listener_arn" {
+  description = "ARN of the Portal ALB HTTPS listener"
+  type        = string
+}
+
+variable "alb_security_group_id" {
+  description = "Security group ID of the Portal ALB"
+  type        = string
+}
+
 # ------------------------------------------------------------------------------
 # ECR Configuration
 # ------------------------------------------------------------------------------
@@ -45,8 +64,18 @@ variable "guacd_ecr_repository_url" {
   type        = string
 }
 
+variable "guacd_ecr_repository_arn" {
+  description = "ARN of the guacd ECR repository (for IAM scoping)"
+  type        = string
+}
+
 variable "guacamole_client_ecr_repository_url" {
   description = "URL of the ECR repository for the guacamole-client image"
+  type        = string
+}
+
+variable "guacamole_client_ecr_repository_arn" {
+  description = "ARN of the guacamole-client ECR repository (for IAM scoping)"
   type        = string
 }
 
@@ -159,5 +188,14 @@ variable "autoscaling_max_capacity" {
 
 variable "autoscaling_cpu_target" {
   description = "Target CPU utilization percentage for auto scaling"
+  type        = number
+}
+
+# ------------------------------------------------------------------------------
+# Secrets
+# ------------------------------------------------------------------------------
+
+variable "secrets_recovery_window_days" {
+  description = "Recovery window in days for Secrets Manager (0 for immediate deletion)"
   type        = number
 }

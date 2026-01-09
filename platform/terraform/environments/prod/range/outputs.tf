@@ -50,9 +50,14 @@ output "dc_security_group_id" {
 # VM-Series NGFW
 # ------------------------------------------------------------------------------
 
-output "ngfw_security_group_id" {
-  description = "ID of the security group for VM-Series NGFW instances (null if disabled)"
-  value       = module.vpc.ngfw_security_group_id
+output "ngfw_mgmt_security_group_id" {
+  description = "Security group for NGFW management ENI (SSH, HTTPS from portal)"
+  value       = module.vpc.ngfw_mgmt_security_group_id
+}
+
+output "ngfw_data_security_group_id" {
+  description = "Security group for NGFW data ENI (all traffic from VPC for GENEVE)"
+  value       = module.vpc.ngfw_data_security_group_id
 }
 
 output "vm_series_ami_id" {

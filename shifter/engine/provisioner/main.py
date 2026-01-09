@@ -28,6 +28,7 @@ from events import (
     publish_status_update,
 )
 from executors.aws_executor import AWSExecutor
+from executors.ssh_executor import SSHExecutor
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupOrchestrator
 
@@ -288,7 +289,7 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
             stack_name,
             "--secrets-provider",
             secrets_provider,
-        ],  # noqa: S607
+        ],
         cwd="/app",
         env=env,
         capture_output=True,
@@ -419,7 +420,7 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
             "--yes",
             "--non-interactive",
             "--skip-preview",
-        ],  # noqa: S607
+        ],
         cwd="/app",
         env=env,
         capture_output=True,
@@ -680,28 +681,51 @@ def _run_ngfw_provision(
     output_data = json.loads(outputs.stdout)
     logger.info(f"NGFW Stack outputs: {json.dumps(output_data, indent=2)}")
 
-    # Run post-Pulumi configuration (wait for SSH, configure XDR, etc.)
+    # Run post-Pulumi configuration (wait for SSH, configure cloud logging, etc.)
     logger.info("Running post-Pulumi NGFW configuration...")
-    executor = AWSExecutor()
-    orchestrator = SetupOrchestrator(executor)
 
-    # Create a context object with the stack outputs
+    # Get SSH private key from Secrets Manager
+    management_ip = output_data.get("management_ip")
+    ssh_key_secret_arn = output_data.get("ssh_key_secret_arn")
+    if not ssh_key_secret_arn:
+        raise RuntimeError("NGFW stack missing ssh_key_secret_arn output")
+    if not management_ip:
+        raise RuntimeError("NGFW stack missing management_ip output")
+
+    secrets_client = boto3.client("secretsmanager")
+    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+    private_key = secret_response["SecretString"]
+
+    # Create SSH executor and wait for NGFW to be ready (15-25 min boot time)
+    ssh_executor = SSHExecutor(private_key=private_key)
+    logger.info(f"Waiting for SSH on NGFW at {management_ip}...")
+    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=1800)
+
+    # Create orchestrator with SSH executor
+    orchestrator = SetupOrchestrator(ssh_executor)
+
+    # Create context object with the stack outputs
     class NGFWContext:
         pass
 
     context = NGFWContext()
     context.ec2_instance_id = output_data.get("instance_id")
-    context.management_ip = output_data.get("management_ip")
+    context.management_ip = management_ip
     context.dataplane_ip = output_data.get("dataplane_ip")
     context.service_name = output_data.get("service_name")
     context.gwlb_arn = output_data.get("gwlb_arn")
     context.target_group_arn = output_data.get("target_group_arn")
+    context.sls_region = os.environ.get("AWS_REGION", "us-east-2")
 
     # Import and run the NGFW provision plan
     from plans.ngfw_provision import NGFWProvisionPlan
 
     provision_plan = NGFWProvisionPlan()
-    provision_result = orchestrator.orchestrate(provision_plan, context)
+    provision_result = orchestrator.orchestrate(
+        instance_id=management_ip,
+        plan=provision_plan,
+        context=context,
+    )
 
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
@@ -714,6 +738,7 @@ def _run_ngfw_provision(
         "service_name": output_data.get("service_name"),
         "gwlb_arn": output_data.get("gwlb_arn"),
         "target_group_arn": output_data.get("target_group_arn"),
+        "ssh_key_secret_arn": ssh_key_secret_arn,
         "pulumi_stack": stack_name,
     }
 
@@ -751,35 +776,53 @@ def _run_ngfw_deprovision(
         status=STATUS_DESTROYING,
     )
 
-    # Get current instance state for management_ip needed by license deactivation
+    # Get current instance state for management_ip and ssh_key needed by license deactivation
     ngfw_data = get_ngfw_data_by_request_id(request_id)
     current_state = ngfw_data.get("state", {})
+    management_ip = current_state.get("management_ip")
+    ssh_key_secret_arn = current_state.get("ssh_key_secret_arn")
 
-    # Run pre-destroy license deactivation
-    logger.info("Running NGFW license deactivation...")
-    executor = AWSExecutor()
-    orchestrator = SetupOrchestrator(executor)
+    # Run pre-destroy license deactivation (requires SSH to NGFW)
+    if management_ip and ssh_key_secret_arn:
+        logger.info("Running NGFW license deactivation...")
+        try:
+            # Get SSH private key from Secrets Manager
+            secrets_client = boto3.client("secretsmanager")
+            secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+            private_key = secret_response["SecretString"]
 
-    # Import and run the NGFW deprovision plan (license deactivation)
-    from plans.ngfw_deprovision import NGFWDeprovisionPlan
+            # Create SSH executor
+            ssh_executor = SSHExecutor(private_key=private_key)
+            orchestrator = SetupOrchestrator(ssh_executor)
 
-    deprovision_plan = NGFWDeprovisionPlan()
+            # Import and run the NGFW deprovision plan (license deactivation)
+            from plans.ngfw_deprovision import NGFWDeprovisionPlan
 
-    # Create context with management_ip from stored state
-    class NGFWContext:
-        pass
+            deprovision_plan = NGFWDeprovisionPlan()
 
-    context = NGFWContext()
-    context.management_ip = current_state.get("management_ip")
+            # Create context with management_ip from stored state
+            class NGFWContext:
+                pass
 
-    if context.management_ip:
-        deprovision_result = orchestrator.orchestrate(deprovision_plan, context)
-        if not deprovision_result.success:
-            logger.warning(
-                "License deactivation failed, proceeding with destroy anyway"
+            context = NGFWContext()
+            context.management_ip = management_ip
+
+            deprovision_result = orchestrator.orchestrate(
+                instance_id=management_ip,
+                plan=deprovision_plan,
+                context=context,
             )
+            if not deprovision_result.success:
+                logger.warning(
+                    "License deactivation failed, proceeding with destroy anyway"
+                )
+        except Exception as e:
+            logger.warning(f"License deactivation error: {e}, proceeding with destroy")
     else:
-        logger.warning("No management_ip in state, skipping license deactivation")
+        logger.warning(
+            "Missing management_ip or ssh_key_secret_arn in state, "
+            "skipping license deactivation"
+        )
 
     # Run Pulumi destroy
     logger.info("Running pulumi destroy for NGFW...")
@@ -791,7 +834,7 @@ def _run_ngfw_deprovision(
             "--yes",
             "--non-interactive",
             "--skip-preview",
-        ],  # noqa: S607
+        ],
         cwd="/app",
         env=env,
         capture_output=True,

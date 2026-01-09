@@ -205,7 +205,7 @@ def mock_psycopg_connect(mocker, mock_db_connection):
 
 @pytest.fixture
 def mock_boto3_clients(mocker):
-    """Fixture providing mocked boto3 clients for RDS and S3.
+    """Fixture providing mocked boto3 clients for RDS, S3, and Secrets Manager.
 
     Returns:
         dict: Dictionary of mocked clients.
@@ -218,17 +218,25 @@ def mock_boto3_clients(mocker):
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned-url"
 
+    # Mock Secrets Manager client (for SSH keys)
+    mock_secretsmanager = MagicMock()
+    mock_secretsmanager.get_secret_value.return_value = {
+        "SecretString": "-----BEGIN RSA PRIVATE KEY-----\nMOCK_KEY\n-----END RSA PRIVATE KEY-----"
+    }
+
     # Patch boto3.client to return appropriate mock
     def mock_client_factory(service_name, **kwargs):
         if service_name == "rds":
             return mock_rds
         elif service_name == "s3":
             return mock_s3
+        elif service_name == "secretsmanager":
+            return mock_secretsmanager
         return MagicMock()
 
     mocker.patch("boto3.client", side_effect=mock_client_factory)
 
-    return {"rds": mock_rds, "s3": mock_s3}
+    return {"rds": mock_rds, "s3": mock_s3, "secretsmanager": mock_secretsmanager}
 
 
 # =============================================================================

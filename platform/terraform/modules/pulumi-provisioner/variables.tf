@@ -255,8 +255,14 @@ variable "agent_s3_bucket_arn" {
 # NGFW (VM-Series) Configuration
 # ------------------------------------------------------------------------------
 
-variable "ngfw_security_group_id" {
-  description = "Security group ID for VM-Series NGFW instances (empty if NGFW disabled)"
+variable "ngfw_mgmt_security_group_id" {
+  description = "Security group ID for NGFW management ENI (SSH, HTTPS from portal)"
+  type        = string
+  default     = ""
+}
+
+variable "ngfw_data_security_group_id" {
+  description = "Security group ID for NGFW data ENI (all traffic from VPC for GENEVE)"
   type        = string
   default     = ""
 }

@@ -72,7 +72,7 @@ class SSHExecutor:
         """Initialize SSH executor.
 
         Args:
-            private_key: PEM-encoded private key string
+            private_key: PEM-encoded private key string (RSA or Ed25519)
             username: SSH username (default: admin)
             port: SSH port (default: 22)
             poll_interval_seconds: How often to poll for availability
@@ -82,21 +82,59 @@ class SSHExecutor:
         self._port = port
         self._poll_interval = poll_interval_seconds
 
-        # Parse the private key
-        self._pkey = paramiko.RSAKey.from_private_key(file_obj=io.StringIO(private_key))
+        # Parse the private key (supports RSA and Ed25519)
+        self._pkey = self._load_private_key(private_key)
+
+    def _load_private_key(self, private_key: str) -> paramiko.PKey:
+        """Load a private key, detecting type automatically.
+
+        Args:
+            private_key: PEM-encoded private key string
+
+        Returns:
+            Paramiko key object (RSAKey or Ed25519Key)
+
+        Raises:
+            SSHExecutorError: If key type is unsupported or parsing fails
+        """
+        key_file = io.StringIO(private_key)
+
+        # Try Ed25519 first (our default for NGFW)
+        try:
+            return paramiko.Ed25519Key.from_private_key(file_obj=key_file)
+        except paramiko.SSHException:
+            pass
+
+        # Try RSA
+        key_file.seek(0)
+        try:
+            return paramiko.RSAKey.from_private_key(file_obj=key_file)
+        except paramiko.SSHException:
+            pass
+
+        raise SSHExecutorError(
+            "Unsupported key type. Only Ed25519 and RSA keys are supported."
+        )
 
     def run_command(
         self,
-        host: str,
+        instance_id: str,
         script: str,
         timeout_seconds: int = 300,
+        document_name: str | None = None,
+        stdin_input: str | None = None,
     ) -> CommandResult:
         """Run a CLI command on a PAN-OS device via SSH.
 
         Args:
-            host: Target IP address or hostname
-            script: PAN-OS CLI command to execute
+            instance_id: Target IP address or hostname. Named for SetupOrchestrator
+                compatibility (SSM uses EC2 instance ID, SSH uses IP address).
+            script: PAN-OS CLI command to execute (or empty string if using stdin)
             timeout_seconds: Maximum time to wait for completion
+            document_name: Ignored. For SetupOrchestrator compatibility.
+            stdin_input: Multi-line commands to send via stdin. Use for PAN-OS
+                configure mode which requires interactive input, e.g.:
+                "configure\\nset deviceconfig...\\ncommit\\nexit"
 
         Returns:
             CommandResult with success status, exit code, stdout, stderr
@@ -106,6 +144,7 @@ class SSHExecutor:
             TimeoutError: If the command doesn't complete in time
             ConnectionError: If SSH connection fails
         """
+        host = instance_id
         client = paramiko.SSHClient()
         # Security context: AutoAddPolicy is acceptable because we connect to freshly
         # provisioned PAN-OS VMs in isolated VPC subnets. Host keys change on reprovision.
@@ -123,13 +162,20 @@ class SSHExecutor:
                 look_for_keys=False,
             )
 
-            logger.info(f"Executing command: {script[:100]}...")
-            # Security context: Commands are PAN-OS CLI commands generated internally by
-            # SetupOrchestrator plans, not from user input. No shell injection risk.
-            _stdin, stdout, stderr = client.exec_command(  # nosec B601
+            log_cmd = stdin_input[:100] if stdin_input else script[:100]
+            logger.info(f"Executing command: {log_cmd}...")
+
+            # Security context: Commands are PAN-OS CLI commands generated internally
+            # by SetupOrchestrator plans, not from user input. No shell injection risk.
+            stdin, stdout, stderr = client.exec_command(  # nosec B601
                 script,
                 timeout=timeout_seconds,
             )
+
+            # Send stdin input if provided (for interactive configure mode)
+            if stdin_input:
+                stdin.write(stdin_input)
+                stdin.channel.shutdown_write()
 
             exit_code = stdout.channel.recv_exit_status()
             stdout_text = stdout.read().decode("utf-8")
@@ -233,7 +279,7 @@ class SSHExecutor:
 
         # Issue reboot command
         try:
-            self.run_command(host, "request restart system", timeout_seconds=30)
+            self.run_command(instance_id=host, script="request restart system", timeout_seconds=30)
         except (ConnectionError, CommandError, TimeoutError):
             # Connection may drop during reboot - that's expected
             logger.info("Connection dropped during reboot (expected)")

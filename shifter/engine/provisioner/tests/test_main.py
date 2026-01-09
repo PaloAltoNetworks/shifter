@@ -805,6 +805,7 @@ class TestNgfwProvisionCLI:
                         "management_ip": "10.1.4.10",
                         "dataplane_ip": "10.1.4.11",
                         "service_name": "com.amazonaws.vpce.svc-123",
+                        "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
                         "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
                     }
                 )
@@ -823,6 +824,12 @@ class TestNgfwProvisionCLI:
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock AWSExecutor for GWLB setup
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
 
         from main import run_ngfw_pulumi
 
@@ -851,6 +858,7 @@ class TestNgfwProvisionCLI:
                         "management_ip": "10.1.4.10",
                         "dataplane_ip": "10.1.4.11",
                         "service_name": "com.amazonaws.vpce.svc-123",
+                        "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
                         "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
                     }
                 )
@@ -868,6 +876,12 @@ class TestNgfwProvisionCLI:
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock AWSExecutor for GWLB setup
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
 
         from main import run_ngfw_pulumi
 
@@ -887,8 +901,9 @@ class TestNgfwProvisionCLI:
             "management_ip": "10.1.4.10",
             "dataplane_ip": "10.1.4.11",
             "service_name": "com.amazonaws.vpce.svc-123",
-            "gwlb_arn": "arn:aws:elasticloadbalancing:us-east-2:123:loadbalancer/gwy/test",
-            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
+            "gwlb_arn": "arn:aws:elasticloadbalancing:us-east-2:123:tg/test",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
         }
 
         def side_effect(*args, **kwargs):
@@ -911,6 +926,12 @@ class TestNgfwProvisionCLI:
         mock_orchestrator = MagicMock()
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock AWSExecutor for GWLB setup
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
 
         from main import run_ngfw_pulumi
 
@@ -935,6 +956,7 @@ class TestNgfwProvisionCLI:
                     {
                         "instance_id": "i-ngfw123",
                         "management_ip": "10.1.4.10",
+                        "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
                         "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
                     }
                 )
@@ -953,12 +975,166 @@ class TestNgfwProvisionCLI:
         mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
 
+        # Mock AWSExecutor for GWLB setup
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
         from main import run_ngfw_pulumi
 
         run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
 
         # Verify orchestrator was called for post-Pulumi config
         assert mock_orchestrator.orchestrate.called
+
+    def test_ngfw_provision_runs_gwlb_setup(self, mock_boto3_clients, mock_env_vars, mocker):
+        """NGFW provision should run GWLB target registration."""
+        mocker.patch("main.update_instance_state")
+        mocker.patch("main.publish_ngfw_event")
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        # Mock SSH executor
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        # Mock orchestrator for NGFWProvisionPlan
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock AWSExecutor for GWLB setup
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
+
+        # Verify GWLB target registration was called
+        mock_aws_executor.register_target.assert_called_once_with(
+            target_group_arn="arn:aws:elbv2:us-east-2:123:tg/test",
+            target_id="i-ngfw123",
+        )
+        # Verify health check wait was called
+        mock_aws_executor.wait_for_target_healthy.assert_called_once_with(
+            target_group_arn="arn:aws:elbv2:us-east-2:123:tg/test",
+            target_id="i-ngfw123",
+        )
+
+    def test_ngfw_provision_fails_on_gwlb_setup_failure(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW provision should fail if GWLB setup fails."""
+        mocker.patch("main.update_instance_state")
+        mocker.patch("main.publish_ngfw_event")
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        # Mock SSH executor
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        # Mock orchestrator for NGFWProvisionPlan (succeeds)
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock AWSExecutor - register_target fails
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(
+            success=False, stderr="Target group not found"
+        )
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
+        from main import run_ngfw_pulumi
+
+        with pytest.raises(RuntimeError, match="GWLB setup step"):
+            run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
+
+    def test_ngfw_provision_fails_on_missing_target_group_arn(
+        self, mock_boto3_clients, mock_env_vars, mocker
+    ):
+        """NGFW provision should fail if target_group_arn is missing from outputs."""
+        mocker.patch("main.update_instance_state")
+        mocker.patch("main.publish_ngfw_event")
+
+        # Missing target_group_arn
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=side_effect)
+
+        # Mock SSH executor
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        # Mock orchestrator for NGFWProvisionPlan (succeeds)
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock AWSExecutor (created before validation)
+        mock_aws_executor = MagicMock()
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
+        from main import run_ngfw_pulumi
+
+        with pytest.raises(RuntimeError, match="target_group_arn"):
+            run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
 
     def test_ngfw_provision_failure_sets_failed_status(self, mock_boto3_clients, mock_env_vars, mocker):
         """Failed NGFW provision should set status to failed."""

@@ -4,6 +4,7 @@ This component creates the VM-Series NGFW EC2 instance with:
 - Management ENI for admin access
 - Data ENI for traffic inspection (source_dest_check=False)
 - S3 bootstrap configuration
+- SSH key pair for post-boot configuration
 """
 
 import os
@@ -11,7 +12,35 @@ from pathlib import Path
 
 import pulumi
 import pulumi_aws as aws
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from jinja2 import Environment, FileSystemLoader
+
+
+def _generate_ssh_keypair() -> tuple[str, str]:
+    """Generate an Ed25519 SSH key pair.
+
+    Returns:
+        tuple: (private_key_pem, public_key_openssh)
+    """
+    private_key = ed25519.Ed25519PrivateKey.generate()
+
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.OpenSSH,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+
+    public_key_openssh = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.OpenSSH,
+            format=serialization.PublicFormat.OpenSSH,
+        )
+        .decode("utf-8")
+    )
+
+    return private_key_pem, public_key_openssh
 
 
 def _get_templates_dir() -> Path:
@@ -31,9 +60,12 @@ class NGFWComponent(pulumi.ComponentResource):
         data_eni: Data plane network interface (source_dest_check=False).
         init_cfg: S3 object for bootstrap init-cfg.txt.
         authcodes: S3 object for bootstrap license/authcodes.
+        key_pair: EC2 key pair for SSH access.
+        ssh_key_secret: Secrets Manager secret for SSH private key.
         instance_id: EC2 instance ID.
         management_ip: Management ENI private IP.
         dataplane_ip: Data plane ENI private IP.
+        ssh_key_secret_arn: ARN of the SSH key in Secrets Manager.
     """
 
     instance: aws.ec2.Instance
@@ -41,9 +73,12 @@ class NGFWComponent(pulumi.ComponentResource):
     data_eni: aws.ec2.NetworkInterface
     init_cfg: aws.s3.BucketObject
     authcodes: aws.s3.BucketObject
+    key_pair: aws.ec2.KeyPair
+    ssh_key_secret: aws.secretsmanager.Secret
     instance_id: pulumi.Output[str]
     management_ip: pulumi.Output[str]
     dataplane_ip: pulumi.Output[str]
+    ssh_key_secret_arn: pulumi.Output[str]
 
     def __init__(
         self,
@@ -99,7 +134,7 @@ class NGFWComponent(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        # Create Data ENI with source_dest_check disabled for traffic inspection
+        # Create Data ENI with source_dest_check disabled for inspection
         self.data_eni = aws.ec2.NetworkInterface(
             f"{name}-data-eni",
             subnet_id=subnet_id,
@@ -109,6 +144,37 @@ class NGFWComponent(pulumi.ComponentResource):
             tags={**tags, "Name": f"{name}-data"},
             opts=pulumi.ResourceOptions(parent=self),
         )
+
+        # Generate SSH key pair for post-boot configuration (Steps 11-14)
+        private_key, public_key = _generate_ssh_keypair()
+
+        # Create EC2 KeyPair with the public key
+        self.key_pair = aws.ec2.KeyPair(
+            f"{name}-keypair",
+            key_name=f"ngfw-user-{user_id}",
+            public_key=public_key,
+            tags=tags,
+            opts=pulumi.ResourceOptions(parent=self),
+        )
+
+        # Store private key in Secrets Manager
+        self.ssh_key_secret = aws.secretsmanager.Secret(
+            f"{name}-ssh-secret",
+            name=f"shifter/{environment}/ngfw/{user_id}/ssh-key",
+            description=f"SSH private key for NGFW user {user_id}",
+            recovery_window_in_days=0,  # Immediate delete for cleanup
+            tags=tags,
+            opts=pulumi.ResourceOptions(parent=self),
+        )
+
+        ssh_key_version = aws.secretsmanager.SecretVersion(
+            f"{name}-ssh-secret-version",
+            secret_id=self.ssh_key_secret.id,
+            secret_string=private_key,
+            opts=pulumi.ResourceOptions(parent=self),
+        )
+
+        self.ssh_key_secret_arn = self.ssh_key_secret.arn
 
         # Generate bootstrap init-cfg.txt from template
         bootstrap_prefix = f"bootstrap/ngfw/{user_id}"
@@ -160,12 +226,14 @@ class NGFWComponent(pulumi.ComponentResource):
         )
 
         # Generate user data for VM-Series bootstrap
-        user_data = f"vmseries-bootstrap-aws-s3bucket={bootstrap_bucket}/{bootstrap_prefix}"
+        bootstrap_path = f"{bootstrap_bucket}/{bootstrap_prefix}"
+        user_data = f"vmseries-bootstrap-aws-s3bucket={bootstrap_path}"
 
         # Create EC2 instance
         instance_args = {
             "ami": ami_id,
             "instance_type": instance_type,
+            "key_name": self.key_pair.key_name,
             "network_interfaces": [
                 aws.ec2.InstanceNetworkInterfaceArgs(
                     device_index=0,
@@ -188,7 +256,13 @@ class NGFWComponent(pulumi.ComponentResource):
             **instance_args,
             opts=pulumi.ResourceOptions(
                 parent=self,
-                depends_on=[self.mgmt_eni, self.data_eni, self.init_cfg, self.authcodes],
+                depends_on=[
+                    self.mgmt_eni,
+                    self.data_eni,
+                    self.init_cfg,
+                    self.authcodes,
+                    ssh_key_version,
+                ],
             ),
         )
 
@@ -203,6 +277,7 @@ class NGFWComponent(pulumi.ComponentResource):
                 "instanceId": self.instance_id,
                 "managementIp": self.management_ip,
                 "dataplaneIp": self.dataplane_ip,
+                "sshKeySecretArn": self.ssh_key_secret_arn,
             }
         )
 
@@ -228,8 +303,10 @@ class NGFWComponent(pulumi.ComponentResource):
         """
         template_file = templates_dir / "ngfw_init_cfg.txt.j2"
         if template_file.exists():
-            # Security: autoescape not needed - this is PAN-OS config, not HTML.
-            env = Environment(loader=FileSystemLoader(str(templates_dir)))  # nosec B701  # noqa: S701
+            # Security: autoescape not needed - PAN-OS config, not HTML
+            env = Environment(  # nosec B701  # noqa: S701
+                loader=FileSystemLoader(str(templates_dir))
+            )
             template = env.get_template("ngfw_init_cfg.txt.j2")
             return template.render(
                 hostname=hostname,

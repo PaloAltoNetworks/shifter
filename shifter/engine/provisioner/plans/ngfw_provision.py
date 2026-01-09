@@ -1,171 +1,43 @@
 """NGFW Provision Plan for post-Pulumi NGFW configuration.
 
 This plan runs after the NGFW EC2 instance is created to configure:
-- Wait for SSH availability (~13 min after EC2 launch)
 - Verify device certificate
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
 - Create security policy (allow-all rule with logging)
 
-Commands are executed via SSH to the NGFW management interface.
+Commands are executed via SSHExecutor to the NGFW management interface.
 All PAN-OS CLI commands have been validated against PAN-OS 11.x.
+
+Note: SSH wait is done in main.py before calling this plan.
 """
 
 from typing import Any, ClassVar
 
-from .base import SetupStep
+from plans.base import SetupStep
 
-# SSH wait script - checks if NGFW is ready for SSH commands
-# VM-Series takes ~13 minutes to boot and be ready
-WAIT_SSH_READY_SCRIPT = """
-#!/bin/bash
-set -e
-
-NGFW_IP="{{ management_ip }}"
-MAX_ATTEMPTS=90  # 15 minutes (10 second intervals)
-ATTEMPT=0
-
-echo "Waiting for NGFW SSH availability at $NGFW_IP..."
-
-while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-    if timeout 5 bash -c \
-        "echo 'show system info' | ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 admin@$NGFW_IP" \
-        2>/dev/null | grep -q "hostname"; then
-        echo "NGFW SSH is ready"
-        exit 0
-    fi
-    ATTEMPT=$((ATTEMPT + 1))
-    echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - waiting for SSH..."
-    sleep 10
-done
-
-echo "ERROR: NGFW SSH not available after 15 minutes"
-exit 1
-"""
-
-# Device certificate verification script
-VERIFY_DEVICE_CERT_SCRIPT = """
-#!/bin/bash
-set -e
-
-NGFW_IP="{{ management_ip }}"
-
-echo "Verifying device certificate on $NGFW_IP..."
-
-# Check device certificate status
-CERT_STATUS=$(echo "show system info" | \
-    ssh -o StrictHostKeyChecking=no admin@$NGFW_IP 2>/dev/null | \
-    grep -i "device-certificate" || echo "unknown")
-
-if echo "$CERT_STATUS" | grep -qi "valid"; then
-    echo "Device certificate is valid"
-    exit 0
-elif echo "$CERT_STATUS" | grep -qi "none"; then
-    echo "WARNING: No device certificate - cloud features may be limited"
-    exit 0
-else
-    echo "Device certificate status: $CERT_STATUS"
-    exit 0
-fi
-"""
-
-# Enable cloud logging (Strata Logging Service)
-# Validated PAN-OS CLI commands
-ENABLE_CLOUD_LOGGING_SCRIPT = """
-#!/bin/bash
-set -e
-
-NGFW_IP="{{ management_ip }}"
-SLS_REGION="{{ sls_region }}"
-
-echo "Enabling cloud logging on $NGFW_IP with region $SLS_REGION..."
-
-# Send configuration commands via SSH
-# IMPORTANT: PAN-OS requires commands piped to SSH, not passed as arguments
-cat << 'EOF' | ssh -o StrictHostKeyChecking=no admin@$NGFW_IP
-configure
+# PAN-OS configure mode commands for cloud logging (Step 12 from steps.md)
+# Variables: {{ sls_region }}
+ENABLE_CLOUD_LOGGING_INPUT = """configure
 set deviceconfig setting logging logging-service-forwarding enable yes
 set deviceconfig setting logging logging-service-forwarding logging-service-regions {{ sls_region }}
 commit
 exit
-EOF
-
-echo "Cloud logging enabled successfully"
 """
 
-# Create log forwarding profile for XDR
-# Validated PAN-OS CLI commands
-CREATE_LOG_FORWARDING_PROFILE_SCRIPT = """
-#!/bin/bash
-set -e
-
-NGFW_IP="{{ management_ip }}"
-
-echo "Creating XDR-Forward log forwarding profile on $NGFW_IP..."
-
-cat << 'EOF' | ssh -o StrictHostKeyChecking=no admin@$NGFW_IP
-configure
-set shared log-settings profiles XDR-Forward match-list all-traffic \
-    log-type traffic filter "All Logs" send-to-panorama yes
+# PAN-OS configure mode commands for log forwarding profile (Step 13 from steps.md)
+CREATE_LOG_FORWARDING_PROFILE_INPUT = """configure
+set shared log-settings profiles XDR-Forward match-list all-traffic log-type traffic filter "All Logs" send-to-panorama yes
 set shared log-settings profiles XDR-Forward enhanced-application-logging yes
 commit
 exit
-EOF
-
-echo "Log forwarding profile created successfully"
 """
 
-# Create security policy with allow-all rule and logging
-# Validated PAN-OS CLI commands
-CREATE_SECURITY_POLICY_SCRIPT = """
-#!/bin/bash
-set -e
-
-NGFW_IP="{{ management_ip }}"
-
-echo "Creating security policy on $NGFW_IP..."
-
-cat << 'EOF' | ssh -o StrictHostKeyChecking=no admin@$NGFW_IP
-configure
-set rulebase security rules allow-all from any to any source any \
-    destination any application any service any action allow \
-    log-end yes log-setting XDR-Forward
+# PAN-OS configure mode commands for security policy (Step 14 from steps.md)
+CREATE_SECURITY_POLICY_INPUT = """configure
+set rulebase security rules allow-all from any to any source any destination any application any service any action allow log-end yes log-setting XDR-Forward
 commit
 exit
-EOF
-
-echo "Security policy created successfully"
-"""
-
-# Verification script to check configuration
-VERIFY_CONFIG_SCRIPT = """
-#!/bin/bash
-set -e
-
-NGFW_IP="{{ management_ip }}"
-
-echo "Verifying NGFW configuration on $NGFW_IP..."
-
-# Check security rules
-RULES=$(echo "show running security-policy" | ssh -o StrictHostKeyChecking=no admin@$NGFW_IP 2>/dev/null || echo "")
-
-if echo "$RULES" | grep -qi "allow-all"; then
-    echo "Security policy verified: allow-all rule exists"
-else
-    echo "WARNING: allow-all rule not found in security policy"
-fi
-
-# Check log forwarding profile
-PROFILES=$(echo "show running log-settings" | ssh -o StrictHostKeyChecking=no admin@$NGFW_IP 2>/dev/null || echo "")
-
-if echo "$PROFILES" | grep -qi "XDR-Forward"; then
-    echo "Log forwarding profile verified: XDR-Forward exists"
-else
-    echo "WARNING: XDR-Forward profile not found"
-fi
-
-echo "Configuration verification complete"
-exit 0
 """
 
 
@@ -173,61 +45,59 @@ class NGFWProvisionPlan:
     """Provision plan for NGFW post-Pulumi configuration.
 
     Steps:
-    1. Wait for SSH availability (~13 min for VM-Series boot)
-    2. Verify device certificate
-    3. Enable cloud logging (Strata Logging Service)
-    4. Create log forwarding profile (XDR-Forward)
-    5. Create security policy (allow-all rule)
+    1. Verify device certificate (show system info)
+    2. Enable cloud logging (Strata Logging Service)
+    3. Create log forwarding profile (XDR-Forward)
+    4. Create security policy (allow-all rule)
 
-    All commands are executed via SSH to the NGFW management interface.
+    All commands are executed via SSHExecutor to the NGFW management interface.
+    SSH wait is handled by main.py before this plan runs.
     """
 
+    name: ClassVar[str] = "ngfw_provision"
+
     steps: ClassVar[list[SetupStep]] = [
-        SetupStep(
-            name="wait_ssh_ready",
-            script=WAIT_SSH_READY_SCRIPT,
-            timeout_seconds=900,  # 15 min - VM-Series boot time
-            requires_reboot=False,
-        ),
+        # Step 16: Check device certificate and SCM registration
         SetupStep(
             name="verify_device_cert",
-            script=VERIFY_DEVICE_CERT_SCRIPT,
-            timeout_seconds=300,  # 5 min
-            requires_reboot=False,
+            script="show system info",
+            timeout_seconds=60,
         ),
+        # Step 12: Enable cloud logging
         SetupStep(
             name="enable_cloud_logging",
-            script=ENABLE_CLOUD_LOGGING_SCRIPT,
-            timeout_seconds=600,  # 10 min - config + commit
-            requires_reboot=False,
+            script="",  # Empty - commands sent via stdin
+            stdin_input=ENABLE_CLOUD_LOGGING_INPUT,
+            timeout_seconds=300,  # 5 min - config + commit
         ),
+        # Step 13: Create log forwarding profile
         SetupStep(
             name="create_log_forwarding_profile",
-            script=CREATE_LOG_FORWARDING_PROFILE_SCRIPT,
-            timeout_seconds=600,  # 10 min - config + commit
-            requires_reboot=False,
+            script="",
+            stdin_input=CREATE_LOG_FORWARDING_PROFILE_INPUT,
+            timeout_seconds=300,  # 5 min - config + commit
         ),
+        # Step 14: Create security policy
         SetupStep(
             name="create_security_policy",
-            script=CREATE_SECURITY_POLICY_SCRIPT,
-            timeout_seconds=600,  # 10 min - config + commit
-            requires_reboot=False,
+            script="",
+            stdin_input=CREATE_SECURITY_POLICY_INPUT,
+            timeout_seconds=300,  # 5 min - config + commit
         ),
     ]
 
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ngfw_config",
-        script=VERIFY_CONFIG_SCRIPT,
-        timeout_seconds=300,  # 5 min
-        requires_reboot=False,
+        script="show running security-policy",
+        timeout_seconds=60,
         is_verification=True,
     )
 
     def get_context(self, instance: Any) -> dict[str, Any]:
-        """Get template variables for NGFW provision scripts.
+        """Get template variables for NGFW provision steps.
 
         Args:
-            instance: Instance with management_ip, hostname, sls_region
+            instance: Instance with management_ip and sls_region attributes
 
         Returns:
             Dict with template variables
@@ -239,11 +109,9 @@ class NGFWProvisionPlan:
         if not management_ip:
             raise ValueError("Instance missing required 'management_ip' attribute")
 
-        hostname = getattr(instance, "hostname", "ngfw")
-        sls_region = getattr(instance, "sls_region", "us")
+        sls_region = getattr(instance, "sls_region", "americas")
 
         return {
             "management_ip": management_ip,
-            "hostname": hostname,
             "sls_region": sls_region,
         }

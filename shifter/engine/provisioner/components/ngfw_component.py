@@ -85,7 +85,8 @@ class NGFWComponent(pulumi.ComponentResource):
         name: str,
         user_id: int,
         subnet_id: str,
-        security_group_id: str,
+        mgmt_security_group_id: str,
+        data_security_group_id: str,
         ami_id: str,
         bootstrap_bucket: str,
         scm_pin_id: str,
@@ -103,7 +104,8 @@ class NGFWComponent(pulumi.ComponentResource):
             name: Pulumi resource name prefix.
             user_id: User ID for tagging and bootstrap prefix.
             subnet_id: Subnet ID for ENIs.
-            security_group_id: Security group for NGFW.
+            mgmt_security_group_id: Security group for management ENI.
+            data_security_group_id: Security group for data ENI.
             ami_id: VM-Series AMI ID.
             bootstrap_bucket: S3 bucket for bootstrap files.
             scm_pin_id: SCM auto-registration PIN ID.
@@ -128,7 +130,7 @@ class NGFWComponent(pulumi.ComponentResource):
         self.mgmt_eni = aws.ec2.NetworkInterface(
             f"{name}-mgmt-eni",
             subnet_id=subnet_id,
-            security_groups=[security_group_id],
+            security_groups=[mgmt_security_group_id],
             description=f"NGFW management interface for user {user_id}",
             tags={**tags, "Name": f"{name}-mgmt"},
             opts=pulumi.ResourceOptions(parent=self),
@@ -138,7 +140,7 @@ class NGFWComponent(pulumi.ComponentResource):
         self.data_eni = aws.ec2.NetworkInterface(
             f"{name}-data-eni",
             subnet_id=subnet_id,
-            security_groups=[security_group_id],
+            security_groups=[data_security_group_id],
             source_dest_check=False,  # Required for traffic inspection
             description=f"NGFW data interface for user {user_id}",
             tags={**tags, "Name": f"{name}-data"},

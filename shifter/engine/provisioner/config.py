@@ -141,7 +141,8 @@ class NGFWConfig:
     # Infrastructure
     vpc_id: str
     subnet_id: str
-    security_group_id: str
+    mgmt_security_group_id: str
+    data_security_group_id: str
     ami_id: str
     bootstrap_bucket: str
     instance_type: str
@@ -316,7 +317,8 @@ def load_ngfw_config() -> NGFWConfig:
         # Infrastructure
         vpc_id=config.require("ngfwVpcId"),
         subnet_id=config.require("ngfwSubnetId"),
-        security_group_id=config.require("ngfwSecurityGroupId"),
+        mgmt_security_group_id=config.require("ngfwMgmtSecurityGroupId"),
+        data_security_group_id=config.require("ngfwDataSecurityGroupId"),
         ami_id=config.require("ngfwAmiId"),
         bootstrap_bucket=config.require("bootstrapBucket"),
         instance_type=config.get("ngfwInstanceType") or "m5.xlarge",

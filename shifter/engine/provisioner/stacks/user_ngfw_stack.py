@@ -28,7 +28,8 @@ class UserNGFWStack(pulumi.ComponentResource):
         user_id: int,
         vpc_id: str,
         ngfw_subnet_id: str,
-        ngfw_security_group_id: str,
+        ngfw_mgmt_security_group_id: str,
+        ngfw_data_security_group_id: str,
         ami_id: str,
         bootstrap_bucket: str,
         scm_pin_id: str,
@@ -47,7 +48,8 @@ class UserNGFWStack(pulumi.ComponentResource):
             user_id: User ID for this NGFW stack
             vpc_id: VPC ID where resources are created
             ngfw_subnet_id: Subnet ID for NGFW ENIs
-            ngfw_security_group_id: Security group ID for NGFW
+            ngfw_mgmt_security_group_id: Security group for management ENI
+            ngfw_data_security_group_id: Security group for data ENI
             ami_id: VM-Series AMI ID
             bootstrap_bucket: S3 bucket for bootstrap configuration
             scm_pin_id: SCM auto-registration PIN ID
@@ -68,7 +70,8 @@ class UserNGFWStack(pulumi.ComponentResource):
             f"{name}-ngfw",
             user_id=user_id,
             subnet_id=ngfw_subnet_id,
-            security_group_id=ngfw_security_group_id,
+            mgmt_security_group_id=ngfw_mgmt_security_group_id,
+            data_security_group_id=ngfw_data_security_group_id,
             ami_id=ami_id,
             bootstrap_bucket=bootstrap_bucket,
             scm_pin_id=scm_pin_id,

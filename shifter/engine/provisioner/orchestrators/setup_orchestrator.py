@@ -159,15 +159,19 @@ class SetupOrchestrator:
         Raises:
             CommandError, TimeoutError, SetupError: On failure
         """
-        # Render the script with context variables
+        # Render the script and stdin_input with context variables
         rendered_script = self._render_script(step.script, context, step.name)
+        rendered_stdin = self._render_script(
+            getattr(step, "stdin_input", "") or "", context, step.name
+        )
 
-        # Execute via SSM
+        # Execute via executor (SSM or SSH)
         result = self.executor.run_command(
             instance_id=instance_id,
             script=rendered_script,
             timeout_seconds=step.timeout_seconds,
             document_name=document_name,
+            stdin_input=rendered_stdin if rendered_stdin else None,
         )
 
         return StepResult(

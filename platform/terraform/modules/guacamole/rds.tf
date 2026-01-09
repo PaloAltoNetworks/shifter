@@ -33,7 +33,7 @@ resource "random_password" "db_password" {
 resource "aws_secretsmanager_secret" "db_credentials" {
   name                    = "shifter-${var.name_prefix}-guacamole-db"
   description             = "Guacamole PostgreSQL database credentials"
-  recovery_window_in_days = 0
+  recovery_window_in_days = var.secrets_recovery_window_days
 
   tags = merge(local.common_tags, {
     Name = "shifter-${var.name_prefix}-guacamole-db"

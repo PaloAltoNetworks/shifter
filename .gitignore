@@ -376,3 +376,8 @@ Thumbs.db
 .cursor/mcp.json
 
 risks/
+
+# GitHub Runner
+platform/terraform/global/github-runner/*.zip
+
+temp/

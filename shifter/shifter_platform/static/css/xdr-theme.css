@@ -346,3 +346,39 @@ a:hover {
 ::-webkit-scrollbar-thumb:hover {
     background: #575757;
 }
+
+/* Utility Classes */
+
+/* Text utilities */
+.text-muted { color: var(--xdr-text-secondary); }
+.text-small { font-size: 12px; }
+.text-right { text-align: right; }
+
+/* Margin utilities */
+.mt-sm { margin-top: 8px; }
+.mt-md { margin-top: 12px; }
+.mt-lg { margin-top: 16px; }
+.mb-sm { margin-bottom: 8px; }
+.mb-md { margin-bottom: 12px; }
+.mb-lg { margin-bottom: 16px; }
+
+/* Padding utilities */
+.pl-lg { padding-left: 16px; }
+
+/* Flexbox utilities */
+.flex-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+/* Gap utilities */
+.gap-sm { gap: 8px; }
+.gap-md { gap: 12px; }
+.gap-lg { gap: 16px; }

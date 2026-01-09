@@ -164,9 +164,7 @@ class TestInstanceSpec:
         """InstanceSpec uuid accepts string value."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(
-            name="attacker-kali", uuid="abc-123", role="attacker", os_type="kali"
-        )
+        spec = InstanceSpec(name="attacker-kali", uuid="abc-123", role="attacker", os_type="kali")
         assert spec.uuid == "abc-123"
 
     def test_role_is_required(self):
@@ -208,12 +206,8 @@ class TestInstanceSpec:
         """InstanceSpec accepts AgentDetails for agent field."""
         from shared.schemas.range import AgentDetails, InstanceSpec
 
-        agent = AgentDetails(
-            s3_key="agents/agent.msi", filename="agent.msi", sha256="abc123"
-        )
-        spec = InstanceSpec(
-            name="victim-windows", role="victim", os_type="windows", agent=agent
-        )
+        agent = AgentDetails(s3_key="agents/agent.msi", filename="agent.msi", sha256="abc123")
+        spec = InstanceSpec(name="victim-windows", role="victim", os_type="windows", agent=agent)
         assert spec.agent is not None
         assert spec.agent.s3_key == "agents/agent.msi"
 
@@ -229,9 +223,7 @@ class TestInstanceSpec:
         from shared.schemas.range import DCConfig, InstanceSpec
 
         dc_config = DCConfig(domain_name="lab.local", netbios_name="LAB")
-        spec = InstanceSpec(
-            name="dc-windows", role="dc", os_type="windows", dc_config=dc_config
-        )
+        spec = InstanceSpec(name="dc-windows", role="dc", os_type="windows", dc_config=dc_config)
         assert spec.dc_config is not None
         assert spec.dc_config.domain_name == "lab.local"
 
@@ -246,9 +238,7 @@ class TestInstanceSpec:
         """InstanceSpec join_domain can be set to True."""
         from shared.schemas.range import InstanceSpec
 
-        spec = InstanceSpec(
-            name="victim-windows", role="victim", os_type="windows", join_domain=True
-        )
+        spec = InstanceSpec(name="victim-windows", role="victim", os_type="windows", join_domain=True)
         assert spec.join_domain is True
 
     def test_model_dump_returns_dict(self):
@@ -312,9 +302,7 @@ class TestRangeSpec:
         """RangeSpec can be created with scenario_id, user_id, and instances."""
         from shared.schemas.range import InstanceSpec, RangeSpec
 
-        instances = [
-            InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
-        ]
+        instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
         request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=instances)
         assert request.scenario_id == "basic-attack"
         assert request.user_id == 1
@@ -324,9 +312,7 @@ class TestRangeSpec:
         """RangeSpec requires scenario_id field."""
         from shared.schemas.range import InstanceSpec, RangeSpec
 
-        instances = [
-            InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
-        ]
+        instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
         with pytest.raises(ValidationError):
             RangeSpec(user_id=1, instances=instances)
 
@@ -334,9 +320,7 @@ class TestRangeSpec:
         """RangeSpec requires user_id field."""
         from shared.schemas.range import InstanceSpec, RangeSpec
 
-        instances = [
-            InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
-        ]
+        instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
         with pytest.raises(ValidationError):
             RangeSpec(scenario_id="basic-attack", instances=instances)
 
@@ -421,9 +405,7 @@ class TestRangeSpec:
         """RangeSpec.model_dump() returns a dictionary."""
         from shared.schemas.range import InstanceSpec, RangeSpec
 
-        instances = [
-            InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
-        ]
+        instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
         request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=instances)
         result = request.model_dump()
         assert isinstance(result, dict)
@@ -438,9 +420,7 @@ class TestRangeSpec:
         data = {
             "scenario_id": "basic-attack",
             "user_id": 1,
-            "instances": [
-                {"name": "attacker-kali", "role": "attacker", "os_type": "kali"}
-            ],
+            "instances": [{"name": "attacker-kali", "role": "attacker", "os_type": "kali"}],
         }
         request = RangeSpec.model_validate(data)
         assert request.scenario_id == "basic-attack"

@@ -12,6 +12,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 from shared.channels.groups import ngfw_event_group, range_event_group
+from shared.messages.events import EVENT_TYPE_NGFW
 
 logger = logging.getLogger(__name__)
 
@@ -135,12 +136,12 @@ def process_ngfw_event(message: str | dict) -> None:
         message: SNS-wrapped message containing NGFW event data.
             Expected event format:
             {
-                "event_type": "ngfw.status.updated",
-                "ngfw_id": int,  # Engine's NGFW.id
-                "cms_ngfw_id": int,  # CMS's NGFW.id for correlation
-                "user_id": int,
-                "new_status": str,
-                "error_message": str | None
+                "event_type": "ngfw.event",
+                "request_id": str (UUID),
+                "instance_id": str (UUID),
+                "app_id": str (UUID),
+                "status": str | None,
+                "state": dict | None
             }
 
     Returns:
@@ -149,36 +150,36 @@ def process_ngfw_event(message: str | dict) -> None:
     event = parse_sns_message(message)
 
     event_type = event.get("event_type")
-    if event_type != "ngfw.status.updated":
+    if event_type != EVENT_TYPE_NGFW:
         logger.debug("Ignoring NGFW event_type=%s", event_type)
         return
 
-    cms_ngfw_id = event.get("cms_ngfw_id")
-    new_status = event.get("new_status")
-    error_message = event.get("error_message")
+    app_id = event.get("app_id")
+    status = event.get("status")
+    state = event.get("state") or {}
     event_id = event.get("event_id", "unknown")
 
-    if not isinstance(cms_ngfw_id, int):
-        logger.warning("Invalid cms_ngfw_id type: %s", type(cms_ngfw_id))
+    if not app_id or not isinstance(app_id, str):
+        logger.warning("Invalid app_id: %s", app_id)
         return
 
     channel_layer = get_channel_layer()
-    group_name = ngfw_event_group(cms_ngfw_id)
+    group_name = ngfw_event_group(app_id)
 
     async_to_sync(channel_layer.group_send)(
         group_name,
         {
             "type": "ngfw.status",
-            "ngfw_id": cms_ngfw_id,
-            "new_status": new_status,
-            "error_message": error_message,
+            "app_id": app_id,
+            "status": status,
+            "state": state,
         },
     )
 
     logger.info(
-        "MC broadcast to group %s: ngfw_id=%s status=%s event_id=%s",
+        "MC broadcast to group %s: app_id=%s status=%s event_id=%s",
         group_name,
-        cms_ngfw_id,
-        new_status,
+        app_id,
+        status,
         event_id,
     )

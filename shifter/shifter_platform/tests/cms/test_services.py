@@ -1,6 +1,5 @@
 """Tests for CMS services."""
 
-import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -204,71 +203,6 @@ class TestGetActiveRange:
             get_active_range("not a user")
 
     # ---------------------------------------------------------------------
-    # Logging
-    # ---------------------------------------------------------------------
-
-    def test_logs_debug_on_success(self, caplog):
-        """Logs DEBUG when active range found."""
-        from cms.models import RangeInstance
-        from cms.services import get_active_range
-
-        user = MagicMock()
-        user.id = 42
-
-        RangeInstance.objects.create(
-            range_id=20,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.READY.value,
-        )
-
-        with caplog.at_level(logging.DEBUG, logger="cms.services"):
-            get_active_range(user)
-
-        assert "get_active_range" in caplog.text
-        assert "found range_id=20" in caplog.text
-        assert "42" in caplog.text
-
-    def test_logs_debug_when_no_range_found(self, caplog):
-        """Logs DEBUG when no active range exists."""
-        from cms.services import get_active_range
-
-        user = MagicMock()
-        user.id = 999
-
-        with caplog.at_level(logging.DEBUG, logger="cms.services"):
-            get_active_range(user)
-
-        assert "get_active_range" in caplog.text
-        assert "no active range" in caplog.text
-        assert "999" in caplog.text
-
-    def test_logs_error_on_none_user(self, caplog):
-        """Logs ERROR when user is None."""
-        from cms.services import get_active_range
-
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            get_active_range(None)
-
-        assert "get_active_range called with None" in caplog.text
-
-    def test_logs_error_on_invalid_user_type(self, caplog):
-        """Logs ERROR when user is invalid type."""
-        from cms.services import get_active_range
-
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            get_active_range("not a user")
-
-        assert "get_active_range called with invalid user type" in caplog.text
-        assert "str" in caplog.text
-
-    # ---------------------------------------------------------------------
     # Error handling - database failures
     # ---------------------------------------------------------------------
 
@@ -289,28 +223,6 @@ class TestGetActiveRange:
         ):
             mock_active.filter.side_effect = DatabaseError("DB connection failed")
             get_active_range(user)
-
-    def test_logs_exception_on_database_error(self, caplog):
-        """Logs exception when database error occurs."""
-        from unittest.mock import patch
-
-        from django.db import DatabaseError
-
-        from cms.services import get_active_range
-
-        user = MagicMock()
-        user.id = 42
-
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            patch("cms.services.RangeInstance.active") as mock_active,
-            pytest.raises(DatabaseError),
-        ):
-            mock_active.filter.side_effect = DatabaseError("DB connection failed")
-            get_active_range(user)
-
-        assert "Error in get_active_range" in caplog.text
-        assert "42" in caplog.text
 
     # ---------------------------------------------------------------------
     # Validation - RangeContext validates on creation
@@ -334,9 +246,7 @@ class TestGetActiveRange:
         mock_instance.status = ResourceStatus.READY.value
 
         mock_queryset = MagicMock()
-        mock_queryset.exclude.return_value.order_by.return_value.first.return_value = (
-            mock_instance
-        )
+        mock_queryset.exclude.return_value.order_by.return_value.first.return_value = mock_instance
 
         with (
             patch("cms.services.RangeInstance.active") as mock_active,

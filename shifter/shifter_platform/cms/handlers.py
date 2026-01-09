@@ -29,14 +29,10 @@ def process_event(message: str | dict) -> None:
     event_id = event.get("event_id", "unknown")
 
     if event_type.startswith("range."):
-        logger.debug(
-            "Routing to range handler: event_type=%s event_id=%s", event_type, event_id
-        )
+        logger.debug("Routing to range handler: event_type=%s event_id=%s", event_type, event_id)
         process_range_event(message)
     elif event_type.startswith("ngfw."):
-        logger.debug(
-            "Routing to NGFW handler: event_type=%s event_id=%s", event_type, event_id
-        )
+        logger.debug("Routing to NGFW handler: event_type=%s event_id=%s", event_type, event_id)
         process_ngfw_event(message)
     else:
         logger.debug("Ignoring unknown event_type=%s event_id=%s", event_type, event_id)
@@ -94,6 +90,10 @@ def process_range_event(message: str | dict) -> None:
     user_id = event.get("user_id")
     new_status = event.get("new_status")
     event_id = event.get("event_id", "unknown")
+
+    if range_id is None or new_status is None:
+        logger.warning("Missing range_id or new_status in event")
+        return
 
     try:
         ResourceStatus(new_status)
@@ -178,8 +178,7 @@ def _handle_ngfw_event(event: dict) -> None:
     # Validate required fields
     if not instance_id or not app_id:
         logger.warning(
-            "NGFW event missing required fields: "
-            "instance_id=%s app_id=%s event_id=%s",
+            "NGFW event missing required fields: instance_id=%s app_id=%s event_id=%s",
             instance_id,
             app_id,
             event_id,
@@ -191,9 +190,7 @@ def _handle_ngfw_event(event: dict) -> None:
         try:
             ResourceStatus(status)
         except ValueError:
-            logger.error(
-                "Invalid status value: %s event_id=%s", status, event_id
-            )
+            logger.error("Invalid status value: %s event_id=%s", status, event_id)
             return
 
     # Look up and update Instance
@@ -226,19 +223,14 @@ def _handle_ngfw_event(event: dict) -> None:
             app.status = status
             app.save(update_fields=["status"])
     except App.DoesNotExist:
-        logger.warning(
-            "CMS App not found: app_id=%s event_id=%s", app_id, event_id
-        )
+        logger.warning("CMS App not found: app_id=%s event_id=%s", app_id, event_id)
         previous_app_status = None
     except Exception:
-        logger.exception(
-            "DB error saving CMS App: app_id=%s event_id=%s", app_id, event_id
-        )
+        logger.exception("DB error saving CMS App: app_id=%s event_id=%s", app_id, event_id)
         return
 
     logger.info(
-        "CMS processed NGFW event: instance_id=%s (%s->%s) "
-        "app_id=%s (%s->%s) event_id=%s",
+        "CMS processed NGFW event: instance_id=%s (%s->%s) app_id=%s (%s->%s) event_id=%s",
         instance_id,
         previous_instance_status,
         status or previous_instance_status,

@@ -30,6 +30,7 @@ class NGFWComponent(pulumi.ComponentResource):
         mgmt_eni: Management network interface.
         data_eni: Data plane network interface (source_dest_check=False).
         init_cfg: S3 object for bootstrap init-cfg.txt.
+        authcodes: S3 object for bootstrap license/authcodes.
         instance_id: EC2 instance ID.
         management_ip: Management ENI private IP.
         dataplane_ip: Data plane ENI private IP.
@@ -39,6 +40,7 @@ class NGFWComponent(pulumi.ComponentResource):
     mgmt_eni: aws.ec2.NetworkInterface
     data_eni: aws.ec2.NetworkInterface
     init_cfg: aws.s3.BucketObject
+    authcodes: aws.s3.BucketObject
     instance_id: pulumi.Output[str]
     management_ip: pulumi.Output[str]
     dataplane_ip: pulumi.Output[str]
@@ -51,6 +53,10 @@ class NGFWComponent(pulumi.ComponentResource):
         security_group_id: str,
         ami_id: str,
         bootstrap_bucket: str,
+        scm_pin_id: str,
+        scm_pin_value: str,
+        scm_folder_name: str,
+        authcode: str,
         instance_type: str = "m5.xlarge",
         environment: str = "dev",
         instance_profile_name: str | None = None,
@@ -65,6 +71,10 @@ class NGFWComponent(pulumi.ComponentResource):
             security_group_id: Security group for NGFW.
             ami_id: VM-Series AMI ID.
             bootstrap_bucket: S3 bucket for bootstrap files.
+            scm_pin_id: SCM auto-registration PIN ID.
+            scm_pin_value: SCM auto-registration PIN value.
+            scm_folder_name: SCM folder name (dgname).
+            authcode: VM-Series authcode for licensing.
             instance_type: EC2 instance type (default m5.xlarge).
             environment: Environment name for tagging.
             instance_profile_name: IAM instance profile name.
@@ -105,15 +115,47 @@ class NGFWComponent(pulumi.ComponentResource):
         hostname = f"ngfw-user-{user_id}"
 
         templates_dir = _get_templates_dir()
-        init_cfg_content = self._render_init_cfg(templates_dir, hostname)
+        init_cfg_content = self._render_init_cfg(
+            templates_dir=templates_dir,
+            hostname=hostname,
+            pin_id=scm_pin_id,
+            pin_value=scm_pin_value,
+            folder_name=scm_folder_name,
+        )
 
-        # Upload init-cfg.txt to S3
+        # Upload init-cfg.txt to S3 (config/)
         self.init_cfg = aws.s3.BucketObject(
             f"{name}-init-cfg",
             bucket=bootstrap_bucket,
             key=f"{bootstrap_prefix}/config/init-cfg.txt",
             content=init_cfg_content,
             content_type="text/plain",
+            opts=pulumi.ResourceOptions(parent=self),
+        )
+
+        # Upload authcodes file to S3 (license/)
+        self.authcodes = aws.s3.BucketObject(
+            f"{name}-authcodes",
+            bucket=bootstrap_bucket,
+            key=f"{bootstrap_prefix}/license/authcodes",
+            content=authcode,
+            content_type="text/plain",
+            opts=pulumi.ResourceOptions(parent=self),
+        )
+
+        # Create empty content/ and software/ folders (required by bootstrap)
+        aws.s3.BucketObject(
+            f"{name}-content-placeholder",
+            bucket=bootstrap_bucket,
+            key=f"{bootstrap_prefix}/content/.keep",
+            content="",
+            opts=pulumi.ResourceOptions(parent=self),
+        )
+        aws.s3.BucketObject(
+            f"{name}-software-placeholder",
+            bucket=bootstrap_bucket,
+            key=f"{bootstrap_prefix}/software/.keep",
+            content="",
             opts=pulumi.ResourceOptions(parent=self),
         )
 
@@ -146,7 +188,7 @@ class NGFWComponent(pulumi.ComponentResource):
             **instance_args,
             opts=pulumi.ResourceOptions(
                 parent=self,
-                depends_on=[self.mgmt_eni, self.data_eni, self.init_cfg],
+                depends_on=[self.mgmt_eni, self.data_eni, self.init_cfg, self.authcodes],
             ),
         )
 
@@ -164,12 +206,22 @@ class NGFWComponent(pulumi.ComponentResource):
             }
         )
 
-    def _render_init_cfg(self, templates_dir: Path, hostname: str) -> str:
-        """Render the init-cfg.txt template.
+    def _render_init_cfg(
+        self,
+        templates_dir: Path,
+        hostname: str,
+        pin_id: str,
+        pin_value: str,
+        folder_name: str,
+    ) -> str:
+        """Render the init-cfg.txt template with SCM registration credentials.
 
         Args:
             templates_dir: Path to templates directory.
             hostname: Hostname for the NGFW.
+            pin_id: SCM auto-registration PIN ID.
+            pin_value: SCM auto-registration PIN value.
+            folder_name: SCM folder name (dgname).
 
         Returns:
             Rendered init-cfg.txt content.
@@ -181,11 +233,10 @@ class NGFWComponent(pulumi.ComponentResource):
             template = env.get_template("ngfw_init_cfg.txt.j2")
             return template.render(
                 hostname=hostname,
-                auth_key="",  # Will be set during provisioning
-                panorama_server="",
-                device_group="",
-                template_stack="",
+                pin_id=pin_id,
+                pin_value=pin_value,
+                folder_name=folder_name,
             )
         else:
-            # Fallback minimal config
+            # Fallback minimal config (without SCM registration)
             return f"type=dhcp-client\nhostname={hostname}\n"

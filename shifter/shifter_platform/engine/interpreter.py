@@ -13,8 +13,8 @@ from uuid import uuid4
 from django.db import transaction
 
 if TYPE_CHECKING:
-    from engine.models import Request
-    from shared.schemas import RequestSpec
+    from engine.models import App, Instance, Request
+    from shared.schemas import InstanceSpec, RangeSpec, RequestSpec
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,7 @@ def interpret(request_spec: RequestSpec) -> Request:
     """
     from django.contrib.auth import get_user_model
 
-    from engine.models import App, Instance, Request
-    from shared.enums import RequestType, ResourceStatus
+    from engine.models import Request
     from shared.schemas import InstanceSpec, RangeSpec
     from shared.schemas import RequestSpec as RequestSpecClass
 
@@ -77,9 +76,7 @@ def interpret(request_spec: RequestSpec) -> Request:
             elif isinstance(item, RangeSpec):
                 _interpret_range(item, request)
             else:
-                logger.warning(
-                    "interpret: unknown item type %s", type(item).__name__
-                )
+                logger.warning("interpret: unknown item type %s", type(item).__name__)
 
     return request
 
@@ -99,7 +96,7 @@ def _infer_request_type(request_spec: RequestSpec) -> str:
 
 def _interpret_instance(instance_spec: InstanceSpec, request: Request) -> Instance:
     """Create Instance and any nested Apps from an InstanceSpec."""
-    from engine.models import App, Instance
+    from engine.models import Instance
     from shared.enums import ResourceStatus
 
     # Generate UUID if not provided
@@ -134,21 +131,22 @@ def _interpret_ngfw_app(ngfw_app_spec, instance: Instance, request: Request) -> 
     from engine.models import App
     from shared.enums import ResourceStatus
 
-    # Use ngfw_id as correlation UUID, or generate one
-    app_uuid = str(ngfw_app_spec.ngfw_id) if ngfw_app_spec.ngfw_id else str(uuid4())
+    # Use app_id from spec if provided, otherwise model generates default
+    app_kwargs = {
+        "request": request,
+        "instance": instance,
+        "app_type": App.AppType.NGFW,
+        "spec": ngfw_app_spec.model_dump(mode="json"),
+        "status": ResourceStatus.PENDING.value,
+    }
+    if ngfw_app_spec.app_id:
+        app_kwargs["uuid"] = ngfw_app_spec.app_id
 
-    app = App.objects.create(
-        uuid=app_uuid,
-        request=request,
-        instance=instance,
-        app_type=App.AppType.NGFW,
-        spec=ngfw_app_spec.model_dump(mode="json"),
-        status=ResourceStatus.PENDING.value,
-    )
+    app = App.objects.create(**app_kwargs)
 
     logger.info(
         "interpret: created app uuid=%s type=ngfw",
-        app_uuid,
+        app.uuid,
     )
 
     return app
@@ -159,11 +157,3 @@ def _interpret_range(range_spec: RangeSpec, request: Request) -> None:
     # Walk instances in the range
     for instance_spec in range_spec.instances:
         _interpret_instance(instance_spec, request)
-
-
-# Type hints for forward references
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from engine.models import App, Instance
-    from shared.schemas import InstanceSpec, RangeSpec

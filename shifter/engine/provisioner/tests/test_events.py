@@ -379,46 +379,8 @@ class TestPublishCancelled:
 # =============================================================================
 
 
-class TestCreateNgfwEvent:
-    """Tests for _create_ngfw_event() internal function."""
-
-    def test_creates_event_with_required_fields(self):
-        """Creates NGFW event envelope with all required fields."""
-        from events import _create_ngfw_event
-
-        event = _create_ngfw_event(
-            event_type="ngfw.status.updated",
-            ngfw_id=42,
-            cms_ngfw_id=100,
-            user_id=5,
-        )
-
-        assert event["event_type"] == "ngfw.status.updated"
-        assert event["ngfw_id"] == 42
-        assert event["cms_ngfw_id"] == 100
-        assert event["user_id"] == 5
-        assert "event_id" in event
-        assert "timestamp" in event
-
-    def test_includes_kwargs_in_event(self):
-        """Additional kwargs are included in the event."""
-        from events import _create_ngfw_event
-
-        event = _create_ngfw_event(
-            event_type="ngfw.provisioned",
-            ngfw_id=42,
-            cms_ngfw_id=100,
-            user_id=5,
-            instance_id="i-abc123",
-            management_ip="10.0.1.10",
-        )
-
-        assert event["instance_id"] == "i-abc123"
-        assert event["management_ip"] == "10.0.1.10"
-
-
-class TestPublishNgfwStatusUpdate:
-    """Tests for publish_ngfw_status_update() function."""
+class TestPublishNgfwEvent:
+    """Tests for publish_ngfw_event() unified function."""
 
     @pytest.fixture
     def mock_sns_env(self, monkeypatch):
@@ -429,198 +391,63 @@ class TestPublishNgfwStatusUpdate:
             "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
         )
 
-    def test_publishes_ngfw_status_change_event(self, mock_sns_env):
-        """Publishes event with NGFW status transition details."""
-        from events import publish_ngfw_status_update
+    def test_publishes_ngfw_event_with_required_fields(self, mock_sns_env):
+        """Publishes event with all required UUID fields."""
+        from events import publish_ngfw_event
 
         with patch("events._publish_event") as mock_publish:
-            publish_ngfw_status_update(
-                ngfw_id=42,
-                cms_ngfw_id=100,
-                user_id=5,
-                new_status="provisioning",
+            publish_ngfw_event(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                instance_id="660e8400-e29b-41d4-a716-446655440001",
+                app_id="770e8400-e29b-41d4-a716-446655440002",
+                status="provisioning",
             )
 
             mock_publish.assert_called_once()
             event = mock_publish.call_args[0][0]
 
-            assert event["event_type"] == "ngfw.status.updated"
-            assert event["ngfw_id"] == 42
-            assert event["cms_ngfw_id"] == 100
-            assert event["user_id"] == 5
-            assert event["new_status"] == "provisioning"
+            assert event["event_type"] == "ngfw.event"
+            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+            assert event["instance_id"] == "660e8400-e29b-41d4-a716-446655440001"
+            assert event["app_id"] == "770e8400-e29b-41d4-a716-446655440002"
+            assert event["status"] == "provisioning"
+            assert "event_id" in event
+            assert "timestamp" in event
 
-    def test_includes_error_message_when_provided(self, mock_sns_env):
-        """Error message is included in NGFW event when provided."""
-        from events import publish_ngfw_status_update
+    def test_publishes_ngfw_event_with_state_dict(self, mock_sns_env):
+        """Publishes event with state dict for resource details."""
+        from events import publish_ngfw_event
 
         with patch("events._publish_event") as mock_publish:
-            publish_ngfw_status_update(
-                ngfw_id=42,
-                cms_ngfw_id=100,
-                user_id=5,
-                new_status="failed",
-                error_message="Pulumi stack error",
+            publish_ngfw_event(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                instance_id="660e8400-e29b-41d4-a716-446655440001",
+                app_id="770e8400-e29b-41d4-a716-446655440002",
+                status="ready",
+                state={
+                    "ec2_instance_id": "i-abc123",
+                    "management_ip": "10.0.1.10",
+                    "dataplane_ip": "10.0.2.10",
+                },
             )
 
             event = mock_publish.call_args[0][0]
-            assert event["error_message"] == "Pulumi stack error"
+            assert event["state"]["ec2_instance_id"] == "i-abc123"
+            assert event["state"]["management_ip"] == "10.0.1.10"
 
-    def test_logs_info_on_status_change(self, mock_sns_env, caplog):
-        """Logs info message for NGFW status changes."""
-        from events import publish_ngfw_status_update
-
-        with (
-            patch("events._publish_event"),
-            caplog.at_level(logging.INFO, logger="events"),
-        ):
-            publish_ngfw_status_update(ngfw_id=42, cms_ngfw_id=100, user_id=5, new_status="ready")
-
-            assert "42" in caplog.text
-            assert "ready" in caplog.text
-
-
-class TestPublishNgfwReady:
-    """Tests for publish_ngfw_ready() function."""
-
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
-
-    def test_publishes_ngfw_provisioned_event_with_resources(self, mock_sns_env):
-        """Publishes ngfw.provisioned event with resource details."""
-        from events import publish_ngfw_ready
+    def test_publishes_ngfw_event_with_error_in_state(self, mock_sns_env):
+        """Publishes failed event with error_message in state."""
+        from events import publish_ngfw_event
 
         with patch("events._publish_event") as mock_publish:
-            publish_ngfw_ready(
-                ngfw_id=42,
-                cms_ngfw_id=100,
-                user_id=5,
-                instance_id="i-0abc123def456789",
-                management_ip="10.0.1.10",
-                dataplane_ip="10.0.2.10",
-                service_name="com.amazonaws.vpce.us-east-2.vpce-svc-abc123",
-                gwlb_arn="arn:aws:elasticloadbalancing:us-east-2:123456789:loadbalancer/gwy/test-gwlb/abc123",
-                target_group_arn="arn:aws:elasticloadbalancing:us-east-2:123456789:targetgroup/test-tg/abc123",
+            publish_ngfw_event(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                instance_id="660e8400-e29b-41d4-a716-446655440001",
+                app_id="770e8400-e29b-41d4-a716-446655440002",
+                status="failed",
+                state={"error_message": "Pulumi stack failed"},
             )
 
-            # Should publish both status update and provisioned event
-            assert mock_publish.call_count >= 1
-
-            # Find the provisioned event
-            calls = [call[0][0] for call in mock_publish.call_args_list]
-            provisioned_events = [c for c in calls if c.get("event_type") == "ngfw.provisioned"]
-
-            assert len(provisioned_events) == 1
-            event = provisioned_events[0]
-            assert event["instance_id"] == "i-0abc123def456789"
-            assert event["management_ip"] == "10.0.1.10"
-            assert event["dataplane_ip"] == "10.0.2.10"
-            assert event["service_name"] == "com.amazonaws.vpce.us-east-2.vpce-svc-abc123"
-            assert event["gwlb_arn"].startswith("arn:aws:elasticloadbalancing")
-            assert event["target_group_arn"].startswith("arn:aws:elasticloadbalancing")
-
-    def test_publishes_status_update_before_provisioned(self, mock_sns_env):
-        """First publishes status update with 'ready' status."""
-        from events import publish_ngfw_ready
-
-        with patch("events._publish_event") as mock_publish:
-            publish_ngfw_ready(
-                ngfw_id=42,
-                cms_ngfw_id=100,
-                user_id=5,
-                instance_id="i-abc",
-                management_ip="10.0.1.10",
-                dataplane_ip="10.0.2.10",
-                service_name="svc-abc",
-                gwlb_arn="arn:gwlb",
-                target_group_arn="arn:tg",
-            )
-
-            # Status update should be published first
-            calls = [call[0][0] for call in mock_publish.call_args_list]
-            status_events = [c for c in calls if c.get("event_type") == "ngfw.status.updated"]
-
-            assert len(status_events) == 1
-            assert status_events[0]["new_status"] == "ready"
-
-
-class TestPublishNgfwFailed:
-    """Tests for publish_ngfw_failed() function."""
-
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
-
-    def test_publishes_failed_status_with_error(self, mock_sns_env):
-        """Publishes status update with failed status and error message."""
-        from events import publish_ngfw_failed
-
-        with patch("events._publish_event") as mock_publish:
-            publish_ngfw_failed(
-                ngfw_id=42,
-                cms_ngfw_id=100,
-                user_id=5,
-                error_message="Pulumi stack failed",
-            )
-
-            mock_publish.assert_called_once()
             event = mock_publish.call_args[0][0]
-
-            assert event["new_status"] == "failed"
-            assert event["error_message"] == "Pulumi stack failed"
-            assert event["ngfw_id"] == 42
-            assert event["cms_ngfw_id"] == 100
-
-
-class TestPublishNgfwDestroyed:
-    """Tests for publish_ngfw_destroyed() function."""
-
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
-
-    def test_publishes_ngfw_destroyed_event(self, mock_sns_env):
-        """Publishes ngfw.destroyed event."""
-        from events import publish_ngfw_destroyed
-
-        with patch("events._publish_event") as mock_publish:
-            publish_ngfw_destroyed(ngfw_id=42, cms_ngfw_id=100, user_id=5)
-
-            # Should publish both status update and destroyed event
-            assert mock_publish.call_count >= 1
-
-            calls = [call[0][0] for call in mock_publish.call_args_list]
-            destroyed_events = [c for c in calls if c.get("event_type") == "ngfw.destroyed"]
-
-            assert len(destroyed_events) == 1
-            assert destroyed_events[0]["ngfw_id"] == 42
-            assert destroyed_events[0]["cms_ngfw_id"] == 100
-
-    def test_publishes_status_update_with_deprovisioned_status(self, mock_sns_env):
-        """First publishes status update with 'deprovisioned' status."""
-        from events import publish_ngfw_destroyed
-
-        with patch("events._publish_event") as mock_publish:
-            publish_ngfw_destroyed(ngfw_id=42, cms_ngfw_id=100, user_id=5)
-
-            calls = [call[0][0] for call in mock_publish.call_args_list]
-            status_events = [c for c in calls if c.get("event_type") == "ngfw.status.updated"]
-
-            assert len(status_events) == 1
-            assert status_events[0]["new_status"] == "deprovisioned"
+            assert event["status"] == "failed"
+            assert event["state"]["error_message"] == "Pulumi stack failed"

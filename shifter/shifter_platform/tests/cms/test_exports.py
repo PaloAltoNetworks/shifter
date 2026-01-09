@@ -182,41 +182,11 @@ class TestCMSExports:
 
         assert callable(get_ngfw)
 
-    def test_exports_get_ngfw_linked_ranges(self):
-        """get_ngfw_linked_ranges should be importable from cms."""
-        from cms import get_ngfw_linked_ranges
+    def test_exports_create_ngfw(self):
+        """create_ngfw should be importable from cms."""
+        from cms import create_ngfw
 
-        assert callable(get_ngfw_linked_ranges)
-
-    def test_exports_provision_ngfw(self):
-        """provision_ngfw should be importable from cms."""
-        from cms import provision_ngfw
-
-        assert callable(provision_ngfw)
-
-    def test_exports_start_ngfw(self):
-        """start_ngfw should be importable from cms."""
-        from cms import start_ngfw
-
-        assert callable(start_ngfw)
-
-    def test_exports_stop_ngfw(self):
-        """stop_ngfw should be importable from cms."""
-        from cms import stop_ngfw
-
-        assert callable(stop_ngfw)
-
-    def test_exports_deprovision_ngfw(self):
-        """deprovision_ngfw should be importable from cms."""
-        from cms import deprovision_ngfw
-
-        assert callable(deprovision_ngfw)
-
-    def test_exports_get_ngfw_status(self):
-        """get_ngfw_status should be importable from cms."""
-        from cms import get_ngfw_status
-
-        assert callable(get_ngfw_status)
+        assert callable(create_ngfw)
 
     # --- __all__ verification ---
 
@@ -231,18 +201,16 @@ class TestCMSExports:
             "complete_upload",
             "create_agent",
             "create_credential",
+            "create_ngfw",
             "create_range",
             "delete_agent",
             "delete_credential",
-            "deprovision_ngfw",
             "destroy_range",
             "get_active_range",
             "get_agent",
             "get_allowed_extensions",
             "get_credential",
             "get_ngfw",
-            "get_ngfw_linked_ranges",
-            "get_ngfw_status",
             "get_range",
             "get_scenario",
             "get_storage_used",
@@ -253,10 +221,7 @@ class TestCMSExports:
             "list_ranges",
             "list_scenarios",
             "pause_range",
-            "provision_ngfw",
             "resume_range",
-            "start_ngfw",
-            "stop_ngfw",
             "validate_scenario_requirements",
         }
         assert set(cms.__all__) == expected

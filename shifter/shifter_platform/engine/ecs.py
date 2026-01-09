@@ -178,27 +178,27 @@ def start_teardown(range_id: int, user_id: int) -> str | None:
     return _start_ecs_task(range_id, user_id, "destroy")
 
 
-def _start_ngfw_ecs_task(instance_uuid: "UUID", command: list[str]) -> str | None:
+def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
     """Start an ECS Fargate task for NGFW operations.
 
     Args:
-        instance_uuid: UUID of the Instance to operate on
-        command: Command list to run (e.g., ["ngfw", "provision", "--instance-uuid", "..."])
+        request_id: UUID of the Request to operate on
+        command: Command list to run (e.g., ["ngfw", "provision", "--request-id", "..."])
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
 
     Raises:
-        TypeError: If instance_uuid is None or command is not a list
+        TypeError: If request_id is None or command is not a list
         ValueError: If command is empty
         ClientError: If ECS task fails to start
     """
     from uuid import UUID
 
-    if instance_uuid is None:
-        raise TypeError("instance_uuid cannot be None")
-    if not isinstance(instance_uuid, UUID):
-        raise TypeError(f"instance_uuid must be a UUID, got {type(instance_uuid).__name__}")
+    if request_id is None:
+        raise TypeError("request_id cannot be None")
+    if not isinstance(request_id, UUID):
+        raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
     if command is None or not isinstance(command, list):
         raise TypeError("command must be a list")
     if not command:
@@ -224,7 +224,7 @@ def _start_ngfw_ecs_task(instance_uuid: "UUID", command: list[str]) -> str | Non
         logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
         return None
 
-    logger.info(f"Starting NGFW ECS task for instance_uuid={instance_uuid} command={command}")
+    logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
 
     ecs = _get_ecs_client()
 
@@ -261,48 +261,48 @@ def _start_ngfw_ecs_task(instance_uuid: "UUID", command: list[str]) -> str | Non
             )
 
         task_arn = response["tasks"][0]["taskArn"]
-        logger.info(f"Started NGFW ECS task: instance_uuid={instance_uuid} task_arn={task_arn}")
+        logger.info(f"Started NGFW ECS task: request_id={request_id} task_arn={task_arn}")
         return task_arn
 
     except ClientError as e:
-        logger.error(f"Failed to start NGFW ECS task for instance_uuid={instance_uuid}: {e}")
+        logger.error(f"Failed to start NGFW ECS task for request_id={request_id}: {e}")
         raise
 
 
-def start_ngfw_provisioning(instance_uuid: "UUID") -> str | None:
+def start_ngfw_provisioning(request_id: UUID) -> str | None:
     """Start provisioning an NGFW via ECS Fargate.
 
     Args:
-        instance_uuid: UUID of the Instance to provision.
+        request_id: UUID of the Request to provision.
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
         (falls back to stub behavior for local dev)
 
     Raises:
-        TypeError: If instance_uuid is None or not a UUID
+        TypeError: If request_id is None or not a UUID
         ClientError: If ECS task fails to start
     """
-    command = ["ngfw", "provision", "--instance-uuid", str(instance_uuid)]
-    return _start_ngfw_ecs_task(instance_uuid, command)
+    command = ["ngfw", "provision", "--request-id", str(request_id)]
+    return _start_ngfw_ecs_task(request_id, command)
 
 
-def start_ngfw_teardown(instance_uuid: "UUID") -> str | None:
+def start_ngfw_teardown(request_id: UUID) -> str | None:
     """Start teardown/deprovision of an NGFW via ECS Fargate.
 
     Args:
-        instance_uuid: UUID of the Instance to deprovision.
+        request_id: UUID of the Request to deprovision.
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
         (falls back to stub behavior for local dev)
 
     Raises:
-        TypeError: If instance_uuid is None or not a UUID
+        TypeError: If request_id is None or not a UUID
         ClientError: If ECS task fails to start
     """
-    command = ["ngfw", "deprovision", "--instance-uuid", str(instance_uuid)]
-    return _start_ngfw_ecs_task(instance_uuid, command)
+    command = ["ngfw", "deprovision", "--request-id", str(request_id)]
+    return _start_ngfw_ecs_task(request_id, command)
 
 
 def get_task_status(task_arn: str) -> dict | None:

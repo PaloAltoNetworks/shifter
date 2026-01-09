@@ -4,180 +4,234 @@ describe('NGFWWizardManager', () => {
     let wizard;
 
     const buildWizardMarkup = () => `
-        <div class="wizard-step" id="step-1"></div>
-        <div class="wizard-step" id="step-2"></div>
-        <div class="wizard-step" id="step-3"></div>
+        <div class="wizard-step"></div>
+        <div class="wizard-step"></div>
+        <div class="wizard-step"></div>
         <div class="wizard-panel" id="step-1"></div>
         <div class="wizard-panel" id="step-2"></div>
         <div class="wizard-panel" id="step-3"></div>
         <div class="wizard-panel" id="step-4"></div>
-        <div class="wizard-panel" id="step-5"></div>
         <input id="ngfw-name" type="text">
-        <input type="radio" name="registration_method" value="otp">
-        <input type="radio" name="registration_method" value="pin">
+        <div class="radio-option" data-method="otp"><input type="radio" name="registration_method" value="otp"></div>
+        <div class="radio-option" data-method="pin"><input type="radio" name="registration_method" value="pin"></div>
         <input id="otp-value" type="text">
         <input id="otp-folder" type="text">
-        <select id="otp-sls-region"><option value="americas">Americas</option></select>
         <div id="otp-fields"></div>
-        <div id="pin-option"></div>
-        <div id="deployment-profile-dropdown">
+        <div id="pin-fields"></div>
+        <div id="profile-dropdown">
             <button class="xdr-dropdown-trigger"><span class="xdr-dropdown-value placeholder">Select</span></button>
             <div class="xdr-dropdown-panel">
-                <div class="xdr-dropdown-item" data-value="1"><span class="item-label">Profile 1</span></div>
+                <div class="xdr-dropdown-item" data-value="1" data-name="Profile 1"><span class="item-label">Profile 1</span></div>
             </div>
+            <input type="hidden">
         </div>
-        <input id="deployment-profile-value" type="hidden">
-        <div id="scm-credential-dropdown">
+        <div id="scm-dropdown">
             <button class="xdr-dropdown-trigger"><span class="xdr-dropdown-value placeholder">Select</span></button>
             <div class="xdr-dropdown-panel">
-                <div class="xdr-dropdown-item" data-value="1"><span class="item-label">Cred 1</span></div>
+                <div class="xdr-dropdown-item" data-value="1" data-name="Cred 1" data-region="americas"><span class="item-label">Cred 1</span></div>
             </div>
+            <input type="hidden">
         </div>
-        <input id="scm-credential-value" type="hidden">
-        <span id="confirm-name"></span>
-        <span id="confirm-profile"></span>
-        <span id="confirm-registration"></span>
-        <span id="confirm-folder"></span>
-        <span id="confirm-sls"></span>
-        <span id="ngfw-serial"></span>
-        <span id="serial-in-steps"></span>
-        <div id="progress-fill"></div>
-        <div id="progress-status"></div>
-        <div id="pstep-ec2"></div>
-        <div id="pstep-ssh"></div>
-        <div id="pstep-license"></div>
-        <div id="pstep-cert"></div>
-        <div id="pstep-xdr"></div>
-        <div id="pstep-gwlb"></div>
+        <div id="region-dropdown">
+            <button class="xdr-dropdown-trigger"><span class="xdr-dropdown-value placeholder">Select</span></button>
+            <div class="xdr-dropdown-panel">
+                <div class="xdr-dropdown-item" data-value="americas"><span class="item-label">Americas</span></div>
+            </div>
+            <input type="hidden">
+        </div>
+        <span id="summary-name"></span>
+        <span id="summary-profile"></span>
+        <span id="summary-method"></span>
+        <span id="summary-credential"></span>
+        <span id="summary-folder"></span>
+        <span id="summary-region"></span>
+        <div id="summary-credential-row"></div>
+        <div id="summary-folder-row"></div>
+        <div id="provisioning-progress"></div>
+        <div id="success-state" style="display: none;"></div>
         <a id="view-ngfw-btn" href="#"></a>
+        <button id="step1-next"></button>
+        <button id="step2-back"></button>
+        <button id="step2-next"></button>
+        <button id="step3-back"></button>
+        <button id="step3-provision"></button>
     `;
 
     beforeEach(() => {
         document.body.innerHTML = buildWizardMarkup();
         global.alert = jest.fn();
+        global.fetch = jest.fn();
 
         wizard = new window.NGFWWizardManager({
             csrfToken: 'test-csrf',
-            provisionUrl: '/ngfw/1/',
-            statusWsUrl: 'ws://localhost/ws/ngfw/',
+            provisionUrl: '/api/ngfw/provision/',
+            statusUrlTemplate: '/api/ngfw/{id}/status/',
+            detailUrlTemplate: '/ngfw/{id}/',
         });
+        wizard.init();
     });
 
     afterEach(() => {
         jest.clearAllMocks();
     });
 
-    describe('validateStep', () => {
-        test('step 1 fails without name', () => {
+    describe('constructor', () => {
+        test('initializes with default form data', () => {
+            expect(wizard.formData.name).toBe('');
+            expect(wizard.formData.deployment_profile_id).toBeNull();
+            expect(wizard.formData.registration_method).toBe('otp');
+            expect(wizard.formData.sls_region).toBe('americas');
+        });
+
+        test('initializes at step 1', () => {
+            expect(wizard.currentStep).toBe(1);
+        });
+    });
+
+    describe('validateStep1', () => {
+        test('returns false without name', () => {
             wizard.formData.name = '';
-            wizard.formData.deploymentProfileId = '1';
+            wizard.formData.deployment_profile_id = '1';
 
-            expect(wizard.validateStep(1)).toBe(false);
-            expect(global.alert).toHaveBeenCalledWith('Please enter an NGFW name');
+            expect(wizard.validateStep1()).toBe(false);
         });
 
-        test('step 1 fails without deployment profile', () => {
+        test('returns false without deployment profile', () => {
             wizard.formData.name = 'My NGFW';
-            wizard.formData.deploymentProfileId = null;
+            wizard.formData.deployment_profile_id = null;
 
-            expect(wizard.validateStep(1)).toBe(false);
-            expect(global.alert).toHaveBeenCalledWith('Please select a deployment profile');
+            expect(wizard.validateStep1()).toBe(false);
         });
 
-        test('step 1 passes with valid data', () => {
+        test('returns true with valid data', () => {
             wizard.formData.name = 'My NGFW';
-            wizard.formData.deploymentProfileId = '1';
+            wizard.formData.deployment_profile_id = '1';
 
-            expect(wizard.validateStep(1)).toBe(true);
-            expect(global.alert).not.toHaveBeenCalled();
+            expect(wizard.validateStep1()).toBe(true);
         });
 
-        test('step 2 OTP fails without OTP value', () => {
-            wizard.formData.registrationMethod = 'otp';
-            wizard.formData.otpValue = '';
-            wizard.formData.otpFolder = 'My Folder';
+        test('enables next button when valid', () => {
+            wizard.formData.name = 'My NGFW';
+            wizard.formData.deployment_profile_id = '1';
 
-            expect(wizard.validateStep(2)).toBe(false);
-            expect(global.alert).toHaveBeenCalledWith('Please enter the OTP value');
+            wizard.validateStep1();
+
+            expect(document.getElementById('step1-next').disabled).toBe(false);
         });
 
-        test('step 2 OTP fails without folder', () => {
-            wizard.formData.registrationMethod = 'otp';
-            wizard.formData.otpValue = 'ABC123';
-            wizard.formData.otpFolder = '';
+        test('disables next button when invalid', () => {
+            wizard.formData.name = '';
+            wizard.formData.deployment_profile_id = null;
 
-            expect(wizard.validateStep(2)).toBe(false);
-            expect(global.alert).toHaveBeenCalledWith('Please enter the SCM folder name');
-        });
+            wizard.validateStep1();
 
-        test('step 2 OTP passes with valid data', () => {
-            wizard.formData.registrationMethod = 'otp';
-            wizard.formData.otpValue = 'ABC123';
-            wizard.formData.otpFolder = 'My Folder';
-
-            expect(wizard.validateStep(2)).toBe(true);
-        });
-
-        test('step 2 PIN always passes', () => {
-            wizard.formData.registrationMethod = 'pin';
-
-            expect(wizard.validateStep(2)).toBe(true);
-        });
-
-        test('step 3 always passes', () => {
-            expect(wizard.validateStep(3)).toBe(true);
+            expect(document.getElementById('step1-next').disabled).toBe(true);
         });
     });
 
-    describe('toggleOtpFields', () => {
-        test('shows OTP fields when method is otp', () => {
-            wizard.formData.registrationMethod = 'otp';
-            wizard.toggleOtpFields();
+    describe('validateStep2', () => {
+        test('OTP method returns false without OTP value', () => {
+            wizard.formData.registration_method = 'otp';
+            wizard.formData.otp_value = '';
+            wizard.formData.otp_folder = 'My Folder';
 
-            expect(document.getElementById('otp-fields').style.display).toBe('block');
+            expect(wizard.validateStep2()).toBe(false);
         });
 
-        test('hides OTP fields when method is pin', () => {
-            wizard.formData.registrationMethod = 'pin';
-            wizard.toggleOtpFields();
+        test('OTP method returns false without folder', () => {
+            wizard.formData.registration_method = 'otp';
+            wizard.formData.otp_value = 'ABC123';
+            wizard.formData.otp_folder = '';
 
-            expect(document.getElementById('otp-fields').style.display).toBe('none');
+            expect(wizard.validateStep2()).toBe(false);
+        });
+
+        test('OTP method returns true with valid data', () => {
+            wizard.formData.registration_method = 'otp';
+            wizard.formData.otp_value = 'ABC123';
+            wizard.formData.otp_folder = 'My Folder';
+
+            expect(wizard.validateStep2()).toBe(true);
+        });
+
+        test('PIN method returns false without credential', () => {
+            wizard.formData.registration_method = 'pin';
+            wizard.formData.scm_credential_id = null;
+
+            expect(wizard.validateStep2()).toBe(false);
+        });
+
+        test('PIN method returns true with credential', () => {
+            wizard.formData.registration_method = 'pin';
+            wizard.formData.scm_credential_id = '1';
+
+            expect(wizard.validateStep2()).toBe(true);
         });
     });
 
-    describe('updateConfirmation', () => {
-        test('displays OTP confirmation correctly', () => {
+    describe('goToStep', () => {
+        test('updates currentStep', () => {
+            wizard.goToStep(2);
+            expect(wizard.currentStep).toBe(2);
+        });
+
+        test('activates correct panel', () => {
+            wizard.goToStep(2);
+
+            expect(document.getElementById('step-2').classList.contains('active')).toBe(true);
+            expect(document.getElementById('step-1').classList.contains('active')).toBe(false);
+        });
+    });
+
+    describe('updateSummary', () => {
+        test('displays OTP summary correctly', () => {
             wizard.formData.name = 'Test NGFW';
-            wizard.formData.deploymentProfileName = 'Test Profile';
-            wizard.formData.registrationMethod = 'otp';
-            wizard.formData.otpFolder = 'My Folder';
-            wizard.formData.slsRegion = 'americas';
+            wizard.formData.deployment_profile_name = 'Test Profile';
+            wizard.formData.registration_method = 'otp';
+            wizard.formData.otp_folder = 'My Folder';
+            wizard.formData.sls_region = 'americas';
 
-            wizard.updateConfirmation();
+            wizard.updateSummary();
 
-            expect(document.getElementById('confirm-name').textContent).toBe('Test NGFW');
-            expect(document.getElementById('confirm-profile').textContent).toBe('Test Profile');
-            expect(document.getElementById('confirm-registration').textContent).toBe('One-Time Password');
-            expect(document.getElementById('confirm-folder').textContent).toBe('My Folder');
-            expect(document.getElementById('confirm-sls').textContent).toBe('Americas');
+            expect(document.getElementById('summary-name').textContent).toBe('Test NGFW');
+            expect(document.getElementById('summary-profile').textContent).toBe('Test Profile');
+            expect(document.getElementById('summary-method').textContent).toBe('One-Time Password');
+            expect(document.getElementById('summary-folder').textContent).toBe('My Folder');
+            expect(document.getElementById('summary-region').textContent).toBe('Americas');
         });
 
-        test('displays PIN confirmation correctly', () => {
+        test('displays PIN summary correctly', () => {
             wizard.formData.name = 'Test NGFW';
-            wizard.formData.deploymentProfileName = 'Test Profile';
-            wizard.formData.registrationMethod = 'pin';
-            wizard.formData.scmCredentialName = 'My SCM Cred';
-            wizard.formData.slsRegion = 'europe';
+            wizard.formData.deployment_profile_name = 'Test Profile';
+            wizard.formData.registration_method = 'pin';
+            wizard.formData.scm_credential_name = 'My SCM Cred';
+            wizard.formData.sls_region = 'europe';
 
-            wizard.updateConfirmation();
+            wizard.updateSummary();
 
-            expect(document.getElementById('confirm-registration').textContent).toBe('Auto-Registration PIN');
-            expect(document.getElementById('confirm-folder').textContent).toBe('My SCM Cred');
-            expect(document.getElementById('confirm-sls').textContent).toBe('Europe');
+            expect(document.getElementById('summary-method').textContent).toBe('Stored PIN');
+            expect(document.getElementById('summary-credential').textContent).toBe('My SCM Cred');
+            expect(document.getElementById('summary-region').textContent).toBe('Europe');
+        });
+
+        test('shows credential row for PIN method', () => {
+            wizard.formData.registration_method = 'pin';
+            wizard.updateSummary();
+
+            expect(document.getElementById('summary-credential-row').style.display).toBe('');
+            expect(document.getElementById('summary-folder-row').style.display).toBe('none');
+        });
+
+        test('shows folder row for OTP method', () => {
+            wizard.formData.registration_method = 'otp';
+            wizard.updateSummary();
+
+            expect(document.getElementById('summary-credential-row').style.display).toBe('none');
+            expect(document.getElementById('summary-folder-row').style.display).toBe('');
         });
     });
 
-    describe('WebSocket methods', () => {
+    describe('WebSocket', () => {
         let mockWebSocket;
 
         beforeEach(() => {
@@ -193,44 +247,55 @@ describe('NGFWWizardManager', () => {
         });
 
         test('connectWebSocket creates WebSocket with correct URL', () => {
-            wizard.connectWebSocket(42);
+            wizard.ngfwId = 42;
+            wizard.connectWebSocket();
 
-            expect(global.WebSocket).toHaveBeenCalledWith('ws://localhost/ws/ngfw/');
-            expect(wizard.ngfwId).toBe(42);
+            expect(global.WebSocket).toHaveBeenCalledWith('ws://localhost/ws/ngfw-status/42/');
         });
 
-        test('handleStatusUpdate updates progress bar', () => {
-            wizard.handleStatusUpdate({ progress: 50 });
+        test('WebSocket onmessage shows success on ready status', () => {
+            wizard.ngfwId = 42;
+            wizard.connectWebSocket();
 
-            expect(document.getElementById('progress-fill').style.width).toBe('50%');
-        });
+            // Simulate ready message
+            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'ready' }) });
 
-        test('handleStatusUpdate updates status text', () => {
-            wizard.handleStatusUpdate({ status: 'Creating EC2...' });
-
-            expect(document.getElementById('progress-status').textContent).toBe('Creating EC2...');
-        });
-
-        test('handleStatusUpdate updates serial number', () => {
-            wizard.handleStatusUpdate({ serial_number: '007958001234' });
-
-            expect(document.getElementById('ngfw-serial').textContent).toBe('007958001234');
-            expect(document.getElementById('serial-in-steps').textContent).toBe('007958001234');
-        });
-
-        test('handleStatusUpdate closes WebSocket on complete', () => {
-            wizard.ws = mockWebSocket;
-            wizard.handleStatusUpdate({ step: 'complete' });
-
+            expect(document.getElementById('success-state').style.display).toBe('block');
+            expect(document.getElementById('provisioning-progress').style.display).toBe('none');
             expect(mockWebSocket.close).toHaveBeenCalled();
         });
 
-        test('disconnectWebSocket closes and nulls connection', () => {
-            wizard.ws = mockWebSocket;
-            wizard.disconnectWebSocket();
+        test('WebSocket onmessage shows success on active status', () => {
+            wizard.ngfwId = 42;
+            wizard.connectWebSocket();
 
-            expect(mockWebSocket.close).toHaveBeenCalled();
-            expect(wizard.ws).toBeNull();
+            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'active' }) });
+
+            expect(document.getElementById('success-state').style.display).toBe('block');
+        });
+
+        test('WebSocket onmessage alerts on failed status', () => {
+            wizard.ngfwId = 42;
+            wizard.connectWebSocket();
+
+            // Note: JSDOM doesn't support navigation, so we only test the alert
+            // The actual redirect to detailUrlTemplate happens but throws in JSDOM
+            try {
+                mockWebSocket.onmessage({ data: JSON.stringify({ status: 'failed', error: 'Test error' }) });
+            } catch {
+                // JSDOM navigation error expected
+            }
+
+            expect(global.alert).toHaveBeenCalledWith('Provisioning failed: Test error');
+        });
+    });
+
+    describe('showSuccess', () => {
+        test('hides progress and shows success state', () => {
+            wizard.showSuccess();
+
+            expect(document.getElementById('provisioning-progress').style.display).toBe('none');
+            expect(document.getElementById('success-state').style.display).toBe('block');
         });
     });
 });

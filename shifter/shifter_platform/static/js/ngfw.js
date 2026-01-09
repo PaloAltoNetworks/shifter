@@ -25,7 +25,7 @@ class NGFWWizardManager {
         };
 
         this.ngfwId = null;
-        this.pollInterval = null;
+        this.ws = null;
     }
 
     init() {
@@ -282,12 +282,12 @@ class NGFWWizardManager {
                 return;
             }
 
-            // Start polling for status
+            // Connect WebSocket for status updates
             this.ngfwId = data.id;
             if (this.elements.viewNgfwBtn) {
                 this.elements.viewNgfwBtn.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
             }
-            this.pollStatus();
+            this.connectWebSocket();
 
         } catch (err) {
             console.error('Provisioning error:', err);
@@ -296,44 +296,45 @@ class NGFWWizardManager {
         }
     }
 
-    pollStatus() {
-        const statusUrl = this.statusUrlTemplate.replace('{id}', this.ngfwId);
+    connectWebSocket() {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/ngfw-status/${this.ngfwId}/`;
 
-        const check = async () => {
+        console.log('Connecting to WebSocket:', wsUrl);
+        this.ws = new WebSocket(wsUrl);
+
+        this.ws.onopen = () => {
+            console.log('NGFW status WebSocket connected');
+        };
+
+        this.ws.onmessage = (event) => {
             try {
-                const response = await fetch(statusUrl, {
-                    headers: {
-                        'X-CSRFToken': this.csrfToken
-                    }
-                });
-
-                const data = await response.json();
+                const data = JSON.parse(event.data);
+                console.log('NGFW status update:', data);
 
                 if (data.status === 'ready' || data.status === 'active') {
                     this.showSuccess();
+                    this.ws.close();
                 } else if (data.status === 'failed') {
-                    alert('Provisioning failed. Please check the NGFW details for more information.');
+                    alert('Provisioning failed: ' + (data.error || 'Unknown error'));
                     window.location.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
-                } else {
-                    // Still provisioning, check again
-                    this.pollInterval = setTimeout(check, 5000);
                 }
+                // For other statuses (pending, provisioning), just wait for next message
             } catch (err) {
-                console.error('Status poll error:', err);
-                // Retry on error
-                this.pollInterval = setTimeout(check, 5000);
+                console.error('Error parsing WebSocket message:', err);
             }
         };
 
-        check();
+        this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        this.ws.onclose = (event) => {
+            console.log('WebSocket closed:', event.code, event.reason);
+        };
     }
 
     showSuccess() {
-        if (this.pollInterval) {
-            clearTimeout(this.pollInterval);
-            this.pollInterval = null;
-        }
-
         if (this.elements.provisioningProgress) {
             this.elements.provisioningProgress.style.display = 'none';
         }

@@ -215,3 +215,12 @@ output "pulumi_ecs_task_role_arn" {
   description = "ARN of the ECS task role"
   value       = module.pulumi_provisioner.ecs_task_role_arn
 }
+
+# ------------------------------------------------------------------------------
+# Guacamole
+# ------------------------------------------------------------------------------
+
+output "guacamole_target_group_arn" {
+  description = "ARN of the Guacamole target group"
+  value       = module.guacamole.target_group_arn
+}

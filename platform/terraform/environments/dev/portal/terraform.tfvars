@@ -124,6 +124,38 @@ dc_domain_name = "internal.shifter"
 dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
 
 # ------------------------------------------------------------------------------
+# Guacamole
+# ------------------------------------------------------------------------------
+
+guacd_image_tag                = "1.5.5"
+guacamole_client_image_tag     = "1.5.5"
+guacd_cpu                      = 512
+guacd_memory                   = 1024
+guacamole_client_cpu           = 512
+guacamole_client_memory        = 1024
+guacd_desired_count            = 1
+guacamole_client_desired_count = 1
+
+# Database
+guacamole_db_instance_class        = "db.t3.small"
+guacamole_db_allocated_storage     = 20
+guacamole_db_max_allocated_storage = 50
+guacamole_db_engine_version        = "16"
+guacamole_db_multi_az              = false
+guacamole_db_backup_retention_days = 7
+guacamole_db_deletion_protection   = false
+guacamole_db_skip_final_snapshot   = true
+
+# Autoscaling (disabled for initial testing)
+guacamole_enable_autoscaling       = false
+guacamole_autoscaling_min_capacity = 1
+guacamole_autoscaling_max_capacity = 4
+guacamole_autoscaling_cpu_target   = 70
+
+# Secrets
+guacamole_secrets_recovery_window_days = 0
+
+# ------------------------------------------------------------------------------
 # CI Testing (not used by Terraform, extracted by quality.yml workflow)
 # ------------------------------------------------------------------------------
 

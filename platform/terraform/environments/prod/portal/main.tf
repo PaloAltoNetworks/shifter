@@ -526,3 +526,72 @@ module "log_aggregation" {
 
   tags = var.tags
 }
+
+# ------------------------------------------------------------------------------
+# Bedrock Model Invocation Logging
+# Captures invocation details including errors for debugging
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "bedrock" {
+  count = var.enable_bedrock_logging ? 1 : 0
+
+  name              = "/aws/bedrock/${local.name_prefix}-invocations"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-bedrock-invocations"
+  })
+}
+
+resource "aws_iam_role" "bedrock_logging" {
+  count = var.enable_bedrock_logging ? 1 : 0
+
+  name = "${local.name_prefix}-bedrock-logging"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "bedrock.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "bedrock_logging" {
+  count = var.enable_bedrock_logging ? 1 : 0
+
+  name = "cloudwatch-logs"
+  role = aws_iam_role.bedrock_logging[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ]
+      Resource = "${aws_cloudwatch_log_group.bedrock[0].arn}:*"
+    }]
+  })
+}
+
+resource "aws_bedrock_model_invocation_logging_configuration" "this" {
+  count = var.enable_bedrock_logging ? 1 : 0
+
+  logging_config {
+    embedding_data_delivery_enabled = false
+    image_data_delivery_enabled     = false
+    text_data_delivery_enabled      = true
+
+    cloudwatch_config {
+      log_group_name = aws_cloudwatch_log_group.bedrock[0].name
+      role_arn       = aws_iam_role.bedrock_logging[0].arn
+    }
+  }
+}

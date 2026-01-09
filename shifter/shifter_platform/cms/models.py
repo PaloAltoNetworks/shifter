@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from shared.enums import RequestType, ResourceStatus, TERMINAL_STATUSES
+from shared.enums import TERMINAL_STATUSES, RequestType, ResourceStatus
 
 # CredentialBase is defined locally below (migrated from mission_control)
 
@@ -110,11 +110,6 @@ class EntityBase(models.Model):
     class Meta:
         abstract = True
 
-    @property
-    def is_deleted(self):
-        """Return True if this entity has been soft-deleted."""
-        return self.deleted_at is not None
-
     def save(self, *args, **kwargs):
         """Save with terminal status invariant enforcement.
 
@@ -129,11 +124,16 @@ class EntityBase(models.Model):
                 # If update_fields specified, ensure deleted_at is included
                 update_fields = kwargs.get("update_fields")
                 if update_fields is not None and "deleted_at" not in update_fields:
-                    kwargs["update_fields"] = list(update_fields) + ["deleted_at"]
+                    kwargs["update_fields"] = [*list(update_fields), "deleted_at"]
         except ValueError:
             pass  # Invalid status, let save proceed and fail validation elsewhere
 
         super().save(*args, **kwargs)
+
+    @property
+    def is_deleted(self):
+        """Return True if this entity has been soft-deleted."""
+        return self.deleted_at is not None
 
 
 class Asset(models.Model):
@@ -257,9 +257,7 @@ class OperatingSystem(models.Model):
 
     slug = models.SlugField(max_length=50, unique=True)
     name = models.CharField(max_length=100)
-    extensions = models.JSONField(
-        default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])"
-    )
+    extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
 
     class Meta:
         ordering = ["name"]
@@ -628,40 +626,6 @@ class Request(models.Model):
 # -----------------------------------------------------------------------------
 # Range Instance Tracking
 # -----------------------------------------------------------------------------
-
-
-class NGFW(Asset):
-    """NGFW configuration owned by a user.
-
-    CMS owns the logical NGFW asset - what the user asked for.
-    Engine owns the infrastructure state - AWS resources, IPs, etc.
-
-    Status is synced from Engine via pub/sub events (like RangeInstance).
-    ngfw_spec stores the hydrated configuration sent to Engine.
-
-    Note: Uses legacy table name for migration compatibility.
-    """
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="ngfws",
-    )
-    request = models.ForeignKey(
-        Request,
-        on_delete=models.CASCADE,
-        related_name="ngfws",
-        null=True,
-        blank=True,
-    )
-    # Hydrated configuration sent to Engine (credentials, registration method, etc.)
-    ngfw_spec = models.JSONField(null=True, blank=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "NGFW"
-        verbose_name_plural = "NGFWs"
-        db_table = "mission_control_userngfw"  # Keep for migration compatibility
 
 
 class ActiveRangeInstanceManager(models.Manager):

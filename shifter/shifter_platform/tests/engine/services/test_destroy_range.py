@@ -141,9 +141,7 @@ class TestDestroyRange:
             destroy_range(range_ctx)
 
             assert mock_range.step_function_execution_arn == task_arn
-            mock_range.save.assert_any_call(
-                update_fields=["step_function_execution_arn"]
-            )
+            mock_range.save.assert_any_call(update_fields=["step_function_execution_arn"])
 
     def test_does_not_store_task_arn_when_none(self):
         """Service does not save ARN field when start_teardown returns None."""

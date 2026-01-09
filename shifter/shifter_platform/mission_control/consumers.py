@@ -299,12 +299,12 @@ class NGFWStatusConsumer(AsyncWebsocketConsumer):
     Uses "hydrate on connect, stream deltas" pattern.
     Designed for long provisioning cycles (up to 40 minutes).
 
-    URL pattern: ws/ngfw-status/<ngfw_id>/
+    URL pattern: ws/ngfw-status/<app_id>/
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.ngfw_id: int | None = None
+        self.app_id: str | None = None
         self.group_name: str | None = None
 
     async def connect(self):
@@ -320,17 +320,17 @@ class NGFWStatusConsumer(AsyncWebsocketConsumer):
             await self.close(code=WebSocketCloseCode.NOT_AUTHENTICATED)
             return
 
-        # Get ngfw_id from URL (this is the CMS NGFW ID)
-        self.ngfw_id = int(self.scope["url_route"]["kwargs"]["ngfw_id"])
-        self.group_name = ngfw_event_group(self.ngfw_id)
+        # Get app_id from URL (this is the CMS App UUID)
+        self.app_id = self.scope["url_route"]["kwargs"]["app_id"]
+        self.group_name = ngfw_event_group(self.app_id)
 
         # Verify user owns this NGFW via CMS (handles ownership check)
         try:
-            ngfw = await sync_to_async(cms_get_ngfw)(user, self.ngfw_id)
+            ngfw = await sync_to_async(cms_get_ngfw)(user, self.app_id)
         except CMSError:
             logger.warning(
-                "NGFW %s not found or not owned by user %s",
-                self.ngfw_id,
+                "NGFW app %s not found or not owned by user %s",
+                self.app_id,
                 user.id,
             )
             await self.close(code=WebSocketCloseCode.NOT_FOUND)
@@ -347,13 +347,13 @@ class NGFWStatusConsumer(AsyncWebsocketConsumer):
             text_data=json.dumps(
                 {
                     "type": "status",
-                    "ngfw_id": self.ngfw_id,
+                    "app_id": self.app_id,
                     "status": ngfw.status,
                 }
             )
         )
 
-        logger.info("NGFW status WebSocket connected for NGFW %s", self.ngfw_id)
+        logger.info("NGFW status WebSocket connected for app %s", self.app_id)
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection - leave NGFW group."""
@@ -361,8 +361,8 @@ class NGFWStatusConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
         logger.info(
-            "NGFW status WebSocket disconnected for NGFW %s (code: %s)",
-            self.ngfw_id,
+            "NGFW status WebSocket disconnected for app %s (code: %s)",
+            self.app_id,
             close_code,
         )
 
@@ -375,9 +375,9 @@ class NGFWStatusConsumer(AsyncWebsocketConsumer):
             text_data=json.dumps(
                 {
                     "type": "status",
-                    "ngfw_id": event.get("ngfw_id"),
-                    "status": event.get("new_status"),
-                    "error_message": event.get("error_message"),
+                    "app_id": event.get("app_id"),
+                    "status": event.get("status"),
+                    "state": event.get("state"),
                 }
             )
         )

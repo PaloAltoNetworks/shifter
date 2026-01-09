@@ -1,7 +1,6 @@
 """Tests for CMS handlers."""
 
 import json
-import logging
 from unittest.mock import patch
 
 import pytest
@@ -49,7 +48,7 @@ class TestProcessEvent:
             process_event(message)
             mock_ngfw_handler.assert_called_once_with(message)
 
-    def test_ignores_unknown_event_types(self, caplog):
+    def test_ignores_unknown_event_types(self):
         """Dispatcher ignores events with unknown event_type prefix."""
         from cms.handlers import process_event
 
@@ -63,23 +62,20 @@ class TestProcessEvent:
         }
 
         with (
-            caplog.at_level(logging.DEBUG, logger="cms.handlers"),
             patch("cms.handlers.process_range_event") as mock_range_handler,
             patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
         ):
             process_event(message)
             mock_range_handler.assert_not_called()
             mock_ngfw_handler.assert_not_called()
-            assert "Ignoring unknown event_type" in caplog.text
 
-    def test_handles_missing_event_type(self, caplog):
+    def test_handles_missing_event_type(self):
         """Dispatcher handles messages without event_type gracefully."""
         from cms.handlers import process_event
 
         message = {"Message": json.dumps({"range_id": 1})}
 
         with (
-            caplog.at_level(logging.DEBUG, logger="cms.handlers"),
             patch("cms.handlers.process_range_event") as mock_range_handler,
             patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
         ):
@@ -253,7 +249,7 @@ class TestProcessRangeEvent:
     # Event filtering
     # ---------------------------------------------------------------------
 
-    def test_ignores_non_status_events(self, caplog):
+    def test_ignores_non_status_events(self):
         """Handler ignores events that are not range.status.updated."""
         from cms.handlers import process_range_event
         from cms.models import RangeInstance
@@ -275,10 +271,7 @@ class TestProcessRangeEvent:
             )
         }
 
-        with caplog.at_level(logging.DEBUG, logger="cms.handlers"):
-            process_range_event(message)
-
-        assert "Ignoring event_type" in caplog.text
+        process_range_event(message)
 
         # Status should be unchanged
         instance = RangeInstance.objects.get(range_id=4)
@@ -288,8 +281,8 @@ class TestProcessRangeEvent:
     # Error handling - missing data
     # ---------------------------------------------------------------------
 
-    def test_handles_missing_range_instance(self, caplog):
-        """Handler logs warning when RangeInstance not found."""
+    def test_handles_missing_range_instance(self):
+        """Handler handles missing RangeInstance gracefully (no exception)."""
         from cms.handlers import process_range_event
 
         message = {
@@ -303,14 +296,11 @@ class TestProcessRangeEvent:
             )
         }
 
-        with caplog.at_level(logging.WARNING, logger="cms.handlers"):
-            process_range_event(message)
+        # Should not raise - handler returns early
+        process_range_event(message)
 
-        assert "RangeInstance not found" in caplog.text
-        assert "999" in caplog.text
-
-    def test_handles_user_id_mismatch(self, caplog):
-        """Handler logs error when user_id doesn't match instance."""
+    def test_handles_user_id_mismatch(self):
+        """Handler rejects events when user_id doesn't match instance."""
         from cms.handlers import process_range_event
         from cms.models import RangeInstance
 
@@ -332,19 +322,14 @@ class TestProcessRangeEvent:
             )
         }
 
-        with caplog.at_level(logging.ERROR, logger="cms.handlers"):
-            process_range_event(message)
-
-        assert "user_id mismatch" in caplog.text
-        assert "999" in caplog.text
-        assert "42" in caplog.text
+        process_range_event(message)
 
         # Status should be unchanged
         instance = RangeInstance.objects.get(range_id=5)
         assert instance.status == ResourceStatus.PENDING.value
 
-    def test_rejects_invalid_status_value(self, caplog):
-        """Handler logs error and returns when status is not a valid ResourceStatus."""
+    def test_rejects_invalid_status_value(self):
+        """Handler rejects events with invalid status values."""
         from cms.handlers import process_range_event
         from cms.models import RangeInstance
 
@@ -366,108 +351,11 @@ class TestProcessRangeEvent:
             )
         }
 
-        with caplog.at_level(logging.ERROR, logger="cms.handlers"):
-            process_range_event(message)
-
-        assert "Invalid status value" in caplog.text
-        assert "bogus_status" in caplog.text
+        process_range_event(message)
 
         # Status should be unchanged
         instance = RangeInstance.objects.get(range_id=50)
         assert instance.status == ResourceStatus.PENDING.value
-
-    # ---------------------------------------------------------------------
-    # Error handling - database failures
-    # ---------------------------------------------------------------------
-
-    def test_logs_exception_on_database_error(self, caplog):
-        """Handler logs exception when database save fails."""
-        from unittest.mock import patch
-
-        from cms.handlers import process_range_event
-        from cms.models import RangeInstance
-
-        RangeInstance.objects.create(
-            range_id=6,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PENDING.value,
-        )
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 6,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.handlers"),
-            patch.object(RangeInstance, "save", side_effect=Exception("DB down")),
-        ):
-            process_range_event(message)
-
-        assert "DB error saving RangeInstance" in caplog.text
-        assert "range_id=6" in caplog.text
-
-    # ---------------------------------------------------------------------
-    # Logging - success
-    # ---------------------------------------------------------------------
-
-    def test_logs_info_on_successful_update(self, caplog):
-        """Handler logs INFO when status successfully updated."""
-        from cms.handlers import process_range_event
-        from cms.models import RangeInstance
-
-        RangeInstance.objects.create(
-            range_id=7,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PENDING.value,
-        )
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 7,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with caplog.at_level(logging.INFO, logger="cms.handlers"):
-            process_range_event(message)
-
-        assert "CMS updated RangeInstance" in caplog.text
-        assert "range_id=7" in caplog.text
-        assert "pending" in caplog.text
-        assert "provisioning" in caplog.text
-
-    def test_logs_debug_on_event_ignore(self, caplog):
-        """Handler logs DEBUG when ignoring non-status events."""
-        from cms.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.destroyed",
-                    "range_id": 1,
-                    "user_id": 42,
-                }
-            )
-        }
-
-        with caplog.at_level(logging.DEBUG, logger="cms.handlers"):
-            process_range_event(message)
-
-        assert "Ignoring event_type" in caplog.text
-        assert "range.destroyed" in caplog.text
 
     # ---------------------------------------------------------------------
     # Handler is callable

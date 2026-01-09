@@ -222,9 +222,7 @@ class TestLaunchRange:
             orig_subnets = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
 
             settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
-            settings.PULUMI_TASK_DEFINITION_ARN = (
-                "arn:aws:ecs:us-east-2:123:task-definition/test:1"
-            )
+            settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
             settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
             settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-abc123"
 
@@ -279,9 +277,7 @@ class TestLaunchRange:
         assert response.status_code == 400
         assert "already have an active range" in response.json()["error"]
 
-    def test_ad_scenario_rejects_linux_agent(
-        self, client, test_agent, linux_os, settings
-    ):
+    def test_ad_scenario_rejects_linux_agent(self, client, test_agent, linux_os, settings):
         """AD scenario requires Windows agent (used for both DC and victim)."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
@@ -330,9 +326,7 @@ class TestLaunchRange:
         assert data["range"]["status"] == "provisioning"
         assert data["range"]["scenario_id"] == "ad_attack_lab"
 
-    def test_basic_scenario_allows_any_agent(
-        self, client, test_agent, linux_os, settings
-    ):
+    def test_basic_scenario_allows_any_agent(self, client, test_agent, linux_os, settings):
         """Basic scenario works with any agent OS."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
@@ -458,9 +452,7 @@ class TestCancelRange:
         assert ri.status == "destroyed"
         assert ri.deleted_at is not None  # Terminal status invariant
 
-    def test_cannot_cancel_other_users_range(
-        self, client, test_agent, django_user_model
-    ):
+    def test_cannot_cancel_other_users_range(self, client, test_agent, django_user_model):
         """Users cannot cancel ranges they don't own."""
         from cms.models import RangeInstance
 
@@ -748,9 +740,7 @@ class TestSubnetIndexAllocation:
         with pytest.raises(ValueError, match="No subnet indices available"):
             Range.allocate_subnet_index()
 
-    def test_capacity_error_raises_value_error(
-        self, client, test_agent, settings, django_user_model
-    ):
+    def test_capacity_error_raises_value_error(self, client, test_agent, settings, django_user_model):
         """API raises ValueError when subnet allocation fails (no capacity).
 
         Note: This currently raises an uncaught ValueError because the error

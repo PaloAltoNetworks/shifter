@@ -248,9 +248,7 @@ class TestGetResourceStatus:
         from engine.models import Range
 
         with (
-            patch.object(
-                Range.objects, "get", side_effect=RuntimeError("DB connection failed")
-            ),
+            patch.object(Range.objects, "get", side_effect=RuntimeError("DB connection failed")),
             pytest.raises(RuntimeError),
         ):
             get_range_status(42)
@@ -309,9 +307,7 @@ class TestGetResourceStatus:
         from engine.models import Range
 
         with (
-            patch.object(
-                Range.objects, "get", side_effect=ValueError("invalid literal")
-            ),
+            patch.object(Range.objects, "get", side_effect=ValueError("invalid literal")),
             pytest.raises(ValueError),
         ):
             get_range_status("not-an-id")
@@ -384,9 +380,7 @@ class TestCreateRange:
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(
-                Range.objects, "create", return_value=mock_range
-            ) as mock_create,
+            patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
         ):
@@ -409,9 +403,7 @@ class TestCreateRange:
         with (
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch.object(
-                Range, "allocate_subnet_index", return_value=5
-            ) as mock_allocate,
+            patch.object(Range, "allocate_subnet_index", return_value=5) as mock_allocate,
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
         ):
             create_range(valid_range_spec)
@@ -432,9 +424,7 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch(
-                "engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"
-            ) as mock_start,
+            patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test") as mock_start,
         ):
             create_range(valid_range_spec)
             mock_start.assert_called_once_with(42, 1)
@@ -550,9 +540,7 @@ class TestCreateRange:
         with (
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(
-                Range.objects, "create", side_effect=DatabaseError("DB error")
-            ),
+            patch.object(Range.objects, "create", side_effect=DatabaseError("DB error")),
             pytest.raises(DatabaseError),
         ):
             create_range(valid_range_spec)
@@ -683,9 +671,7 @@ class TestDestroyRange:
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range),
-            patch(
-                "engine.ecs.start_teardown", return_value="arn:aws:ecs:test"
-            ) as mock_teardown,
+            patch("engine.ecs.start_teardown", return_value="arn:aws:ecs:test") as mock_teardown,
         ):
             destroy_range(range_context)
             mock_teardown.assert_called_once_with(42, 1)
@@ -953,9 +939,7 @@ class TestCancelRange:
             assert result is None
         assert "not found" in caplog.text.lower()
 
-    def test_returns_silently_when_range_not_cancellable(
-        self, ready_range_context, caplog
-    ):
+    def test_returns_silently_when_range_not_cancellable(self, ready_range_context, caplog):
         """Service returns silently and logs warning when range is not cancellable."""
         from engine import cancel_range
         from engine.models import Range

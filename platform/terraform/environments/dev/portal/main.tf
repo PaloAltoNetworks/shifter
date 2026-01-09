@@ -449,6 +449,13 @@ module "guacamole" {
 
   # Secrets
   secrets_recovery_window_days = var.guacamole_secrets_recovery_window_days
+
+  # OIDC/Cognito authentication
+  enable_oidc          = var.guacamole_enable_oidc
+  cognito_user_pool_id = module.cognito.user_pool_id
+  cognito_domain       = module.cognito.cognito_domain
+  aws_region           = var.aws_region
+  domain_name          = var.domain_name
 }
 
 # ------------------------------------------------------------------------------

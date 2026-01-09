@@ -154,6 +154,9 @@ guacamole_autoscaling_cpu_target   = 70
 # Secrets
 guacamole_secrets_recovery_window_days = 7
 
+# OIDC/Cognito authentication
+guacamole_enable_oidc = true
+
 # ------------------------------------------------------------------------------
 # CI Testing (not used by Terraform, extracted by quality.yml workflow)
 # ------------------------------------------------------------------------------

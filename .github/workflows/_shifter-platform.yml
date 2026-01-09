@@ -91,21 +91,24 @@ jobs:
             docker push ${ECR_REGISTRY}/${GUACD_REPO}:${GUACAMOLE_VERSION}
             docker push ${ECR_REGISTRY}/${GUACD_REPO}:latest
           fi
-      - name: Push guacamole-client image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push guacamole-client image (with OIDC extension)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./shifter/engine/guacamole
+          push: true
+          build-args: |
+            GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:latest
+          cache-from: type=local,src=/tmp/.buildx-cache-guacamole
+          cache-to: type=local,dest=/tmp/.buildx-cache-guacamole-new,mode=max
+      - name: Move cache
         run: |
-          # Check if image already exists
-          if aws ecr describe-images --repository-name "$GUACAMOLE_CLIENT_REPO" --image-ids imageTag="${GUACAMOLE_VERSION}" 2>/dev/null; then
-            echo "Image $GUACAMOLE_CLIENT_REPO:$GUACAMOLE_VERSION already exists, skipping"
-          else
-            echo "Pulling and pushing guacamole:$GUACAMOLE_VERSION"
-            docker pull guacamole/guacamole:${GUACAMOLE_VERSION}
-            docker tag guacamole/guacamole:${GUACAMOLE_VERSION} ${ECR_REGISTRY}/${GUACAMOLE_CLIENT_REPO}:${GUACAMOLE_VERSION}
-            docker tag guacamole/guacamole:${GUACAMOLE_VERSION} ${ECR_REGISTRY}/${GUACAMOLE_CLIENT_REPO}:latest
-            docker push ${ECR_REGISTRY}/${GUACAMOLE_CLIENT_REPO}:${GUACAMOLE_VERSION}
-            docker push ${ECR_REGISTRY}/${GUACAMOLE_CLIENT_REPO}:latest
-          fi
+          rm -rf /tmp/.buildx-cache-guacamole
+          mv /tmp/.buildx-cache-guacamole-new /tmp/.buildx-cache-guacamole || true
 
   apply:
     name: Apply (${{ inputs.environment }})

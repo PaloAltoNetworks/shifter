@@ -10,7 +10,7 @@ import logging
 
 from django.utils import timezone
 
-from engine.models import App, Instance, Range
+from engine.models import Range
 from shared.enums import ResourceStatus
 from shared.messages.events import (
     EVENT_TYPE_NGFW,
@@ -248,16 +248,14 @@ def _handle_provisioned(event: dict) -> None:
 
 
 def process_ngfw_event(message: str | dict) -> None:
-    """Process unified NGFW event from SNS/SQS.
+    """Process NGFW lifecycle notification from SNS/SQS.
 
-    Updates both Instance and App models based on the event:
-    - Looks up Instance by instance_id (UUID)
-    - Looks up App by app_id (UUID)
-    - Updates status on both if provided
-    - Merges event state into Instance.state
+    This is a notification-only handler. All state updates are performed
+    directly by the provisioner - this handler just logs receipt for
+    audit/debugging purposes.
 
     Args:
-        message: SNS-wrapped message containing NGFW event data.
+        message: SNS-wrapped message containing NGFW event notification.
 
     Returns:
         None. Errors are logged and handled gracefully.
@@ -272,120 +270,29 @@ def process_ngfw_event(message: str | dict) -> None:
     _handle_ngfw_event(event)
 
 
-def _get_ngfw_models(instance_id: str, app_id: str, event_id: str) -> tuple[Instance, App] | None:
-    """Look up Instance and App by UUID, logging warnings if not found."""
-    try:
-        instance = Instance.objects.get(uuid=instance_id)
-    except Instance.DoesNotExist:
-        logger.warning("Instance not found: instance_id=%s event_id=%s", instance_id, event_id)
-        return None
-
-    try:
-        app = App.objects.get(uuid=app_id)
-    except App.DoesNotExist:
-        logger.warning("App not found: app_id=%s event_id=%s", app_id, event_id)
-        return None
-
-    return instance, app
-
-
 def _handle_ngfw_event(event: dict) -> None:
-    """Handle unified ngfw.event - update Instance and App.
+    """Handle NGFW event notification - log only, no DB updates.
+
+    The provisioner writes all state directly to the database.
+    This handler serves as:
+    - Audit trail for NGFW lifecycle events
+    - Notification consumer for other services (MC, CMS)
 
     Args:
-        event: Event payload with request_id, instance_id, app_id, status, state.
+        event: Event payload with request_id, instance_id, app_id, status.
     """
     event_id = event.get("event_id", "unknown")
+    request_id = event.get("request_id")
     instance_id = event.get("instance_id")
     app_id = event.get("app_id")
     status = event.get("status")
-    state = event.get("state")
 
-    # Validate required fields
-    if not instance_id or not app_id:
-        logger.warning(
-            "NGFW event missing required fields: instance_id=%s app_id=%s event_id=%s",
-            instance_id,
-            app_id,
-            event_id,
-        )
-        return
-
-    # Look up models
-    models = _get_ngfw_models(instance_id, app_id, event_id)
-    if not models:
-        return
-    instance, app = models
-
-    previous_instance_status = instance.status
-    previous_app_status = app.status
-
-    # Update Instance
-    instance_update_fields = _update_ngfw_instance(instance, status, state)
-    if instance_update_fields:
-        try:
-            instance.save(update_fields=instance_update_fields)
-        except Exception:
-            logger.exception(
-                "DB error saving Instance: instance_id=%s event_id=%s",
-                instance_id,
-                event_id,
-            )
-            return
-
-    # Update App
-    app_update_fields = _update_ngfw_app(app, status)
-    if app_update_fields:
-        try:
-            app.save(update_fields=app_update_fields)
-        except Exception:
-            logger.exception("DB error saving App: app_id=%s event_id=%s", app_id, event_id)
-            return
-
+    # Log the event for audit purposes
     logger.info(
-        "Engine processed NGFW event: instance_id=%s (%s->%s) app_id=%s (%s->%s) state_keys=%s event_id=%s",
+        "Engine received NGFW event: request_id=%s instance_id=%s app_id=%s status=%s event_id=%s",
+        request_id,
         instance_id,
-        previous_instance_status,
-        status or previous_instance_status,
         app_id,
-        previous_app_status,
-        status or previous_app_status,
-        list(state.keys()) if state else [],
+        status,
         event_id,
     )
-
-
-def _update_ngfw_instance(instance: Instance, status: str | None, state: dict | None) -> list[str]:
-    """Update Instance fields and return list of fields to save."""
-    update_fields = []
-
-    if status:
-        instance.status = status
-        update_fields.append("status")
-
-        if status == ResourceStatus.DESTROYED.value:
-            instance.destroyed_at = timezone.now()
-            update_fields.append("destroyed_at")
-
-    if state:
-        current_state = instance.state or {}
-        current_state.update(state)
-        instance.state = current_state
-        update_fields.append("state")
-
-    return update_fields
-
-
-def _update_ngfw_app(app: App, status: str | None) -> list[str]:
-    """Update App fields and return list of fields to save."""
-    update_fields = []
-
-    if status:
-        app.status = status
-        update_fields.append("status")
-
-        if status == ResourceStatus.DESTROYED.value:
-            app.destroyed_at = timezone.now()
-            update_fields.append("destroyed_at")
-
-    return update_fields

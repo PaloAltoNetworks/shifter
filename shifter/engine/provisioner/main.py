@@ -147,26 +147,28 @@ def get_ngfw_data_by_request_id(request_id: str) -> dict:
 
 
 def update_instance_state(request_id: str, status: str, **state_updates) -> None:
-    """Update NGFW Instance status and state in Engine database.
+    """Update NGFW Instance and App status/state in Engine database.
 
-    Updates the engine_instance record for the NGFW instance associated
-    with the given request_id.
+    Updates both the engine_instance and engine_app records for the NGFW
+    associated with the given request_id. This is the single source of truth
+    for state - events are lightweight notifications only.
 
     Args:
         request_id: UUID string of the Request.
-        status: New status value (e.g., 'provisioning', 'ready', 'failed').
+        status: New status value (e.g., 'provisioning', 'ready', 'failed', 'destroyed').
         **state_updates: Key-value pairs to merge into Instance.state JSON.
             Common keys: ec2_instance_id, management_ip, dataplane_ip,
             service_name, gwlb_arn, target_group_arn, pulumi_stack, error_message.
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # First get the instance id and current state
+            # Get instance id, app id, and current state
             cur.execute(
                 """
-                SELECT i.id, i.state
+                SELECT i.id, i.state, a.id
                 FROM engine_request r
                 JOIN engine_instance i ON i.request_id = r.id
+                LEFT JOIN engine_app a ON a.instance_id = i.id
                 WHERE r.request_id = %s
                   AND i.role = 'ngfw'
                 """,
@@ -178,20 +180,53 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
 
             instance_id = row[0]
             current_state = row[1] if row[1] else {}
+            app_id = row[2]
 
             # Merge state updates into current state
             if state_updates:
                 current_state.update(state_updates)
 
-            # Update instance with new status and merged state
-            cur.execute(
-                """
-                UPDATE engine_instance
-                SET status = %s, state = %s, updated_at = NOW()
-                WHERE id = %s
-                """,
-                (status, json.dumps(current_state), instance_id),
-            )
+            # Update Instance with new status and merged state
+            if status == STATUS_DESTROYED:
+                cur.execute(
+                    """
+                    UPDATE engine_instance
+                    SET status = %s, state = %s, updated_at = NOW(), destroyed_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (status, json.dumps(current_state), instance_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE engine_instance
+                    SET status = %s, state = %s, updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (status, json.dumps(current_state), instance_id),
+                )
+
+            # Update App status (if app exists)
+            if app_id:
+                if status == STATUS_DESTROYED:
+                    cur.execute(
+                        """
+                        UPDATE engine_app
+                        SET status = %s, updated_at = NOW(), destroyed_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (status, app_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE engine_app
+                        SET status = %s, updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (status, app_id),
+                    )
+
         conn.commit()
 
 
@@ -579,7 +614,6 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
             instance_id=instance_id,
             app_id=app_id,
             status=STATUS_FAILED,
-            state={"error_message": error_msg},
         )
         raise
 
@@ -730,6 +764,38 @@ def _run_ngfw_provision(
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
 
+    # Run GWLB setup (register target, wait for healthy)
+    # This uses AWSExecutor directly since GWLBSetupPlan expects AWS API calls
+    logger.info("Running GWLB target registration...")
+    from plans.gwlb_setup import GWLBSetupPlan
+
+    aws_executor = AWSExecutor()
+    gwlb_plan = GWLBSetupPlan()
+
+    # Build context for GWLB setup - needs target_group_arn and instance_id (EC2)
+    ec2_instance_id = output_data.get("instance_id")
+    target_group_arn = output_data.get("target_group_arn")
+
+    if not target_group_arn:
+        raise RuntimeError("NGFW stack missing target_group_arn output")
+    if not ec2_instance_id:
+        raise RuntimeError("NGFW stack missing instance_id output")
+
+    # Execute GWLB setup steps directly via AWSExecutor
+    gwlb_context = {
+        "target_group_arn": target_group_arn,
+        "target_id": ec2_instance_id,
+    }
+
+    for step in gwlb_plan.steps:
+        step_params = {k: gwlb_context[k] for k in step.params}
+        logger.info(f"Executing GWLB step: {step.name}")
+        method = getattr(aws_executor, step.action)
+        step_result = method(**step_params)
+        if not step_result.success:
+            raise RuntimeError(f"GWLB setup step '{step.name}' failed: {step_result.stderr}")
+        logger.info(f"GWLB step '{step.name}' completed successfully")
+
     # Build state dict with all outputs
     state = {
         "ec2_instance_id": output_data.get("instance_id"),
@@ -745,13 +811,13 @@ def _run_ngfw_provision(
     # Update local DB with provisioned resources
     update_instance_state(request_id, STATUS_READY, **state)
 
-    # Emit ready event with resource details for CMS/Engine handlers
+    # Emit ready event notification for CMS/Engine handlers
+    # Note: Full state is already in DB - this is just a notification
     publish_ngfw_event(
         request_id=request_id,
         instance_id=instance_id,
         app_id=app_id,
         status=STATUS_READY,
-        state=state,
     )
 
 

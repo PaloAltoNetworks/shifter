@@ -114,6 +114,9 @@ resource "aws_ecs_task_definition" "guacamole_client" {
       { name = "POSTGRESQL_HOSTNAME", value = aws_db_instance.guacamole.address },
       { name = "POSTGRESQL_PORT", value = tostring(aws_db_instance.guacamole.port) },
       { name = "POSTGRESQL_DATABASE", value = "guacamole" },
+
+      # Auto-create schema and default admin on first startup
+      { name = "POSTGRESQL_AUTO_CREATE_ACCOUNTS", value = "true" },
     ]
 
     secrets = [

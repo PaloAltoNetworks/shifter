@@ -273,6 +273,18 @@ variable "ngfw_instance_type" {
   default     = "m5.xlarge"
 }
 
+variable "ngfw_subnet_id" {
+  description = "Subnet ID for VM-Series NGFW instances"
+  type        = string
+  default     = ""
+}
+
+variable "ngfw_instance_profile_name" {
+  description = "IAM instance profile name for VM-Series NGFW instances (for S3 bootstrap access)"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # Alarms Configuration
 # ------------------------------------------------------------------------------

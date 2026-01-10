@@ -98,6 +98,63 @@
     color: var(--xdr-text-muted);
 }
 
+/* RDP Action Button */
+.pane-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    color: var(--xdr-text-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-left: auto;
+}
+
+.pane-action-btn:hover {
+    background: var(--xdr-surface);
+    color: var(--xdr-primary);
+    border-color: var(--xdr-primary);
+}
+
+.pane-action-btn:active {
+    background: rgb(var(--xdr-primary-rgb, 0, 150, 199), 0.1);
+}
+
+.pane-action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pane-action-btn.loading {
+    position: relative;
+}
+
+.pane-action-btn.loading::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border: 2px solid transparent;
+    border-top-color: currentcolor;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    right: 4px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Adjust pane-status when RDP button present */
+.pane-header .pane-action-btn + .pane-status {
+    margin-left: 0.5rem;
+}
+
 .status-indicator {
     width: 6px;
     height: 6px;

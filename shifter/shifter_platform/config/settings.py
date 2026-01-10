@@ -305,6 +305,15 @@ AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 
 # ------------------------------------------------------------------------------
+# Guacamole RDP Integration
+# ------------------------------------------------------------------------------
+# JSON auth secret key for signing RDP session URLs
+# Must match the JSON_SECRET_KEY configured in Guacamole's ECS task definition
+# This is a 32-character hex string (128-bit key) stored in Secrets Manager
+GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
+GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
+
+# ------------------------------------------------------------------------------
 # Django REST Framework Configuration
 # ------------------------------------------------------------------------------
 

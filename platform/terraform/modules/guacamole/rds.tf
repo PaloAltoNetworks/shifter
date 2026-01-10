@@ -53,6 +53,36 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
 }
 
 # ------------------------------------------------------------------------------
+# Secrets Manager - JSON Auth Secret Key
+# ------------------------------------------------------------------------------
+# This secret is used for signing JSON authentication payloads that enable
+# on-the-fly RDP connections from Portal to range instances.
+#
+# IMPORTANT: Guacamole JSON auth requires a 128-bit (16-byte) key encoded as
+# a 32-character hex string. Using random_id ensures proper hex output
+# (random_password generates alphanumeric which includes non-hex chars g-z).
+
+resource "random_id" "json_auth_secret" {
+  byte_length = 16 # 16 bytes = 128 bits = 32 hex characters
+}
+
+# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal platform
+resource "aws_secretsmanager_secret" "json_auth" {
+  name                    = "shifter-${var.name_prefix}-guacamole-json-auth"
+  description             = "Guacamole JSON auth 128-bit secret key for Portal RDP integration"
+  recovery_window_in_days = var.secrets_recovery_window_days
+
+  tags = merge(local.common_tags, {
+    Name = "shifter-${var.name_prefix}-guacamole-json-auth"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "json_auth" {
+  secret_id     = aws_secretsmanager_secret.json_auth.id
+  secret_string = random_id.json_auth_secret.hex
+}
+
+# ------------------------------------------------------------------------------
 # RDS PostgreSQL Instance
 # ------------------------------------------------------------------------------
 

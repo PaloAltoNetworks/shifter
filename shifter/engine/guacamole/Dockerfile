@@ -6,7 +6,8 @@
 ARG GUACAMOLE_VERSION=1.5.5
 FROM guacamole/guacamole:${GUACAMOLE_VERSION}
 
-ARG GUACAMOLE_VERSION
+# Re-declare ARG after FROM with default (ARGs before FROM are out of scope)
+ARG GUACAMOLE_VERSION=1.5.5
 
 # Use /tmp as working directory for downloads (ensures write permissions)
 WORKDIR /tmp

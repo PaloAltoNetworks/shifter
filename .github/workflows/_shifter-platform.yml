@@ -284,6 +284,7 @@ jobs:
           DB_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-db-credentials"
           APP_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-app"
           COGNITO_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-cognito"
+          GUACAMOLE_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-guacamole-json-auth"
 
           COMMAND_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" --instance-ids "$INSTANCE_ID" \
             --parameters "commands=[
@@ -298,6 +299,7 @@ jobs:
                 -e DB_SECRET_ARN=${DB_SECRET_ARN} \
                 -e APP_SECRET_ARN=${APP_SECRET_ARN} \
                 -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
+                -e GUACAMOLE_SECRET_ARN=${GUACAMOLE_SECRET_ARN} \
                 -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
                 -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
                 -e SITE_URL=https://${PORTAL_DOMAIN} \
@@ -335,6 +337,7 @@ jobs:
           DB_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-db-credentials"
           APP_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-app"
           COGNITO_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-cognito"
+          GUACAMOLE_SECRET_ARN="arn:aws:secretsmanager:us-east-2:${ACCOUNT_ID}:secret:shifter-${ENV}-portal-guacamole-json-auth"
 
           # Get all running instances in the ASG
           INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
@@ -363,6 +366,7 @@ jobs:
                 -e DB_SECRET_ARN=${DB_SECRET_ARN} \
                 -e APP_SECRET_ARN=${APP_SECRET_ARN} \
                 -e COGNITO_SECRET_ARN=${COGNITO_SECRET_ARN} \
+                -e GUACAMOLE_SECRET_ARN=${GUACAMOLE_SECRET_ARN} \
                 -e DJANGO_ALLOWED_HOSTS=${PORTAL_DOMAIN} \
                 -e DJANGO_CSRF_TRUSTED_ORIGINS=https://${PORTAL_DOMAIN} \
                 -e SITE_URL=https://${PORTAL_DOMAIN} \

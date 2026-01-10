@@ -216,12 +216,23 @@ def terminal(request):
     # Check if range is ready for terminal access
     range_ready = active_range and active_range.status == Range.Status.READY
 
+    # Get OS types for RDP button visibility (kali and windows have GUIs)
+    kali_os_type = None
+    victim_os_type = None
+    if range_ready and active_range:
+        attacker = active_range.attacker_instance
+        victims = active_range.victim_instances
+        kali_os_type = attacker.get("os_type") if attacker else None
+        victim_os_type = victims[0].get("os_type") if victims else None
+
     context = {
         "page_title": "Terminal",
         "active_nav": "terminal",
         "range": active_range if range_ready else None,
         "range_id": active_range.id if range_ready else None,
         "range_ready": range_ready,
+        "kali_os_type": kali_os_type,
+        "victim_os_type": victim_os_type,
     }
     return render(request, "mission_control/terminal.html", context)
 
@@ -235,6 +246,101 @@ def settings(request):
         "active_nav": "settings",
     }
     return render(request, "mission_control/settings.html", context)
+
+
+# -----------------------------------------------------------------------------
+# Guacamole RDP API
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_POST
+def guacamole_rdp_url(request):
+    """
+    Generate a signed Guacamole URL for RDP access to a range instance.
+
+    Request body (JSON):
+        - instance_type: 'kali' or 'victim'
+
+    Response (JSON):
+        - url: Signed Guacamole URL that opens RDP session
+
+    Security:
+        - User must have an active range in READY status
+        - URL is signed with HMAC-SHA256 and expires in 5 minutes
+        - Only works for instances with GUI (kali, windows)
+    """
+    from mission_control.guacamole import create_guacamole_rdp_url
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    instance_type = data.get("instance_type", "").strip()
+    if instance_type not in ("kali", "victim"):
+        return JsonResponse({"error": "instance_type must be 'kali' or 'victim'"}, status=400)
+
+    # Get user's active range
+    active_range = Range.get_active_for_user(request.user)
+    if not active_range or active_range.status != Range.Status.READY:
+        return JsonResponse({"error": "No active range available"}, status=400)
+
+    # Get instance details
+    if instance_type == "kali":
+        instance = active_range.attacker_instance
+        connection_name = f"kali-{active_range.id}"
+    else:
+        instances = active_range.victim_instances
+        instance = instances[0] if instances else None
+        connection_name = f"victim-{active_range.id}"
+
+    if not instance:
+        return JsonResponse({"error": f"No {instance_type} instance found"}, status=400)
+
+    # Check if instance has a GUI (only kali and windows)
+    os_type = instance.get("os_type", "")
+    if os_type not in ("kali", "windows"):
+        return JsonResponse(
+            {"error": f"RDP not available for {os_type} instances (no GUI)"},
+            status=400,
+        )
+
+    hostname = instance.get("private_ip")
+    if not hostname:
+        return JsonResponse({"error": "Instance IP not available"}, status=400)
+
+    # Get Guacamole secret key from settings
+    secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
+    if not secret_key:
+        logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
+        return JsonResponse({"error": "RDP service not configured"}, status=503)
+
+    # Get Guacamole base URL from settings
+    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+
+    # Generate signed URL
+    try:
+        url = create_guacamole_rdp_url(
+            base_url=guacamole_base_url,
+            secret_key=secret_key,
+            username=request.user.email,
+            connection_name=connection_name,
+            hostname=hostname,
+            expires_minutes=5,
+        )
+    except ValueError as e:
+        logger.error(f"Failed to generate Guacamole URL: {e}")
+        return JsonResponse({"error": "Failed to generate RDP URL"}, status=500)
+
+    logger.info(
+        "Guacamole RDP URL generated: user=%s range_id=%s instance=%s",
+        request.user.email,
+        active_range.id,
+        instance_type,
+    )
+
+    return JsonResponse({"url": url})
 
 
 @login_required

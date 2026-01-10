@@ -31,6 +31,16 @@
                 </span>
                 <span class="pane-title">Kali Linux</span>
                 <span class="pane-subtitle">{{ range.kali_private_ip }}</span>
+                {% if kali_os_type == 'kali' or kali_os_type == 'windows' %}
+                <button class="pane-action-btn rdp-btn" data-instance="kali" title="Open RDP Session">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>RDP</span>
+                </button>
+                {% endif %}
                 <div class="pane-status" id="kali-status">
                     <span class="status-indicator connecting"></span>
                     <span>Connecting...</span>
@@ -57,6 +67,16 @@
                 </span>
                 <span class="pane-title">Victim</span>
                 <span class="pane-subtitle">{{ range.victim_private_ip }}</span>
+                {% if victim_os_type == 'kali' or victim_os_type == 'windows' %}
+                <button class="pane-action-btn rdp-btn" data-instance="victim" title="Open RDP Session">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>RDP</span>
+                </button>
+                {% endif %}
                 <div class="pane-status" id="victim-status">
                     <span class="status-indicator connecting"></span>
                     <span>Connecting...</span>
@@ -109,6 +129,44 @@ document.addEventListener('DOMContentLoaded', function() {
         wsHost: window.location.host,
     });
     terminalManager.init();
+
+    // Setup RDP button click handlers
+    document.querySelectorAll('.rdp-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const button = e.currentTarget;
+            const instanceType = button.dataset.instance;
+
+            // Disable button while loading
+            button.disabled = true;
+            button.classList.add('loading');
+
+            try {
+                const response = await fetch('{% url "mission_control:guacamole_rdp_url" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}',
+                    },
+                    body: JSON.stringify({ instance_type: instanceType }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to generate RDP URL');
+                }
+
+                // Open RDP session in new tab
+                window.open(data.url, '_blank');
+            } catch (error) {
+                console.error('RDP button error:', error);
+                alert('Failed to open RDP session: ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.classList.remove('loading');
+            }
+        });
+    });
 });
 </script>
 {% endif %}

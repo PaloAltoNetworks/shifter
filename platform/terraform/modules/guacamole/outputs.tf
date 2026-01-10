@@ -69,6 +69,11 @@ output "db_credentials_secret_arn" {
   value       = aws_secretsmanager_secret.db_credentials.arn
 }
 
+output "json_auth_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing JSON auth key for Portal RDP integration"
+  value       = aws_secretsmanager_secret.json_auth.arn
+}
+
 # ------------------------------------------------------------------------------
 # Service Discovery Outputs
 # ------------------------------------------------------------------------------

@@ -99,6 +99,17 @@ resource "aws_ssm_parameter" "cognito_secret_arn" {
   tags = local.common_tags
 }
 
+resource "aws_ssm_parameter" "guacamole_secret_arn" {
+  count = var.guacamole_secret_arn != "" ? 1 : 0
+
+  name        = "${local.ps_prefix}/guacamole-secret-arn"
+  description = "Guacamole JSON auth secret ARN for RDP integration"
+  type        = "String"
+  value       = var.guacamole_secret_arn
+
+  tags = local.common_tags
+}
+
 resource "aws_ssm_parameter" "pulumi_ecs_cluster_arn" {
   name        = "${local.ps_prefix}/pulumi-ecs-cluster-arn"
   description = "ECS cluster ARN for Pulumi provisioner"
@@ -288,6 +299,7 @@ resource "aws_ssm_document" "portal_deploy" {
             "SQS_ENGINE_URL=$(get_param \"$PS_PREFIX/sqs-engine-url\")",
             "SQS_MC_URL=$(get_param \"$PS_PREFIX/sqs-mc-url\")",
             "REDIS_ENDPOINT=$(get_param \"$PS_PREFIX/redis-endpoint\")",
+            "GUACAMOLE_SECRET_ARN=$(get_param \"$PS_PREFIX/guacamole-secret-arn\" 2>/dev/null || echo \"\")",
             "",
             "IMAGE=\"$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG\"",
             "echo \"Deploying image: $IMAGE\"",
@@ -314,6 +326,11 @@ resource "aws_ssm_document" "portal_deploy" {
             "# Add Redis if configured",
             "if [ -n \"$REDIS_ENDPOINT\" ]; then",
             "  COMMON_ENV=\"$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT\"",
+            "fi",
+            "",
+            "# Add Guacamole secret ARN if configured (for RDP integration)",
+            "if [ -n \"$GUACAMOLE_SECRET_ARN\" ]; then",
+            "  COMMON_ENV=\"$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN\"",
             "fi",
             "",
             "# ------------------------------------------------------------------------------",

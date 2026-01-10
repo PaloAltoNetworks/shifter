@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.6] - 2025-01-09
+
+### Added
+- Guacamole RDP for Range instances
+
 ## [0.10.5] - 2025-01-06
 
 ### Changed

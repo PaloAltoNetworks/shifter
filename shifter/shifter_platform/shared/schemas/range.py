@@ -63,9 +63,11 @@ class InstanceSpec(SpecBase):
         dc_config: Optional domain controller configuration.
         join_domain: Whether instance should join the domain (default False).
         ngfw_app: Optional NGFW app spec for NGFW instances.
+
+    TODO: Remove redundant uuid field - now inherited from SpecBase (#522).
     """
 
-    uuid: str | None = None
+    uuid: str | None = None  # TODO: Remove - inherited from SpecBase (#522)
     role: Literal["attacker", "victim", "dc", "ngfw"]
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
     agent: AgentDetails | None = None

@@ -13,13 +13,15 @@ class SpecBase(BaseModel):
     """Base specification for all entities.
 
     All entity specs inherit from this class, ensuring consistent
-    validation for common fields like name.
+    validation for common fields like name and uuid.
 
     Attributes:
         name: User-friendly entity name (optional, subclasses may require it).
+        uuid: Unique identifier (optional, assigned during hydration).
     """
 
     name: str | None = None
+    uuid: str | None = None
 
     @field_validator("name")
     @classmethod

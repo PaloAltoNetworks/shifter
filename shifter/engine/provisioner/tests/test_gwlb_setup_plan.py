@@ -8,7 +8,6 @@ This plan uses AWSExecutor for AWS API calls, not bash scripts.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest

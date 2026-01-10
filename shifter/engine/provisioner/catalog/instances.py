@@ -12,7 +12,6 @@ Instance types (EC2 sizes like t3.medium) are configured via environment variabl
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 
 def _get_kali_instance_type() -> str:
@@ -52,7 +51,7 @@ class InstanceType:
     user_data_template: str
     description: str
     _instance_type_getter: callable  # Function to get default instance type
-    ami_lookup: Optional[dict] = None  # For dynamic AMI lookup
+    ami_lookup: dict | None = None  # For dynamic AMI lookup
     requires_agent: bool = False
     ssh_user: str = "ubuntu"  # Default SSH user for the OS
 
@@ -142,7 +141,7 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
 }
 
 
-def get_instance_type(name: str) -> Optional[InstanceType]:
+def get_instance_type(name: str) -> InstanceType | None:
     """Get instance type configuration by name.
 
     Args:

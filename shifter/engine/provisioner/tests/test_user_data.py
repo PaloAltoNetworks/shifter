@@ -182,11 +182,7 @@ class TestUserDataGeneration:
         )
 
         role = "victim"
-        template_name = (
-            "kali.sh.j2"
-            if role == "attacker"
-            else "victim_linux.sh.j2"
-        )
+        template_name = "kali.sh.j2" if role == "attacker" else "victim_linux.sh.j2"
         template = env.get_template(template_name)
 
         # Victim templates are minimal - no variables needed
@@ -283,7 +279,7 @@ class TestTemplateContentSafety:
     def test_windows_uses_error_action_stop(self, all_templates):
         """Windows template should use ErrorActionPreference Stop."""
         result = all_templates["windows"].render()
-        assert 'ErrorActionPreference' in result and 'Stop' in result
+        assert "ErrorActionPreference" in result and "Stop" in result
 
     def test_templates_log_output(self, all_templates):
         """Templates should log their output for debugging."""

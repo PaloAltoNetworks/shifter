@@ -121,10 +121,15 @@ python manage.py migrate --noinput
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# Start daphne (ASGI server for WebSocket support)
-echo "Starting daphne..."
-exec daphne config.asgi:application \
-    --bind 0.0.0.0 \
-    --port 8000 \
-    --access-log - \
-    --verbosity 1
+# Run command passed as arguments, or default to daphne
+if [ $# -gt 0 ]; then
+    echo "Running: $@"
+    exec "$@"
+else
+    echo "Starting daphne..."
+    exec daphne config.asgi:application \
+        --bind 0.0.0.0 \
+        --port 8000 \
+        --access-log - \
+        --verbosity 1
+fi

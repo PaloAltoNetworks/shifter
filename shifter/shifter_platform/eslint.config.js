@@ -1,11 +1,13 @@
 import eslint from '@eslint/js';
 import globals from 'globals';
+import security from 'eslint-plugin-security';
 
 export default [
   {
     ignores: ['**/*.test.js'],
   },
   eslint.configs.recommended,
+  security.configs.recommended,
   {
     files: ['static/js/**/*.js'],
     languageOptions: {

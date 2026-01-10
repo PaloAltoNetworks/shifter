@@ -55,7 +55,8 @@ class TestNGFWStartPlanSteps:
 
         start_idx = next(i for i, n in enumerate(step_names) if "start" in n.lower())
         wait_idx = next(
-            i for i, n in enumerate(step_names)
+            i
+            for i, n in enumerate(step_names)
             if "running" in n.lower() or ("wait" in n.lower() and "start" not in n.lower())
         )
         assert start_idx < wait_idx

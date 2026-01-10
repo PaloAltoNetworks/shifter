@@ -4,9 +4,8 @@ Tests verify the Executor protocol and CommandResult dataclass
 that all executors (SSM, SSH, AWS) must implement.
 """
 
-import pytest
-from typing import Protocol, runtime_checkable
 from dataclasses import fields
+from typing import Protocol
 
 
 class TestCommandResultDataclass:
@@ -94,7 +93,7 @@ class TestSSMExecutorImplementsProtocol:
         from executors.ssm_executor import SSMExecutor
 
         assert hasattr(SSMExecutor, "run_command")
-        assert callable(getattr(SSMExecutor, "run_command"))
+        assert callable(SSMExecutor.run_command)
 
     def test_ssm_executor_has_wait_for_agent(self):
         """SSMExecutor has wait_for_agent method (equivalent to wait_for_ready)."""
@@ -102,7 +101,7 @@ class TestSSMExecutorImplementsProtocol:
 
         # SSMExecutor uses wait_for_agent instead of wait_for_ready
         assert hasattr(SSMExecutor, "wait_for_agent")
-        assert callable(getattr(SSMExecutor, "wait_for_agent"))
+        assert callable(SSMExecutor.wait_for_agent)
 
 
 class TestSSHExecutorImplementsProtocol:
@@ -113,7 +112,7 @@ class TestSSHExecutorImplementsProtocol:
         from executors.ssh_executor import SSHExecutor
 
         assert hasattr(SSHExecutor, "run_command")
-        assert callable(getattr(SSHExecutor, "run_command"))
+        assert callable(SSHExecutor.run_command)
 
     def test_ssh_executor_has_wait_for_agent(self):
         """SSHExecutor has wait_for_agent method (equivalent to wait_for_ready)."""
@@ -121,7 +120,7 @@ class TestSSHExecutorImplementsProtocol:
 
         # SSHExecutor uses wait_for_agent instead of wait_for_ready
         assert hasattr(SSHExecutor, "wait_for_agent")
-        assert callable(getattr(SSHExecutor, "wait_for_agent"))
+        assert callable(SSHExecutor.wait_for_agent)
 
 
 class TestCommandResultEquality:

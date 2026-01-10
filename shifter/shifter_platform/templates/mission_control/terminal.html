@@ -10,15 +10,15 @@
     <div class="terminal-header">
         <div class="terminal-header-left">
             <h1 class="terminal-title">Terminal</h1>
-            {% if range_ready %}
-            <span class="terminal-range-info">Range #{{ range.id }} - {{ range.agent.name }}</span>
+            {% if has_active_range %}
+            <span class="terminal-range-info">Range #{{ active_range.range_id }}</span>
             {% else %}
             <span class="terminal-range-info text-muted">No active range</span>
             {% endif %}
         </div>
     </div>
 
-    {% if range_ready %}
+    {% if has_active_range %}
     <div class="terminal-container" id="terminal-container">
         <!-- Kali Terminal Pane -->
         <div class="terminal-pane" id="kali-pane">
@@ -30,9 +30,8 @@
                     </svg>
                 </span>
                 <span class="pane-title">Kali Linux</span>
-                <span class="pane-subtitle">{{ range.kali_private_ip }}</span>
-                {% if kali_os_type == 'kali' or kali_os_type == 'windows' %}
-                <button class="pane-action-btn rdp-btn" data-instance="kali" title="Open RDP Session">
+                <span class="pane-subtitle">Attacker</span>
+                <button class="pane-action-btn rdp-btn" title="Open RDP Session">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
                         <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -40,7 +39,6 @@
                     </svg>
                     <span>RDP</span>
                 </button>
-                {% endif %}
                 <div class="pane-status" id="kali-status">
                     <span class="status-indicator connecting"></span>
                     <span>Connecting...</span>
@@ -66,9 +64,8 @@
                     </svg>
                 </span>
                 <span class="pane-title">Victim</span>
-                <span class="pane-subtitle">{{ range.victim_private_ip }}</span>
-                {% if victim_os_type == 'kali' or victim_os_type == 'windows' %}
-                <button class="pane-action-btn rdp-btn" data-instance="victim" title="Open RDP Session">
+                <span class="pane-subtitle">Target</span>
+                <button class="pane-action-btn rdp-btn" title="Open RDP Session">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
                         <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -76,7 +73,6 @@
                     </svg>
                     <span>RDP</span>
                 </button>
-                {% endif %}
                 <div class="pane-status" id="victim-status">
                     <span class="status-indicator connecting"></span>
                     <span>Connecting...</span>
@@ -87,7 +83,7 @@
             </div>
         </div>
     </div>
-    {% else %}
+    {% else %}{# has_active_range #}
     <!-- No active range state -->
     <div class="terminal-disconnected">
         <div class="disconnected-content">
@@ -106,12 +102,12 @@
             </a>
         </div>
     </div>
-    {% endif %}
+    {% endif %}{# has_active_range #}
 </div>
 {% endblock %}
 
 {% block extra_js %}
-{% if range_ready %}
+{% if has_active_range %}
 <!-- xterm.js from CDN with SRI -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" integrity="sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH" crossorigin="anonymous"></script>
@@ -121,8 +117,30 @@
 <script src="{% static 'js/terminal.js' %}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Instances from RangeContext (uuid, role, os_type, etc.)
+    const instances = [
+        {% for instance in active_range.instances %}
+        {
+            uuid: "{{ instance.uuid }}",
+            role: "{{ instance.role }}",
+            osType: "{{ instance.os_type }}"
+        }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    // Connection URLs from context processor (uuid, terminal_url)
+    const connectionUrls = [
+        {% for conn in connection_urls %}
+        {
+            uuid: "{{ conn.uuid }}",
+            terminalUrl: "{{ conn.terminal_url }}"
+        }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+
     const terminalManager = new TerminalManager({
-        rangeId: {{ range_id }},
+        instances: instances,
+        connectionUrls: connectionUrls,
         kaliContainerId: 'kali-terminal',
         victimContainerId: 'victim-terminal',
         wsProtocol: window.location.protocol === 'https:' ? 'wss:' : 'ws:',
@@ -134,7 +152,13 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.rdp-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             const button = e.currentTarget;
-            const instanceType = button.dataset.instance;
+            const pane = button.closest('.terminal-pane');
+            const instanceUuid = pane?.dataset.uuid;
+
+            if (!instanceUuid) {
+                alert('Instance not available');
+                return;
+            }
 
             // Disable button while loading
             button.disabled = true;
@@ -147,7 +171,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         'Content-Type': 'application/json',
                         'X-CSRFToken': '{{ csrf_token }}',
                     },
-                    body: JSON.stringify({ instance_type: instanceType }),
+                    body: JSON.stringify({ instance_uuid: instanceUuid }),
                 });
 
                 const data = await response.json();
@@ -169,5 +193,5 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
-{% endif %}
+{% endif %}{# has_active_range #}
 {% endblock %}

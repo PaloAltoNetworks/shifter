@@ -6,13 +6,10 @@ This stack composes NGFWComponent + GWLBComponent to provide:
 - VPC Endpoint Service for range connectivity
 """
 
-from typing import Optional
-
 import pulumi
-from pulumi import Output
 
-from components.ngfw_component import NGFWComponent
 from components.gwlb_component import GWLBComponent
+from components.ngfw_component import NGFWComponent
 
 
 class UserNGFWStack(pulumi.ComponentResource):
@@ -36,8 +33,8 @@ class UserNGFWStack(pulumi.ComponentResource):
         bootstrap_bucket: str,
         instance_type: str = "m5.xlarge",
         environment: str = "dev",
-        instance_profile_name: Optional[str] = None,
-        opts: Optional[pulumi.ResourceOptions] = None,
+        instance_profile_name: str | None = None,
+        opts: pulumi.ResourceOptions | None = None,
     ):
         """Initialize UserNGFWStack.
 
@@ -93,16 +90,18 @@ class UserNGFWStack(pulumi.ComponentResource):
         self.service_name = self.gwlb.service_name
 
         # Register outputs
-        self.register_outputs({
-            "user_id": user_id,
-            "instance_id": self.instance_id,
-            "management_ip": self.management_ip,
-            "dataplane_ip": self.dataplane_ip,
-            "data_eni_id": self.data_eni_id,
-            "gwlb_arn": self.gwlb_arn,
-            "target_group_arn": self.target_group_arn,
-            "service_name": self.service_name,
-        })
+        self.register_outputs(
+            {
+                "user_id": user_id,
+                "instance_id": self.instance_id,
+                "management_ip": self.management_ip,
+                "dataplane_ip": self.dataplane_ip,
+                "data_eni_id": self.data_eni_id,
+                "gwlb_arn": self.gwlb_arn,
+                "target_group_arn": self.target_group_arn,
+                "service_name": self.service_name,
+            }
+        )
 
     def get_outputs(self) -> dict:
         """Get stack outputs as a dictionary.
@@ -132,8 +131,8 @@ class UserNGFWStack(pulumi.ComponentResource):
         Returns:
             Result from orchestrator
         """
-        from plans.ngfw_provision import NGFWProvisionPlan
         from plans.gwlb_setup import GWLBSetupPlan
+        from plans.ngfw_provision import NGFWProvisionPlan
 
         # Run NGFW provision plan (wait for SSH, configure XDR)
         provision_plan = NGFWProvisionPlan()
@@ -197,6 +196,7 @@ class UserNGFWStack(pulumi.ComponentResource):
         module_path, class_name = plan_path.rsplit(".", 1)
 
         import importlib
+
         module = importlib.import_module(module_path)
         plan_class = getattr(module, class_name)
 

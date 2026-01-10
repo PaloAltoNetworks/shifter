@@ -151,6 +151,12 @@ resource "aws_ecs_task_definition" "guacamole_client" {
       {
         name      = "POSTGRESQL_PASSWORD"
         valueFrom = "${aws_secretsmanager_secret.db_credentials.arn}:password::"
+      },
+      {
+        # JSON auth secret key for Portal RDP integration
+        # This enables on-the-fly RDP connections via signed URL parameters
+        name      = "JSON_SECRET_KEY"
+        valueFrom = aws_secretsmanager_secret.json_auth.arn
       }
     ]
 

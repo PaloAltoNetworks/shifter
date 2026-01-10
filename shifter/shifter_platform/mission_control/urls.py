@@ -36,5 +36,7 @@ urlpatterns = [
     path("api/range/cancel/", views.cancel_range, name="cancel_range"),
     path("api/range/destroy/", views.destroy_range, name="destroy_range"),
     path("api/agents/", views.list_agents_for_launch, name="list_agents"),
+    # Guacamole RDP API
+    path("api/guacamole/rdp-url/", views.guacamole_rdp_url, name="guacamole_rdp_url"),
     # NGFW Config API routes will be added when SCMCredential/NGFWDeploymentProfile views are implemented
 ]

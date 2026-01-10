@@ -114,12 +114,5 @@ resource "aws_service_discovery_service" "guacd" {
     failure_threshold = 3
   }
 
-  # Force ECS service to update before this can be destroyed
-  # The ECS service depends on this via registry_arn, but we need
-  # to ensure deregistration happens before destruction
-  lifecycle {
-    create_before_destroy = true
-  }
-
   tags = local.common_tags
 }

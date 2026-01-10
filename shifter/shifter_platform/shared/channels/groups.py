@@ -7,18 +7,19 @@ WebSocket layer (Mission Control browser connections).
 from __future__ import annotations
 
 
-def range_event_group(range_id: int) -> str:
+def range_event_group(request_id: str) -> str:
     """Get the channel group name for a specific range.
 
     Used for subscribing to status updates for a specific range.
+    Uses request_id (UUID) for consistency with NGFW pattern.
 
     Args:
-        range_id: The ID of the range.
+        request_id: The UUID of the request (as string).
 
     Returns:
-        Channel group name in format "range_status_{range_id}".
+        Channel group name in format "range_status_{request_id}".
     """
-    return f"range_status_{range_id}"
+    return f"range_status_{request_id}"
 
 
 def user_event_group(user_id: int) -> str:

@@ -6,6 +6,6 @@ from mission_control.consumers import NGFWStatusConsumer, RangeStatusConsumer, S
 
 websocket_urlpatterns = [
     re_path(r"ws/terminal/(?P<instance_uuid>[a-f0-9-]+)/$", SSHConsumer.as_asgi()),
-    re_path(r"ws/range-status/(?P<range_id>\d+)/$", RangeStatusConsumer.as_asgi()),
+    re_path(r"ws/range-status/(?P<request_id>[a-f0-9-]+)/$", RangeStatusConsumer.as_asgi()),
     re_path(r"ws/ngfw-status/(?P<app_id>[a-f0-9-]+)/$", NGFWStatusConsumer.as_asgi()),
 ]

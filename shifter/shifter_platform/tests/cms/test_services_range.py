@@ -9,6 +9,7 @@ Does NOT re-test model behavior (filtering, field validation, etc).
 """
 
 from unittest.mock import Mock, patch
+from uuid import UUID, uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -17,6 +18,13 @@ from cms import services
 from cms.models import AgentConfig, OperatingSystem
 
 User = get_user_model()
+
+
+def make_mock_request(request_id: UUID | None = None) -> Mock:
+    """Create a mock Request object with request_id attribute."""
+    mock_request = Mock()
+    mock_request.request_id = request_id or uuid4()
+    return mock_request
 
 
 @pytest.fixture
@@ -503,32 +511,37 @@ class TestCreateRangeEngineCall:
         mock_engine.assert_called_once()
 
     @patch("cms.services.engine_create_range")
-    def test_engine_receives_range_request(self, mock_engine, user, windows_agent):
-        """Engine receives a RangeSpec with scenario and instances."""
-        from shared.schemas import RangeSpec
+    def test_engine_receives_request_spec(self, mock_engine, user, windows_agent):
+        """Engine receives a RequestSpec containing RangeSpec."""
+        from shared.schemas import RangeSpec, RequestSpec
 
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", {"windows": windows_agent.id})
 
-        # Get the RangeSpec passed to engine
+        # Get the RequestSpec passed to engine
         call_args = mock_engine.call_args
-        range_request = call_args[0][0]  # First positional arg
+        request_spec = call_args[0][0]  # First positional arg
 
-        assert isinstance(range_request, RangeSpec)
-        assert range_request.scenario_id == "basic"
-        assert range_request.user_id == user.id
-        assert isinstance(range_request.instances, list)
+        assert isinstance(request_spec, RequestSpec)
+        assert request_spec.user_id == user.id
+        assert len(request_spec.items) == 1
+        # First item is the RangeSpec
+        range_spec = request_spec.items[0]
+        assert isinstance(range_spec, RangeSpec)
+        assert range_spec.scenario_id == "basic"
+        assert isinstance(range_spec.instances, list)
 
     @patch("cms.services.engine_create_range")
     def test_range_request_has_correct_scenario_id(self, mock_engine, user, windows_agent):
-        """RangeSpec includes the correct scenario_id."""
+        """RangeSpec inside RequestSpec includes the correct scenario_id."""
         mock_engine.return_value = 42
 
         services.create_range(user, "basic", {"windows": windows_agent.id})
 
-        range_request = mock_engine.call_args[0][0]
-        assert range_request.scenario_id == "basic"
+        request_spec = mock_engine.call_args[0][0]
+        range_spec = request_spec.items[0]
+        assert range_spec.scenario_id == "basic"
 
     @patch("cms.services.engine_create_range")
     def test_range_request_has_hydrated_instances(self, mock_engine, user, windows_agent):
@@ -537,8 +550,9 @@ class TestCreateRangeEngineCall:
 
         services.create_range(user, "basic", {"windows": windows_agent.id})
 
-        range_request = mock_engine.call_args[0][0]
-        instances = range_request.instances
+        request_spec = mock_engine.call_args[0][0]
+        range_spec = request_spec.items[0]
+        instances = range_spec.instances
 
         # Basic scenario has attacker and victim
         assert len(instances) == 2
@@ -562,8 +576,8 @@ class TestCreateRangeInstance:
 
         services.create_range(user, "basic", {"windows": windows_agent.id})
 
-        # RangeInstance should be created
-        ri = RangeInstance.objects.get(range_id=42)
+        # RangeInstance should be created (lookup by user_id and scenario_id)
+        ri = RangeInstance.objects.get(user_id=user.id, scenario_id="basic")
         assert ri.scenario_id == "basic"
         assert ri.user_id == user.id
         assert ri.agent_id == windows_agent.id
@@ -577,7 +591,7 @@ class TestCreateRangeInstance:
 
         services.create_range(user, "ad_attack_lab", {"windows": windows_agent.id})
 
-        ri = RangeInstance.objects.get(range_id=43)
+        ri = RangeInstance.objects.get(user_id=user.id, scenario_id="ad_attack_lab")
         assert ri.scenario_id == "ad_attack_lab"
 
     @patch("cms.services.engine_create_range")
@@ -589,7 +603,7 @@ class TestCreateRangeInstance:
 
         services.create_range(user, "basic", {"windows": windows_agent.id})
 
-        ri = RangeInstance.objects.get(range_id=44)
+        ri = RangeInstance.objects.get(user_id=user.id, scenario_id="basic")
         assert ri.user_id == user.id
         assert ri.agent_id == windows_agent.id
         assert isinstance(ri.user_id, int)
@@ -612,13 +626,15 @@ class TestCreateRangeReturn:
         assert isinstance(result, RangeContext)
 
     @patch("cms.services.engine_create_range")
-    def test_range_context_has_range_id(self, mock_engine, user, windows_agent):
-        """RangeContext contains the range_id from engine."""
+    def test_range_context_has_request_id(self, mock_engine, user, windows_agent):
+        """RangeContext contains request_id (range_id is None for new ranges)."""
         mock_engine.return_value = 42
 
         result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
-        assert result.range_id == 42
+        # New ranges use request_id, range_id is None
+        assert result.request_id is not None
+        assert result.range_id is None
 
     @patch("cms.services.engine_create_range")
     def test_range_context_has_scenario_id(self, mock_engine, user, windows_agent):
@@ -710,6 +726,7 @@ class TestDestroyRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range) as mock_get,
@@ -727,6 +744,7 @@ class TestDestroyRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
 
         mock_now = timezone.now()
@@ -751,6 +769,7 @@ class TestDestroyRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
@@ -774,6 +793,7 @@ class TestDestroyRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
@@ -824,6 +844,7 @@ class TestDestroyRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
@@ -841,6 +862,7 @@ class TestDestroyRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
@@ -925,6 +947,7 @@ class TestCancelRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range) as mock_get,
@@ -940,6 +963,7 @@ class TestCancelRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
@@ -959,6 +983,7 @@ class TestCancelRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
@@ -982,6 +1007,7 @@ class TestCancelRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
@@ -1025,6 +1051,7 @@ class TestCancelRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
@@ -1042,6 +1069,7 @@ class TestCancelRange:
 
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
+        mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),

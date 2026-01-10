@@ -16,9 +16,9 @@ from cms.assets.services import delete_agent as assets_delete_agent
 from cms.assets.validation import get_allowed_extensions as _get_allowed_extensions
 from cms.exceptions import CMSError
 from cms.models import AgentConfig, RangeInstance
-from engine import cancel_range as engine_cancel_range
+from engine import cancel_range_by_request as engine_cancel_range_by_request
 from engine import create_range as engine_create_range
-from engine import destroy_range as engine_destroy_range
+from engine import destroy_range_by_request as engine_destroy_range_by_request
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.enums import ResourceStatus
 
@@ -1580,7 +1580,6 @@ def destroy_range(user: User, range_id: int) -> None:
         CMSError: If range not found or not owned by user
         EngineError: If engine fails to destroy range
     """
-    from shared.schemas import RangeContext
 
     # Input validation - user
     if user is None:
@@ -1657,27 +1656,21 @@ def destroy_range(user: User, range_id: int) -> None:
         instance.deleted_at = timezone.now()
         instance.save(update_fields=["status", "deleted_at"])
 
-        # Get request_id from request FK
+        # Get request_id from request FK and call Engine with request_id
         request_id = instance.request.request_id if instance.request else None
         if request_id is None:
-            from uuid import uuid4
+            logger.error(
+                "destroy_range: no request_id for range_id=%s, cannot destroy",
+                range_id,
+            )
+            raise CMSError(f"Range {range_id} has no associated request")
 
-            request_id = uuid4()
-
-        range_ctx = RangeContext(
-            request_id=request_id,
-            range_id=instance.range_id,
-            scenario_id=instance.scenario_id,
-            user_id=instance.user_id,
-            status=ResourceStatus(instance.status),
-            instances=[],
-            agent_name=instance.agent.name if instance.agent else None,
-        )
-        engine_destroy_range(range_ctx)
+        engine_destroy_range_by_request(request_id)
 
         logger.debug(
-            "destroy_range completed for range_id=%s, user_id=%s",
+            "destroy_range completed for range_id=%s request_id=%s user_id=%s",
             range_id,
+            request_id,
             user.id,
         )
 
@@ -1712,7 +1705,6 @@ def cancel_range(user: User, range_id: int) -> None:
         CMSError: If range not found or not owned by user
         OrchestrationError: If range not in cancellable status
     """
-    from shared.schemas import RangeContext
 
     # Input validation - user
     if user is None:
@@ -1790,23 +1782,16 @@ def cancel_range(user: User, range_id: int) -> None:
         if instance.status != ResourceStatus.DESTROYED.value:
             raise CMSError("Range status not updated to DESTROYED")
 
-        # Get request_id from request FK
+        # Get request_id from request FK and call Engine with request_id
         request_id = instance.request.request_id if instance.request else None
         if request_id is None:
-            from uuid import uuid4
+            logger.error(
+                "cancel_range: no request_id for range_id=%s, cannot cancel",
+                range_id,
+            )
+            raise CMSError(f"Range {range_id} has no associated request")
 
-            request_id = uuid4()
-
-        range_ctx = RangeContext(
-            request_id=request_id,
-            range_id=instance.range_id,
-            scenario_id=instance.scenario_id,
-            user_id=instance.user_id,
-            status=ResourceStatus(instance.status),
-            instances=[],
-            agent_name=instance.agent.name if instance.agent else None,
-        )
-        engine_cancel_range(range_ctx)
+        engine_cancel_range_by_request(request_id)
     except (TypeError, ValueError, CMSError):
         # Re-raise known errors
         raise
@@ -1836,7 +1821,6 @@ def destroy_range_by_request_id(user: User, request_id: str) -> None:
         TypeError: If user is None or invalid type
         CMSError: If range not found or not owned by user
     """
-    from shared.schemas import RangeContext
 
     # Input validation
     if user is None:
@@ -1885,16 +1869,8 @@ def destroy_range_by_request_id(user: User, request_id: str) -> None:
         instance.deleted_at = timezone.now()
         instance.save(update_fields=["status", "deleted_at"])
 
-        range_ctx = RangeContext(
-            request_id=instance.request.request_id,
-            range_id=instance.range_id,
-            scenario_id=instance.scenario_id,
-            user_id=instance.user_id,
-            status=ResourceStatus(instance.status),
-            instances=[],
-            agent_name=instance.agent.name if instance.agent else None,
-        )
-        engine_destroy_range(range_ctx)
+        # Call Engine with request_id directly
+        engine_destroy_range_by_request(instance.request.request_id)
 
         logger.debug(
             "destroy_range_by_request_id completed: request_id=%s user_id=%s",
@@ -1929,7 +1905,6 @@ def cancel_range_by_request_id(user: User, request_id: str) -> None:
         TypeError: If user is None or invalid type
         CMSError: If range not found or not owned by user
     """
-    from shared.schemas import RangeContext
 
     # Input validation
     if user is None:
@@ -1977,16 +1952,8 @@ def cancel_range_by_request_id(user: User, request_id: str) -> None:
         instance.status = ResourceStatus.DESTROYED.value
         instance.save(update_fields=["status"])
 
-        range_ctx = RangeContext(
-            request_id=instance.request.request_id,
-            range_id=instance.range_id,
-            scenario_id=instance.scenario_id,
-            user_id=instance.user_id,
-            status=ResourceStatus(instance.status),
-            instances=[],
-            agent_name=instance.agent.name if instance.agent else None,
-        )
-        engine_cancel_range(range_ctx)
+        # Call Engine with request_id directly
+        engine_cancel_range_by_request(instance.request.request_id)
 
         logger.debug(
             "cancel_range_by_request_id completed: request_id=%s user_id=%s",

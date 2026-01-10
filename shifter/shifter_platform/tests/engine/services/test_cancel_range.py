@@ -233,3 +233,117 @@ class TestCancelRange:
                 instances=[],
                 agent_name="Test Agent",
             )
+
+
+@pytest.mark.django_db
+class TestCancelRangeByRequest:
+    """Tests for cancel_range_by_request() in engine/services.py.
+
+    Tests the service contract:
+    - Input: request_id (UUID)
+    - Output: bool (True if cancelled, False if not found or not cancellable)
+    - Side effects: sets status to DESTROYING for cancellable ranges
+    """
+
+    # -------------------------------------------------------------------------
+    # Outputs - returns bool indicating success
+    # -------------------------------------------------------------------------
+
+    def test_returns_true_for_pending_range(self):
+        """Service returns True when range is pending."""
+        from unittest.mock import patch
+
+        from engine.models import Range
+        from engine.services import cancel_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.PENDING)
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+            result = cancel_range_by_request(request_id)
+            assert result is True
+
+    def test_returns_true_for_provisioning_range(self):
+        """Service returns True when range is provisioning."""
+        from unittest.mock import patch
+
+        from engine.models import Range
+        from engine.services import cancel_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.PROVISIONING)
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+            result = cancel_range_by_request(request_id)
+            assert result is True
+
+    def test_returns_false_for_ready_range(self):
+        """Service returns False when range is already ready (not cancellable)."""
+        from unittest.mock import patch
+
+        from engine.models import Range
+        from engine.services import cancel_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+            result = cancel_range_by_request(request_id)
+            assert result is False
+
+    def test_returns_false_for_missing_request(self):
+        """Service returns False when no range for request_id."""
+        from unittest.mock import patch
+
+        from engine.models import Range
+        from engine.services import cancel_range_by_request
+
+        request_id = uuid4()
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=None))):
+            result = cancel_range_by_request(request_id)
+            assert result is False
+
+    def test_sets_status_to_destroying(self):
+        """Service sets range status to DESTROYING."""
+        from unittest.mock import patch
+
+        from engine.models import Range
+        from engine.services import cancel_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.PENDING)
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+            cancel_range_by_request(request_id)
+
+            assert mock_range.status == Range.Status.DESTROYING
+            mock_range.save.assert_called_once_with(update_fields=["status"])
+
+    def test_returns_false_for_destroyed_range(self):
+        """Service returns False when range is already destroyed."""
+        from unittest.mock import patch
+
+        from engine.models import Range
+        from engine.services import cancel_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.DESTROYED)
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+            result = cancel_range_by_request(request_id)
+            assert result is False
+
+    def test_returns_false_for_destroying_range(self):
+        """Service returns False when range is already destroying."""
+        from unittest.mock import patch
+
+        from engine.models import Range
+        from engine.services import cancel_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.DESTROYING)
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+            result = cancel_range_by_request(request_id)
+            assert result is False

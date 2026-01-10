@@ -305,6 +305,8 @@ class TestSetStackConfig:
 class TestRunProvision:
     """Tests for provision flow."""
 
+    TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
+
     def test_run_provision_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """pulumi up success, outputs parsed, events published."""
         mock_run, _mock_result = mock_subprocess
@@ -332,13 +334,16 @@ class TestRunProvision:
             from main import _run_provision
 
             env = os.environ.copy()
-            _run_provision(42, 7, "range-42", env)
+            _run_provision(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
             # Verify status update event was published
-            mock_status.assert_called_once_with(range_id=42, user_id=7, new_status="provisioning")
+            mock_status.assert_called_once_with(
+                request_id=self.TEST_REQUEST_ID, range_id=42, user_id=7, new_status="provisioning"
+            )
             # Verify ready event was published with instance details
             mock_ready.assert_called_once()
             call_kwargs = mock_ready.call_args[1]
+            assert call_kwargs["request_id"] == self.TEST_REQUEST_ID
             assert call_kwargs["range_id"] == 42
             assert call_kwargs["user_id"] == 7
 
@@ -354,7 +359,7 @@ class TestRunProvision:
             env = os.environ.copy()
 
             with pytest.raises(Exception, match="Pulumi up failed"):
-                _run_provision(42, 7, "range-42", env)
+                _run_provision(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
     def test_run_provision_publishes_ready_with_all_outputs(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """publish_ready should receive all Pulumi outputs."""
@@ -386,7 +391,7 @@ class TestRunProvision:
             from main import _run_provision
 
             env = os.environ.copy()
-            _run_provision(42, 7, "range-42", env)
+            _run_provision(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
             # Check all outputs were passed to publish_ready
             call_kwargs = mock_ready.call_args[1]
@@ -427,7 +432,7 @@ class TestRunProvision:
             from main import _run_provision
 
             env = os.environ.copy()
-            _run_provision(42, 7, "range-42", env)
+            _run_provision(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
             # NGFW fields should NOT be in kwargs (moved to UserNGFW model in issue 412)
             call_kwargs = mock_ready.call_args[1]
@@ -439,6 +444,8 @@ class TestRunProvision:
 class TestRunDestroy:
     """Tests for destroy flow."""
 
+    TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
+
     def test_run_destroy_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """pulumi destroy + stack rm success."""
         _mock_run, mock_result = mock_subprocess
@@ -448,10 +455,11 @@ class TestRunDestroy:
             from main import _run_destroy
 
             env = os.environ.copy()
-            _run_destroy(42, 7, "range-42", env)
+            _run_destroy(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
             # Verify destroyed event published with correct user_id
             mock_destroyed.assert_called_once()
+            assert mock_destroyed.call_args[1]["request_id"] == self.TEST_REQUEST_ID
             assert mock_destroyed.call_args[1]["user_id"] == 7
 
     def test_run_destroy_failure(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
@@ -465,7 +473,7 @@ class TestRunDestroy:
         env = os.environ.copy()
 
         with pytest.raises(Exception, match="Pulumi destroy failed"):
-            _run_destroy(42, 7, "range-42", env)
+            _run_destroy(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
     def test_run_destroy_stack_removed(self, mock_env_vars, mock_boto3_clients, mocker):
         """Stack should be removed after successful destroy."""
@@ -483,7 +491,7 @@ class TestRunDestroy:
             from main import _run_destroy
 
             env = os.environ.copy()
-            _run_destroy(42, 7, "range-42", env)
+            _run_destroy(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
             # Verify stack rm was called
             calls = mock_run.call_args_list
@@ -494,6 +502,23 @@ class TestRunDestroy:
 class TestRunPulumi:
     """Tests for main run_pulumi function."""
 
+    TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
+
+    @pytest.fixture(autouse=True)
+    def mock_get_range_data(self, mocker):
+        """Mock get_range_data_by_request_id for all tests in this class."""
+        return mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {},
+                "subnet_index": 6,
+                "status": "pending",
+            },
+        )
+
     def test_run_pulumi_unknown_operation(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
         """ValueError for invalid operation."""
         _mock_run, mock_result = mock_subprocess
@@ -503,7 +528,7 @@ class TestRunPulumi:
             from main import run_pulumi
 
             with pytest.raises(ValueError, match="Unknown operation"):
-                run_pulumi("invalid", 42, 7)
+                run_pulumi("invalid", self.TEST_REQUEST_ID)
 
     def test_run_pulumi_prod_auto_cleanup(self, mock_subprocess, mocker, mock_boto3_clients):
         """Production failure should trigger auto-destroy."""
@@ -516,6 +541,7 @@ class TestRunPulumi:
             "DB_NAME": "shifter",
             "DB_USER": "app",
             "AWS_REGION": "us-east-2",
+            "PULUMI_SECRETS_PROVIDER": "awskms://alias/test-pulumi-secrets",
         }
         mocker.patch.dict(os.environ, env_vars, clear=False)
 
@@ -543,7 +569,7 @@ class TestRunPulumi:
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
-                run_pulumi("up", 42, 7)
+                run_pulumi("up", self.TEST_REQUEST_ID)
 
             # Verify destroy was attempted after failure
             calls = mock_run.call_args_list
@@ -561,6 +587,7 @@ class TestRunPulumi:
             "DB_NAME": "shifter",
             "DB_USER": "app",
             "AWS_REGION": "us-east-2",
+            "PULUMI_SECRETS_PROVIDER": "awskms://alias/test-pulumi-secrets",
         }
         mocker.patch.dict(os.environ, env_vars, clear=False)
 
@@ -581,7 +608,7 @@ class TestRunPulumi:
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
-                run_pulumi("up", 42, 7)
+                run_pulumi("up", self.TEST_REQUEST_ID)
 
             # Verify destroy WAS attempted - auto-cleanup now enabled for all environments
             calls = mock_run.call_args_list
@@ -612,7 +639,7 @@ class TestRunPulumi:
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
-                run_pulumi("up", 42, 7)
+                run_pulumi("up", self.TEST_REQUEST_ID)
 
             # Verify publish_failed was called with truncated error
             mock_publish.assert_called_once()
@@ -640,11 +667,12 @@ class TestRunPulumi:
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
-                run_pulumi("up", 42, 7)
+                run_pulumi("up", self.TEST_REQUEST_ID)
 
             # Verify failed event was published with correct user_id
             mock_publish.assert_called_once()
             call_kwargs = mock_publish.call_args[1]
+            assert call_kwargs["request_id"] == self.TEST_REQUEST_ID
             assert call_kwargs["range_id"] == 42
             assert call_kwargs["user_id"] == 7
             assert "error_message" in call_kwargs
@@ -718,18 +746,19 @@ class TestMainEntryPoint:
         assert result.returncode != 0
         assert "--user-id" in result.stderr or "required" in result.stderr.lower()
 
-    def test_main_range_invalid_range_id_arg(self):
-        """Exit with error when --range-id is not an integer."""
+    def test_main_range_invalid_request_id_format(self):
+        """Exit with error when --request-id has invalid format."""
+        # Note: request_id is a string (UUID), so we just verify the CLI accepts it
+        # and fails on actual execution due to missing DB/environment
         result = subprocess.run(  # noqa: S603
-            [sys.executable, "main.py", "range", "provision", "--range-id", "not-a-number", "--user-id", "7"],
+            [sys.executable, "main.py", "range", "provision", "--request-id", "test-uuid"],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
         )
 
-        # Should fail due to invalid --range-id (not an integer)
+        # Should fail (likely on DB connection or missing env vars), not on argument parsing
         assert result.returncode != 0
-        assert "invalid int value" in result.stderr.lower()
 
     def test_main_invalid_resource(self):
         """Exit with error for invalid resource."""
@@ -749,11 +778,24 @@ class TestMainEntryPoint:
         _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
+        # Mock get_range_data_by_request_id
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": "550e8400-e29b-41d4-a716-446655440000",
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {},
+                "subnet_index": 6,
+                "status": "pending",
+            },
+        )
+
         with patch("main.publish_failed"):
             from main import run_pulumi
 
             with pytest.raises(ValueError, match="Unknown operation"):
-                run_pulumi("invalid_op", 42, 7)
+                run_pulumi("invalid_op", "550e8400-e29b-41d4-a716-446655440000")
 
 
 class TestNgfwProvisionCLI:
@@ -1187,6 +1229,8 @@ class TestNgfwProvisionCLI:
 class TestEventPublishing:
     """Tests for SNS event publishing integration in provision/destroy flows."""
 
+    TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
+
     def test_run_provision_publishes_status_update_event(
         self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
     ):
@@ -1209,15 +1253,19 @@ class TestEventPublishing:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_status_update") as mock_publish, patch("main.publish_ready"):
+        with (
+            patch("main.publish_status_update") as mock_publish,
+            patch("main.publish_ready"),
+        ):
             from main import _run_provision
 
             env = os.environ.copy()
-            _run_provision(42, 7, "range-42", env)
+            _run_provision(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
             # Verify status update event was published with correct user_id
             mock_publish.assert_called_once()
             call_kwargs = mock_publish.call_args[1]
+            assert call_kwargs["request_id"] == self.TEST_REQUEST_ID
             assert call_kwargs["range_id"] == 42
             assert call_kwargs["user_id"] == 7
 
@@ -1244,15 +1292,19 @@ class TestEventPublishing:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_status_update"), patch("main.publish_ready") as mock_publish:
+        with (
+            patch("main.publish_status_update"),
+            patch("main.publish_ready") as mock_publish,
+        ):
             from main import _run_provision
 
             env = os.environ.copy()
-            _run_provision(42, 7, "range-42", env)
+            _run_provision(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
             # Verify ready event was published with correct user_id
             mock_publish.assert_called_once()
             call_kwargs = mock_publish.call_args[1]
+            assert call_kwargs["request_id"] == self.TEST_REQUEST_ID
             assert call_kwargs["range_id"] == 42
             assert call_kwargs["user_id"] == 7
 
@@ -1269,17 +1321,31 @@ class TestEventPublishing:
             from main import _run_destroy
 
             env = os.environ.copy()
-            _run_destroy(42, 7, "range-42", env)
+            _run_destroy(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
             # Verify destroyed event was published with correct user_id
             mock_publish.assert_called_once()
+            assert mock_publish.call_args[1]["request_id"] == self.TEST_REQUEST_ID
             assert mock_publish.call_args[1]["user_id"] == 7
 
     def test_run_pulumi_failure_publishes_failed_event(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch, mocker
     ):
         """Pulumi failure should publish failed event."""
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
+
+        # Mock get_range_data_by_request_id
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {},
+                "subnet_index": 6,
+                "status": "pending",
+            },
+        )
 
         mock_run, _mock_result = mock_subprocess
 
@@ -1296,15 +1362,19 @@ class TestEventPublishing:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
+        with (
+            patch("main.publish_failed") as mock_publish,
+            patch("main.publish_status_update"),
+        ):
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
-                run_pulumi("up", 42, 7)
+                run_pulumi("up", self.TEST_REQUEST_ID)
 
             # Verify failed event was published with correct user_id
             mock_publish.assert_called_once()
             call_kwargs = mock_publish.call_args[1]
+            assert call_kwargs["request_id"] == self.TEST_REQUEST_ID
             assert call_kwargs["user_id"] == 7
 
 

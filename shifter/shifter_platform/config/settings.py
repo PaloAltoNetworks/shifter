@@ -285,6 +285,10 @@ if not FIELD_ENCRYPTION_KEY:
 # TODO: Set via SHIFTER_SUPPORT_EMAIL env var
 SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "support@example.com")
 
+# Provisioning timeout - how long dashboard waits before showing timeout error
+# UI fallback is 60 min if not provided (avoids long range standup issues during testing)
+PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
+
 # ------------------------------------------------------------------------------
 # AWS S3 Configuration
 # ------------------------------------------------------------------------------
@@ -304,7 +308,6 @@ AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
 AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 
-# ------------------------------------------------------------------------------
 # Guacamole RDP Integration
 # ------------------------------------------------------------------------------
 # JSON auth secret key for signing RDP session URLs
@@ -312,6 +315,27 @@ AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 # This is a 32-character hex string (128-bit key) stored in Secrets Manager
 GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
 GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
+
+# ------------------------------------------------------------------------------
+# SQS Worker Configuration
+# ------------------------------------------------------------------------------
+# Queue URLs are passed via environment variables by the deployment workflow.
+# Each worker polls one queue and dispatches to the corresponding handler.
+
+SQS_QUEUE_CONFIG = {
+    "cms": {
+        "url": os.environ.get("SQS_CMS_URL", ""),
+        "handler": "cms.handlers.process_range_event",
+    },
+    "engine": {
+        "url": os.environ.get("SQS_ENGINE_URL", ""),
+        "handler": "engine.handlers.process_range_event",
+    },
+    "mc": {
+        "url": os.environ.get("SQS_MC_URL", ""),
+        "handler": "mission_control.handlers.process_range_event",
+    },
+}
 
 # ------------------------------------------------------------------------------
 # Django REST Framework Configuration

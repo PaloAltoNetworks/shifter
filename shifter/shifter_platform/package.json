@@ -14,11 +14,17 @@
     "collectCoverageFrom": [
       "static/js/**/*.js",
       "!**/*.test.js"
+    ],
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "cobertura"
     ]
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "eslint": "^9.39.2",
+    "eslint-plugin-security": "^3.0.1",
     "globals": "^16.5.0",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",

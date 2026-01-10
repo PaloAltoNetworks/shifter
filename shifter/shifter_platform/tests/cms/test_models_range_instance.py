@@ -369,3 +369,125 @@ class TestRangeInstanceAgentFK:
         # Should be able to use select_related to load agent efficiently
         ri = RangeInstance.objects.select_related("agent").get(range_id=105)
         assert ri.agent.name == "Select Related Agent"
+
+
+@pytest.mark.django_db
+class TestRangeInstanceRangeSpec:
+    """Tests for RangeInstance.range_spec JSONField.
+
+    The range_spec field stores the hydrated RangeSpec JSON that was
+    sent to the engine during range creation. This allows CMS to
+    provide instance details without calling back to the engine.
+    """
+
+    def test_range_spec_is_optional(self, db):
+        """range_spec can be None (for backwards compatibility)."""
+        from cms.models import RangeInstance
+
+        ri = RangeInstance.objects.create(
+            range_id=200,
+            scenario_id="basic",
+            user_id=1,
+            range_spec=None,
+        )
+        assert ri.range_spec is None
+
+    def test_range_spec_stores_json(self, db):
+        """range_spec stores JSON data."""
+        from cms.models import RangeInstance
+
+        spec = {
+            "scenario_id": "basic",
+            "user_id": 1,
+            "instances": [
+                {"uuid": "abc-123", "role": "attacker", "os_type": "kali", "join_domain": False},
+                {"uuid": "def-456", "role": "victim", "os_type": "windows", "join_domain": False},
+            ],
+        }
+
+        ri = RangeInstance.objects.create(
+            range_id=201,
+            scenario_id="basic",
+            user_id=1,
+            range_spec=spec,
+        )
+        assert ri.range_spec == spec
+
+    def test_range_spec_instances_accessible(self, db):
+        """range_spec['instances'] can be accessed."""
+        from cms.models import RangeInstance
+
+        spec = {
+            "scenario_id": "basic",
+            "user_id": 1,
+            "instances": [
+                {"uuid": "abc-123", "role": "attacker", "os_type": "kali", "join_domain": False},
+            ],
+        }
+
+        ri = RangeInstance.objects.create(
+            range_id=202,
+            scenario_id="basic",
+            user_id=1,
+            range_spec=spec,
+        )
+
+        assert "instances" in ri.range_spec
+        assert len(ri.range_spec["instances"]) == 1
+        assert ri.range_spec["instances"][0]["role"] == "attacker"
+
+    def test_range_spec_persists_after_refresh(self, db):
+        """range_spec data persists after refresh_from_db."""
+        from cms.models import RangeInstance
+
+        spec = {
+            "scenario_id": "ad_attack_lab",
+            "user_id": 42,
+            "instances": [
+                {"uuid": "uuid-1", "role": "attacker", "os_type": "kali", "join_domain": False},
+                {"uuid": "uuid-2", "role": "dc", "os_type": "windows", "join_domain": False},
+                {"uuid": "uuid-3", "role": "victim", "os_type": "windows", "join_domain": True},
+            ],
+        }
+
+        ri = RangeInstance.objects.create(
+            range_id=203,
+            scenario_id="ad_attack_lab",
+            user_id=42,
+            range_spec=spec,
+        )
+
+        ri.refresh_from_db()
+        assert ri.range_spec == spec
+        assert len(ri.range_spec["instances"]) == 3
+
+    def test_range_spec_with_agent_details(self, db):
+        """range_spec can include agent details in instances."""
+        from cms.models import RangeInstance
+
+        spec = {
+            "scenario_id": "basic",
+            "user_id": 1,
+            "instances": [
+                {
+                    "uuid": "victim-uuid",
+                    "role": "victim",
+                    "os_type": "windows",
+                    "join_domain": False,
+                    "agent": {
+                        "s3_key": "agents/user/agent.msi",
+                        "filename": "agent.msi",
+                        "sha256": "a" * 64,
+                    },
+                },
+            ],
+        }
+
+        ri = RangeInstance.objects.create(
+            range_id=204,
+            scenario_id="basic",
+            user_id=1,
+            range_spec=spec,
+        )
+
+        assert ri.range_spec["instances"][0]["agent"]["s3_key"] == "agents/user/agent.msi"

@@ -19,4 +19,5 @@ class TestKaliSetupPlanRemoved:
     def test_kali_setup_plan_class_does_not_exist(self):
         """KaliSetupPlan class should not exist in plans."""
         import plans
+
         assert not hasattr(plans, "KaliSetupPlan")

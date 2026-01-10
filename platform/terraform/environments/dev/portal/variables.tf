@@ -101,6 +101,11 @@ variable "db_skip_final_snapshot" {
 # EC2
 # ------------------------------------------------------------------------------
 
+variable "ec2_ami_id" {
+  description = "AMI ID for portal EC2 instances (use standard AL2023, not ECS-optimized)"
+  type        = string
+}
+
 variable "ec2_instance_type" {
   description = "EC2 instance type for Django portal"
   type        = string
@@ -395,6 +400,74 @@ variable "guacamole_secrets_recovery_window_days" {
 variable "guacamole_enable_oidc" {
   description = "Enable OIDC/Cognito authentication for Guacamole"
   type        = bool
+}
+
+# ------------------------------------------------------------------------------
+# Messaging (SNS/SQS)
+# ------------------------------------------------------------------------------
+
+variable "messaging_consumers" {
+  description = "List of consumer names for SQS queues"
+  type        = list(string)
+}
+
+variable "messaging_visibility_timeout_seconds" {
+  description = "SQS visibility timeout in seconds"
+  type        = number
+}
+
+variable "messaging_message_retention_seconds" {
+  description = "SQS message retention period in seconds"
+  type        = number
+}
+
+variable "messaging_enable_dlq" {
+  description = "Enable dead letter queues for failed messages"
+  type        = bool
+}
+
+variable "messaging_dlq_max_receive_count" {
+  description = "Number of times a message can be received before moving to DLQ"
+  type        = number
+}
+
+variable "messaging_dlq_message_retention_seconds" {
+  description = "DLQ message retention period in seconds"
+  type        = number
+}
+
+variable "messaging_enable_alarms" {
+  description = "Enable CloudWatch alarms for queue monitoring"
+  type        = bool
+}
+
+variable "messaging_alarm_queue_depth_threshold" {
+  description = "Alarm threshold for approximate number of messages in queue"
+  type        = number
+}
+
+variable "messaging_alarm_message_age_threshold" {
+  description = "Alarm threshold for oldest message age in seconds"
+  type        = number
+}
+
+variable "messaging_alarm_dlq_threshold" {
+  description = "Alarm threshold for messages in DLQ"
+  type        = number
+}
+
+variable "messaging_alarm_actions" {
+  description = "List of ARNs to notify when alarm triggers (e.g., SNS topic ARNs)"
+  type        = list(string)
+}
+
+# ------------------------------------------------------------------------------
+# Alerting
+# ------------------------------------------------------------------------------
+
+variable "alarm_email" {
+  description = "Email address for CloudWatch alarm notifications"
+  type        = string
 }
 
 # ------------------------------------------------------------------------------

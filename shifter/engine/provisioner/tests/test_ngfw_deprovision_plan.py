@@ -6,7 +6,6 @@ NGFWDeprovisionPlan handles NGFW cleanup before Pulumi destroy:
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pytest
 

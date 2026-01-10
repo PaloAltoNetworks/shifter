@@ -8,13 +8,12 @@ This plan supports different Linux distributions by using a configurable
 SSH user (ubuntu, ec2-user, etc.).
 """
 
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 from .base import SetupStep
 
-
 # Bash script to set hostname
-SET_HOSTNAME_SCRIPT = '''#!/bin/bash
+SET_HOSTNAME_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
 hostname="{{ hostname }}"
@@ -29,11 +28,11 @@ echo "127.0.0.1 $hostname" >> /etc/hosts
 
 echo "Hostname set to $hostname"
 exit 0
-'''
+"""
 
 # Bash script to configure SSH with authorized keys
 # Uses template variable for configurable user
-CONFIGURE_SSH_SCRIPT = '''#!/bin/bash
+CONFIGURE_SSH_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
 ssh_user="{{ ssh_user }}"
@@ -60,10 +59,10 @@ fi
 
 echo "SSH configuration complete"
 exit 0
-'''
+"""
 
 # Bash script to verify hostname is set correctly
-VERIFY_HOSTNAME_SCRIPT = '''#!/bin/bash
+VERIFY_HOSTNAME_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
 expected_hostname="{{ hostname }}"
@@ -81,7 +80,7 @@ else
     echo "Got: $current_hostname"
     exit 1
 fi
-'''
+"""
 
 
 class LinuxBootstrapPlan:
@@ -103,7 +102,7 @@ class LinuxBootstrapPlan:
     - Check hostname matches expected value
     """
 
-    steps: List[SetupStep] = [
+    steps: ClassVar[list[SetupStep]] = [
         SetupStep(
             name="set_hostname",
             script=SET_HOSTNAME_SCRIPT,
@@ -118,14 +117,14 @@ class LinuxBootstrapPlan:
         ),
     ]
 
-    verify_step: SetupStep = SetupStep(
+    verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_hostname",
         script=VERIFY_HOSTNAME_SCRIPT,
         timeout_seconds=30,
         is_verification=True,
     )
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for Linux bootstrap scripts.
 
         Args:

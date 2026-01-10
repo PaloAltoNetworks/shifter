@@ -8,6 +8,9 @@ FROM guacamole/guacamole:${GUACAMOLE_VERSION}
 
 ARG GUACAMOLE_VERSION
 
+# Use /tmp as working directory for downloads (ensures write permissions)
+WORKDIR /tmp
+
 # Download and install authentication extensions:
 # 1. SSO/OIDC extension for Cognito authentication
 # 2. JSON auth extension for on-the-fly RDP connections from Portal

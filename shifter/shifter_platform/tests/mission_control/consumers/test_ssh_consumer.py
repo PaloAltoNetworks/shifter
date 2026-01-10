@@ -7,12 +7,17 @@ connect, receive input, send output, disconnect.
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 from django.contrib.auth.models import AnonymousUser
 
 from shared.enums import ResourceStatus, WebSocketCloseCode
 from shared.schemas import InstanceContext, RangeContext
+
+# Test UUID for request_id
+TEST_REQUEST_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+TEST_REQUEST_UUID = UUID(TEST_REQUEST_ID)
 
 
 @pytest.fixture
@@ -55,6 +60,7 @@ def unauthenticated_scope():
 def ready_range_context():
     """RangeContext with READY status and matching instance."""
     return RangeContext(
+        request_id=TEST_REQUEST_UUID,
         range_id=42,
         scenario_id="test-scenario",
         user_id=1,
@@ -104,6 +110,7 @@ class TestSSHConsumerConnect:
         """Range not in READY status returns NOT_FOUND."""
         consumer.scope = authenticated_scope
         not_ready = RangeContext(
+            request_id=TEST_REQUEST_UUID,
             range_id=42,
             scenario_id="test",
             user_id=1,
@@ -121,6 +128,7 @@ class TestSSHConsumerConnect:
         """Instance UUID not in range returns NOT_FOUND."""
         consumer.scope = authenticated_scope
         range_ctx = RangeContext(
+            request_id=TEST_REQUEST_UUID,
             range_id=42,
             scenario_id="test",
             user_id=1,

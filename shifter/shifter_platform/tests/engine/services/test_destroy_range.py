@@ -2,6 +2,7 @@
 
 import logging
 from unittest.mock import Mock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -12,6 +13,7 @@ from shared.schemas import RangeContext
 def make_range_ctx(range_id: int = 42, user_id: int = 7) -> RangeContext:
     """Create a RangeContext for testing."""
     return RangeContext(
+        request_id=uuid4(),
         range_id=range_id,
         user_id=user_id,
         scenario_id="basic",

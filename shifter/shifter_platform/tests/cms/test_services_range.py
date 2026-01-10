@@ -730,7 +730,7 @@ class TestDestroyRange:
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range) as mock_get,
-            patch("cms.services.engine_destroy_range"),
+            patch("cms.services.engine_destroy_range_by_request"),
         ):
             services.destroy_range(user, 42)
             mock_get.assert_called_once_with(range_id=42)
@@ -750,7 +750,7 @@ class TestDestroyRange:
         mock_now = timezone.now()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
-            patch("cms.services.engine_destroy_range"),
+            patch("cms.services.engine_destroy_range_by_request"),
             patch("django.utils.timezone.now", return_value=mock_now),
         ):
             services.destroy_range(user, 42)
@@ -762,26 +762,28 @@ class TestDestroyRange:
             # Verify save was called with both fields
             mock_range.save.assert_called_once_with(update_fields=["status", "deleted_at"])
 
-    def test_calls_engine_destroy_with_range_context(self, user):
-        """Service passes RangeContext (not range_id) to engine."""
-        from cms.models import RangeInstance
-        from shared.schemas import RangeContext
+    def test_calls_engine_destroy_with_request_id(self, user):
+        """Service passes request_id (not RangeContext) to engine."""
+        from uuid import UUID
 
+        from cms.models import RangeInstance
+
+        mock_request = make_mock_request()
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
-        mock_range.request = make_mock_request()
+        mock_range.request = mock_request
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
-            patch("cms.services.engine_destroy_range") as mock_destroy,
+            patch("cms.services.engine_destroy_range_by_request") as mock_destroy,
         ):
             services.destroy_range(user, 42)
 
-            # Verify engine was called with RangeContext
+            # Verify engine was called with request_id
             mock_destroy.assert_called_once()
             call_arg = mock_destroy.call_args[0][0]
-            assert isinstance(call_arg, RangeContext)
-            assert call_arg.range_id == 42
+            assert isinstance(call_arg, UUID)
+            assert call_arg == mock_request.request_id
 
     # -------------------------------------------------------------------------
     # Service returns None (void function)
@@ -797,7 +799,7 @@ class TestDestroyRange:
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
-            patch("cms.services.engine_destroy_range"),
+            patch("cms.services.engine_destroy_range_by_request"),
         ):
             result = services.destroy_range(user, 42)
             assert result is None
@@ -849,7 +851,7 @@ class TestDestroyRange:
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch(
-                "cms.services.engine_destroy_range",
+                "cms.services.engine_destroy_range_by_request",
                 side_effect=EngineError("No range to destroy"),
             ),
             pytest.raises(EngineError, match="No range to destroy"),
@@ -867,7 +869,7 @@ class TestDestroyRange:
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
             patch(
-                "cms.services.engine_destroy_range",
+                "cms.services.engine_destroy_range_by_request",
                 side_effect=Exception("DB connection failed"),
             ),
             pytest.raises(Exception, match="DB connection failed"),
@@ -951,7 +953,7 @@ class TestCancelRange:
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range) as mock_get,
-            patch("cms.services.engine_cancel_range"),
+            patch("cms.services.engine_cancel_range_by_request"),
         ):
             services.cancel_range(user, 42)
             mock_get.assert_called_once_with(user, 42)
@@ -967,7 +969,7 @@ class TestCancelRange:
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_cancel_range"),
+            patch("cms.services.engine_cancel_range_by_request"),
         ):
             services.cancel_range(user, 42)
 
@@ -976,26 +978,28 @@ class TestCancelRange:
             # Verify save was called with update_fields
             mock_range.save.assert_called_once_with(update_fields=["status"])
 
-    def test_calls_engine_cancel_with_range_context(self, user):
-        """Service passes RangeContext (not range_id) to engine."""
-        from cms.models import RangeInstance
-        from shared.schemas import RangeContext
+    def test_calls_engine_cancel_with_request_id(self, user):
+        """Service passes request_id (not RangeContext) to engine."""
+        from uuid import UUID
 
+        from cms.models import RangeInstance
+
+        mock_request = make_mock_request()
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id, scenario_id="basic")
         mock_range.agent = None
-        mock_range.request = make_mock_request()
+        mock_range.request = mock_request
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_cancel_range") as mock_cancel,
+            patch("cms.services.engine_cancel_range_by_request") as mock_cancel,
         ):
             services.cancel_range(user, 42)
 
-            # Verify engine was called with RangeContext
+            # Verify engine was called with request_id
             mock_cancel.assert_called_once()
             call_arg = mock_cancel.call_args[0][0]
-            assert isinstance(call_arg, RangeContext)
-            assert call_arg.range_id == 42
+            assert isinstance(call_arg, UUID)
+            assert call_arg == mock_request.request_id
 
     # -------------------------------------------------------------------------
     # Service returns None (void function)
@@ -1011,7 +1015,7 @@ class TestCancelRange:
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch("cms.services.engine_cancel_range"),
+            patch("cms.services.engine_cancel_range_by_request"),
         ):
             result = services.cancel_range(user, 42)
             assert result is None
@@ -1056,7 +1060,7 @@ class TestCancelRange:
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch(
-                "cms.services.engine_cancel_range",
+                "cms.services.engine_cancel_range_by_request",
                 side_effect=EngineError("Cannot cancel range"),
             ),
             pytest.raises(EngineError, match="Cannot cancel range"),
@@ -1074,7 +1078,7 @@ class TestCancelRange:
         with (
             patch.object(services, "get_range", return_value=mock_range),
             patch(
-                "cms.services.engine_cancel_range",
+                "cms.services.engine_cancel_range_by_request",
                 side_effect=Exception("DB connection failed"),
             ),
             pytest.raises(Exception, match="DB connection failed"),

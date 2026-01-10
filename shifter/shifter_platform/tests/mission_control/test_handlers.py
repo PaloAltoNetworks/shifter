@@ -163,22 +163,11 @@ class TestParseSnsMessage:
 class TestProcessRangeEvent:
     """Tests for process_range_event handler."""
 
-    @pytest.fixture
-    def mock_range(self):
-        """Create a mock Range object with request FK."""
-        mock_request = MagicMock()
-        mock_request.request_id = TEST_REQUEST_ID
-
-        mock_range_obj = MagicMock()
-        mock_range_obj.request = mock_request
-
-        return mock_range_obj
-
     # ---------------------------------------------------------------------
     # Happy path - broadcast to channel layer
     # ---------------------------------------------------------------------
 
-    def test_broadcasts_status_update_to_channel_layer(self, mock_range):
+    def test_broadcasts_status_update_to_channel_layer(self):
         """Handler broadcasts status update to Django Channels group."""
         from mission_control.handlers import process_range_event
 
@@ -186,6 +175,7 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 1,
                     "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
@@ -193,18 +183,11 @@ class TestProcessRangeEvent:
             )
         }
 
-        with (
-            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
-            patch("engine.models.Range") as mock_range_model,
-        ):
+        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
             mock_send = MagicMock()
             mock_async_to_sync.return_value = mock_send
-            mock_range_model.objects.select_related.return_value.get.return_value = mock_range
 
             process_range_event(message)
-
-            # Verify Range was looked up
-            mock_range_model.objects.select_related.assert_called_once_with("request")
 
             # Verify async_to_sync was called with group_send
             mock_async_to_sync.assert_called_once()
@@ -222,7 +205,7 @@ class TestProcessRangeEvent:
             assert sent_message["request_id"] == str(TEST_REQUEST_ID)
             assert sent_message["new_status"] == ResourceStatus.PROVISIONING.value
 
-    def test_broadcasts_error_message_when_present(self, mock_range):
+    def test_broadcasts_error_message_when_present(self):
         """Handler includes error_message in broadcast when present."""
         from mission_control.handlers import process_range_event
 
@@ -230,6 +213,7 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 2,
                     "new_status": ResourceStatus.FAILED.value,
                     "user_id": 42,
@@ -238,13 +222,9 @@ class TestProcessRangeEvent:
             )
         }
 
-        with (
-            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
-            patch("engine.models.Range") as mock_range_model,
-        ):
+        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
             mock_send = MagicMock()
             mock_async_to_sync.return_value = mock_send
-            mock_range_model.objects.select_related.return_value.get.return_value = mock_range
 
             process_range_event(message)
 
@@ -253,7 +233,7 @@ class TestProcessRangeEvent:
             sent_message = args[1]
             assert sent_message["error_message"] == "Subnet exhausted"
 
-    def test_broadcasts_null_error_message_when_not_present(self, mock_range):
+    def test_broadcasts_null_error_message_when_not_present(self):
         """Handler includes null error_message when not in event."""
         from mission_control.handlers import process_range_event
 
@@ -261,6 +241,7 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 3,
                     "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
@@ -268,13 +249,9 @@ class TestProcessRangeEvent:
             )
         }
 
-        with (
-            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
-            patch("engine.models.Range") as mock_range_model,
-        ):
+        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
             mock_send = MagicMock()
             mock_async_to_sync.return_value = mock_send
-            mock_range_model.objects.select_related.return_value.get.return_value = mock_range
 
             process_range_event(message)
 
@@ -314,7 +291,7 @@ class TestProcessRangeEvent:
     # Logging
     # ---------------------------------------------------------------------
 
-    def test_logs_info_on_successful_broadcast(self, mock_range):
+    def test_logs_info_on_successful_broadcast(self):
         """Handler logs INFO when broadcast succeeds."""
         from mission_control.handlers import process_range_event
 
@@ -322,6 +299,7 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 5,
                     "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
@@ -332,11 +310,9 @@ class TestProcessRangeEvent:
         with (
             patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
             patch("mission_control.handlers.logger") as mock_logger,
-            patch("engine.models.Range") as mock_range_model,
         ):
             mock_send = MagicMock()
             mock_async_to_sync.return_value = mock_send
-            mock_range_model.objects.select_related.return_value.get.return_value = mock_range
 
             process_range_event(message)
 
@@ -355,6 +331,7 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.destroyed",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 1,
                     "user_id": 42,
                 }
@@ -376,6 +353,39 @@ class TestProcessRangeEvent:
         assert "Ignoring event_type" in call_args[0]
         assert call_args[1] == "range.destroyed"
 
+    def test_logs_error_when_request_id_missing(self):
+        """Handler logs ERROR when request_id is missing from event."""
+        from mission_control.handlers import process_range_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "range_id": 1,
+                    "new_status": ResourceStatus.PROVISIONING.value,
+                    "user_id": 42,
+                    # No request_id
+                }
+            )
+        }
+
+        with (
+            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
+            patch("mission_control.handlers.logger") as mock_logger,
+        ):
+            mock_send = MagicMock()
+            mock_async_to_sync.return_value = mock_send
+
+            process_range_event(message)
+
+        # Verify logger.error was called
+        mock_logger.error.assert_called_once()
+        call_args = mock_logger.error.call_args[0]
+        assert "Missing request_id" in call_args[0]
+
+        # Should NOT have broadcast
+        mock_async_to_sync.assert_not_called()
+
     # ---------------------------------------------------------------------
     # Handler is callable
     # ---------------------------------------------------------------------
@@ -390,7 +400,7 @@ class TestProcessRangeEvent:
     # Group name
     # ---------------------------------------------------------------------
 
-    def test_uses_correct_group_name_format(self, mock_range):
+    def test_uses_correct_group_name_format(self):
         """Handler uses range_event_group helper for group name."""
         from mission_control.handlers import process_range_event
 
@@ -398,6 +408,7 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 123,
                     "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
@@ -405,13 +416,9 @@ class TestProcessRangeEvent:
             )
         }
 
-        with (
-            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
-            patch("engine.models.Range") as mock_range_model,
-        ):
+        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
             mock_send = MagicMock()
             mock_async_to_sync.return_value = mock_send
-            mock_range_model.objects.select_related.return_value.get.return_value = mock_range
 
             process_range_event(message)
 
@@ -422,15 +429,16 @@ class TestProcessRangeEvent:
     # Minimum required input
     # ---------------------------------------------------------------------
 
-    def test_succeeds_with_minimum_required_input(self, mock_range):
-        """Handler works with minimal event fields."""
+    def test_succeeds_with_minimum_required_input(self):
+        """Handler works with minimal event fields (request_id required)."""
         from mission_control.handlers import process_range_event
 
-        # Minimal SNS message - no error_message
+        # Minimal SNS message - no error_message, but request_id is required
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 6,
                     "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
@@ -438,13 +446,9 @@ class TestProcessRangeEvent:
             )
         }
 
-        with (
-            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
-            patch("engine.models.Range") as mock_range_model,
-        ):
+        with patch("mission_control.handlers.async_to_sync") as mock_async_to_sync:
             mock_send = MagicMock()
             mock_async_to_sync.return_value = mock_send
-            mock_range_model.objects.select_related.return_value.get.return_value = mock_range
 
             process_range_event(message)
 

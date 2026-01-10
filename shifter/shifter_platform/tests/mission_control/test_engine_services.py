@@ -393,7 +393,7 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
         ):
             create_range(valid_request_spec)
             mock_create.assert_called_once()
@@ -417,13 +417,13 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5) as mock_allocate,
-            patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
         ):
             create_range(valid_request_spec)
             mock_allocate.assert_called_once()
 
     def test_starts_ecs_provisioning(self, valid_request_spec):
-        """Service calls start_provisioning with range_id and user_id."""
+        """Service calls start_range_provisioning with request_id."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
@@ -439,10 +439,10 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test") as mock_start,
+            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test") as mock_start,
         ):
             create_range(valid_request_spec)
-            mock_start.assert_called_once_with(42, 1)
+            mock_start.assert_called_once_with(valid_request_spec.request_id)
 
     # -------------------------------------------------------------------------
     # Service returns request_id UUID
@@ -465,7 +465,7 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
         ):
             result = create_range(valid_request_spec)
             assert result == valid_request_spec.request_id
@@ -491,7 +491,7 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             create_range(valid_request_spec)
@@ -515,7 +515,7 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(valid_request_spec)
@@ -589,7 +589,7 @@ class TestCreateRange:
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch(
-                "engine.ecs.start_provisioning",
+                "engine.ecs.start_range_provisioning",
                 side_effect=ClientError(
                     {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
                     "RunTask",

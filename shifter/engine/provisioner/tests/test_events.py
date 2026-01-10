@@ -170,6 +170,7 @@ class TestPublishStatusUpdate:
 
         with patch("events._publish_event") as mock_publish:
             publish_status_update(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
                 new_status="provisioning",
@@ -179,6 +180,7 @@ class TestPublishStatusUpdate:
             event = mock_publish.call_args[0][0]
 
             assert event["event_type"] == "range.status.updated"
+            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
             assert event["range_id"] == 42
             assert event["user_id"] == 1
             assert event["new_status"] == "provisioning"
@@ -189,6 +191,7 @@ class TestPublishStatusUpdate:
 
         with patch("events._publish_event") as mock_publish:
             publish_status_update(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
                 new_status="failed",
@@ -206,7 +209,12 @@ class TestPublishStatusUpdate:
             patch("events._publish_event"),
             caplog.at_level(logging.INFO, logger="events"),
         ):
-            publish_status_update(range_id=42, user_id=1, new_status="provisioning")
+            publish_status_update(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                range_id=42,
+                user_id=1,
+                new_status="provisioning",
+            )
 
             assert "42" in caplog.text
             assert "provisioning" in caplog.text
@@ -234,7 +242,12 @@ class TestPublishReady:
                 {"role": "victim", "ip": "10.1.1.20"},
             ]
 
-            publish_ready(range_id=42, user_id=1, instances=instances)
+            publish_ready(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                range_id=42,
+                user_id=1,
+                instances=instances,
+            )
 
             # Should publish both status update and provisioned event
             assert mock_publish.call_count >= 1
@@ -254,6 +267,7 @@ class TestPublishReady:
             instances = [{"role": "attacker", "ip": "10.1.1.10"}]
 
             publish_ready(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
                 instances=instances,
@@ -279,7 +293,12 @@ class TestPublishReady:
         with patch("events._publish_event") as mock_publish:
             instances = [{"role": "attacker", "ip": "10.1.1.10"}]
 
-            publish_ready(range_id=42, user_id=1, instances=instances)
+            publish_ready(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                range_id=42,
+                user_id=1,
+                instances=instances,
+            )
 
             # Find the provisioned event
             calls = [call[0][0] for call in mock_publish.call_args_list]
@@ -310,7 +329,12 @@ class TestPublishFailed:
         from events import publish_failed
 
         with patch("events._publish_event") as mock_publish:
-            publish_failed(range_id=42, user_id=1, error_message="Instance launch failed")
+            publish_failed(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                range_id=42,
+                user_id=1,
+                error_message="Instance launch failed",
+            )
 
             mock_publish.assert_called_once()
             event = mock_publish.call_args[0][0]
@@ -336,7 +360,11 @@ class TestPublishDestroyed:
         from events import publish_destroyed
 
         with patch("events._publish_event") as mock_publish:
-            publish_destroyed(range_id=42, user_id=1)
+            publish_destroyed(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                range_id=42,
+                user_id=1,
+            )
 
             # Should publish both status update and destroyed event
             assert mock_publish.call_count >= 1
@@ -364,12 +392,17 @@ class TestPublishCancelled:
         from events import publish_cancelled
 
         with patch("events._publish_event") as mock_publish:
-            publish_cancelled(range_id=42, user_id=1)
+            publish_cancelled(
+                request_id="550e8400-e29b-41d4-a716-446655440000",
+                range_id=42,
+                user_id=1,
+            )
 
             mock_publish.assert_called_once()
             event = mock_publish.call_args[0][0]
 
             assert event["event_type"] == "range.cancelled"
+            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
             assert event["range_id"] == 42
             assert event["user_id"] == 1
 

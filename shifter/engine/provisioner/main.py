@@ -155,6 +155,56 @@ def get_ngfw_data_by_request_id(request_id: str) -> dict:
         }
 
 
+def get_range_data_by_request_id(request_id: str) -> dict:
+    """Read Range request data from Engine database.
+
+    Queries engine_request joined with mission_control_range to get
+    all correlation IDs and data needed for provisioning.
+
+    Args:
+        request_id: UUID string of the Request.
+
+    Returns:
+        Dictionary with:
+            - request_id: UUID string of the Request
+            - range_id: Integer ID of the Range
+            - user_id: Django User ID
+            - spec: JSON dict (range_config)
+            - subnet_index: Allocated subnet index
+            - status: Current Range status
+
+    Raises:
+        ValueError: If Request or Range not found.
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                r.request_id,
+                rng.id AS range_id,
+                rng.user_id,
+                rng.range_config,
+                rng.subnet_index,
+                rng.status
+            FROM engine_request r
+            JOIN mission_control_range rng ON rng.request_id = r.id
+            WHERE r.request_id = %s
+            """,
+            (request_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Range request not found: {request_id}")
+        return {
+            "request_id": str(row[0]),
+            "range_id": row[1],
+            "user_id": row[2],
+            "spec": row[3] if row[3] else {},
+            "subnet_index": row[4],
+            "status": row[5],
+        }
+
+
 def parse_serial_number(system_info_output: str) -> str | None:
     """Extract serial number from PAN-OS 'show system info' output.
 
@@ -271,17 +321,21 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
         conn.commit()
 
 
-def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
+def run_pulumi(operation: str, request_id: str) -> None:
     """Run Pulumi operation.
 
     Args:
         operation: Either 'up' (provision) or 'destroy' (teardown).
-        range_id: The ID of the range to operate on.
-        user_id: The Django user ID who owns this range.
+        request_id: UUID string of the Request.
 
     Raises:
         Exception: If the Pulumi operation fails.
     """
+    # Fetch data from DB (matches NGFW pattern)
+    range_data = get_range_data_by_request_id(request_id)
+    range_id = range_data["range_id"]
+    user_id = range_data["user_id"]
+
     stack_name = f"range-{range_id}"
     env = os.environ.copy()
     # Security: Empty passphrase is intentional - we use AWS KMS via PULUMI_SECRETS_PROVIDER.
@@ -295,9 +349,9 @@ def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
         _set_stack_config(env, range_id)
 
         if operation == "up":
-            _run_provision(range_id, user_id, stack_name, env)
+            _run_provision(request_id, range_id, user_id, stack_name, env)
         elif operation == "destroy":
-            _run_destroy(range_id, user_id, stack_name, env)
+            _run_destroy(request_id, range_id, user_id, stack_name, env)
         else:
             raise ValueError(f"Unknown operation: {operation}")
 
@@ -316,7 +370,7 @@ def run_pulumi(operation: str, range_id: int, user_id: int) -> None:
             )
 
         # Publish failed event
-        publish_failed(range_id=range_id, user_id=user_id, error_message=error_msg)
+        publish_failed(request_id=request_id, range_id=range_id, user_id=user_id, error_message=error_msg)
         raise
 
 
@@ -425,17 +479,18 @@ def _set_stack_config(env: dict, range_id: int) -> None:
             )
 
 
-def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> None:
+def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str, env: dict) -> None:
     """Run Pulumi up to provision the range.
 
     Args:
+        request_id: UUID string of the Request.
         range_id: The range ID being provisioned.
         user_id: The Django user ID who owns this range.
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
     # Publish status change event
-    publish_status_update(range_id=range_id, user_id=user_id, new_status="provisioning")
+    publish_status_update(request_id=request_id, range_id=range_id, user_id=user_id, new_status="provisioning")
     logger.info("Running pulumi up...")
 
     result = subprocess.run(
@@ -468,6 +523,7 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
 
     # Publish ready event with instance details
     publish_ready(
+        request_id=request_id,
         range_id=range_id,
         user_id=user_id,
         instances=output_data.get("instances", []),
@@ -477,10 +533,11 @@ def _run_provision(range_id: int, user_id: int, stack_name: str, env: dict) -> N
     )
 
 
-def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> None:
+def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, env: dict) -> None:
     """Run Pulumi destroy to tear down the range.
 
     Args:
+        request_id: UUID string of the Request.
         range_id: The range ID being destroyed.
         user_id: The Django user ID who owns this range.
         stack_name: The Pulumi stack name.
@@ -521,7 +578,7 @@ def _run_destroy(range_id: int, user_id: int, stack_name: str, env: dict) -> Non
     )
 
     # Publish destroyed event
-    publish_destroyed(range_id=range_id, user_id=user_id)
+    publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 
 
 def run_ngfw_operation(operation: str, request_id: str, **kwargs) -> None:
@@ -1034,13 +1091,10 @@ if __name__ == "__main__":
 
     import argparse
 
-    RANGE_ID_HELP = "Database ID of the range to operate on"
-
     parser = argparse.ArgumentParser(description="Shifter Engine for provisioning cyber ranges and NGFW operations")
     subparsers = parser.add_subparsers(dest="resource", required=True, help="Resource type")
 
-    # Range operations - backward compatible with: provision --range-id 42
-    # Also supports: range provision --range-id 42
+    # Range operations - use request_id (UUID) like NGFW pattern
     range_parser = subparsers.add_parser("range", help="Range lifecycle operations")
     range_parser.add_argument(
         "operation",
@@ -1048,16 +1102,11 @@ if __name__ == "__main__":
         help="Operation to perform: provision (create) or destroy (teardown)",
     )
     range_parser.add_argument(
-        "--range-id",
-        type=int,
+        "--request-id",
+        type=str,
         required=True,
-        help=RANGE_ID_HELP,
-    )
-    range_parser.add_argument(
-        "--user-id",
-        type=int,
-        required=True,
-        help="Django User ID of the range owner",
+        dest="request_id",
+        help="UUID of the Request for this Range",
     )
 
     # NGFW operations
@@ -1146,16 +1195,15 @@ if __name__ == "__main__":
 
     elif args.resource == "range":
         # Handle range operations
-        range_id = args.range_id
-        user_id = args.user_id
+        request_id = args.request_id
 
         # Map Django command names to Pulumi operations
         operation_map = {"provision": "up", "destroy": "destroy"}
         pulumi_op = operation_map[args.operation]
 
-        logger.info(f"Starting {pulumi_op} for range {range_id} (user {user_id})")
+        logger.info(f"Starting {pulumi_op} for request_id={request_id}")
         logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
-        run_pulumi(pulumi_op, range_id, user_id)
+        run_pulumi(pulumi_op, request_id)
 
-        logger.info(f"Completed {pulumi_op} for range {range_id}")
+        logger.info(f"Completed {pulumi_op} for request_id={request_id}")

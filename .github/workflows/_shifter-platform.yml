@@ -132,6 +132,49 @@ jobs:
         with:
           terraform_version: "1.7.1"
       - run: terraform init
+      - name: Handle Service Discovery replacement
+        run: |
+          # Check if Service Discovery service needs replacement
+          terraform plan -detailed-exitcode -out=tfplan 2>/dev/null || PLAN_EXIT=$?
+
+          # Exit code 2 means there are changes
+          if [ "${PLAN_EXIT:-0}" = "2" ]; then
+            # Check if service discovery service is being replaced
+            if terraform show -json tfplan | jq -e '.resource_changes[]? | select(.address | contains("service_discovery_service")) | select(.change.actions | contains(["delete"]))' > /dev/null 2>&1; then
+              echo "Service Discovery service replacement detected - scaling down ECS services first"
+
+              # Get the ECS cluster and service names from terraform state
+              CLUSTER_NAME=$(terraform show -json | jq -r '.values.root_module.child_modules[]?.resources[]? | select(.address | contains("aws_ecs_cluster.guacamole")) | .values.name' 2>/dev/null || echo "")
+
+              if [ -n "$CLUSTER_NAME" ]; then
+                echo "Found Guacamole cluster: $CLUSTER_NAME"
+
+                # Scale down guacd service to deregister from Service Discovery
+                GUACD_SERVICE=$(aws ecs list-services --cluster "$CLUSTER_NAME" --query "serviceArns[?contains(@, 'guacd')]|[0]" --output text 2>/dev/null || echo "")
+
+                if [ -n "$GUACD_SERVICE" ] && [ "$GUACD_SERVICE" != "None" ]; then
+                  echo "Scaling down guacd service to deregister instances..."
+                  aws ecs update-service --cluster "$CLUSTER_NAME" --service "$GUACD_SERVICE" --desired-count 0 --no-cli-pager
+
+                  # Wait for tasks to drain (max 2 minutes)
+                  for i in $(seq 1 24); do
+                    RUNNING=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].runningCount" --output text)
+                    if [ "$RUNNING" = "0" ]; then
+                      echo "All guacd tasks stopped"
+                      break
+                    fi
+                    echo "Waiting for tasks to stop... ($RUNNING running)"
+                    sleep 5
+                  done
+
+                  # Give Service Discovery time to deregister
+                  sleep 10
+                fi
+              fi
+            fi
+          fi
+
+          rm -f tfplan
       - run: terraform apply -auto-approve
 
   build:

@@ -277,12 +277,12 @@ class TestLaunchRange:
         assert response.status_code == 400
         assert "already have an active range" in response.json()["error"]
 
-    def test_ad_scenario_rejects_linux_agent(self, client, test_agent, linux_os, settings):
-        """AD scenario requires Windows agent (used for both DC and victim)."""
+    def test_ad_scenario_accepts_linux_agent(self, client, test_agent, linux_os, settings):
+        """AD scenario accepts Linux agent (from_agent allows any OS for victim)."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
-        # Create a Linux agent (invalid for AD scenario)
+        # Create a Linux agent (valid for AD scenario with from_agent)
         linux_agent = AgentConfig.objects.create(
             user=test_agent.user,
             os=linux_os,
@@ -302,8 +302,8 @@ class TestLaunchRange:
             content_type="application/json",
         )
 
-        assert response.status_code == 400
-        assert "Windows" in response.json()["error"]
+        # from_agent scenarios accept any OS
+        assert response.status_code == 200
 
     def test_ad_scenario_success_with_windows_agent(self, client, test_agent, settings):
         """AD scenario succeeds with Windows agent (used for both DC and victim)."""

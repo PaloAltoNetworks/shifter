@@ -11,11 +11,43 @@
 
 Self-service enterprise cyber range platform. Users provision isolated attack environments to run purple, red, and blue team scenarios with telemetry from targets to showcase XDR/XSIAM capabilities.
 
+Status: Under evaluation for adoption by the Security Lab Team.
+
+## CyberScript
+
+Shifter is powered by CyberScript - a language for defining cyber ranges. Write what you want in CyberScript, then Shifter builds it.
+
+```yaml
+instances:
+  - name: Domain Controller
+    role: dc
+    os_type: windows
+    domain_controller: true
+    xdr_agent: false
+
+  - name: Workstation 1
+    role: victim
+    os_type: windows
+    xdr_agent: true
+    join_domain: true
+
+subnets:
+  - name: dc_network
+    instances: [Domain Controller]
+    connected_to: [workstation_network]
+```
+
+You describe attack scenarios, network topology, and victim configurations without dealing with AWS primitives or infrastructure complexity.
+
+See [cortex_byot.yaml](shifter/shifter_platform/cms/scenarios/templates/cortex_byot.yaml) for a complete example.
+
+## Agentic Cyber Range Platform
+
 *Shifter IS NOT a product*. It is an internal tool to showcase XDR/XSIAM capabilities to customers. Cortex UX is intended to make the platform more user-friendly for technical sellers and visually appropriate during customer demos.
 
 *Shifter IS NOT intended for product/stress testing any PANW products or services. Speak to Product Engineering for any such requests*.
 
-Shifter complements existing demo environments and tools. It is not intended to replace them. BYOS, shared demo tenants, and other enablement resources are the official and primary demo tooling for technical sellers.
+Shifter complements existing demo environments and tools. It is not intended to replace them. BYOS, shared demo tenants, and other enablement resources are the primary demo tooling for technical sellers.
 
 ## Ethics
 

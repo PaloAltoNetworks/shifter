@@ -441,22 +441,14 @@ class TestCreateRangeValidation:
         from cms.exceptions import CMSError
 
         with pytest.raises(CMSError, match="not found"):
-            services.create_range(user, "nonexistent_scenario", windows_agent.id)
-
-    def test_raises_when_agent_requirements_not_met(self, user, linux_agent):
-        """create_range raises CMSError when agent doesn't meet scenario requirements."""
-        from cms.exceptions import CMSError
-
-        # ad_attack_lab requires Windows agent
-        with pytest.raises(CMSError, match=r"(?i)windows"):
-            services.create_range(user, "ad_attack_lab", linux_agent.id)
+            services.create_range(user, "nonexistent_scenario", {"windows": windows_agent.id})
 
     def test_raises_when_agent_not_found(self, user):
         """create_range raises CMSError when agent doesn't exist."""
         from cms.exceptions import CMSError
 
         with pytest.raises(CMSError, match="not found"):
-            services.create_range(user, "basic", 99999)
+            services.create_range(user, "basic", {"windows": 99999})
 
     def test_raises_when_agent_belongs_to_other_user(self, user, db):
         """create_range raises CMSError when agent belongs to another user."""
@@ -476,7 +468,7 @@ class TestCreateRangeValidation:
         )
 
         with pytest.raises(CMSError, match="not found"):
-            services.create_range(user, "basic", other_agent.id)
+            services.create_range(user, "basic", {"windows": other_agent.id})
 
     @patch("cms.services.engine_create_range")
     def test_raises_when_user_already_has_active_range(self, mock_engine, user, windows_agent):
@@ -486,14 +478,14 @@ class TestCreateRangeValidation:
 
         # Create existing active range for user
         mock_engine.return_value = 100
-        services.create_range(user, "basic", windows_agent.id)
+        services.create_range(user, "basic", {"windows": windows_agent.id})
 
         # Verify range was created
         assert RangeInstance.objects.filter(user_id=user.id).exists()
 
         # Attempt to create second range should fail
         with pytest.raises(CMSError, match="already have an active range"):
-            services.create_range(user, "basic", windows_agent.id)
+            services.create_range(user, "basic", {"windows": windows_agent.id})
 
 
 @pytest.mark.django_db
@@ -505,7 +497,7 @@ class TestCreateRangeEngineCall:
         """create_range calls engine.create_range with RangeSpec."""
         mock_engine.return_value = 42  # Engine returns range_id
 
-        services.create_range(user, "basic", windows_agent.id)
+        services.create_range(user, "basic", {"windows": windows_agent.id})
 
         # Engine should be called once
         mock_engine.assert_called_once()
@@ -517,7 +509,7 @@ class TestCreateRangeEngineCall:
 
         mock_engine.return_value = 42
 
-        services.create_range(user, "basic", windows_agent.id)
+        services.create_range(user, "basic", {"windows": windows_agent.id})
 
         # Get the RangeSpec passed to engine
         call_args = mock_engine.call_args
@@ -533,7 +525,7 @@ class TestCreateRangeEngineCall:
         """RangeSpec includes the correct scenario_id."""
         mock_engine.return_value = 42
 
-        services.create_range(user, "basic", windows_agent.id)
+        services.create_range(user, "basic", {"windows": windows_agent.id})
 
         range_request = mock_engine.call_args[0][0]
         assert range_request.scenario_id == "basic"
@@ -543,7 +535,7 @@ class TestCreateRangeEngineCall:
         """RangeSpec instances are hydrated with resolved OS and agent."""
         mock_engine.return_value = 42
 
-        services.create_range(user, "basic", windows_agent.id)
+        services.create_range(user, "basic", {"windows": windows_agent.id})
 
         range_request = mock_engine.call_args[0][0]
         instances = range_request.instances
@@ -568,7 +560,7 @@ class TestCreateRangeInstance:
 
         mock_engine.return_value = 42
 
-        services.create_range(user, "basic", windows_agent.id)
+        services.create_range(user, "basic", {"windows": windows_agent.id})
 
         # RangeInstance should be created
         ri = RangeInstance.objects.get(range_id=42)
@@ -583,7 +575,7 @@ class TestCreateRangeInstance:
 
         mock_engine.return_value = 43
 
-        services.create_range(user, "ad_attack_lab", windows_agent.id)
+        services.create_range(user, "ad_attack_lab", {"windows": windows_agent.id})
 
         ri = RangeInstance.objects.get(range_id=43)
         assert ri.scenario_id == "ad_attack_lab"
@@ -595,7 +587,7 @@ class TestCreateRangeInstance:
 
         mock_engine.return_value = 44
 
-        services.create_range(user, "basic", windows_agent.id)
+        services.create_range(user, "basic", {"windows": windows_agent.id})
 
         ri = RangeInstance.objects.get(range_id=44)
         assert ri.user_id == user.id
@@ -615,7 +607,7 @@ class TestCreateRangeReturn:
 
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         assert isinstance(result, RangeContext)
 
@@ -624,7 +616,7 @@ class TestCreateRangeReturn:
         """RangeContext contains the range_id from engine."""
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         assert result.range_id == 42
 
@@ -633,7 +625,7 @@ class TestCreateRangeReturn:
         """RangeContext contains the scenario_id."""
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         assert result.scenario_id == "basic"
 
@@ -642,7 +634,7 @@ class TestCreateRangeReturn:
         """RangeContext contains the user_id."""
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         assert result.user_id == user.id
 
@@ -651,7 +643,7 @@ class TestCreateRangeReturn:
         """RangeContext contains the agent_name."""
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         assert result.agent_name == "Windows Agent"
 
@@ -662,7 +654,7 @@ class TestCreateRangeReturn:
 
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         assert result.status == ResourceStatus.PROVISIONING
 
@@ -671,7 +663,7 @@ class TestCreateRangeReturn:
         """RangeContext contains instances list."""
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         assert len(result.instances) == 2  # basic scenario has attacker + victim
 
@@ -680,7 +672,7 @@ class TestCreateRangeReturn:
         """Each instance has a UUID."""
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         for instance in result.instances:
             assert instance.uuid is not None
@@ -690,7 +682,7 @@ class TestCreateRangeReturn:
         """Instances have correct roles from scenario."""
         mock_engine.return_value = 42
 
-        result = services.create_range(user, "basic", windows_agent.id)
+        result = services.create_range(user, "basic", {"windows": windows_agent.id})
 
         roles = [i.role for i in result.instances]
         assert "attacker" in roles

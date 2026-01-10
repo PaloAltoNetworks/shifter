@@ -23,6 +23,7 @@ urlpatterns = [
     path("api/range/cancel/", views.cancel_range, name="cancel_range"),
     path("api/range/destroy/", views.destroy_range, name="destroy_range"),
     path("api/agents/", views.list_agents, name="list_agents"),
+    path("api/scenarios/", views.list_scenarios, name="list_scenarios"),
     # NGFW views
     path("ngfw/", views.ngfw_list, name="ngfw_list"),
     path("ngfw/setup/", views.ngfw_wizard, name="ngfw_wizard"),

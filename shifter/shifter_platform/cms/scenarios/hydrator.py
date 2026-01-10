@@ -3,7 +3,7 @@
 Takes a scenario template + agent and produces a fully resolved
 RangeSpec with:
 - Resolved os_type (from_agent -> actual OS)
-- Embedded agent details for instances with agent_slot
+- Embedded agent details for instances with xdr_agent=True
 
 Also provides NGFW hydration to extract credential data for provisioning.
 """
@@ -11,17 +11,15 @@ Also provides NGFW hydration to extract credential data for provisioning.
 from __future__ import annotations
 
 import logging
-import uuid
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from cms.exceptions import CMSError
-from shared.schemas import AgentDetails, DCConfig, InstanceSpec, NGFWAppSpec, RangeSpec
+from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec
 
 from .loader import load_scenario
 
 if TYPE_CHECKING:
     from cms.models import AgentConfig, App, Credential, Instance, Request
-    from cms.scenarios.schema import InstanceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,29 +27,21 @@ logger = logging.getLogger(__name__)
 def hydrate_scenario(
     scenario_id: str,
     user_id: int,
-    agent: AgentConfig | None,
+    agents: dict[str, AgentConfig],
 ) -> RangeSpec:
     """Hydrate a scenario template with agent details.
 
     Args:
         scenario_id: ID of the scenario template (e.g., 'basic')
         user_id: ID of the user requesting the range
-        agent: The agent to use for victim instances
+        agents: Mapping of OS type to AgentConfig, e.g. {"windows": agent, "linux": agent}
 
     Returns:
         RangeSpec with scenario_id, user_id, and hydrated instances
 
     Raises:
-        CMSError: If scenario not found or agent is None
+        CMSError: If scenario not found or required agents missing
     """
-    # Validate agent
-    if agent is None:
-        logger.error(
-            "hydrate_scenario called with None agent for scenario=%s",
-            scenario_id,
-        )
-        raise CMSError("agent is required for scenario hydration")
-
     # Load scenario template
     try:
         template = load_scenario(scenario_id)
@@ -59,14 +49,22 @@ def hydrate_scenario(
         logger.error("Scenario not found: scenario_id=%s", scenario_id)
         raise CMSError(f"Scenario '{scenario_id}' not found") from e
 
-    # Resolve agent OS to instance os_type
-    agent_os_type = _resolve_agent_os(agent)
+    # Validate agents if required by scenario
+    if template.requires_agent() and not agents:
+        logger.error(
+            "hydrate_scenario: scenario=%s requires agent but none provided",
+            scenario_id,
+        )
+        raise CMSError(f"Scenario '{scenario_id}' requires an agent")
 
-    # Hydrate instances
+    # Hydrate instances using InstanceSpec.from_template()
     instances: list[InstanceSpec] = []
     for instance in template.instances:
-        hydrated = _hydrate_instance(instance, agent, agent_os_type)
-        instances.append(hydrated)
+        try:
+            hydrated = InstanceSpec.from_template(instance.model_dump(), agents)
+            instances.append(hydrated)
+        except ValueError as e:
+            raise CMSError(str(e)) from e
 
     logger.debug(
         "Hydrated scenario: scenario_id=%s, user_id=%s, instances=%d",
@@ -79,68 +77,6 @@ def hydrate_scenario(
         scenario_id=scenario_id,
         user_id=user_id,
         instances=instances,
-    )
-
-
-def _resolve_agent_os(agent: AgentConfig) -> str:
-    """Map agent OS to provisioner os_type.
-
-    Args:
-        agent: The agent with OS info
-
-    Returns:
-        os_type string: 'windows' or 'ubuntu'
-    """
-    os_slug = agent.os.slug.lower()
-    if os_slug == "windows":
-        return "windows"
-    # All Linux variants map to ubuntu
-    return "ubuntu"
-
-
-def _hydrate_instance(
-    instance: InstanceConfig,
-    agent: AgentConfig,
-    agent_os_type: str,
-) -> InstanceSpec:
-    """Hydrate a single instance config.
-
-    Args:
-        instance: InstanceConfig from template
-        agent: Agent to embed if instance has agent_slot
-        agent_os_type: Resolved OS type from agent
-
-    Returns:
-        Hydrated InstanceSpec
-    """
-    # Resolve os_type
-    os_type = instance.os_type if instance.os_type != "from_agent" else agent_os_type
-
-    # Build DC config if present
-    dc_config = None
-    if instance.dc_config:
-        dc_config = DCConfig(
-            domain_name=instance.dc_config.domain_name,
-            netbios_name=instance.dc_config.netbios_name,
-        )
-
-    # Build agent details if instance has agent_slot
-    agent_details = None
-    if instance.agent_slot:
-        agent_details = AgentDetails(
-            s3_key=agent.s3_key,
-            filename=agent.original_filename,
-            sha256=agent.sha256_hash or "",
-        )
-
-    return InstanceSpec(
-        name=f"{instance.role}-{os_type}",
-        uuid=str(uuid.uuid4()),
-        role=cast(Literal["attacker", "victim", "dc"], instance.role),
-        os_type=cast(Literal["kali", "ubuntu", "windows"], os_type),
-        agent=agent_details,
-        dc_config=dc_config,
-        join_domain=instance.join_domain,
     )
 
 

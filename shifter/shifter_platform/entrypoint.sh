@@ -68,6 +68,18 @@ print(response['SecretString'])
         export OIDC_AUTH_DOMAIN=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['domain'])")
     fi
 
+    # Fetch Guacamole JSON auth secret if ARN provided (for RDP integration)
+    if [ -n "${GUACAMOLE_SECRET_ARN:-}" ]; then
+        export GUACAMOLE_JSON_AUTH_SECRET=$(python -c "
+import boto3
+import os
+
+client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
+response = client.get_secret_value(SecretId=os.environ['GUACAMOLE_SECRET_ARN'])
+print(response['SecretString'])
+")
+    fi
+
     echo "Secrets loaded successfully"
 fi
 

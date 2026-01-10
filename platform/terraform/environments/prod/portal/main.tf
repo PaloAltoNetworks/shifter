@@ -202,6 +202,7 @@ module "ec2" {
     module.rds.db_credentials_secret_arn,
     aws_secretsmanager_secret.app.arn,
     module.cognito.cognito_secret_arn,
+    module.guacamole.json_auth_secret_arn,
   ]
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port

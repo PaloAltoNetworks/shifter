@@ -206,17 +206,17 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
     Pushes status updates to browser when range lifecycle events occur.
     Uses "hydrate on connect, stream deltas" pattern.
 
-    URL pattern: ws/range-status/<range_id>/
+    URL pattern: ws/range-status/<request_id>/
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.range_id: int | None = None
+        self.request_id: str | None = None
         self.group_name: str | None = None
 
     async def connect(self):
         """Handle WebSocket connection - join range group and send initial state."""
-        from cms import get_range
+        from cms import get_range_by_request_id
         from shared.channels.groups import range_event_group
         from shared.exceptions import CMSError
 
@@ -227,18 +227,18 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
             await self.close(code=WebSocketCloseCode.NOT_AUTHENTICATED)
             return
 
-        # Get range_id from URL
-        self.range_id = int(self.scope["url_route"]["kwargs"]["range_id"])
-        self.group_name = range_event_group(self.range_id)
+        # Get request_id from URL (UUID string)
+        self.request_id = self.scope["url_route"]["kwargs"]["request_id"]
+        self.group_name = range_event_group(self.request_id)
 
         # Verify user owns this range via CMS (handles ownership check)
         try:
-            range_instance = await sync_to_async(get_range)(user, self.range_id)
+            range_instance = await sync_to_async(get_range_by_request_id)(user, self.request_id)
         except CMSError:
             # CMSError covers both not found and permission denied
             logger.warning(
-                "Range %s not found or not owned by user %s",
-                self.range_id,
+                "Range with request_id %s not found or not owned by user %s",
+                self.request_id,
                 user.id,
             )
             await self.close(code=WebSocketCloseCode.NOT_FOUND)
@@ -255,13 +255,13 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
             text_data=json.dumps(
                 {
                     "type": "status",
-                    "range_id": self.range_id,
+                    "request_id": self.request_id,
                     "status": range_instance.status,
                 }
             )
         )
 
-        logger.info("Range status WebSocket connected for range %s", self.range_id)
+        logger.info("Range status WebSocket connected for request %s", self.request_id)
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection - leave range group."""
@@ -269,8 +269,8 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
         logger.info(
-            "Range status WebSocket disconnected for range %s (code: %s)",
-            self.range_id,
+            "Range status WebSocket disconnected for request %s (code: %s)",
+            self.request_id,
             close_code,
         )
 
@@ -283,7 +283,7 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
             text_data=json.dumps(
                 {
                     "type": "status",
-                    "range_id": event.get("range_id"),
+                    "request_id": event.get("request_id"),
                     "status": event.get("new_status"),
                     "error_message": event.get("error_message"),
                 }

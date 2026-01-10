@@ -190,6 +190,14 @@ class Range(models.Model):
         FAILED = "failed", "Failed"
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
+    request = models.ForeignKey(
+        Request,
+        on_delete=models.CASCADE,
+        related_name="ranges",
+        null=True,
+        blank=True,
+        help_text="Request that spawned this range (new pattern)",
+    )
     cms_user_id = models.PositiveIntegerField(
         null=True,
         blank=True,

@@ -327,39 +327,48 @@ class TestCreateRange:
     """Tests for create_range() in engine/services.py.
 
     Tests SERVICE behavior:
-    - Validates request parameter (RangeSpec)
+    - Validates request parameter (RequestSpec)
     - Creates Range record with PROVISIONING status
     - Allocates subnet index
     - Starts ECS provisioning task
-    - Returns the created range_id
+    - Returns the request_id UUID
     - Logs all errors from downstream
     """
 
     # -------------------------------------------------------------------------
-    # Valid RangeSpec fixture
+    # Valid RequestSpec fixture
     # -------------------------------------------------------------------------
 
     @pytest.fixture
-    def valid_range_spec(self):
-        """Return a valid RangeSpec for testing."""
-        from shared.schemas import InstanceSpec, RangeSpec
+    def valid_request_spec(self):
+        """Return a valid RequestSpec containing a RangeSpec for testing."""
+        from uuid import uuid4
 
-        return RangeSpec(
+        from shared.schemas import InstanceSpec, RangeSpec, RequestSpec
+
+        request_id = uuid4()
+        return RequestSpec(
+            request_id=request_id,
             user_id=1,
-            scenario_id="test-scenario",
-            instances=[
-                InstanceSpec(
-                    name="attacker-kali",
-                    uuid="uuid-1",
-                    role="attacker",
-                    os_type="kali",
-                ),
-                InstanceSpec(
-                    name="victim-ubuntu",
-                    uuid="uuid-2",
-                    role="victim",
-                    os_type="ubuntu",
-                ),
+            items=[
+                RangeSpec(
+                    user_id=1,
+                    scenario_id="test-scenario",
+                    instances=[
+                        InstanceSpec(
+                            name="attacker-kali",
+                            uuid="uuid-1",
+                            role="attacker",
+                            os_type="kali",
+                        ),
+                        InstanceSpec(
+                            name="victim-ubuntu",
+                            uuid="uuid-2",
+                            role="victim",
+                            os_type="ubuntu",
+                        ),
+                    ],
+                )
             ],
         )
 
@@ -367,137 +376,149 @@ class TestCreateRange:
     # Service creates Range correctly
     # -------------------------------------------------------------------------
 
-    def test_creates_range_with_provisioning_status(self, valid_range_spec):
+    def test_creates_range_with_provisioning_status(self, valid_request_spec):
         """Service creates Range record with PROVISIONING status."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=42)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
         ):
-            create_range(valid_range_spec)
+            create_range(valid_request_spec)
             mock_create.assert_called_once()
             call_kwargs = mock_create.call_args.kwargs
             assert call_kwargs["status"] == Range.Status.PROVISIONING
 
-    def test_allocates_subnet_index(self, valid_range_spec):
+    def test_allocates_subnet_index(self, valid_request_spec):
         """Service calls Range.allocate_subnet_index."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=42)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5) as mock_allocate,
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
         ):
-            create_range(valid_range_spec)
+            create_range(valid_request_spec)
             mock_allocate.assert_called_once()
 
-    def test_starts_ecs_provisioning(self, valid_range_spec):
+    def test_starts_ecs_provisioning(self, valid_request_spec):
         """Service calls start_provisioning with range_id and user_id."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=42)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test") as mock_start,
         ):
-            create_range(valid_range_spec)
+            create_range(valid_request_spec)
             mock_start.assert_called_once_with(42, 1)
 
     # -------------------------------------------------------------------------
-    # Service returns range_id
+    # Service returns request_id UUID
     # -------------------------------------------------------------------------
 
-    def test_returns_range_id(self, valid_range_spec):
-        """Service returns created range_id."""
+    def test_returns_request_id(self, valid_request_spec):
+        """Service returns request_id UUID."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=42)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
         ):
-            result = create_range(valid_range_spec)
-            assert result == 42
+            result = create_range(valid_request_spec)
+            assert result == valid_request_spec.request_id
 
     # -------------------------------------------------------------------------
     # Logging - DEBUG on success
     # -------------------------------------------------------------------------
 
-    def test_logs_debug_on_entry(self, valid_range_spec, caplog):
+    def test_logs_debug_on_entry(self, valid_request_spec, caplog):
         """Service logs debug on entry with range_config info."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=42)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
-            create_range(valid_range_spec)
+            create_range(valid_request_spec)
 
         assert "create_range" in caplog.text
 
-    def test_logs_info_on_range_created(self, valid_range_spec, caplog):
+    def test_logs_info_on_range_created(self, valid_request_spec, caplog):
         """Service logs info when range is created."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=42)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_provisioning", return_value="arn:aws:ecs:test"),
             caplog.at_level(logging.INFO, logger="engine"),
         ):
-            create_range(valid_range_spec)
+            create_range(valid_request_spec)
 
         assert "42" in caplog.text
 
@@ -505,18 +526,20 @@ class TestCreateRange:
     # Error propagation
     # -------------------------------------------------------------------------
 
-    def test_propagates_subnet_allocation_error(self, valid_range_spec):
+    def test_propagates_subnet_allocation_error(self, valid_request_spec):
         """Service propagates ValueError from subnet allocation."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(
                 Range,
                 "allocate_subnet_index",
@@ -524,41 +547,45 @@ class TestCreateRange:
             ),
             pytest.raises(ValueError, match="No subnets available"),
         ):
-            create_range(valid_range_spec)
+            create_range(valid_request_spec)
 
-    def test_propagates_database_error(self, valid_range_spec):
+    def test_propagates_database_error(self, valid_request_spec):
         """Service propagates DatabaseError from Range.create."""
         from django.contrib.auth import get_user_model
         from django.db import DatabaseError
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", side_effect=DatabaseError("DB error")),
             pytest.raises(DatabaseError),
         ):
-            create_range(valid_range_spec)
+            create_range(valid_request_spec)
 
-    def test_propagates_ecs_client_error(self, valid_range_spec):
+    def test_propagates_ecs_client_error(self, valid_request_spec):
         """Service propagates ClientError from ECS."""
         from botocore.exceptions import ClientError
         from django.contrib.auth import get_user_model
 
         from engine import create_range
-        from engine.models import Range
+        from engine.models import Range, Request
 
         User = get_user_model()
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=42)
+        mock_request = Mock(spec=Request)
 
         with (
             patch.object(User.objects, "get", return_value=mock_user),
+            patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch(
@@ -570,7 +597,7 @@ class TestCreateRange:
             ),
             pytest.raises(ClientError),
         ):
-            create_range(valid_range_spec)
+            create_range(valid_request_spec)
 
     # -------------------------------------------------------------------------
     # Input validation
@@ -583,18 +610,18 @@ class TestCreateRange:
         with pytest.raises(TypeError):
             create_range(None)
 
-    def test_raises_on_non_rangespec_request(self):
-        """Service raises TypeError if request is not a RangeSpec."""
+    def test_raises_on_non_requestspec_request(self):
+        """Service raises TypeError if request is not a RequestSpec."""
         from engine import create_range
 
-        with pytest.raises(TypeError, match="must be RangeSpec"):
-            create_range("not a RangeSpec")
+        with pytest.raises(TypeError, match="must be RequestSpec"):
+            create_range("not a RequestSpec")
 
-    def test_raises_on_dict_instead_of_rangespec(self):
-        """Service raises TypeError if dict passed instead of RangeSpec."""
+    def test_raises_on_dict_instead_of_requestspec(self):
+        """Service raises TypeError if dict passed instead of RequestSpec."""
         from engine import create_range
 
-        with pytest.raises(TypeError, match="must be RangeSpec"):
+        with pytest.raises(TypeError, match="must be RequestSpec"):
             create_range({"user_id": 1, "scenario_id": "test"})
 
 
@@ -617,10 +644,13 @@ class TestDestroyRange:
     @pytest.fixture
     def range_context(self):
         """Return a valid RangeContext for testing."""
+        from uuid import uuid4
+
         from shared.enums import ResourceStatus
         from shared.schemas import RangeContext
 
         return RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=1,
             scenario_id="test-scenario",
@@ -804,10 +834,13 @@ class TestCancelRange:
     @pytest.fixture
     def pending_range_context(self):
         """Return a RangeContext for a pending range."""
+        from uuid import uuid4
+
         from shared.enums import ResourceStatus
         from shared.schemas import RangeContext
 
         return RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=1,
             scenario_id="test-scenario",
@@ -818,10 +851,13 @@ class TestCancelRange:
     @pytest.fixture
     def provisioning_range_context(self):
         """Return a RangeContext for a provisioning range."""
+        from uuid import uuid4
+
         from shared.enums import ResourceStatus
         from shared.schemas import RangeContext
 
         return RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=1,
             scenario_id="test-scenario",
@@ -832,10 +868,13 @@ class TestCancelRange:
     @pytest.fixture
     def ready_range_context(self):
         """Return a RangeContext for a ready range (not cancellable)."""
+        from uuid import uuid4
+
         from shared.enums import ResourceStatus
         from shared.schemas import RangeContext
 
         return RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=1,
             scenario_id="test-scenario",

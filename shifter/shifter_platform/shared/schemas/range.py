@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import uuid as uuid_module
 from typing import TYPE_CHECKING, Any, Literal, cast
+from uuid import UUID
 
 from pydantic import BaseModel, computed_field, field_validator
 
@@ -293,7 +294,8 @@ class RangeContextBase(BaseModel):
     Type-specific contexts extend this with their own fields.
 
     Attributes:
-        range_id: Unique identifier of the range.
+        request_id: UUID correlation key for Request-based pattern.
+        range_id: Legacy integer identifier (optional for new Request-based ranges).
         scenario_id: Identifier of the scenario being deployed.
         user_id: ID of the user who owns this range.
         status: Current status of the range.
@@ -306,7 +308,8 @@ class RangeContextBase(BaseModel):
         is_active: True if range is not in a terminal state.
     """
 
-    range_id: int
+    request_id: UUID
+    range_id: int | None = None
     scenario_id: str
     user_id: int
     status: ResourceStatus
@@ -315,10 +318,10 @@ class RangeContextBase(BaseModel):
 
     @field_validator("range_id")
     @classmethod
-    def range_id_positive(cls, v: int) -> int:
-        """Validate range_id is a positive integer."""
-        if v <= 0:
-            raise ValueError("range_id must be a positive integer")
+    def range_id_positive_if_provided(cls, v: int | None) -> int | None:
+        """Validate range_id is a positive integer if provided."""
+        if v is not None and v <= 0:
+            raise ValueError("range_id must be a positive integer if provided")
         return v
 
     @field_validator("scenario_id")
@@ -376,21 +379,23 @@ class RangeRef(BaseModel):
     Used for status updates and lifecycle operations.
 
     Attributes:
-        range_id: Unique identifier of the range.
+        request_id: UUID correlation key for Request-based pattern.
+        range_id: Legacy integer identifier (optional for new Request-based ranges).
         user_id: ID of the user who owns this range.
         status: Current status of the range.
     """
 
-    range_id: int
+    request_id: UUID
+    range_id: int | None = None
     user_id: int
     status: ResourceStatus
 
     @field_validator("range_id")
     @classmethod
-    def range_id_positive(cls, v: int) -> int:
-        """Validate range_id is a positive integer."""
-        if v <= 0:
-            raise ValueError("range_id must be a positive integer")
+    def range_id_positive_if_provided(cls, v: int | None) -> int | None:
+        """Validate range_id is a positive integer if provided."""
+        if v is not None and v <= 0:
+            raise ValueError("range_id must be a positive integer if provided")
         return v
 
     @field_validator("user_id")

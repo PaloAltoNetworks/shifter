@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
 from shared.schemas import InstanceSpec, RangeContext, RangeSpec, RequestSpec
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from django.contrib.auth.models import User
 
     from engine.ssh import SSHConnection
@@ -27,70 +26,95 @@ class EngineError(Exception):
     pass
 
 
-def create_range(request: RangeSpec) -> int:
+def create_range(request_spec: RequestSpec) -> UUID:
     """Provision infrastructure for range.
 
-    Creates a Range record, allocates subnet, and triggers ECS provisioning.
+    Interprets the RequestSpec into Engine models (Request, Instance),
+    creates a Range record for backward compat, and triggers ECS provisioning.
 
     Args:
-        request: Validated RangeSpec with scenario, user, and instances.
+        request_spec: RequestSpec containing a RangeSpec item.
+            The RangeSpec must have scenario_id, user_id, and instances.
 
     Returns:
-        range_id: The ID of the created range.
+        The request_id UUID for correlation with CMS.
 
     Raises:
-        TypeError: If request is not a RangeSpec
-        ValueError: If subnet allocation fails (capacity exhausted)
-        User.DoesNotExist: If user_id doesn't map to a Django user
+        TypeError: If request_spec is not a RequestSpec.
+        ValueError: If request_spec doesn't contain a RangeSpec,
+            or subnet allocation fails (capacity exhausted).
+        User.DoesNotExist: If user_id doesn't map to a Django user.
     """
     from django.contrib.auth import get_user_model
 
     from engine.ecs import start_provisioning
+    from engine.interpreter import interpret
     from engine.models import Range
 
     User = get_user_model()
 
     # Validate request type
-    if not isinstance(request, RangeSpec):
-        raise TypeError(f"request must be RangeSpec, got {type(request).__name__}")
+    if not isinstance(request_spec, RequestSpec):
+        raise TypeError(f"request_spec must be RequestSpec, got {type(request_spec).__name__}")
+
+    # Extract RangeSpec from items
+    range_spec: RangeSpec | None = None
+    for item in request_spec.items:
+        if isinstance(item, RangeSpec):
+            range_spec = item
+            break
+
+    if range_spec is None:
+        raise ValueError("RequestSpec must contain a RangeSpec item")
 
     logger.debug(
         "create_range: scenario=%s user_id=%s instances=%d",
-        request.scenario_id,
-        request.user_id,
-        len(request.instances),
+        range_spec.scenario_id,
+        range_spec.user_id,
+        len(range_spec.instances),
+    )
+
+    # Interpret spec into models (creates Request + Instances)
+    request = interpret(request_spec)
+
+    logger.info(
+        "create_range: interpreted request_id=%s",
+        request_spec.request_id,
     )
 
     # Get Django user for FK (required for auth)
-    user = User.objects.get(id=request.user_id)
+    user = User.objects.get(id=range_spec.user_id)
 
     # Allocate subnet index
     subnet_index = Range.allocate_subnet_index()
 
-    # Create range with full config
+    # Create Range model for backward compat with provisioner
+    # Links to Request via FK
     range_obj = Range.objects.create(
         user=user,
-        cms_user_id=request.user_id,
+        request=request,
+        cms_user_id=range_spec.user_id,
         status=Range.Status.PROVISIONING,
         subnet_index=subnet_index,
-        range_config=request.model_dump(),
+        range_config=range_spec.model_dump(),
     )
 
     logger.info(
-        "create_range: created range_id=%s subnet_index=%s",
+        "create_range: created range_id=%s subnet_index=%s request_id=%s",
         range_obj.id,
         subnet_index,
+        request_spec.request_id,
     )
 
-    # Trigger ECS provisioning
-    task_arn = start_provisioning(range_obj.id, request.user_id)
+    # Trigger ECS provisioning (still uses range_id for now)
+    task_arn = start_provisioning(range_obj.id, range_spec.user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
         range_obj.save(update_fields=["step_function_execution_arn"])
         logger.info("create_range: started ECS task=%s", task_arn)
 
-    return range_obj.id
+    return request_spec.request_id
 
 
 def destroy_range(request: RangeContext) -> bool:
@@ -104,10 +128,15 @@ def destroy_range(request: RangeContext) -> bool:
 
     Returns:
         True if range exists and destruction initiated (or already in progress).
-        False if range not found or already destroyed.
+        False if range not found, already destroyed, or range_id is None.
     """
     from engine.ecs import start_teardown
     from engine.models import Range
+
+    # range_id is optional in RangeContext (None for new Request-based ranges)
+    if request.range_id is None:
+        logger.warning("destroy_range: range_id is None - use destroy_ngfw for Request-based resources")
+        return False
 
     logger.debug("destroy_range: range_id=%s", request.range_id)
 

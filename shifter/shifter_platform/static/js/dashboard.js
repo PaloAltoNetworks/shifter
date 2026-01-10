@@ -122,7 +122,7 @@ class DashboardManager {
                 this._closeStatusSocket();
             } else if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
                 // Reconnect WebSocket when tab becomes visible again if in transitional state
-                this._connectStatusSocket(this.currentRange.range_id);
+                this._connectStatusSocket(this.currentRange.request_id);
             }
         });
     }
@@ -416,7 +416,7 @@ class DashboardManager {
 
         // Connect WebSocket if in a transitional state
         if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-            this._connectStatusSocket(this.currentRange.range_id);
+            this._connectStatusSocket(this.currentRange.request_id);
         }
     }
 
@@ -593,7 +593,7 @@ class DashboardManager {
 
             this.currentRange = data.range;
             this._updateUI();
-            this._connectStatusSocket(data.range.range_id);
+            this._connectStatusSocket(data.range.request_id);
 
         } catch (error) {
             alert(error.message);
@@ -616,7 +616,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
-                body: JSON.stringify({ range_id: this.currentRange.range_id }),
+                body: JSON.stringify({ request_id: this.currentRange.request_id }),
             });
 
             const data = await response.json();
@@ -646,7 +646,7 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.csrfToken,
                 },
-                body: JSON.stringify({ range_id: this.currentRange.range_id }),
+                body: JSON.stringify({ request_id: this.currentRange.request_id }),
             });
 
             const data = await response.json();
@@ -675,21 +675,23 @@ class DashboardManager {
     /**
      * Build WebSocket URL for range status updates.
      * Uses wss:// for https:// pages, ws:// for http://.
+     * @param {string} requestId - UUID of the request
      */
-    _buildWebSocketUrl(rangeId) {
+    _buildWebSocketUrl(requestId) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${protocol}//${window.location.host}/ws/range-status/${rangeId}/`;
+        return `${protocol}//${window.location.host}/ws/range-status/${requestId}/`;
     }
 
     /**
      * Connect to WebSocket for real-time range status updates.
+     * @param {string} requestId - UUID of the request
      * @param {boolean} isReconnect - Whether this is a reconnect attempt (preserves retry counters)
      */
-    _connectStatusSocket(rangeId, isReconnect = false) {
+    _connectStatusSocket(requestId, isReconnect = false) {
         // Close existing connection if any, but preserve retry counters on reconnect
         this._closeStatusSocket(!isReconnect);
 
-        const wsUrl = this._buildWebSocketUrl(rangeId);
+        const wsUrl = this._buildWebSocketUrl(requestId);
         console.log(`Connecting to WebSocket: ${wsUrl}`);
 
         this.statusSocket = new WebSocket(wsUrl);
@@ -713,7 +715,7 @@ class DashboardManager {
         };
 
         this.statusSocket.onclose = (event) => {
-            this._handleSocketClose(event, rangeId);
+            this._handleSocketClose(event, requestId);
         };
 
         this.statusSocket.onerror = (error) => {
@@ -756,8 +758,10 @@ class DashboardManager {
 
     /**
      * Handle WebSocket close - attempt reconnect if appropriate.
+     * @param {CloseEvent} event - WebSocket close event
+     * @param {string} requestId - UUID of the request for reconnection
      */
-    _handleSocketClose(event, rangeId) {
+    _handleSocketClose(event, requestId) {
         console.log(`WebSocket closed: code=${event.code}, reason=${event.reason}`);
 
         // Don't reconnect if intentionally closed or auth failed
@@ -777,7 +781,7 @@ class DashboardManager {
 
             setTimeout(() => {
                 if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-                    this._connectStatusSocket(rangeId, true);
+                    this._connectStatusSocket(requestId, true);
                 }
             }, this.reconnectDelay);
 

@@ -74,10 +74,13 @@ class TestGetRange:
         assert data["range"] is None
 
     def test_returns_active_range(self, client, test_agent):
+        from uuid import uuid4
+
         client.force_login(test_agent.user)
 
         # Create a RangeContext projection (what CMS service returns)
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=test_agent.user.id,
             scenario_id="basic",
@@ -106,9 +109,12 @@ class TestGetRange:
 
     def test_returns_provisioning_range(self, client, test_agent):
         """Test range in provisioning state has correct computed properties."""
+        from uuid import uuid4
+
         client.force_login(test_agent.user)
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=test_agent.user.id,
             scenario_id="basic",
@@ -133,9 +139,12 @@ class TestGetRange:
 
     def test_returns_destroying_range(self, client, test_agent):
         """Test range in destroying state has correct computed properties."""
+        from uuid import uuid4
+
         client.force_login(test_agent.user)
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=test_agent.user.id,
             scenario_id="basic",
@@ -204,6 +213,8 @@ class TestLaunchRange:
 
     def test_successful_launch_with_ecs(self, client, test_agent):
         """Test launch with mocked ECS."""
+        from uuid import UUID
+
         mock_path = "engine.ecs._get_ecs_client"
         with patch(mock_path) as mock_client:
             task_arn = "arn:aws:ecs:us-east-2:123:task/test/abc123"
@@ -239,7 +250,9 @@ class TestLaunchRange:
                 assert data["range"]["status"] == "provisioning"
 
                 # Verify task ARN was stored
-                range_obj = Range.objects.get(id=data["range"]["range_id"])
+                # Range is linked via Request FK, use request_id from response
+                request_id = UUID(data["range"]["request_id"])
+                range_obj = Range.objects.get(request__request_id=request_id)
                 assert range_obj.step_function_execution_arn == task_arn
             finally:
                 settings.PULUMI_ECS_CLUSTER_ARN = orig_cluster
@@ -629,6 +642,8 @@ class TestSubnetIndexAllocation:
 
     def test_allocates_index_on_launch(self, client, test_agent, settings):
         """Launch should allocate a subnet_index."""
+        from uuid import UUID
+
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
@@ -639,7 +654,9 @@ class TestSubnetIndexAllocation:
         )
 
         assert response.status_code == 200
-        range_obj = Range.objects.get(id=response.json()["range"]["range_id"])
+        # Range is linked via Request FK, use request_id from response
+        request_id = UUID(response.json()["range"]["request_id"])
+        range_obj = Range.objects.get(request__request_id=request_id)
         assert range_obj.subnet_index is not None
         assert 1 <= range_obj.subnet_index <= 254
 

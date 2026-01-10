@@ -7,6 +7,8 @@ Tests the Pydantic models used for CMS to Engine communication:
 - RangeSpec: complete range creation request
 """
 
+import uuid
+
 import pytest
 from pydantic import ValidationError
 
@@ -646,13 +648,16 @@ class TestRangeContext:
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeContext
 
+        request_id = uuid.uuid4()
         ctx = RangeContext(
+            request_id=request_id,
             range_id=42,
             scenario_id="basic-attack",
             user_id=1,
             status=ResourceStatus.READY,
             instances=[],
         )
+        assert ctx.request_id == request_id
         assert ctx.range_id == 42
         assert ctx.scenario_id == "basic-attack"
         assert ctx.user_id == 1
@@ -669,6 +674,7 @@ class TestRangeContext:
             InstanceContext(role="victim", os_type="windows"),
         ]
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=1,
             scenario_id="basic",
             user_id=42,
@@ -683,13 +689,31 @@ class TestRangeContext:
     # Input validation - field constraints
     # ---------------------------------------------------------------------
 
+    def test_request_id_is_required(self):
+        """RangeContext requires request_id field."""
+        from shared.enums import ResourceStatus
+        from shared.schemas.range import RangeContext
+
+        with pytest.raises(ValidationError):
+            RangeContext(
+                scenario_id="basic",
+                user_id=1,
+                status=ResourceStatus.READY,
+                instances=[],
+            )
+
     def test_scenario_id_is_required(self):
         """RangeContext requires scenario_id field."""
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeContext
 
         with pytest.raises(ValidationError):
-            RangeContext(user_id=1, status=ResourceStatus.READY, instances=[])
+            RangeContext(
+                request_id=uuid.uuid4(),
+                user_id=1,
+                status=ResourceStatus.READY,
+                instances=[],
+            )
 
     def test_user_id_is_required(self):
         """RangeContext requires user_id field."""
@@ -697,14 +721,24 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         with pytest.raises(ValidationError):
-            RangeContext(scenario_id="basic", status=ResourceStatus.READY, instances=[])
+            RangeContext(
+                request_id=uuid.uuid4(),
+                scenario_id="basic",
+                status=ResourceStatus.READY,
+                instances=[],
+            )
 
     def test_status_is_required(self):
         """RangeContext requires status field."""
         from shared.schemas.range import RangeContext
 
         with pytest.raises(ValidationError):
-            RangeContext(scenario_id="basic", user_id=1, instances=[])
+            RangeContext(
+                request_id=uuid.uuid4(),
+                scenario_id="basic",
+                user_id=1,
+                instances=[],
+            )
 
     def test_instances_is_required(self):
         """RangeContext requires instances field."""
@@ -712,7 +746,12 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         with pytest.raises(ValidationError):
-            RangeContext(scenario_id="basic", user_id=1, status=ResourceStatus.READY)
+            RangeContext(
+                request_id=uuid.uuid4(),
+                scenario_id="basic",
+                user_id=1,
+                status=ResourceStatus.READY,
+            )
 
     # ---------------------------------------------------------------------
     # Validators - scenario_id must be non-empty
@@ -725,6 +764,7 @@ class TestRangeContext:
 
         with pytest.raises(ValidationError, match="scenario_id"):
             RangeContext(
+                request_id=uuid.uuid4(),
                 scenario_id="",
                 user_id=1,
                 status=ResourceStatus.READY,
@@ -738,6 +778,7 @@ class TestRangeContext:
 
         with pytest.raises(ValidationError, match="scenario_id"):
             RangeContext(
+                request_id=uuid.uuid4(),
                 scenario_id="   ",
                 user_id=1,
                 status=ResourceStatus.READY,
@@ -755,6 +796,7 @@ class TestRangeContext:
 
         with pytest.raises(ValidationError, match="user_id"):
             RangeContext(
+                request_id=uuid.uuid4(),
                 scenario_id="basic",
                 user_id=0,
                 status=ResourceStatus.READY,
@@ -768,6 +810,7 @@ class TestRangeContext:
 
         with pytest.raises(ValidationError, match="user_id"):
             RangeContext(
+                request_id=uuid.uuid4(),
                 scenario_id="basic",
                 user_id=-1,
                 status=ResourceStatus.READY,
@@ -780,6 +823,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=1,
             scenario_id="basic",
             user_id=1,
@@ -798,6 +842,7 @@ class TestRangeContext:
 
         with pytest.raises(ValidationError, match="status"):
             RangeContext(
+                request_id=uuid.uuid4(),
                 scenario_id="basic",
                 user_id=1,
                 status="invalid_status",
@@ -810,6 +855,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=1,
             scenario_id="basic",
             user_id=1,
@@ -824,6 +870,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=1,
             scenario_id="basic",
             user_id=1,
@@ -842,6 +889,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=1,
             scenario_id="basic",
             user_id=1,
@@ -862,6 +910,7 @@ class TestRangeContext:
             ResourceStatus.DESTROYED,
         ]:
             ctx = RangeContext(
+                request_id=uuid.uuid4(),
                 range_id=1,
                 scenario_id="basic",
                 user_id=1,
@@ -876,6 +925,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=1,
             scenario_id="basic",
             user_id=1,
@@ -890,6 +940,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=1,
             scenario_id="basic",
             user_id=1,
@@ -909,6 +960,7 @@ class TestRangeContext:
             ResourceStatus.READY,
         ]:
             ctx = RangeContext(
+                request_id=uuid.uuid4(),
                 range_id=1,
                 scenario_id="basic",
                 user_id=1,
@@ -928,6 +980,7 @@ class TestRangeContext:
             ResourceStatus.READY,
         ]:
             ctx = RangeContext(
+                request_id=uuid.uuid4(),
                 range_id=1,
                 scenario_id="basic",
                 user_id=1,
@@ -943,6 +996,7 @@ class TestRangeContext:
 
         for status in [ResourceStatus.DESTROYED, ResourceStatus.FAILED]:
             ctx = RangeContext(
+                request_id=uuid.uuid4(),
                 range_id=1,
                 scenario_id="basic",
                 user_id=1,
@@ -952,22 +1006,22 @@ class TestRangeContext:
             assert ctx.is_active is False, f"is_active should be False for {status}"
 
     # ---------------------------------------------------------------------
-    # range_id field - required, positive integer
+    # range_id field - optional, positive integer if provided
     # ---------------------------------------------------------------------
 
-    def test_range_id_is_required(self):
-        """RangeContext requires range_id field."""
+    def test_range_id_is_optional(self):
+        """RangeContext allows range_id to be omitted (defaults to None)."""
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeContext
 
-        with pytest.raises(ValidationError):
-            RangeContext(
-                scenario_id="basic",
-                user_id=1,
-                status=ResourceStatus.READY,
-                instances=[],
-                # range_id missing
-            )
+        ctx = RangeContext(
+            request_id=uuid.uuid4(),
+            scenario_id="basic",
+            user_id=1,
+            status=ResourceStatus.READY,
+            instances=[],
+        )
+        assert ctx.range_id is None
 
     def test_range_id_accepts_positive_integer(self):
         """RangeContext accepts positive range_id."""
@@ -975,6 +1029,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=42,
             scenario_id="basic",
             user_id=1,
@@ -984,12 +1039,13 @@ class TestRangeContext:
         assert ctx.range_id == 42
 
     def test_range_id_rejects_zero(self):
-        """RangeContext rejects zero range_id."""
+        """RangeContext rejects zero range_id when explicitly provided."""
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeContext
 
         with pytest.raises(ValidationError, match="range_id"):
             RangeContext(
+                request_id=uuid.uuid4(),
                 range_id=0,
                 scenario_id="basic",
                 user_id=1,
@@ -998,12 +1054,13 @@ class TestRangeContext:
             )
 
     def test_range_id_rejects_negative(self):
-        """RangeContext rejects negative range_id."""
+        """RangeContext rejects negative range_id when explicitly provided."""
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeContext
 
         with pytest.raises(ValidationError, match="range_id"):
             RangeContext(
+                request_id=uuid.uuid4(),
                 range_id=-1,
                 scenario_id="basic",
                 user_id=1,
@@ -1021,6 +1078,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=42,
             scenario_id="basic",
             user_id=1,
@@ -1035,6 +1093,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=42,
             scenario_id="basic",
             user_id=1,
@@ -1050,6 +1109,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=42,
             scenario_id="basic",
             user_id=1,
@@ -1069,6 +1129,7 @@ class TestRangeContext:
         from shared.schemas.range import RangeContext
 
         ctx = RangeContext(
+            request_id=uuid.uuid4(),
             range_id=42,
             scenario_id="basic",
             user_id=1,
@@ -1088,7 +1149,9 @@ class TestRangeContext:
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeContext
 
+        request_id = uuid.uuid4()
         data = {
+            "request_id": str(request_id),
             "range_id": 42,
             "scenario_id": "basic",
             "user_id": 42,
@@ -1096,6 +1159,7 @@ class TestRangeContext:
             "instances": [{"role": "attacker", "os_type": "kali"}],
         }
         ctx = RangeContext.model_validate(data)
+        assert ctx.request_id == request_id
         assert ctx.range_id == 42
         assert ctx.scenario_id == "basic"
         assert ctx.user_id == 42
@@ -1121,11 +1185,14 @@ class TestRangeRef:
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeRef
 
+        request_id = uuid.uuid4()
         ref = RangeRef(
+            request_id=request_id,
             range_id=123,
             user_id=42,
             status=ResourceStatus.READY,
         )
+        assert ref.request_id == request_id
         assert ref.range_id == 123
         assert ref.user_id == 42
         assert ref.status == ResourceStatus.READY
@@ -1134,13 +1201,25 @@ class TestRangeRef:
     # Input validation - field requirements
     # ---------------------------------------------------------------------
 
-    def test_range_id_is_required(self):
-        """RangeRef requires range_id field."""
+    def test_request_id_is_required(self):
+        """RangeRef requires request_id field."""
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeRef
 
         with pytest.raises(ValidationError):
             RangeRef(user_id=42, status=ResourceStatus.READY)
+
+    def test_range_id_is_optional(self):
+        """RangeRef allows range_id to be omitted (defaults to None)."""
+        from shared.enums import ResourceStatus
+        from shared.schemas.range import RangeRef
+
+        ref = RangeRef(
+            request_id=uuid.uuid4(),
+            user_id=42,
+            status=ResourceStatus.READY,
+        )
+        assert ref.range_id is None
 
     def test_user_id_is_required(self):
         """RangeRef requires user_id field."""
@@ -1148,34 +1227,44 @@ class TestRangeRef:
         from shared.schemas.range import RangeRef
 
         with pytest.raises(ValidationError):
-            RangeRef(range_id=123, status=ResourceStatus.READY)
+            RangeRef(request_id=uuid.uuid4(), range_id=123, status=ResourceStatus.READY)
 
     def test_status_is_required(self):
         """RangeRef requires status field."""
         from shared.schemas.range import RangeRef
 
         with pytest.raises(ValidationError):
-            RangeRef(range_id=123, user_id=42)
+            RangeRef(request_id=uuid.uuid4(), range_id=123, user_id=42)
 
     # ---------------------------------------------------------------------
-    # Validators - range_id must be positive
+    # Validators - range_id must be positive if provided
     # ---------------------------------------------------------------------
 
     def test_rejects_zero_range_id(self):
-        """RangeRef rejects zero range_id."""
+        """RangeRef rejects zero range_id when explicitly provided."""
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeRef
 
         with pytest.raises(ValidationError, match="range_id"):
-            RangeRef(range_id=0, user_id=42, status=ResourceStatus.READY)
+            RangeRef(
+                request_id=uuid.uuid4(),
+                range_id=0,
+                user_id=42,
+                status=ResourceStatus.READY,
+            )
 
     def test_rejects_negative_range_id(self):
-        """RangeRef rejects negative range_id."""
+        """RangeRef rejects negative range_id when explicitly provided."""
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeRef
 
         with pytest.raises(ValidationError, match="range_id"):
-            RangeRef(range_id=-1, user_id=42, status=ResourceStatus.READY)
+            RangeRef(
+                request_id=uuid.uuid4(),
+                range_id=-1,
+                user_id=42,
+                status=ResourceStatus.READY,
+            )
 
     # ---------------------------------------------------------------------
     # Validators - user_id must be positive
@@ -1187,7 +1276,12 @@ class TestRangeRef:
         from shared.schemas.range import RangeRef
 
         with pytest.raises(ValidationError, match="user_id"):
-            RangeRef(range_id=123, user_id=0, status=ResourceStatus.READY)
+            RangeRef(
+                request_id=uuid.uuid4(),
+                range_id=123,
+                user_id=0,
+                status=ResourceStatus.READY,
+            )
 
     def test_rejects_negative_user_id(self):
         """RangeRef rejects negative user_id."""
@@ -1195,7 +1289,12 @@ class TestRangeRef:
         from shared.schemas.range import RangeRef
 
         with pytest.raises(ValidationError, match="user_id"):
-            RangeRef(range_id=123, user_id=-1, status=ResourceStatus.READY)
+            RangeRef(
+                request_id=uuid.uuid4(),
+                range_id=123,
+                user_id=-1,
+                status=ResourceStatus.READY,
+            )
 
     # ---------------------------------------------------------------------
     # Validators - status must be valid ResourceStatus
@@ -1206,14 +1305,24 @@ class TestRangeRef:
         from shared.schemas.range import RangeRef
 
         with pytest.raises(ValidationError, match="status"):
-            RangeRef(range_id=123, user_id=42, status="invalid_status")
+            RangeRef(
+                request_id=uuid.uuid4(),
+                range_id=123,
+                user_id=42,
+                status="invalid_status",
+            )
 
     def test_accepts_valid_status_string(self):
         """RangeRef accepts valid status string and converts to enum."""
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeRef
 
-        ref = RangeRef(range_id=123, user_id=42, status="ready")
+        ref = RangeRef(
+            request_id=uuid.uuid4(),
+            range_id=123,
+            user_id=42,
+            status="ready",
+        )
         assert ref.status == ResourceStatus.READY
 
     # ---------------------------------------------------------------------
@@ -1225,9 +1334,16 @@ class TestRangeRef:
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeRef
 
-        ref = RangeRef(range_id=123, user_id=42, status=ResourceStatus.READY)
+        request_id = uuid.uuid4()
+        ref = RangeRef(
+            request_id=request_id,
+            range_id=123,
+            user_id=42,
+            status=ResourceStatus.READY,
+        )
         result = ref.model_dump()
         assert isinstance(result, dict)
+        assert result["request_id"] == request_id
         assert result["range_id"] == 123
         assert result["user_id"] == 42
         assert result["status"] == ResourceStatus.READY
@@ -1237,8 +1353,15 @@ class TestRangeRef:
         from shared.enums import ResourceStatus
         from shared.schemas.range import RangeRef
 
-        data = {"range_id": 123, "user_id": 42, "status": "provisioning"}
+        request_id = uuid.uuid4()
+        data = {
+            "request_id": str(request_id),
+            "range_id": 123,
+            "user_id": 42,
+            "status": "provisioning",
+        }
         ref = RangeRef.model_validate(data)
+        assert ref.request_id == request_id
         assert ref.range_id == 123
         assert ref.user_id == 42
         assert ref.status == ResourceStatus.PROVISIONING

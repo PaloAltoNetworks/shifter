@@ -49,6 +49,7 @@ from .range import (
     RangeSpecBase,
 )
 from .request import RequestSpec
+from .subnet import SubnetContext, SubnetRef, SubnetSpec
 
 __all__ = [
     "AgentAppContext",
@@ -92,4 +93,7 @@ __all__ = [
     "SCMCredentialContext",
     "SCMCredentialSpec",
     "SpecBase",
+    "SubnetContext",
+    "SubnetRef",
+    "SubnetSpec",
 ]

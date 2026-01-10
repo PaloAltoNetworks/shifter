@@ -1,13 +1,8 @@
-"""CMS service exceptions."""
+"""CMS service exceptions.
 
+Re-exports from shared.exceptions for backwards compatibility.
+"""
 
-class CMSError(Exception):
-    """Base exception for CMS service errors.
+from shared.exceptions import CMSError
 
-    Raised for business logic failures such as:
-    - Resource not found
-    - Access denied / ownership violation
-    - Resource is deleted
-    """
-
-    pass
+__all__ = ["CMSError"]

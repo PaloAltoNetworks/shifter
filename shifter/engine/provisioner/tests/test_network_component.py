@@ -2,11 +2,12 @@
 
 These tests use Pulumi's mocking framework to test the actual NetworkComponent
 without making real AWS API calls. Tests verify that the component:
-- Creates subnets with correct CIDR calculations
+- Finds free subnets by querying AWS
+- Handles overlapping CIDRs correctly (e.g., /22 blocks)
+- Creates subnets with correct configuration
 - Associates route tables correctly
 - Applies proper tags
 - Exports correct outputs
-- Cleans up orphaned subnets before creating new ones
 """
 
 import sys
@@ -18,140 +19,319 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from components.network import _cleanup_orphaned_subnet
+from components.network import _find_free_subnet, _publish_subnet_exhaustion_alarm
+
+# =============================================================================
+# Unit Tests for _publish_subnet_exhaustion_alarm
+# =============================================================================
+
+
+class TestPublishSubnetExhaustionAlarm:
+    """Tests for the subnet exhaustion alarm function."""
+
+    def test_publishes_cloudwatch_metric(self):
+        """Alarm function publishes a CloudWatch metric."""
+        mock_cloudwatch = MagicMock()
+
+        with patch("components.network.boto3.client", return_value=mock_cloudwatch):
+            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1")
+
+        mock_cloudwatch.put_metric_data.assert_called_once()
+        call_args = mock_cloudwatch.put_metric_data.call_args
+        assert call_args[1]["Namespace"] == "Shifter/RangeProvisioning"
+        assert call_args[1]["MetricData"][0]["MetricName"] == "SubnetExhaustion"
+        assert call_args[1]["MetricData"][0]["Value"] == 1
+
+    def test_metric_includes_vpc_dimension(self):
+        """Metric includes VPC ID as a dimension."""
+        mock_cloudwatch = MagicMock()
+
+        with patch("components.network.boto3.client", return_value=mock_cloudwatch):
+            _publish_subnet_exhaustion_alarm("vpc-my-test-vpc", "10.1")
+
+        call_args = mock_cloudwatch.put_metric_data.call_args
+        dimensions = call_args[1]["MetricData"][0]["Dimensions"]
+        assert {"Name": "VpcId", "Value": "vpc-my-test-vpc"} in dimensions
+
+    def test_uses_aws_region_env_var(self):
+        """Uses AWS_REGION environment variable."""
+        mock_cloudwatch = MagicMock()
+
+        with (
+            patch("components.network.boto3.client", return_value=mock_cloudwatch) as mock_client,
+            patch.dict("os.environ", {"AWS_REGION": "eu-west-1"}),
+        ):
+            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1")
+
+        mock_client.assert_called_with("cloudwatch", region_name="eu-west-1")
+
+    def test_defaults_to_us_east_2(self):
+        """Defaults to us-east-2 if AWS_REGION not set."""
+        mock_cloudwatch = MagicMock()
+
+        with (
+            patch("components.network.boto3.client", return_value=mock_cloudwatch) as mock_client,
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1")
+
+        mock_client.assert_called_with("cloudwatch", region_name="us-east-2")
 
 
 # =============================================================================
-# Unit Tests for _cleanup_orphaned_subnet
+# Unit Tests for _find_free_subnet
 # =============================================================================
 
 
-class TestCleanupOrphanedSubnetHappyPath:
-    """Happy path tests for _cleanup_orphaned_subnet."""
+class TestFindFreeSubnetHappyPath:
+    """Happy path tests for _find_free_subnet."""
 
-    def test_no_orphaned_subnet_exists(self):
-        """No orphaned subnet exists, function returns without action."""
+    def test_finds_first_free_subnet_no_existing(self):
+        """No existing subnets, returns first available (.2.0/24)."""
         mock_ec2 = MagicMock()
         mock_ec2.describe_subnets.return_value = {"Subnets": []}
 
         with patch("components.network.boto3.client", return_value=mock_ec2):
-            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+            result = _find_free_subnet("vpc-12345", "10.1")
 
-        mock_ec2.describe_subnets.assert_called_once_with(
-            Filters=[
-                {"Name": "vpc-id", "Values": ["vpc-12345"]},
-                {"Name": "cidr-block", "Values": ["10.1.5.0/24"]},
-            ]
-        )
-        mock_ec2.delete_subnet.assert_not_called()
+        assert result == "10.1.2.0/24"
+        mock_ec2.describe_subnets.assert_called_once_with(Filters=[{"Name": "vpc-id", "Values": ["vpc-12345"]}])
 
-    def test_orphaned_subnet_deleted_successfully(self):
-        """Orphaned subnet exists and is deleted successfully."""
+    def test_skips_existing_subnets(self):
+        """Skips existing /24 subnets and finds next free one."""
         mock_ec2 = MagicMock()
         mock_ec2.describe_subnets.return_value = {
             "Subnets": [
-                {
-                    "SubnetId": "subnet-orphan123",
-                    "CidrBlock": "10.1.5.0/24",
-                    "Tags": [{"Key": "Name", "Value": "shifter-range-42"}],
-                }
+                {"CidrBlock": "10.1.2.0/24"},  # First range subnet
+                {"CidrBlock": "10.1.3.0/24"},  # Second range subnet
             ]
         }
-        mock_ec2.delete_subnet.return_value = {}
 
         with patch("components.network.boto3.client", return_value=mock_ec2):
-            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+            result = _find_free_subnet("vpc-12345", "10.1")
 
-        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-orphan123")
+        assert result == "10.1.4.0/24"
 
-    def test_orphaned_subnet_no_name_tag(self):
-        """Subnet without Name tag should still be deleted."""
+    def test_skips_infrastructure_subnets(self):
+        """Skips small infrastructure subnets in .0.x space."""
         mock_ec2 = MagicMock()
         mock_ec2.describe_subnets.return_value = {
             "Subnets": [
-                {
-                    "SubnetId": "subnet-notag",
-                    "CidrBlock": "10.1.5.0/24",
-                    "Tags": [],
-                }
+                {"CidrBlock": "10.1.0.0/28"},  # Firewall subnet
+                {"CidrBlock": "10.1.0.16/28"},  # NAT subnet
+                {"CidrBlock": "10.1.0.32/28"},  # SSM endpoints
             ]
         }
-        mock_ec2.delete_subnet.return_value = {}
 
         with patch("components.network.boto3.client", return_value=mock_ec2):
-            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+            result = _find_free_subnet("vpc-12345", "10.1")
 
-        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-notag")
+        # Should start at .2.0/24, skipping .0.x and .1.x
+        assert result == "10.1.2.0/24"
 
 
-class TestCleanupOrphanedSubnetFailures:
-    """Failure case tests for _cleanup_orphaned_subnet."""
+class TestFindFreeSubnetOverlappingCIDRs:
+    """Tests for handling overlapping CIDRs (the main bug fix)."""
 
-    def test_delete_fails_dependency_violation(self):
-        """Subnet has resources attached and cannot be deleted."""
+    def test_skips_larger_cidr_that_overlaps(self):
+        """A /22 subnet blocks multiple /24 candidates."""
         mock_ec2 = MagicMock()
         mock_ec2.describe_subnets.return_value = {
             "Subnets": [
-                {
-                    "SubnetId": "subnet-inuse",
-                    "CidrBlock": "10.1.5.0/24",
-                    "Tags": [{"Key": "Name", "Value": "shifter-range-99"}],
-                }
+                {"CidrBlock": "10.1.2.0/24"},  # Range 1
+                {"CidrBlock": "10.1.3.0/24"},  # Range 2
+                {"CidrBlock": "10.1.4.0/22"},  # NGFW - covers .4, .5, .6, .7
             ]
         }
-        from botocore.exceptions import ClientError
-
-        mock_ec2.delete_subnet.side_effect = ClientError(
-            {
-                "Error": {
-                    "Code": "DependencyViolation",
-                    "Message": "The subnet 'subnet-inuse' has dependencies.",
-                }
-            },
-            "DeleteSubnet",
-        )
 
         with patch("components.network.boto3.client", return_value=mock_ec2):
-            with pytest.raises(RuntimeError) as exc_info:
-                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+            result = _find_free_subnet("vpc-12345", "10.1")
 
-        assert "subnet-inuse" in str(exc_info.value)
-        assert "could not be deleted" in str(exc_info.value)
-        assert "DependencyViolation" in str(exc_info.value)
+        # Should skip 10.1.4.0/24 through 10.1.7.0/24 (covered by /22)
+        assert result == "10.1.8.0/24"
 
-    def test_delete_fails_access_denied(self):
-        """IAM permissions prevent subnet deletion."""
+    def test_skips_slash_21_that_overlaps(self):
+        """A /21 subnet blocks 8 /24 candidates."""
         mock_ec2 = MagicMock()
         mock_ec2.describe_subnets.return_value = {
             "Subnets": [
-                {
-                    "SubnetId": "subnet-noaccess",
-                    "CidrBlock": "10.1.5.0/24",
-                    "Tags": [],
-                }
+                {"CidrBlock": "10.1.8.0/21"},  # Covers .8 through .15
             ]
         }
-        from botocore.exceptions import ClientError
-
-        mock_ec2.delete_subnet.side_effect = ClientError(
-            {
-                "Error": {
-                    "Code": "UnauthorizedOperation",
-                    "Message": "You are not authorized to perform this operation.",
-                }
-            },
-            "DeleteSubnet",
-        )
 
         with patch("components.network.boto3.client", return_value=mock_ec2):
-            with pytest.raises(RuntimeError) as exc_info:
-                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
+            result = _find_free_subnet("vpc-12345", "10.1")
 
-        assert "subnet-noaccess" in str(exc_info.value)
-        assert "UnauthorizedOperation" in str(exc_info.value)
+        # First available is .2 (skipping .0, .1 for infra)
+        # But .8-.15 are blocked by /21, so if .2-.7 taken, would skip to .16
+        # In this case .2 is free
+        assert result == "10.1.2.0/24"
 
-    def test_describe_subnets_fails_invalid_vpc(self):
-        """AWS API call to describe subnets fails with invalid VPC."""
+    def test_complex_overlapping_scenario(self):
+        """Multiple overlapping subnets of different sizes."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {"CidrBlock": "10.1.0.0/28"},  # Infra - overlaps .0
+                {"CidrBlock": "10.1.2.0/24"},  # Range 1
+                {"CidrBlock": "10.1.3.0/24"},  # Range 2
+                {"CidrBlock": "10.1.4.0/22"},  # NGFW - covers .4-.7
+                {"CidrBlock": "10.1.8.0/24"},  # Range 3
+            ]
+        }
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1")
+
+        # .2, .3 taken; .4-.7 blocked by /22; .8 taken; .9 free
+        assert result == "10.1.9.0/24"
+
+    def test_slash_16_blocks_all_candidates(self):
+        """A /16 subnet should cause no free subnet error."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {"CidrBlock": "10.1.0.0/16"},  # Covers entire range
+            ]
+        }
+
+        with (
+            patch("components.network.boto3.client", return_value=mock_ec2),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            _find_free_subnet("vpc-12345", "10.1")
+
+        assert "No free /24 subnet available" in str(exc_info.value)
+
+
+class TestFindFreeSubnetExhaustion:
+    """Tests for subnet exhaustion scenarios."""
+
+    def test_all_subnets_used(self):
+        """All /24 subnets from .2 to .254 are in use."""
+        mock_ec2 = MagicMock()
+        mock_cloudwatch = MagicMock()
+        # Create list of all possible subnets
+        all_subnets = [{"CidrBlock": f"10.1.{i}.0/24"} for i in range(2, 255)]
+        mock_ec2.describe_subnets.return_value = {"Subnets": all_subnets}
+
+        def client_factory(service, **kwargs):
+            if service == "ec2":
+                return mock_ec2
+            if service == "cloudwatch":
+                return mock_cloudwatch
+            return MagicMock()
+
+        with (
+            patch("components.network.boto3.client", side_effect=client_factory),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            _find_free_subnet("vpc-12345", "10.1")
+
+        assert "No free /24 subnet available" in str(exc_info.value)
+
+    def test_exhaustion_publishes_alarm(self):
+        """Subnet exhaustion triggers CloudWatch alarm metric."""
+        mock_ec2 = MagicMock()
+        mock_cloudwatch = MagicMock()
+        # Create list of all possible subnets
+        all_subnets = [{"CidrBlock": f"10.1.{i}.0/24"} for i in range(2, 255)]
+        mock_ec2.describe_subnets.return_value = {"Subnets": all_subnets}
+
+        def client_factory(service, **kwargs):
+            if service == "ec2":
+                return mock_ec2
+            if service == "cloudwatch":
+                return mock_cloudwatch
+            return MagicMock()
+
+        with (
+            patch("components.network.boto3.client", side_effect=client_factory),
+            pytest.raises(RuntimeError),
+        ):
+            _find_free_subnet("vpc-exhausted", "10.1")
+
+        # Verify alarm was published
+        mock_cloudwatch.put_metric_data.assert_called_once()
+        call_args = mock_cloudwatch.put_metric_data.call_args
+        assert call_args[1]["MetricData"][0]["MetricName"] == "SubnetExhaustion"
+        dimensions = call_args[1]["MetricData"][0]["Dimensions"]
+        assert {"Name": "VpcId", "Value": "vpc-exhausted"} in dimensions
+
+    def test_finds_gap_in_middle(self):
+        """Finds a free subnet in a gap between used ones."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {"CidrBlock": "10.1.2.0/24"},
+                {"CidrBlock": "10.1.3.0/24"},
+                # Gap at .4
+                {"CidrBlock": "10.1.5.0/24"},
+                {"CidrBlock": "10.1.6.0/24"},
+            ]
+        }
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1")
+
+        assert result == "10.1.4.0/24"
+
+
+class TestFindFreeSubnetEdgeCases:
+    """Edge case tests for _find_free_subnet."""
+
+    def test_different_cidr_prefix(self):
+        """Works with different CIDR prefixes."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "172.16")
+
+        assert result == "172.16.2.0/24"
+
+    def test_invalid_cidr_in_aws_response_ignored(self):
+        """Invalid CIDRs from AWS are gracefully ignored."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {"CidrBlock": "invalid-cidr"},
+                {"CidrBlock": "10.1.2.0/24"},
+            ]
+        }
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1")
+
+        # Should skip invalid and find next after .2
+        assert result == "10.1.3.0/24"
+
+    def test_empty_subnets_response(self):
+        """Empty Subnets list works correctly."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1")
+
+        assert result == "10.1.2.0/24"
+
+    def test_missing_subnets_key(self):
+        """Missing Subnets key in response handled."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1")
+
+        assert result == "10.1.2.0/24"
+
+
+class TestFindFreeSubnetAWSErrors:
+    """Tests for AWS API error handling."""
+
+    def test_vpc_not_found_error(self):
+        """AWS error for invalid VPC propagates."""
         mock_ec2 = MagicMock()
         from botocore.exceptions import ClientError
 
@@ -165,61 +345,16 @@ class TestCleanupOrphanedSubnetFailures:
             "DescribeSubnets",
         )
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            with pytest.raises(ClientError) as exc_info:
-                _cleanup_orphaned_subnet("vpc-invalid", "10.1.5.0/24")
+        with (
+            patch("components.network.boto3.client", return_value=mock_ec2),
+            pytest.raises(ClientError) as exc_info,
+        ):
+            _find_free_subnet("vpc-invalid", "10.1")
 
         assert "InvalidVpcID.NotFound" in str(exc_info.value)
 
-
-class TestCleanupOrphanedSubnetUnexpected:
-    """Unexpected/edge case tests for _cleanup_orphaned_subnet."""
-
-    def test_multiple_subnets_found_deletes_first(self):
-        """Multiple subnets with same CIDR - deletes first one only."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {
-            "Subnets": [
-                {
-                    "SubnetId": "subnet-first",
-                    "CidrBlock": "10.1.5.0/24",
-                    "Tags": [{"Key": "Name", "Value": "first"}],
-                },
-                {
-                    "SubnetId": "subnet-second",
-                    "CidrBlock": "10.1.5.0/24",
-                    "Tags": [{"Key": "Name", "Value": "second"}],
-                },
-            ]
-        }
-        mock_ec2.delete_subnet.return_value = {}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
-
-        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-first")
-
-    def test_subnet_missing_tags_key(self):
-        """Subnet response missing 'Tags' key entirely."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {
-            "Subnets": [
-                {
-                    "SubnetId": "subnet-notags",
-                    "CidrBlock": "10.1.5.0/24",
-                    # No 'Tags' key at all
-                }
-            ]
-        }
-        mock_ec2.delete_subnet.return_value = {}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
-
-        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-notags")
-
-    def test_connection_error_to_aws(self):
-        """Network error connecting to AWS."""
+    def test_connection_error(self):
+        """Network connection error propagates."""
         mock_ec2 = MagicMock()
         from botocore.exceptions import EndpointConnectionError
 
@@ -227,51 +362,11 @@ class TestCleanupOrphanedSubnetUnexpected:
             endpoint_url="https://ec2.us-east-2.amazonaws.com"
         )
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            with pytest.raises(EndpointConnectionError):
-                _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
-
-    def test_empty_vpc_id(self):
-        """Empty VPC ID passed - let AWS validate."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            _cleanup_orphaned_subnet("", "10.1.5.0/24")
-
-        mock_ec2.describe_subnets.assert_called_once()
-
-    def test_empty_cidr_block(self):
-        """Empty CIDR block passed - let AWS validate."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            _cleanup_orphaned_subnet("vpc-12345", "")
-
-        mock_ec2.describe_subnets.assert_called_once()
-
-    def test_subnet_with_other_tags_but_no_name(self):
-        """Subnet has tags but none with Key='Name'."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {
-            "Subnets": [
-                {
-                    "SubnetId": "subnet-othertags",
-                    "CidrBlock": "10.1.5.0/24",
-                    "Tags": [
-                        {"Key": "Environment", "Value": "dev"},
-                        {"Key": "ManagedBy", "Value": "pulumi"},
-                    ],
-                }
-            ]
-        }
-        mock_ec2.delete_subnet.return_value = {}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            _cleanup_orphaned_subnet("vpc-12345", "10.1.5.0/24")
-
-        mock_ec2.delete_subnet.assert_called_once_with(SubnetId="subnet-othertags")
+        with (
+            patch("components.network.boto3.client", return_value=mock_ec2),
+            pytest.raises(EndpointConnectionError),
+        ):
+            _find_free_subnet("vpc-12345", "10.1")
 
 
 # =============================================================================
@@ -280,14 +375,14 @@ class TestCleanupOrphanedSubnetUnexpected:
 
 
 @pytest.fixture
-def mock_cleanup_orphaned_subnet():
-    """Mock _cleanup_orphaned_subnet for NetworkComponent tests.
+def mock_find_free_subnet():
+    """Mock _find_free_subnet for NetworkComponent tests.
 
-    The cleanup function makes real AWS API calls, which we don't want
+    The function makes real AWS API calls, which we don't want
     during Pulumi component tests.
     """
-    with patch("components.network._cleanup_orphaned_subnet"):
-        yield
+    with patch("components.network._find_free_subnet", return_value="10.1.8.0/24") as mock:
+        yield mock
 
 
 class TestNetworkComponentWithPulumiMocks:
@@ -298,9 +393,10 @@ class TestNetworkComponentWithPulumiMocks:
     """
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
+        self.mock_find_free_subnet = mock_find_free_subnet
 
     @pulumi.runtime.test
     def test_creates_subnet(self):
@@ -313,7 +409,6 @@ class TestNetworkComponentWithPulumiMocks:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -325,8 +420,8 @@ class TestNetworkComponentWithPulumiMocks:
         assert component.subnet_cidr is not None
 
     @pulumi.runtime.test
-    def test_subnet_cidr_calculation(self):
-        """Subnet CIDR should be {prefix}.{index+1}.0/24."""
+    def test_uses_find_free_subnet_result(self):
+        """Subnet CIDR should come from _find_free_subnet, not calculation."""
         from components.network import NetworkComponent
 
         component = NetworkComponent(
@@ -335,58 +430,14 @@ class TestNetworkComponentWithPulumiMocks:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,  # Should result in 10.1.6.0/24
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
         )
 
         def check_cidr(cidr):
-            assert cidr == "10.1.6.0/24"
-
-        component.subnet.cidr_block.apply(check_cidr)
-
-    @pulumi.runtime.test
-    def test_subnet_cidr_index_zero(self):
-        """Subnet index 0 creates CIDR .1.0/24 (reserving .0 for infra)."""
-        from components.network import NetworkComponent
-
-        component = NetworkComponent(
-            name="test-network",
-            range_id=42,
-            user_id=1,
-            vpc_id="vpc-12345",
-            cidr_prefix="10.1",
-            subnet_index=0,  # Should result in 10.1.1.0/24
-            route_table_id="rtb-12345",
-            environment="dev",
-            availability_zone="us-east-2a",
-        )
-
-        def check_cidr(cidr):
-            assert cidr == "10.1.1.0/24"
-
-        component.subnet.cidr_block.apply(check_cidr)
-
-    @pulumi.runtime.test
-    def test_subnet_cidr_different_prefix(self):
-        """Different CIDR prefixes should work correctly."""
-        from components.network import NetworkComponent
-
-        component = NetworkComponent(
-            name="test-network",
-            range_id=42,
-            user_id=1,
-            vpc_id="vpc-12345",
-            cidr_prefix="172.16",  # Different prefix
-            subnet_index=10,
-            route_table_id="rtb-12345",
-            environment="dev",
-            availability_zone="us-east-2a",
-        )
-
-        def check_cidr(cidr):
-            assert cidr == "172.16.11.0/24"
+            # Should use the mocked value from _find_free_subnet
+            assert cidr == "10.1.8.0/24"
 
         component.subnet.cidr_block.apply(check_cidr)
 
@@ -401,7 +452,6 @@ class TestNetworkComponentWithPulumiMocks:
             user_id=1,
             vpc_id="vpc-my-specific-vpc",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -423,7 +473,6 @@ class TestNetworkComponentWithPulumiMocks:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-west-2b",
@@ -445,7 +494,6 @@ class TestNetworkComponentWithPulumiMocks:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -467,7 +515,6 @@ class TestNetworkComponentWithPulumiMocks:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -492,7 +539,6 @@ class TestNetworkComponentWithPulumiMocks:
             user_id=5,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="prod",
             availability_zone="us-east-2a",
@@ -516,7 +562,6 @@ class TestNetworkComponentWithPulumiMocks:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -531,31 +576,9 @@ class TestNetworkComponentEdgeCases:
     """Edge case tests for NetworkComponent."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
-
-    @pulumi.runtime.test
-    def test_max_subnet_index(self):
-        """Subnet index 254 should create .255.0/24."""
-        from components.network import NetworkComponent
-
-        component = NetworkComponent(
-            name="test-network",
-            range_id=42,
-            user_id=1,
-            vpc_id="vpc-12345",
-            cidr_prefix="10.1",
-            subnet_index=254,  # Max valid index -> 10.1.255.0/24
-            route_table_id="rtb-12345",
-            environment="dev",
-            availability_zone="us-east-2a",
-        )
-
-        def check_cidr(cidr):
-            assert cidr == "10.1.255.0/24"
-
-        component.subnet.cidr_block.apply(check_cidr)
 
     @pulumi.runtime.test
     def test_range_id_zero(self):
@@ -568,7 +591,6 @@ class TestNetworkComponentEdgeCases:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -591,7 +613,6 @@ class TestNetworkComponentEdgeCases:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -608,7 +629,7 @@ class TestResourceCreationVerification:
     """Tests that verify resources are created correctly via pulumi_mocks."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -623,7 +644,6 @@ class TestResourceCreationVerification:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -647,7 +667,6 @@ class TestResourceCreationVerification:
             user_id=1,
             vpc_id="vpc-12345",
             cidr_prefix="10.1",
-            subnet_index=5,
             route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
@@ -658,8 +677,8 @@ class TestResourceCreationVerification:
         assert component.subnet_id is not None
         assert component.subnet_cidr is not None
 
-        # Verify subnet_cidr output value
+        # Verify subnet_cidr output value comes from _find_free_subnet
         def check_cidr(cidr):
-            assert cidr == "10.1.6.0/24"
+            assert cidr == "10.1.8.0/24"
 
         component.subnet_cidr.apply(check_cidr)

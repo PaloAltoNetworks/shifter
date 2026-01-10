@@ -10,4 +10,7 @@ exclude:
     - "**/conftest.py"
     - "shifter/shifter_platform/tests/**"
     - "shifter/engine/provisioner/tests/**"
+    - "shifter/packer/tests/**"
+    - "scripts/bootstrap/tests/**"
+    - "scripts/check_layer_imports/tests/**"
     - "pulumi-provisioner/tests/**"

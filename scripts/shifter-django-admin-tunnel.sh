@@ -9,6 +9,13 @@
 #
 set -euo pipefail
 
+# Load profile from .env
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -f "$REPO_ROOT/.env" ]]; then
+    # shellcheck source=/dev/null
+    source "$REPO_ROOT/.env"
+fi
+
 # Defaults
 ENV="dev"
 AWS_REGION="${AWS_REGION:-us-east-2}"
@@ -38,9 +45,9 @@ fi
 
 # Set profile based on environment
 if [[ "$ENV" == "dev" ]]; then
-    AWS_PROFILE="$PANW_SHIFTER_DEV_PROFILE"
+    AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:?PANW_SHIFTER_DEV_PROFILE not set. Check .env file.}"
 else
-    AWS_PROFILE="$PANW_SHIFTER_PROD_PROFILE"
+    AWS_PROFILE="${PANW_SHIFTER_PROD_PROFILE:?PANW_SHIFTER_PROD_PROFILE not set. Check .env file.}"
 fi
 
 INSTANCE_TAG="${ENV}-portal-ec2"

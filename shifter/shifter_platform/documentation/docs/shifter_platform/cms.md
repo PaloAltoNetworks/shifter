@@ -79,7 +79,6 @@ range_config = {
             "agent": {
                 "s3_key": "agents/123/abc.deb",
                 "filename": "agent.deb",
-                "sha256": "...",
             }
         }
     ],
@@ -139,7 +138,7 @@ range_config = {
 | Function | Purpose |
 |----------|---------|
 | `initiate_upload(user, name, filename, file_size)` | Validate, generate presigned URL |
-| `complete_upload(user, upload_token, sha256)` | Verify and finalize upload |
+| `complete_upload(user, upload_token)` | Verify and finalize upload |
 | `cancel_upload(user, upload_token)` | Clean up failed upload |
 
 #### User Quota

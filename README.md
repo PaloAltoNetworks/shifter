@@ -36,3 +36,7 @@ This software is provided "as is" without warranty. The authors disclaim all lia
 ## License
 
 (c) 2025 Palo Alto Networks, Inc. All rights reserved.
+
+Repo held on behalf of Palo Alto Networks, Inc. (PANW) by Brad Edwards until transfer to PANW at PANW's sole discretion at a time of PANW's choosing.
+
+The contents of this repository are work product of Palo Alto Networks, Inc. (PANW) and are not intended for use by any other party.

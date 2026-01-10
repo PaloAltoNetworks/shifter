@@ -22,10 +22,6 @@ class Range(models.Model):
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
 
-    # Status groupings for lifecycle queries
-    TERMINAL_STATUSES: frozenset[str]  # Range has reached end of lifecycle
-    CANCELLABLE_STATUSES: frozenset[str]  # Range can be cancelled (early lifecycle only)
-
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
     cms_user_id = models.PositiveIntegerField(
         null=True,
@@ -81,7 +77,7 @@ class Range(models.Model):
     range_config = models.JSONField(
         null=True,
         blank=True,
-        help_text="Full RangeRequest from CMS (scenario_id, user_id, instances)",
+        help_text="Full RangeSpec from CMS (scenario_id, user_id, instances)",
     )
     provisioned_instances = models.JSONField(
         null=True,
@@ -289,18 +285,3 @@ class Range(models.Model):
         if not victims:
             return None
         return victims[0].get("private_ip")
-
-
-# Define Range status groupings (after class definition to reference Status enum)
-Range.TERMINAL_STATUSES = frozenset(
-    {
-        Range.Status.DESTROYED,
-        Range.Status.FAILED,
-    }
-)
-Range.CANCELLABLE_STATUSES = frozenset(
-    {
-        Range.Status.PENDING,
-        Range.Status.PROVISIONING,
-    }
-)

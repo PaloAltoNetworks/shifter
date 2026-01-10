@@ -1,0 +1,5 @@
+bucket         = "shifter-infra-9f7d1dc4-7f0c-495b-9c03-624dfd5a8795"
+key            = "prod/portal/terraform.tfstate"
+region         = "us-east-2"
+dynamodb_table = "shifter-terraform-9f7d1dc4-7f0c-495b-9c03-624dfd5a8795"
+encrypt        = true

@@ -727,11 +727,16 @@ class RangeInstance(models.Model):
     - status tracks CMS's view of range lifecycle (from pub/sub events)
     - deleted_at enables soft deletion for history preservation
 
+    After GH issue #416:
+    - request FK links to CMS Request (new pattern)
+    - range_id is now nullable for new Request-based ranges
+
     Invariant: Terminal statuses (DESTROYED, FAILED) automatically set deleted_at.
     This is enforced in save() to prevent orphaned terminal records.
 
     Attributes:
-        range_id: ID of the Range created by engine (IntegerField, not FK)
+        request: CMS Request that spawned this range (new pattern, nullable).
+        range_id: ID of the Range created by engine (legacy, nullable for new ranges).
         scenario_id: Template name used (e.g., 'basic', 'ad_attack_lab')
         user_id: ID of the user who requested creation (IntegerField, not FK)
         agent: AgentConfig used, if any (FK, nullable)
@@ -741,7 +746,15 @@ class RangeInstance(models.Model):
         deleted_at: When this record was soft-deleted (null if active)
     """
 
-    range_id = models.IntegerField(unique=True)
+    request = models.ForeignKey(
+        "Request",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="range_instances",
+        help_text="CMS Request that spawned this range (new pattern)",
+    )
+    range_id = models.IntegerField(unique=True, null=True, blank=True)
     scenario_id = models.CharField(max_length=50)
     user_id = models.IntegerField()
     agent = models.ForeignKey(

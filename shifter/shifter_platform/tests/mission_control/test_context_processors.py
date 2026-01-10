@@ -1,6 +1,7 @@
 """Tests for mission_control context processors."""
 
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from django.db import DatabaseError
@@ -26,6 +27,7 @@ class TestActiveRangeContextProcessor:
         mock_request.user.id = 42
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=1,
             user_id=42,
             scenario_id="basic",
@@ -54,6 +56,7 @@ class TestActiveRangeContextProcessor:
         mock_request.user.id = 42
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=1,
             user_id=42,
             scenario_id="basic",
@@ -209,6 +212,7 @@ class TestActiveRangeContextProcessor:
         mock_request.user.id = 42
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=1,
             user_id=42,
             scenario_id="basic",
@@ -291,6 +295,7 @@ class TestActiveRangeContextProcessor:
 
         # Create RangeContext with READY status
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=1,
             user_id=42,
             scenario_id="basic",
@@ -321,6 +326,7 @@ class TestActiveRangeContextProcessor:
 
         for status in [ResourceStatus.DESTROYED, ResourceStatus.FAILED]:
             mock_range_context = RangeContext(
+                request_id=uuid4(),
                 range_id=1,
                 user_id=42,
                 scenario_id="basic",

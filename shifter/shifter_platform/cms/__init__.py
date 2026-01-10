@@ -41,6 +41,7 @@ __all__ = [
     "get_credential",
     "get_ngfw",
     "get_range",
+    "get_range_by_request_id",
     "get_scenario",
     "get_storage_used",
     "initiate_upload",

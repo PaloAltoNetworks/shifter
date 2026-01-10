@@ -2,6 +2,7 @@
 
 import logging
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
@@ -60,19 +61,19 @@ class TestCancelRange:
     # Input validation - range_id value (handled by Pydantic)
     # -------------------------------------------------------------------------
 
-    def test_pydantic_rejects_none_range_id(self):
-        """RangeContext Pydantic validator rejects None range_id."""
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            RangeContext(
-                range_id=None,
-                user_id=1,
-                scenario_id="basic",
-                status=ResourceStatus.DESTROYED,
-                instances=[],
-                agent_name="Test Agent",
-            )
+    def test_pydantic_allows_none_range_id(self):
+        """RangeContext Pydantic validator allows None range_id (new pattern)."""
+        # range_id is now optional for Request-based ranges
+        ctx = RangeContext(
+            request_id=uuid4(),
+            range_id=None,
+            user_id=1,
+            scenario_id="basic",
+            status=ResourceStatus.DESTROYED,
+            instances=[],
+            agent_name="Test Agent",
+        )
+        assert ctx.range_id is None
 
     def test_pydantic_rejects_negative_range_id(self):
         """RangeContext Pydantic validator rejects negative range_id."""
@@ -80,6 +81,7 @@ class TestCancelRange:
 
         with pytest.raises(ValidationError):
             RangeContext(
+                request_id=uuid4(),
                 range_id=-1,
                 user_id=1,
                 scenario_id="basic",
@@ -97,6 +99,7 @@ class TestCancelRange:
         from engine.services import cancel_range
 
         range_ctx = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=1,
             scenario_id="basic",
@@ -113,6 +116,7 @@ class TestCancelRange:
         from engine.services import cancel_range
 
         range_ctx = RangeContext(
+            request_id=uuid4(),
             range_id=100,
             user_id=5,
             scenario_id="ad_attack_lab",
@@ -133,6 +137,7 @@ class TestCancelRange:
         from engine.services import cancel_range
 
         range_ctx = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=7,
             scenario_id="basic",
@@ -156,6 +161,7 @@ class TestCancelRange:
         from engine.services import cancel_range
 
         range_ctx = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=1,
             scenario_id="basic",
@@ -198,20 +204,19 @@ class TestCancelRange:
 
         assert "invalid" in caplog.text.lower() or "str" in caplog.text
 
-    def test_pydantic_validation_prevents_none_range_id(self):
-        """Pydantic validation prevents None range_id from reaching service."""
-        from pydantic import ValidationError
-
-        # RangeContext validator rejects None before service can log
-        with pytest.raises(ValidationError):
-            RangeContext(
-                range_id=None,
-                user_id=1,
-                scenario_id="basic",
-                status=ResourceStatus.DESTROYED,
-                instances=[],
-                agent_name="Test Agent",
-            )
+    def test_pydantic_validation_allows_none_range_id(self):
+        """Pydantic validation allows None range_id (new Request pattern)."""
+        # range_id is now optional for Request-based ranges
+        ctx = RangeContext(
+            request_id=uuid4(),
+            range_id=None,
+            user_id=1,
+            scenario_id="basic",
+            status=ResourceStatus.DESTROYED,
+            instances=[],
+            agent_name="Test Agent",
+        )
+        assert ctx.range_id is None
 
     def test_pydantic_validation_prevents_invalid_range_id(self):
         """Pydantic validation prevents invalid range_id from reaching service."""
@@ -220,6 +225,7 @@ class TestCancelRange:
         # RangeContext validator rejects negative range_id before service can log
         with pytest.raises(ValidationError):
             RangeContext(
+                request_id=uuid4(),
                 range_id=-5,
                 user_id=1,
                 scenario_id="basic",

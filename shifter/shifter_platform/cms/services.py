@@ -1238,7 +1238,17 @@ def get_active_range(user: User) -> RangeContext | None:
         # Get agent_name from FK if exists
         agent_name = instance.agent.name if instance.agent else None
 
+        # Get request_id from request FK (backfill migration ensures all have one)
+        request_id = instance.request.request_id if instance.request else None
+        if request_id is None:
+            logger.warning("get_active_range: range_id=%s has no request FK", instance.range_id)
+            # Generate a placeholder UUID for schema compliance
+            from uuid import uuid4
+
+            request_id = uuid4()
+
         return RangeContext(
+            request_id=request_id,
             range_id=instance.range_id,
             scenario_id=instance.scenario_id,
             user_id=instance.user_id,
@@ -1252,6 +1262,94 @@ def get_active_range(user: User) -> RangeContext | None:
             user.id,
         )
         return None
+
+
+def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
+    """Get range by request_id (UUID string).
+
+    Used by WebSocket consumers and views to look up range by request_id.
+
+    Args:
+        user: User requesting the range (ownership check)
+        request_id: UUID string of the request
+
+    Returns:
+        RangeContext: Template-safe projection of the range
+
+    Raises:
+        TypeError: If user is None or invalid type
+        CMSError: If range not found or not owned by user
+    """
+    from cms.exceptions import CMSError
+    from shared.enums import ResourceStatus
+    from shared.schemas import InstanceContext, RangeContext
+
+    # Input validation
+    if user is None:
+        logger.error("get_range_by_request_id called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "get_range_by_request_id called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if not request_id:
+        logger.error("get_range_by_request_id called with empty request_id")
+        raise CMSError("request_id is required")
+
+    logger.debug(
+        "get_range_by_request_id called: user_id=%s request_id=%s",
+        user.id,
+        request_id,
+    )
+
+    # Query by request_id via the Request FK
+    instance = RangeInstance.objects.filter(
+        request__request_id=request_id,
+        user_id=user.id,
+    ).first()
+
+    if not instance:
+        logger.warning(
+            "get_range_by_request_id: not found or not owned: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+        raise CMSError("Range not found")
+
+    # The filter guarantees instance.request exists
+    if instance.request is None:
+        raise CMSError("Range has no associated request")
+
+    # Build instance contexts from range_spec
+    instance_contexts = []
+    if instance.range_spec and "instances" in instance.range_spec:
+        instance_contexts = [
+            InstanceContext(
+                uuid=spec.get("uuid"),
+                role=spec["role"],
+                os_type=spec["os_type"],
+                join_domain=spec.get("join_domain", False),
+            )
+            for spec in instance.range_spec["instances"]
+        ]
+
+    # Get agent_name from FK if exists
+    agent_name = instance.agent.name if instance.agent else None
+
+    return RangeContext(
+        request_id=instance.request.request_id,
+        range_id=instance.range_id,
+        scenario_id=instance.scenario_id,
+        user_id=instance.user_id,
+        status=ResourceStatus(instance.status),
+        instances=instance_contexts,
+        agent_name=agent_name,
+    )
 
 
 def create_range(
@@ -1349,7 +1447,7 @@ def create_range(
         existing = get_active_range(user)
         if existing:
             logger.warning(
-                "create_range: user_id=%s already has active range_id=%s",
+                "create_range: user_id=%s already has active range request_id=%s",
                 user.id,
                 existing.range_id,
             )
@@ -1378,32 +1476,58 @@ def create_range(
             agents[os_type] = get_agent(user, aid)
 
         # 4. Hydrate scenario with agent details
-        range_request = hydrate_scenario(scenario, user.id, agents)
+        range_spec = hydrate_scenario(scenario, user.id, agents)
 
-        # 5. Call engine to create range
-        range_id = engine_create_range(range_request)
+        # 5. Create CMS Request record
+        from uuid import uuid4
 
-        # 6. Store RangeInstance record with hydrated spec
+        from cms.models import Request
+        from shared.enums import RequestType
+        from shared.schemas import RequestSpec
+
+        request_id = uuid4()
+        cms_request = Request.objects.create(
+            request_id=request_id,
+            request_type=RequestType.RANGE.value,
+            user=user,
+        )
+
+        logger.info(
+            "create_range: created CMS Request id=%s for user_id=%s",
+            request_id,
+            user.id,
+        )
+
+        # 6. Wrap RangeSpec in RequestSpec and call engine
+        request_spec = RequestSpec(
+            request_id=request_id,
+            user_id=user.id,
+            items=[range_spec],
+        )
+
+        engine_create_range(request_spec)
+
+        # 7. Store RangeInstance record with request FK
         # Store first agent for backward compatibility (field is nullable)
         first_agent = next(iter(agents.values()), None)
         RangeInstance.objects.create(
-            range_id=range_id,
+            request=cms_request,
             scenario_id=scenario,
             user_id=user.id,
             agent=first_agent,
-            range_spec=range_request.model_dump(mode="json"),
+            range_spec=range_spec.model_dump(mode="json"),
         )
 
         logger.debug(
-            "create_range completed: range_id=%s, scenario=%s, user_id=%s",
-            range_id,
+            "create_range completed: request_id=%s, scenario=%s, user_id=%s",
+            request_id,
             scenario,
             user.id,
         )
 
-        # 7. Return RangeContext projection with instances
+        # 8. Return RangeContext projection with instances
         # Engine always sets PROVISIONING status on creation
-        from shared.enums import ResourceStatus
+        # Note: range_id is 0 for new Request-based ranges (use request_id for correlation)
         from shared.schemas import InstanceContext, RangeContext
 
         instance_contexts = [
@@ -1413,14 +1537,15 @@ def create_range(
                 os_type=spec.os_type,
                 join_domain=spec.join_domain,
             )
-            for spec in range_request.instances
+            for spec in range_spec.instances
         ]
 
         # Format agent names for display
         agent_names = ", ".join(a.name for a in agents.values())
 
         return RangeContext(
-            range_id=range_id,
+            request_id=request_id,
+            range_id=None,  # Legacy field, use request_id for new ranges
             scenario_id=scenario,
             user_id=user.id,
             status=ResourceStatus.PROVISIONING,
@@ -1532,7 +1657,15 @@ def destroy_range(user: User, range_id: int) -> None:
         instance.deleted_at = timezone.now()
         instance.save(update_fields=["status", "deleted_at"])
 
+        # Get request_id from request FK
+        request_id = instance.request.request_id if instance.request else None
+        if request_id is None:
+            from uuid import uuid4
+
+            request_id = uuid4()
+
         range_ctx = RangeContext(
+            request_id=request_id,
             range_id=instance.range_id,
             scenario_id=instance.scenario_id,
             user_id=instance.user_id,
@@ -1657,7 +1790,15 @@ def cancel_range(user: User, range_id: int) -> None:
         if instance.status != ResourceStatus.DESTROYED.value:
             raise CMSError("Range status not updated to DESTROYED")
 
+        # Get request_id from request FK
+        request_id = instance.request.request_id if instance.request else None
+        if request_id is None:
+            from uuid import uuid4
+
+            request_id = uuid4()
+
         range_ctx = RangeContext(
+            request_id=request_id,
             range_id=instance.range_id,
             scenario_id=instance.scenario_id,
             user_id=instance.user_id,
@@ -1674,6 +1815,191 @@ def cancel_range(user: User, range_id: int) -> None:
             "Error in cancel_range for user_id=%s, range_id=%s",
             user.id,
             range_id,
+        )
+        raise
+
+
+def destroy_range_by_request_id(user: User, request_id: str) -> None:
+    """Tear down range by request_id.
+
+    Fetches RangeInstance by request_id, verifies ownership, updates CMS status
+    to DESTROYING, then delegates to engine.services.destroy_range.
+
+    Args:
+        user: User requesting destruction
+        request_id: UUID string of the request
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None or invalid type
+        CMSError: If range not found or not owned by user
+    """
+    from shared.schemas import RangeContext
+
+    # Input validation
+    if user is None:
+        logger.error("destroy_range_by_request_id called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "destroy_range_by_request_id called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if not request_id:
+        logger.error("destroy_range_by_request_id called with empty request_id")
+        raise CMSError("request_id is required")
+
+    logger.debug(
+        "destroy_range_by_request_id called: user_id=%s request_id=%s",
+        user.id,
+        request_id,
+    )
+
+    # Fetch range instance by request_id
+    instance = RangeInstance.objects.filter(
+        request__request_id=request_id,
+        user_id=user.id,
+    ).first()
+
+    if not instance:
+        logger.warning(
+            "destroy_range_by_request_id: not found: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+        raise CMSError("Range not found")
+
+    # The filter guarantees instance.request exists
+    if instance.request is None:
+        raise CMSError("Range has no associated request")
+
+    try:
+        # Update CMS status to DESTROYING and soft delete
+        instance.status = ResourceStatus.DESTROYING.value
+        instance.deleted_at = timezone.now()
+        instance.save(update_fields=["status", "deleted_at"])
+
+        range_ctx = RangeContext(
+            request_id=instance.request.request_id,
+            range_id=instance.range_id,
+            scenario_id=instance.scenario_id,
+            user_id=instance.user_id,
+            status=ResourceStatus(instance.status),
+            instances=[],
+            agent_name=instance.agent.name if instance.agent else None,
+        )
+        engine_destroy_range(range_ctx)
+
+        logger.debug(
+            "destroy_range_by_request_id completed: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in destroy_range_by_request_id: user_id=%s request_id=%s",
+            user.id,
+            request_id,
+        )
+        raise
+
+
+def cancel_range_by_request_id(user: User, request_id: str) -> None:
+    """Cancel provisioning range by request_id.
+
+    Fetches RangeInstance by request_id, verifies ownership, updates status,
+    then delegates to engine.orchestration.cancel().
+
+    Args:
+        user: User requesting cancellation
+        request_id: UUID string of the request
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None or invalid type
+        CMSError: If range not found or not owned by user
+    """
+    from shared.schemas import RangeContext
+
+    # Input validation
+    if user is None:
+        logger.error("cancel_range_by_request_id called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "cancel_range_by_request_id called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if not request_id:
+        logger.error("cancel_range_by_request_id called with empty request_id")
+        raise CMSError("request_id is required")
+
+    logger.debug(
+        "cancel_range_by_request_id called: user_id=%s request_id=%s",
+        user.id,
+        request_id,
+    )
+
+    # Fetch range instance by request_id
+    instance = RangeInstance.objects.filter(
+        request__request_id=request_id,
+        user_id=user.id,
+    ).first()
+
+    if not instance:
+        logger.warning(
+            "cancel_range_by_request_id: not found: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+        raise CMSError("Range not found")
+
+    # The filter guarantees instance.request exists
+    if instance.request is None:
+        raise CMSError("Range has no associated request")
+
+    try:
+        # Update CMS status to DESTROYED
+        instance.status = ResourceStatus.DESTROYED.value
+        instance.save(update_fields=["status"])
+
+        range_ctx = RangeContext(
+            request_id=instance.request.request_id,
+            range_id=instance.range_id,
+            scenario_id=instance.scenario_id,
+            user_id=instance.user_id,
+            status=ResourceStatus(instance.status),
+            instances=[],
+            agent_name=instance.agent.name if instance.agent else None,
+        )
+        engine_cancel_range(range_ctx)
+
+        logger.debug(
+            "cancel_range_by_request_id completed: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in cancel_range_by_request_id: user_id=%s request_id=%s",
+            user.id,
+            request_id,
         )
         raise
 

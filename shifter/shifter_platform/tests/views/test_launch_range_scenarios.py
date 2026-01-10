@@ -9,6 +9,7 @@ Verifies that launch_range:
 """
 
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -69,6 +70,7 @@ def mock_range_context():
     from shared.schemas import InstanceContext, RangeContext
 
     return RangeContext(
+        request_id=uuid4(),
         range_id=42,
         scenario_id="basic",
         user_id=1,

@@ -84,14 +84,16 @@ def interpret(request_spec: RequestSpec) -> Request:
 def _infer_request_type(request_spec: RequestSpec) -> str:
     """Infer RequestType from the items in the spec."""
     from shared.enums import RequestType
-    from shared.schemas import InstanceSpec
+    from shared.schemas import InstanceSpec, RangeSpec
 
     for item in request_spec.items:
+        if isinstance(item, RangeSpec):
+            return RequestType.RANGE.value
         if isinstance(item, InstanceSpec) and item.role == "ngfw":
             return RequestType.NGFW.value
 
-    # Default/fallback - extend as needed
-    return RequestType.NGFW.value
+    # Default fallback for unknown item types
+    raise ValueError("RequestSpec must contain RangeSpec or NGFW InstanceSpec")
 
 
 def _interpret_instance(instance_spec: InstanceSpec, request: Request) -> Instance:

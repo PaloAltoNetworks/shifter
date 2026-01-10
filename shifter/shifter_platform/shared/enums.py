@@ -26,6 +26,7 @@ class RequestType(str, Enum):
     Used by Request models to categorize what is being requested.
     """
 
+    RANGE = "range"
     NGFW = "ngfw"
 
 

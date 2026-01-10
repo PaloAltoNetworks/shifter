@@ -74,6 +74,7 @@ def process_range_event(message: str | dict) -> None:
             {
                 "event_type": "range.status.updated",
                 "range_id": int,
+                "request_id": str (UUID) - preferred
                 "user_id": int,
                 "new_status": str,
                 "error_message": str | None
@@ -82,6 +83,8 @@ def process_range_event(message: str | dict) -> None:
     Returns:
         None. Errors are logged and handled gracefully.
     """
+    from engine.models import Range
+
     event = parse_sns_message(message)
 
     event_type = event.get("event_type")
@@ -90,31 +93,52 @@ def process_range_event(message: str | dict) -> None:
         return
 
     range_id = event.get("range_id")
+    request_id = event.get("request_id")
     new_status = event.get("new_status")
     error_message = event.get("error_message")
     event_id = event.get("event_id", "unknown")
 
-    if not isinstance(range_id, int):
-        logger.warning("Invalid range_id type: %s", type(range_id))
+    # Prefer request_id if provided (new pattern)
+    # Fall back to looking up request_id from range_id (backward compat)
+    if request_id:
+        group_request_id = str(request_id)
+    elif isinstance(range_id, int):
+        # Look up the Range to get its Request's request_id
+        try:
+            range_obj = Range.objects.select_related("request").get(id=range_id)
+            if range_obj.request:
+                group_request_id = str(range_obj.request.request_id)
+            else:
+                logger.warning(
+                    "Range %s has no request - cannot broadcast event_id=%s",
+                    range_id,
+                    event_id,
+                )
+                return
+        except Range.DoesNotExist:
+            logger.warning("Range not found: range_id=%s event_id=%s", range_id, event_id)
+            return
+    else:
+        logger.warning("Invalid event - no range_id or request_id: event_id=%s", event_id)
         return
 
     channel_layer = get_channel_layer()
-    group_name = range_event_group(range_id)
+    group_name = range_event_group(group_request_id)
 
     async_to_sync(channel_layer.group_send)(
         group_name,
         {
             "type": "range.status",
-            "range_id": range_id,
+            "request_id": group_request_id,
             "new_status": new_status,
             "error_message": error_message,
         },
     )
 
     logger.info(
-        "MC broadcast to group %s: range_id=%s status=%s event_id=%s",
+        "MC broadcast to group %s: request_id=%s status=%s event_id=%s",
         group_name,
-        range_id,
+        group_request_id,
         new_status,
         event_id,
     )

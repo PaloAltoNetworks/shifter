@@ -188,6 +188,14 @@ class TestCMSExports:
 
         assert callable(create_ngfw)
 
+    # --- Range service exports (new) ---
+
+    def test_exports_get_range_by_request_id(self):
+        """get_range_by_request_id should be importable from cms."""
+        from cms import get_range_by_request_id
+
+        assert callable(get_range_by_request_id)
+
     # --- __all__ verification ---
 
     def test_all_exports_match_declared(self):
@@ -212,6 +220,7 @@ class TestCMSExports:
             "get_credential",
             "get_ngfw",
             "get_range",
+            "get_range_by_request_id",
             "get_scenario",
             "get_storage_used",
             "initiate_upload",

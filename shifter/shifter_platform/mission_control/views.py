@@ -15,14 +15,12 @@ from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from cms import cancel_range as cms_cancel_range
 from cms import cancel_upload as cms_cancel_upload
 from cms import complete_upload as cms_complete_upload
 from cms import create_credential as cms_create_credential
 from cms import create_range as cms_create_range
 from cms import delete_agent as cms_delete_agent
 from cms import delete_credential as cms_delete_credential
-from cms import destroy_range as cms_destroy_range
 from cms import get_active_range, get_allowed_extensions
 from cms import get_agent as cms_get_agent
 from cms import get_credential as cms_get_credential
@@ -370,9 +368,9 @@ def launch_range(request):
         return JsonResponse({"error": str(e)}, status=400)
 
     logger.info(
-        "Range launched: user=%s range_id=%s agent=%s scenario=%s",
+        "Range launched: user=%s request_id=%s agent=%s scenario=%s",
         request.user.email,
-        range_ctx.range_id,
+        range_ctx.request_id,
         range_ctx.agent_name,
         scenario,
     )
@@ -392,25 +390,35 @@ def cancel_range(request):
     Cancel a provisioning range.
 
     Request body (JSON):
-        - range_id: ID of range to cancel
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to cancel (legacy, deprecated)
 
     Only works for ranges in PENDING or PROVISIONING status.
     """
+    from cms import cancel_range as cms_cancel_range_by_id
+    from cms.services import cancel_range_by_request_id as cms_cancel_range_by_request
+
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
     range_id = data.get("range_id")
-    if not range_id:
-        return JsonResponse({"error": "range_id is required"}, status=400)
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
 
     try:
-        cms_cancel_range(request.user, range_id)
+        if request_id:
+            cms_cancel_range_by_request(request.user, request_id)
+            logger.info("Range cancelled: user=%s request_id=%s", request.user.email, request_id)
+        else:
+            cms_cancel_range_by_id(request.user, range_id)
+            logger.info("Range cancelled: user=%s range_id=%s", request.user.email, range_id)
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
-
-    logger.info("Range cancelled: user=%s range_id=%s", request.user.email, range_id)
 
     return JsonResponse({"success": True})
 
@@ -422,25 +430,35 @@ def destroy_range(request):
     Destroy an active, paused, or failed range.
 
     Request body (JSON):
-        - range_id: ID of range to destroy
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to destroy (legacy, deprecated)
 
     Sets status to DESTROYING and triggers async resource cleanup.
     """
+    from cms import destroy_range as cms_destroy_range_by_id
+    from cms.services import destroy_range_by_request_id as cms_destroy_range_by_request
+
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
     range_id = data.get("range_id")
-    if not range_id:
-        return JsonResponse({"error": "range_id is required"}, status=400)
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
 
     try:
-        cms_destroy_range(request.user, range_id)
+        if request_id:
+            cms_destroy_range_by_request(request.user, request_id)
+            logger.info("Range destroyed: user=%s request_id=%s", request.user.email, request_id)
+        else:
+            cms_destroy_range_by_id(request.user, range_id)
+            logger.info("Range destroyed: user=%s range_id=%s", request.user.email, range_id)
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
-
-    logger.info("Range destroyed: user=%s range_id=%s", request.user.email, range_id)
 
     return JsonResponse({"success": True})
 

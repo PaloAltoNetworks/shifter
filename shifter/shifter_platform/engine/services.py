@@ -47,7 +47,7 @@ def create_range(request_spec: RequestSpec) -> UUID:
     """
     from django.contrib.auth import get_user_model
 
-    from engine.ecs import start_provisioning
+    from engine.ecs import start_range_provisioning
     from engine.interpreter import interpret
     from engine.models import Range
 
@@ -106,8 +106,8 @@ def create_range(request_spec: RequestSpec) -> UUID:
         request_spec.request_id,
     )
 
-    # Trigger ECS provisioning (still uses range_id for now)
-    task_arn = start_provisioning(range_obj.id, range_spec.user_id)
+    # Trigger ECS provisioning using request_id (matches NGFW pattern)
+    task_arn = start_range_provisioning(request_spec.request_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
@@ -123,19 +123,25 @@ def destroy_range(request: RangeContext) -> bool:
     Sets status to DESTROYING and triggers async ECS teardown.
     Idempotent: returns True if range is already being destroyed.
 
+    Supports both legacy (range_id) and new (request_id) patterns.
+    When range_id is None but request_id is provided, delegates to
+    destroy_range_by_request().
+
     Args:
-        request: RangeContext with range_id and metadata.
+        request: RangeContext with range_id or request_id and metadata.
 
     Returns:
         True if range exists and destruction initiated (or already in progress).
-        False if range not found, already destroyed, or range_id is None.
+        False if range not found, already destroyed, or both IDs are None.
     """
     from engine.ecs import start_teardown
     from engine.models import Range
 
-    # range_id is optional in RangeContext (None for new Request-based ranges)
+    # Try request_id first (new pattern) when range_id is None
     if request.range_id is None:
-        logger.warning("destroy_range: range_id is None - use destroy_ngfw for Request-based resources")
+        if request.request_id:
+            return destroy_range_by_request(request.request_id)
+        logger.warning("destroy_range: both range_id and request_id are None")
         return False
 
     logger.debug("destroy_range: range_id=%s", request.range_id)
@@ -176,21 +182,25 @@ def cancel_range(range_ctx: RangeContext) -> None:
     """Cancel in-progress provisioning.
 
     Only works for ranges in PENDING or PROVISIONING status.
-    Sets status directly to DESTROYED without triggering teardown.
+    Sets status directly to DESTROYING without triggering teardown.
+
+    Supports both legacy (range_id) and new (request_id) patterns.
+    When range_id is None but request_id is provided, delegates to
+    cancel_range_by_request().
 
     Note: This does NOT clean up any AWS resources that may have been
     partially created. A proper implementation would signal the provisioner
     to abort and clean up. See GitHub issue for tracking.
 
     Args:
-        range_ctx: RangeContext with range_id and metadata.
+        range_ctx: RangeContext with range_id or request_id and metadata.
 
     Returns:
         None
 
     Raises:
         TypeError: If range_ctx is None or not a RangeContext.
-        ValueError: If range_ctx.range_id is None or negative.
+        ValueError: If both range_id and request_id are None, or range_id is invalid.
     """
     # Input validation
     if range_ctx is None:
@@ -204,9 +214,13 @@ def cancel_range(range_ctx: RangeContext) -> None:
         )
         raise TypeError(f"range_ctx must be RangeContext, got {type(range_ctx).__name__}")
 
+    # Try request_id first (new pattern) when range_id is None
     if range_ctx.range_id is None:
-        logger.error("cancel_range called with None range_id")
-        raise ValueError("range_ctx.range_id cannot be None")
+        if range_ctx.request_id:
+            cancel_range_by_request(range_ctx.request_id)
+            return
+        logger.error("cancel_range called with both range_id and request_id as None")
+        raise ValueError("range_ctx must have either range_id or request_id")
 
     if not isinstance(range_ctx.range_id, int) or range_ctx.range_id < 0:
         logger.error(
@@ -247,6 +261,110 @@ def cancel_range(range_ctx: RangeContext) -> None:
     # accept small risk of race condition. TODO: #465
 
     logger.info("cancel_range: cancelled range_id=%s", range_id)
+
+
+# =============================================================================
+# Request-based Range Functions (new pattern matching NGFW)
+# =============================================================================
+
+
+def destroy_range_by_request(request_id: UUID) -> bool:
+    """Tear down range infrastructure by request_id.
+
+    Follows same pattern as destroy_ngfw(). Looks up Range via Request FK
+    and triggers ECS teardown.
+
+    Args:
+        request_id: UUID of the request containing the Range.
+
+    Returns:
+        True if teardown initiated or already in progress.
+        False if not found or already destroyed.
+    """
+    from engine.ecs import start_range_teardown
+    from engine.models import Range
+
+    logger.debug("destroy_range_by_request: request_id=%s", request_id)
+
+    range_obj = Range.objects.filter(request__request_id=request_id).first()
+    if not range_obj:
+        logger.warning("destroy_range_by_request: no range for request_id=%s", request_id)
+        return False
+
+    # Already destroyed - nothing to do
+    if range_obj.status == ResourceStatus.DESTROYED.value:
+        logger.warning(
+            "destroy_range_by_request: already destroyed request_id=%s",
+            request_id,
+        )
+        return False
+
+    # Already destroying - idempotent success
+    if range_obj.status == ResourceStatus.DESTROYING.value:
+        logger.info(
+            "destroy_range_by_request: already destroying request_id=%s",
+            request_id,
+        )
+        return True
+
+    # Set status and trigger teardown
+    range_obj.status = ResourceStatus.DESTROYING.value
+    range_obj.save(update_fields=["status"])
+
+    logger.info(
+        "destroy_range_by_request: set DESTROYING request_id=%s range_id=%s",
+        request_id,
+        range_obj.id,
+    )
+
+    task_arn = start_range_teardown(request_id)
+
+    if task_arn:
+        range_obj.step_function_execution_arn = task_arn
+        range_obj.save(update_fields=["step_function_execution_arn"])
+        logger.info("destroy_range_by_request: started ECS task=%s", task_arn)
+
+    return True
+
+
+def cancel_range_by_request(request_id: UUID) -> bool:
+    """Cancel in-progress range provisioning by request_id.
+
+    Only works for ranges in PENDING or PROVISIONING status.
+
+    Args:
+        request_id: UUID of the request containing the Range.
+
+    Returns:
+        True if cancelled, False if not found or not cancellable.
+    """
+    from engine.models import Range
+
+    logger.debug("cancel_range_by_request: request_id=%s", request_id)
+
+    range_obj = Range.objects.filter(request__request_id=request_id).first()
+    if not range_obj:
+        logger.warning("cancel_range_by_request: no range for request_id=%s", request_id)
+        return False
+
+    if range_obj.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
+        logger.warning(
+            "cancel_range_by_request: not cancellable status=%s request_id=%s",
+            range_obj.status,
+            request_id,
+        )
+        return False
+
+    range_obj.status = Range.Status.DESTROYING
+    range_obj.save(update_fields=["status"])
+
+    logger.info(
+        "cancel_range_by_request: cancelled request_id=%s range_id=%s",
+        request_id,
+        range_obj.id,
+    )
+
+    return True
 
 
 def get_range_status(range_id: int) -> dict[str, Any] | None:

@@ -7,13 +7,28 @@ Usage from provisioner:
     from events import publish_status_update, publish_ready, publish_failed, publish_ngfw_event
 
     # When range status changes
-    publish_status_update(range_id=1, user_id=42, new_status="provisioning")
+    publish_status_update(
+        request_id="uuid-string",
+        range_id=1,
+        user_id=42,
+        new_status="provisioning",
+    )
 
     # When range provisioning completes
-    publish_ready(range_id=1, user_id=42, instances=[...])
+    publish_ready(
+        request_id="uuid-string",
+        range_id=1,
+        user_id=42,
+        instances=[...],
+    )
 
     # When range provisioning fails
-    publish_failed(range_id=1, user_id=42, error_message="Subnet exhausted")
+    publish_failed(
+        request_id="uuid-string",
+        range_id=1,
+        user_id=42,
+        error_message="Subnet exhausted",
+    )
 
     # When NGFW lifecycle changes (status update, provisioned, failed, destroyed)
     publish_ngfw_event(
@@ -84,6 +99,7 @@ def _get_sns_topic_arn() -> str:
 
 def _create_event(
     event_type: str,
+    request_id: str,
     range_id: int,
     user_id: int,
     **kwargs: Any,
@@ -92,6 +108,7 @@ def _create_event(
 
     Args:
         event_type: Type of event (e.g., "range.status.updated")
+        request_id: UUID string of the Request (primary correlation key)
         range_id: ID of the range
         user_id: ID of the user who owns the range
         **kwargs: Additional event-specific data
@@ -103,6 +120,7 @@ def _create_event(
         "event_type": event_type,
         "event_id": str(uuid4()),
         "timestamp": datetime.now(UTC).isoformat(),
+        "request_id": request_id,
         "range_id": range_id,
         "user_id": user_id,
         **kwargs,
@@ -134,20 +152,23 @@ def _publish_event(event: dict) -> None:
         )
 
         logger.debug(
-            "Published event to SNS: range_id=%s event_type=%s",
+            "Published event to SNS: request_id=%s range_id=%s event_type=%s",
+            event.get("request_id"),
             event.get("range_id"),
             event.get("event_type"),
         )
 
     except Exception as e:
         logger.error(
-            "Failed to publish event to SNS: range_id=%s error=%s",
+            "Failed to publish event to SNS: request_id=%s range_id=%s error=%s",
+            event.get("request_id"),
             event.get("range_id"),
             str(e),
         )
 
 
 def publish_status_update(
+    request_id: str,
     range_id: int,
     user_id: int,
     new_status: str,
@@ -156,6 +177,7 @@ def publish_status_update(
     """Publish a status change event.
 
     Args:
+        request_id: UUID string of the Request (primary correlation key)
         range_id: ID of the range
         user_id: ID of the user who owns the range
         new_status: New status value
@@ -163,6 +185,7 @@ def publish_status_update(
     """
     event = _create_event(
         event_type=EVENT_TYPE_STATUS_UPDATED,
+        request_id=request_id,
         range_id=range_id,
         user_id=user_id,
         new_status=new_status,
@@ -170,7 +193,8 @@ def publish_status_update(
     )
 
     logger.info(
-        "Publishing status update: range_id=%s new_status=%s",
+        "Publishing status update: request_id=%s range_id=%s new_status=%s",
+        request_id,
         range_id,
         new_status,
     )
@@ -179,6 +203,7 @@ def publish_status_update(
 
 
 def publish_ready(
+    request_id: str,
     range_id: int,
     user_id: int,
     instances: list[dict[str, Any]],
@@ -189,6 +214,7 @@ def publish_ready(
     """Publish a provisioning complete event.
 
     Args:
+        request_id: UUID string of the Request (primary correlation key)
         range_id: ID of the range
         user_id: ID of the user who owns the range
         instances: List of provisioned instance details
@@ -198,6 +224,7 @@ def publish_ready(
     """
     # First publish status update
     publish_status_update(
+        request_id=request_id,
         range_id=range_id,
         user_id=user_id,
         new_status=STATUS_READY,
@@ -206,6 +233,7 @@ def publish_ready(
     # Then publish provisioned event with instance details
     event = _create_event(
         event_type=EVENT_TYPE_PROVISIONED,
+        request_id=request_id,
         range_id=range_id,
         user_id=user_id,
         instances=instances,
@@ -215,7 +243,8 @@ def publish_ready(
     )
 
     logger.info(
-        "Publishing ready event: range_id=%s instances=%d",
+        "Publishing ready event: request_id=%s range_id=%s instances=%d",
+        request_id,
         range_id,
         len(instances),
     )
@@ -224,6 +253,7 @@ def publish_ready(
 
 
 def publish_failed(
+    request_id: str,
     range_id: int,
     user_id: int,
     error_message: str,
@@ -231,11 +261,13 @@ def publish_failed(
     """Publish a provisioning failure event.
 
     Args:
+        request_id: UUID string of the Request (primary correlation key)
         range_id: ID of the range
         user_id: ID of the user who owns the range
         error_message: Description of the failure
     """
     publish_status_update(
+        request_id=request_id,
         range_id=range_id,
         user_id=user_id,
         new_status=STATUS_FAILED,
@@ -243,14 +275,16 @@ def publish_failed(
     )
 
 
-def publish_destroyed(range_id: int, user_id: int) -> None:
+def publish_destroyed(request_id: str, range_id: int, user_id: int) -> None:
     """Publish a range destroyed event.
 
     Args:
+        request_id: UUID string of the Request (primary correlation key)
         range_id: ID of the range
         user_id: ID of the user who owns the range
     """
     publish_status_update(
+        request_id=request_id,
         range_id=range_id,
         user_id=user_id,
         new_status=STATUS_DESTROYED,
@@ -258,29 +292,32 @@ def publish_destroyed(range_id: int, user_id: int) -> None:
 
     event = _create_event(
         event_type=EVENT_TYPE_DESTROYED,
+        request_id=request_id,
         range_id=range_id,
         user_id=user_id,
     )
 
-    logger.info("Publishing destroyed event: range_id=%s", range_id)
+    logger.info("Publishing destroyed event: request_id=%s range_id=%s", request_id, range_id)
 
     _publish_event(event)
 
 
-def publish_cancelled(range_id: int, user_id: int) -> None:
+def publish_cancelled(request_id: str, range_id: int, user_id: int) -> None:
     """Publish a range cancelled event.
 
     Args:
+        request_id: UUID string of the Request (primary correlation key)
         range_id: ID of the range
         user_id: ID of the user who owns the range
     """
     event = _create_event(
         event_type=EVENT_TYPE_CANCELLED,
+        request_id=request_id,
         range_id=range_id,
         user_id=user_id,
     )
 
-    logger.info("Publishing cancelled event: range_id=%s", range_id)
+    logger.info("Publishing cancelled event: request_id=%s range_id=%s", request_id, range_id)
 
     _publish_event(event)
 

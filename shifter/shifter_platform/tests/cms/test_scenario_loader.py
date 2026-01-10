@@ -60,18 +60,21 @@ class TestLoadScenario:
         assert "victim" in roles
 
     def test_basic_scenario_requires_agent(self):
-        """Basic scenario requires an agent."""
+        """Basic scenario requires an agent (has xdr_agent instance)."""
         from cms.scenarios.loader import load_scenario
 
         scenario = load_scenario("basic")
-        assert scenario.requirements.required is True
+        assert scenario.requires_agent() is True
 
-    def test_basic_scenario_accepts_any_os(self):
-        """Basic scenario accepts any OS (os=None)."""
+    def test_basic_scenario_has_from_agent(self):
+        """Basic scenario uses from_agent (accepts any OS)."""
         from cms.scenarios.loader import load_scenario
 
         scenario = load_scenario("basic")
-        assert scenario.requirements.os is None
+        reqs = scenario.get_agent_requirements()
+        assert reqs["has_from_agent"] is True
+        assert reqs["requires_windows"] is False
+        assert reqs["requires_linux"] is False
 
     def test_ad_attack_lab_has_dc_instance(self):
         """AD attack lab has a domain controller instance."""
@@ -81,12 +84,14 @@ class TestLoadScenario:
         roles = [i.role for i in scenario.instances]
         assert "dc" in roles
 
-    def test_ad_attack_lab_requires_windows(self):
-        """AD attack lab requires Windows agent."""
+    def test_ad_attack_lab_has_from_agent(self):
+        """AD attack lab uses from_agent for victim (user picks OS)."""
         from cms.scenarios.loader import load_scenario
 
         scenario = load_scenario("ad_attack_lab")
-        assert scenario.requirements.os == "windows"
+        reqs = scenario.get_agent_requirements()
+        # Victim uses from_agent, DC has xdr_agent=false
+        assert reqs["has_from_agent"] is True
 
     def test_ad_attack_lab_dc_has_config(self):
         """AD attack lab DC instance has domain configuration."""
@@ -203,5 +208,6 @@ class TestGetAllScenarios:
             assert scenario.id
             assert scenario.name
             assert scenario.description
-            assert scenario.requirements is not None
+            assert isinstance(scenario.enabled, bool)
+            assert isinstance(scenario.ngfw, bool)
             assert len(scenario.instances) > 0

@@ -1,0 +1,54 @@
+id: cortex_byot
+name: Cortex BYOT
+description: The classic Cortex XDR BYOT range with a ngfw, domain controller, two workstations, a server, and an attacker.
+enabled: false
+ngfw: true
+
+instances:
+  - name: Attacker
+    role: attacker
+    os_type: kali
+    xdr_agent: false
+    join_domain: false
+
+  - name: Domain Controller
+    role: dc
+    os_type: windows
+    domain_controller: true
+    xdr_agent: false
+    dc_config:
+      domain_name: cortexbyot.lab
+      netbios_name: CORTEXBYOT
+
+  - name: Workstation 1
+    role: victim
+    os_type: windows
+    xdr_agent: true
+    join_domain: true
+
+  - name: Workstation 2
+    role: victim
+    os_type: windows
+    xdr_agent: true
+    join_domain: true
+
+  - name: Server
+    role: victim
+    os_type: ubuntu
+    xdr_agent: true
+    join_domain: true
+
+subnets:
+  - name: dc_network
+    instances: [Domain Controller]
+    connected_to: [workstation_network, server_network]
+
+  - name: workstation_network
+    instances: [Workstation 1, Workstation 2]
+    connected_to: [attacker_network]
+
+  - name: server_network
+    instances: [Server]
+
+  - name: attacker_network
+    instances: [Attacker]

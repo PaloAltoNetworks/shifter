@@ -10,6 +10,9 @@ inter-subnet traffic flows through it based on defined routes.
 
 from __future__ import annotations
 
+import uuid as uuid_module
+from typing import Any
+
 from pydantic import BaseModel, field_validator
 
 from .base import SpecBase
@@ -47,6 +50,34 @@ class SubnetSpec(SpecBase):
         if not v:
             raise ValueError("subnet must contain at least one instance")
         return v
+
+    @classmethod
+    def from_template(cls, data: dict[str, Any]) -> SubnetSpec:
+        """Create a SubnetSpec from a scenario template dict.
+
+        Args:
+            data: Template dict with keys: name, instances, connected_to.
+
+        Returns:
+            Hydrated SubnetSpec with UUID assigned.
+
+        Raises:
+            ValueError: If required fields are missing or invalid.
+        """
+        name = data.get("name")
+        instances = data.get("instances")
+
+        if not name:
+            raise ValueError("Subnet template requires 'name' field")
+        if not instances:
+            raise ValueError("Subnet template requires 'instances' field")
+
+        return cls(
+            name=name,
+            uuid=str(uuid_module.uuid4()),
+            instances=instances,
+            connected_to=data.get("connected_to", []),
+        )
 
 
 class SubnetContext(BaseModel):

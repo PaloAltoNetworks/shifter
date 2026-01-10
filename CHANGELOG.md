@@ -7,15 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.10.5] - 2025-01-08
+## [0.10.7] - 2025-01-08
 
 ### Added
 - NGFW create/destroy flow and UI
-- Extended DSL and initial DSL interpreter implementation for NGFW flows
+- CyberScript DSL and initial DSL interpreter implementation for NGFW flows
 - Improved Bedrock logging and alarms
+- Draft Cortex BYOT scenario template
 
 ### Changed
 - NGFW models and services refactored to use schemas
+- Extended DSL and initial DSL interpreter implementation for NGFW flows
+- Templates refactored to use CyberScript DSL
+
 ## [0.10.4] - 2025-01-06
 
 ### Fixed

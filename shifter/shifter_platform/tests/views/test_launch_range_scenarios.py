@@ -350,10 +350,10 @@ class TestLaunchRangeSuccess:
             mock_create.assert_called_once()
             call_args = mock_create.call_args
 
-            # Verify positional args: (user, scenario, agent_id)
+            # Verify positional args: (user, scenario, agents_by_os)
             assert call_args[0][0].email == user.email  # User object
             assert call_args[0][1] == "ad_attack_lab"  # scenario
-            assert call_args[0][2] == windows_agent.id  # agent_id
+            assert call_args[0][2] == {"windows": windows_agent.id}  # agents_by_os
 
 
 # -----------------------------------------------------------------------------

@@ -915,6 +915,11 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         serial_number=serial_number,
     )
 
+    # Auto-stop NGFW after provisioning to save costs
+    # NGFW will be started on-demand when ranges link to it
+    logger.info("Auto-stopping NGFW after provisioning: request_id=%s", request_id)
+    run_ngfw_operation("stop", request_id)
+
 
 def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
     """Run license deactivation then Pulumi destroy for NGFW.

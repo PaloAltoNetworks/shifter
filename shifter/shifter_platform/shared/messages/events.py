@@ -45,7 +45,8 @@ class RangeStatusUpdatedEvent(BaseEvent):
     - Mission Control: Pushes to browser WebSocket
     """
 
-    range_id: int
+    request_id: UUID  # Primary correlation key
+    range_id: int  # Engine uses this for DB lookup
     user_id: int
     new_status: ResourceStatus
     error_message: str | None = None
@@ -57,14 +58,19 @@ class RangeProvisionedEvent(BaseEvent):
     Contains the complete list of provisioned instances with their details.
     """
 
+    request_id: UUID  # Primary correlation key
     range_id: int
     user_id: int
     instances: list[dict[str, Any]]
+    subnet_id: str | None = None
+    subnet_cidr: str | None = None
+    pulumi_stack: str | None = None
 
 
 class RangeDestroyedEvent(BaseEvent):
     """Event published when a range is fully destroyed."""
 
+    request_id: UUID  # Primary correlation key
     range_id: int
     user_id: int
 
@@ -72,6 +78,7 @@ class RangeDestroyedEvent(BaseEvent):
 class RangeCancelledEvent(BaseEvent):
     """Event published when a range provisioning is cancelled."""
 
+    request_id: UUID  # Primary correlation key
     range_id: int
     user_id: int
 

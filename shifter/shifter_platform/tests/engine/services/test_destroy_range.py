@@ -335,3 +335,118 @@ class TestDestroyRange:
             destroy_range(range_ctx)
 
         assert "already destroyed" in caplog.text.lower() or "42" in caplog.text
+
+
+@pytest.mark.django_db
+class TestDestroyRangeByRequest:
+    """Tests for destroy_range_by_request() in engine/services.py.
+
+    Tests the service contract:
+    - Input: request_id (UUID)
+    - Output: bool (True if teardown initiated, False if not found or already destroyed)
+    - Side effects: sets status to DESTROYING, triggers ECS teardown via request_id
+    """
+
+    # -------------------------------------------------------------------------
+    # Outputs - returns bool indicating success
+    # -------------------------------------------------------------------------
+
+    def test_returns_true_for_valid_request(self):
+        """Service returns True when range exists and can be destroyed."""
+        from engine.models import Range
+        from engine.services import destroy_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+
+        with (
+            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
+            patch("engine.ecs.start_range_teardown", return_value=None),
+        ):
+            result = destroy_range_by_request(request_id)
+            assert result is True
+
+    def test_returns_false_for_missing_request(self):
+        """Service returns False when no range for request_id."""
+        from engine.models import Range
+        from engine.services import destroy_range_by_request
+
+        request_id = uuid4()
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=None))):
+            result = destroy_range_by_request(request_id)
+            assert result is False
+
+    def test_returns_false_for_already_destroyed(self):
+        """Service returns False when range is already destroyed."""
+        from engine.models import Range
+        from engine.services import destroy_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.DESTROYED.value)
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+            result = destroy_range_by_request(request_id)
+            assert result is False
+
+    def test_returns_true_idempotent_for_destroying(self):
+        """Service returns True (idempotent) when already destroying."""
+        from engine.models import Range
+        from engine.services import destroy_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.DESTROYING.value)
+
+        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+            result = destroy_range_by_request(request_id)
+            assert result is True
+
+    def test_calls_start_range_teardown_with_request_id(self):
+        """Service calls start_range_teardown with request_id."""
+        from engine.models import Range
+        from engine.services import destroy_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+
+        with (
+            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
+            patch("engine.ecs.start_range_teardown", return_value=None) as mock_teardown,
+        ):
+            destroy_range_by_request(request_id)
+            mock_teardown.assert_called_once_with(request_id)
+
+    def test_stores_task_arn_when_returned(self):
+        """Service stores ECS task ARN when start_range_teardown returns one."""
+        from engine.models import Range
+        from engine.services import destroy_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
+
+        with (
+            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
+            patch("engine.ecs.start_range_teardown", return_value=task_arn),
+        ):
+            destroy_range_by_request(request_id)
+
+            assert mock_range.step_function_execution_arn == task_arn
+            mock_range.save.assert_any_call(update_fields=["step_function_execution_arn"])
+
+    def test_sets_status_to_destroying(self):
+        """Service sets range status to DESTROYING."""
+        from engine.models import Range
+        from engine.services import destroy_range_by_request
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+
+        with (
+            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
+            patch("engine.ecs.start_range_teardown", return_value=None),
+        ):
+            destroy_range_by_request(request_id)
+
+            assert mock_range.status == ResourceStatus.DESTROYING.value
+            mock_range.save.assert_any_call(update_fields=["status"])

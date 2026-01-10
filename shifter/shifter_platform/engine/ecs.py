@@ -174,8 +174,140 @@ def start_teardown(range_id: int, user_id: int) -> str | None:
 
     Raises:
         ClientError: If ECS task fails to start
+
+    .. deprecated::
+        Use :func:`start_range_teardown` instead.
     """
     return _start_ecs_task(range_id, user_id, "destroy")
+
+
+# =============================================================================
+# Request-based Range ECS Functions (new pattern matching NGFW)
+# =============================================================================
+
+
+def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
+    """Start an ECS Fargate task for Range operations using request_id.
+
+    Matches NGFW pattern - provisioner fetches all data from DB using request_id.
+
+    Args:
+        request_id: UUID of the Request to operate on
+        command: Command to run ("provision" or "destroy")
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured
+
+    Raises:
+        TypeError: If request_id is None or not a UUID
+        ValueError: If command is invalid
+        ClientError: If ECS task fails to start
+    """
+    from uuid import UUID as UUIDType
+
+    if request_id is None:
+        raise TypeError("request_id cannot be None")
+    if not isinstance(request_id, UUIDType):
+        raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
+    if command not in ("provision", "destroy"):
+        raise ValueError(f"Invalid command: {command}. Must be 'provision' or 'destroy'.")
+
+    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
+    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
+    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
+    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+
+    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
+        logger.warning(
+            "ECS configuration incomplete, skipping Range ECS task. "
+            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
+            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
+        )
+        return None
+
+    # Parse subnet IDs (comma-separated string)
+    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
+
+    if not subnet_ids:
+        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
+        return None
+
+    command_list = ["range", command, "--request-id", str(request_id)]
+    logger.info(f"Starting Range ECS task for request_id={request_id} command={command}")
+
+    ecs = _get_ecs_client()
+
+    try:
+        response = ecs.run_task(
+            cluster=cluster_arn,
+            taskDefinition=task_definition_arn,
+            launchType="FARGATE",
+            networkConfiguration={
+                "awsvpcConfiguration": {
+                    "subnets": subnet_ids,
+                    "securityGroups": [security_group_id],
+                    "assignPublicIp": "DISABLED",
+                }
+            },
+            overrides={
+                "containerOverrides": [
+                    {
+                        "name": "pulumi-provisioner",
+                        "command": command_list,
+                    }
+                ]
+            },
+        )
+
+        # Check if task was started successfully
+        if not response.get("tasks"):
+            failures = response.get("failures", [])
+            failure_reasons = [f.get("reason", "unknown") for f in failures]
+            logger.error(f"Range ECS task failed to start: {failure_reasons}")
+            raise ClientError(
+                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
+                "RunTask",
+            )
+
+        task_arn = response["tasks"][0]["taskArn"]
+        logger.info(f"Started Range ECS task: request_id={request_id} task_arn={task_arn}")
+        return task_arn
+
+    except ClientError as e:
+        logger.error(f"Failed to start Range ECS task for request_id={request_id}: {e}")
+        raise
+
+
+def start_range_provisioning(request_id: UUID) -> str | None:
+    """Start provisioning a range via ECS Fargate using request_id.
+
+    Args:
+        request_id: UUID of the Request to provision.
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured.
+
+    Raises:
+        TypeError: If request_id is None or not a UUID
+        ClientError: If ECS task fails to start
+    """
+    return _start_range_ecs_task(request_id, "provision")
+
+
+def start_range_teardown(request_id: UUID) -> str | None:
+    """Start teardown of a range via ECS Fargate using request_id.
+
+    Args:
+        request_id: UUID of the Request to teardown.
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured.
+
+    Raises:
+        TypeError: If request_id is None or not a UUID
+        ClientError: If ECS task fails to start
+    """
+    return _start_range_ecs_task(request_id, "destroy")
 
 
 def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:

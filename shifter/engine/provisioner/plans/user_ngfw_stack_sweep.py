@@ -9,7 +9,7 @@ Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -24,7 +24,7 @@ class UserNGFWStackSweepStep:
 
     name: str
     action: str
-    params: List[str] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
 
 
 class UserNGFWStackSweepPlan:
@@ -39,9 +39,9 @@ class UserNGFWStackSweepPlan:
     Uses AWSExecutor methods for AWS API calls.
     """
 
-    name: str = "user_ngfw_stack_sweep"
+    name: ClassVar[str] = "user_ngfw_stack_sweep"
 
-    steps: List[UserNGFWStackSweepStep] = [
+    steps: ClassVar[list[UserNGFWStackSweepStep]] = [
         UserNGFWStackSweepStep(
             name="describe_instances",
             action="describe_instances",
@@ -49,7 +49,7 @@ class UserNGFWStackSweepPlan:
         ),
     ]
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get context variables for sweep plan.
 
         Args:

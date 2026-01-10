@@ -28,11 +28,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
@@ -59,11 +54,11 @@ jobs:
         run: packer init .
 
       - name: Validate template
-        run: packer validate -var-file=dev.pkrvars.hcl ${{ inputs.ami_type }}.pkr.hcl
+        run: packer validate -var-file=dev.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
 
       - name: Build AMI
         run: |
-          packer build -color=false -var-file=dev.pkrvars.hcl ${{ inputs.ami_type }}.pkr.hcl
+          packer build -color=false -var-file=dev.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
 
           # Extract AMI ID from manifest
           AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' ${{ inputs.ami_type }}-manifest.json)

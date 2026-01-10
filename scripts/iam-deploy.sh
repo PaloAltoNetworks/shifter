@@ -51,6 +51,13 @@ if [[ "$ENV" != "dev" && "$ENV" != "prod" && "$ENV" != "all" ]]; then
     exit 1
 fi
 
+# Load profile from .env if not already set
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -f "$REPO_ROOT/.env" ]]; then
+    # shellcheck source=/dev/null
+    source "$REPO_ROOT/.env"
+fi
+
 # Handle 'all' by recursively calling for dev and prod
 if [[ "$ENV" == "all" ]]; then
     echo "Deploying to all environments..."
@@ -65,9 +72,9 @@ fi
 
 # Set AWS profile based on environment
 if [[ "$ENV" == "dev" ]]; then
-    AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:-panw-shifter-dev-workstation}"
+    AWS_PROFILE="${PANW_SHIFTER_DEV_PROFILE:?PANW_SHIFTER_DEV_PROFILE not set. Check .env file.}"
 else
-    AWS_PROFILE="${PANW_SHIFTER_PROD_PROFILE:-dev-workstation-user}"
+    AWS_PROFILE="${PANW_SHIFTER_PROD_PROFILE:?PANW_SHIFTER_PROD_PROFILE not set. Check .env file.}"
 fi
 
 echo "=========================================="

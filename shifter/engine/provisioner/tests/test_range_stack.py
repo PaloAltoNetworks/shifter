@@ -23,13 +23,13 @@ from config import InstanceConfig, RangeConfig
 
 
 @pytest.fixture
-def mock_cleanup_orphaned_subnet():
-    """Mock _cleanup_orphaned_subnet for RangeStack tests.
+def mock_find_free_subnet():
+    """Mock _find_free_subnet for RangeStack tests.
 
-    The cleanup function makes real AWS API calls, which we don't want
+    The subnet finder makes real AWS API calls, which we don't want
     during Pulumi component tests.
     """
-    with patch("components.network._cleanup_orphaned_subnet"):
+    with patch("components.network._find_free_subnet", return_value="10.1.8.0/24"):
         yield
 
 
@@ -61,7 +61,7 @@ class TestRangeStackComposition:
     """Tests for RangeStack component composition."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -76,7 +76,6 @@ class TestRangeStackComposition:
         return RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -134,7 +133,7 @@ class TestRangeStackComposition:
             stack = RangeStack("test-range", config=basic_config)
 
             # The network should use the correct CIDR prefix
-            # 10.1.0.0/16 -> 10.1, with subnet_index=5 -> 10.1.6.0/24
+            # 10.1.0.0/16 -> 10.1
             def check_cidr(cidr):
                 assert cidr.startswith("10.1.")
 
@@ -160,7 +159,7 @@ class TestRangeStackSecurityGroupAssignment:
     """Tests for security group assignment logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -177,7 +176,6 @@ class TestRangeStackSecurityGroupAssignment:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -215,7 +213,6 @@ class TestRangeStackSecurityGroupAssignment:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -253,7 +250,7 @@ class TestRangeStackAmiSelection:
     """Tests for AMI selection logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -270,7 +267,6 @@ class TestRangeStackAmiSelection:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -307,7 +303,6 @@ class TestRangeStackAmiSelection:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -348,7 +343,6 @@ class TestRangeStackAmiSelection:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -386,7 +380,7 @@ class TestRangeStackMultipleInstances:
     """Tests for multiple instance handling and indexing."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -403,7 +397,6 @@ class TestRangeStackMultipleInstances:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -437,7 +430,6 @@ class TestRangeStackMultipleInstances:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="victim", os_type="ubuntu", instance_type="t3.micro"),
@@ -471,7 +463,6 @@ class TestRangeStackMultipleInstances:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -507,7 +498,6 @@ class TestRangeStackMultipleInstances:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],  # Empty!
             vpc_id="vpc-12345",
@@ -535,7 +525,7 @@ class TestRangeStackCidrPrefixExtraction:
     """Tests for CIDR prefix extraction logic."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -552,7 +542,6 @@ class TestRangeStackCidrPrefixExtraction:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],
             vpc_id="vpc-12345",
@@ -585,7 +574,6 @@ class TestRangeStackCidrPrefixExtraction:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],
             vpc_id="vpc-12345",
@@ -602,7 +590,10 @@ class TestRangeStackCidrPrefixExtraction:
             availability_zone="us-east-2a",
         )
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch("components.network._find_free_subnet", return_value="172.16.8.0/24"),
+        ):
             stack = RangeStack("test-range", config=config)
 
             def check_cidr(cidr):
@@ -618,7 +609,6 @@ class TestRangeStackCidrPrefixExtraction:
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[],
             vpc_id="vpc-12345",
@@ -635,7 +625,10 @@ class TestRangeStackCidrPrefixExtraction:
             availability_zone="us-east-2a",
         )
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch("components.network._find_free_subnet", return_value="192.168.8.0/24"),
+        ):
             stack = RangeStack("test-range", config=config)
 
             def check_cidr(cidr):
@@ -655,18 +648,21 @@ class TestRangeStackDCDependencyOrdering:
     """
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(self, pulumi_mocks, mock_cleanup_orphaned_subnet, mock_dc_setup, mock_setup):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_dc_setup, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
     @pytest.fixture(autouse=True)
     def setup_dc_env_vars(self, temp_templates_dir):
         """Set up DC environment variables for all DC tests."""
-        with patch.dict(os.environ, {
-            "TEMPLATES_DIR": str(temp_templates_dir),
-            "DC_DOMAIN_NAME": "internal.shifter",
-            "DC_DOMAIN_PASSWORD": "TestPassword123!",  # nosec B105 - test credential
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "TEMPLATES_DIR": str(temp_templates_dir),
+                "DC_DOMAIN_NAME": "internal.shifter",
+                "DC_DOMAIN_PASSWORD": "TestPassword123!",  # nosec B105 - test credential
+            },
+        ):
             yield
 
     @pytest.fixture
@@ -683,7 +679,6 @@ class TestRangeStackDCDependencyOrdering:
         return RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 # Intentionally put victim first to test reordering
@@ -752,23 +747,21 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
             stack = RangeStack("test-range", config=dc_range_config)
 
             # Find victim instance (has no dc_config_param, not attacker)
-            victim_instance = None
             for inst in stack.instances:
                 if inst.dc_config_param is None:
                     # Check it's not the attacker by checking SG
                     def is_victim(sgs):
                         return "sg-victim" in sgs
-                    # Use tags to identify
-                    def check_role(tags):
-                        return tags.get("shifter:role") == "victim"
-                    victim_instance = inst
+
                     break
 
             # Verify by checking all non-DC instances
             for inst in stack.instances:
                 if inst.dc_config_param is None:
+
                     def check_not_dc_sg(sgs):
                         assert "sg-dc" not in sgs, f"Non-DC instance should not use sg-dc, got {sgs}"
+
                     inst.instance.vpc_security_group_ids.apply(check_not_dc_sg)
 
     @pulumi.runtime.test
@@ -779,7 +772,6 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -804,9 +796,11 @@ class TestDCSecurityGroupAssignment(TestRangeStackDCDependencyOrdering):
             availability_zone="us-east-2a",
         )
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with pytest.raises(ValueError, match="dc_security_group_id is required"):
-                RangeStack("test-range", config=config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            pytest.raises(ValueError, match="dc_security_group_id is required"),
+        ):
+            RangeStack("test-range", config=config)
 
 
 class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
@@ -821,8 +815,9 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
             stack = RangeStack("test-range", config=dc_range_config)
 
             expected_path = "/shifter/dev/range/42/dc-config"
-            assert stack.dc_config_param_name == expected_path, \
+            assert stack.dc_config_param_name == expected_path, (
                 f"Expected {expected_path}, got {stack.dc_config_param_name}"
+            )
 
     @pulumi.runtime.test
     def test_dc_config_param_name_none_without_dc(self, temp_templates):
@@ -832,7 +827,6 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -855,8 +849,7 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=config)
-            assert stack.dc_config_param_name is None, \
-                "dc_config_param_name should be None when no DC"
+            assert stack.dc_config_param_name is None, "dc_config_param_name should be None when no DC"
 
     @pulumi.runtime.test
     def test_dc_config_param_name_in_get_outputs(self, temp_templates, dc_range_config):
@@ -878,7 +871,6 @@ class TestDCConfigParamName(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=99,
             user_id=1,
-            subnet_index=5,
             environment="prod",
             instances=[
                 InstanceConfig(
@@ -929,8 +921,7 @@ class TestDCInstanceOrdering(TestRangeStackDCDependencyOrdering):
             stack = RangeStack("test-range", config=dc_range_config)
 
             # DC should be first (config had victim first, but we reorder)
-            assert stack.instances[0].dc_config_param is not None, \
-                "First instance should be DC (has dc_config_param)"
+            assert stack.instances[0].dc_config_param is not None, "First instance should be DC (has dc_config_param)"
 
     @pulumi.runtime.test
     def test_instance_count_matches_config(self, temp_templates, dc_range_config):
@@ -949,7 +940,6 @@ class TestDCInstanceOrdering(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -1003,23 +993,27 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_domain_member_depends_on_dc(self, temp_templates, dc_range_config):
         """Domain member (join_domain=True) should have DC in depends_on."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
 
         def capture_init(self, *args, **kwargs):
-            created_instances.append({
-                "name": args[0] if args else kwargs.get("name"),
-                "role": kwargs.get("role"),
-                "opts": kwargs.get("opts"),
-            })
+            created_instances.append(
+                {
+                    "name": args[0] if args else kwargs.get("name"),
+                    "role": kwargs.get("role"),
+                    "opts": kwargs.get("opts"),
+                }
+            )
             return original_init(self, *args, **kwargs)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "__init__", capture_init):
-                stack = RangeStack("test-range", config=dc_range_config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "__init__", capture_init),
+        ):
+            RangeStack("test-range", config=dc_range_config)
 
         # Find DC and victim creations
         dc_creation = next((c for c in created_instances if c["role"] == "dc"), None)
@@ -1037,29 +1031,34 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
 
         # Victim only depends on network now (DC triggers domain join via SSM)
         depends_on_count = len(victim_opts.depends_on)
-        assert depends_on_count == 1, \
+        assert depends_on_count == 1, (
             f"Victim should only depend on network (DC triggers join via SSM), got {depends_on_count} dependencies"
+        )
 
     @pulumi.runtime.test
     def test_non_domain_member_does_not_depend_on_dc(self, temp_templates, dc_range_config):
         """Non-domain member (join_domain=False) should NOT have DC in depends_on."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
 
         def capture_init(self, *args, **kwargs):
-            created_instances.append({
-                "name": args[0] if args else kwargs.get("name"),
-                "role": kwargs.get("role"),
-                "opts": kwargs.get("opts"),
-            })
+            created_instances.append(
+                {
+                    "name": args[0] if args else kwargs.get("name"),
+                    "role": kwargs.get("role"),
+                    "opts": kwargs.get("opts"),
+                }
+            )
             return original_init(self, *args, **kwargs)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "__init__", capture_init):
-                stack = RangeStack("test-range", config=dc_range_config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "__init__", capture_init),
+        ):
+            RangeStack("test-range", config=dc_range_config)
 
         # Find attacker (join_domain=False by default)
         attacker_creation = next((c for c in created_instances if c["role"] == "attacker"), None)
@@ -1072,19 +1071,17 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
         assert attacker_opts.depends_on is not None, "Attacker should have depends_on"
 
         depends_on_count = len(attacker_opts.depends_on)
-        assert depends_on_count == 1, \
-            f"Attacker should only depend on network, got {depends_on_count} dependencies"
+        assert depends_on_count == 1, f"Attacker should only depend on network, got {depends_on_count} dependencies"
 
     @pulumi.runtime.test
     def test_join_domain_true_but_no_dc_in_range(self, temp_templates):
         """join_domain=True without DC should not cause error (no DC to depend on)."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -1113,22 +1110,25 @@ class TestDCDependsOn(TestRangeStackDCDependencyOrdering):
         original_init = InstanceComponent.__init__
 
         def capture_init(self, *args, **kwargs):
-            created_instances.append({
-                "role": kwargs.get("role"),
-                "opts": kwargs.get("opts"),
-            })
+            created_instances.append(
+                {
+                    "role": kwargs.get("role"),
+                    "opts": kwargs.get("opts"),
+                }
+            )
             return original_init(self, *args, **kwargs)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "__init__", capture_init):
-                # Should not raise an error
-                stack = RangeStack("test-range", config=config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "__init__", capture_init),
+        ):
+            # Should not raise an error
+            RangeStack("test-range", config=config)
 
         # Victim should be created with only network dependency
         victim_creation = created_instances[0]
         depends_on_count = len(victim_creation["opts"].depends_on)
-        assert depends_on_count == 1, \
-            "Victim with join_domain=True but no DC should only depend on network"
+        assert depends_on_count == 1, "Victim with join_domain=True but no DC should only depend on network"
 
 
 class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
@@ -1137,24 +1137,28 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
     @pulumi.runtime.test
     def test_domain_member_receives_dc_config_param_name(self, temp_templates, dc_range_config):
         """Domain member (join_domain=True) should receive dc_config_param_name."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
 
         def capture_init(self, *args, **kwargs):
-            created_instances.append({
-                "name": args[0] if args else kwargs.get("name"),
-                "role": kwargs.get("role"),
-                "join_domain": kwargs.get("join_domain"),
-                "dc_config_param_name": kwargs.get("dc_config_param_name"),
-            })
+            created_instances.append(
+                {
+                    "name": args[0] if args else kwargs.get("name"),
+                    "role": kwargs.get("role"),
+                    "join_domain": kwargs.get("join_domain"),
+                    "dc_config_param_name": kwargs.get("dc_config_param_name"),
+                }
+            )
             return original_init(self, *args, **kwargs)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "__init__", capture_init):
-                stack = RangeStack("test-range", config=dc_range_config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "__init__", capture_init),
+        ):
+            RangeStack("test-range", config=dc_range_config)
 
         # Find the domain member victim
         victim_creation = next((c for c in created_instances if c["role"] == "victim"), None)
@@ -1162,56 +1166,67 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
         assert victim_creation is not None, "Victim should be created"
         # In the new architecture, dc_config_param_name is None for all victims.
         # DC triggers domain join via SSM, so victims don't need this param.
-        assert victim_creation["dc_config_param_name"] is None, \
-            f"Domain member should NOT receive dc_config_param_name (DC triggers join via SSM), got {victim_creation['dc_config_param_name']}"
+        assert victim_creation["dc_config_param_name"] is None, (
+            "Domain member should NOT receive dc_config_param_name "
+            f"(DC triggers join via SSM), got {victim_creation['dc_config_param_name']}"
+        )
 
     @pulumi.runtime.test
     def test_non_domain_member_does_not_receive_dc_config_param_name(self, temp_templates, dc_range_config):
         """Non-domain member should NOT receive dc_config_param_name."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
 
         def capture_init(self, *args, **kwargs):
-            created_instances.append({
-                "name": args[0] if args else kwargs.get("name"),
-                "role": kwargs.get("role"),
-                "dc_config_param_name": kwargs.get("dc_config_param_name"),
-            })
+            created_instances.append(
+                {
+                    "name": args[0] if args else kwargs.get("name"),
+                    "role": kwargs.get("role"),
+                    "dc_config_param_name": kwargs.get("dc_config_param_name"),
+                }
+            )
             return original_init(self, *args, **kwargs)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "__init__", capture_init):
-                stack = RangeStack("test-range", config=dc_range_config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "__init__", capture_init),
+        ):
+            RangeStack("test-range", config=dc_range_config)
 
         # Attacker should NOT receive dc_config_param_name
         attacker_creation = next((c for c in created_instances if c["role"] == "attacker"), None)
 
         assert attacker_creation is not None, "Attacker should be created"
-        assert attacker_creation["dc_config_param_name"] is None, \
+        assert attacker_creation["dc_config_param_name"] is None, (
             f"Attacker should NOT receive dc_config_param_name, got {attacker_creation['dc_config_param_name']}"
+        )
 
     @pulumi.runtime.test
     def test_join_domain_flag_passed_to_instance(self, temp_templates, dc_range_config):
         """join_domain flag should be passed to InstanceComponent."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         created_instances = []
         original_init = InstanceComponent.__init__
 
         def capture_init(self, *args, **kwargs):
-            created_instances.append({
-                "role": kwargs.get("role"),
-                "join_domain": kwargs.get("join_domain"),
-            })
+            created_instances.append(
+                {
+                    "role": kwargs.get("role"),
+                    "join_domain": kwargs.get("join_domain"),
+                }
+            )
             return original_init(self, *args, **kwargs)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "__init__", capture_init):
-                stack = RangeStack("test-range", config=dc_range_config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "__init__", capture_init),
+        ):
+            RangeStack("test-range", config=dc_range_config)
 
         # Victim with join_domain=True should have it passed
         victim_creation = next((c for c in created_instances if c["role"] == "victim"), None)
@@ -1219,19 +1234,19 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
 
         # Attacker should have join_domain=False (default)
         attacker_creation = next((c for c in created_instances if c["role"] == "attacker"), None)
-        assert attacker_creation["join_domain"] is False or attacker_creation["join_domain"] is None, \
+        assert attacker_creation["join_domain"] is False or attacker_creation["join_domain"] is None, (
             "Attacker join_domain should be False or None"
+        )
 
     @pulumi.runtime.test
     def test_range_without_dc_domain_member_gets_none(self, temp_templates):
         """Domain member in range without DC should get None for dc_config_param_name."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(
@@ -1261,20 +1276,25 @@ class TestDomainMemberDCConfigParamName(TestRangeStackDCDependencyOrdering):
         original_init = InstanceComponent.__init__
 
         def capture_init(self, *args, **kwargs):
-            created_instances.append({
-                "role": kwargs.get("role"),
-                "dc_config_param_name": kwargs.get("dc_config_param_name"),
-            })
+            created_instances.append(
+                {
+                    "role": kwargs.get("role"),
+                    "dc_config_param_name": kwargs.get("dc_config_param_name"),
+                }
+            )
             return original_init(self, *args, **kwargs)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "__init__", capture_init):
-                stack = RangeStack("test-range", config=config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "__init__", capture_init),
+        ):
+            RangeStack("test-range", config=config)
 
         # Victim should get None since no DC exists
         victim_creation = next((c for c in created_instances if c["role"] == "victim"), None)
-        assert victim_creation["dc_config_param_name"] is None, \
+        assert victim_creation["dc_config_param_name"] is None, (
             "Domain member without DC should get None for dc_config_param_name"
+        )
 
 
 class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
@@ -1288,16 +1308,15 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
     """
 
     @pulumi.runtime.test
-    def test_range_stack_passes_dc_private_ip_to_domain_joining_victims(
-        self, temp_templates, dc_range_config
-    ):
+    def test_range_stack_passes_dc_private_ip_to_domain_joining_victims(self, temp_templates, dc_range_config):
         """Victims with join_domain=True should receive DC's private_ip in run_setup().
 
         Domain-joining instances use Output.apply() to pass DC IP, so the call
         happens asynchronously. We verify by checking the source code pattern.
         """
-        from stacks.range_stack import RangeStack
         import inspect
+
+        from stacks.range_stack import RangeStack
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             source = inspect.getsource(RangeStack._run_all_setup)
@@ -1305,46 +1324,41 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
             # Verify the pattern: dc_components[0].private_ip.apply(
             #     lambda ip, inst=instance: inst.run_setup(dc_ip=ip)
             # )
-            assert "private_ip.apply" in source, \
-                "Domain-joining instances should use DC's private_ip.apply()"
-            assert "run_setup(dc_ip=" in source, \
-                "run_setup should be called with dc_ip parameter"
+            assert "private_ip.apply" in source, "Domain-joining instances should use DC's private_ip.apply()"
+            assert "run_setup(dc_ip=" in source, "run_setup should be called with dc_ip parameter"
 
     @pulumi.runtime.test
-    def test_range_stack_does_not_pass_dc_ip_to_non_domain_joining_victims(
-        self, temp_templates, dc_range_config
-    ):
+    def test_range_stack_does_not_pass_dc_ip_to_non_domain_joining_victims(self, temp_templates, dc_range_config):
         """Victims with join_domain=False should NOT receive dc_ip in run_setup()."""
-        from stacks.range_stack import RangeStack
         from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         run_setup_calls = []
         original_run_setup = InstanceComponent.run_setup
 
         def capture_run_setup(self, region=None, dc_ip=None):
-            run_setup_calls.append({
-                "role": self.role,
-                "join_domain": getattr(self, "join_domain", None),
-                "dc_ip": dc_ip,
-            })
+            run_setup_calls.append(
+                {
+                    "role": self.role,
+                    "join_domain": getattr(self, "join_domain", None),
+                    "dc_ip": dc_ip,
+                }
+            )
             return original_run_setup(self, region=region, dc_ip=dc_ip)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "run_setup", capture_run_setup):
-                stack = RangeStack("test-range", config=dc_range_config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "run_setup", capture_run_setup),
+        ):
+            RangeStack("test-range", config=dc_range_config)
 
         # Find the attacker's run_setup call (join_domain=False by default)
-        attacker_call = next(
-            (c for c in run_setup_calls if c["role"] == "attacker"), None
-        )
+        attacker_call = next((c for c in run_setup_calls if c["role"] == "attacker"), None)
         assert attacker_call is not None, "Attacker run_setup should be called"
-        assert attacker_call["dc_ip"] is None, \
-            "Non-domain-joining instance should NOT receive dc_ip"
+        assert attacker_call["dc_ip"] is None, "Non-domain-joining instance should NOT receive dc_ip"
 
     @pulumi.runtime.test
-    def test_dc_run_dc_setup_called_without_domain_members_param(
-        self, temp_templates, dc_range_config
-    ):
+    def test_dc_run_dc_setup_called_without_domain_members_param(self, temp_templates, dc_range_config):
         """DC's run_dc_setup() should be called without domain_members.
 
         In the new architecture, range_stack should NOT pass domain_members to
@@ -1360,6 +1374,7 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
             # Check the source code directly - in new architecture,
             # there should be no domain_member_ids collection
             import inspect
+
             source = inspect.getsource(RangeStack.__init__)
 
             # After implementation, these should NOT be in the code:
@@ -1369,24 +1384,21 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
 
             # For now (TDD red phase), this FAILS because current code
             # still collects domain_member_ids
-            assert "domain_member_ids.append" not in source, \
-                "New architecture should NOT collect domain_member_ids"
-            assert "run_dc_setup(domain_members=" not in source, \
-                "run_dc_setup should NOT receive domain_members param"
+            assert "domain_member_ids.append" not in source, "New architecture should NOT collect domain_member_ids"
+            assert "run_dc_setup(domain_members=" not in source, "run_dc_setup should NOT receive domain_members param"
 
     @pulumi.runtime.test
-    def test_all_non_dc_instances_get_run_setup_called(
-        self, temp_templates, dc_range_config
-    ):
+    def test_all_non_dc_instances_get_run_setup_called(self, temp_templates, dc_range_config):
         """All non-DC instances should have run_setup() called.
 
         Note: Domain-joining instances call run_setup via Output.apply(),
         so they execute asynchronously. We verify direct calls for non-joining
         instances and check source code for the apply pattern for joining ones.
         """
-        from stacks.range_stack import RangeStack
-        from components.instance import InstanceComponent
         import inspect
+
+        from components.instance import InstanceComponent
+        from stacks.range_stack import RangeStack
 
         run_setup_calls = []
         original_run_setup = InstanceComponent.run_setup
@@ -1395,12 +1407,14 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
             run_setup_calls.append({"role": self.role, "dc_ip": dc_ip})
             return original_run_setup(self, region=region, dc_ip=dc_ip)
 
-        with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
-            with patch.object(InstanceComponent, "run_setup", capture_run_setup):
-                stack = RangeStack("test-range", config=dc_range_config)
+        with (
+            patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}),
+            patch.object(InstanceComponent, "run_setup", capture_run_setup),
+        ):
+            RangeStack("test-range", config=dc_range_config)
 
-            # Check source for proper handling of both types
-            source = inspect.getsource(RangeStack._run_all_setup)
+        # Check source for proper handling of both types
+        source = inspect.getsource(RangeStack._run_all_setup)
 
         # Non-domain-joining instances (attacker) should be called directly
         attacker_calls = [c for c in run_setup_calls if c["role"] == "attacker"]
@@ -1408,8 +1422,9 @@ class TestVictimSelfOrchestratedDomainJoin(TestRangeStackDCDependencyOrdering):
         assert attacker_calls[0]["dc_ip"] is None, "Attacker should not receive dc_ip"
 
         # Domain-joining instances use Output.apply (verified via source)
-        assert "inst.run_setup(dc_ip=ip)" in source, \
+        assert "inst.run_setup(dc_ip=ip)" in source, (
             "Domain-joining instances should call run_setup with dc_ip via apply"
+        )
 
         # DC should NOT have run_setup called
         dc_calls = [c for c in run_setup_calls if c["role"] == "dc"]
@@ -1427,7 +1442,6 @@ class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
         config = RangeConfig(
             range_id=42,
             user_id=1,
-            subnet_index=5,
             environment="dev",
             instances=[
                 InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
@@ -1472,9 +1486,13 @@ class TestBackwardCompatibility(TestRangeStackDCDependencyOrdering):
 
             # Find attacker instance
             for inst in stack.instances:
-                def check_if_attacker(tags):
+
+                def check_if_attacker(tags, current_inst=inst):
                     if tags.get("shifter:role") == "attacker":
+
                         def verify_kali_sg(sgs):
                             assert "sg-kali" in sgs, f"Attacker should use sg-kali, got {sgs}"
-                        inst.instance.vpc_security_group_ids.apply(verify_kali_sg)
+
+                        current_inst.instance.vpc_security_group_ids.apply(verify_kali_sg)
+
                 inst.instance.tags.apply(check_if_attacker)

@@ -7,20 +7,18 @@ OpsOrchestrator handles runtime operations like:
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import MagicMock
-
-import pytest
 
 
 @dataclass
 class MockOpsPlan:
     """Mock operations plan for testing."""
 
-    steps: List[Any]
+    steps: list[Any]
     name: str = "mock_ops_plan"
 
-    def get_context(self, target: Any) -> Dict[str, Any]:
+    def get_context(self, target: Any) -> dict[str, Any]:
         return {}
 
 
@@ -38,8 +36,9 @@ class TestOpsOrchestratorInit:
 
     def test_init_requires_executor(self):
         """OpsOrchestrator requires an executor."""
-        from orchestrators.ops_orchestrator import OpsOrchestrator
         import inspect
+
+        from orchestrators.ops_orchestrator import OpsOrchestrator
 
         sig = inspect.signature(OpsOrchestrator.__init__)
         params = sig.parameters
@@ -69,7 +68,6 @@ class TestOpsOrchestratorOrchestrate:
     def test_orchestrate_executes_plan_steps(self):
         """orchestrate executes each step in the plan."""
         from orchestrators.ops_orchestrator import OpsOrchestrator
-        from orchestrators.base import StepResult
 
         mock_executor = MagicMock()
         mock_executor.run_command.return_value = MagicMock(success=True, stdout="ok", stderr="")
@@ -127,8 +125,8 @@ class TestOpsOrchestratorOrchestrate:
 
     def test_orchestrate_returns_step_results(self):
         """orchestrate returns results for each executed step."""
-        from orchestrators.ops_orchestrator import OpsOrchestrator
         from orchestrators.base import StepResult
+        from orchestrators.ops_orchestrator import OpsOrchestrator
 
         mock_executor = MagicMock()
         mock_executor.run_command.return_value = MagicMock(success=True, stdout="output", stderr="")
@@ -139,9 +137,7 @@ class TestOpsOrchestratorOrchestrate:
             action: str
             params: dict
 
-        plan = MockOpsPlan(
-            steps=[MockStep(name="test_step", action="test", params={})]
-        )
+        plan = MockOpsPlan(steps=[MockStep(name="test_step", action="test", params={})])
 
         orchestrator = OpsOrchestrator(executor=mock_executor)
         result = orchestrator.orchestrate("target-id", plan, {})
@@ -161,12 +157,13 @@ class TestOpsOrchestratorProtocolCompliance:
         from orchestrators.ops_orchestrator import OpsOrchestrator
 
         assert hasattr(OpsOrchestrator, "orchestrate")
-        assert callable(getattr(OpsOrchestrator, "orchestrate"))
+        assert callable(OpsOrchestrator.orchestrate)
 
     def test_orchestrate_signature(self):
         """OpsOrchestrator.orchestrate has expected signature."""
-        from orchestrators.ops_orchestrator import OpsOrchestrator
         import inspect
+
+        from orchestrators.ops_orchestrator import OpsOrchestrator
 
         sig = inspect.signature(OpsOrchestrator.orchestrate)
         param_names = list(sig.parameters.keys())

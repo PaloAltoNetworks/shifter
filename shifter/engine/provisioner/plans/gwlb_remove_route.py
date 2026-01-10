@@ -8,7 +8,7 @@ Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -23,7 +23,7 @@ class GWLBRemoveRouteStep:
 
     name: str
     action: str
-    params: List[str] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
 
 
 class GWLBRemoveRoutePlan:
@@ -36,9 +36,9 @@ class GWLBRemoveRoutePlan:
     Uses AWSExecutor methods for AWS API calls.
     """
 
-    name: str = "gwlb_remove_route"
+    name: ClassVar[str] = "gwlb_remove_route"
 
-    steps: List[GWLBRemoveRouteStep] = [
+    steps: ClassVar[list[GWLBRemoveRouteStep]] = [
         GWLBRemoveRouteStep(
             name="delete_route",
             action="delete_route",
@@ -51,7 +51,7 @@ class GWLBRemoveRoutePlan:
         ),
     ]
 
-    def get_context(self, instance: Any) -> Dict[str, Any]:
+    def get_context(self, instance: Any) -> dict[str, Any]:
         """Get context variables for GWLB remove route.
 
         Args:

@@ -4,12 +4,11 @@ SSHExecutor uses SSH to execute CLI commands on PAN-OS devices (VM-Series).
 Provides same interface as SSMExecutor for use with SetupOrchestrator.
 """
 
+import builtins
 import io
 import logging
-import socket
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 import paramiko
 
@@ -108,7 +107,9 @@ class SSHExecutor:
             ConnectionError: If SSH connection fails
         """
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # Security context: AutoAddPolicy is acceptable because we connect to freshly
+        # provisioned PAN-OS VMs in isolated VPC subnets. Host keys change on reprovision.
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507  # noqa: S507
 
         try:
             logger.info(f"Connecting to {host}:{self._port} as {self._username}")
@@ -123,7 +124,9 @@ class SSHExecutor:
             )
 
             logger.info(f"Executing command: {script[:100]}...")
-            stdin, stdout, stderr = client.exec_command(
+            # Security context: Commands are PAN-OS CLI commands generated internally by
+            # SetupOrchestrator plans, not from user input. No shell injection risk.
+            _stdin, stdout, stderr = client.exec_command(  # nosec B601
                 script,
                 timeout=timeout_seconds,
             )
@@ -149,9 +152,9 @@ class SSHExecutor:
             )
 
         except paramiko.SSHException as e:
-            raise ConnectionError(f"SSH connection failed to {host}: {e}")
-        except socket.timeout:
-            raise TimeoutError(f"SSH command timed out on {host}")
+            raise ConnectionError(f"SSH connection failed to {host}: {e}") from e
+        except builtins.TimeoutError as e:
+            raise TimeoutError(f"SSH command timed out on {host}") from e
         finally:
             client.close()
 
@@ -180,25 +183,21 @@ class SSHExecutor:
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
-                raise TimeoutError(
-                    f"SSH on {host} did not become available "
-                    f"within {timeout_seconds}s"
-                )
+                raise TimeoutError(f"SSH on {host} did not become available within {timeout_seconds}s")
 
             if self._check_ssh_available(host):
                 logger.info(f"SSH available on {host} after {elapsed:.1f}s")
                 return True
 
-            logger.info(
-                f"Waiting for SSH on {host}... " f"({elapsed:.1f}s / {timeout_seconds}s)"
-            )
+            logger.info(f"Waiting for SSH on {host}... ({elapsed:.1f}s / {timeout_seconds}s)")
             time.sleep(self._poll_interval)
 
     def _check_ssh_available(self, host: str) -> bool:
         """Check if SSH port is accepting connections and auth works."""
         try:
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507  # noqa: S507
             client.connect(
                 hostname=host,
                 port=self._port,

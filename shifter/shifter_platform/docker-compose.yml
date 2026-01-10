@@ -32,5 +32,72 @@ services:
       - .:/app
       - /app/.venv
 
+  # ------------------------------------------------------------------------------
+  # SQS Workers
+  # Each worker polls its dedicated SQS queue (SNS fan-out)
+  # Health check monitors heartbeat file - if stale for >60s, container restarts
+  # ------------------------------------------------------------------------------
+
+  worker-cms:
+    build: .
+    command: python manage.py run_worker --queue cms
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      AWS_REGION: ${AWS_REGION:-us-east-2}
+      SQS_CMS_URL: ${SQS_CMS_URL}
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/worker-cms-heartbeat -mmin -1 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 2
+
+  worker-engine:
+    build: .
+    command: python manage.py run_worker --queue engine
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      AWS_REGION: ${AWS_REGION:-us-east-2}
+      SQS_ENGINE_URL: ${SQS_ENGINE_URL}
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/worker-engine-heartbeat -mmin -1 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 2
+
+  worker-mc:
+    build: .
+    command: python manage.py run_worker --queue mc
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      AWS_REGION: ${AWS_REGION:-us-east-2}
+      SQS_MC_URL: ${SQS_MC_URL}
+      REDIS_HOST: ${REDIS_HOST}
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/worker-mc-heartbeat -mmin -1 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 2
+
 volumes:
   postgres_data:

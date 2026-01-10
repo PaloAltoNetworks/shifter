@@ -8,7 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from shared.schemas import RangeRequest
+from shared.enums import CANCELLABLE_STATUSES, RangeStatus
+from shared.schemas import RangeContext, RangeSpec
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -24,19 +25,19 @@ class EngineError(Exception):
     pass
 
 
-def create_range(request: RangeRequest) -> int:
+def create_range(request: RangeSpec) -> int:
     """Provision infrastructure for range.
 
     Creates a Range record, allocates subnet, and triggers ECS provisioning.
 
     Args:
-        request: Validated RangeRequest with scenario, user, and instances.
+        request: Validated RangeSpec with scenario, user, and instances.
 
     Returns:
         range_id: The ID of the created range.
 
     Raises:
-        TypeError: If request is not a RangeRequest
+        TypeError: If request is not a RangeSpec
         ValueError: If subnet allocation fails (capacity exhausted)
         User.DoesNotExist: If user_id doesn't map to a Django user
     """
@@ -48,8 +49,8 @@ def create_range(request: RangeRequest) -> int:
     User = get_user_model()
 
     # Validate request type
-    if not isinstance(request, RangeRequest):
-        raise TypeError(f"request must be RangeRequest, got {type(request).__name__}")
+    if not isinstance(request, RangeSpec):
+        raise TypeError(f"request must be RangeSpec, got {type(request).__name__}")
 
     logger.debug(
         "create_range: scenario=%s user_id=%s instances=%d",
@@ -80,7 +81,7 @@ def create_range(request: RangeRequest) -> int:
     )
 
     # Trigger ECS provisioning
-    task_arn = start_provisioning(range_obj.id)
+    task_arn = start_provisioning(range_obj.id, request.user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
@@ -90,14 +91,14 @@ def create_range(request: RangeRequest) -> int:
     return range_obj.id
 
 
-def destroy_range(range_id: int) -> bool:
+def destroy_range(request: RangeContext) -> bool:
     """Tear down range infrastructure.
 
     Sets status to DESTROYING and triggers async ECS teardown.
     Idempotent: returns True if range is already being destroyed.
 
     Args:
-        range_id: The ID of the range to destroy.
+        request: RangeContext with range_id and metadata.
 
     Returns:
         True if range exists and destruction initiated (or already in progress).
@@ -106,31 +107,31 @@ def destroy_range(range_id: int) -> bool:
     from engine.ecs import start_teardown
     from engine.models import Range
 
-    logger.debug("destroy_range: range_id=%s", range_id)
+    logger.debug("destroy_range: range_id=%s", request.range_id)
 
     try:
-        range_obj = Range.objects.get(id=range_id)
+        range_obj = Range.objects.get(id=request.range_id)
     except Range.DoesNotExist:
-        logger.warning("destroy_range: range not found range_id=%s", range_id)
+        logger.warning("destroy_range: range not found range_id=%s", request.range_id)
         return False
 
     # Already destroyed - nothing to do
-    if range_obj.status == Range.Status.DESTROYED:
-        logger.warning("destroy_range: range already destroyed range_id=%s", range_id)
+    if range_obj.status == RangeStatus.DESTROYED:
+        logger.warning("destroy_range: range already destroyed range_id=%s", request.range_id)
         return False
 
     # Already destroying - idempotent success
-    if range_obj.status == Range.Status.DESTROYING:
-        logger.info("destroy_range: range already destroying range_id=%s", range_id)
+    if range_obj.status == RangeStatus.DESTROYING:
+        logger.info("destroy_range: range already destroying range_id=%s", request.range_id)
         return True
 
     # Set status and trigger teardown
-    range_obj.status = Range.Status.DESTROYING
+    range_obj.status = RangeStatus.DESTROYING.value
     range_obj.save(update_fields=["status"])
 
-    logger.info("destroy_range: set status to DESTROYING range_id=%s", range_id)
+    logger.info("destroy_range: set status to DESTROYING range_id=%s", request.range_id)
 
-    task_arn = start_teardown(range_id)
+    task_arn = start_teardown(request.range_id, request.user_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
@@ -140,7 +141,7 @@ def destroy_range(range_id: int) -> bool:
     return True
 
 
-def cancel_range(range_id: int) -> bool:
+def cancel_range(range_ctx: RangeContext) -> None:
     """Cancel in-progress provisioning.
 
     Only works for ranges in PENDING or PROVISIONING status.
@@ -151,41 +152,70 @@ def cancel_range(range_id: int) -> bool:
     to abort and clean up. See GitHub issue for tracking.
 
     Args:
-        range_id: The ID of the range to cancel.
+        range_ctx: RangeContext with range_id and metadata.
 
     Returns:
-        True if range was cancelled.
-        False if range not found or not in a cancellable status.
-    """
-    from django.utils import timezone
+        None
 
+    Raises:
+        TypeError: If range_ctx is None or not a RangeContext.
+        ValueError: If range_ctx.range_id is None or negative.
+    """
+    # Input validation
+    if range_ctx is None:
+        logger.error("cancel_range called with None range_ctx")
+        raise TypeError("range_ctx cannot be None")
+
+    if not isinstance(range_ctx, RangeContext):
+        logger.error(
+            "cancel_range called with invalid type: %s",
+            type(range_ctx).__name__,
+        )
+        raise TypeError(f"range_ctx must be RangeContext, got {type(range_ctx).__name__}")
+
+    if range_ctx.range_id is None:
+        logger.error("cancel_range called with None range_id")
+        raise ValueError("range_ctx.range_id cannot be None")
+
+    if not isinstance(range_ctx.range_id, int) or range_ctx.range_id < 0:
+        logger.error(
+            "cancel_range called with invalid range_id: %s",
+            range_ctx.range_id,
+        )
+        raise ValueError("range_ctx.range_id must be a non-negative integer")
+
+    logger.debug(
+        "cancel_range: range_id=%s user_id=%s status=%s",
+        range_ctx.range_id,
+        range_ctx.user_id,
+        range_ctx.status,
+    )
     from engine.models import Range
 
-    logger.debug("cancel_range: range_id=%s", range_id)
+    range_id = range_ctx.range_id
 
     try:
         range_obj = Range.objects.get(id=range_id)
     except Range.DoesNotExist:
         logger.warning("cancel_range: range not found range_id=%s", range_id)
-        return False
+        return
 
-    # Only cancel ranges in early lifecycle
-    if range_obj.status not in Range.CANCELLABLE_STATUSES:
+    if range_ctx.status not in CANCELLABLE_STATUSES:
         logger.warning(
             "cancel_range: range not cancellable range_id=%s status=%s",
             range_id,
-            range_obj.status,
+            range_ctx.status,
         )
-        return False
+        return
 
-    # Mark as destroyed immediately
-    range_obj.status = Range.Status.DESTROYED
-    range_obj.destroyed_at = timezone.now()
-    range_obj.save(update_fields=["status", "destroyed_at"])
+    range_ctx.status = RangeStatus.DESTROYING
+    range_obj.status = Range.Status.DESTROYING
+    range_obj.save(update_fields=["status"])
+
+    # Provisioner will poll for status and destroy when it sees DESTROYING
+    # accept small risk of race condition. TODO: #465
 
     logger.info("cancel_range: cancelled range_id=%s", range_id)
-
-    return True
 
 
 def get_range_status(range_id: int) -> dict[str, Any] | None:
@@ -225,6 +255,65 @@ def pause_range(range_id: int) -> None:
 def resume_range(range_id: int) -> None:
     """Resume range instances."""
     raise NotImplementedError
+
+
+def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
+    """Get connection info for RDP access to a range instance.
+
+    Args:
+        user: Authenticated user requesting connection
+        instance_uuid: UUID of the instance to connect to
+
+    Returns:
+        Dict with keys: private_ip, os_type, connection_name
+
+    Raises:
+        ValueError: If no active range, range not READY, instance not found,
+            or instance has no GUI (ubuntu)
+        PermissionError: If user doesn't own the range
+    """
+    from engine.models import Range
+
+    if user is None:
+        raise ValueError("user is required")
+    if not instance_uuid:
+        raise ValueError("instance_uuid is required")
+
+    logger.debug("get_rdp_connection_info: user=%s instance_uuid=%s", user.id, instance_uuid)
+
+    # Get user's active range
+    range_obj = Range.get_active_for_user(user)
+    if not range_obj:
+        raise ValueError("No active range found")
+
+    # Verify range is ready
+    if range_obj.status != Range.Status.READY:
+        raise ValueError(f"Range is not ready (status: {range_obj.status})")
+
+    # Find instance by UUID
+    instance = range_obj.get_instance_by_uuid(instance_uuid)
+    if not instance:
+        raise ValueError(f"Instance {instance_uuid} not found in range")
+
+    # Check if instance has GUI
+    os_type = instance.get("os_type", "")
+    if os_type not in ("kali", "windows"):
+        raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
+
+    # Get IP
+    private_ip = instance.get("private_ip")
+    if not private_ip:
+        raise ValueError(f"Instance {instance_uuid} has no IP address")
+
+    # Build connection name from role and range ID
+    role = instance.get("role", "instance")
+    connection_name = f"{role}-{range_obj.id}"
+
+    return {
+        "private_ip": private_ip,
+        "os_type": os_type,
+        "connection_name": connection_name,
+    }
 
 
 def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnection:
@@ -296,8 +385,19 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
         logger.error("No IP address for instance: %s", instance_uuid)
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
+    # Determine SSH username based on OS type
+    os_type = instance.get("os_type", "").lower()
+    if os_type == "kali":
+        username = "kali"
+    elif os_type == "amazon-linux":
+        username = "ec2-user"
+    elif os_type == "windows":
+        username = "Administrator"
+    else:
+        username = "ubuntu"  # Default for ubuntu and other Linux distros
+
     return SSHConnection(
         host=host,
-        username="ubuntu",  # Default, could be enhanced based on OS type
+        username=username,
         private_key=ssh_key,
     )

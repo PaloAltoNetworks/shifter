@@ -24,11 +24,17 @@ locals {
 
     # Auto-create schema and default admin on first startup
     { name = "POSTGRESQL_AUTO_CREATE_ACCOUNTS", value = "true" },
+
+    # JSON auth extension - enables on-the-fly RDP connections from Portal
+    # JSON_SECRET_KEY is passed as a secret, this enables the extension
+    { name = "JSON_ENABLED", value = "true" },
   ]
 
   # OIDC environment variables (only when enabled)
   # Uses local values computed in cognito.tf from the Cognito app client
+  # OPENID_ENABLED must be set to "true" to activate the extension
   guacamole_oidc_env = var.enable_oidc ? [
+    { name = "OPENID_ENABLED", value = "true" },
     { name = "OPENID_AUTHORIZATION_ENDPOINT", value = local.oidc_authorization_endpoint },
     { name = "OPENID_JWKS_ENDPOINT", value = local.oidc_jwks_endpoint },
     { name = "OPENID_ISSUER", value = local.oidc_issuer_url },

@@ -21,6 +21,10 @@ RUN set -ex \
     && cp "guacamole-auth-json-${GUACAMOLE_VERSION}/guacamole-auth-json-${GUACAMOLE_VERSION}.jar" /opt/guacamole/extensions/ \
     && rm -rf "guacamole-auth-json-${GUACAMOLE_VERSION}" "guacamole-auth-json-${GUACAMOLE_VERSION}.tar.gz"
 
+# Run as non-root user (security best practice)
+# The base guacamole/guacamole image creates this user
+USER guacamole
+
 # The following environment variables configure OIDC authentication:
 # - OPENID_AUTHORIZATION_ENDPOINT: Cognito OAuth2 authorization URL
 # - OPENID_JWKS_ENDPOINT: Cognito JWKS endpoint for token validation

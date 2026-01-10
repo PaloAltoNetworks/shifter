@@ -5,7 +5,7 @@ set -euo pipefail
 # Fetch secrets from AWS Secrets Manager (prod only)
 # ------------------------------------------------------------------------------
 
-if [ -n "${DB_SECRET_ARN:-}" ] && [ -n "${APP_SECRET_ARN:-}" ]; then
+if [[ -n "${DB_SECRET_ARN:-}" ]] && [[ -n "${APP_SECRET_ARN:-}" ]]; then
     echo "Fetching secrets from AWS Secrets Manager..."
 
     # Fetch DB secret
@@ -50,7 +50,7 @@ print(key + '=' * padding)
 ")
 
     # Fetch Cognito secret if ARN provided
-    if [ -n "${COGNITO_SECRET_ARN:-}" ]; then
+    if [[ -n "${COGNITO_SECRET_ARN:-}" ]]; then
         COGNITO_SECRET=$(python -c "
 import boto3
 import json
@@ -69,7 +69,7 @@ print(response['SecretString'])
     fi
 
     # Fetch Guacamole JSON auth secret if ARN provided (for RDP integration)
-    if [ -n "${GUACAMOLE_SECRET_ARN:-}" ]; then
+    if [[ -n "${GUACAMOLE_SECRET_ARN:-}" ]]; then
         export GUACAMOLE_JSON_AUTH_SECRET=$(python -c "
 import boto3
 import os
@@ -122,7 +122,7 @@ echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
 # Run command passed as arguments, or default to daphne
-if [ $# -gt 0 ]; then
+if [[ $# -gt 0 ]]; then
     echo "Running: $@"
     exec "$@"
 else

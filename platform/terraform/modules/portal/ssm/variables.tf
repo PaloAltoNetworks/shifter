@@ -62,6 +62,12 @@ variable "cognito_secret_arn" {
   type        = string
 }
 
+variable "guacamole_secret_arn" {
+  description = "ARN of Guacamole JSON auth secret for RDP integration"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # Application Configuration
 # ------------------------------------------------------------------------------

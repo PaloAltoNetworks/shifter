@@ -243,9 +243,10 @@ module "ssm" {
   ecr_repository_name = split("/", data.terraform_remote_state.foundation.outputs.portal_ecr_url)[1]
 
   # Secrets Manager ARNs
-  db_secret_arn      = module.rds.db_credentials_secret_arn
-  app_secret_arn     = aws_secretsmanager_secret.app.arn
-  cognito_secret_arn = module.cognito.cognito_secret_arn
+  db_secret_arn        = module.rds.db_credentials_secret_arn
+  app_secret_arn       = aws_secretsmanager_secret.app.arn
+  cognito_secret_arn   = module.cognito.cognito_secret_arn
+  guacamole_secret_arn = module.guacamole.json_auth_secret_arn
 
   # Application configuration
   domain_name    = var.domain_name

@@ -541,6 +541,86 @@ class App(EntityBase):
 
 
 # -----------------------------------------------------------------------------
+# Subnet Models
+# -----------------------------------------------------------------------------
+
+
+class Subnet(EntityBase):
+    """Logical network segment in a range.
+
+    Subnets group instances for routing policy purposes. When a range
+    has an NGFW, inter-subnet traffic flows through it via connections.
+
+    Inherits from EntityBase:
+        id: UUID primary key (auto-generated, used for event correlation).
+        status: Lifecycle status (pending, provisioning, ready, etc.).
+        created_at: When this subnet was created.
+        deleted_at: Soft delete timestamp (auto-set on terminal status).
+
+    Attributes:
+        request: FK to Request (provides user context).
+        name: Subnet name (e.g., 'dc_network', 'server_network').
+        data: SubnetSpec data as JSON (instances list, connected_to).
+    """
+
+    request = models.ForeignKey(
+        "Request",
+        on_delete=models.CASCADE,
+        related_name="subnets",
+    )
+    name = models.CharField(max_length=100, help_text="Subnet name")
+    data = models.JSONField(
+        default=dict,
+        help_text="SubnetSpec data (instances, connected_to)",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Subnet"
+        verbose_name_plural = "Subnets"
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.id})"
+
+    def save(self, *args, **kwargs) -> None:
+        """Save with validation and logging."""
+        is_new = self._state.adding
+        self.validate_data()
+        super().save(*args, **kwargs)
+
+        if is_new:
+            logger.info(
+                "Subnet created: name=%s, id=%s, instances=%r",
+                self.name,
+                self.id,
+                self.instances,
+            )
+
+    def validate_data(self) -> None:
+        """Validate data against SubnetSpec.
+
+        Raises:
+            pydantic.ValidationError: If data is invalid.
+        """
+        from shared.schemas import SubnetSpec
+
+        spec_data: dict = {"name": self.name, **self.data}
+        if self.id:
+            spec_data["uuid"] = str(self.id)
+        SubnetSpec.model_validate(spec_data)
+
+    @property
+    def instances(self) -> list[str]:
+        """Return list of instance names in this subnet."""
+        return self.data.get("instances", [])
+
+    @property
+    def connected_to(self) -> list[str]:
+        """Return list of subnet names this subnet connects to."""
+        return self.data.get("connected_to", [])
+
+
+# -----------------------------------------------------------------------------
 # Agent Models
 # -----------------------------------------------------------------------------
 

@@ -24,6 +24,7 @@ from cms import delete_agent as cms_delete_agent
 from cms import delete_credential as cms_delete_credential
 from cms import destroy_range as cms_destroy_range
 from cms import get_active_range, get_allowed_extensions
+from cms import get_agent as cms_get_agent
 from cms import get_credential as cms_get_credential
 from cms import initiate_upload as cms_initiate_upload
 from cms import list_agents as cms_list_agents
@@ -315,9 +316,13 @@ def launch_range(request):
     Launch a new cyber range.
 
     Request body (JSON):
+        New format:
+        - agents: Dict mapping OS type to agent ID, e.g. {"windows": 123}
+        - scenario: Scenario type (basic, ad_attack_lab). Defaults to basic.
+
+        Legacy format (backward compatible):
         - agent_id: ID of agent to use for victim instances
         - scenario: Scenario type (basic, ad_attack_lab). Defaults to basic.
-        - dc_agent_id: ID of Windows agent for DC (required for ad_attack_lab)
 
     Response (JSON):
         - success: true
@@ -328,20 +333,38 @@ def launch_range(request):
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    agent_id = data.get("agent_id")
-    if not agent_id:
-        return JsonResponse({"error": "agent_id is required"}, status=400)
-
     scenario = data.get("scenario", "basic")
     valid_scenarios = {s["id"] for s in cms_list_scenarios(request.user)}
     if scenario not in valid_scenarios:
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
+    # Support both new (agents) and legacy (agent_id) formats
+    agents_by_os: dict[str, int] = {}
+    if "agents" in data:
+        # New format: {"windows": 123, "linux": 456}
+        agents_by_os = data["agents"]
+    elif "agent_id" in data:
+        # Legacy format: single agent - determine OS from agent
+        agent_id = data["agent_id"]
+        if not agent_id:
+            return JsonResponse({"error": "agent_id is required"}, status=400)
+        try:
+            agent = cms_get_agent(request.user, agent_id)
+            os_type = "windows" if agent.os.slug == "windows" else "linux"
+            agents_by_os[os_type] = agent_id
+        except CMSError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+    else:
+        return JsonResponse(
+            {"error": "Either 'agents' or 'agent_id' is required"},
+            status=400,
+        )
+
     try:
         range_ctx = cms_create_range(
             request.user,
             scenario,
-            agent_id,
+            agents_by_os,
         )
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
@@ -436,6 +459,19 @@ def list_agents(request):
     """
     agents = cms_list_agents(request.user)
     return JsonResponse({"agents": agents})
+
+
+@login_required
+@require_GET
+def list_scenarios(request):
+    """
+    Get available scenarios with agent requirements.
+
+    Response (JSON):
+        - scenarios: List of scenario dicts with agent_requirements field
+    """
+    scenarios = cms_list_scenarios(request.user)
+    return JsonResponse({"scenarios": scenarios})
 
 
 # -----------------------------------------------------------------------------

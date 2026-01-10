@@ -28,8 +28,8 @@ def user(db):
 
 
 @pytest.fixture
-def windows_agent(user, db):
-    """Windows agent for testing."""
+def windows_agent_obj(user, db):
+    """Windows agent object for testing."""
     os = OperatingSystem.objects.get(slug="windows")
     return AgentConfig.objects.create(
         user=user,
@@ -43,8 +43,8 @@ def windows_agent(user, db):
 
 
 @pytest.fixture
-def linux_agent(user, db):
-    """Linux agent for testing."""
+def linux_agent_obj(user, db):
+    """Linux agent object for testing."""
     os = OperatingSystem.objects.get(slug="linux-debian")
     return AgentConfig.objects.create(
         user=user,
@@ -55,6 +55,18 @@ def linux_agent(user, db):
         file_size_bytes=3000000,
         sha256_hash="def789ghi012",
     )
+
+
+@pytest.fixture
+def windows_agent(windows_agent_obj):
+    """Windows agent dict for hydrator (new format)."""
+    return {"windows": windows_agent_obj}
+
+
+@pytest.fixture
+def linux_agent(linux_agent_obj):
+    """Linux agent dict for hydrator (new format)."""
+    return {"linux": linux_agent_obj}
 
 
 @pytest.mark.django_db
@@ -230,14 +242,13 @@ class TestHydrateScenario:
         assert victim.agent is not None
         assert victim.agent.s3_key == "agents/123/agent.msi"
 
-    def test_ad_attack_lab_dc_has_agent(self, user, windows_agent):
-        """DC instance has agent for XDR monitoring."""
+    def test_ad_attack_lab_dc_has_no_agent(self, user, windows_agent):
+        """DC instance does not have agent (xdr_agent=false in template)."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("ad_attack_lab", user.id, windows_agent)
         dc = next(i for i in result.instances if i.role == "dc")
-        assert dc.agent is not None
-        assert dc.agent.s3_key == "agents/123/agent.msi"
+        assert dc.agent is None
 
     # --- Error handling ---
 
@@ -249,13 +260,13 @@ class TestHydrateScenario:
         with pytest.raises(CMSError, match="not found"):
             hydrate_scenario("nonexistent", user.id, windows_agent)
 
-    def test_raises_when_agent_is_none(self, user):
-        """Raises CMSError when agent is None."""
+    def test_raises_when_agents_empty(self, user):
+        """Raises CMSError when agents dict is empty."""
         from cms.exceptions import CMSError
         from cms.scenarios.hydrator import hydrate_scenario
 
-        with pytest.raises(CMSError, match=r"agent.*required"):
-            hydrate_scenario("basic", user.id, None)
+        with pytest.raises(CMSError, match=r"requires an agent"):
+            hydrate_scenario("basic", user.id, {})
 
     # --- Model serialization ---
 

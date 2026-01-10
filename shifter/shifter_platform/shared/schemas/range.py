@@ -10,7 +10,8 @@ incoming requests against them.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+import uuid as uuid_module
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, computed_field, field_validator
 
@@ -74,6 +75,125 @@ class InstanceSpec(SpecBase):
     dc_config: DCConfig | None = None
     join_domain: bool = False
     ngfw_app: NGFWAppSpec | None = None
+
+    @classmethod
+    def from_template(
+        cls,
+        data: dict[str, Any],
+        agents: dict[str, Any] | None = None,
+    ) -> InstanceSpec:
+        """Create an InstanceSpec from a scenario template dict.
+
+        Handles:
+        - UUID assignment
+        - os_type resolution for "from_agent"
+        - Agent lookup and AgentDetails creation for xdr_agent instances
+        - DCConfig conversion
+
+        Args:
+            data: Template dict with keys: name, role, os_type, xdr_agent,
+                  domain_controller, join_domain, dc_config.
+            agents: Optional mapping of OS type to agent object. Agent objects
+                    must have s3_key, original_filename, sha256_hash attributes.
+
+        Returns:
+            Hydrated InstanceSpec ready for Engine consumption.
+
+        Raises:
+            ValueError: If required fields are missing or agent lookup fails.
+        """
+        name, role, template_os_type = _extract_required_fields(data)
+        agents = agents or {}
+
+        # Resolve OS type and agent
+        xdr_agent = data.get("xdr_agent", False)
+        os_type, agent_obj = _resolve_os_and_agent(name, template_os_type, xdr_agent, agents)
+
+        # Build AgentDetails if agent found
+        agent_details = _build_agent_details(agent_obj) if agent_obj else None
+
+        # Build DCConfig if present
+        dc_config = _build_dc_config(data.get("dc_config"))
+
+        return cls(
+            name=f"{role}-{os_type}",
+            uuid=str(uuid_module.uuid4()),
+            role=cast(Literal["attacker", "victim", "dc", "ngfw"], role),
+            os_type=cast(Literal["kali", "ubuntu", "windows", "panos"], os_type),
+            agent=agent_details,
+            dc_config=dc_config,
+            join_domain=data.get("join_domain", False),
+        )
+
+
+def _extract_required_fields(data: dict[str, Any]) -> tuple[str, str, str]:
+    """Extract and validate required template fields."""
+    name = data.get("name")
+    role = data.get("role")
+    os_type = data.get("os_type")
+
+    if not name:
+        raise ValueError("Instance template requires 'name' field")
+    if not role:
+        raise ValueError("Instance template requires 'role' field")
+    if not os_type:
+        raise ValueError("Instance template requires 'os_type' field")
+
+    return name, role, os_type
+
+
+def _resolve_os_and_agent(
+    name: str,
+    template_os_type: str,
+    xdr_agent: bool,
+    agents: dict[str, Any],
+) -> tuple[str, Any]:
+    """Resolve OS type and find matching agent.
+
+    Returns:
+        Tuple of (resolved_os_type, agent_object or None).
+    """
+    if not xdr_agent:
+        return template_os_type, None
+
+    if template_os_type == "from_agent":
+        agent_obj = next(iter(agents.values()), None)
+        if agent_obj is None:
+            raise ValueError(f"Instance '{name}' uses from_agent but no agent provided")
+        return _resolve_agent_os(agent_obj), agent_obj
+
+    if template_os_type == "windows":
+        return template_os_type, agents.get("windows")
+
+    if template_os_type in ("ubuntu", "kali"):
+        return template_os_type, agents.get("linux")
+
+    return template_os_type, None
+
+
+def _resolve_agent_os(agent: Any) -> str:
+    """Map agent OS to provisioner os_type."""
+    os_slug = agent.os.slug.lower()
+    return "windows" if os_slug == "windows" else "ubuntu"
+
+
+def _build_agent_details(agent_obj: Any) -> AgentDetails:
+    """Build AgentDetails from agent object."""
+    return AgentDetails(
+        s3_key=agent_obj.s3_key,
+        filename=agent_obj.original_filename,
+        sha256=agent_obj.sha256_hash or "",
+    )
+
+
+def _build_dc_config(dc_config_data: dict[str, Any] | None) -> DCConfig | None:
+    """Build DCConfig from template data."""
+    if not dc_config_data:
+        return None
+    return DCConfig(
+        domain_name=dc_config_data["domain_name"],
+        netbios_name=dc_config_data["netbios_name"],
+    )
 
 
 class RangeSpecBase(SpecBase):

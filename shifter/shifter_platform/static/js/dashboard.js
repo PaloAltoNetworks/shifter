@@ -16,6 +16,7 @@ class DashboardManager {
         this.cancelUrl = options.cancelUrl;
         this.destroyUrl = options.destroyUrl;
         this.agentsUrl = options.agentsUrl;
+        this.scenariosUrl = options.scenariosUrl;
         this.loginUrl = options.loginUrl || '/oidc/authenticate/';
 
         // State
@@ -41,15 +42,34 @@ class DashboardManager {
         this.pausedRangeState = document.getElementById('paused-range-state');
         this.failedState = document.getElementById('failed-state');
 
+        // Scenario dropdown
+        this.scenarioDropdown = document.getElementById('scenario-dropdown');
+        this.scenarioSelect = document.getElementById('scenario-select-value');
+
+        // OS selection (for from_agent scenarios)
+        this.osSelectionSection = document.getElementById('os-selection-section');
+        this.osDropdown = document.getElementById('os-dropdown');
+        this.osSelect = document.getElementById('os-select-value');
+
+        // General agent dropdown (filtered by OS selection)
+        this.agentSection = document.getElementById('agent-section');
         this.agentDropdown = document.getElementById('agent-dropdown');
         this.agentSelect = document.getElementById('agent-select-value');
         this.agentItems = document.getElementById('agent-items');
-        this.scenarioDropdown = document.getElementById('scenario-dropdown');
-        this.scenarioSelect = document.getElementById('scenario-select-value');
-        this.dcAgentSection = document.getElementById('dc-agent-section');
-        this.dcAgentDropdown = document.getElementById('dc-agent-dropdown');
-        this.dcAgentSelect = document.getElementById('dc-agent-select-value');
-        this.dcAgentItems = document.getElementById('dc-agent-items');
+
+        // Windows agent dropdown (for requires_windows scenarios)
+        this.windowsAgentSection = document.getElementById('windows-agent-section');
+        this.windowsAgentDropdown = document.getElementById('windows-agent-dropdown');
+        this.windowsAgentSelect = document.getElementById('windows-agent-select-value');
+        this.windowsAgentItems = document.getElementById('windows-agent-items');
+
+        // Linux agent dropdown (for requires_linux scenarios)
+        this.linuxAgentSection = document.getElementById('linux-agent-section');
+        this.linuxAgentDropdown = document.getElementById('linux-agent-dropdown');
+        this.linuxAgentSelect = document.getElementById('linux-agent-select-value');
+        this.linuxAgentItems = document.getElementById('linux-agent-items');
+
+        // Buttons
         this.launchBtn = document.getElementById('launch-btn');
         this.cancelBtn = document.getElementById('cancel-btn');
         this.pauseBtn = document.getElementById('pause-btn');
@@ -57,6 +77,9 @@ class DashboardManager {
         this.resumeBtn = document.getElementById('resume-btn');
         this.destroyPausedBtn = document.getElementById('destroy-paused-btn');
         this.dismissErrorBtn = document.getElementById('dismiss-error-btn');
+
+        // Scenario requirements cache
+        this.scenarioRequirements = {};
 
         this._bindEvents();
         this._bindCleanup();
@@ -105,6 +128,13 @@ class DashboardManager {
     }
 
     _bindEvents() {
+        // OS dropdown change - filter agents by selected OS
+        if (this.osDropdown) {
+            this.osDropdown.addEventListener('change', (e) => {
+                this._onOsChange(e.detail?.value);
+            });
+        }
+
         // Agent dropdown change
         if (this.agentDropdown) {
             this.agentDropdown.addEventListener('change', () => {
@@ -112,9 +142,16 @@ class DashboardManager {
             });
         }
 
-        // DC Agent dropdown change
-        if (this.dcAgentDropdown) {
-            this.dcAgentDropdown.addEventListener('change', () => {
+        // Windows agent dropdown change
+        if (this.windowsAgentDropdown) {
+            this.windowsAgentDropdown.addEventListener('change', () => {
+                this._updateLaunchButtonState();
+            });
+        }
+
+        // Linux agent dropdown change
+        if (this.linuxAgentDropdown) {
+            this.linuxAgentDropdown.addEventListener('change', () => {
                 this._updateLaunchButtonState();
             });
         }
@@ -122,7 +159,7 @@ class DashboardManager {
         // Scenario dropdown change
         if (this.scenarioDropdown) {
             this.scenarioDropdown.addEventListener('change', (e) => {
-                this._onScenarioChange(e.detail.value);
+                this._onScenarioChange(e.detail?.value);
             });
         }
 
@@ -152,45 +189,164 @@ class DashboardManager {
 
     /**
      * Handle scenario dropdown change.
-     * AD scenario uses same agent for DC and victim (no separate DC agent needed).
+     * Shows/hides agent sections based on scenario requirements.
      */
-    _onScenarioChange(_scenario) {
-        // DC agent section is not needed - same agent used for DC and victim
-        // Keep it hidden for all scenarios
-        if (this.dcAgentSection) {
-            this.dcAgentSection.style.display = 'none';
+    _onScenarioChange(scenario) {
+        const req = this.scenarioRequirements[scenario] || {};
+
+        // Hide all agent sections first
+        this._hideAllAgentSections();
+
+        // Clear all agent selections
+        this._clearAgentSelections();
+
+        // Show appropriate sections based on requirements
+        if (req.has_from_agent && !req.requires_windows && !req.requires_linux) {
+            // Only from_agent instances - show OS picker first
+            if (this.osSelectionSection) {
+                this.osSelectionSection.style.display = 'block';
+            }
+            // Agent dropdown shown after OS selection
+        } else {
+            // Fixed OS requirements
+            if (req.requires_windows) {
+                if (this.windowsAgentSection) {
+                    this.windowsAgentSection.style.display = 'block';
+                }
+            }
+            if (req.requires_linux) {
+                if (this.linuxAgentSection) {
+                    this.linuxAgentSection.style.display = 'block';
+                }
+            }
+            // If has_from_agent AND fixed requirements, show OS picker too
+            if (req.has_from_agent) {
+                if (this.osSelectionSection) {
+                    this.osSelectionSection.style.display = 'block';
+                }
+            }
         }
-        if (this.dcAgentSelect) {
-            this.dcAgentSelect.value = '';
-        }
+
         this._updateLaunchButtonState();
     }
 
     /**
-     * Reset DC agent dropdown to placeholder state.
+     * Handle OS selection change.
+     * Filters agent dropdown by selected OS.
      */
-    _resetDcAgentDropdown() {
-        if (this.dcAgentDropdown) {
-            const trigger = this.dcAgentDropdown.querySelector('.xdr-dropdown-value');
-            if (trigger) {
-                trigger.textContent = '-- Select a Windows agent --';
-                trigger.classList.add('placeholder');
+    _onOsChange(osType) {
+        if (!osType) return;
+
+        // Show the agent section
+        if (this.agentSection) {
+            this.agentSection.style.display = 'block';
+        }
+
+        // Filter agents by OS
+        const filteredAgents = this.agents.filter(agent => {
+            if (osType === 'windows') {
+                return agent.os_slug === 'windows';
             }
-            // Clear selected state
-            const items = this.dcAgentDropdown.querySelectorAll('.xdr-dropdown-item');
-            items.forEach(item => item.classList.remove('selected'));
+            // linux includes ubuntu, kali, etc.
+            return agent.os_slug !== 'windows';
+        });
+
+        // Populate filtered dropdown
+        this._renderAgentItems(this.agentItems, filteredAgents);
+        this._initDropdown(this.agentDropdown);
+
+        // Clear previous selection
+        if (this.agentSelect) {
+            this.agentSelect.value = '';
+        }
+        this._resetDropdownDisplay(this.agentDropdown, '-- Select an agent --');
+
+        this._updateLaunchButtonState();
+    }
+
+    /**
+     * Hide all agent-related sections.
+     */
+    _hideAllAgentSections() {
+        if (this.osSelectionSection) {
+            this.osSelectionSection.style.display = 'none';
+        }
+        if (this.agentSection) {
+            this.agentSection.style.display = 'none';
+        }
+        if (this.windowsAgentSection) {
+            this.windowsAgentSection.style.display = 'none';
+        }
+        if (this.linuxAgentSection) {
+            this.linuxAgentSection.style.display = 'none';
         }
     }
 
-    async init() {
-        // Initialize scenario dropdown
-        this._initScenarioDropdown();
+    /**
+     * Clear all agent selections.
+     */
+    _clearAgentSelections() {
+        if (this.osSelect) this.osSelect.value = '';
+        if (this.agentSelect) this.agentSelect.value = '';
+        if (this.windowsAgentSelect) this.windowsAgentSelect.value = '';
+        if (this.linuxAgentSelect) this.linuxAgentSelect.value = '';
 
-        // Load agents and current status in parallel
+        this._resetDropdownDisplay(this.osDropdown, '-- Select OS type --');
+        this._resetDropdownDisplay(this.agentDropdown, '-- Select an agent --');
+        this._resetDropdownDisplay(this.windowsAgentDropdown, '-- Select a Windows agent --');
+        this._resetDropdownDisplay(this.linuxAgentDropdown, '-- Select a Linux agent --');
+    }
+
+    /**
+     * Reset a dropdown to placeholder state.
+     */
+    _resetDropdownDisplay(dropdown, placeholder) {
+        if (!dropdown) return;
+        const trigger = dropdown.querySelector('.xdr-dropdown-value');
+        if (trigger) {
+            trigger.textContent = placeholder;
+            trigger.classList.add('placeholder');
+        }
+        // Clear selected state
+        const items = dropdown.querySelectorAll('.xdr-dropdown-item');
+        items.forEach(item => item.classList.remove('selected'));
+    }
+
+    async init() {
+        // Initialize dropdowns
+        this._initScenarioDropdown();
+        this._initDropdown(this.osDropdown);
+
+        // Load scenarios, agents and current status in parallel
         await Promise.all([
+            this.loadScenarios(),
             this.loadAgents(),
             this.loadRange(),
         ]);
+    }
+
+    async loadScenarios() {
+        // Scenarios are loaded via the scenarios endpoint
+        // which includes agent_requirements for each scenario
+        const scenariosUrl = this.scenariosUrl;
+        if (!scenariosUrl) {
+            // Fallback: assume basic has from_agent only
+            this.scenarioRequirements = {
+                basic: { has_from_agent: true, requires_windows: false, requires_linux: false },
+                ad_attack_lab: { has_from_agent: true, requires_windows: false, requires_linux: false },
+            };
+            return;
+        }
+
+        const data = await this._fetchJson(scenariosUrl, 'Failed to load scenarios');
+        if (!data || !data.scenarios) {
+            return;
+        }
+
+        // Cache agent requirements by scenario ID
+        for (const scenario of data.scenarios) {
+            this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
+        }
     }
 
     _initScenarioDropdown() {
@@ -201,9 +357,34 @@ class DashboardManager {
     _updateLaunchButtonState() {
         if (!this.launchBtn) return;
 
-        const hasAgent = Boolean(this.agentSelect?.value);
-        // Launch is enabled if agent is selected
-        this.launchBtn.disabled = !hasAgent;
+        const scenario = this.scenarioSelect?.value || 'basic';
+        const req = this.scenarioRequirements[scenario] || {};
+
+        let canLaunch = true;
+
+        // Check if from_agent scenario needs OS + agent selection
+        if (req.has_from_agent && !req.requires_windows && !req.requires_linux) {
+            // Need OS selected AND agent selected
+            const hasOs = Boolean(this.osSelect?.value);
+            const hasAgent = Boolean(this.agentSelect?.value);
+            canLaunch = hasOs && hasAgent;
+        } else {
+            // Check fixed requirements
+            if (req.requires_windows) {
+                canLaunch = canLaunch && Boolean(this.windowsAgentSelect?.value);
+            }
+            if (req.requires_linux) {
+                canLaunch = canLaunch && Boolean(this.linuxAgentSelect?.value);
+            }
+            // If has_from_agent with fixed requirements, also need OS + agent
+            if (req.has_from_agent) {
+                const hasOs = Boolean(this.osSelect?.value);
+                const hasAgent = Boolean(this.agentSelect?.value);
+                canLaunch = canLaunch && hasOs && hasAgent;
+            }
+        }
+
+        this.launchBtn.disabled = !canLaunch;
     }
 
     async loadAgents() {
@@ -215,8 +396,13 @@ class DashboardManager {
         // Cache agents for later reference
         this.agents = data.agents || [];
 
-        this._populateAgentDropdown(this.agents);
-        this._populateDcAgentDropdown(this.agents);
+        // Populate OS-specific dropdowns
+        this._populateWindowsAgentDropdown(this.agents);
+        this._populateLinuxAgentDropdown(this.agents);
+
+        // Initialize current scenario's agent UI
+        const scenario = this.scenarioSelect?.value || 'basic';
+        this._onScenarioChange(scenario);
     }
 
     async loadRange() {
@@ -353,17 +539,39 @@ class DashboardManager {
     }
 
     async launchRange() {
-        const agentId = this.agentSelect?.value;
-        if (!agentId) return;
-
         const scenario = this.scenarioSelect?.value || 'basic';
+        const req = this.scenarioRequirements[scenario] || {};
+
+        // Build agents dict based on scenario requirements
+        const agents = {};
+
+        // Check for OS-picked agent (from_agent scenarios)
+        if (this.osSelect?.value && this.agentSelect?.value) {
+            const osType = this.osSelect.value;
+            agents[osType] = Number.parseInt(this.agentSelect.value, 10);
+        }
+
+        // Check for fixed Windows agent requirement
+        if (req.requires_windows && this.windowsAgentSelect?.value) {
+            agents.windows = Number.parseInt(this.windowsAgentSelect.value, 10);
+        }
+
+        // Check for fixed Linux agent requirement
+        if (req.requires_linux && this.linuxAgentSelect?.value) {
+            agents.linux = Number.parseInt(this.linuxAgentSelect.value, 10);
+        }
+
+        // Validate we have at least one agent
+        if (Object.keys(agents).length === 0) {
+            return;
+        }
 
         this.launchBtn.disabled = true;
         this.launchBtn.textContent = 'Launching...';
 
-        // Build request body - backend handles dc_agent for AD scenarios
+        // Build request body with new agents format
         const body = {
-            agent_id: parseInt(agentId),
+            agents: agents,
             scenario: scenario,
         };
 
@@ -674,28 +882,34 @@ class DashboardManager {
         return new window.XdrDropdown(dropdown);
     }
 
-    _populateAgentDropdown(agents) {
-        if (!this.agentItems) {
-            return;
-        }
-
-        this._renderAgentItems(this.agentItems, agents);
-        this._initDropdown(this.agentDropdown);
-    }
-
-    _populateDcAgentDropdown(agents) {
-        if (!this.dcAgentItems) {
+    _populateWindowsAgentDropdown(agents) {
+        if (!this.windowsAgentItems) {
             return;
         }
 
         const windowsAgents = agents.filter(agent => agent.os_slug === 'windows');
         if (windowsAgents.length === 0) {
-            this._renderEmptyDropdown(this.dcAgentItems, 'No Windows agents uploaded');
+            this._renderEmptyDropdown(this.windowsAgentItems, 'No Windows agents');
         } else {
-            this._renderAgentItems(this.dcAgentItems, windowsAgents);
+            this._renderAgentItems(this.windowsAgentItems, windowsAgents);
         }
 
-        this._initDropdown(this.dcAgentDropdown);
+        this._initDropdown(this.windowsAgentDropdown);
+    }
+
+    _populateLinuxAgentDropdown(agents) {
+        if (!this.linuxAgentItems) {
+            return;
+        }
+
+        const linuxAgents = agents.filter(agent => agent.os_slug !== 'windows');
+        if (linuxAgents.length === 0) {
+            this._renderEmptyDropdown(this.linuxAgentItems, 'No Linux agents');
+        } else {
+            this._renderAgentItems(this.linuxAgentItems, linuxAgents);
+        }
+
+        this._initDropdown(this.linuxAgentDropdown);
     }
 
     _renderAgentItems(container, agents) {

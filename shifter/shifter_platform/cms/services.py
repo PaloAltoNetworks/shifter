@@ -1254,7 +1254,12 @@ def get_active_range(user: User) -> RangeContext | None:
         return None
 
 
-def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = False) -> RangeContext:
+def create_range(
+    user: User,
+    scenario: str,
+    agents_by_os: dict[str, int],
+    ngfw_enabled: bool = False,
+) -> RangeContext:
     """Validate, hydrate, and trigger range provisioning.
 
     CMS validates scenario and agent requirements, hydrates the scenario
@@ -1263,7 +1268,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
     Args:
         user: User requesting the range
         scenario: Scenario ID (basic, ad_attack_lab)
-        agent_id: ID of the agent to use for victim instances
+        agents_by_os: Mapping of OS type to agent ID, e.g. {"windows": 123, "linux": 456}
         ngfw_enabled: Whether to deploy VM-Series NGFW inline
 
     Returns:
@@ -1280,6 +1285,7 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
     from cms.exceptions import CMSError
     from cms.models import RangeInstance
     from cms.scenarios.hydrator import hydrate_scenario
+    from cms.scenarios.loader import load_scenario
 
     # Input validation - user
     if user is None:
@@ -1314,35 +1320,27 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
         )
         raise ValueError("scenario must be a non-empty string")
 
-    # Input validation - agent_id
-    if agent_id is None:
+    # Input validation - agents_by_os
+    if agents_by_os is None:
         logger.error(
-            "create_range called with None agent_id for user_id=%s",
+            "create_range called with None agents_by_os for user_id=%s",
             user.id,
         )
-        raise TypeError("agent_id cannot be None")
+        raise TypeError("agents_by_os cannot be None")
 
-    if not isinstance(agent_id, int):
+    if not isinstance(agents_by_os, dict):
         logger.error(
-            "create_range called with invalid agent_id type: %s",
-            type(agent_id).__name__,
+            "create_range called with invalid agents_by_os type: %s",
+            type(agents_by_os).__name__,
         )
-        msg = f"agent_id must be an int, got {type(agent_id).__name__}"
+        msg = f"agents_by_os must be a dict, got {type(agents_by_os).__name__}"
         raise TypeError(msg)
 
-    if agent_id < 0:
-        logger.error(
-            "create_range called with negative agent_id=%s for user_id=%s",
-            agent_id,
-            user.id,
-        )
-        raise ValueError("agent_id must be non-negative")
-
     logger.debug(
-        "create_range called for user_id=%s, scenario=%s, agent_id=%s, ngfw_enabled=%s",
+        "create_range called for user_id=%s, scenario=%s, agents_by_os=%s, ngfw_enabled=%s",
         user.id,
         scenario,
-        agent_id,
+        agents_by_os,
         ngfw_enabled,
     )
 
@@ -1358,35 +1356,41 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
             msg = "You already have an active range. Please destroy it before creating a new one."
             raise CMSError(msg)
 
-        # 1. Validate scenario exists
+        # 1. Load scenario and get requirements
         try:
-            get_scenario(scenario)
-        except CMSError:
-            logger.error(
-                "create_range: scenario '%s' not found for user_id=%s",
-                scenario,
-                user.id,
-            )
-            raise
+            scenario_template = load_scenario(scenario)
+        except ValueError as e:
+            logger.error("create_range: scenario '%s' not found", scenario)
+            raise CMSError(str(e)) from e
+        requirements = scenario_template.get_agent_requirements()
 
-        # 2. Get agent (validates ownership and not deleted)
-        agent = get_agent(user, agent_id)
+        # 2. Validate we have all required agents
+        if requirements["requires_windows"] and "windows" not in agents_by_os:
+            raise CMSError(f"Scenario '{scenario}' requires a Windows agent")
+        if requirements["requires_linux"] and "linux" not in agents_by_os:
+            raise CMSError(f"Scenario '{scenario}' requires a Linux agent")
+        if requirements["has_from_agent"] and not agents_by_os:
+            raise CMSError(f"Scenario '{scenario}' requires at least one agent")
 
-        # 3. Validate agent meets scenario requirements
-        validate_scenario_requirements(scenario, agent)
+        # 3. Look up each agent (validates ownership and not deleted)
+        agents: dict[str, AgentConfig] = {}
+        for os_type, aid in agents_by_os.items():
+            agents[os_type] = get_agent(user, aid)
 
         # 4. Hydrate scenario with agent details
-        range_request = hydrate_scenario(scenario, user.id, agent)
+        range_request = hydrate_scenario(scenario, user.id, agents)
 
         # 5. Call engine to create range
         range_id = engine_create_range(range_request)
 
         # 6. Store RangeInstance record with hydrated spec
+        # Store first agent for backward compatibility (field is nullable)
+        first_agent = next(iter(agents.values()), None)
         RangeInstance.objects.create(
             range_id=range_id,
             scenario_id=scenario,
             user_id=user.id,
-            agent=agent,
+            agent=first_agent,
             range_spec=range_request.model_dump(mode="json"),
         )
 
@@ -1412,13 +1416,16 @@ def create_range(user: User, scenario: str, agent_id: int, ngfw_enabled: bool = 
             for spec in range_request.instances
         ]
 
+        # Format agent names for display
+        agent_names = ", ".join(a.name for a in agents.values())
+
         return RangeContext(
             range_id=range_id,
             scenario_id=scenario,
             user_id=user.id,
             status=ResourceStatus.PROVISIONING,
             instances=instance_contexts,
-            agent_name=agent.name,
+            agent_name=agent_names,
         )
 
     except (TypeError, ValueError, CMSError):
@@ -2207,8 +2214,13 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
     try:
         scenarios = get_all_scenarios()
 
-        # Convert to list of dicts (deep copy to prevent mutation)
-        result = [scenario.model_dump() for scenario in scenarios]
+        # Filter to enabled scenarios and convert to dicts with agent requirements
+        result = []
+        for scenario in scenarios:
+            if scenario.enabled:
+                data = scenario.model_dump()
+                data["agent_requirements"] = scenario.get_agent_requirements()
+                result.append(data)
 
         logger.debug(
             "list_scenarios returning %d scenarios for user_id=%s",
@@ -2287,42 +2299,13 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
         )
         raise CMSError(f"Scenario '{scenario_id}' not found") from e
 
-    requirements = scenario.requirements
-
-    # Check if agent is required
-    if requirements.required and agent is None:
+    # Check if agent is required (any instance has xdr_agent: true)
+    if scenario.requires_agent() and agent is None:
         logger.error(
             "validate_scenario_requirements: scenario '%s' requires an agent",
             scenario_id,
         )
         raise CMSError(f"Scenario '{scenario_id}' requires an agent")
-
-    # Check OS requirement if specified
-    if requirements.os is not None and agent is not None:
-        # Get agent's OS slug
-        agent_os = agent.os.slug if hasattr(agent.os, "slug") else str(agent.os)
-
-        # Check if agent OS matches requirement (windows matches
-        # windows, etc.)
-        # For windows requirement, check if agent_os starts with
-        # 'windows'
-        if requirements.os == "windows":
-            if not agent_os.startswith("windows"):
-                logger.error(
-                    "validate_scenario_requirements: scenario '%s' requires windows, but agent has %s",
-                    scenario_id,
-                    agent_os,
-                )
-                msg = f"Scenario '{scenario_id}' requires a Windows agent, but agent has OS '{agent_os}'"
-                raise CMSError(msg)
-        elif requirements.os == "linux" and not agent_os.startswith("linux"):
-            logger.error(
-                "validate_scenario_requirements: scenario '%s' requires linux, but agent has %s",
-                scenario_id,
-                agent_os,
-            )
-            msg = f"Scenario '{scenario_id}' requires a Linux agent, but agent has OS '{agent_os}'"
-            raise CMSError(msg)
 
     logger.debug(
         "validate_scenario_requirements: validation passed for scenario_id=%s",

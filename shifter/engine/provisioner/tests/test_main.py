@@ -776,6 +776,11 @@ class TestNgfwProvisionCLI:
             },
         )
 
+    @pytest.fixture(autouse=True)
+    def mock_auto_stop(self, mocker):
+        """Mock run_ngfw_operation for auto-stop (not tested here)."""
+        return mocker.patch("main.run_ngfw_operation")
+
     def test_ngfw_provision_requires_request_id(self):
         """ngfw provision requires --request-id argument."""
         result = subprocess.run(  # noqa: S603
@@ -1631,6 +1636,11 @@ class TestNgfwProvisionSerialNumber:
             },
         )
 
+    @pytest.fixture(autouse=True)
+    def mock_auto_stop(self, mocker):
+        """Mock run_ngfw_operation for auto-stop (not tested here)."""
+        return mocker.patch("main.run_ngfw_operation")
+
     def test_ngfw_provision_extracts_serial_number(self, mock_boto3_clients, mock_env_vars, mocker):
         """NGFW provision should extract serial number from verify_device_cert step."""
         mock_update = mocker.patch("main.update_instance_state")
@@ -1786,3 +1796,235 @@ class TestNgfwProvisionSerialNumber:
 
         with pytest.raises(RuntimeError, match="serial number not found"):
             run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
+
+
+class TestNgfwProvisionAutoStop:
+    """Tests for auto-stop after NGFW provisioning."""
+
+    TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
+
+    @pytest.fixture(autouse=True)
+    def mock_get_ngfw_data(self, mocker):
+        """Mock get_ngfw_data_by_request_id for all tests."""
+        return mocker.patch(
+            "main.get_ngfw_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "instance_id": "660e8400-e29b-41d4-a716-446655440001",
+                "app_id": "770e8400-e29b-41d4-a716-446655440002",
+                "spec": {"role": "ngfw", "ngfw_app": {"type": "ngfw"}},
+                "app_spec": {
+                    "scm_pin_id": "pin-123",
+                    "scm_pin_value": "secret-pin",
+                    "scm_folder_name": "shifter",
+                    "authcode": "AUTH123",
+                },
+                "state": {"ec2_instance_id": "i-ngfw123"},
+                "status": "ready",
+            },
+        )
+
+    def test_ngfw_provision_calls_stop_after_ready(self, mock_boto3_clients, mock_env_vars, mocker):
+        """NGFW provision should call ngfw_operation(stop) after ready event."""
+        mocker.patch("main.update_instance_state")
+        mocker.patch("main.publish_ngfw_event")
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def subprocess_side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=subprocess_side_effect)
+
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: 007200001267"
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(
+            success=True,
+            step_results=[mock_step_result],
+        )
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
+        # Mock run_ngfw_operation to track calls
+        mock_run_ngfw_operation = mocker.patch("main.run_ngfw_operation")
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
+
+        # Verify run_ngfw_operation was called with "stop"
+        mock_run_ngfw_operation.assert_called_once_with("stop", self.TEST_REQUEST_ID)
+
+    def test_ngfw_provision_stop_called_after_ready_event(self, mock_boto3_clients, mock_env_vars, mocker):
+        """Auto-stop should be called after ready event is published."""
+        mocker.patch("main.update_instance_state")
+
+        call_order = []
+
+        def track_publish(*args, **kwargs):
+            status = kwargs.get("status")
+            call_order.append(("publish_ngfw_event", status))
+
+        mocker.patch("main.publish_ngfw_event", side_effect=track_publish)
+
+        def track_run_ngfw_operation(operation, request_id):
+            call_order.append(("run_ngfw_operation", operation))
+
+        mocker.patch("main.run_ngfw_operation", side_effect=track_run_ngfw_operation)
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def subprocess_side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=subprocess_side_effect)
+
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: 007200001267"
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(
+            success=True,
+            step_results=[mock_step_result],
+        )
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
+
+        # Verify order: ready event published BEFORE stop is called
+        ready_idx = None
+        stop_idx = None
+        for i, (func, arg) in enumerate(call_order):
+            if func == "publish_ngfw_event" and arg == "ready":
+                ready_idx = i
+            if func == "run_ngfw_operation" and arg == "stop":
+                stop_idx = i
+
+        assert ready_idx is not None, "Ready event not published"
+        assert stop_idx is not None, "Stop not called"
+        assert ready_idx < stop_idx, "Stop should be called after ready event"
+
+    def test_ngfw_provision_stop_emits_status_events(self, mock_boto3_clients, mock_env_vars, mocker):
+        """Auto-stop should emit stopping and stopped status events."""
+        mocker.patch("main.update_instance_state")
+
+        status_events = []
+
+        def track_publish(*args, **kwargs):
+            status = kwargs.get("status")
+            status_events.append(status)
+
+        mocker.patch("main.publish_ngfw_event", side_effect=track_publish)
+        # Also patch events.publish_ngfw_event for run_ngfw_operation's local import
+        mocker.patch("events.publish_ngfw_event", side_effect=track_publish)
+
+        outputs = {
+            "instance_id": "i-ngfw123",
+            "management_ip": "10.1.4.10",
+            "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+
+        def subprocess_side_effect(*args, **kwargs):
+            cmd = args[0]
+            result = MagicMock()
+            result.returncode = 0
+            if "output" in cmd and "--json" in cmd:
+                result.stdout = json.dumps(outputs)
+            else:
+                result.stdout = ""
+            result.stderr = ""
+            return result
+
+        mocker.patch("subprocess.run", side_effect=subprocess_side_effect)
+
+        mock_ssh_executor = MagicMock()
+        mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
+
+        mock_step_result = MagicMock()
+        mock_step_result.step_name = "verify_device_cert"
+        mock_step_result.stdout = "serial: 007200001267"
+
+        mock_setup_orchestrator = MagicMock()
+        mock_setup_orchestrator.orchestrate.return_value = MagicMock(
+            success=True,
+            step_results=[mock_step_result],
+        )
+        mocker.patch("main.SetupOrchestrator", return_value=mock_setup_orchestrator)
+
+        mock_aws_executor = MagicMock()
+        mock_aws_executor.register_target.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_target_healthy.return_value = MagicMock(success=True)
+        mock_aws_executor.stop_instance.return_value = MagicMock(success=True)
+        mock_aws_executor.wait_for_stopped.return_value = MagicMock(success=True)
+        mocker.patch("main.AWSExecutor", return_value=mock_aws_executor)
+
+        # Mock OpsOrchestrator for stop operation
+        mock_ops_orchestrator = MagicMock()
+        mock_ops_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
+        mocker.patch("main.OpsOrchestrator", return_value=mock_ops_orchestrator)
+
+        from main import run_ngfw_pulumi
+
+        run_ngfw_pulumi("up", self.TEST_REQUEST_ID)
+
+        # Verify status progression: provisioning -> ready -> stopping -> stopped
+        assert "provisioning" in status_events
+        assert "ready" in status_events
+        assert "stopping" in status_events
+        assert "stopped" in status_events
+
+        # Verify order
+        prov_idx = status_events.index("provisioning")
+        ready_idx = status_events.index("ready")
+        stopping_idx = status_events.index("stopping")
+        stopped_idx = status_events.index("stopped")
+
+        assert prov_idx < ready_idx < stopping_idx < stopped_idx

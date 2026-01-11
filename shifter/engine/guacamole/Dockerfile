@@ -1,59 +1,23 @@
 # Guacamole Client with Authentication Extensions
 #
-# Extends the official guacamole/guacamole image to add:
-# - SSO/OIDC extension for Cognito authentication
-# - JSON auth extension for on-the-fly RDP connections from Portal
+# Uses the official guacamole/guacamole image with extensions enabled via env vars.
+# The base image includes extensions in /opt/guacamole/extensions-available/
+# and the entrypoint symlinks them to $GUACAMOLE_HOME/extensions/ when enabled.
+#
+# Required environment variables for OIDC:
+# - OPENID_AUTHORIZATION_ENDPOINT, OPENID_JWKS_ENDPOINT, OPENID_ISSUER
+# - OPENID_CLIENT_ID, OPENID_REDIRECT_URI
+#
+# Required environment variables for JSON auth:
+# - JSON_SECRET_KEY: 128-bit hex key for signing/encrypting JSON auth payloads
 #
 # Reference: https://guacamole.apache.org/doc/gug/guacamole-docker.html
 
 ARG GUACAMOLE_VERSION=1.5.5
 FROM guacamole/guacamole:${GUACAMOLE_VERSION}
 
-# Re-declare ARG after FROM (Docker scoping requires this)
-ARG GUACAMOLE_VERSION=1.5.5
-
-# GUACAMOLE_HOME is /etc/guacamole in the official image
-# Extensions go in $GUACAMOLE_HOME/extensions
-ENV GUACAMOLE_HOME=/etc/guacamole
-
-USER root
-
-# Download and install authentication extensions
-RUN set -eux; \
-    # Create extensions directory
-    mkdir -p "${GUACAMOLE_HOME}/extensions"; \
-    \
-    # Download SSO/OIDC extension
-    wget -q -O /tmp/guacamole-auth-sso.tar.gz \
-        "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/binary/guacamole-auth-sso-${GUACAMOLE_VERSION}.tar.gz"; \
-    tar -xzf /tmp/guacamole-auth-sso.tar.gz -C /tmp; \
-    cp "/tmp/guacamole-auth-sso-${GUACAMOLE_VERSION}/openid/guacamole-auth-sso-openid-${GUACAMOLE_VERSION}.jar" \
-        "${GUACAMOLE_HOME}/extensions/"; \
-    \
-    # Download JSON auth extension
-    wget -q -O /tmp/guacamole-auth-json.tar.gz \
-        "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/binary/guacamole-auth-json-${GUACAMOLE_VERSION}.tar.gz"; \
-    tar -xzf /tmp/guacamole-auth-json.tar.gz -C /tmp; \
-    cp "/tmp/guacamole-auth-json-${GUACAMOLE_VERSION}/guacamole-auth-json-${GUACAMOLE_VERSION}.jar" \
-        "${GUACAMOLE_HOME}/extensions/"; \
-    \
-    # Cleanup
-    rm -rf /tmp/guacamole-auth-*; \
-    \
-    # Verify extensions installed
-    ls -la "${GUACAMOLE_HOME}/extensions/"
-
-# Drop back to non-root (guacamole user created by base image)
-USER guacamole
-
-# Environment variables for OIDC authentication (set via ECS task definition):
-# - OPENID_AUTHORIZATION_ENDPOINT: Cognito OAuth2 authorization URL
-# - OPENID_JWKS_ENDPOINT: Cognito JWKS endpoint for token validation
-# - OPENID_ISSUER: Cognito issuer URL
-# - OPENID_CLIENT_ID: Cognito app client ID
-# - OPENID_REDIRECT_URI: Guacamole callback URL
-# - OPENID_SCOPE: OAuth scopes (default: "openid profile email")
-# - OPENID_USERNAME_CLAIM_TYPE: Claim to use as username (default: "email")
+# Extensions are enabled via environment variables in ECS task definition:
+# - OPENID_ENABLED=true (auto-detected when OPENID_* vars are set)
+# - JSON_ENABLED=true
 #
-# Environment variable for JSON authentication:
-# - JSON_SECRET_KEY: 128-bit hex key for signing/encrypting JSON auth payloads
+# The entrypoint handles symlinking extensions from /opt/guacamole/extensions-available/

@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Guacamole RDP for Range instances
 
+### Fixed
+- tmux now used for Terminal UI sessions
+
 ## [0.10.5] - 2025-01-06
 
 ### Changed

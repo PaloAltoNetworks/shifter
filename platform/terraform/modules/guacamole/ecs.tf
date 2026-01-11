@@ -12,8 +12,8 @@
 
 locals {
   # Base environment variables for guacamole-client
-  # Note: Extensions are pre-installed in Dockerfile, not enabled via *_ENABLED env vars
-  # Using *_ENABLED would conflict with pre-installed JARs (entrypoint tries to symlink)
+  # Extensions are enabled via *_ENABLED env vars - the official entrypoint
+  # symlinks them from /opt/guacamole/extensions-available/
   guacamole_base_env = [
     # Guacd connection via service discovery
     { name = "GUACD_HOSTNAME", value = "guacd.guacamole.${var.environment}.internal" },
@@ -26,11 +26,13 @@ locals {
 
     # Auto-create schema and default admin on first startup
     { name = "POSTGRESQL_AUTO_CREATE_ACCOUNTS", value = "true" },
+
+    # Enable JSON auth extension for RDP connections from Portal
+    { name = "JSON_ENABLED", value = "true" },
   ]
 
   # OIDC environment variables (only when enabled)
   # Uses local values computed in cognito.tf from the Cognito app client
-  # Note: OPENID_ENABLED is NOT set because extension is pre-installed in Dockerfile
   guacamole_oidc_env = var.enable_oidc ? [
     { name = "OPENID_AUTHORIZATION_ENDPOINT", value = local.oidc_authorization_endpoint },
     { name = "OPENID_JWKS_ENDPOINT", value = local.oidc_jwks_endpoint },

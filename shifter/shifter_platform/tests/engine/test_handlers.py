@@ -537,258 +537,25 @@ class TestProcessRangeEvent:
 
 @pytest.mark.django_db
 class TestHandleProvisioned:
-    """Tests for _handle_provisioned handler."""
+    """Tests for _handle_provisioned handler.
 
-    # ---------------------------------------------------------------------
-    # Happy path - provisioned event processing
-    # ---------------------------------------------------------------------
+    _handle_provisioned is now notification-only (log only, no DB updates).
+    The provisioner writes all state directly to the database before
+    publishing the range.provisioned event.
+    """
 
-    def test_updates_provisioned_instances(self, user):
-        """Handler updates provisioned_instances from event."""
+    def test_logs_provisioned_event(self, user, caplog):
+        """Handler logs INFO when receiving provisioned event."""
         from engine.handlers import process_range_event
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PROVISIONING.value,
-            range_config={
-                "scenario_id": "basic",
-                "user_id": user.id,
-                "instances": [
-                    {
-                        "uuid": "uuid-attacker-123",
-                        "role": "attacker",
-                        "os_type": "kali",
-                    },
-                    {"uuid": "uuid-victim-456", "role": "victim", "os_type": "ubuntu"},
-                ],
-            },
-        )
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.provisioned",
-                    "range_id": range_obj.id,
+                    "event_id": "evt-12345",
+                    "request_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "range_id": 42,
                     "user_id": user.id,
-                    "instances": [
-                        {
-                            "role": "attacker",
-                            "os": "kali",
-                            "instance_id": "i-attacker123",
-                            "private_ip": "10.1.2.10",
-                            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key-attacker",
-                        },
-                        {
-                            "role": "victim",
-                            "os": "ubuntu",
-                            "instance_id": "i-victim456",
-                            "private_ip": "10.1.2.20",
-                            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key-victim",
-                        },
-                    ],
-                    "subnet_id": "subnet-123",
-                    "subnet_cidr": "10.1.2.0/24",
-                    "pulumi_stack": "range-42",
-                }
-            )
-        }
-
-        process_range_event(message)
-
-        range_obj.refresh_from_db()
-        assert range_obj.provisioned_instances is not None
-        assert len(range_obj.provisioned_instances) == 2
-
-        # Check that UUIDs from range_config are merged with provisioner data
-        attacker = next(i for i in range_obj.provisioned_instances if i["role"] == "attacker")
-        assert attacker["uuid"] == "uuid-attacker-123"
-        assert attacker["instance_id"] == "i-attacker123"
-        assert attacker["private_ip"] == "10.1.2.10"
-        assert attacker["ssh_key_secret_arn"] == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key-attacker"
-
-        victim = next(i for i in range_obj.provisioned_instances if i["role"] == "victim")
-        assert victim["uuid"] == "uuid-victim-456"
-        assert victim["instance_id"] == "i-victim456"
-        assert victim["private_ip"] == "10.1.2.20"
-
-        # Check other fields
-        assert range_obj.subnet_id == "subnet-123"
-        assert range_obj.subnet_cidr == "10.1.2.0/24"
-        assert range_obj.pulumi_stack == "range-42"
-
-    def test_handles_missing_range_config(self, user):
-        """Handler works even if range_config is empty (UUIDs will be None)."""
-        from engine.handlers import process_range_event
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PROVISIONING.value,
-            range_config=None,  # No range_config
-        )
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.provisioned",
-                    "range_id": range_obj.id,
-                    "user_id": user.id,
-                    "instances": [
-                        {
-                            "role": "attacker",
-                            "os": "kali",
-                            "instance_id": "i-attacker123",
-                            "private_ip": "10.1.2.10",
-                            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key",
-                        },
-                    ],
-                }
-            )
-        }
-
-        process_range_event(message)
-
-        range_obj.refresh_from_db()
-        assert range_obj.provisioned_instances is not None
-        assert len(range_obj.provisioned_instances) == 1
-        # UUID will be None since no range_config
-        assert range_obj.provisioned_instances[0]["uuid"] is None
-        assert range_obj.provisioned_instances[0]["instance_id"] == "i-attacker123"
-
-    def test_get_instance_by_uuid_works_after_provisioned(self, user):
-        """After processing provisioned event, get_instance_by_uuid returns correct data."""
-        from engine.handlers import process_range_event
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PROVISIONING.value,
-            range_config={
-                "scenario_id": "basic",
-                "user_id": user.id,
-                "instances": [
-                    {
-                        "uuid": "uuid-attacker-123",
-                        "role": "attacker",
-                        "os_type": "kali",
-                    },
-                ],
-            },
-        )
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.provisioned",
-                    "range_id": range_obj.id,
-                    "user_id": user.id,
-                    "instances": [
-                        {
-                            "role": "attacker",
-                            "os": "kali",
-                            "instance_id": "i-attacker123",
-                            "private_ip": "10.1.2.10",
-                            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key",
-                        },
-                    ],
-                }
-            )
-        }
-
-        process_range_event(message)
-
-        range_obj.refresh_from_db()
-        # This is the actual lookup used by connect_terminal
-        instance = range_obj.get_instance_by_uuid("uuid-attacker-123")
-        assert instance is not None
-        assert instance["private_ip"] == "10.1.2.10"
-        assert instance["ssh_key_secret_arn"] == "arn:aws:secretsmanager:us-east-2:123:secret:ssh-key"
-
-    # ---------------------------------------------------------------------
-    # Error handling
-    # ---------------------------------------------------------------------
-
-    def test_handles_missing_range(self, caplog):
-        """Handler logs warning when Range not found for provisioned event."""
-        from engine.handlers import process_range_event
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.provisioned",
-                    "range_id": 999999,
-                    "user_id": 42,
-                    "instances": [],
-                }
-            )
-        }
-
-        with caplog.at_level(logging.WARNING, logger="engine.handlers"):
-            process_range_event(message)
-
-        assert log_contains(caplog, "Range not found for provisioned event")
-        assert log_contains(caplog, "999999")
-
-    def test_handles_user_id_mismatch(self, user, caplog):
-        """Handler logs error when user_id doesn't match Range."""
-        from engine.handlers import process_range_event
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PROVISIONING.value,
-        )
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.provisioned",
-                    "range_id": range_obj.id,
-                    "user_id": 999999,  # Wrong user
-                    "instances": [],
-                }
-            )
-        }
-
-        with caplog.at_level(logging.ERROR, logger="engine.handlers"):
-            process_range_event(message)
-
-        assert log_contains(caplog, "user_id mismatch in provisioned event")
-
-        # provisioned_instances should be unchanged
-        range_obj.refresh_from_db()
-        assert range_obj.provisioned_instances is None
-
-    def test_logs_info_on_successful_update(self, user, caplog):
-        """Handler logs INFO when provisioned_instances successfully updated."""
-        from engine.handlers import process_range_event
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PROVISIONING.value,
-            range_config={
-                "instances": [
-                    {"uuid": "uuid-123", "role": "attacker", "os_type": "kali"}
-                ]
-            },
-        )
-
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.provisioned",
-                    "range_id": range_obj.id,
-                    "user_id": user.id,
-                    "instances": [
-                        {
-                            "role": "attacker",
-                            "os": "kali",
-                            "instance_id": "i-123",
-                            "private_ip": "10.1.2.10",
-                        },
-                    ],
                 }
             )
         }
@@ -796,6 +563,59 @@ class TestHandleProvisioned:
         with caplog.at_level(logging.INFO, logger="engine.handlers"):
             process_range_event(message)
 
-        assert log_contains(caplog, "Engine updated provisioned_instances")
-        assert log_contains(caplog, f"range_id={range_obj.id}")
-        assert log_contains(caplog, "instances=1")
+        assert log_contains(caplog, "Engine received range.provisioned")
+        assert log_contains(caplog, "request_id=550e8400-e29b-41d4-a716-446655440000")
+        assert log_contains(caplog, "range_id=42")
+        assert log_contains(caplog, "event_id=evt-12345")
+
+    def test_does_not_modify_database(self, user):
+        """Handler does not modify Range model (provisioner writes directly)."""
+        from engine.handlers import process_range_event
+        from engine.models import Range
+
+        range_obj = Range.objects.create(
+            user=user,
+            status=ResourceStatus.PROVISIONING.value,
+            provisioned_instances=None,
+        )
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.provisioned",
+                    "event_id": "evt-12345",
+                    "request_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "range_id": range_obj.id,
+                    "user_id": user.id,
+                }
+            )
+        }
+
+        process_range_event(message)
+
+        # Handler is log-only - provisioned_instances should be unchanged
+        range_obj.refresh_from_db()
+        assert range_obj.provisioned_instances is None
+
+    def test_handles_event_without_range_in_db(self, caplog):
+        """Handler logs event even if Range not in DB (notification-only)."""
+        from engine.handlers import process_range_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.provisioned",
+                    "event_id": "evt-12345",
+                    "request_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "range_id": 999999,
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with caplog.at_level(logging.INFO, logger="engine.handlers"):
+            # Should not raise - just log
+            process_range_event(message)
+
+        assert log_contains(caplog, "Engine received range.provisioned")
+        assert log_contains(caplog, "range_id=999999")

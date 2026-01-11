@@ -96,8 +96,14 @@ def _infer_request_type(request_spec: RequestSpec) -> str:
     raise ValueError("RequestSpec must contain RangeSpec or NGFW InstanceSpec")
 
 
-def _interpret_instance(instance_spec: InstanceSpec, request: Request) -> Instance:
-    """Create Instance and any nested Apps from an InstanceSpec."""
+def _interpret_instance(instance_spec: InstanceSpec, request: Request, subnet: Subnet | None = None) -> Instance:
+    """Create Instance and any nested Apps from an InstanceSpec.
+
+    Args:
+        instance_spec: InstanceSpec from the hydrated request.
+        request: Parent Request this instance belongs to.
+        subnet: Optional Subnet this instance belongs to (for Range instances).
+    """
     from engine.models import Instance
     from shared.enums import ResourceStatus
 
@@ -107,6 +113,7 @@ def _interpret_instance(instance_spec: InstanceSpec, request: Request) -> Instan
     instance = Instance.objects.create(
         uuid=instance_uuid,
         request=request,
+        subnet=subnet,
         role=instance_spec.role,
         os_type=instance_spec.os_type,
         spec=instance_spec.model_dump(mode="json"),
@@ -191,6 +198,6 @@ def _interpret_subnet(subnet_spec: SubnetSpec, request: Request) -> Subnet:
 
     # Create instances within this subnet
     for instance_spec in subnet_spec.instances:
-        _interpret_instance(instance_spec, request)
+        _interpret_instance(instance_spec, request, subnet=subnet)
 
     return subnet

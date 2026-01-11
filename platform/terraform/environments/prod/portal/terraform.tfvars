@@ -73,7 +73,7 @@ user_storage_bucket = "shifter-user-storage-7a3f9c2e"
 # AMI IDs are now managed via SSM Parameter Store (/shifter/ami/*)
 # See shifter/packer/ for AMI build configuration
 
-victim_instance_type = "t3.medium"
+victim_instance_type = "t3.large"
 kali_instance_type   = "t3.medium"
 
 # ------------------------------------------------------------------------------

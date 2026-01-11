@@ -10,7 +10,6 @@ from django.core.management import call_command
 
 from management.management.commands.check_model_fks import (
     ALL_LAYERS,
-    LAYER_INDEX,
     REVERSE_RELATION_TYPES,
     get_layer_for_app,
     is_violation,
@@ -18,34 +17,33 @@ from management.management.commands.check_model_fks import (
 
 
 class TestIsViolation:
-    """Tests for is_violation helper function."""
+    """Tests for is_violation helper function.
 
-    def test_lower_to_higher_is_violation(self):
-        """Importing from lower layer to higher layer is a violation."""
-        assert is_violation("shared", "engine") is True
-        assert is_violation("shared", "cms") is True
-        assert is_violation("engine", "cms") is True
-        assert is_violation("engine", "management") is True
-        assert is_violation("cms", "management") is True
-        assert is_violation("cms", "mission_control") is True
+    The platform enforces ZERO cross-layer FK coupling.
+    Any FK between layers is a violation - no exceptions.
+    """
 
-    def test_higher_to_lower_is_not_violation(self):
-        """Importing from higher layer to lower layer is allowed."""
-        assert is_violation("engine", "shared") is False
-        assert is_violation("cms", "shared") is False
-        assert is_violation("cms", "engine") is False
-        assert is_violation("mission_control", "shared") is False
-        assert is_violation("mission_control", "cms") is False
-
-    def test_unknown_layer_is_not_violation(self):
-        """Unknown layers are not flagged as violations."""
-        assert is_violation("unknown", "cms") is False
-        assert is_violation("cms", "unknown") is False
+    def test_any_cross_layer_fk_is_violation(self):
+        """Any FK between different layers is a violation."""
+        # All combinations of different layers should be violations
+        for from_layer in ALL_LAYERS:
+            for to_layer in ALL_LAYERS:
+                if from_layer != to_layer:
+                    assert is_violation(from_layer, to_layer) is True, (
+                        f"{from_layer} -> {to_layer} should be a violation"
+                    )
 
     def test_same_layer_is_not_violation(self):
         """Same layer to same layer is not a violation."""
         for layer in ALL_LAYERS:
             assert is_violation(layer, layer) is False
+
+    def test_unknown_layer_is_not_violation(self):
+        """Unknown layers are not flagged as violations."""
+        assert is_violation("unknown", "cms") is False
+        assert is_violation("cms", "unknown") is False
+        assert is_violation("auth", "cms") is False
+        assert is_violation("cms", "contenttypes") is False
 
 
 class TestGetLayerForApp:
@@ -73,18 +71,6 @@ class TestLayerConstants:
         assert "cms" in ALL_LAYERS
         assert "management" in ALL_LAYERS
         assert "mission_control" in ALL_LAYERS
-
-    def test_layer_index_matches_all_layers(self):
-        """LAYER_INDEX has entry for each layer in ALL_LAYERS."""
-        for layer in ALL_LAYERS:
-            assert layer in LAYER_INDEX
-
-    def test_layer_index_order(self):
-        """LAYER_INDEX reflects correct hierarchy (shared lowest)."""
-        assert LAYER_INDEX["shared"] < LAYER_INDEX["engine"]
-        assert LAYER_INDEX["engine"] < LAYER_INDEX["cms"]
-        assert LAYER_INDEX["cms"] < LAYER_INDEX["management"]
-        assert LAYER_INDEX["management"] < LAYER_INDEX["mission_control"]
 
     def test_reverse_relation_types(self):
         """REVERSE_RELATION_TYPES contains Django reverse relation classes."""

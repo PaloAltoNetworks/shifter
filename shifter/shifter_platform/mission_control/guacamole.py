@@ -147,6 +147,8 @@ def create_guacamole_rdp_url(
     hostname: str,
     port: int = 3389,
     expires_minutes: int = 5,
+    rdp_username: str | None = None,
+    rdp_password: str | None = None,
 ) -> str:
     """Create a signed Guacamole URL for RDP access.
 
@@ -158,6 +160,8 @@ def create_guacamole_rdp_url(
         hostname: Target host IP for RDP
         port: RDP port (default 3389)
         expires_minutes: Minutes until URL expires
+        rdp_username: Windows username for RDP login
+        rdp_password: Windows password for RDP login
 
     Returns:
         Full Guacamole URL with signed 'data' parameter
@@ -166,7 +170,7 @@ def create_guacamole_rdp_url(
     connections = {
         connection_name: {
             "protocol": "rdp",
-            "parameters": create_rdp_connection_params(hostname, port),
+            "parameters": create_rdp_connection_params(hostname, port, username=rdp_username, password=rdp_password),
         }
     }
 

@@ -354,6 +354,7 @@ jobs:
           APP_SECRET_ARN=$(get_param "$PS_PREFIX/app-secret-arn")
           COGNITO_SECRET_ARN=$(get_param "$PS_PREFIX/cognito-secret-arn")
           GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" || echo "")
+          GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" || echo "")
           PULUMI_ECS_CLUSTER_ARN=$(get_param "$PS_PREFIX/pulumi-ecs-cluster-arn")
           PULUMI_TASK_DEFINITION_ARN=$(get_param "$PS_PREFIX/pulumi-task-definition-arn")
           PULUMI_ECS_SECURITY_GROUP_ID=$(get_param "$PS_PREFIX/pulumi-ecs-security-group-id")
@@ -369,6 +370,7 @@ jobs:
           COMMON_ENV="-e AWS_REGION=$AWS_REGION -e AWS_S3_BUCKET_NAME=$S3_BUCKET -e DB_SECRET_ARN=$DB_SECRET_ARN"
           COMMON_ENV="$COMMON_ENV -e APP_SECRET_ARN=$APP_SECRET_ARN -e COGNITO_SECRET_ARN=$COGNITO_SECRET_ARN"
           [ -n "$GUACAMOLE_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
+          [ -n "$GUACAMOLE_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
           COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
           COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME -e PULUMI_ECS_CLUSTER_ARN=$PULUMI_ECS_CLUSTER_ARN"
           COMMON_ENV="$COMMON_ENV -e PULUMI_TASK_DEFINITION_ARN=$PULUMI_TASK_DEFINITION_ARN"

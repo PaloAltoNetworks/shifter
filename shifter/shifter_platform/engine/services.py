@@ -309,10 +309,23 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     role = instance.get("role", "instance")
     connection_name = f"{role}-{range_obj.id}"
 
+    # Get RDP credentials based on OS type
+    # TODO: Move instance default passwords to CMS (#542)
+    rdp_username = None
+    rdp_password = None
+    if os_type == "windows":
+        rdp_username = "Administrator"
+        rdp_password = "CortexSavesTheDay!"  # nosec B105 - demo environment
+    elif os_type == "kali":
+        rdp_username = "kali"
+        rdp_password = "kali"  # nosec B105 - Kali OS default
+
     return {
         "private_ip": private_ip,
         "os_type": os_type,
         "connection_name": connection_name,
+        "rdp_username": rdp_username,
+        "rdp_password": rdp_password,
     }
 
 

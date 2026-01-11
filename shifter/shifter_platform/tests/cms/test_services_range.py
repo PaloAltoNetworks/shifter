@@ -530,7 +530,7 @@ class TestCreateRangeEngineCall:
         range_spec = request_spec.items[0]
         assert isinstance(range_spec, RangeSpec)
         assert range_spec.scenario_id == "basic"
-        assert isinstance(range_spec.instances, list)
+        assert isinstance(range_spec.all_instances, list)
 
     @patch("cms.services.engine_create_range")
     def test_range_request_has_correct_scenario_id(self, mock_engine, user, windows_agent):
@@ -552,7 +552,7 @@ class TestCreateRangeEngineCall:
 
         request_spec = mock_engine.call_args[0][0]
         range_spec = request_spec.items[0]
-        instances = range_spec.instances
+        instances = range_spec.all_instances
 
         # Basic scenario has attacker and victim
         assert len(instances) == 2

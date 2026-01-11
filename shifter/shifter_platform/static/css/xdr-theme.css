@@ -236,28 +236,51 @@ body.xdr-dark-theme {
     font-family: monospace;
 }
 
-/* Status */
+/* Status indicators */
+.status {
+    display: inline-flex;
+    align-items: center;
+}
+
 .status-dot {
     display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     margin-right: 8px;
+    flex-shrink: 0;
 }
 
 .status-online .status-dot,
-.status-active .status-dot { background: #00d26a; }
-.status-offline .status-dot { background: #707070; }
-.status-error .status-dot { background: #ff4d4f; }
+.status-active .status-dot {
+    background: #00d26a;
+    box-shadow: 0 0 6px rgb(0, 210, 106, 0.6);
+}
+
+.status-offline .status-dot,
+.status-paused .status-dot { background: #707070; }
+
+.status-error .status-dot {
+    background: #ff4d4f;
+    box-shadow: 0 0 6px rgb(255, 77, 79, 0.6);
+}
 
 .status-provisioning .status-dot {
     background: #faad14;
-    animation: pulse-dot 1.5s infinite;
+    box-shadow: 0 0 8px rgb(250, 173, 20, 0.8);
+    animation: pulse-glow 1.5s infinite;
 }
 
-@keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
+@keyframes pulse-glow {
+    0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 8px rgb(250, 173, 20, 0.8);
+    }
+
+    50% {
+        opacity: 0.7;
+        box-shadow: 0 0 12px rgb(250, 173, 20, 1);
+    }
 }
 
 /* Empty State */

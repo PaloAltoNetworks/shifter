@@ -146,15 +146,17 @@ def write_provisioned_state(
             # (engine_instance table may not exist yet, so we store in Range.provisioned_instances)
             provisioned_instances = []
             for inst in instances:
-                provisioned_instances.append({
-                    "uuid": inst.get("uuid"),
-                    "role": inst.get("role"),
-                    "os_type": inst.get("os"),
-                    "subnet_name": inst.get("subnet_name"),
-                    "instance_id": inst.get("instance_id"),
-                    "private_ip": inst.get("private_ip"),
-                    "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
-                })
+                provisioned_instances.append(
+                    {
+                        "uuid": inst.get("uuid"),
+                        "role": inst.get("role"),
+                        "os_type": inst.get("os"),
+                        "subnet_name": inst.get("subnet_name"),
+                        "instance_id": inst.get("instance_id"),
+                        "private_ip": inst.get("private_ip"),
+                        "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
+                    }
+                )
 
             cur.execute(
                 """
@@ -164,10 +166,227 @@ def write_provisioned_state(
                 """,
                 (json.dumps(provisioned_instances), range_id),
             )
-            logger.debug("Updated Range.provisioned_instances: range_id=%s count=%d", range_id, len(provisioned_instances))
+            logger.debug(
+                "Updated Range.provisioned_instances: range_id=%s count=%d",
+                range_id,
+                len(provisioned_instances),
+            )
 
         conn.commit()
-    logger.info("Wrote provisioned state to DB: range_id=%s subnets=%d instances=%d", range_id, len(subnets), len(instances))
+    logger.info(
+        "Wrote provisioned state to DB: range_id=%s subnets=%d instances=%d",
+        range_id,
+        len(subnets),
+        len(instances),
+    )
+
+
+def get_user_ngfw_data(user_id: int) -> dict | None:
+    """Get NGFW data for a user (if they have one provisioned).
+
+    Queries for a ready/active NGFW Instance belonging to this user.
+
+    Args:
+        user_id: Django User ID.
+
+    Returns:
+        Dictionary with ec2_instance_id, management_ip, ssh_key_secret_arn,
+        and ngfw_request_id. Returns None if user has no NGFW.
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                r.request_id,
+                i.state,
+                i.status
+            FROM engine_instance i
+            JOIN engine_request r ON i.request_id = r.id
+            WHERE r.user_id = %s
+              AND i.role = 'ngfw'
+              AND i.status IN ('ready', 'active', 'stopped')
+            ORDER BY i.created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        request_id = str(row[0])
+        state = row[1] if row[1] else {}
+        status = row[2]
+
+        return {
+            "ngfw_request_id": request_id,
+            "ec2_instance_id": state.get("ec2_instance_id"),
+            "management_ip": state.get("management_ip"),
+            "ssh_key_secret_arn": state.get("ssh_key_secret_arn"),
+            "status": status,
+        }
+
+
+def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
+    """Configure user's NGFW with subnet addresses and security rules.
+
+    Starts the NGFW if stopped, waits for SSH, then runs the configure plan.
+
+    Args:
+        user_id: Django User ID who owns the NGFW.
+        subnets: List of subnet dicts with 'name', 'cidr', 'connected_to'.
+        range_id: Range ID for unique naming of addresses/rules.
+
+    Raises:
+        ValueError: If user has no NGFW provisioned.
+        RuntimeError: If NGFW configuration fails.
+    """
+    from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
+
+    # Get user's NGFW
+    ngfw_data = get_user_ngfw_data(user_id)
+    if not ngfw_data:
+        logger.warning("User %s has no NGFW, skipping subnet configuration", user_id)
+        return
+
+    ngfw_request_id = ngfw_data["ngfw_request_id"]
+    management_ip = ngfw_data["management_ip"]
+    ssh_key_secret_arn = ngfw_data["ssh_key_secret_arn"]
+    status = ngfw_data["status"]
+
+    if not management_ip or not ssh_key_secret_arn:
+        logger.warning("NGFW missing management_ip or ssh_key, skipping config")
+        return
+
+    # Start NGFW if stopped
+    if status == "stopped":
+        logger.info("Starting stopped NGFW for subnet configuration...")
+        run_ngfw_operation("start", ngfw_request_id)
+
+    # Get SSH private key from Secrets Manager
+    secrets_client = boto3.client("secretsmanager")
+    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+    private_key = secret_response["SecretString"]
+
+    # Create SSH executor and wait for NGFW to be ready
+    ssh_executor = SSHExecutor(private_key=private_key)
+    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
+
+    # Build and execute the configure plan
+    plan = NGFWConfigureSubnetsPlan()
+    steps = plan.get_steps(subnets, range_id)
+
+    # Execute steps manually since they're dynamically generated
+    for step in steps:
+        logger.info("Executing NGFW config step: %s", step.name)
+        result = ssh_executor.execute(
+            host=management_ip,
+            script=step.script,
+            stdin_input=step.stdin_input,
+            timeout_seconds=step.timeout_seconds,
+        )
+        if not result.success:
+            raise RuntimeError(f"NGFW config step '{step.name}' failed: {result.stderr}")
+        logger.info("NGFW config step '%s' completed", step.name)
+
+    logger.info("NGFW subnet configuration complete for range %s", range_id)
+
+
+def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
+    """Remove subnet addresses and security rules from user's NGFW.
+
+    Starts the NGFW if stopped, waits for SSH, then runs the remove plan.
+
+    Args:
+        user_id: Django User ID who owns the NGFW.
+        subnets: List of subnet dicts with 'name' and 'connected_to'.
+        range_id: Range ID for naming of addresses/rules to remove.
+
+    Raises:
+        RuntimeError: If NGFW configuration removal fails.
+    """
+    from plans.ngfw_configure_subnets import NGFWRemoveSubnetsPlan
+
+    # Get user's NGFW
+    ngfw_data = get_user_ngfw_data(user_id)
+    if not ngfw_data:
+        logger.warning("User %s has no NGFW, skipping subnet removal", user_id)
+        return
+
+    ngfw_request_id = ngfw_data["ngfw_request_id"]
+    management_ip = ngfw_data["management_ip"]
+    ssh_key_secret_arn = ngfw_data["ssh_key_secret_arn"]
+    status = ngfw_data["status"]
+
+    if not management_ip or not ssh_key_secret_arn:
+        logger.warning("NGFW missing management_ip or ssh_key, skipping removal")
+        return
+
+    # NGFW should NEVER be stopped while ranges are active - this indicates a bug
+    if status == "stopped":
+        logger.error(
+            "NGFW is stopped during range destroy - this should never happen! "
+            "range_id=%s user_id=%s ngfw_request_id=%s. Skipping NGFW cleanup.",
+            range_id,
+            user_id,
+            ngfw_request_id,
+        )
+        return
+
+    # Get SSH private key from Secrets Manager
+    secrets_client = boto3.client("secretsmanager")
+    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+    private_key = secret_response["SecretString"]
+
+    # Create SSH executor and wait for NGFW to be ready
+    ssh_executor = SSHExecutor(private_key=private_key)
+    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
+
+    # Build and execute the remove plan
+    plan = NGFWRemoveSubnetsPlan()
+    steps = plan.get_steps(subnets, range_id)
+
+    # Execute steps manually since they're dynamically generated
+    for step in steps:
+        logger.info("Executing NGFW remove step: %s", step.name)
+        result = ssh_executor.execute(
+            host=management_ip,
+            script=step.script,
+            stdin_input=step.stdin_input,
+            timeout_seconds=step.timeout_seconds,
+        )
+        if not result.success:
+            raise RuntimeError(f"NGFW remove step '{step.name}' failed: {result.stderr}")
+        logger.info("NGFW remove step '%s' completed", step.name)
+
+    logger.info("NGFW subnet removal complete for range %s", range_id)
+
+
+def user_has_active_ranges(user_id: int, exclude_range_id: int) -> bool:
+    """Check if user has any active ranges besides the one being destroyed.
+
+    Args:
+        user_id: Django User ID.
+        exclude_range_id: Range ID to exclude from the check.
+
+    Returns:
+        True if user has other active ranges, False otherwise.
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mission_control_range
+            WHERE user_id = %s
+              AND id != %s
+              AND status IN ('ready', 'provisioning')
+            """,
+            (user_id, exclude_range_id),
+        )
+        count = cur.fetchone()[0]
+        return count > 0
 
 
 def get_ngfw_data_by_request_id(request_id: str) -> dict:
@@ -592,11 +811,34 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     logger.info(f"Stack outputs: {json.dumps(output_data, indent=2)}")
 
     # Write provisioned state directly to DB (follows NGFW pattern)
+    subnets_output = output_data.get("subnets", {})
     write_provisioned_state(
         range_id=range_id,
-        subnets=output_data.get("subnets", {}),
+        subnets=subnets_output,
         instances=output_data.get("instances", []),
     )
+
+    # Configure user's NGFW with subnet addresses and security rules
+    # Build subnet list with CIDRs for NGFW configuration
+    range_data = get_range_data_by_request_id(request_id)
+    range_spec = range_data.get("spec", {})
+    spec_subnets = range_spec.get("subnets", [])
+
+    # Merge CIDRs from Pulumi output into subnet specs
+    subnets_for_ngfw = []
+    for subnet_spec in spec_subnets:
+        subnet_name = subnet_spec.get("name")
+        subnet_output = subnets_output.get(subnet_name, {})
+        subnets_for_ngfw.append(
+            {
+                "name": subnet_name,
+                "cidr": subnet_output.get("subnet_cidr", ""),
+                "connected_to": subnet_spec.get("connected_to", []),
+            }
+        )
+
+    if subnets_for_ngfw:
+        configure_ngfw_subnets(user_id, subnets_for_ngfw, range_id)
 
     # Publish notification-only ready event
     publish_ready(
@@ -617,6 +859,20 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
         env: Environment dictionary for subprocess.
     """
     # Engine already set status to DESTROYING before launching ECS task
+
+    # Remove NGFW subnet config BEFORE destroying AWS resources
+    # Get subnet specs from range_config for removal
+    range_data = get_range_data_by_request_id(request_id)
+    range_spec = range_data.get("spec", {})
+    spec_subnets = range_spec.get("subnets", [])
+
+    if spec_subnets:
+        try:
+            remove_ngfw_subnets(user_id, spec_subnets, range_id)
+        except Exception as e:
+            # Log but continue with destroy - don't leave AWS resources orphaned
+            logger.warning("NGFW subnet removal failed (continuing with destroy): %s", e)
+
     logger.info("Running pulumi destroy...")
 
     result = subprocess.run(  # noqa: S603
@@ -649,6 +905,16 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
         check=True,
         capture_output=True,
     )
+
+    # If this was the user's last active range, stop their NGFW to save costs
+    if not user_has_active_ranges(user_id, range_id):
+        ngfw_data = get_user_ngfw_data(user_id)
+        if ngfw_data and ngfw_data["status"] == "active":
+            logger.info("No other active ranges for user %s, stopping NGFW", user_id)
+            try:
+                run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
+            except Exception as e:
+                logger.warning("Failed to stop NGFW (non-fatal): %s", e)
 
     # Publish destroyed event
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)

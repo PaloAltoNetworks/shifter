@@ -2,24 +2,22 @@
 
 This management command inspects Django models across the platform's
 service layers and detects FK/OneToOne/M2M relationships that cross
-layer boundaries in the wrong direction.
+layer boundaries.
 
-## Layer Hierarchy
+## Layer Boundaries
 
-  - shared (0)        - lowest, common utilities
-  - engine (1)        - infrastructure provisioning
-  - cms (2)           - content management
-  - management (3)    - platform administration
-  - mission_control (4) - presentation layer (highest)
+  - shared        - common utilities
+  - engine        - infrastructure provisioning
+  - cms           - content management
+  - management    - platform administration
+  - mission_control - presentation layer
 
 ## Rules
 
-Lower layers should NOT have FKs to higher layers:
-  - engine models should not FK to cms, management, mission_control
-  - cms models should not FK to management, mission_control
-  - etc.
+NO cross-layer FKs allowed. Zero coupling between layers.
+Each layer's models can only FK to models within the same layer.
 
-FKs to Django's auth.User are allowed (special case).
+FKs to Django's auth.User and other built-in apps are allowed.
 
 Usage:
     python manage.py check_model_fks
@@ -34,9 +32,8 @@ from typing import Any
 from django.apps import apps
 from django.core.management.base import BaseCommand
 
-# Layer hierarchy - index represents position in stack (lower = lower layer)
+# All service layers
 ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control"]
-LAYER_INDEX = {layer: i for i, layer in enumerate(ALL_LAYERS)}
 
 # Apps that are allowed to be referenced from any layer
 ALLOWED_EXTERNAL_APPS = {"auth", "contenttypes", "sessions", "admin"}
@@ -48,11 +45,11 @@ REVERSE_RELATION_TYPES = {"ManyToOneRel", "OneToOneRel", "ManyToManyRel"}
 def is_violation(from_layer: str, to_layer: str) -> bool:
     """Check if a FK from from_layer to to_layer is a violation.
 
-    Violations occur when a lower layer has a FK to a higher layer.
+    ANY cross-layer FK is a violation. Zero coupling between layers.
     """
-    if from_layer not in LAYER_INDEX or to_layer not in LAYER_INDEX:
+    if from_layer not in ALL_LAYERS or to_layer not in ALL_LAYERS:
         return False
-    return LAYER_INDEX[from_layer] < LAYER_INDEX[to_layer]
+    return from_layer != to_layer  # Any cross-layer FK is a violation
 
 
 def get_layer_for_app(app_label: str) -> str | None:

@@ -292,7 +292,11 @@ class TestInstanceSpec:
 
 
 class TestRangeSpec:
-    """Tests for RangeSpec Pydantic model."""
+    """Tests for RangeSpec Pydantic model.
+
+    RangeSpec uses subnets containing instances. Access all_instances
+    property to get flattened list of instances across all subnets.
+    """
 
     def test_import_range_request(self):
         """RangeSpec can be imported from shared.schemas.range."""
@@ -301,51 +305,59 @@ class TestRangeSpec:
         assert RangeSpec is not None
 
     def test_create_with_required_fields(self):
-        """RangeSpec can be created with scenario_id, user_id, and instances."""
+        """RangeSpec can be created with scenario_id, user_id, and subnets."""
         from shared.schemas.range import InstanceSpec, RangeSpec
+        from shared.schemas.subnet import SubnetSpec
 
         instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
-        request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=instances)
+        subnets = [SubnetSpec(name="attack_net", instances=instances)]
+        request = RangeSpec(scenario_id="basic-attack", user_id=1, subnets=subnets)
         assert request.scenario_id == "basic-attack"
         assert request.user_id == 1
-        assert len(request.instances) == 1
+        assert len(request.subnets) == 1
+        assert len(request.all_instances) == 1
 
     def test_scenario_id_is_required(self):
         """RangeSpec requires scenario_id field."""
         from shared.schemas.range import InstanceSpec, RangeSpec
+        from shared.schemas.subnet import SubnetSpec
 
         instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
+        subnets = [SubnetSpec(name="attack_net", instances=instances)]
         with pytest.raises(ValidationError):
-            RangeSpec(user_id=1, instances=instances)
+            RangeSpec(user_id=1, subnets=subnets)
 
     def test_user_id_is_required(self):
         """RangeSpec requires user_id field."""
         from shared.schemas.range import InstanceSpec, RangeSpec
+        from shared.schemas.subnet import SubnetSpec
 
         instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
+        subnets = [SubnetSpec(name="attack_net", instances=instances)]
         with pytest.raises(ValidationError):
-            RangeSpec(scenario_id="basic-attack", instances=instances)
+            RangeSpec(scenario_id="basic-attack", subnets=subnets)
 
-    def test_instances_is_required(self):
-        """RangeSpec requires instances field."""
+    def test_subnets_is_required(self):
+        """RangeSpec requires subnets field."""
         from shared.schemas.range import RangeSpec
 
         with pytest.raises(ValidationError):
             RangeSpec(scenario_id="basic-attack", user_id=1)
 
-    def test_instances_must_be_list(self):
-        """RangeSpec instances must be a list."""
+    def test_subnets_must_be_list(self):
+        """RangeSpec subnets must be a list."""
         from shared.schemas.range import RangeSpec
 
         with pytest.raises(ValidationError):
-            RangeSpec(scenario_id="basic-attack", user_id=1, instances="not a list")
+            RangeSpec(scenario_id="basic-attack", user_id=1, subnets="not a list")
 
-    def test_instances_can_be_empty(self):
-        """RangeSpec accepts empty instances list."""
+    def test_subnets_can_be_empty(self):
+        """RangeSpec accepts empty subnets list."""
         from shared.schemas.range import RangeSpec
 
-        request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=[])
-        assert request.instances == []
+        request = RangeSpec(scenario_id="basic-attack", user_id=1, subnets=[])
+        assert request.subnets == []
+        assert request.all_instances == []
 
     # ---------------------------------------------------------------------
     # Validators - scenario_id must be non-empty
@@ -356,14 +368,14 @@ class TestRangeSpec:
         from shared.schemas.range import RangeSpec
 
         with pytest.raises(ValidationError, match="scenario_id"):
-            RangeSpec(scenario_id="", user_id=1, instances=[])
+            RangeSpec(scenario_id="", user_id=1, subnets=[])
 
     def test_rejects_whitespace_only_scenario_id(self):
         """RangeSpec rejects whitespace-only scenario_id."""
         from shared.schemas.range import RangeSpec
 
         with pytest.raises(ValidationError, match="scenario_id"):
-            RangeSpec(scenario_id="   ", user_id=1, instances=[])
+            RangeSpec(scenario_id="   ", user_id=1, subnets=[])
 
     # ---------------------------------------------------------------------
     # Validators - user_id must be positive
@@ -374,46 +386,52 @@ class TestRangeSpec:
         from shared.schemas.range import RangeSpec
 
         with pytest.raises(ValidationError, match="user_id"):
-            RangeSpec(scenario_id="basic", user_id=0, instances=[])
+            RangeSpec(scenario_id="basic", user_id=0, subnets=[])
 
     def test_rejects_negative_user_id(self):
         """RangeSpec rejects negative user_id."""
         from shared.schemas.range import RangeSpec
 
         with pytest.raises(ValidationError, match="user_id"):
-            RangeSpec(scenario_id="basic", user_id=-1, instances=[])
+            RangeSpec(scenario_id="basic", user_id=-1, subnets=[])
 
     def test_accepts_positive_user_id(self):
         """RangeSpec accepts positive user_id."""
         from shared.schemas.range import RangeSpec
 
-        request = RangeSpec(scenario_id="basic", user_id=1, instances=[])
+        request = RangeSpec(scenario_id="basic", user_id=1, subnets=[])
         assert request.user_id == 1
 
-    def test_instances_contains_instance_specs(self):
-        """RangeSpec instances list contains InstanceSpec objects."""
+    def test_all_instances_contains_instance_specs(self):
+        """RangeSpec all_instances returns flattened InstanceSpec list."""
         from shared.schemas.range import InstanceSpec, RangeSpec
+        from shared.schemas.subnet import SubnetSpec
 
-        instances = [
-            InstanceSpec(name="attacker-kali", role="attacker", os_type="kali"),
-            InstanceSpec(name="victim-windows", role="victim", os_type="windows"),
+        attacker = InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
+        victim = InstanceSpec(name="victim-windows", role="victim", os_type="windows")
+        subnets = [
+            SubnetSpec(name="attack_net", instances=[attacker]),
+            SubnetSpec(name="target_net", instances=[victim]),
         ]
-        request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=instances)
-        assert len(request.instances) == 2
-        assert request.instances[0].role == "attacker"
-        assert request.instances[1].role == "victim"
+        request = RangeSpec(scenario_id="basic-attack", user_id=1, subnets=subnets)
+        assert len(request.all_instances) == 2
+        assert request.all_instances[0].role == "attacker"
+        assert request.all_instances[1].role == "victim"
 
     def test_model_dump_returns_dict(self):
         """RangeSpec.model_dump() returns a dictionary."""
         from shared.schemas.range import InstanceSpec, RangeSpec
+        from shared.schemas.subnet import SubnetSpec
 
         instances = [InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")]
-        request = RangeSpec(scenario_id="basic-attack", user_id=1, instances=instances)
+        subnets = [SubnetSpec(name="attack_net", instances=instances)]
+        request = RangeSpec(scenario_id="basic-attack", user_id=1, subnets=subnets)
         result = request.model_dump()
         assert isinstance(result, dict)
         assert result["scenario_id"] == "basic-attack"
         assert result["user_id"] == 1
-        assert len(result["instances"]) == 1
+        assert len(result["subnets"]) == 1
+        assert len(result["subnets"][0]["instances"]) == 1
 
     def test_model_validate_from_dict(self):
         """RangeSpec.model_validate() creates instance from dict."""
@@ -422,13 +440,18 @@ class TestRangeSpec:
         data = {
             "scenario_id": "basic-attack",
             "user_id": 1,
-            "instances": [{"name": "attacker-kali", "role": "attacker", "os_type": "kali"}],
+            "subnets": [
+                {
+                    "name": "attack_net",
+                    "instances": [{"name": "attacker-kali", "role": "attacker", "os_type": "kali"}],
+                }
+            ],
         }
         request = RangeSpec.model_validate(data)
         assert request.scenario_id == "basic-attack"
         assert request.user_id == 1
-        assert len(request.instances) == 1
-        assert request.instances[0].role == "attacker"
+        assert len(request.subnets) == 1
+        assert request.all_instances[0].role == "attacker"
 
     def test_model_validate_with_full_nested_structure(self):
         """RangeSpec.model_validate() handles fully nested dict structure."""
@@ -437,38 +460,59 @@ class TestRangeSpec:
         data = {
             "scenario_id": "advanced-scenario",
             "user_id": 42,
-            "instances": [
-                {"name": "attacker-kali", "role": "attacker", "os_type": "kali"},
+            "subnets": [
                 {
-                    "name": "victim-windows",
-                    "role": "victim",
-                    "os_type": "windows",
-                    "agent": {
-                        "s3_key": "agents/agent.msi",
-                        "filename": "cortex.msi",
-                        "sha256": "abc123",
-                    },
-                    "join_domain": True,
+                    "name": "attack_net",
+                    "instances": [
+                        {"name": "attacker-kali", "role": "attacker", "os_type": "kali"},
+                    ],
                 },
                 {
-                    "name": "dc-windows",
-                    "role": "dc",
-                    "os_type": "windows",
-                    "dc_config": {
-                        "domain_name": "lab.local",
-                        "netbios_name": "LAB",
-                    },
+                    "name": "dc_net",
+                    "instances": [
+                        {
+                            "name": "dc-windows",
+                            "role": "dc",
+                            "os_type": "windows",
+                            "dc_config": {
+                                "domain_name": "lab.local",
+                                "netbios_name": "LAB",
+                            },
+                        },
+                    ],
+                },
+                {
+                    "name": "target_net",
+                    "instances": [
+                        {
+                            "name": "victim-windows",
+                            "role": "victim",
+                            "os_type": "windows",
+                            "agent": {
+                                "s3_key": "agents/agent.msi",
+                                "filename": "cortex.msi",
+                                "sha256": "abc123",
+                            },
+                            "join_domain": True,
+                        },
+                    ],
+                    "connected_to": ["dc_net"],
                 },
             ],
         }
         request = RangeSpec.model_validate(data)
         assert request.scenario_id == "advanced-scenario"
         assert request.user_id == 42
-        assert len(request.instances) == 3
-        assert request.instances[1].agent is not None
-        assert request.instances[1].agent.filename == "cortex.msi"
-        assert request.instances[2].dc_config is not None
-        assert request.instances[2].dc_config.domain_name == "lab.local"
+        assert len(request.subnets) == 3
+        assert len(request.all_instances) == 3
+        # Find victim by role
+        victim = next(i for i in request.all_instances if i.role == "victim")
+        assert victim.agent is not None
+        assert victim.agent.filename == "cortex.msi"
+        # Find DC by role
+        dc = next(i for i in request.all_instances if i.role == "dc")
+        assert dc.dc_config is not None
+        assert dc.dc_config.domain_name == "lab.local"
 
 
 # =============================================================================

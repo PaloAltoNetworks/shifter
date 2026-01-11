@@ -12,6 +12,12 @@ from shared.enums import RequestType, ResourceStatus
 User = get_user_model()
 
 
+# Helper to create valid instance spec dicts
+def make_instance(name: str, role: str = "victim", os_type: str = "windows") -> dict:
+    """Create a valid instance spec dict for testing."""
+    return {"name": name, "role": role, "os_type": os_type}
+
+
 @pytest.fixture
 def user(db):
     """Create a test user."""
@@ -41,7 +47,10 @@ def subnet(db, request_obj):
         request=request_obj,
         name="test_network",
         data={
-            "instances": ["server1", "server2"],
+            "instances": [
+                make_instance("server1"),
+                make_instance("server2"),
+            ],
             "connected_to": ["other_network"],
         },
     )
@@ -64,7 +73,7 @@ class TestSubnetModel:
             request=request_obj,
             name="dc_network",
             data={
-                "instances": ["domain_controller"],
+                "instances": [make_instance("domain_controller", "dc")],
                 "connected_to": [],
             },
         )
@@ -73,7 +82,8 @@ class TestSubnetModel:
         assert isinstance(subnet.id, UUID)
         assert subnet.request == request_obj
         assert subnet.name == "dc_network"
-        assert subnet.data["instances"] == ["domain_controller"]
+        assert len(subnet.data["instances"]) == 1
+        assert subnet.data["instances"][0]["name"] == "domain_controller"
         assert subnet.data["connected_to"] == []
 
     def test_str_returns_name_and_id(self, subnet):
@@ -90,7 +100,7 @@ class TestSubnetModel:
         subnet = Subnet.objects.create(
             request=request_obj,
             name="auto_uuid_test",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
         )
 
         assert subnet.id is not None
@@ -103,7 +113,7 @@ class TestSubnetModel:
         subnet = Subnet.objects.create(
             request=request_obj,
             name="status_test",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
         )
 
         assert subnet.status == ResourceStatus.PENDING.value
@@ -115,12 +125,12 @@ class TestSubnetModel:
         subnet1 = Subnet.objects.create(
             request=request_obj,
             name="first",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
         )
         subnet2 = Subnet.objects.create(
             request=request_obj,
             name="second",
-            data={"instances": ["box2"], "connected_to": []},
+            data={"instances": [make_instance("box2")], "connected_to": []},
         )
 
         subnets = list(Subnet.objects.filter(request=request_obj))
@@ -150,7 +160,7 @@ class TestSubnetEntityBase:
         subnet = Subnet.objects.create(
             request=request_obj,
             name="deleted_test",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
             deleted_at=timezone.now(),
         )
 
@@ -163,7 +173,7 @@ class TestSubnetEntityBase:
         subnet = Subnet.objects.create(
             request=request_obj,
             name="terminal_test",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
         )
         assert subnet.deleted_at is None
 
@@ -180,7 +190,7 @@ class TestSubnetEntityBase:
         subnet = Subnet.objects.create(
             request=request_obj,
             name="failed_test",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
         )
 
         subnet.status = ResourceStatus.FAILED.value
@@ -205,7 +215,7 @@ class TestSubnetRelationships:
         subnet = Subnet.objects.create(
             request=request_obj,
             name="cascade_test",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
         )
         subnet_id = subnet.id
 
@@ -220,12 +230,12 @@ class TestSubnetRelationships:
         Subnet.objects.create(
             request=request_obj,
             name="subnet1",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
         )
         Subnet.objects.create(
             request=request_obj,
             name="subnet2",
-            data={"instances": ["box2"], "connected_to": []},
+            data={"instances": [make_instance("box2")], "connected_to": []},
         )
 
         assert request_obj.subnets.count() == 2
@@ -244,14 +254,22 @@ class TestSubnetData:
         """Data field stores instances list correctly."""
         from cms.models import Subnet
 
+        instances = [
+            make_instance("server1"),
+            make_instance("server2"),
+            make_instance("server3"),
+        ]
         subnet = Subnet.objects.create(
             request=request_obj,
             name="instances_test",
-            data={"instances": ["server1", "server2", "server3"]},
+            data={"instances": instances},
         )
 
         subnet.refresh_from_db()
-        assert subnet.data["instances"] == ["server1", "server2", "server3"]
+        assert len(subnet.data["instances"]) == 3
+        assert subnet.data["instances"][0]["name"] == "server1"
+        assert subnet.data["instances"][1]["name"] == "server2"
+        assert subnet.data["instances"][2]["name"] == "server3"
 
     def test_data_stores_connected_to_list(self, request_obj):
         """Data field stores connected_to list correctly."""
@@ -261,7 +279,7 @@ class TestSubnetData:
             request=request_obj,
             name="connected_test",
             data={
-                "instances": ["box1"],
+                "instances": [make_instance("box1")],
                 "connected_to": ["network_a", "network_b"],
             },
         )
@@ -276,7 +294,7 @@ class TestSubnetData:
         subnet = Subnet.objects.create(
             request=request_obj,
             name="isolated",
-            data={"instances": ["box1"], "connected_to": []},
+            data={"instances": [make_instance("box1")], "connected_to": []},
         )
 
         subnet.refresh_from_db()
@@ -311,7 +329,11 @@ class TestSubnetValidation:
 
     def test_instances_property(self, subnet):
         """instances property returns data['instances']."""
-        assert subnet.instances == ["server1", "server2"]
+        # instances property returns the raw list from data (list of dicts)
+        instances = subnet.instances
+        assert len(instances) == 2
+        assert instances[0]["name"] == "server1"
+        assert instances[1]["name"] == "server2"
 
     def test_connected_to_property(self, subnet):
         """connected_to property returns data['connected_to']."""

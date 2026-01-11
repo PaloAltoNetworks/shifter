@@ -144,13 +144,12 @@ jobs:
           echo "::notice::Type checking complete - see above for any type errors"
 
   # ===========================================================================
-  # Architecture as Code
+  # Architecture as Code (hard fail - zero tolerance)
   # ===========================================================================
 
   check-layer-imports-arch:
     name: Architecture (layer imports)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -158,11 +157,12 @@ jobs:
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Install dependencies
-        working-directory: shifter/shifter_platform
-        run: uv sync --group dev
+        working-directory: scripts/check_layer_imports
+        run: uv sync
 
       - name: Check layer imports
-        run: python scripts/check_layer_imports/check_layer_imports.py
+        working-directory: scripts/check_layer_imports
+        run: uv run python check_layer_imports.py
 
   # ===========================================================================
   # SAST
@@ -464,7 +464,6 @@ jobs:
   model-fks-arch:
     name: Architecture (model FKs)
     runs-on: self-hosted
-    continue-on-error: true
     services:
       postgres:
         image: postgres:16

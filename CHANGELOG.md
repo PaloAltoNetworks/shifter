@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.10.7] - 2025-01-08
+## [1.0.0] - 2026-01-10
 
 ### Added
 - NGFW create/destroy flow and UI
-- CyberScript DSL and initial DSL interpreter implementation for NGFW flows
+- NGFW's dynamically add routes for subnets in user ranges
+- NGFW's dynamically pause if user has no active ranges
+- CyberScript (DSL) templates and initial interpreter for all range operations (range, ngfw, dc, etc.)
+- v1.0 of the Cortex BYOT scenario template
+  - Two config options: Automated or Full Manual
+  - Automated: NGFW, DC, 2x Workstations, Server, Attacker, domain join, XDR agent install, subnet routing
+    - Remaining manual (automation coming soon): CIE, XDR Collector, Caldera
 - Improved Bedrock logging and alarms
 - Draft Cortex BYOT scenario template
 - venv enforcer hook for Claude Code
@@ -20,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NGFW models and services refactored to use schemas
 - Extended DSL and initial DSL interpreter implementation for NGFW flows
 - Templates refactored to use CyberScript DSL
+- Engine refactored to accept RequestSpec and interpret it into Engine models
+- CyberScript subnets align with actual subnets in AWS
+- AaC gate (service layer boundary violations at code or model level) fails will now block PRs
+
+### Fixed
+- Dashboard range status updates and styling
+- Better AaC checking in check_layer_imports script
 
 ## [0.10.4] - 2025-01-06
 

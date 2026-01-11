@@ -68,10 +68,11 @@ def create_range(request_spec: RequestSpec) -> UUID:
         raise ValueError("RequestSpec must contain a RangeSpec item")
 
     logger.debug(
-        "create_range: scenario=%s user_id=%s instances=%d",
+        "create_range: scenario=%s user_id=%s subnets=%d instances=%d",
         range_spec.scenario_id,
         range_spec.user_id,
-        len(range_spec.instances),
+        len(range_spec.subnets),
+        len(range_spec.all_instances),
     )
 
     # Interpret spec into models (creates Request + Instances)
@@ -105,6 +106,11 @@ def create_range(request_spec: RequestSpec) -> UUID:
         subnet_index,
         request_spec.request_id,
     )
+
+    # Link logical subnets to Range (created by interpreter, need Range FK)
+    from engine.models import Subnet
+
+    Subnet.objects.filter(request=request).update(range=range_obj)
 
     # Trigger ECS provisioning using request_id (matches NGFW pattern)
     task_arn = start_range_provisioning(request_spec.request_id)

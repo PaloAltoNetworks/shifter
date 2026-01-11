@@ -7,19 +7,28 @@ from uuid import UUID, uuid4
 import pytest
 from django.contrib.auth import get_user_model
 
-from shared.schemas import InstanceSpec, RangeSpec, RequestSpec
+from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
 
 
 def make_request_spec(
     scenario_id: str = "basic-attack",
     user_id: int = 1,
-    instances: list | None = None,
+    subnets: list | None = None,
 ) -> RequestSpec:
     """Create a RequestSpec containing a RangeSpec for testing."""
+    default_subnets = [
+        SubnetSpec(
+            name="default",
+            uuid=str(uuid4()),
+            instances=[InstanceSpec(role="attacker", os_type="kali", uuid=str(uuid4()))],
+            connected_to=[],
+        )
+    ]
     range_spec = RangeSpec(
+        uuid=str(uuid4()),
         scenario_id=scenario_id,
         user_id=user_id,
-        instances=instances or [InstanceSpec(role="attacker", os_type="kali")],
+        subnets=subnets or default_subnets,
     )
     return RequestSpec(
         request_id=uuid4(),

@@ -221,7 +221,12 @@ class TestPublishStatusUpdate:
 
 
 class TestPublishReady:
-    """Tests for publish_ready() function."""
+    """Tests for publish_ready() function.
+
+    publish_ready() is notification-only. All state (instances, subnets) is
+    written directly to the database by the provisioner before this event
+    is published.
+    """
 
     @pytest.fixture
     def mock_sns_env(self, monkeypatch):
@@ -232,48 +237,35 @@ class TestPublishReady:
             "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
         )
 
-    def test_publishes_provisioned_event_with_instances(self, mock_sns_env):
-        """Publishes range.provisioned event with instance details."""
+    def test_publishes_status_update_and_provisioned_events(self, mock_sns_env):
+        """Publishes both status update (ready) and provisioned events."""
         from events import publish_ready
 
         with patch("events._publish_event") as mock_publish:
-            instances = [
-                {"role": "attacker", "ip": "10.1.1.10"},
-                {"role": "victim", "ip": "10.1.1.20"},
-            ]
-
             publish_ready(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
-                instances=instances,
             )
 
             # Should publish both status update and provisioned event
-            assert mock_publish.call_count >= 1
+            assert mock_publish.call_count == 2
 
-            # Find the provisioned event
             calls = [call[0][0] for call in mock_publish.call_args_list]
-            provisioned_events = [c for c in calls if c.get("event_type") == "range.provisioned"]
+            event_types = [c.get("event_type") for c in calls]
 
-            assert len(provisioned_events) == 1
-            assert provisioned_events[0]["instances"] == instances
+            assert "range.status.updated" in event_types
+            assert "range.provisioned" in event_types
 
-    def test_publishes_provisioned_event_with_infrastructure_details(self, mock_sns_env):
-        """Publishes range.provisioned event with subnet and stack details."""
+    def test_provisioned_event_is_notification_only(self, mock_sns_env):
+        """Provisioned event contains only identification fields, no state data."""
         from events import publish_ready
 
         with patch("events._publish_event") as mock_publish:
-            instances = [{"role": "attacker", "ip": "10.1.1.10"}]
-
             publish_ready(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
-                instances=instances,
-                subnet_id="subnet-12345",
-                subnet_cidr="10.1.6.0/24",
-                pulumi_stack="range-42",
             )
 
             # Find the provisioned event
@@ -282,34 +274,36 @@ class TestPublishReady:
 
             assert len(provisioned_events) == 1
             event = provisioned_events[0]
-            assert event["subnet_id"] == "subnet-12345"
-            assert event["subnet_cidr"] == "10.1.6.0/24"
-            assert event["pulumi_stack"] == "range-42"
 
-    def test_publishes_provisioned_event_with_none_infrastructure_details(self, mock_sns_env):
-        """Optional infrastructure params can be None."""
+            # Should have identification fields
+            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+            assert event["range_id"] == 42
+            assert event["user_id"] == 1
+            assert "event_id" in event
+            assert "timestamp" in event
+
+            # Should NOT have state data (provisioner writes directly to DB)
+            assert "instances" not in event
+            assert "subnets" not in event
+            assert "pulumi_stack" not in event
+
+    def test_status_update_sets_ready_status(self, mock_sns_env):
+        """Status update event has new_status='ready'."""
         from events import publish_ready
 
         with patch("events._publish_event") as mock_publish:
-            instances = [{"role": "attacker", "ip": "10.1.1.10"}]
-
             publish_ready(
                 request_id="550e8400-e29b-41d4-a716-446655440000",
                 range_id=42,
                 user_id=1,
-                instances=instances,
             )
 
-            # Find the provisioned event
+            # Find the status update event
             calls = [call[0][0] for call in mock_publish.call_args_list]
-            provisioned_events = [c for c in calls if c.get("event_type") == "range.provisioned"]
+            status_events = [c for c in calls if c.get("event_type") == "range.status.updated"]
 
-            assert len(provisioned_events) == 1
-            event = provisioned_events[0]
-            # None values should still be in the event (filtered by consumers if needed)
-            assert "subnet_id" in event
-            assert "subnet_cidr" in event
-            assert "pulumi_stack" in event
+            assert len(status_events) == 1
+            assert status_events[0]["new_status"] == "ready"
 
 
 class TestPublishFailed:

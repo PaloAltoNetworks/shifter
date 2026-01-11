@@ -19,7 +19,7 @@ import pytest
 # Add parent directory to path so we can import the modules under test
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import InstanceConfig, RangeConfig
+from config import InstanceConfig, RangeConfig, SubnetConfig
 
 # =============================================================================
 # Pulumi Mocking Infrastructure
@@ -302,13 +302,36 @@ def sample_instance_config_windows():
 
 
 @pytest.fixture
-def sample_range_config(sample_instance_config_attacker, sample_instance_config_victim):
-    """Sample RangeConfig with one attacker and one victim."""
+def sample_subnet_config_attack(sample_instance_config_attacker):
+    """Sample SubnetConfig for an attack subnet."""
+    return SubnetConfig(
+        name="attack",
+        uuid="subnet-uuid-attack-123",
+        instances=[sample_instance_config_attacker],
+        connected_to=["target"],
+    )
+
+
+@pytest.fixture
+def sample_subnet_config_target(sample_instance_config_victim):
+    """Sample SubnetConfig for a target subnet."""
+    return SubnetConfig(
+        name="target",
+        uuid="subnet-uuid-target-456",
+        instances=[sample_instance_config_victim],
+        connected_to=[],
+    )
+
+
+@pytest.fixture
+def sample_range_config(sample_subnet_config_attack, sample_subnet_config_target):
+    """Sample RangeConfig with attack and target subnets."""
     return RangeConfig(
         range_id=42,
         user_id=1,
+        request_uuid="request-uuid-12345",
         environment="dev",
-        instances=[sample_instance_config_attacker, sample_instance_config_victim],
+        subnets=[sample_subnet_config_attack, sample_subnet_config_target],
         vpc_id="vpc-12345",
         vpc_cidr="10.1.0.0/16",
         route_table_id="rtb-12345",
@@ -321,34 +344,70 @@ def sample_range_config(sample_instance_config_attacker, sample_instance_config_
         dc_ami_id="ami-dc-test",
         agent_s3_bucket="shifter-agents",
         availability_zone="us-east-2a",
+        gwlb_service_name="",
     )
 
 
 @pytest.fixture
-def sample_range_config_multi_instance():
-    """Sample RangeConfig with multiple attackers and victims."""
+def sample_range_config_multi_subnet():
+    """Sample RangeConfig with multiple subnets (cortex_byot-style)."""
     return RangeConfig(
         range_id=99,
         user_id=2,
+        request_uuid="request-uuid-multi-67890",
         environment="prod",
-        instances=[
-            InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small"),
-            InstanceConfig(role="attacker", os_type="kali", instance_type="t3.medium"),
-            InstanceConfig(
-                role="victim",
-                os_type="ubuntu",
-                instance_type="t3.micro",
-                agent_id=1,
-                agent_s3_key="agents/xdr.tar.gz",
-                agent_presigned_url="https://s3.example.com/1",
+        subnets=[
+            SubnetConfig(
+                name="attack",
+                uuid="subnet-uuid-attack-multi",
+                instances=[
+                    InstanceConfig(
+                        role="attacker",
+                        os_type="kali",
+                        instance_type="t3.small",
+                    ),
+                ],
+                connected_to=["servers", "workstations"],
             ),
-            InstanceConfig(
-                role="victim",
-                os_type="windows",
-                instance_type="t3.medium",
-                agent_id=2,
-                agent_s3_key="agents/xdr.msi",
-                agent_presigned_url="https://s3.example.com/2",
+            SubnetConfig(
+                name="servers",
+                uuid="subnet-uuid-servers",
+                instances=[
+                    InstanceConfig(
+                        role="victim",
+                        os_type="ubuntu",
+                        instance_type="t3.micro",
+                        agent_s3_key="agents/xdr.tar.gz",
+                        agent_presigned_url="https://s3.example.com/1",
+                    ),
+                ],
+                connected_to=["dc_network"],
+            ),
+            SubnetConfig(
+                name="workstations",
+                uuid="subnet-uuid-workstations",
+                instances=[
+                    InstanceConfig(
+                        role="victim",
+                        os_type="windows",
+                        instance_type="t3.medium",
+                        agent_s3_key="agents/xdr.msi",
+                        agent_presigned_url="https://s3.example.com/2",
+                    ),
+                ],
+                connected_to=["dc_network"],
+            ),
+            SubnetConfig(
+                name="dc_network",
+                uuid="subnet-uuid-dc",
+                instances=[
+                    InstanceConfig(
+                        role="dc",
+                        os_type="windows",
+                        instance_type="t3.large",
+                    ),
+                ],
+                connected_to=[],
             ),
         ],
         vpc_id="vpc-prod",
@@ -363,6 +422,7 @@ def sample_range_config_multi_instance():
         dc_ami_id="ami-dc-prod",
         agent_s3_bucket="shifter-agents-prod",
         availability_zone="us-east-2b",
+        gwlb_service_name="com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123",
     )
 
 
@@ -552,17 +612,67 @@ def mock_env_vars_minimal(mocker):
 
 @pytest.fixture
 def sample_db_range_row():
-    """Sample database row for a range with instances."""
+    """Sample database row for a range with subnets (new format).
+
+    Returns tuple matching get_range_from_db query:
+    (id, user_id, request_uuid, range_config, ngfw_enabled, gwlb_service_name)
+    """
     return (
         42,  # id
         1,  # user_id
+        "request-uuid-12345",  # request_uuid
         {  # range_config
-            "instances": [
-                {"role": "attacker", "os_type": "kali"},
-                {"role": "victim", "os_type": "ubuntu", "agent": {"s3_key": "agents/xdr-agent.tar.gz"}},
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "subnet-uuid-attack",
+                    "instances": [{"role": "attacker", "os_type": "kali"}],
+                    "connected_to": ["target"],
+                },
+                {
+                    "name": "target",
+                    "uuid": "subnet-uuid-target",
+                    "instances": [
+                        {
+                            "role": "victim",
+                            "os_type": "ubuntu",
+                            "agent": {"s3_key": "agents/xdr-agent.tar.gz"},
+                        }
+                    ],
+                    "connected_to": [],
+                },
             ]
         },
         False,  # ngfw_enabled
+        "",  # gwlb_service_name (no NGFW)
+    )
+
+
+@pytest.fixture
+def sample_db_range_row_with_ngfw():
+    """Sample database row for a range with NGFW enabled."""
+    return (
+        42,  # id
+        1,  # user_id
+        "request-uuid-ngfw-12345",  # request_uuid
+        {  # range_config
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "subnet-uuid-attack",
+                    "instances": [{"role": "attacker", "os_type": "kali"}],
+                    "connected_to": ["target"],
+                },
+                {
+                    "name": "target",
+                    "uuid": "subnet-uuid-target",
+                    "instances": [{"role": "victim", "os_type": "ubuntu"}],
+                    "connected_to": [],
+                },
+            ]
+        },
+        True,  # ngfw_enabled
+        "com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123",  # gwlb_service_name
     )
 
 
@@ -572,30 +682,86 @@ def sample_db_range_row_no_agent():
     return (
         43,  # id
         2,  # user_id
+        "request-uuid-no-agent",  # request_uuid
         {  # range_config
-            "instances": [
-                {"role": "attacker", "os_type": "kali"},
-                {"role": "victim", "os_type": "ubuntu"},
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "subnet-uuid-attack-43",
+                    "instances": [{"role": "attacker", "os_type": "kali"}],
+                    "connected_to": ["target"],
+                },
+                {
+                    "name": "target",
+                    "uuid": "subnet-uuid-target-43",
+                    "instances": [{"role": "victim", "os_type": "ubuntu"}],
+                    "connected_to": [],
+                },
             ]
         },
         False,  # ngfw_enabled
+        "",  # gwlb_service_name
     )
 
 
 @pytest.fixture
-def sample_db_range_row_custom_config():
-    """Sample database row for a range with custom instance config."""
+def sample_db_range_row_multi_subnet():
+    """Sample database row for a range with 4 subnets (cortex_byot-style)."""
     return (
         44,  # id
         3,  # user_id
+        "request-uuid-multi-subnet",  # request_uuid
         {  # range_config
-            "instances": [
-                {"role": "attacker", "os_type": "kali"},
-                {"role": "victim", "os_type": "ubuntu", "agent": {"s3_key": "agents/custom.tar.gz"}},
-                {"role": "victim", "os_type": "windows", "agent": {"s3_key": "agents/custom.msi"}},
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "subnet-uuid-attack-44",
+                    "instances": [{"role": "attacker", "os_type": "kali"}],
+                    "connected_to": ["servers", "workstations"],
+                },
+                {
+                    "name": "servers",
+                    "uuid": "subnet-uuid-servers-44",
+                    "instances": [
+                        {
+                            "role": "victim",
+                            "os_type": "ubuntu",
+                            "agent": {"s3_key": "agents/linux.tar.gz"},
+                        },
+                    ],
+                    "connected_to": ["dc_network"],
+                },
+                {
+                    "name": "workstations",
+                    "uuid": "subnet-uuid-ws-44",
+                    "instances": [
+                        {
+                            "role": "victim",
+                            "os_type": "windows",
+                            "agent": {"s3_key": "agents/windows.msi"},
+                        },
+                    ],
+                    "connected_to": ["dc_network"],
+                },
+                {
+                    "name": "dc_network",
+                    "uuid": "subnet-uuid-dc-44",
+                    "instances": [
+                        {
+                            "role": "dc",
+                            "os_type": "windows",
+                            "dc_config": {
+                                "domain_name": "test.local",
+                                "netbios_name": "TEST",
+                            },
+                        },
+                    ],
+                    "connected_to": [],
+                },
             ]
         },
-        False,  # ngfw_enabled
+        True,  # ngfw_enabled
+        "com.amazonaws.vpce.us-east-2.vpce-svc-multi",  # gwlb_service_name
     )
 
 

@@ -11,11 +11,15 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
+import urllib.request
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+logger = logging.getLogger(__name__)
 
 
 def create_guacamole_auth_payload(
@@ -128,7 +132,15 @@ def create_rdp_connection_params(
         "ignore-cert": "true" if ignore_cert else "false",
         "security": security,
         "resize-method": "display-update",
-        "enable-font-smoothing": "true",
+        # Performance optimizations - reduce bandwidth and server-side rendering load
+        "color-depth": "16",
+        "disable-audio": "true",
+        "enable-wallpaper": "false",
+        "enable-theming": "false",
+        "enable-font-smoothing": "false",
+        "enable-full-window-drag": "false",
+        "enable-desktop-composition": "false",
+        "enable-menu-animations": "false",
     }
 
     if username:
@@ -137,6 +149,42 @@ def create_rdp_connection_params(
         params["password"] = password
 
     return params
+
+
+def get_guacamole_auth_token(base_url: str, encrypted_data: str) -> str:
+    """Get an auth token from Guacamole API.
+
+    Args:
+        base_url: Base Guacamole URL (e.g., 'https://portal.example.com/guacamole')
+        encrypted_data: Base64-encoded encrypted JSON payload
+
+    Returns:
+        Auth token string
+
+    Raises:
+        ValueError: If token request fails
+    """
+    base_url = base_url.rstrip("/")
+    token_url = f"{base_url}/api/tokens"
+
+    # POST the encrypted data to get a token
+    req_data = urlencode({"data": encrypted_data}).encode("utf-8")
+    req = urllib.request.Request(token_url, data=req_data)  # noqa: S310
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310 # nosec B310
+            result = json.loads(response.read().decode("utf-8"))
+            return result["authToken"]
+    except urllib.error.HTTPError as e:
+        logger.error(f"Guacamole token request failed: {e.code} {e.reason}")
+        raise ValueError(f"Failed to get Guacamole auth token: {e.reason}") from e
+    except urllib.error.URLError as e:
+        logger.error(f"Guacamole token request failed: {e.reason}")
+        raise ValueError(f"Failed to connect to Guacamole: {e.reason}") from e
+    except (KeyError, json.JSONDecodeError) as e:
+        logger.error(f"Invalid Guacamole token response: {e}")
+        raise ValueError("Invalid response from Guacamole") from e
 
 
 def create_guacamole_rdp_url(
@@ -152,6 +200,11 @@ def create_guacamole_rdp_url(
 ) -> str:
     """Create a signed Guacamole URL for RDP access.
 
+    This function:
+    1. Creates an encrypted JSON payload with connection details
+    2. POSTs to Guacamole's /api/tokens to get an auth token
+    3. Returns a URL that auto-connects to the RDP session
+
     Args:
         base_url: Base Guacamole URL (e.g., 'https://portal.example.com/guacamole')
         secret_key: 32-character hex string (128-bit key)
@@ -164,7 +217,10 @@ def create_guacamole_rdp_url(
         rdp_password: Windows password for RDP login
 
     Returns:
-        Full Guacamole URL with signed 'data' parameter
+        Full Guacamole URL with auth token that auto-connects to RDP
+
+    Raises:
+        ValueError: If secret key is invalid or token request fails
     """
     # Create connection definition
     connections = {
@@ -178,16 +234,12 @@ def create_guacamole_rdp_url(
     payload = create_guacamole_auth_payload(username, connections, expires_minutes)
     encrypted_data = sign_and_encrypt_payload(payload, secret_key)
 
-    # Build URL - the data parameter triggers JSON auth
-    # Remove trailing slash from base_url if present
+    # Get auth token from Guacamole API
     base_url = base_url.rstrip("/")
-
-    # URL-encode the base64 data (+ and / characters need encoding)
-    encoded_data = quote(encrypted_data, safe="")
+    auth_token = get_guacamole_auth_token(base_url, encrypted_data)
 
     # Build client identifier: connection_name + NULL + "c" + NULL + "json"
     # This tells Guacamole to auto-connect to the specified connection from JSON auth
-    # Note: Don't URL-encode - it's in the fragment (#), handled by browser JS directly
     client_id = base64.b64encode(f"{connection_name}\0c\0json".encode()).decode().rstrip("=")
 
-    return f"{base_url}/#/client/{client_id}?data={encoded_data}"
+    return f"{base_url}/#/client/{client_id}?token={auth_token}"

@@ -396,8 +396,15 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     else:
         username = "ubuntu"  # Default for ubuntu and other Linux distros
 
+    # Use tmux for persistent sessions on Linux instances
+    # Windows doesn't have tmux, so skip session_id for Windows
+    session_id = None
+    if os_type != "windows":
+        session_id = instance_uuid
+
     return SSHConnection(
         host=host,
         username=username,
         private_key=ssh_key,
+        session_id=session_id,
     )

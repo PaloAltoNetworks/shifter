@@ -32,6 +32,7 @@ class SSHConnection:
         port: int = 22,
         term_type: str = "xterm-256color",
         term_size: tuple[int, int] = (80, 24),
+        session_id: str | None = None,
     ):
         """
         Initialize SSH connection parameters.
@@ -43,6 +44,8 @@ class SSHConnection:
             port: SSH port (default: 22)
             term_type: Terminal type for PTY (default: xterm-256color)
             term_size: Terminal size as (columns, rows)
+            session_id: Optional tmux session ID for persistent sessions.
+                If provided, attaches to existing session or creates new one.
         """
         self.host = host
         self.username = username
@@ -50,12 +53,18 @@ class SSHConnection:
         self.port = port
         self.term_type = term_type
         self.term_size = term_size
+        self.session_id = session_id
 
         self._conn: asyncssh.SSHClientConnection | None = None
         self._process: asyncssh.SSHClientProcess | None = None
 
     async def connect(self) -> None:
-        """Establish SSH connection and start interactive shell."""
+        """Establish SSH connection and start interactive shell.
+
+        If session_id is set, uses tmux for persistent sessions:
+        - Attaches to existing session if it exists
+        - Creates new session if it doesn't exist
+        """
         try:
             # Parse the private key
             key = asyncssh.import_private_key(self.private_key)
@@ -69,8 +78,19 @@ class SSHConnection:
                 known_hosts=None,  # Accept any host key (internal network)
             )
 
+            # Build command for persistent tmux session or default shell
+            command = None
+            if self.session_id:
+                # tmux new-session -A: attach if exists, create if not
+                # -s: session name
+                # Using a sanitized session name (alphanumeric + hyphen only)
+                safe_session_id = "".join(c if c.isalnum() or c == "-" else "-" for c in self.session_id)
+                command = f"tmux new-session -A -s {safe_session_id}"
+                logger.debug("Using tmux session: %s", safe_session_id)
+
             # Start interactive shell with PTY
             self._process = await self._conn.create_process(
+                command,  # None = default shell, or tmux command
                 term_type=self.term_type,
                 term_size=self.term_size,
                 encoding=None,  # Binary mode for raw terminal data

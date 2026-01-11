@@ -194,6 +194,26 @@ jobs:
 
           rm -f tfplan
       - run: terraform apply -auto-approve
+      - name: Wait for Guacamole ECS services to stabilize
+        env:
+          ENV: ${{ inputs.environment }}
+        run: |
+          CLUSTER_NAME="${ENV}-portal-guacamole"
+
+          # Check if cluster exists
+          if ! aws ecs describe-clusters --clusters "$CLUSTER_NAME" --query "clusters[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
+            echo "Guacamole cluster not found, skipping stability check"
+            exit 0
+          fi
+
+          echo "Waiting for Guacamole ECS services to stabilize..."
+
+          # Wait for both services (10 min timeout is default)
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER_NAME" \
+            --services "${ENV}-portal-guacd" "${ENV}-portal-guacamole-client"
+
+          echo "Guacamole ECS services are stable"
 
   build:
     name: Build (${{ inputs.environment }})

@@ -59,6 +59,8 @@ tplname={{ template_stack }}
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.instance is not None
@@ -81,6 +83,8 @@ tplname={{ template_stack }}
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_type(inst_type):
@@ -106,6 +110,8 @@ tplname={{ template_stack }}
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.mgmt_eni is not None
@@ -128,6 +134,8 @@ tplname={{ template_stack }}
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.data_eni is not None
@@ -150,6 +158,8 @@ tplname={{ template_stack }}
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_source_dest(enabled):
@@ -175,6 +185,8 @@ tplname={{ template_stack }}
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.init_cfg is not None
@@ -213,6 +225,8 @@ class TestNGFWComponentOutputs:
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.instance_id is not None
@@ -235,6 +249,8 @@ class TestNGFWComponentOutputs:
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.management_ip is not None
@@ -257,6 +273,8 @@ class TestNGFWComponentOutputs:
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.dataplane_ip is not None
@@ -295,6 +313,8 @@ class TestNGFWComponentTags:
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_tags(tags):
@@ -321,6 +341,8 @@ class TestNGFWComponentTags:
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 environment="prod",
             )
 
@@ -369,6 +391,8 @@ vm-auth-key={{ auth_key }}
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             # Verify init_cfg was created
@@ -392,6 +416,8 @@ vm-auth-key={{ auth_key }}
                 scm_pin_value="pin-value-456",
                 scm_folder_name="test-folder",
                 authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_user_data(user_data):

@@ -63,9 +63,7 @@ class TestGeneratePresignedUrl:
 class TestGetRangeFromDb:
     """Tests for database range loading with new subnet-based schema."""
 
-    def test_get_range_from_db_success(
-        self, mock_boto3_clients, mock_env_vars_minimal, sample_db_range_row
-    ):
+    def test_get_range_from_db_success(self, mock_boto3_clients, mock_env_vars_minimal, sample_db_range_row):
         """Range data should be loaded with subnets and gwlb_service_name."""
         with patch("psycopg.connect") as mock_connect:
             mock_cursor = MagicMock()
@@ -129,9 +127,7 @@ class TestSubnetConfigDataclass:
         config = SubnetConfig(
             name="attack",
             uuid="subnet-uuid-123",
-            instances=[
-                InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small")
-            ],
+            instances=[InstanceConfig(uuid="inst-uuid-123", role="attacker", os_type="kali", instance_type="t3.small")],
         )
         assert config.name == "attack"
         assert config.uuid == "subnet-uuid-123"
@@ -143,9 +139,7 @@ class TestSubnetConfigDataclass:
         config = SubnetConfig(
             name="attack",
             uuid="subnet-uuid-123",
-            instances=[
-                InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small")
-            ],
+            instances=[InstanceConfig(uuid="inst-uuid-124", role="attacker", os_type="kali", instance_type="t3.small")],
             connected_to=["target", "dc_network"],
         )
         assert config.connected_to == ["target", "dc_network"]
@@ -156,8 +150,8 @@ class TestSubnetConfigDataclass:
             name="servers",
             uuid="subnet-uuid-456",
             instances=[
-                InstanceConfig(role="victim", os_type="ubuntu", instance_type="t3.micro"),
-                InstanceConfig(role="victim", os_type="windows", instance_type="t3.medium"),
+                InstanceConfig(uuid="inst-uuid-125", role="victim", os_type="ubuntu", instance_type="t3.micro"),
+                InstanceConfig(uuid="inst-uuid-126", role="victim", os_type="windows", instance_type="t3.medium"),
             ],
         )
         assert len(config.instances) == 2
@@ -171,6 +165,7 @@ class TestInstanceConfigDataclass:
     def test_instance_config_defaults(self):
         """Default values for optional fields."""
         config = InstanceConfig(
+            uuid="inst-uuid-127",
             role="victim",
             os_type="ubuntu",
             instance_type="t3.micro",
@@ -186,6 +181,7 @@ class TestInstanceConfigDataclass:
     def test_instance_config_all_fields(self):
         """All fields should be populated."""
         config = InstanceConfig(
+            uuid="inst-uuid-128",
             role="victim",
             os_type="windows",
             instance_type="t3.medium",
@@ -203,6 +199,7 @@ class TestInstanceConfigDataclass:
     def test_instance_config_attacker(self):
         """Attacker config should not have agent fields."""
         config = InstanceConfig(
+            uuid="inst-uuid-129",
             role="attacker",
             os_type="kali",
             instance_type="t3.small",
@@ -226,7 +223,7 @@ class TestRangeConfigDataclass:
                     name="attack",
                     uuid="subnet-uuid-attack",
                     instances=[
-                        InstanceConfig(role="attacker", os_type="kali", instance_type="t3.small")
+                        InstanceConfig(uuid="inst-uuid-130", role="attacker", os_type="kali", instance_type="t3.small")
                     ],
                 ),
             ],
@@ -284,10 +281,12 @@ class TestBuildInstanceConfig:
 
     def test_build_instance_config_basic(self):
         """Basic instance config should be built correctly."""
-        inst = {"role": "attacker", "os_type": "kali"}
-        get_presigned_url = lambda s3_key: None
+        inst = {"uuid": "inst-uuid-001", "role": "attacker", "os_type": "kali"}
 
-        config = _build_instance_config(inst, get_presigned_url)
+        def get_presigned_url(s3_key):
+            return None
+
+        config = _build_instance_config(inst, get_presigned_url, "attack")
 
         assert config.role == "attacker"
         assert config.os_type == "kali"
@@ -296,15 +295,16 @@ class TestBuildInstanceConfig:
     def test_build_instance_config_with_agent(self, mock_boto3_clients):
         """Instance with agent should get presigned URL."""
         inst = {
+            "uuid": "inst-uuid-002",
             "role": "victim",
             "os_type": "ubuntu",
             "agent": {"s3_key": "agents/xdr.tar.gz"},
         }
-        get_presigned_url = lambda s3_key: (
-            f"https://s3.example.com/{s3_key}" if s3_key else None
-        )
 
-        config = _build_instance_config(inst, get_presigned_url)
+        def get_presigned_url(s3_key):
+            return f"https://s3.example.com/{s3_key}" if s3_key else None
+
+        config = _build_instance_config(inst, get_presigned_url, "target")
 
         assert config.agent_s3_key == "agents/xdr.tar.gz"
         assert config.agent_presigned_url == "https://s3.example.com/agents/xdr.tar.gz"
@@ -312,13 +312,16 @@ class TestBuildInstanceConfig:
     def test_build_instance_config_with_dc_config(self):
         """DC instance should have dc_config extracted."""
         inst = {
+            "uuid": "inst-uuid-003",
             "role": "dc",
             "os_type": "windows",
             "dc_config": {"domain_name": "test.local", "netbios_name": "TEST"},
         }
-        get_presigned_url = lambda s3_key: None
 
-        config = _build_instance_config(inst, get_presigned_url)
+        def get_presigned_url(s3_key):
+            return None
+
+        config = _build_instance_config(inst, get_presigned_url, "dc_network")
 
         assert config.role == "dc"
         assert config.dc_config is not None
@@ -328,13 +331,16 @@ class TestBuildInstanceConfig:
     def test_build_instance_config_join_domain(self):
         """join_domain flag should be extracted."""
         inst = {
+            "uuid": "inst-uuid-004",
             "role": "victim",
             "os_type": "windows",
             "join_domain": True,
         }
-        get_presigned_url = lambda s3_key: None
 
-        config = _build_instance_config(inst, get_presigned_url)
+        def get_presigned_url(s3_key):
+            return None
+
+        config = _build_instance_config(inst, get_presigned_url, "workstations")
 
         assert config.join_domain is True
 
@@ -348,10 +354,12 @@ class TestBuildSubnetConfigs:
             {
                 "name": "attack",
                 "uuid": "subnet-uuid-attack",
-                "instances": [{"role": "attacker", "os_type": "kali"}],
+                "instances": [{"uuid": "inst-uuid-005", "role": "attacker", "os_type": "kali"}],
             },
         ]
-        get_presigned_url = lambda s3_key: None
+
+        def get_presigned_url(s3_key):
+            return None
 
         subnets = _build_subnet_configs(spec_subnets, get_presigned_url)
 
@@ -366,11 +374,13 @@ class TestBuildSubnetConfigs:
             {
                 "name": "attack",
                 "uuid": "subnet-uuid-attack",
-                "instances": [{"role": "attacker", "os_type": "kali"}],
+                "instances": [{"uuid": "inst-uuid-006", "role": "attacker", "os_type": "kali"}],
                 "connected_to": ["target", "dc_network"],
             },
         ]
-        get_presigned_url = lambda s3_key: None
+
+        def get_presigned_url(s3_key):
+            return None
 
         subnets = _build_subnet_configs(spec_subnets, get_presigned_url)
 
@@ -381,10 +391,12 @@ class TestBuildSubnetConfigs:
         spec_subnets = [
             {
                 "uuid": "subnet-uuid-attack",
-                "instances": [{"role": "attacker", "os_type": "kali"}],
+                "instances": [{"uuid": "inst-uuid-007", "role": "attacker", "os_type": "kali"}],
             },
         ]
-        get_presigned_url = lambda s3_key: None
+
+        def get_presigned_url(s3_key):
+            return None
 
         with pytest.raises(ValueError, match="missing required 'name' field"):
             _build_subnet_configs(spec_subnets, get_presigned_url)
@@ -394,10 +406,12 @@ class TestBuildSubnetConfigs:
         spec_subnets = [
             {
                 "name": "attack",
-                "instances": [{"role": "attacker", "os_type": "kali"}],
+                "instances": [{"uuid": "inst-uuid-008", "role": "attacker", "os_type": "kali"}],
             },
         ]
-        get_presigned_url = lambda s3_key: None
+
+        def get_presigned_url(s3_key):
+            return None
 
         with pytest.raises(ValueError, match="missing required 'uuid' field"):
             _build_subnet_configs(spec_subnets, get_presigned_url)
@@ -408,20 +422,22 @@ class TestBuildSubnetConfigs:
             {
                 "name": "attack",
                 "uuid": "subnet-uuid-attack",
-                "instances": [{"role": "attacker", "os_type": "kali"}],
+                "instances": [{"uuid": "inst-uuid-009", "role": "attacker", "os_type": "kali"}],
                 "connected_to": ["target"],
             },
             {
                 "name": "target",
                 "uuid": "subnet-uuid-target",
                 "instances": [
-                    {"role": "victim", "os_type": "ubuntu"},
-                    {"role": "victim", "os_type": "windows"},
+                    {"uuid": "inst-uuid-010", "role": "victim", "os_type": "ubuntu"},
+                    {"uuid": "inst-uuid-011", "role": "victim", "os_type": "windows"},
                 ],
                 "connected_to": [],
             },
         ]
-        get_presigned_url = lambda s3_key: None
+
+        def get_presigned_url(s3_key):
+            return None
 
         subnets = _build_subnet_configs(spec_subnets, get_presigned_url)
 
@@ -452,9 +468,7 @@ class TestLoadConfigIntegration:
 
         return _mock_db
 
-    def test_load_config_returns_range_config(
-        self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients
-    ):
+    def test_load_config_returns_range_config(self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients):
         """load_config should return a RangeConfig with subnets."""
         from config import load_config
 
@@ -465,12 +479,12 @@ class TestLoadConfigIntegration:
                     {
                         "name": "attack",
                         "uuid": "subnet-uuid-attack",
-                        "instances": [{"role": "attacker", "os_type": "kali"}],
+                        "instances": [{"uuid": "inst-uuid-012", "role": "attacker", "os_type": "kali"}],
                     },
                     {
                         "name": "target",
                         "uuid": "subnet-uuid-target",
-                        "instances": [{"role": "victim", "os_type": "ubuntu"}],
+                        "instances": [{"uuid": "inst-uuid-013", "role": "victim", "os_type": "ubuntu"}],
                     },
                 ]
             },
@@ -486,9 +500,7 @@ class TestLoadConfigIntegration:
         assert result.vpc_id == "vpc-test123"
         assert len(result.subnets) == 2
 
-    def test_load_config_parses_subnets(
-        self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients
-    ):
+    def test_load_config_parses_subnets(self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients):
         """Subnets should be parsed from range_config.subnets."""
         from config import load_config
 
@@ -499,7 +511,7 @@ class TestLoadConfigIntegration:
                     {
                         "name": "attack",
                         "uuid": "subnet-uuid-attack",
-                        "instances": [{"role": "attacker", "os_type": "kali"}],
+                        "instances": [{"uuid": "inst-uuid-014", "role": "attacker", "os_type": "kali"}],
                         "connected_to": ["target"],
                     },
                     {
@@ -507,6 +519,7 @@ class TestLoadConfigIntegration:
                         "uuid": "subnet-uuid-target",
                         "instances": [
                             {
+                                "uuid": "inst-uuid-015",
                                 "role": "victim",
                                 "os_type": "ubuntu",
                                 "agent": {"s3_key": "agents/xdr.tar.gz"},
@@ -527,9 +540,7 @@ class TestLoadConfigIntegration:
         assert len(result.subnets[1].instances) == 1
         assert result.subnets[1].instances[0].agent_s3_key == "agents/xdr.tar.gz"
 
-    def test_load_config_generates_presigned_url(
-        self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients
-    ):
+    def test_load_config_generates_presigned_url(self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients):
         """Presigned URL should be generated for agents with s3_key."""
         from config import load_config
 
@@ -542,6 +553,7 @@ class TestLoadConfigIntegration:
                         "uuid": "subnet-uuid-target",
                         "instances": [
                             {
+                                "uuid": "inst-uuid-016",
                                 "role": "victim",
                                 "os_type": "ubuntu",
                                 "agent": {"s3_key": "agents/xdr.tar.gz"},
@@ -558,9 +570,7 @@ class TestLoadConfigIntegration:
         assert victim.agent_presigned_url == "https://s3.example.com/presigned-url"
         mock_boto3_clients["s3"].generate_presigned_url.assert_called()
 
-    def test_load_config_with_ngfw(
-        self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients
-    ):
+    def test_load_config_with_ngfw(self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients):
         """load_config should include gwlb_service_name when NGFW enabled."""
         from config import load_config
 
@@ -576,9 +586,7 @@ class TestLoadConfigIntegration:
         assert result.ngfw_enabled is True
         assert result.gwlb_service_name == "com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123"
 
-    def test_load_config_empty_subnets(
-        self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients
-    ):
+    def test_load_config_empty_subnets(self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients):
         """Empty subnets list should work."""
         from config import load_config
 
@@ -595,6 +603,7 @@ class TestDCConfiguration:
     def test_instance_config_supports_dc_config(self):
         """InstanceConfig should accept dc_config dict."""
         config = InstanceConfig(
+            uuid="inst-uuid-131",
             role="dc",
             os_type="windows",
             instance_type="t3.large",
@@ -609,6 +618,7 @@ class TestDCConfiguration:
     def test_instance_config_supports_join_domain(self):
         """InstanceConfig should support join_domain flag."""
         config = InstanceConfig(
+            uuid="inst-uuid-132",
             role="victim",
             os_type="windows",
             instance_type="t3.medium",
@@ -619,6 +629,7 @@ class TestDCConfiguration:
     def test_instance_config_join_domain_default_false(self):
         """join_domain should default to False."""
         config = InstanceConfig(
+            uuid="inst-uuid-133",
             role="victim",
             os_type="windows",
             instance_type="t3.medium",
@@ -646,6 +657,7 @@ class TestLoadConfigDCSupport:
                             "uuid": "subnet-uuid-dc",
                             "instances": [
                                 {
+                                    "uuid": "inst-uuid-017",
                                     "role": "dc",
                                     "os_type": "windows",
                                     "dc_config": {
@@ -685,7 +697,7 @@ class TestLoadConfigDCSupport:
                             "name": "workstations",
                             "uuid": "subnet-uuid-ws",
                             "instances": [
-                                {"role": "victim", "os_type": "windows", "join_domain": True},
+                                {"uuid": "inst-uuid-018", "role": "victim", "os_type": "windows", "join_domain": True},
                             ],
                         },
                     ]
@@ -718,7 +730,7 @@ class TestInstanceTypeDefaults:
                         {
                             "name": "attack",
                             "uuid": "subnet-uuid-attack",
-                            "instances": [{"role": "attacker", "os_type": "kali"}],
+                            "instances": [{"uuid": "inst-uuid-019", "role": "attacker", "os_type": "kali"}],
                         },
                     ]
                 },
@@ -746,7 +758,7 @@ class TestInstanceTypeDefaults:
                         {
                             "name": "target",
                             "uuid": "subnet-uuid-target",
-                            "instances": [{"role": "victim", "os_type": "ubuntu"}],
+                            "instances": [{"uuid": "inst-uuid-020", "role": "victim", "os_type": "ubuntu"}],
                         },
                     ]
                 },
@@ -774,7 +786,7 @@ class TestInstanceTypeDefaults:
                         {
                             "name": "dc_network",
                             "uuid": "subnet-uuid-dc",
-                            "instances": [{"role": "dc", "os_type": "windows"}],
+                            "instances": [{"uuid": "inst-uuid-021", "role": "dc", "os_type": "windows"}],
                         },
                     ]
                 },

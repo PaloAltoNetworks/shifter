@@ -59,8 +59,8 @@ class TestLoadConfigEdgeCases:
                             "name": "test-subnet",
                             "uuid": "subnet-uuid-123",
                             "instances": [
-                                {"role": "attacker", "os_type": "kali"},
-                                {"role": "victim", "os_type": "ubuntu"},
+                                {"role": "attacker", "os_type": "kali", "uuid": "inst-uuid-1"},
+                                {"role": "victim", "os_type": "ubuntu", "uuid": "inst-uuid-2"},
                             ],
                             "connected_to": [],
                         }
@@ -99,8 +99,8 @@ class TestLoadConfigEdgeCases:
         assert result.range_id == 999999
 
     def test_load_config_many_instances(self, mock_pulumi_config, mocker, mock_boto3_clients):
-        instances = [{"role": "attacker", "os_type": "kali"}] + [
-            {"role": "victim", "os_type": "ubuntu"} for _ in range(10)
+        instances = [{"role": "attacker", "os_type": "kali", "uuid": "inst-uuid-0"}] + [
+            {"role": "victim", "os_type": "ubuntu", "uuid": f"inst-uuid-{i + 1}"} for i in range(10)
         ]
 
         mocker.patch(
@@ -135,9 +135,9 @@ class TestLoadConfigEdgeCases:
 
     def test_load_config_mixed_os_types(self, mock_pulumi_config, mocker, mock_boto3_clients):
         instances = [
-            {"role": "victim", "os_type": "ubuntu"},
-            {"role": "victim", "os_type": "windows"},
-            {"role": "victim", "os_type": "amazon-linux"},
+            {"role": "victim", "os_type": "ubuntu", "uuid": "inst-uuid-1"},
+            {"role": "victim", "os_type": "windows", "uuid": "inst-uuid-2"},
+            {"role": "victim", "os_type": "amazon-linux", "uuid": "inst-uuid-3"},
         ]
 
         mocker.patch(
@@ -224,6 +224,7 @@ class TestInstanceConfigBoundaryValues:
             role="victim",
             os_type="ubuntu",
             instance_type="t3.micro",
+            uuid="inst-uuid-test",
         )
         assert config.agent_s3_key is None
         assert config.agent_presigned_url is None

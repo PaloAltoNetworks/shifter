@@ -31,9 +31,7 @@ def mock_find_free_subnet():
     The subnet finder makes real AWS API calls, which we don't want
     during Pulumi component tests.
     """
-    with patch(
-        "components.network._find_free_subnet", return_value="10.1.2.0/28"
-    ):
+    with patch("components.network._find_free_subnet", return_value="10.1.2.0/28"):
         yield
 
 
@@ -104,6 +102,7 @@ class TestRangeStackMultiSubnet:
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.small",
+                            uuid="inst-uuid-attacker",
                         ),
                     ],
                 ),
@@ -115,6 +114,7 @@ class TestRangeStackMultiSubnet:
                             role="victim",
                             os_type="ubuntu",
                             instance_type="t3.micro",
+                            uuid="inst-uuid-victim",
                         ),
                     ],
                 ),
@@ -143,6 +143,7 @@ class TestRangeStackMultiSubnet:
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.small",
+                            uuid="inst-uuid-attacker",
                         ),
                     ],
                 ),
@@ -154,6 +155,7 @@ class TestRangeStackMultiSubnet:
                             role="victim",
                             os_type="ubuntu",
                             instance_type="t3.micro",
+                            uuid="inst-uuid-victim",
                         ),
                     ],
                 ),
@@ -212,6 +214,7 @@ class TestRangeStackMultiSubnet:
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.small",
+                            uuid="inst-uuid-attacker",
                         ),
                     ],
                 ),
@@ -290,6 +293,7 @@ class TestRangeStackValidation:
                             role="dc",
                             os_type="windows",
                             instance_type="t3.large",
+                            uuid="inst-uuid-dc",
                             dc_config={
                                 "domain_name": "test.local",
                                 "netbios_name": "TEST",
@@ -323,9 +327,7 @@ class TestRangeStackDCOrdering:
     """Tests for DC instance dependency ordering."""
 
     @pytest.fixture(autouse=True)
-    def setup_pulumi_mocks(
-        self, pulumi_mocks, mock_find_free_subnet, mock_dc_setup, mock_setup
-    ):
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet, mock_dc_setup, mock_setup):
         """Set up Pulumi mocks for each test."""
         self.mocks = pulumi_mocks
 
@@ -349,6 +351,7 @@ class TestRangeStackDCOrdering:
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.small",
+                            uuid="inst-uuid-attacker",
                         ),
                     ],
                 ),
@@ -360,6 +363,7 @@ class TestRangeStackDCOrdering:
                             role="dc",
                             os_type="windows",
                             instance_type="t3.large",
+                            uuid="inst-uuid-dc",
                             dc_config={
                                 "domain_name": "test.local",
                                 "netbios_name": "TEST",
@@ -393,6 +397,7 @@ class TestRangeStackDCOrdering:
                             role="dc",
                             os_type="windows",
                             instance_type="t3.large",
+                            uuid="inst-uuid-dc",
                             dc_config={
                                 "domain_name": "test.local",
                                 "netbios_name": "TEST",
@@ -425,6 +430,7 @@ class TestRangeStackDCOrdering:
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.small",
+                            uuid="inst-uuid-attacker",
                         ),
                     ],
                 ),
@@ -465,6 +471,7 @@ class TestRangeStackAmiSelection:
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.small",
+                            uuid="inst-uuid-attacker",
                         ),
                     ],
                 ),
@@ -496,6 +503,7 @@ class TestRangeStackAmiSelection:
                             role="victim",
                             os_type="ubuntu",
                             instance_type="t3.micro",
+                            uuid="inst-uuid-victim",
                         ),
                     ],
                 ),
@@ -527,6 +535,7 @@ class TestRangeStackAmiSelection:
                             role="victim",
                             os_type="windows",
                             instance_type="t3.medium",
+                            uuid="inst-uuid-windows",
                         ),
                     ],
                 ),
@@ -572,11 +581,13 @@ class TestRangeStackMultipleInstances:
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.small",
+                            uuid="inst-uuid-attacker",
                         ),
                         InstanceConfig(
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.medium",
+                            uuid="inst-uuid-attacker-2",
                         ),
                     ],
                 ),
@@ -606,6 +617,7 @@ class TestRangeStackMultipleInstances:
                             role="attacker",
                             os_type="kali",
                             instance_type="t3.small",
+                            uuid="inst-uuid-attacker",
                         ),
                     ],
                 ),
@@ -617,6 +629,7 @@ class TestRangeStackMultipleInstances:
                             role="victim",
                             os_type="ubuntu",
                             instance_type="t3.micro",
+                            uuid="inst-uuid-victim",
                         ),
                     ],
                 ),
@@ -628,6 +641,7 @@ class TestRangeStackMultipleInstances:
                             role="victim",
                             os_type="windows",
                             instance_type="t3.medium",
+                            uuid="inst-uuid-windows",
                         ),
                     ],
                 ),
@@ -667,9 +681,7 @@ class TestRangeStackCidrPrefix:
                 SubnetConfig(name="test", uuid="uuid-1", instances=[]),
             ]
         )
-        config = RangeConfig(
-            **{**config.__dict__, "vpc_cidr": "10.1.0.0/16"}
-        )
+        config = RangeConfig(**{**config.__dict__, "vpc_cidr": "10.1.0.0/16"})
 
         with patch.dict(os.environ, {"TEMPLATES_DIR": str(temp_templates)}):
             stack = RangeStack("test-range", config=config)

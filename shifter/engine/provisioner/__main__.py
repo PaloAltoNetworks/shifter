@@ -51,6 +51,8 @@ def _provision_ngfw() -> None:
         scm_pin_value=config.scm_pin_value,
         scm_folder_name=config.scm_folder_name,
         authcode=config.authcode,
+        request_uuid=config.request_id,
+        instance_uuid=config.instance_uuid,
         instance_type=config.instance_type,
         environment=config.environment,
         instance_profile_name=config.instance_profile_name or None,

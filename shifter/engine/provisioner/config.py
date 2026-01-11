@@ -89,8 +89,21 @@ def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str
 
 @dataclass
 class InstanceConfig:
-    """Configuration for an instance to be provisioned."""
+    """Configuration for an instance to be provisioned.
 
+    Attributes:
+        uuid: Unique identifier from the spec (for tagging and DB correlation).
+        role: Instance role ("attacker", "victim", or "dc").
+        os_type: Operating system type ("kali", "ubuntu", "windows").
+        instance_type: AWS instance type (e.g., "t3.medium").
+        agent_s3_key: S3 key for agent installer (optional).
+        agent_presigned_url: Presigned URL for agent download (optional).
+        dc_config: Domain controller configuration (optional).
+        join_domain: Whether this instance should join a domain.
+        dc_config_param_name: SSM parameter path for DC config (optional).
+    """
+
+    uuid: str  # Required: correlation key for tagging and DB updates
     role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
@@ -170,9 +183,28 @@ class NGFWConfig:
 
     Infrastructure config comes from Pulumi config (set from environment).
     Credential config comes from Pulumi config (set from app_spec in DB).
+
+    Attributes:
+        request_id: UUID of the provisioning request (for tagging/correlation).
+        instance_uuid: UUID of the NGFW instance (for tagging/DB correlation).
+        user_id: Django User ID who owns this NGFW.
+        environment: Deployment environment (dev, staging, prod).
+        vpc_id: AWS VPC ID for NGFW deployment.
+        subnet_id: Subnet ID for NGFW ENIs.
+        mgmt_security_group_id: Security group for management ENI.
+        data_security_group_id: Security group for data ENI.
+        ami_id: VM-Series AMI ID.
+        bootstrap_bucket: S3 bucket for bootstrap configuration.
+        instance_type: EC2 instance type.
+        instance_profile_name: IAM instance profile name.
+        scm_pin_id: SCM auto-registration PIN ID.
+        scm_pin_value: SCM auto-registration PIN value.
+        scm_folder_name: SCM folder name (dgname).
+        authcode: VM-Series authcode for licensing.
     """
 
     request_id: str
+    instance_uuid: str  # Required: for tagging and DB correlation
     user_id: int
     environment: str
     # Infrastructure
@@ -272,16 +304,28 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
 def _build_instance_config(
     inst: dict[str, Any],
     get_presigned_url: Callable[[str | None], str | None],
+    subnet_name: str,
 ) -> InstanceConfig:
     """Build InstanceConfig from raw instance dict.
 
     Args:
         inst: Instance dict from range_config.
         get_presigned_url: Function to generate presigned URLs.
+        subnet_name: Name of the parent subnet (for error context).
 
     Returns:
         Configured InstanceConfig.
+
+    Raises:
+        ValueError: If instance is missing required 'uuid' field.
     """
+    # Extract and validate uuid (required for tagging and DB correlation)
+    instance_uuid = inst.get("uuid")
+    if not instance_uuid:
+        role = inst.get("role", "unknown")
+        raise ValueError(f"Instance (role={role}) in subnet '{subnet_name}' missing required 'uuid' field")
+    instance_uuid = str(instance_uuid)
+
     role = inst.get("role", "victim")
     os_type = inst.get("os_type", "ubuntu")
 
@@ -309,6 +353,7 @@ def _build_instance_config(
         }
 
     return InstanceConfig(
+        uuid=instance_uuid,
         role=role,
         os_type=os_type,
         instance_type=instance_type,
@@ -355,7 +400,7 @@ def _build_subnet_configs(
             logger.warning("Subnet '%s' has no instances", subnet_name)
 
         for inst in raw_instances:
-            instances.append(_build_instance_config(inst, get_presigned_url))
+            instances.append(_build_instance_config(inst, get_presigned_url, subnet_name))
 
         # Get connected_to, ensuring it's a list of strings
         connected_to_raw = subnet_dict.get("connected_to") or []
@@ -494,6 +539,7 @@ def load_ngfw_config() -> NGFWConfig:
 
     return NGFWConfig(
         request_id=config.require("requestId"),
+        instance_uuid=config.require("instanceUuid"),
         user_id=config.require_int("userId"),
         environment=config.require("environment"),
         # Infrastructure

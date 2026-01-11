@@ -513,9 +513,7 @@ class TestFindFreeSubnetSlash28:
 @pytest.fixture
 def mock_find_free_subnet():
     """Mock _find_free_subnet for NetworkComponent tests."""
-    with patch(
-        "components.network._find_free_subnet", return_value="10.1.8.0/24"
-    ) as mock:
+    with patch("components.network._find_free_subnet", return_value="10.1.8.0/24") as mock:
         yield mock
 
 
@@ -542,6 +540,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         # Verify subnet was created
@@ -563,6 +562,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         assert component.security_group is not None
@@ -582,6 +582,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         assert component.route_table is not None
@@ -601,6 +602,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_cidr(cidr):
@@ -622,6 +624,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_vpc_id(vpc_id):
@@ -643,6 +646,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-west-2b",
+            request_uuid="req-test-123",
         )
 
         def check_az(az):
@@ -664,6 +668,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
@@ -686,6 +691,8 @@ class TestNetworkComponentWithPulumiMocks:
             environment="dev",
             availability_zone="us-east-2a",
             subnet_name="attack",
+            subnet_uuid="uuid-attack-123",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
@@ -707,6 +714,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
@@ -758,6 +766,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         # Verify all outputs exist
@@ -781,6 +790,7 @@ class TestNetworkComponentWithPulumiMocks:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         assert component.gwlb_endpoint is None
@@ -808,6 +818,7 @@ class TestNetworkComponentEdgeCases:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
@@ -830,6 +841,7 @@ class TestNetworkComponentEdgeCases:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
@@ -861,6 +873,7 @@ class TestResourceCreationVerification:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         # Verify subnet has an ID output (via Pulumi mocks)
@@ -884,6 +897,7 @@ class TestResourceCreationVerification:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         # Verify component has expected outputs
@@ -925,6 +939,7 @@ class TestGWLBEndpointCreation:
             environment="dev",
             availability_zone="us-east-2a",
             gwlb_service_name="com.amazonaws.vpce.us-east-2.vpce-svc-123",
+            request_uuid="req-test-123",
         )
 
         assert component.gwlb_endpoint is not None
@@ -944,6 +959,7 @@ class TestGWLBEndpointCreation:
             cidr_prefix="10.1",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_empty(endpoint_id):
@@ -963,9 +979,7 @@ class TestSubnetSizeParameter:
     @pulumi.runtime.test
     def test_slash28_subnet_creation(self):
         """NetworkComponent creates /28 subnet when subnet_size=28."""
-        with patch(
-            "components.network._find_free_subnet", return_value="10.1.2.0/28"
-        ):
+        with patch("components.network._find_free_subnet", return_value="10.1.2.0/28"):
             from components.network import NetworkComponent
 
             component = NetworkComponent(
@@ -978,6 +992,7 @@ class TestSubnetSizeParameter:
                 environment="dev",
                 availability_zone="us-east-2a",
                 subnet_size=28,
+                request_uuid="req-test-123",
             )
 
             def check_cidr(cidr):
@@ -988,9 +1003,7 @@ class TestSubnetSizeParameter:
     @pulumi.runtime.test
     def test_slash24_subnet_creation_default(self):
         """NetworkComponent creates /24 subnet by default."""
-        with patch(
-            "components.network._find_free_subnet", return_value="10.1.2.0/24"
-        ):
+        with patch("components.network._find_free_subnet", return_value="10.1.2.0/24"):
             from components.network import NetworkComponent
 
             component = NetworkComponent(
@@ -1002,6 +1015,7 @@ class TestSubnetSizeParameter:
                 cidr_prefix="10.1",
                 environment="dev",
                 availability_zone="us-east-2a",
+                request_uuid="req-test-123",
             )
 
             def check_cidr(cidr):

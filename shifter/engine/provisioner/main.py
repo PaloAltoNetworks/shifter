@@ -142,13 +142,39 @@ def write_provisioned_state(
                 )
                 logger.debug("Updated engine_subnet state: uuid=%s", subnet_uuid)
 
-            # Update Range.provisioned_instances with instance details
-            # (engine_instance table may not exist yet, so we store in Range.provisioned_instances)
+            # Update engine_instance records with provisioned state
             provisioned_instances = []
             for inst in instances:
+                instance_uuid = inst.get("uuid")
+                if not instance_uuid:
+                    logger.warning(
+                        "Instance (role=%s) missing UUID, skipping DB write",
+                        inst.get("role", "unknown"),
+                    )
+                    continue
+
+                # Build state dict with AWS resource details
+                instance_state = {
+                    "aws_instance_id": inst.get("instance_id"),
+                    "private_ip": inst.get("private_ip"),
+                    "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
+                    "subnet_name": inst.get("subnet_name"),
+                }
+
+                cur.execute(
+                    """
+                    UPDATE engine_instance
+                    SET status = 'ready', state = %s
+                    WHERE uuid = %s
+                    """,
+                    (json.dumps(instance_state), instance_uuid),
+                )
+                logger.debug("Updated engine_instance state: uuid=%s", instance_uuid)
+
+                # Also build legacy provisioned_instances for Range.provisioned_instances
                 provisioned_instances.append(
                     {
-                        "uuid": inst.get("uuid"),
+                        "uuid": instance_uuid,
                         "role": inst.get("role"),
                         "os_type": inst.get("os"),
                         "subnet_name": inst.get("subnet_name"),
@@ -158,6 +184,7 @@ def write_provisioned_state(
                     }
                 )
 
+            # Update Range.provisioned_instances for backwards compatibility
             cur.execute(
                 """
                 UPDATE mission_control_range
@@ -179,6 +206,59 @@ def write_provisioned_state(
         len(subnets),
         len(instances),
     )
+
+
+def mark_range_instances_destroyed(range_id: int) -> None:
+    """Mark all engine_instance and engine_subnet records for a range as destroyed.
+
+    Called after Pulumi destroy succeeds to update Instance and Subnet status.
+
+    Args:
+        range_id: The range ID that was destroyed.
+    """
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Get all instance UUIDs for this range via engine_subnet
+            cur.execute(
+                """
+                SELECT DISTINCT i.uuid
+                FROM engine_instance i
+                JOIN engine_request r ON i.request_id = r.id
+                JOIN mission_control_range rng ON rng.request_id = r.id
+                WHERE rng.id = %s
+                """,
+                (range_id,),
+            )
+            instance_uuids = [row[0] for row in cur.fetchall()]
+
+            # Update engine_instance records
+            if instance_uuids:
+                cur.execute(
+                    """
+                    UPDATE engine_instance
+                    SET status = 'destroyed', destroyed_at = NOW()
+                    WHERE uuid = ANY(%s)
+                    """,
+                    (instance_uuids,),
+                )
+                logger.debug(
+                    "Marked %d engine_instance records as destroyed for range_id=%s",
+                    len(instance_uuids),
+                    range_id,
+                )
+
+            # Update engine_subnet records
+            cur.execute(
+                """
+                UPDATE engine_subnet
+                SET status = 'destroyed', destroyed_at = NOW()
+                WHERE range_id = %s
+                """,
+                (range_id,),
+            )
+
+        conn.commit()
+    logger.info("Marked engine records as destroyed: range_id=%s", range_id)
 
 
 def get_user_ngfw_data(user_id: int) -> dict | None:
@@ -906,6 +986,9 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
         capture_output=True,
     )
 
+    # Mark engine_instance and engine_subnet records as destroyed
+    mark_range_instances_destroyed(range_id)
+
     # If this was the user's last active range, stop their NGFW to save costs
     if not user_has_active_ranges(user_id, range_id):
         ngfw_data = get_user_ngfw_data(user_id)
@@ -1064,7 +1147,7 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
         _select_or_create_stack(stack_name, env)
 
         # Set NGFW stack configuration from environment and app_spec credentials
-        _set_ngfw_stack_config(env, request_id, app_spec)
+        _set_ngfw_stack_config(env, request_id, instance_id, app_spec)
 
         if operation == "up":
             _run_ngfw_provision(request_id, instance_id, app_id, stack_name, env)
@@ -1098,7 +1181,7 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
         raise
 
 
-def _set_ngfw_stack_config(env: dict, request_id: str, app_spec: dict) -> None:
+def _set_ngfw_stack_config(env: dict, request_id: str, instance_uuid: str, app_spec: dict) -> None:
     """Set Pulumi stack configuration for NGFW from environment and app_spec.
 
     Infrastructure config (VPC, subnet, AMI, etc.) comes from environment variables.
@@ -1107,11 +1190,13 @@ def _set_ngfw_stack_config(env: dict, request_id: str, app_spec: dict) -> None:
     Args:
         env: Environment dictionary for subprocess.
         request_id: UUID string of the Request.
+        instance_uuid: UUID string of the Instance (for tagging/correlation).
         app_spec: Hydrated NGFWAppSpec dict containing credentials.
     """
     # Infrastructure config from environment (same for all NGFWs)
     config_values = {
         "requestId": request_id,
+        "instanceUuid": instance_uuid,
         "environment": os.environ.get("ENVIRONMENT", "dev"),
         "ngfwVpcId": os.environ.get("NGFW_VPC_ID", ""),
         "ngfwSubnetId": os.environ.get("NGFW_SUBNET_ID", ""),

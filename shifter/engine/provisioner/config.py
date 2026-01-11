@@ -225,18 +225,36 @@ class NGFWConfig:
 
 def get_db_connection() -> psycopg.Connection:
     """Get database connection using RDS IAM auth."""
+    db_host = os.environ.get("DB_HOST")
+    db_port = int(os.environ.get("DB_PORT", 5432))
+    db_user = os.environ.get("DB_USER")
+    db_name = os.environ.get("DB_NAME")
+    aws_region = os.environ.get("AWS_REGION")
+
+    if not all([db_host, db_user, db_name, aws_region]):
+        env_pairs = [
+            ("DB_HOST", db_host),
+            ("DB_USER", db_user),
+            ("DB_NAME", db_name),
+            ("AWS_REGION", aws_region),
+        ]
+        missing = [k for k, v in env_pairs if not v]
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    logger.debug("get_db_connection: connecting to %s:%s/%s", db_host, db_port, db_name)
+
     client = boto3.client("rds")
     token = client.generate_db_auth_token(
-        DBHostname=os.environ["DB_HOST"],
-        Port=int(os.environ.get("DB_PORT", 5432)),
-        DBUsername=os.environ["DB_USER"],
-        Region=os.environ["AWS_REGION"],
+        DBHostname=db_host,
+        Port=db_port,
+        DBUsername=db_user,
+        Region=aws_region,
     )
     return psycopg.connect(
-        host=os.environ["DB_HOST"],
-        port=int(os.environ.get("DB_PORT", 5432)),
-        dbname=os.environ["DB_NAME"],
-        user=os.environ["DB_USER"],
+        host=db_host,
+        port=db_port,
+        dbname=db_name,
+        user=db_user,
         password=token,
         sslmode="require",
     )
@@ -535,12 +553,24 @@ def load_ngfw_config() -> NGFWConfig:
     Returns:
         NGFWConfig: Complete configuration for NGFW provisioning.
     """
+    logger.info("Loading NGFW configuration")
     config = pulumi.Config()
 
+    request_id = config.require("requestId")
+    instance_uuid = config.require("instanceUuid")
+    user_id = config.require_int("userId")
+
+    logger.debug(
+        "load_ngfw_config: request_id=%s instance_uuid=%s user_id=%s",
+        request_id,
+        instance_uuid,
+        user_id,
+    )
+
     return NGFWConfig(
-        request_id=config.require("requestId"),
-        instance_uuid=config.require("instanceUuid"),
-        user_id=config.require_int("userId"),
+        request_id=request_id,
+        instance_uuid=instance_uuid,
+        user_id=user_id,
         environment=config.require("environment"),
         # Infrastructure
         vpc_id=config.require("ngfwVpcId"),

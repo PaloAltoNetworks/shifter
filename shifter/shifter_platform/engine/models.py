@@ -133,6 +133,14 @@ class Instance(Instantiation):
 
     role = models.CharField(max_length=20, choices=Role.choices, db_index=True)
     os_type = models.CharField(max_length=20, choices=OSType.choices)
+    subnet = models.ForeignKey(
+        "Subnet",
+        on_delete=models.CASCADE,
+        related_name="instances",
+        null=True,
+        blank=True,
+        help_text="Logical subnet this instance belongs to",
+    )
 
     class Meta:
         ordering = ["-created_at"]

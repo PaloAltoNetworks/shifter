@@ -6,10 +6,15 @@ This stack composes NGFWComponent + GWLBComponent to provide:
 - VPC Endpoint Service for range connectivity
 """
 
+import logging
+from typing import Any
+
 import pulumi
 
 from components.gwlb_component import GWLBComponent
 from components.ngfw_component import NGFWComponent
+
+logger = logging.getLogger(__name__)
 
 
 class UserNGFWStack(pulumi.ComponentResource):
@@ -69,6 +74,14 @@ class UserNGFWStack(pulumi.ComponentResource):
             ValueError: If required uuid parameters are missing.
         """
         super().__init__("shifter:stacks:UserNGFWStack", name, None, opts)
+
+        logger.debug(
+            "__init__: name=%s user_id=%s instance_uuid=%s request_uuid=%s",
+            name,
+            user_id,
+            instance_uuid,
+            request_uuid,
+        )
 
         # Validate required UUID parameters
         if not request_uuid:
@@ -136,7 +149,14 @@ class UserNGFWStack(pulumi.ComponentResource):
             }
         )
 
-    def get_outputs(self) -> dict:
+        logger.info(
+            "__init__: created UserNGFWStack name=%s user_id=%s instance_uuid=%s",
+            name,
+            user_id,
+            instance_uuid,
+        )
+
+    def get_outputs(self) -> dict[str, Any]:
         """Get stack outputs as a dictionary.
 
         Returns:
@@ -153,7 +173,7 @@ class UserNGFWStack(pulumi.ComponentResource):
             "service_name": self.service_name,
         }
 
-    def run_provision(self, orchestrator):
+    def run_provision(self, orchestrator) -> Any:
         """Post-Pulumi provisioning via SetupOrchestrator.
 
         Wait for SSH, verify device cert, configure XDR logging.
@@ -164,6 +184,8 @@ class UserNGFWStack(pulumi.ComponentResource):
         Returns:
             Result from orchestrator
         """
+        logger.debug("run_provision: starting for user_id=%s", self.user_id)
+
         from plans.gwlb_setup import GWLBSetupPlan
         from plans.ngfw_provision import NGFWProvisionPlan
 
@@ -180,7 +202,7 @@ class UserNGFWStack(pulumi.ComponentResource):
 
         return gwlb_result
 
-    def run_deprovision(self, orchestrator):
+    def run_deprovision(self, orchestrator) -> Any:
         """Cleanup with license deactivation.
 
         Deactivates VM-Series license before termination.
@@ -191,12 +213,14 @@ class UserNGFWStack(pulumi.ComponentResource):
         Returns:
             Result from orchestrator
         """
+        logger.debug("run_deprovision: starting for user_id=%s", self.user_id)
+
         from plans.ngfw_deprovision import NGFWDeprovisionPlan
 
         deprovision_plan = NGFWDeprovisionPlan()
         return orchestrator.orchestrate(deprovision_plan, self)
 
-    def run_ops(self, operation: str, orchestrator, **kwargs):
+    def run_ops(self, operation: str, orchestrator, **kwargs: Any) -> Any:
         """Runtime operations via OpsOrchestrator.
 
         Operations: start, stop, add-route, remove-route, reconcile, sweep
@@ -212,6 +236,8 @@ class UserNGFWStack(pulumi.ComponentResource):
         Raises:
             ValueError: If unknown operation requested
         """
+        logger.debug("run_ops: operation=%s user_id=%s", operation, self.user_id)
+
         operation_plans = {
             "start": "plans.ngfw_start.NGFWStartPlan",
             "stop": "plans.ngfw_stop.NGFWStopPlan",

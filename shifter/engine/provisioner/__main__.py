@@ -6,11 +6,18 @@ It detects the stack type from config and creates the appropriate resources:
 - NGFW stack: Creates VM-Series NGFW with GWLB for traffic inspection
 """
 
+from __future__ import annotations
+
+import logging
+from typing import Any
+
 import pulumi
 
 from config import load_config, load_ngfw_config
 from stacks import RangeStack
 from stacks.user_ngfw_stack import UserNGFWStack
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -24,18 +31,30 @@ def main() -> None:
 
     # Check which type of stack to create based on config
     request_id = config.get("requestId")
+    range_id = config.get("rangeId")
+
+    logger.debug("main: request_id=%s range_id=%s", request_id, range_id)
 
     if request_id:
         # NGFW provisioning path
+        logger.info("main: dispatching to NGFW provisioning for request_id=%s", request_id)
         _provision_ngfw()
     else:
         # Range provisioning path (existing behavior)
+        logger.info("main: dispatching to Range provisioning for range_id=%s", range_id)
         _provision_range()
 
 
 def _provision_ngfw() -> None:
     """Provision NGFW stack (UserNGFWStack)."""
     config = load_ngfw_config()
+
+    logger.debug(
+        "_provision_ngfw: config loaded request_id=%s instance_uuid=%s user_id=%s",
+        config.request_id,
+        config.instance_uuid,
+        config.user_id,
+    )
 
     # Create the NGFW stack
     ngfw_stack = UserNGFWStack(
@@ -58,6 +77,8 @@ def _provision_ngfw() -> None:
         instance_profile_name=config.instance_profile_name or None,
     )
 
+    logger.info("_provision_ngfw: UserNGFWStack created for request_id=%s", config.request_id)
+
     # Export outputs for main.py to read after pulumi up
     pulumi.export("instance_id", ngfw_stack.instance_id)
     pulumi.export("management_ip", ngfw_stack.management_ip)
@@ -66,15 +87,31 @@ def _provision_ngfw() -> None:
     pulumi.export("target_group_arn", ngfw_stack.target_group_arn)
     pulumi.export("service_name", ngfw_stack.service_name)
 
+    logger.debug("_provision_ngfw: exports registered")
+
 
 def _provision_range() -> None:
     """Provision Range stack (RangeStack)."""
     config = load_config()
 
+    logger.debug(
+        "_provision_range: config loaded range_id=%s request_uuid=%s subnet_count=%d",
+        config.range_id,
+        config.request_uuid,
+        len(config.subnets),
+    )
+
     # Create the range stack
     range_stack = RangeStack(
         f"range-{config.range_id}",
         config=config,
+    )
+
+    logger.info(
+        "_provision_range: RangeStack created range_id=%s networks=%d instances=%d",
+        config.range_id,
+        len(range_stack.networks),
+        len(range_stack.instances),
     )
 
     # Build lookup for subnet UUIDs from config
@@ -83,8 +120,11 @@ def _provision_range() -> None:
     # Export subnets dict with per-subnet details including UUID for DB correlation
     subnets_output: dict[str, dict[str, pulumi.Output[str] | str]] = {}
     for subnet_name, network in range_stack.networks.items():
+        subnet_uuid = subnet_uuid_lookup.get(subnet_name, "")
+        if not subnet_uuid:
+            logger.warning("_provision_range: missing UUID for subnet_name=%s in config", subnet_name)
         subnets_output[subnet_name] = {
-            "uuid": subnet_uuid_lookup.get(subnet_name, ""),
+            "uuid": subnet_uuid,
             "subnet_id": network.subnet_id,
             "subnet_cidr": network.subnet_cidr,
             "security_group_id": network.security_group_id,
@@ -93,19 +133,14 @@ def _provision_range() -> None:
         }
     pulumi.export("subnets", subnets_output)
 
-    # Build lookup for instance UUIDs from config
-    instance_uuid_lookup: dict[tuple[str, str], str] = {}
-    for subnet_config in config.subnets:
-        for inst in subnet_config.instances:
-            instance_uuid_lookup[(subnet_config.name, inst.role)] = inst.uuid
-
     # Export instance details with UUID for DB correlation
     # range_stack.instances is list[tuple[InstanceComponent, str]]
-    instances_output = []
+    # InstanceComponent.uuid holds the instance UUID directly (no lookup needed)
+    instances_output: list[dict[str, Any]] = []
     for inst, subnet_name in range_stack.instances:
         instances_output.append(
             {
-                "uuid": instance_uuid_lookup.get((subnet_name, inst.role), ""),
+                "uuid": inst.uuid,
                 "role": inst.role,
                 "os": inst.os_type,
                 "subnet_name": subnet_name,
@@ -116,6 +151,12 @@ def _provision_range() -> None:
         )
 
     pulumi.export("instances", instances_output)
+
+    logger.debug(
+        "_provision_range: exports registered subnets=%d instances=%d",
+        len(subnets_output),
+        len(instances_output),
+    )
 
 
 # Run the main function

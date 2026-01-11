@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Dashboard range status updates and styling
 - Better AaC checking in check_layer_imports script
+- Sticky sesesions on Linux terminals: keep history, scrollback, etc when reconnecting
 
 ## [0.10.4] - 2025-01-06
 

@@ -41,6 +41,7 @@ def _get_pulumi_path() -> str:
     path = shutil.which("pulumi")
     if not path:
         raise RuntimeError("pulumi executable not found in PATH")
+    logger.debug("_get_pulumi_path: found pulumi at %s", path)
     return path
 
 
@@ -53,24 +54,42 @@ def get_db_connection() -> psycopg.Connection:
     Raises:
         Exception: If connection fails.
     """
+    db_host = os.environ.get("DB_HOST")
+    db_port = int(os.environ.get("DB_PORT", 5432))
+    db_user = os.environ.get("DB_USER")
+    db_name = os.environ.get("DB_NAME")
+    aws_region = os.environ.get("AWS_REGION")
+
+    if not all([db_host, db_user, db_name, aws_region]):
+        env_pairs = [
+            ("DB_HOST", db_host),
+            ("DB_USER", db_user),
+            ("DB_NAME", db_name),
+            ("AWS_REGION", aws_region),
+        ]
+        missing = [k for k, v in env_pairs if not v]
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    logger.debug("get_db_connection: connecting to %s:%s/%s", db_host, db_port, db_name)
+
     client = boto3.client("rds")
     token = client.generate_db_auth_token(
-        DBHostname=os.environ["DB_HOST"],
-        Port=int(os.environ.get("DB_PORT", 5432)),
-        DBUsername=os.environ["DB_USER"],
-        Region=os.environ["AWS_REGION"],
+        DBHostname=db_host,
+        Port=db_port,
+        DBUsername=db_user,
+        Region=aws_region,
     )
     return psycopg.connect(
-        host=os.environ["DB_HOST"],
-        port=int(os.environ.get("DB_PORT", 5432)),
-        dbname=os.environ["DB_NAME"],
-        user=os.environ["DB_USER"],
+        host=db_host,
+        port=db_port,
+        dbname=db_name,
+        user=db_user,
         password=token,
         sslmode="require",
     )
 
 
-def update_range_status(range_id: int, status: str, **kwargs) -> None:
+def update_range_status(range_id: int, status: str, **kwargs: str | int | None) -> None:
     """Update range status in database.
 
     Args:
@@ -78,6 +97,7 @@ def update_range_status(range_id: int, status: str, **kwargs) -> None:
         status: New status value (e.g., 'provisioning', 'ready', 'failed').
         **kwargs: Additional fields to update (e.g., subnet_id, error_message).
     """
+    logger.debug("update_range_status: range_id=%s status=%s kwargs=%s", range_id, status, list(kwargs.keys()))
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             updates = ["status = %s", "updated_at = NOW()"]
@@ -454,6 +474,7 @@ def user_has_active_ranges(user_id: int, exclude_range_id: int) -> bool:
     Returns:
         True if user has other active ranges, False otherwise.
     """
+    logger.debug("user_has_active_ranges: user_id=%s exclude_range_id=%s", user_id, exclude_range_id)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -465,7 +486,9 @@ def user_has_active_ranges(user_id: int, exclude_range_id: int) -> bool:
             """,
             (user_id, exclude_range_id),
         )
-        count = cur.fetchone()[0]
+        row = cur.fetchone()
+        count = row[0] if row else 0
+        logger.debug("user_has_active_ranges: found %d active ranges", count)
         return count > 0
 
 
@@ -700,6 +723,8 @@ def run_pulumi(operation: str, request_id: str) -> None:
     Raises:
         Exception: If the Pulumi operation fails.
     """
+    logger.info("run_pulumi: starting operation=%s request_id=%s", operation, request_id)
+
     # Fetch data from DB (matches NGFW pattern)
     range_data = get_range_data_by_request_id(request_id)
     range_id = range_data["range_id"]
@@ -1003,7 +1028,7 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 
 
-def run_ngfw_operation(operation: str, request_id: str, **kwargs) -> None:
+def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     """Run NGFW runtime operation (start/stop/route management).
 
     Retrieves EC2 instance ID from the Instance.state (populated during Pulumi
@@ -1019,6 +1044,10 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs) -> None:
         ValueError: If unknown operation or EC2 instance ID not found.
         Exception: If operation fails.
     """
+    logger.info("run_ngfw_operation: starting operation=%s request_id=%s", operation, request_id)
+    if kwargs:
+        logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
+
     from events import publish_ngfw_event
 
     # Status transitions for each operation
@@ -1130,6 +1159,8 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
         ValueError: If unknown operation or Request not found.
         Exception: If the Pulumi operation fails.
     """
+    logger.info("run_ngfw_pulumi: starting operation=%s request_id=%s", operation, request_id)
+
     # Get NGFW data from database (needed for correlation IDs and credentials)
     ngfw_data = get_ngfw_data_by_request_id(request_id)
     instance_id = ngfw_data["instance_id"]

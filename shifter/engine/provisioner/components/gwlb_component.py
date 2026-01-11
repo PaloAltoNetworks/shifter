@@ -8,8 +8,12 @@ range subnets through the NGFW:
 - VPC Endpoint Service
 """
 
+import logging
+
 import pulumi
 import pulumi_aws as aws
+
+logger = logging.getLogger(__name__)
 
 
 class GWLBComponent(pulumi.ComponentResource):
@@ -60,6 +64,14 @@ class GWLBComponent(pulumi.ComponentResource):
             ValueError: If required uuid parameters are missing.
         """
         super().__init__("shifter:ngfw:GWLBComponent", name, None, opts)
+
+        logger.debug(
+            "__init__: name=%s user_id=%s instance_uuid=%s request_uuid=%s",
+            name,
+            user_id,
+            instance_uuid,
+            request_uuid,
+        )
 
         # Validate required UUID parameters
         if not request_uuid:
@@ -137,6 +149,13 @@ class GWLBComponent(pulumi.ComponentResource):
         self.gwlb_arn = self.gwlb.arn
         self.target_group_arn = self.target_group.arn
         self.service_name = self.endpoint_service.service_name
+
+        logger.info(
+            "__init__: created GWLBComponent name=%s user_id=%s instance_uuid=%s",
+            name,
+            user_id,
+            instance_uuid,
+        )
 
         # Register outputs
         self.register_outputs(

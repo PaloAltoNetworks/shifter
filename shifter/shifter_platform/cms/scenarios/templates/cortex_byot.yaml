@@ -10,6 +10,7 @@ instances:
     os_type: kali
     xdr_agent: false
     join_domain: false
+    ai_agent: true
 
   - name: Domain Controller
     role: dc

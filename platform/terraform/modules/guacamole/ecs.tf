@@ -44,7 +44,9 @@ locals {
   ] : []
 
   # Combined environment variables
-  guacamole_environment = concat(local.guacamole_base_env, local.guacamole_oidc_env)
+  # Note: OIDC is intentionally excluded - Portal handles auth via JSON auth extension
+  # Users authenticate to Portal (Django), then get signed RDP URLs
+  guacamole_environment = local.guacamole_base_env
 }
 
 # ------------------------------------------------------------------------------

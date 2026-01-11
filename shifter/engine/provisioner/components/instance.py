@@ -10,6 +10,7 @@ All AWS resources are created via Pulumi to ensure proper lifecycle management.
 """
 
 import base64
+import logging
 import os
 import re
 from pathlib import Path
@@ -27,6 +28,8 @@ from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
+
+logger = logging.getLogger(__name__)
 
 
 def validate_s3_path(value: str) -> bool:
@@ -52,6 +55,7 @@ def generate_ssh_keypair() -> tuple[str, str]:
     Returns:
         tuple: (private_key_pem, public_key_openssh)
     """
+    logger.debug("generate_ssh_keypair: generating Ed25519 key pair")
     private_key = ed25519.Ed25519PrivateKey.generate()
 
     private_key_pem = private_key.private_bytes(
@@ -161,6 +165,16 @@ class InstanceComponent(pulumi.ComponentResource):
             ValueError: If required uuid parameters are missing or invalid.
         """
         super().__init__("shifter:range:InstanceComponent", name, None, opts)
+
+        logger.debug(
+            "__init__: name=%s range_id=%s role=%s os_type=%s instance_uuid=%s request_uuid=%s",
+            name,
+            range_id,
+            role,
+            os_type,
+            instance_uuid,
+            request_uuid,
+        )
 
         # Validate required UUID parameters
         if not request_uuid:
@@ -325,6 +339,13 @@ class InstanceComponent(pulumi.ComponentResource):
         # Export outputs
         self.instance_id = self.instance.id
         self.private_ip = self.instance.private_ip
+
+        logger.info(
+            "__init__: created InstanceComponent name=%s role=%s instance_uuid=%s",
+            name,
+            role,
+            instance_uuid,
+        )
 
         self.register_outputs(
             {
@@ -659,6 +680,15 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         Returns:
             Base64-encoded user data script.
         """
+        logger.debug(
+            "_generate_user_data: role=%s os_type=%s range_id=%s index=%s join_domain=%s",
+            role,
+            os_type,
+            range_id,
+            index,
+            join_domain,
+        )
+
         # Load Jinja2 templates
         # Use TEMPLATES_DIR env var if set, otherwise default to relative path
         templates_dir = os.environ.get(
@@ -697,6 +727,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
             context = {}  # No variables needed - template just logs SSM will handle setup
 
         script = template.render(**context)
+        logger.debug("_generate_user_data: rendered template for role=%s os_type=%s", role, os_type)
         return base64.b64encode(script.encode()).decode()
 
     @property

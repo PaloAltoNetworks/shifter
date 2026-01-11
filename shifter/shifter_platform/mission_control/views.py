@@ -53,7 +53,7 @@ def _get_user(request: HttpRequest) -> User:
 
 @login_required
 @require_GET
-def dashboard(request):
+def dashboard(request: HttpRequest) -> HttpResponse:
     """Main dashboard - launch and manage ranges."""
     context = {
         "page_title": "Dashboard",
@@ -65,9 +65,8 @@ def dashboard(request):
 
 @login_required
 @require_GET
-def agents(request):
+def agents(request: HttpRequest) -> HttpResponse:
     """Agent management - upload and manage XDR/XSIAM agents."""
-
     context = {
         "page_title": "Agents",
         "active_nav": "agents",
@@ -79,17 +78,18 @@ def agents(request):
 
 @login_required
 @require_POST
-def delete_agent(request, agent_id):
+def delete_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
     """Handle agent deletion (soft delete)."""
+    user = _get_user(request)
     try:
-        cms_delete_agent(request.user, agent_id)
+        cms_delete_agent(user, agent_id)
         messages.success(request, "Agent deleted.")
-        logger.info("Agent deleted: user=%s agent_id=%s", request.user.email, agent_id)
+        logger.info("Agent deleted: user=%s agent_id=%s", user.email, agent_id)
     except (CMSError, AssetError) as e:
         messages.error(request, str(e))
         logger.error(
             "Agent delete error: user=%s agent_id=%s error=%s",
-            request.user.email,
+            user.email,
             agent_id,
             str(e),
         )
@@ -99,7 +99,7 @@ def delete_agent(request, agent_id):
 
 @login_required
 @require_GET
-def terminal(request):
+def terminal(request: HttpRequest) -> HttpResponse:
     """Terminal - SSH access to range instances.
 
     Uses active_range and has_active_range from context processor.
@@ -114,7 +114,7 @@ def terminal(request):
 
 @login_required
 @require_GET
-def settings(request):
+def settings(request: HttpRequest) -> HttpResponse:
     """Account settings."""
     context = {
         "page_title": "Settings",
@@ -125,7 +125,7 @@ def settings(request):
 
 @login_required
 @require_GET
-def help_page(request):
+def help_page(request: HttpRequest) -> HttpResponse:
     """Help and documentation."""
     context = {
         "page_title": "Help",
@@ -142,7 +142,7 @@ def help_page(request):
 
 @login_required
 @require_POST
-def initiate_upload(request):
+def initiate_upload(request: HttpRequest) -> JsonResponse:
     """
     Step 1: Request presigned URL for direct S3 upload.
 
@@ -183,8 +183,9 @@ def initiate_upload(request):
     # Sanitize filename
     filename = os.path.basename(filename)
 
+    user = _get_user(request)
     try:
-        result = cms_initiate_upload(request.user, name, filename, file_size)
+        result = cms_initiate_upload(user, name, filename, file_size)
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -193,7 +194,7 @@ def initiate_upload(request):
 
     logger.info(
         "Upload initiated: user=%s filename=%s size=%d",
-        request.user.email,
+        user.email,
         filename,
         file_size,
     )
@@ -203,7 +204,7 @@ def initiate_upload(request):
 
 @login_required
 @require_POST
-def complete_upload(request):
+def complete_upload(request: HttpRequest) -> JsonResponse:
     """
     Step 3: Complete upload after file is in S3.
 
@@ -221,9 +222,10 @@ def complete_upload(request):
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
     upload_token = data.get("upload_token", "")
+    user = _get_user(request)
 
     try:
-        agent = cms_complete_upload(request.user, upload_token)
+        agent = cms_complete_upload(user, upload_token)
     except CMSError as e:
         set_upload_in_progress(request.session, False)
         return JsonResponse({"error": str(e)}, status=400)
@@ -231,7 +233,7 @@ def complete_upload(request):
     # Clear upload in progress
     set_upload_in_progress(request.session, False)
 
-    logger.info("Upload completed: user=%s agent_id=%s", request.user.email, agent.id)
+    logger.info("Upload completed: user=%s agent_id=%s", user.email, agent.id)
 
     return JsonResponse(
         {
@@ -245,7 +247,7 @@ def complete_upload(request):
 @csrf_exempt  # Allow sendBeacon on page unload (no custom headers)
 @login_required
 @require_POST
-def cancel_upload(request):
+def cancel_upload(request: HttpRequest) -> JsonResponse:
     """
     Cancel an in-progress upload.
 
@@ -263,12 +265,13 @@ def cancel_upload(request):
         data = {}
 
     upload_token = data.get("upload_token", "")
+    user = _get_user(request)
 
     # Try to clean up S3 object if token provided
     if upload_token:
         try:
-            cms_cancel_upload(request.user, upload_token)
-            logger.info("Cancelled upload cleaned up: user=%s", request.user.email)
+            cms_cancel_upload(user, upload_token)
+            logger.info("Cancelled upload cleaned up: user=%s", user.email)
         except CMSError:
             pass  # Invalid token or S3 error, ignore
 
@@ -285,7 +288,7 @@ def cancel_upload(request):
 
 @login_required
 @require_GET
-def get_range(request):
+def get_range(request: HttpRequest) -> JsonResponse:
     """
     Get the current user's active range.
 
@@ -309,7 +312,7 @@ def get_range(request):
 
 @login_required
 @require_POST
-def launch_range(request):
+def launch_range(request: HttpRequest) -> JsonResponse:
     """
     Launch a new cyber range.
 
@@ -326,13 +329,14 @@ def launch_range(request):
         - success: true
         - range: Range object
     """
+    user = _get_user(request)
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
     scenario = data.get("scenario", "basic")
-    valid_scenarios = {s["id"] for s in cms_list_scenarios(request.user)}
+    valid_scenarios = {s["id"] for s in cms_list_scenarios(user)}
     if scenario not in valid_scenarios:
         return JsonResponse({"error": "Invalid scenario"}, status=400)
 
@@ -347,7 +351,7 @@ def launch_range(request):
         if not agent_id:
             return JsonResponse({"error": "agent_id is required"}, status=400)
         try:
-            agent = cms_get_agent(request.user, agent_id)
+            agent = cms_get_agent(user, agent_id)
             os_type = "windows" if agent.os.slug == "windows" else "linux"
             agents_by_os[os_type] = agent_id
         except CMSError as e:
@@ -360,7 +364,7 @@ def launch_range(request):
 
     try:
         range_ctx = cms_create_range(
-            request.user,
+            user,
             scenario,
             agents_by_os,
         )
@@ -369,7 +373,7 @@ def launch_range(request):
 
     logger.info(
         "Range launched: user=%s request_id=%s agent=%s scenario=%s",
-        request.user.email,
+        user.email,
         range_ctx.request_id,
         range_ctx.agent_name,
         scenario,
@@ -385,7 +389,7 @@ def launch_range(request):
 
 @login_required
 @require_POST
-def cancel_range(request):
+def cancel_range(request: HttpRequest) -> JsonResponse:
     """
     Cancel a provisioning range.
 
@@ -398,6 +402,7 @@ def cancel_range(request):
     from cms import cancel_range as cms_cancel_range_by_id
     from cms.services import cancel_range_by_request_id as cms_cancel_range_by_request
 
+    user = _get_user(request)
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -412,11 +417,11 @@ def cancel_range(request):
 
     try:
         if request_id:
-            cms_cancel_range_by_request(request.user, request_id)
-            logger.info("Range cancelled: user=%s request_id=%s", request.user.email, request_id)
+            cms_cancel_range_by_request(user, request_id)
+            logger.info("Range cancelled: user=%s request_id=%s", user.email, request_id)
         else:
-            cms_cancel_range_by_id(request.user, range_id)
-            logger.info("Range cancelled: user=%s range_id=%s", request.user.email, range_id)
+            cms_cancel_range_by_id(user, range_id)
+            logger.info("Range cancelled: user=%s range_id=%s", user.email, range_id)
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -425,7 +430,7 @@ def cancel_range(request):
 
 @login_required
 @require_POST
-def destroy_range(request):
+def destroy_range(request: HttpRequest) -> JsonResponse:
     """
     Destroy an active, paused, or failed range.
 
@@ -438,6 +443,7 @@ def destroy_range(request):
     from cms import destroy_range as cms_destroy_range_by_id
     from cms.services import destroy_range_by_request_id as cms_destroy_range_by_request
 
+    user = _get_user(request)
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -452,11 +458,11 @@ def destroy_range(request):
 
     try:
         if request_id:
-            cms_destroy_range_by_request(request.user, request_id)
-            logger.info("Range destroyed: user=%s request_id=%s", request.user.email, request_id)
+            cms_destroy_range_by_request(user, request_id)
+            logger.info("Range destroyed: user=%s request_id=%s", user.email, request_id)
         else:
-            cms_destroy_range_by_id(request.user, range_id)
-            logger.info("Range destroyed: user=%s range_id=%s", request.user.email, range_id)
+            cms_destroy_range_by_id(user, range_id)
+            logger.info("Range destroyed: user=%s range_id=%s", user.email, range_id)
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -465,7 +471,7 @@ def destroy_range(request):
 
 @login_required
 @require_GET
-def list_agents(request):
+def list_agents(request: HttpRequest) -> JsonResponse:
     """
     Get user's agents.
 
@@ -481,7 +487,7 @@ def list_agents(request):
 
 @login_required
 @require_GET
-def list_scenarios(request):
+def list_scenarios(request: HttpRequest) -> JsonResponse:
     """
     Get available scenarios with agent requirements.
 
@@ -673,7 +679,7 @@ def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
 
 @login_required
 @require_GET
-def credentials_list(request):
+def credentials_list(request: HttpRequest) -> HttpResponse:
     """List user's credentials."""
     credentials = cms_list_credentials(request.user)
 
@@ -692,7 +698,7 @@ def credentials_list(request):
 
 @login_required
 @require_GET
-def credential_detail(request, credential_id):
+def credential_detail(request: HttpRequest, credential_id: int) -> HttpResponse:
     """View credential details."""
     try:
         credential = cms_get_credential(request.user, credential_id)
@@ -709,7 +715,7 @@ def credential_detail(request, credential_id):
 
 @login_required
 @require_GET
-def credential_add(request):
+def credential_add(request: HttpRequest) -> HttpResponse:
     """Add credential form (unified page with type selector)."""
     context = {
         "page_title": "Add Credential",
@@ -725,7 +731,7 @@ def credential_add(request):
 
 @login_required
 @require_POST
-def api_credential_create(request):
+def api_credential_create(request: HttpRequest) -> JsonResponse:
     """Create a new credential.
 
     Accepts JSON with credential_type ('scm' or 'deployment_profile') and
@@ -735,6 +741,7 @@ def api_credential_create(request):
 
     from shared.schemas import DeploymentProfileSpec, SCMCredentialSpec
 
+    user = _get_user(request)
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -748,7 +755,7 @@ def api_credential_create(request):
         )
 
     # Add user_id for spec validation
-    data["user_id"] = request.user.id
+    data["user_id"] = user.id
 
     # Select spec class based on type
     spec_class = SCMCredentialSpec if credential_type_slug == "scm" else DeploymentProfileSpec
@@ -768,7 +775,7 @@ def api_credential_create(request):
 
     try:
         cred_ref = cms_create_credential(
-            request.user,
+            user,
             credential_type_slug,
             **kwargs,
         )
@@ -783,7 +790,7 @@ def api_credential_create(request):
 
     logger.info(
         "Credential created: user=%s credential_id=%s type=%s",
-        request.user.email,
+        user.email,
         cred_ref.credential_id,
         credential_type_slug,
     )
@@ -800,16 +807,17 @@ def api_credential_create(request):
 
 @login_required
 @require_POST
-def api_credential_delete(request, credential_id):
+def api_credential_delete(request: HttpRequest, credential_id: int) -> JsonResponse:
     """Soft-delete a credential."""
+    user = _get_user(request)
     try:
-        cms_delete_credential(request.user, credential_id)
+        cms_delete_credential(user, credential_id)
     except CMSError:
         raise Http404("Credential not found") from None
 
     logger.info(
         "Credential deleted: user=%s credential_id=%s",
-        request.user.email,
+        user.email,
         credential_id,
     )
 

@@ -189,6 +189,13 @@ class Range(models.Model):
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
 
+    uuid = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        db_index=True,
+        editable=False,
+        help_text="Unique identifier for cross-service correlation",
+    )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
     request = models.ForeignKey(
         Request,

@@ -187,8 +187,7 @@ def create_guacamole_rdp_url(
 
     # Build client identifier: connection_name + NULL + "c" + NULL + "json"
     # This tells Guacamole to auto-connect to the specified connection from JSON auth
-    client_id_raw = base64.b64encode(f"{connection_name}\0c\0json".encode()).decode()
-    # URL-encode the client_id (base64 contains +, /, = which need encoding in paths)
-    client_id = quote(client_id_raw, safe="")
+    # Note: Don't URL-encode - it's in the fragment (#), handled by browser JS directly
+    client_id = base64.b64encode(f"{connection_name}\0c\0json".encode()).decode().rstrip("=")
 
     return f"{base_url}/#/client/{client_id}?data={encoded_data}"

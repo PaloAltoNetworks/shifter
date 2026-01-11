@@ -98,10 +98,7 @@ class RangeStack(pulumi.ComponentResource):
     def _register_outputs(self) -> None:
         """Build and register Pulumi outputs."""
         # Build instance outputs with subnet_name
-        instance_outputs = [
-            self._build_instance_output(inst, subnet_name)
-            for inst, subnet_name in self.instances
-        ]
+        instance_outputs = [self._build_instance_output(inst, subnet_name) for inst, subnet_name in self.instances]
 
         # Build subnets output dict
         subnets_output: dict[str, dict[str, pulumi.Output[str]]] = {
@@ -124,9 +121,7 @@ class RangeStack(pulumi.ComponentResource):
 
         self.register_outputs(outputs)
 
-    def _run_all_setup(
-        self, dc_components: list[InstanceComponent], config: RangeConfig
-    ) -> None:
+    def _run_all_setup(self, dc_components: list[InstanceComponent], config: RangeConfig) -> None:
         """Run setup for all instances (non-DC first, then DCs).
 
         Args:
@@ -151,9 +146,7 @@ class RangeStack(pulumi.ComponentResource):
             # Domain-joining instances get DC's private_ip for domain join
             if inst_config.join_domain and dc_components:
 
-                def setup_with_dc_ip(
-                    ip: str, inst: InstanceComponent = instance
-                ) -> None:
+                def setup_with_dc_ip(ip: str, inst: InstanceComponent = instance) -> None:
                     inst.run_setup(dc_ip=ip)
 
                 dc_components[0].private_ip.apply(setup_with_dc_ip)
@@ -164,9 +157,7 @@ class RangeStack(pulumi.ComponentResource):
         for dc_instance in dc_components:
             dc_instance.run_dc_setup()
 
-    def _create_all_instances(
-        self, name: str, config: RangeConfig
-    ) -> list[InstanceComponent]:
+    def _create_all_instances(self, name: str, config: RangeConfig) -> list[InstanceComponent]:
         """Create all instances (DCs first, then others).
 
         Iterates through subnets and creates instances in their designated subnet.
@@ -207,9 +198,7 @@ class RangeStack(pulumi.ComponentResource):
             network = self.networks[subnet_config.name]
             for inst_config in subnet_config.instances:
                 if inst_config.role != "dc":
-                    instance = self._create_instance(
-                        name, inst_config, config, counters, network, subnet_config.name
-                    )
+                    instance = self._create_instance(name, inst_config, config, counters, network, subnet_config.name)
                     self.instances.append((instance, subnet_config.name))
 
         logger.debug(
@@ -319,6 +308,9 @@ class RangeStack(pulumi.ComponentResource):
         Creates one NetworkComponent per logical subnet, each with its own
         security group, route table, and optional GWLB endpoint.
 
+        After all networks are created, adds inter-subnet routes to force
+        all inter-subnet traffic through the GWLB/NGFW.
+
         Args:
             name: Pulumi resource name prefix.
             config: Range configuration with subnets list.
@@ -360,6 +352,67 @@ class RangeStack(pulumi.ComponentResource):
             )
             self.networks[subnet_config.name] = network
 
+        # Add inter-subnet routes to force all inter-subnet traffic through GWLB
+        self._add_inter_subnet_routes(name, config)
+
+    def _add_inter_subnet_routes(self, name: str, config: RangeConfig) -> None:
+        """Add routes from each subnet to all other subnets through GWLB.
+
+        This forces ALL inter-subnet traffic through the NGFW, overriding
+        AWS's implicit local VPC route. Without these explicit routes,
+        traffic between subnets (e.g., 10.1.2.0/28 → 10.1.3.0/28) would
+        use the local route and bypass the NGFW entirely.
+
+        The NGFW policies (based on connected_to) determine what traffic
+        is allowed; this routing ensures ALL inter-subnet traffic is
+        inspected by the NGFW first.
+
+        Args:
+            name: Pulumi resource name prefix.
+            config: Range configuration.
+        """
+        if not config.gwlb_service_name:
+            logger.debug("No GWLB configured, skipping inter-subnet routes")
+            return
+
+        if len(self.networks) < 2:
+            logger.debug("Only one subnet, no inter-subnet routes needed")
+            return
+
+        subnet_names = list(self.networks.keys())
+        route_count = 0
+
+        for src_name in subnet_names:
+            src_network = self.networks[src_name]
+
+            for dst_name in subnet_names:
+                if src_name == dst_name:
+                    continue  # Skip routes to self
+
+                dst_network = self.networks[dst_name]
+
+                # Add route from src subnet to dst subnet's CIDR via GWLB
+                route_name = f"{name}-{src_name}-to-{dst_name}-route"
+                src_network.add_route_to_subnet(
+                    route_name,
+                    dst_network.subnet_cidr,
+                    opts=pulumi.ResourceOptions(
+                        parent=self,
+                        depends_on=[
+                            src_network.route_table,
+                            src_network.gwlb_endpoint,
+                            dst_network.subnet,
+                        ],
+                    ),
+                )
+                route_count += 1
+
+        logger.info(
+            "Added %d inter-subnet routes for %d subnets",
+            route_count,
+            len(subnet_names),
+        )
+
     def _validate_config(self, config: RangeConfig) -> None:
         """Validate config has required fields for instance types present.
 
@@ -379,11 +432,7 @@ class RangeStack(pulumi.ComponentResource):
             raise ValueError("Subnet names must be unique")
 
         # Check DC requirements by iterating through subnets
-        has_dc = any(
-            inst.role == "dc"
-            for subnet in config.subnets
-            for inst in subnet.instances
-        )
+        has_dc = any(inst.role == "dc" for subnet in config.subnets for inst in subnet.instances)
         if has_dc and not config.dc_ami_id:
             raise ValueError("dc_ami_id is required for DC instances")
 
@@ -418,10 +467,7 @@ class RangeStack(pulumi.ComponentResource):
         }
 
         # Build instance outputs with subnet_name
-        instance_outputs = [
-            self._build_instance_output(inst, subnet_name)
-            for inst, subnet_name in self.instances
-        ]
+        instance_outputs = [self._build_instance_output(inst, subnet_name) for inst, subnet_name in self.instances]
 
         return {
             "subnets": subnets_output,

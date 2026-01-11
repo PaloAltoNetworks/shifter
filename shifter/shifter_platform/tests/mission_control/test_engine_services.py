@@ -344,7 +344,7 @@ class TestCreateRange:
         """Return a valid RequestSpec containing a RangeSpec for testing."""
         from uuid import uuid4
 
-        from shared.schemas import InstanceSpec, RangeSpec, RequestSpec
+        from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
 
         request_id = uuid4()
         return RequestSpec(
@@ -354,19 +354,26 @@ class TestCreateRange:
                 RangeSpec(
                     user_id=1,
                     scenario_id="test-scenario",
-                    instances=[
-                        InstanceSpec(
-                            name="attacker-kali",
-                            uuid="uuid-1",
-                            role="attacker",
-                            os_type="kali",
-                        ),
-                        InstanceSpec(
-                            name="victim-ubuntu",
-                            uuid="uuid-2",
-                            role="victim",
-                            os_type="ubuntu",
-                        ),
+                    subnets=[
+                        SubnetSpec(
+                            name="test_network",
+                            uuid=str(uuid4()),
+                            instances=[
+                                InstanceSpec(
+                                    name="attacker-kali",
+                                    uuid="uuid-1",
+                                    role="attacker",
+                                    os_type="kali",
+                                ),
+                                InstanceSpec(
+                                    name="victim-ubuntu",
+                                    uuid="uuid-2",
+                                    role="victim",
+                                    os_type="ubuntu",
+                                ),
+                            ],
+                            connected_to=[],
+                        )
                     ],
                 )
             ],
@@ -394,6 +401,7 @@ class TestCreateRange:
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(valid_request_spec)
             mock_create.assert_called_once()
@@ -418,6 +426,7 @@ class TestCreateRange:
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5) as mock_allocate,
             patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(valid_request_spec)
             mock_allocate.assert_called_once()
@@ -440,6 +449,7 @@ class TestCreateRange:
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test") as mock_start,
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(valid_request_spec)
             mock_start.assert_called_once_with(valid_request_spec.request_id)
@@ -466,6 +476,7 @@ class TestCreateRange:
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             result = create_range(valid_request_spec)
             assert result == valid_request_spec.request_id
@@ -492,6 +503,7 @@ class TestCreateRange:
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             create_range(valid_request_spec)
@@ -516,6 +528,7 @@ class TestCreateRange:
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(valid_request_spec)
@@ -595,6 +608,7 @@ class TestCreateRange:
                     "RunTask",
                 ),
             ),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             pytest.raises(ClientError),
         ):
             create_range(valid_request_spec)

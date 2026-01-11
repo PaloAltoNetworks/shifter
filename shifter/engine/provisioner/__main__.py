@@ -75,18 +75,38 @@ def _provision_range() -> None:
         config=config,
     )
 
-    # Export outputs for the container entrypoint to read
-    pulumi.export("subnet_id", range_stack.subnet_id)
-    pulumi.export("subnet_cidr", range_stack.subnet_cidr)
+    # Build lookup for subnet UUIDs from config
+    subnet_uuid_lookup = {s.name: s.uuid for s in config.subnets}
 
-    # Export instance details using stored role/os_type from each instance
-    # (not index-based lookup - instance order may differ from config order)
+    # Export subnets dict with per-subnet details including UUID for DB correlation
+    subnets_output: dict[str, dict[str, pulumi.Output[str] | str]] = {}
+    for subnet_name, network in range_stack.networks.items():
+        subnets_output[subnet_name] = {
+            "uuid": subnet_uuid_lookup.get(subnet_name, ""),
+            "subnet_id": network.subnet_id,
+            "subnet_cidr": network.subnet_cidr,
+            "security_group_id": network.security_group_id,
+            "route_table_id": network.route_table_id,
+            "gwlb_endpoint_id": network.gwlb_endpoint_id,
+        }
+    pulumi.export("subnets", subnets_output)
+
+    # Build lookup for instance UUIDs from config
+    instance_uuid_lookup: dict[tuple[str, str], str] = {}
+    for subnet_config in config.subnets:
+        for inst in subnet_config.instances:
+            instance_uuid_lookup[(subnet_config.name, inst.role)] = inst.uuid
+
+    # Export instance details with UUID for DB correlation
+    # range_stack.instances is list[tuple[InstanceComponent, str]]
     instances_output = []
-    for inst in range_stack.instances:
+    for inst, subnet_name in range_stack.instances:
         instances_output.append(
             {
+                "uuid": instance_uuid_lookup.get((subnet_name, inst.role), ""),
                 "role": inst.role,
                 "os": inst.os_type,
+                "subnet_name": subnet_name,
                 "instance_id": inst.instance_id,
                 "private_ip": inst.private_ip,
                 "ssh_key_secret_arn": inst.ssh_key_secret_arn,

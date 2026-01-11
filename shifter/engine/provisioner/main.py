@@ -100,6 +100,76 @@ def update_range_status(range_id: int, status: str, **kwargs) -> None:
         conn.commit()
 
 
+def write_provisioned_state(
+    range_id: int,
+    subnets: dict[str, dict],
+    instances: list[dict],
+) -> None:
+    """Write provisioned infrastructure state directly to database.
+
+    This follows the NGFW pattern: provisioner writes state directly to DB,
+    events are notification-only.
+
+    Args:
+        range_id: The range ID being provisioned.
+        subnets: Dict of subnet_name -> subnet details with uuid and AWS resource IDs.
+        instances: List of instance dicts with uuid, instance_id, private_ip, etc.
+    """
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Update engine_subnet.state for each subnet
+            for subnet_name, subnet_data in subnets.items():
+                subnet_uuid = subnet_data.get("uuid")
+                if not subnet_uuid:
+                    logger.warning("Subnet %s missing UUID, skipping DB write", subnet_name)
+                    continue
+
+                state = {
+                    "aws_subnet_id": subnet_data.get("subnet_id"),
+                    "aws_cidr": subnet_data.get("subnet_cidr"),
+                    "aws_security_group_id": subnet_data.get("security_group_id"),
+                    "aws_route_table_id": subnet_data.get("route_table_id"),
+                    "aws_gwlb_endpoint_id": subnet_data.get("gwlb_endpoint_id"),
+                }
+
+                cur.execute(
+                    """
+                    UPDATE engine_subnet
+                    SET state = %s, status = 'ready'
+                    WHERE uuid = %s AND range_id = %s
+                    """,
+                    (json.dumps(state), subnet_uuid, range_id),
+                )
+                logger.debug("Updated engine_subnet state: uuid=%s", subnet_uuid)
+
+            # Update Range.provisioned_instances with instance details
+            # (engine_instance table may not exist yet, so we store in Range.provisioned_instances)
+            provisioned_instances = []
+            for inst in instances:
+                provisioned_instances.append({
+                    "uuid": inst.get("uuid"),
+                    "role": inst.get("role"),
+                    "os_type": inst.get("os"),
+                    "subnet_name": inst.get("subnet_name"),
+                    "instance_id": inst.get("instance_id"),
+                    "private_ip": inst.get("private_ip"),
+                    "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
+                })
+
+            cur.execute(
+                """
+                UPDATE mission_control_range
+                SET provisioned_instances = %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (json.dumps(provisioned_instances), range_id),
+            )
+            logger.debug("Updated Range.provisioned_instances: range_id=%s count=%d", range_id, len(provisioned_instances))
+
+        conn.commit()
+    logger.info("Wrote provisioned state to DB: range_id=%s subnets=%d instances=%d", range_id, len(subnets), len(instances))
+
+
 def get_ngfw_data_by_request_id(request_id: str) -> dict:
     """Read NGFW request and instance data from Engine database.
 
@@ -521,15 +591,18 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     output_data = json.loads(outputs.stdout)
     logger.info(f"Stack outputs: {json.dumps(output_data, indent=2)}")
 
-    # Publish ready event with instance details
+    # Write provisioned state directly to DB (follows NGFW pattern)
+    write_provisioned_state(
+        range_id=range_id,
+        subnets=output_data.get("subnets", {}),
+        instances=output_data.get("instances", []),
+    )
+
+    # Publish notification-only ready event
     publish_ready(
         request_id=request_id,
         range_id=range_id,
         user_id=user_id,
-        instances=output_data.get("instances", []),
-        subnet_id=output_data.get("subnet_id"),
-        subnet_cidr=output_data.get("subnet_cidr"),
-        pulumi_stack=stack_name,
     )
 
 

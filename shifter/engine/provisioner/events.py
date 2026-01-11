@@ -14,12 +14,11 @@ Usage from provisioner:
         new_status="provisioning",
     )
 
-    # When range provisioning completes
+    # When range provisioning completes (notification only - state written to DB first)
     publish_ready(
         request_id="uuid-string",
         range_id=1,
         user_id=42,
-        instances=[...],
     )
 
     # When range provisioning fails
@@ -206,21 +205,17 @@ def publish_ready(
     request_id: str,
     range_id: int,
     user_id: int,
-    instances: list[dict[str, Any]],
-    subnet_id: str | None = None,
-    subnet_cidr: str | None = None,
-    pulumi_stack: str | None = None,
 ) -> None:
     """Publish a provisioning complete event.
+
+    This is a notification-only event. All state (instance IPs, subnet IDs, etc.)
+    is written directly to the database by the provisioner before this event is
+    published. Consumers should query the database if they need state details.
 
     Args:
         request_id: UUID string of the Request (primary correlation key)
         range_id: ID of the range
         user_id: ID of the user who owns the range
-        instances: List of provisioned instance details
-        subnet_id: AWS subnet ID where instances are provisioned
-        subnet_cidr: CIDR block of the provisioned subnet
-        pulumi_stack: Name of the Pulumi stack
     """
     # First publish status update
     publish_status_update(
@@ -230,23 +225,18 @@ def publish_ready(
         new_status=STATUS_READY,
     )
 
-    # Then publish provisioned event with instance details
+    # Then publish provisioned event (notification only - no state data)
     event = _create_event(
         event_type=EVENT_TYPE_PROVISIONED,
         request_id=request_id,
         range_id=range_id,
         user_id=user_id,
-        instances=instances,
-        subnet_id=subnet_id,
-        subnet_cidr=subnet_cidr,
-        pulumi_stack=pulumi_stack,
     )
 
     logger.info(
-        "Publishing ready event: request_id=%s range_id=%s instances=%d",
+        "Publishing ready event: request_id=%s range_id=%s",
         request_id,
         range_id,
-        len(instances),
     )
 
     _publish_event(event)

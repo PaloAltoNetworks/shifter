@@ -91,15 +91,20 @@ def hydrate_scenario(
             )
         )
 
+    # Generate range UUID for cross-service correlation
+    range_uuid = str(uuid_module.uuid4())
+
     logger.debug(
-        "Hydrated scenario: scenario_id=%s, user_id=%s, subnets=%d, instances=%d",
+        "Hydrated scenario: scenario_id=%s, user_id=%s, subnets=%d, instances=%d, uuid=%s",
         scenario_id,
         user_id,
         len(subnets),
         len(instances_by_name),
+        range_uuid,
     )
 
     return RangeSpec(
+        uuid=range_uuid,
         scenario_id=scenario_id,
         user_id=user_id,
         subnets=subnets,

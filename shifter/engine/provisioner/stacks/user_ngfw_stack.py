@@ -36,6 +36,8 @@ class UserNGFWStack(pulumi.ComponentResource):
         scm_pin_value: str,
         scm_folder_name: str,
         authcode: str,
+        request_uuid: str,
+        instance_uuid: str,
         instance_type: str = "m5.xlarge",
         environment: str = "dev",
         instance_profile_name: str | None = None,
@@ -56,14 +58,26 @@ class UserNGFWStack(pulumi.ComponentResource):
             scm_pin_value: SCM auto-registration PIN value
             scm_folder_name: SCM folder name (dgname)
             authcode: VM-Series authcode for licensing
+            request_uuid: UUID of the provisioning request (for tagging/correlation)
+            instance_uuid: UUID of this NGFW instance (for tagging/correlation)
             instance_type: EC2 instance type (default: m5.xlarge)
             environment: Environment name for tagging
             instance_profile_name: IAM instance profile name (optional)
             opts: Pulumi resource options
+
+        Raises:
+            ValueError: If required uuid parameters are missing.
         """
         super().__init__("shifter:stacks:UserNGFWStack", name, None, opts)
 
+        # Validate required UUID parameters
+        if not request_uuid:
+            raise ValueError("request_uuid is required for UserNGFWStack")
+        if not instance_uuid:
+            raise ValueError("instance_uuid is required for UserNGFWStack")
+
         self.user_id = user_id
+        self._instance_uuid = instance_uuid
 
         # Create NGFW Component
         self.ngfw = NGFWComponent(
@@ -78,6 +92,8 @@ class UserNGFWStack(pulumi.ComponentResource):
             scm_pin_value=scm_pin_value,
             scm_folder_name=scm_folder_name,
             authcode=authcode,
+            request_uuid=request_uuid,
+            instance_uuid=instance_uuid,
             instance_type=instance_type,
             environment=environment,
             instance_profile_name=instance_profile_name,
@@ -90,6 +106,8 @@ class UserNGFWStack(pulumi.ComponentResource):
             user_id=user_id,
             subnet_ids=[ngfw_subnet_id],
             vpc_id=vpc_id,
+            request_uuid=request_uuid,
+            instance_uuid=instance_uuid,
             environment=environment,
             opts=pulumi.ResourceOptions(parent=self),
         )

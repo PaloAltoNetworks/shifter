@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Engine refactored to accept RequestSpec and interpret it into Engine models
 - CyberScript subnets align with actual subnets in AWS
 - AaC gate (service layer boundary violations at code or model level) fails will now block PRs
+- AWS assets tagged to requests for cost tracking and cleanup
 
 ### Fixed
 - Dashboard range status updates and styling

@@ -39,6 +39,8 @@ class GWLBComponent(pulumi.ComponentResource):
         user_id: int,
         subnet_ids: list[str],
         vpc_id: str,
+        request_uuid: str,
+        instance_uuid: str,
         environment: str = "dev",
         opts: pulumi.ResourceOptions | None = None,
     ):
@@ -49,17 +51,37 @@ class GWLBComponent(pulumi.ComponentResource):
             user_id: User ID for tagging.
             subnet_ids: List of subnet IDs for GWLB placement.
             vpc_id: VPC ID for the target group.
+            request_uuid: UUID of the provisioning request (for tagging/correlation).
+            instance_uuid: UUID of the associated NGFW instance (for lifecycle grouping).
             environment: Environment name for tagging.
             opts: Pulumi resource options.
+
+        Raises:
+            ValueError: If required uuid parameters are missing.
         """
         super().__init__("shifter:ngfw:GWLBComponent", name, None, opts)
 
-        tags = {
-            "Name": f"{name}",
-            "shifter:user_id": str(user_id),
-            "shifter:environment": environment,
-            "shifter:component": "gwlb",
-        }
+        # Validate required UUID parameters
+        if not request_uuid:
+            raise ValueError("request_uuid is required for GWLBComponent")
+        if not instance_uuid:
+            raise ValueError("instance_uuid is required for GWLBComponent")
+
+        # Store instance_uuid for output building
+        self._instance_uuid = instance_uuid
+
+        # Build common tags using shared helper
+        from components.tags import build_common_tags
+
+        tags = build_common_tags(
+            user_id=user_id,
+            environment=environment,
+            request_uuid=request_uuid,
+            unit_type="instance",
+            unit_uuid=instance_uuid,
+            component="gwlb",
+        )
+        tags["Name"] = name
 
         # Create Gateway Load Balancer
         self.gwlb = aws.lb.LoadBalancer(
@@ -124,3 +146,8 @@ class GWLBComponent(pulumi.ComponentResource):
                 "serviceName": self.service_name,
             }
         )
+
+    @property
+    def uuid(self) -> str:
+        """Return the associated NGFW instance UUID for correlation."""
+        return self._instance_uuid

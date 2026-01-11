@@ -42,6 +42,8 @@ class TestUserNGFWStackComposition:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
         assert stack is not None
 
@@ -62,6 +64,8 @@ class TestUserNGFWStackComposition:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
         assert hasattr(stack, "ngfw")
 
@@ -82,6 +86,8 @@ class TestUserNGFWStackComposition:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
         assert hasattr(stack, "gwlb")
 
@@ -118,6 +124,8 @@ class TestUserNGFWStackOutputs:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
         assert hasattr(stack, "instance_id")
 
@@ -138,6 +146,8 @@ class TestUserNGFWStackOutputs:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
         assert hasattr(stack, "management_ip")
 
@@ -158,6 +168,8 @@ class TestUserNGFWStackOutputs:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
         assert hasattr(stack, "service_name")
 
@@ -178,6 +190,8 @@ class TestUserNGFWStackOutputs:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
         assert hasattr(stack, "target_group_arn")
 
@@ -272,6 +286,8 @@ class TestUserNGFWStackRunProvision:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         mock_orchestrator = MagicMock()
@@ -323,6 +339,8 @@ class TestUserNGFWStackRunDeprovision:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         mock_orchestrator = MagicMock()
@@ -384,6 +402,8 @@ class TestUserNGFWStackRunOps:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         mock_orchestrator = MagicMock()
@@ -409,6 +429,8 @@ class TestUserNGFWStackRunOps:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         mock_orchestrator = MagicMock()
@@ -434,6 +456,8 @@ class TestUserNGFWStackRunOps:
             scm_pin_value="pin-value-456",
             scm_folder_name="test-folder",
             authcode="I1234567",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         mock_orchestrator = MagicMock()

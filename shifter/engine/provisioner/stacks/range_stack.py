@@ -84,9 +84,10 @@ class RangeStack(pulumi.ComponentResource):
             subnet_name: Name of the subnet this instance is in.
 
         Returns:
-            Dictionary with instance output fields.
+            Dictionary with instance output fields including uuid for DB correlation.
         """
         return {
+            "uuid": instance.uuid,
             "role": instance.role,
             "os": instance.os_type,
             "subnet_name": subnet_name,
@@ -256,6 +257,8 @@ class RangeStack(pulumi.ComponentResource):
             "security_group_id": network.security_group_id,
             "ami_id": ami_id,
             "environment": config.environment,
+            "request_uuid": config.request_uuid,
+            "instance_uuid": inst_config.uuid,
             "instance_profile_name": config.instance_profile_name,
             "agent_s3_bucket": config.agent_s3_bucket,
             "agent_s3_key": inst_config.agent_s3_key or "",

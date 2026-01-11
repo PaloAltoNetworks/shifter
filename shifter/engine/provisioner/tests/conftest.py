@@ -226,13 +226,12 @@ def mock_boto3_clients(mocker):
 
     # Patch boto3.client to return appropriate mock
     def mock_client_factory(service_name, **kwargs):
-        if service_name == "rds":
-            return mock_rds
-        elif service_name == "s3":
-            return mock_s3
-        elif service_name == "secretsmanager":
-            return mock_secretsmanager
-        return MagicMock()
+        clients = {
+            "rds": mock_rds,
+            "s3": mock_s3,
+            "secretsmanager": mock_secretsmanager,
+        }
+        return clients.get(service_name, MagicMock())
 
     mocker.patch("boto3.client", side_effect=mock_client_factory)
 
@@ -269,6 +268,7 @@ def mock_subprocess(mocker):
 def sample_instance_config_attacker():
     """Sample InstanceConfig for an attacker (Kali) instance."""
     return InstanceConfig(
+        uuid="inst-uuid-attacker",
         role="attacker",
         os_type="kali",
         instance_type="t3.small",
@@ -279,6 +279,7 @@ def sample_instance_config_attacker():
 def sample_instance_config_victim():
     """Sample InstanceConfig for a Linux victim instance."""
     return InstanceConfig(
+        uuid="inst-uuid-victim",
         role="victim",
         os_type="ubuntu",
         instance_type="t3.micro",
@@ -292,6 +293,7 @@ def sample_instance_config_victim():
 def sample_instance_config_windows():
     """Sample InstanceConfig for a Windows victim instance."""
     return InstanceConfig(
+        uuid="inst-uuid-windows",
         role="victim",
         os_type="windows",
         instance_type="t3.medium",
@@ -362,6 +364,7 @@ def sample_range_config_multi_subnet():
                 uuid="subnet-uuid-attack-multi",
                 instances=[
                     InstanceConfig(
+                        uuid="inst-uuid-001",
                         role="attacker",
                         os_type="kali",
                         instance_type="t3.small",
@@ -374,6 +377,7 @@ def sample_range_config_multi_subnet():
                 uuid="subnet-uuid-servers",
                 instances=[
                     InstanceConfig(
+                        uuid="inst-uuid-002",
                         role="victim",
                         os_type="ubuntu",
                         instance_type="t3.micro",
@@ -388,6 +392,7 @@ def sample_range_config_multi_subnet():
                 uuid="subnet-uuid-workstations",
                 instances=[
                     InstanceConfig(
+                        uuid="inst-uuid-003",
                         role="victim",
                         os_type="windows",
                         instance_type="t3.medium",
@@ -402,6 +407,7 @@ def sample_range_config_multi_subnet():
                 uuid="subnet-uuid-dc",
                 instances=[
                     InstanceConfig(
+                        uuid="inst-uuid-004",
                         role="dc",
                         os_type="windows",
                         instance_type="t3.large",
@@ -626,7 +632,7 @@ def sample_db_range_row():
                 {
                     "name": "attack",
                     "uuid": "subnet-uuid-attack",
-                    "instances": [{"role": "attacker", "os_type": "kali"}],
+                    "instances": [{"uuid": "inst-uuid-001", "role": "attacker", "os_type": "kali"}],
                     "connected_to": ["target"],
                 },
                 {
@@ -634,6 +640,7 @@ def sample_db_range_row():
                     "uuid": "subnet-uuid-target",
                     "instances": [
                         {
+                            "uuid": "inst-uuid-002",
                             "role": "victim",
                             "os_type": "ubuntu",
                             "agent": {"s3_key": "agents/xdr-agent.tar.gz"},
@@ -660,13 +667,13 @@ def sample_db_range_row_with_ngfw():
                 {
                     "name": "attack",
                     "uuid": "subnet-uuid-attack",
-                    "instances": [{"role": "attacker", "os_type": "kali"}],
+                    "instances": [{"uuid": "inst-uuid-001", "role": "attacker", "os_type": "kali"}],
                     "connected_to": ["target"],
                 },
                 {
                     "name": "target",
                     "uuid": "subnet-uuid-target",
-                    "instances": [{"role": "victim", "os_type": "ubuntu"}],
+                    "instances": [{"uuid": "inst-uuid-002", "role": "victim", "os_type": "ubuntu"}],
                     "connected_to": [],
                 },
             ]
@@ -688,13 +695,13 @@ def sample_db_range_row_no_agent():
                 {
                     "name": "attack",
                     "uuid": "subnet-uuid-attack-43",
-                    "instances": [{"role": "attacker", "os_type": "kali"}],
+                    "instances": [{"uuid": "inst-uuid-001", "role": "attacker", "os_type": "kali"}],
                     "connected_to": ["target"],
                 },
                 {
                     "name": "target",
                     "uuid": "subnet-uuid-target-43",
-                    "instances": [{"role": "victim", "os_type": "ubuntu"}],
+                    "instances": [{"uuid": "inst-uuid-002", "role": "victim", "os_type": "ubuntu"}],
                     "connected_to": [],
                 },
             ]
@@ -716,7 +723,7 @@ def sample_db_range_row_multi_subnet():
                 {
                     "name": "attack",
                     "uuid": "subnet-uuid-attack-44",
-                    "instances": [{"role": "attacker", "os_type": "kali"}],
+                    "instances": [{"uuid": "inst-uuid-001", "role": "attacker", "os_type": "kali"}],
                     "connected_to": ["servers", "workstations"],
                 },
                 {
@@ -724,6 +731,7 @@ def sample_db_range_row_multi_subnet():
                     "uuid": "subnet-uuid-servers-44",
                     "instances": [
                         {
+                            "uuid": "inst-uuid-002",
                             "role": "victim",
                             "os_type": "ubuntu",
                             "agent": {"s3_key": "agents/linux.tar.gz"},
@@ -736,6 +744,7 @@ def sample_db_range_row_multi_subnet():
                     "uuid": "subnet-uuid-ws-44",
                     "instances": [
                         {
+                            "uuid": "inst-uuid-003",
                             "role": "victim",
                             "os_type": "windows",
                             "agent": {"s3_key": "agents/windows.msi"},
@@ -748,6 +757,7 @@ def sample_db_range_row_multi_subnet():
                     "uuid": "subnet-uuid-dc-44",
                     "instances": [
                         {
+                            "uuid": "inst-uuid-004",
                             "role": "dc",
                             "os_type": "windows",
                             "dc_config": {

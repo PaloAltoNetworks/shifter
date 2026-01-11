@@ -93,6 +93,8 @@ class NGFWComponent(pulumi.ComponentResource):
         scm_pin_value: str,
         scm_folder_name: str,
         authcode: str,
+        request_uuid: str,
+        instance_uuid: str,
         instance_type: str = "m5.xlarge",
         environment: str = "dev",
         instance_profile_name: str | None = None,
@@ -112,19 +114,39 @@ class NGFWComponent(pulumi.ComponentResource):
             scm_pin_value: SCM auto-registration PIN value.
             scm_folder_name: SCM folder name (dgname).
             authcode: VM-Series authcode for licensing.
+            request_uuid: UUID of the provisioning request (for tagging/correlation).
+            instance_uuid: UUID of this NGFW instance (for tagging/correlation).
             instance_type: EC2 instance type (default m5.xlarge).
             environment: Environment name for tagging.
             instance_profile_name: IAM instance profile name.
             opts: Pulumi resource options.
+
+        Raises:
+            ValueError: If required uuid parameters are missing.
         """
         super().__init__("shifter:ngfw:NGFWComponent", name, None, opts)
 
-        tags = {
-            "Name": f"{name}",
-            "shifter:user_id": str(user_id),
-            "shifter:environment": environment,
-            "shifter:component": "ngfw",
-        }
+        # Validate required UUID parameters
+        if not request_uuid:
+            raise ValueError("request_uuid is required for NGFWComponent")
+        if not instance_uuid:
+            raise ValueError("instance_uuid is required for NGFWComponent")
+
+        # Store instance_uuid for output building
+        self._instance_uuid = instance_uuid
+
+        # Build common tags using shared helper
+        from components.tags import build_common_tags
+
+        tags = build_common_tags(
+            user_id=user_id,
+            environment=environment,
+            request_uuid=request_uuid,
+            unit_type="instance",
+            unit_uuid=instance_uuid,
+            component="ngfw",
+        )
+        tags["Name"] = name
 
         # Create Management ENI
         self.mgmt_eni = aws.ec2.NetworkInterface(
@@ -282,6 +304,11 @@ class NGFWComponent(pulumi.ComponentResource):
                 "sshKeySecretArn": self.ssh_key_secret_arn,
             }
         )
+
+    @property
+    def uuid(self) -> str:
+        """Return the instance UUID for correlation and output building."""
+        return self._instance_uuid
 
     def _render_init_cfg(
         self,

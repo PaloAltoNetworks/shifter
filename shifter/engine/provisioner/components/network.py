@@ -318,7 +318,7 @@ class NetworkComponent(pulumi.ComponentResource):
         subnet_uuid: str,
         request_uuid: str,
     ) -> dict[str, str]:
-        """Build common tags for all resources.
+        """Build common tags for all resources using shared helper.
 
         Args:
             range_id: The range ID.
@@ -331,23 +331,17 @@ class NetworkComponent(pulumi.ComponentResource):
         Returns:
             Dict of tag key-value pairs.
         """
-        tags = {
-            "shifter:range_id": str(range_id),
-            "shifter:user_id": str(user_id),
-            "shifter:environment": environment,
-            "shifter:system": "shifter",
-            "ManagedBy": "pulumi",
-        }
+        from components.tags import build_common_tags
 
-        # Add optional tags if provided
-        if subnet_name:
-            tags["shifter:subnet_name"] = subnet_name
-        if subnet_uuid:
-            tags["shifter:subnet_uuid"] = subnet_uuid
-        if request_uuid:
-            tags["shifter:request_uuid"] = request_uuid
-
-        return tags
+        return build_common_tags(
+            user_id=user_id,
+            environment=environment,
+            request_uuid=request_uuid,
+            range_id=range_id,
+            unit_type="subnet" if subnet_uuid else None,
+            unit_uuid=subnet_uuid if subnet_uuid else None,
+            unit_name=subnet_name if subnet_name else None,
+        )
 
     def _create_subnet(
         self,

@@ -1,7 +1,7 @@
 """Request interpreter - materializes specs into models.
 
 Takes a RequestSpec from CMS, walks the spec tree, and creates
-the corresponding Engine models (Request, Instance, App).
+the corresponding Engine models (Request, Instance, App, Subnet).
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from uuid import uuid4
 from django.db import transaction
 
 if TYPE_CHECKING:
-    from engine.models import App, Instance, Request
-    from shared.schemas import InstanceSpec, RangeSpec, RequestSpec
+    from engine.models import App, Instance, Request, Subnet
+    from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,42 @@ def _interpret_ngfw_app(ngfw_app_spec, instance: Instance, request: Request) -> 
 
 
 def _interpret_range(range_spec: RangeSpec, request: Request) -> None:
-    """Create instances from a RangeSpec."""
-    # Walk instances in the range
-    for instance_spec in range_spec.instances:
+    """Create Subnets and Instances from a RangeSpec.
+
+    Iterates through all subnets in the range, creates Subnet
+    records for each, and Instance records for instances within.
+    """
+    # Walk subnets - create Subnet record and its Instances
+    for subnet_spec in range_spec.subnets:
+        _interpret_subnet(subnet_spec, request)
+
+
+def _interpret_subnet(subnet_spec: SubnetSpec, request: Request) -> Subnet:
+    """Create Subnet and its Instances from a SubnetSpec."""
+    from engine.models import Subnet
+    from shared.enums import ResourceStatus
+
+    # Use UUID from spec if provided
+    subnet_uuid = subnet_spec.uuid or str(uuid4())
+
+    subnet = Subnet.objects.create(
+        uuid=subnet_uuid,
+        request=request,
+        name=subnet_spec.name,
+        connected_to=subnet_spec.connected_to,
+        spec=subnet_spec.model_dump(mode="json"),
+        status=ResourceStatus.PENDING.value,
+    )
+
+    logger.info(
+        "interpret: created subnet uuid=%s name=%s connected_to=%s",
+        subnet_uuid,
+        subnet_spec.name,
+        subnet_spec.connected_to,
+    )
+
+    # Create instances within this subnet
+    for instance_spec in subnet_spec.instances:
         _interpret_instance(instance_spec, request)
+
+    return subnet

@@ -11,10 +11,11 @@ Also provides NGFW hydration to extract credential data for provisioning.
 from __future__ import annotations
 
 import logging
+import uuid as uuid_module
 from typing import TYPE_CHECKING, Literal
 
 from cms.exceptions import CMSError
-from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec
+from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec, SubnetSpec
 
 from .loader import load_scenario
 
@@ -37,7 +38,7 @@ def hydrate_scenario(
         agents: Mapping of OS type to AgentConfig, e.g. {"windows": agent, "linux": agent}
 
     Returns:
-        RangeSpec with scenario_id, user_id, and hydrated instances
+        RangeSpec with scenario_id, user_id, and hydrated subnets containing instances
 
     Raises:
         CMSError: If scenario not found or required agents missing
@@ -57,26 +58,51 @@ def hydrate_scenario(
         )
         raise CMSError(f"Scenario '{scenario_id}' requires an agent")
 
-    # Hydrate instances using InstanceSpec.from_template()
-    instances: list[InstanceSpec] = []
+    # Hydrate instances and build name→InstanceSpec mapping
+    # Key is the template name (e.g., "Attacker") for subnet lookups
+    instances_by_name: dict[str, InstanceSpec] = {}
     for instance in template.instances:
         try:
             hydrated = InstanceSpec.from_template(instance.model_dump(), agents)
-            instances.append(hydrated)
+            instances_by_name[instance.name] = hydrated
         except ValueError as e:
             raise CMSError(str(e)) from e
 
+    # Build subnets from template, or create default if none defined
+    subnets: list[SubnetSpec] = []
+    if template.subnets:
+        for subnet_config in template.subnets:
+            try:
+                hydrated_subnet = SubnetSpec.from_template(
+                    subnet_config.model_dump(),
+                    instances_by_name,
+                )
+                subnets.append(hydrated_subnet)
+            except ValueError as e:
+                raise CMSError(str(e)) from e
+    else:
+        # No subnets defined - create default subnet with all instances
+        subnets.append(
+            SubnetSpec(
+                name="default",
+                uuid=str(uuid_module.uuid4()),
+                instances=list(instances_by_name.values()),
+                connected_to=[],
+            )
+        )
+
     logger.debug(
-        "Hydrated scenario: scenario_id=%s, user_id=%s, instances=%d",
+        "Hydrated scenario: scenario_id=%s, user_id=%s, subnets=%d, instances=%d",
         scenario_id,
         user_id,
-        len(instances),
+        len(subnets),
+        len(instances_by_name),
     )
 
     return RangeSpec(
         scenario_id=scenario_id,
         user_id=user_id,
-        instances=instances,
+        subnets=subnets,
     )
 
 

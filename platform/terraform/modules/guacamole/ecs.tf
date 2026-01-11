@@ -29,6 +29,9 @@ locals {
 
     # Enable JSON auth extension for RDP connections from Portal
     { name = "JSON_ENABLED", value = "true" },
+
+    # Explicitly disable OIDC - Portal handles auth via JSON auth extension
+    { name = "OPENID_ENABLED", value = "false" },
   ]
 
   # OIDC environment variables (only when enabled)

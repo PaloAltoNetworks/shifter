@@ -155,6 +155,8 @@ def guacamole_rdp_url(request):
             connection_name=conn_info["connection_name"],
             hostname=conn_info["private_ip"],
             expires_minutes=5,
+            rdp_username=conn_info.get("rdp_username"),
+            rdp_password=conn_info.get("rdp_password"),
         )
     except ValueError as e:
         logger.error(f"Failed to generate Guacamole URL: {e}")

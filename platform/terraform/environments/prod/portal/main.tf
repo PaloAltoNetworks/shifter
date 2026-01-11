@@ -247,6 +247,7 @@ module "ssm" {
   app_secret_arn       = aws_secretsmanager_secret.app.arn
   cognito_secret_arn   = module.cognito.cognito_secret_arn
   guacamole_secret_arn = module.guacamole.json_auth_secret_arn
+  guacamole_base_url   = "https://${var.domain_name}/guacamole"
 
   # Application configuration
   domain_name    = var.domain_name

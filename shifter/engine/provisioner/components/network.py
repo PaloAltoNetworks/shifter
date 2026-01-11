@@ -3,8 +3,15 @@
 This component creates the network infrastructure for a logical subnet:
 - AWS Subnet (/28 for logical subnets, /24 for legacy single-subnet)
 - Security Group (intra-subnet unrestricted, GWLB return traffic)
-- Route Table (0.0.0.0/0 → GWLB endpoint for inter-subnet traffic)
+- Route Table (0.0.0.0/0 → GWLB endpoint for internet traffic)
 - GWLB Endpoint (when NGFW is enabled)
+
+Inter-subnet routing:
+After NetworkComponents are created, RangeStack adds explicit routes from
+each subnet to every other subnet's CIDR via the GWLB. This overrides AWS's
+implicit local VPC route, forcing ALL inter-subnet traffic through the NGFW.
+Without these routes, traffic between 10.1.2.0/28 and 10.1.3.0/28 would use
+the local route and bypass NGFW inspection entirely.
 """
 
 import ipaddress
@@ -138,9 +145,7 @@ def _find_free_subnet(vpc_id: str, cidr_prefix: str, subnet_size: int = 24) -> s
     for candidate_cidr in candidates:
         candidate_network = ipaddress.ip_network(candidate_cidr)
 
-        has_conflict = any(
-            candidate_network.overlaps(existing) for existing in existing_networks
-        )
+        has_conflict = any(candidate_network.overlaps(existing) for existing in existing_networks)
 
         if not has_conflict:
             logger.info("Found free subnet: %s", candidate_cidr)
@@ -548,6 +553,45 @@ class NetworkComponent(pulumi.ComponentResource):
         )
 
         logger.info("Created GWLB endpoint and default route for subnet %s", name)
+
+    def add_route_to_subnet(
+        self,
+        name: str,
+        destination_cidr: pulumi.Output[str],
+        opts: pulumi.ResourceOptions | None = None,
+    ) -> aws.ec2.Route | None:
+        """Add a route to another subnet's CIDR through GWLB.
+
+        This overrides AWS's implicit local VPC route for that specific CIDR,
+        forcing traffic through the GWLB/NGFW instead of direct local routing.
+
+        Use this after all NetworkComponents are created to add inter-subnet
+        routes that force all inter-subnet traffic through the NGFW.
+
+        Args:
+            name: Unique resource name for this route.
+            destination_cidr: The destination subnet's CIDR block (Pulumi Output).
+            opts: Optional Pulumi resource options.
+
+        Returns:
+            The created Route resource, or None if no GWLB endpoint.
+        """
+        if not self.gwlb_endpoint:
+            logger.debug(
+                "No GWLB endpoint, skipping inter-subnet route %s",
+                name,
+            )
+            return None
+
+        logger.debug("Adding inter-subnet route %s", name)
+
+        return aws.ec2.Route(
+            name,
+            route_table_id=self.route_table.id,
+            destination_cidr_block=destination_cidr,
+            vpc_endpoint_id=self.gwlb_endpoint.id,
+            opts=opts or pulumi.ResourceOptions(parent=self),
+        )
 
     def _register_outputs(self) -> None:
         """Register Pulumi outputs."""

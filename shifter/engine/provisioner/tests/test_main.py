@@ -307,8 +307,11 @@ class TestRunProvision:
 
     TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
 
-    def test_run_provision_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
+    def test_run_provision_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker):
         """pulumi up success, outputs parsed, events published."""
+        # Mock database connection
+        mocker.patch("main.get_db_connection")
+
         mock_run, _mock_result = mock_subprocess
 
         outputs = {
@@ -361,13 +364,24 @@ class TestRunProvision:
             with pytest.raises(Exception, match="Pulumi up failed"):
                 _run_provision(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
-    def test_run_provision_publishes_ready_with_all_outputs(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
-        """publish_ready should receive all Pulumi outputs."""
+    def test_run_provision_publishes_ready_with_all_outputs(
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker
+    ):
+        """publish_ready should be called after successful provision."""
+        # Mock database connection and write_provisioned_state
+        mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+
         mock_run, _mock_result = mock_subprocess
 
         outputs = {
-            "subnet_id": "subnet-12345",
-            "subnet_cidr": "10.1.6.0/24",
+            "subnets": {
+                "subnet-uuid-1": {
+                    "subnet_id": "subnet-12345",
+                    "cidr": "10.1.6.0/24",
+                }
+            },
             "instances": [
                 {"role": "attacker", "instance_id": "i-kali"},
                 {"role": "victim", "instance_id": "i-victim"},
@@ -393,15 +407,18 @@ class TestRunProvision:
             env = os.environ.copy()
             _run_provision(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
-            # Check all outputs were passed to publish_ready
-            call_kwargs = mock_ready.call_args[1]
-            assert call_kwargs["subnet_id"] == "subnet-12345"
-            assert call_kwargs["subnet_cidr"] == "10.1.6.0/24"
-            assert call_kwargs["pulumi_stack"] == "range-42"
-            assert len(call_kwargs["instances"]) == 2
+            # Verify publish_ready was called with correct args (new signature)
+            mock_ready.assert_called_once_with(
+                request_id=self.TEST_REQUEST_ID,
+                range_id=42,
+                user_id=7,
+            )
 
-    def test_run_provision_ignores_ngfw_outputs(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
+    def test_run_provision_ignores_ngfw_outputs(self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker):
         """NGFW outputs should be ignored (stored in UserNGFW model, not Range)."""
+        # Mock database connection
+        mocker.patch("main.get_db_connection")
+
         mock_run, _mock_result = mock_subprocess
 
         outputs = {
@@ -446,8 +463,25 @@ class TestRunDestroy:
 
     TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
 
-    def test_run_destroy_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
+    def test_run_destroy_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker):
         """pulumi destroy + stack rm success."""
+        # Mock database connection
+        mocker.patch("main.get_db_connection")
+        # Mock get_range_data_by_request_id to return proper data
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": []},
+                "subnet_index": 6,
+                "status": "destroying",
+            },
+        )
+        # Mock user_has_active_ranges (no other active ranges)
+        mocker.patch("main.user_has_active_ranges", return_value=False)
+
         _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 0
 
@@ -462,8 +496,11 @@ class TestRunDestroy:
             assert mock_destroyed.call_args[1]["request_id"] == self.TEST_REQUEST_ID
             assert mock_destroyed.call_args[1]["user_id"] == 7
 
-    def test_run_destroy_failure(self, mock_subprocess, mock_env_vars, mock_boto3_clients):
+    def test_run_destroy_failure(self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker):
         """pulumi destroy failure should raise exception."""
+        # Mock database connection
+        mocker.patch("main.get_db_connection")
+
         _mock_run, mock_result = mock_subprocess
         mock_result.returncode = 1
         mock_result.stderr = "Destroy failed"
@@ -472,11 +509,27 @@ class TestRunDestroy:
 
         env = os.environ.copy()
 
-        with pytest.raises(Exception, match="Pulumi destroy failed"):
+        with pytest.raises(Exception, match=r"(?i)destroy.*failed"):
             _run_destroy(self.TEST_REQUEST_ID, 42, 7, "range-42", env)
 
     def test_run_destroy_stack_removed(self, mock_env_vars, mock_boto3_clients, mocker):
         """Stack should be removed after successful destroy."""
+        # Mock database connection
+        mocker.patch("main.get_db_connection")
+        # Mock get_range_data_by_request_id to return proper data
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": []},
+                "subnet_index": 6,
+                "status": "destroying",
+            },
+        )
+        # Mock user_has_active_ranges (no other active ranges)
+        mocker.patch("main.user_has_active_ranges", return_value=False)
 
         def side_effect(*args, **kwargs):
             result = MagicMock()
@@ -1232,9 +1285,12 @@ class TestEventPublishing:
     TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
 
     def test_run_provision_publishes_status_update_event(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch, mocker
     ):
         """Provision flow should publish status update events via SNS."""
+        # Mock database connection
+        mocker.patch("main.get_db_connection")
+
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
         mock_run, _mock_result = mock_subprocess
@@ -1269,8 +1325,13 @@ class TestEventPublishing:
             assert call_kwargs["range_id"] == 42
             assert call_kwargs["user_id"] == 7
 
-    def test_run_provision_publishes_ready_event(self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch):
+    def test_run_provision_publishes_ready_event(
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch, mocker
+    ):
         """Provision success should publish ready event with instances."""
+        # Mock database connection
+        mocker.patch("main.get_db_connection")
+
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
         mock_run, _mock_result = mock_subprocess
@@ -1309,9 +1370,26 @@ class TestEventPublishing:
             assert call_kwargs["user_id"] == 7
 
     def test_run_destroy_publishes_destroyed_event(
-        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch
+        self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch, mocker
     ):
         """Destroy success should publish destroyed event."""
+        # Mock database connection
+        mocker.patch("main.get_db_connection")
+        # Mock get_range_data_by_request_id to return proper data
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": []},
+                "subnet_index": 6,
+                "status": "destroying",
+            },
+        )
+        # Mock user_has_active_ranges (no other active ranges)
+        mocker.patch("main.user_has_active_ranges", return_value=False)
+
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
         _mock_run, mock_result = mock_subprocess

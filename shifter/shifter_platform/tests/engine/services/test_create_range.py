@@ -71,6 +71,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             result = create_range(request_spec)
 
@@ -95,6 +96,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=10),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             result = create_range(request_spec)
 
@@ -122,6 +124,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=1),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -149,6 +152,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=15) as mock_allocate,
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -176,6 +180,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -201,6 +206,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -225,6 +231,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -249,6 +256,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=87),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -273,6 +281,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -301,6 +310,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning") as mock_start,
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             mock_start.return_value = None
 
@@ -327,6 +337,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=task_arn),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -351,6 +362,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
@@ -388,7 +400,13 @@ class TestCreateRange:
         range_spec = RangeSpec(
             scenario_id="basic-attack",
             user_id=1,
-            instances=[InstanceSpec(role="attacker", os_type="kali")],
+            subnets=[
+                SubnetSpec(
+                    name="default",
+                    uuid=str(uuid4()),
+                    instances=[InstanceSpec(role="attacker", os_type="kali", uuid=str(uuid4()))],
+                )
+            ],
         )
 
         with pytest.raises(TypeError, match="request_spec must be RequestSpec"):
@@ -494,6 +512,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             create_range(request_spec)
@@ -518,6 +537,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             create_range(request_spec)
@@ -531,12 +551,19 @@ class TestCreateRange:
 
         User = get_user_model()
 
-        instances = [
-            InstanceSpec(role="attacker", os_type="kali"),
-            InstanceSpec(role="victim", os_type="windows"),
-            InstanceSpec(role="dc", os_type="windows"),
+        # Create a subnet with 3 instances
+        subnets = [
+            SubnetSpec(
+                name="test_net",
+                uuid=str(uuid4()),
+                instances=[
+                    InstanceSpec(role="attacker", os_type="kali", uuid=str(uuid4())),
+                    InstanceSpec(role="victim", os_type="windows", uuid=str(uuid4())),
+                    InstanceSpec(role="dc", os_type="windows", uuid=str(uuid4())),
+                ],
+            )
         ]
-        request_spec = make_request_spec(user_id=1, instances=instances)
+        request_spec = make_request_spec(user_id=1, subnets=subnets)
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=1)
         mock_request = Mock(request_id=request_spec.request_id)
@@ -547,6 +574,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             create_range(request_spec)
@@ -576,6 +604,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(request_spec)
@@ -600,6 +629,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(request_spec)
@@ -624,6 +654,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=123),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(request_spec)
@@ -653,6 +684,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=task_arn),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(request_spec)
@@ -677,6 +709,7 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(request_spec)

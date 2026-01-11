@@ -268,7 +268,7 @@ class Range(models.Model):
     range_config = models.JSONField(
         null=True,
         blank=True,
-        help_text="Full RangeSpec from CMS (scenario_id, user_id, instances)",
+        help_text="Full RangeSpec from CMS (scenario_id, user_id, subnets)",
     )
     provisioned_instances = models.JSONField(
         null=True,
@@ -476,3 +476,59 @@ class Range(models.Model):
         if not victims:
             return None
         return victims[0].get("private_ip")
+
+
+class Subnet(Instantiation):
+    """Logical subnet for CyberScript DSL routing.
+
+    Represents a logical network segment from the CyberScript DSL.
+    NOT an AWS subnet - this is realized as NGFW routes when a range
+    with NGFW is provisioned.
+
+    Tracks lifecycle for:
+    - Creating NGFW address objects and routes on provision
+    - Removing NGFW routes on destroy
+    - Cleanup on failures
+
+    Attributes:
+        name: Logical subnet name from DSL (e.g., 'dc_network', 'server_network').
+        connected_to: List of subnet names this subnet can reach (for NGFW routes).
+        range: The Range this subnet belongs to.
+    """
+
+    name = models.CharField(
+        max_length=100,
+        db_index=True,
+        help_text="Logical subnet name from CyberScript DSL",
+    )
+    connected_to = models.JSONField(
+        default=list,
+        help_text="List of subnet names this subnet connects to (for NGFW routes)",
+    )
+    range = models.ForeignKey(
+        Range,
+        on_delete=models.CASCADE,
+        related_name="logical_subnets",
+        null=True,
+        blank=True,
+        help_text="Range this logical subnet belongs to",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Logical Subnet"
+        verbose_name_plural = "Logical Subnets"
+
+    def __str__(self):
+        return f"Subnet {self.name} ({self.uuid})"
+
+    @property
+    def instance_uuids(self) -> list[str]:
+        """Return list of instance UUIDs in this subnet.
+
+        Extracts from spec if available, otherwise empty list.
+        """
+        if not self.spec:
+            return []
+        instances = self.spec.get("instances", [])
+        return [inst.get("uuid") for inst in instances if inst.get("uuid")]

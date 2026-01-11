@@ -11,11 +11,14 @@ inter-subnet traffic flows through it based on defined routes.
 from __future__ import annotations
 
 import uuid as uuid_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, field_validator
 
 from .base import SpecBase
+
+if TYPE_CHECKING:
+    from .range import InstanceSpec
 
 
 class SubnetSpec(SpecBase):
@@ -35,42 +38,54 @@ class SubnetSpec(SpecBase):
     Attributes:
         name: Subnet name (e.g., 'dc_network', 'server_network').
         uuid: Unique identifier (inherited from SpecBase, assigned during hydration).
-        instances: List of instance names belonging to this subnet.
+        instances: List of InstanceSpecs belonging to this subnet.
         connected_to: List of subnet names this subnet can reach (bidirectional).
     """
 
     name: str  # Required for subnets (overrides optional in SpecBase)
-    instances: list[str]
+    instances: list[InstanceSpec]
     connected_to: list[str] = []
 
     @field_validator("instances")
     @classmethod
-    def instances_not_empty(cls, v: list[str]) -> list[str]:
+    def instances_not_empty(cls, v: list) -> list:
         """Validate instances list is not empty."""
         if not v:
             raise ValueError("subnet must contain at least one instance")
         return v
 
     @classmethod
-    def from_template(cls, data: dict[str, Any]) -> SubnetSpec:
+    def from_template(
+        cls,
+        data: dict[str, Any],
+        instances_by_name: dict[str, InstanceSpec],
+    ) -> SubnetSpec:
         """Create a SubnetSpec from a scenario template dict.
 
         Args:
-            data: Template dict with keys: name, instances, connected_to.
+            data: Template dict with keys: name, instances (names), connected_to.
+            instances_by_name: Mapping of instance name to hydrated InstanceSpec.
 
         Returns:
-            Hydrated SubnetSpec with UUID assigned.
+            Hydrated SubnetSpec with UUID assigned and InstanceSpecs embedded.
 
         Raises:
-            ValueError: If required fields are missing or invalid.
+            ValueError: If required fields are missing or instance not found.
         """
         name = data.get("name")
-        instances = data.get("instances")
+        instance_names = data.get("instances")
 
         if not name:
             raise ValueError("Subnet template requires 'name' field")
-        if not instances:
+        if not instance_names:
             raise ValueError("Subnet template requires 'instances' field")
+
+        # Look up each instance by name
+        instances: list[InstanceSpec] = []
+        for inst_name in instance_names:
+            if inst_name not in instances_by_name:
+                raise ValueError(f"Subnet '{name}' references unknown instance '{inst_name}'")
+            instances.append(instances_by_name[inst_name])
 
         return cls(
             name=name,
@@ -128,3 +143,6 @@ class SubnetRef(BaseModel):
         if not v or not v.strip():
             raise ValueError("uuid cannot be empty")
         return v
+
+
+# NOTE: Model rebuilds moved to shared/schemas/__init__.py to avoid circular imports

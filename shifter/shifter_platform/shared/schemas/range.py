@@ -22,6 +22,7 @@ from .base import SpecBase
 
 if TYPE_CHECKING:
     from .app import NGFWAppSpec
+    from .subnet import SubnetSpec
 
 
 class AgentDetails(BaseModel):
@@ -206,12 +207,12 @@ class RangeSpecBase(SpecBase):
         name: Optional range name (inherited from SpecBase).
         scenario_id: Identifier of the scenario being deployed.
         user_id: ID of the user who owns this range.
-        instances: List of instance specifications for the range.
+        subnets: List of subnet specifications containing instances.
     """
 
     scenario_id: str
     user_id: int
-    instances: list[InstanceSpec]
+    subnets: list[SubnetSpec]
 
     @field_validator("scenario_id")
     @classmethod
@@ -228,6 +229,11 @@ class RangeSpecBase(SpecBase):
         if v <= 0:
             raise ValueError("user_id must be a positive integer")
         return v
+
+    @property
+    def all_instances(self) -> list[InstanceSpec]:
+        """Return flattened list of all instances across all subnets."""
+        return [inst for subnet in self.subnets for inst in subnet.instances]
 
 
 class RangeSpec(RangeSpecBase):
@@ -407,13 +413,4 @@ class RangeRef(BaseModel):
         return v
 
 
-# Rebuild InstanceSpec to resolve forward reference to NGFWAppSpec
-# This must be done after NGFWAppSpec is importable
-def _rebuild_instance_spec() -> None:
-    """Rebuild InstanceSpec model to resolve NGFWAppSpec forward reference."""
-    from .app import NGFWAppSpec  # noqa: F401
-
-    InstanceSpec.model_rebuild()
-
-
-_rebuild_instance_spec()
+# NOTE: Model rebuilds moved to shared/schemas/__init__.py to avoid circular imports

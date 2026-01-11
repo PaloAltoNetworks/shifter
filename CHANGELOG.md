@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CyberScript DSL and initial DSL interpreter implementation for NGFW flows
 - Improved Bedrock logging and alarms
 - Draft Cortex BYOT scenario template
+- venv enforcer hook for Claude Code
 
 ### Changed
 - NGFW models and services refactored to use schemas

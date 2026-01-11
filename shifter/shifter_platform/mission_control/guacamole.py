@@ -13,6 +13,7 @@ import hmac
 import json
 import time
 from typing import Any
+from urllib.parse import quote
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -177,4 +178,7 @@ def create_guacamole_rdp_url(
     # Remove trailing slash from base_url if present
     base_url = base_url.rstrip("/")
 
-    return f"{base_url}/?data={encrypted_data}"
+    # URL-encode the base64 data (+ and / characters need encoding)
+    encoded_data = quote(encrypted_data, safe="")
+
+    return f"{base_url}/?data={encoded_data}"

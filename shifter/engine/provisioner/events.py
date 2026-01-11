@@ -71,13 +71,14 @@ STATUS_DESTROYING = "destroying"
 STATUS_DESTROYED = "destroyed"
 
 
-def _get_sns_client():
+def _get_sns_client() -> Any:
     """Get SNS client with region from environment.
 
     Returns:
         boto3 SNS client configured for the appropriate region.
     """
     region = os.environ.get("AWS_REGION", "us-east-2")
+    logger.debug("_get_sns_client: using region=%s", region)
     return boto3.client("sns", region_name=region)
 
 
@@ -101,8 +102,8 @@ def _create_event(
     request_id: str,
     range_id: int,
     user_id: int,
-    **kwargs: Any,
-) -> dict:
+    **kwargs: str | int | None,
+) -> dict[str, Any]:
     """Create a standard event envelope.
 
     Args:
@@ -126,7 +127,7 @@ def _create_event(
     }
 
 
-def _publish_event(event: dict) -> None:
+def _publish_event(event: dict[str, Any]) -> None:
     """Publish event to SNS topic.
 
     Publishes the event to SNS

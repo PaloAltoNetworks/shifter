@@ -4,6 +4,7 @@ SetupOrchestrator takes a SetupPlan and an SSMExecutor, and runs the plan
 step by step, handling reboots and verification.
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,6 +16,8 @@ from executors.ssm_executor import (
     TimeoutError,
 )
 from plans.base import SetupPlan, SetupStep
+
+logger = logging.getLogger(__name__)
 
 
 class SetupError(Exception):
@@ -65,6 +68,7 @@ class SetupOrchestrator:
         Args:
             executor: SSMExecutor to use for running commands
         """
+        logger.debug("__init__: executor=%s", type(executor).__name__)
         self.executor = executor
 
     def orchestrate(
@@ -89,6 +93,13 @@ class SetupOrchestrator:
         Raises:
             SetupError: If any step fails or verification fails
         """
+        plan_name = getattr(plan, "name", type(plan).__name__)
+        logger.debug(
+            "orchestrate: instance_id=%s plan=%s steps=%d",
+            instance_id,
+            plan_name,
+            len(plan.steps),
+        )
         step_results: list[StepResult] = []
 
         # Execute each step in order
@@ -100,13 +111,16 @@ class SetupOrchestrator:
                 # Handle reboot if required
                 if step.requires_reboot:
                     reboot_timeout = max(step.timeout_seconds, self.DEFAULT_REBOOT_TIMEOUT)
+                    logger.debug("orchestrate: rebooting after step=%s", step.name)
                     try:
                         self.executor.reboot_and_wait(
                             instance_id,
                             timeout_seconds=reboot_timeout,
                             document_name=document_name,
                         )
+                        logger.debug("orchestrate: reboot completed")
                     except (TimeoutError, SSMExecutorError) as e:
+                        logger.error("orchestrate: reboot failed step=%s", step.name)
                         raise SetupError(
                             f"Reboot failed after step '{step.name}': {e}",
                             step_name=step.name,
@@ -114,6 +128,7 @@ class SetupOrchestrator:
                         ) from e
 
             except (CommandError, TimeoutError, SSMExecutorError) as e:
+                logger.error("orchestrate: step failed step=%s error=%s", step.name, e)
                 raise SetupError(
                     f"Step '{step.name}' failed: {e}",
                     step_name=step.name,
@@ -123,15 +138,18 @@ class SetupOrchestrator:
         # Run verification if defined
         verify_result = None
         if plan.verify_step is not None:
+            logger.debug("orchestrate: running verification step")
             try:
                 verify_result = self._execute_step(instance_id, plan.verify_step, context, document_name)
             except (CommandError, TimeoutError, SSMExecutorError) as e:
+                logger.error("orchestrate: verification failed error=%s", e)
                 raise SetupError(
                     f"Verification failed: {e}",
                     step_name=plan.verify_step.name,
                     cause=e,
                 ) from e
 
+        logger.info("orchestrate: completed plan=%s", plan_name)
         return SetupResult(
             success=True,
             step_results=step_results,
@@ -159,11 +177,10 @@ class SetupOrchestrator:
         Raises:
             CommandError, TimeoutError, SetupError: On failure
         """
+        logger.debug("_execute_step: step=%s instance_id=%s", step.name, instance_id)
         # Render the script and stdin_input with context variables
         rendered_script = self._render_script(step.script, context, step.name)
-        rendered_stdin = self._render_script(
-            getattr(step, "stdin_input", "") or "", context, step.name
-        )
+        rendered_stdin = self._render_script(getattr(step, "stdin_input", "") or "", context, step.name)
 
         # Execute via executor (SSM or SSH)
         result = self.executor.run_command(
@@ -173,6 +190,15 @@ class SetupOrchestrator:
             document_name=document_name,
             stdin_input=rendered_stdin if rendered_stdin else None,
         )
+
+        if result.success:
+            logger.debug("_execute_step: completed step=%s", step.name)
+        else:
+            logger.warning(
+                "_execute_step: failed step=%s stderr=%s",
+                step.name,
+                result.stderr[:200] if result.stderr else "",
+            )
 
         return StepResult(
             step_name=step.name,
@@ -211,6 +237,12 @@ class SetupOrchestrator:
 
         for var_name in matches:
             if var_name not in context:
+                logger.error(
+                    "_render_script: missing variable=%s step=%s available=%s",
+                    var_name,
+                    step_name,
+                    list(context.keys()),
+                )
                 raise SetupError(
                     f"Missing template variable '{var_name}' in step '{step_name}'. "
                     f"Available variables: {list(context.keys())}",

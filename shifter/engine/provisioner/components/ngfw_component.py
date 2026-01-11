@@ -7,6 +7,7 @@ This component creates the VM-Series NGFW EC2 instance with:
 - SSH key pair for post-boot configuration
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from jinja2 import Environment, FileSystemLoader
 
+logger = logging.getLogger(__name__)
+
 
 def _generate_ssh_keypair() -> tuple[str, str]:
     """Generate an Ed25519 SSH key pair.
@@ -23,6 +26,7 @@ def _generate_ssh_keypair() -> tuple[str, str]:
     Returns:
         tuple: (private_key_pem, public_key_openssh)
     """
+    logger.debug("_generate_ssh_keypair: generating Ed25519 key pair")
     private_key = ed25519.Ed25519PrivateKey.generate()
 
     private_key_pem = private_key.private_bytes(
@@ -125,6 +129,14 @@ class NGFWComponent(pulumi.ComponentResource):
             ValueError: If required uuid parameters are missing.
         """
         super().__init__("shifter:ngfw:NGFWComponent", name, None, opts)
+
+        logger.debug(
+            "__init__: name=%s user_id=%s instance_uuid=%s request_uuid=%s",
+            name,
+            user_id,
+            instance_uuid,
+            request_uuid,
+        )
 
         # Validate required UUID parameters
         if not request_uuid:
@@ -295,6 +307,13 @@ class NGFWComponent(pulumi.ComponentResource):
         self.management_ip = self.mgmt_eni.private_ip
         self.dataplane_ip = self.data_eni.private_ip
 
+        logger.info(
+            "__init__: created NGFWComponent name=%s user_id=%s instance_uuid=%s",
+            name,
+            user_id,
+            instance_uuid,
+        )
+
         # Register outputs
         self.register_outputs(
             {
@@ -330,6 +349,7 @@ class NGFWComponent(pulumi.ComponentResource):
         Returns:
             Rendered init-cfg.txt content.
         """
+        logger.debug("_render_init_cfg: hostname=%s folder_name=%s", hostname, folder_name)
         template_file = templates_dir / "ngfw_init_cfg.txt.j2"
         if template_file.exists():
             # Security: autoescape not needed - PAN-OS config, not HTML
@@ -345,4 +365,8 @@ class NGFWComponent(pulumi.ComponentResource):
             )
         else:
             # Fallback minimal config (without SCM registration)
+            logger.warning(
+                "_render_init_cfg: template not found at %s, using fallback config",
+                template_file,
+            )
             return f"type=dhcp-client\nhostname={hostname}\n"

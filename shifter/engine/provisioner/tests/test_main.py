@@ -48,7 +48,7 @@ class TestGetDbConnection:
             with patch.dict(os.environ, {}, clear=True):
                 from main import get_db_connection
 
-                with pytest.raises(KeyError):
+                with pytest.raises(RuntimeError, match="Missing required environment variables"):
                     get_db_connection()
 
     def test_get_db_connection_ssl_required(self, mock_boto3_clients, mock_env_vars_minimal):

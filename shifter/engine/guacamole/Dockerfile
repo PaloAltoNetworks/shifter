@@ -20,4 +20,20 @@ FROM guacamole/guacamole:${GUACAMOLE_VERSION}
 # - OPENID_ENABLED=true (auto-detected when OPENID_* vars are set)
 # - JSON_ENABLED=true
 #
-# The entrypoint handles symlinking extensions from /opt/guacamole/extensions-available/
+# The base entrypoint handles symlinking extensions from /opt/guacamole/extensions-available/
+
+# Install PostgreSQL client for database initialization
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client && \
+    rm -rf /var/lib/apt/lists/*
+USER guacamole
+
+# Custom entrypoint wrapper that initializes the database schema if needed
+# This is idempotent - checks if schema exists before running initdb.sh
+COPY entrypoint.sh /opt/guacamole/bin/entrypoint-wrapper.sh
+USER root
+RUN chmod +x /opt/guacamole/bin/entrypoint-wrapper.sh
+USER guacamole
+
+ENTRYPOINT ["/opt/guacamole/bin/entrypoint-wrapper.sh"]

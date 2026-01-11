@@ -7,7 +7,7 @@ data = json.load(sys.stdin)
 command = data.get("tool_input", {}).get("command", "")
 
 # Check if running Python/pytest without venv activation
-python_commands = ["python", "pytest", "pip", "python3"]
+python_commands = ["pytest"]
 if any(cmd in command for cmd in python_commands):
     # Check if venv is already activated in command
     if not any(

@@ -110,8 +110,11 @@ resource "aws_service_discovery_service" "guacd" {
     routing_policy = "MULTIVALUE"
   }
 
+  # failure_threshold is deprecated - AWS always uses 1 regardless of config
+  # Must set to 1 to match AWS state and prevent drift
+  # See: https://github.com/hashicorp/terraform-provider-aws/issues/35559
   health_check_custom_config {
-    failure_threshold = 3
+    failure_threshold = 1
   }
 
   tags = local.common_tags

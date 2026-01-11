@@ -1530,6 +1530,7 @@ def create_range(
         # Note: range_id is 0 for new Request-based ranges (use request_id for correlation)
         from shared.schemas import InstanceContext, RangeContext
 
+        # Flatten instances from all subnets for RangeContext
         instance_contexts = [
             InstanceContext(
                 uuid=spec.uuid,
@@ -1537,7 +1538,7 @@ def create_range(
                 os_type=spec.os_type,
                 join_domain=spec.join_domain,
             )
-            for spec in range_spec.instances
+            for spec in range_spec.all_instances
         ]
 
         # Format agent names for display

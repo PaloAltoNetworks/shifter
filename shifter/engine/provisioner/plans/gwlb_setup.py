@@ -65,17 +65,13 @@ class GWLBSetupPlan:
         """
         target_group_arn = getattr(instance, "target_group_arn", None)
         if not target_group_arn:
-            raise ValueError(
-                "Instance missing required 'target_group_arn' attribute"
-            )
+            raise ValueError("Instance missing required 'target_group_arn' attribute")
 
         # Use instance_id for target registration
         # (target_type="instance" in target group)
         instance_id = getattr(instance, "instance_id", None)
         if not instance_id:
-            raise ValueError(
-                "Instance missing 'instance_id' - required for target registration"
-            )
+            raise ValueError("Instance missing 'instance_id' - required for target registration")
 
         return {
             "target_group_arn": target_group_arn,

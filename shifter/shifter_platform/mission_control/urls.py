@@ -22,6 +22,8 @@ urlpatterns = [
     path("api/range/launch/", views.launch_range, name="launch_range"),
     path("api/range/cancel/", views.cancel_range, name="cancel_range"),
     path("api/range/destroy/", views.destroy_range, name="destroy_range"),
+    path("api/range/pause/", views.pause_range, name="pause_range"),
+    path("api/range/resume/", views.resume_range, name="resume_range"),
     path("api/agents/", views.list_agents, name="list_agents"),
     path("api/scenarios/", views.list_scenarios, name="list_scenarios"),
     # Guacamole RDP API

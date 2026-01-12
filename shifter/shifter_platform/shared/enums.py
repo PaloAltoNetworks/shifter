@@ -40,6 +40,7 @@ class ResourceStatus(str, Enum):
     PENDING = "pending"
     PROVISIONING = "provisioning"
     READY = "ready"
+    PAUSING = "pausing"
     PAUSED = "paused"
     RESUMING = "resuming"
     DESTROYING = "destroying"
@@ -52,6 +53,7 @@ ACTIVE_STATUSES: set[ResourceStatus] = {
     ResourceStatus.PENDING,
     ResourceStatus.PROVISIONING,
     ResourceStatus.READY,
+    ResourceStatus.PAUSING,
     ResourceStatus.PAUSED,
     ResourceStatus.RESUMING,
     ResourceStatus.DESTROYING,

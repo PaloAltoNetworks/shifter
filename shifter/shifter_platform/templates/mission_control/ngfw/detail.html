@@ -1,0 +1,258 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<style>
+    /* Back link */
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+        margin-bottom: 16px;
+    }
+
+    .back-link:hover {
+        color: var(--xdr-text);
+        text-decoration: none;
+    }
+
+    /* Status badges */
+    .status {
+        display: inline-flex;
+        align-items: center;
+        font-size: 13px;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+    }
+
+    .status-ready .status-dot,
+    .status-active .status-dot { background: #00d26a; }
+    .status-provisioning .status-dot,
+    .status-starting .status-dot,
+    .status-stopping .status-dot,
+    .status-deprovisioning .status-dot { background: #faad14; animation: pulse 1.5s infinite; }
+    .status-stopped .status-dot { background: #707070; }
+    .status-failed .status-dot { background: #ff4d4f; }
+    .status-not_provisioned .status-dot { background: #484848; }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    /* Page header with actions */
+    .page-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 24px;
+    }
+
+    .page-header-content {
+        flex: 1;
+    }
+
+    .page-header-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .page-subtitle {
+        font-size: 14px;
+        color: var(--xdr-text-secondary);
+        margin: 8px 0 0;
+    }
+
+    /* Section cards */
+    .section-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+        margin: 0 0 16px;
+    }
+
+    /* Details grid */
+    .details-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+
+    .detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .detail-label {
+        font-size: 11px;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+
+    .detail-value {
+        font-size: 14px;
+        color: var(--xdr-text);
+    }
+
+    .detail-value.mono {
+        font-family: monospace;
+    }
+
+    .detail-value.placeholder {
+        color: var(--xdr-text-secondary);
+        font-style: italic;
+    }
+
+    .detail-value.success {
+        color: #00d26a;
+    }
+
+    .detail-value.warning {
+        color: #faad14;
+    }
+
+    .detail-value.error {
+        color: #ff4d4f;
+    }
+
+    /* Linked ranges table */
+    .ranges-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .ranges-table th,
+    .ranges-table td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--xdr-border);
+    }
+
+    .ranges-table th {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+
+    .ranges-table td {
+        font-size: 13px;
+        color: var(--xdr-text);
+    }
+
+    .ranges-table tbody tr:hover {
+        background: var(--xdr-hover);
+    }
+
+    /* Danger zone */
+    .danger-zone {
+        border-color: rgba(255, 77, 79, 0.3);
+    }
+
+    .danger-zone .card-title {
+        color: #ff4d4f;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{% url 'mission_control:ngfw_list' %}" class="back-link">
+    <span>&larr;</span> Back to NGFWs
+</a>
+
+<div class="page-header-row">
+    <div class="page-header-content">
+        <h1 class="page-title">{{ ngfw.name }}</h1>
+        <div class="page-subtitle">
+            <div class="status status-{{ ngfw.status }}">
+                <span class="status-dot"></span>
+                <span>{{ ngfw.get_status_display }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Overview Section -->
+<div class="card">
+    <h2 class="section-title">Overview</h2>
+    <div class="details-grid">
+        <div class="detail-item">
+            <span class="detail-label">Name</span>
+            <span class="detail-value">{{ ngfw.name }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Status</span>
+            <span class="detail-value">{{ ngfw.get_status_display }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Serial Number</span>
+            {% if ngfw.serial_number %}
+            <span class="detail-value mono">{{ ngfw.serial_number }}</span>
+            {% else %}
+            <span class="detail-value placeholder">Pending provisioning</span>
+            {% endif %}
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Created</span>
+            <span class="detail-value">{{ ngfw.created_at|date:"M d, Y H:i" }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- Linked Ranges -->
+<div class="card">
+    <h2 class="section-title">Linked Ranges</h2>
+    {% if linked_ranges %}
+    <table class="ranges-table">
+        <thead>
+            <tr>
+                <th>Range ID</th>
+                <th>Status</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for range in linked_ranges %}
+            <tr>
+                <td>{{ range.id }}</td>
+                <td>
+                    <div class="status status-{{ range.status }}">
+                        <span class="status-dot"></span>
+                        <span>{{ range.get_status_display }}</span>
+                    </div>
+                </td>
+                <td>{{ range.created_at|date:"M d, Y H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--xdr-text-secondary); margin: 0;">
+        No ranges are currently using this NGFW.
+    </p>
+    {% endif %}
+</div>
+
+<!-- Danger Zone -->
+<div class="card danger-zone">
+    <h2 class="card-title">Danger Zone</h2>
+    <p style="color: var(--xdr-text-secondary); margin: 0 0 16px; font-size: 13px;">
+        Deprovisioning will destroy this NGFW and deactivate its license. Credits will be returned to your pool.
+        {% if linked_ranges %}
+        <strong style="color: #ff4d4f;">Warning: {{ linked_ranges|length }} range(s) are currently using this NGFW.</strong>
+        {% endif %}
+    </p>
+    <a href="{% url 'mission_control:ngfw_deprovision' ngfw.app_id %}" class="btn btn-danger btn-small">
+        Deprovision NGFW
+    </a>
+</div>
+{% endblock %}

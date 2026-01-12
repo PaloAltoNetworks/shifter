@@ -4,6 +4,9 @@ source "amazon-ebs" "ubuntu" {
   instance_type   = var.instance_type
   region          = var.aws_region
 
+  // Ensure instance is terminated (not just stopped) if Packer exits ungracefully
+  shutdown_behavior = "terminate"
+
   // Official Ubuntu 22.04 LTS from Canonical
   source_ami_filter {
     filters = {

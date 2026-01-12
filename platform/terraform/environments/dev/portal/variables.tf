@@ -233,6 +233,16 @@ variable "redis_enable_replication" {
 }
 
 # ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+
+variable "log_level" {
+  description = "Django log level (DEBUG, INFO, WARNING, ERROR). Use DEBUG in dev for detailed event tracing."
+  type        = string
+  default     = "INFO"
+}
+
+# ------------------------------------------------------------------------------
 # Log Aggregation
 # ------------------------------------------------------------------------------
 
@@ -286,6 +296,154 @@ variable "dc_domain_password" {
   type        = string
   sensitive   = true
   default     = ""
+}
+
+# ------------------------------------------------------------------------------
+# Guacamole
+# ------------------------------------------------------------------------------
+
+variable "guacd_image_tag" {
+  description = "Docker image tag for guacd"
+  type        = string
+}
+
+variable "guacamole_client_image_tag" {
+  description = "Docker image tag for guacamole-client"
+  type        = string
+}
+
+variable "guacd_cpu" {
+  description = "CPU units for guacd task"
+  type        = number
+}
+
+variable "guacd_memory" {
+  description = "Memory in MB for guacd task"
+  type        = number
+}
+
+variable "guacamole_client_cpu" {
+  description = "CPU units for guacamole-client task"
+  type        = number
+}
+
+variable "guacamole_client_memory" {
+  description = "Memory in MB for guacamole-client task"
+  type        = number
+}
+
+variable "guacd_desired_count" {
+  description = "Desired number of guacd tasks"
+  type        = number
+}
+
+variable "guacamole_client_desired_count" {
+  description = "Desired number of guacamole-client tasks"
+  type        = number
+}
+
+variable "guacamole_db_instance_class" {
+  description = "RDS instance class for Guacamole database"
+  type        = string
+}
+
+variable "guacamole_db_allocated_storage" {
+  description = "Allocated storage for Guacamole RDS in GB"
+  type        = number
+}
+
+variable "guacamole_db_max_allocated_storage" {
+  description = "Maximum storage for Guacamole RDS autoscaling in GB"
+  type        = number
+}
+
+variable "guacamole_db_engine_version" {
+  description = "PostgreSQL engine version for Guacamole"
+  type        = string
+}
+
+variable "guacamole_db_multi_az" {
+  description = "Enable Multi-AZ for Guacamole RDS"
+  type        = bool
+}
+
+variable "guacamole_db_backup_retention_days" {
+  description = "Backup retention days for Guacamole RDS"
+  type        = number
+}
+
+variable "guacamole_db_deletion_protection" {
+  description = "Enable deletion protection for Guacamole RDS"
+  type        = bool
+}
+
+variable "guacamole_db_skip_final_snapshot" {
+  description = "Skip final snapshot for Guacamole RDS"
+  type        = bool
+}
+
+variable "guacamole_enable_autoscaling" {
+  description = "Enable autoscaling for Guacamole ECS services"
+  type        = bool
+}
+
+variable "guacamole_autoscaling_min_capacity" {
+  description = "Minimum capacity for Guacamole autoscaling"
+  type        = number
+}
+
+variable "guacamole_autoscaling_max_capacity" {
+  description = "Maximum capacity for Guacamole autoscaling"
+  type        = number
+}
+
+variable "guacamole_autoscaling_cpu_target" {
+  description = "CPU target for Guacamole autoscaling"
+  type        = number
+}
+
+variable "guacamole_secrets_recovery_window_days" {
+  description = "Recovery window for Guacamole secrets (0 for dev, 7+ for prod)"
+  type        = number
+}
+
+variable "guacamole_enable_oidc" {
+  description = "Enable OIDC/Cognito authentication for Guacamole"
+  type        = bool
+}
+
+# ------------------------------------------------------------------------------
+# PgBouncer (Connection Pooling)
+# ------------------------------------------------------------------------------
+
+variable "pgbouncer_cpu" {
+  description = "CPU units for PgBouncer task (256 = 0.25 vCPU)"
+  type        = number
+}
+
+variable "pgbouncer_memory" {
+  description = "Memory in MB for PgBouncer task"
+  type        = number
+}
+
+variable "pgbouncer_desired_count" {
+  description = "Desired number of PgBouncer tasks"
+  type        = number
+}
+
+variable "pgbouncer_pool_mode" {
+  description = "PgBouncer pool mode (transaction, session, statement)"
+  type        = string
+}
+
+variable "pgbouncer_max_client_conn" {
+  description = "Maximum client connections per PgBouncer task"
+  type        = number
+}
+
+variable "pgbouncer_default_pool_size" {
+  description = "Default pool size per user/database pair"
+  type        = number
 }
 
 # ------------------------------------------------------------------------------
@@ -354,6 +512,15 @@ variable "messaging_alarm_actions" {
 variable "alarm_email" {
   description = "Email address for CloudWatch alarm notifications"
   type        = string
+}
+
+# ------------------------------------------------------------------------------
+# Bedrock Logging
+# ------------------------------------------------------------------------------
+
+variable "enable_bedrock_logging" {
+  description = "Enable Bedrock model invocation logging to CloudWatch"
+  type        = bool
 }
 
 # ------------------------------------------------------------------------------

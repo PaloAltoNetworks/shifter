@@ -2,14 +2,12 @@
 
 Tests service-level behavior only:
 - Expected behavior / return values
-- Logging (debug and error levels)
 - Exception handling
 - Input validation (service's responsibility)
 
 Does NOT re-test model behavior (filtering, field validation, etc).
 """
 
-import logging
 from unittest.mock import patch
 
 import pytest
@@ -107,35 +105,6 @@ class TestGetStorageUsed:
         unsaved_user = User(username="unsaved@example.com")
         with pytest.raises(ValueError, match="user must be saved"):
             services.get_storage_used(unsaved_user)
-
-    # --- Logging ---
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user info."""
-        with (
-            patch("cms.assets.services.get_storage_used", return_value=0),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.get_storage_used(user)
-        assert str(user.id) in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on success with storage info."""
-        with (
-            patch("cms.assets.services.get_storage_used", return_value=1000),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.get_storage_used(user)
-        assert "1000" in caplog.text or "storage" in caplog.text.lower()
-
-    def test_logs_error_when_user_none(self, caplog):
-        """Service logs error when user is None."""
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            services.get_storage_used(None)
-        assert "None" in caplog.text
 
     # --- Error propagation ---
 

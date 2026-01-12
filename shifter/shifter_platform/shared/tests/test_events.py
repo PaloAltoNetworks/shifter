@@ -3,11 +3,11 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 
-class TestRangeStatusUpdatedEvent:
-    """Tests for RangeStatusUpdatedEvent."""
+class TestResourceStatusUpdatedEvent:
+    """Tests for ResourceStatusUpdatedEvent."""
 
     # ---------------------------------------------------------------------
     # Construction - required fields
@@ -15,40 +15,40 @@ class TestRangeStatusUpdatedEvent:
 
     def test_creates_with_required_fields(self):
         """Event creates successfully with required fields."""
-        from shared.messages.events import RangeStatusUpdatedEvent
+        from shared.messages.events import ResourceStatusUpdatedEvent
 
-        event = RangeStatusUpdatedEvent(
+        event = ResourceStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            new_status=RangeStatus.PROVISIONING,
+            new_status=ResourceStatus.PROVISIONING,
         )
 
         assert event.range_id == 1
         assert event.user_id == 42
-        assert event.new_status == RangeStatus.PROVISIONING
+        assert event.new_status == ResourceStatus.PROVISIONING
         assert event.error_message is None
 
     def test_auto_generates_event_id(self):
         """Event auto-generates UUID for event_id."""
-        from shared.messages.events import RangeStatusUpdatedEvent
+        from shared.messages.events import ResourceStatusUpdatedEvent
 
-        event = RangeStatusUpdatedEvent(
+        event = ResourceStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            new_status=RangeStatus.PROVISIONING,
+            new_status=ResourceStatus.PROVISIONING,
         )
 
         assert isinstance(event.event_id, UUID)
 
     def test_auto_generates_timestamp(self):
         """Event auto-generates timestamp."""
-        from shared.messages.events import RangeStatusUpdatedEvent
+        from shared.messages.events import ResourceStatusUpdatedEvent
 
         before = datetime.now(UTC)
-        event = RangeStatusUpdatedEvent(
+        event = ResourceStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            new_status=RangeStatus.PROVISIONING,
+            new_status=ResourceStatus.PROVISIONING,
         )
         after = datetime.now(UTC)
 
@@ -56,12 +56,12 @@ class TestRangeStatusUpdatedEvent:
 
     def test_accepts_optional_error_message(self):
         """Event accepts error_message for failure events."""
-        from shared.messages.events import RangeStatusUpdatedEvent
+        from shared.messages.events import ResourceStatusUpdatedEvent
 
-        event = RangeStatusUpdatedEvent(
+        event = ResourceStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            new_status=RangeStatus.FAILED,
+            new_status=ResourceStatus.FAILED,
             error_message="Subnet exhausted",
         )
 
@@ -71,13 +71,13 @@ class TestRangeStatusUpdatedEvent:
         """Event accepts optional correlation_id for tracing."""
         from uuid import uuid4
 
-        from shared.messages.events import RangeStatusUpdatedEvent
+        from shared.messages.events import ResourceStatusUpdatedEvent
 
         correlation_id = uuid4()
-        event = RangeStatusUpdatedEvent(
+        event = ResourceStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            new_status=RangeStatus.PROVISIONING,
+            new_status=ResourceStatus.PROVISIONING,
             correlation_id=correlation_id,
         )
 
@@ -89,12 +89,12 @@ class TestRangeStatusUpdatedEvent:
 
     def test_serializes_to_dict(self):
         """Event serializes to dictionary."""
-        from shared.messages.events import RangeStatusUpdatedEvent
+        from shared.messages.events import ResourceStatusUpdatedEvent
 
-        event = RangeStatusUpdatedEvent(
+        event = ResourceStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            new_status=RangeStatus.PROVISIONING,
+            new_status=ResourceStatus.PROVISIONING,
         )
 
         data = event.model_dump()
@@ -105,12 +105,12 @@ class TestRangeStatusUpdatedEvent:
 
     def test_serializes_to_json(self):
         """Event serializes to JSON string."""
-        from shared.messages.events import RangeStatusUpdatedEvent
+        from shared.messages.events import ResourceStatusUpdatedEvent
 
-        event = RangeStatusUpdatedEvent(
+        event = ResourceStatusUpdatedEvent(
             range_id=1,
             user_id=42,
-            new_status=RangeStatus.PROVISIONING,
+            new_status=ResourceStatus.PROVISIONING,
         )
 
         json_str = event.model_dump_json()
@@ -122,7 +122,7 @@ class TestRangeStatusUpdatedEvent:
         """Event deserializes from dictionary."""
         from uuid import uuid4
 
-        from shared.messages.events import RangeStatusUpdatedEvent
+        from shared.messages.events import ResourceStatusUpdatedEvent
 
         event_id = uuid4()
         timestamp = datetime.now(UTC)
@@ -134,7 +134,7 @@ class TestRangeStatusUpdatedEvent:
             "new_status": "provisioning",
         }
 
-        event = RangeStatusUpdatedEvent.model_validate(data)
+        event = ResourceStatusUpdatedEvent.model_validate(data)
 
         assert event.event_id == event_id
         assert event.range_id == 1

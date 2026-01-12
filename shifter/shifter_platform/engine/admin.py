@@ -7,10 +7,10 @@ from engine.models import Range
 
 @admin.register(Range)
 class RangeAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "scenario_id", "ngfw", "status", "created_at")
+    list_display = ("id", "user", "scenario_id", "status", "created_at")
     list_filter = ("status", "created_at")
     search_fields = ("user__email",)
-    raw_id_fields = ("user", "ngfw")
+    raw_id_fields = ("user",)
 
     @admin.display(description="Scenario")
     def scenario_id(self, obj):

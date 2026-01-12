@@ -45,11 +45,27 @@ def _get_pulumi_path() -> str:
     return path
 
 
+def _get_working_dir() -> str:
+    """Get the working directory for Pulumi commands.
+
+    In ECS container: /app
+    In local dev: the provisioner directory (where this script lives)
+    """
+    # If DB_PASSWORD is set, we're running locally
+    if os.environ.get("DB_PASSWORD"):
+        return os.path.dirname(os.path.abspath(__file__))
+    return "/app"
+
+
 def get_db_connection() -> psycopg.Connection:
-    """Get database connection using RDS IAM auth.
+    """Get database connection.
+
+    Supports two authentication modes:
+    - If DB_PASSWORD is set: Uses standard password authentication (local dev)
+    - Otherwise: Uses RDS IAM authentication (ECS/production)
 
     Returns:
-        psycopg.Connection: Active database connection with SSL.
+        psycopg.Connection: Active database connection.
 
     Raises:
         Exception: If connection fails.
@@ -58,20 +74,47 @@ def get_db_connection() -> psycopg.Connection:
     db_port = int(os.environ.get("DB_PORT", 5432))
     db_user = os.environ.get("DB_USER")
     db_name = os.environ.get("DB_NAME")
+    db_password = os.environ.get("DB_PASSWORD")
+
+    # Local dev mode: use password auth
+    if db_password:
+        if not all([db_host, db_user, db_name]):
+            missing = [
+                k
+                for k, v in [
+                    ("DB_HOST", db_host),
+                    ("DB_USER", db_user),
+                    ("DB_NAME", db_name),
+                ]
+                if not v
+            ]
+            raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
+
+        logger.debug("get_db_connection: password auth to %s:%s/%s", db_host, db_port, db_name)
+        return psycopg.connect(
+            host=db_host,
+            port=db_port,
+            dbname=db_name,
+            user=db_user,
+            password=db_password,
+        )
+
+    # Production mode: use RDS IAM auth
     aws_region = os.environ.get("AWS_REGION")
-
     if not all([db_host, db_user, db_name, aws_region]):
-        env_pairs = [
-            ("DB_HOST", db_host),
-            ("DB_USER", db_user),
-            ("DB_NAME", db_name),
-            ("AWS_REGION", aws_region),
+        missing = [
+            k
+            for k, v in [
+                ("DB_HOST", db_host),
+                ("DB_USER", db_user),
+                ("DB_NAME", db_name),
+                ("AWS_REGION", aws_region),
+            ]
+            if not v
         ]
-        missing = [k for k, v in env_pairs if not v]
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+        raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
-    logger.debug("get_db_connection: connecting to %s:%s/%s", db_host, db_port, db_name)
-
+    logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
     client = boto3.client("rds")
     token = client.generate_db_auth_token(
         DBHostname=db_host,
@@ -758,7 +801,7 @@ def run_pulumi(operation: str, request_id: str) -> None:
             logger.info("Provision failed - attempting auto-cleanup...")
             subprocess.run(
                 ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
@@ -787,7 +830,7 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
     # Try to select existing stack
     result = subprocess.run(  # noqa: S603
         ["pulumi", "stack", "select", stack_name],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -814,7 +857,7 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
             "--secrets-provider",
             secrets_provider,
         ],
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -858,7 +901,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         if value:
             subprocess.run(  # noqa: S603
                 ["pulumi", "config", "set", key, value],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
@@ -866,7 +909,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
             # Remove empty config values to prevent stale values from persisting
             subprocess.run(  # noqa: S603
                 ["pulumi", "config", "rm", key],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
                 # Ignore errors - key may not exist
@@ -889,7 +932,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
 
     result = subprocess.run(
         ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -906,7 +949,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     logger.info("Retrieving stack outputs...")
     outputs = subprocess.run(
         ["pulumi", "stack", "output", "--json"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -988,7 +1031,7 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
             "--non-interactive",
             "--skip-preview",
         ],
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -1005,7 +1048,7 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
     logger.info(f"Removing stack: {stack_name}")
     subprocess.run(  # noqa: S603
         ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         check=True,
         capture_output=True,
@@ -1196,7 +1239,7 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
             logger.info("NGFW provision failed - attempting auto-cleanup...")
             subprocess.run(
                 ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
@@ -1231,7 +1274,8 @@ def _set_ngfw_stack_config(env: dict, request_id: str, instance_uuid: str, app_s
         "environment": os.environ.get("ENVIRONMENT", "dev"),
         "ngfwVpcId": os.environ.get("NGFW_VPC_ID", ""),
         "ngfwSubnetId": os.environ.get("NGFW_SUBNET_ID", ""),
-        "ngfwSecurityGroupId": os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+        "ngfwMgmtSecurityGroupId": os.environ.get("NGFW_MGMT_SECURITY_GROUP_ID", ""),
+        "ngfwDataSecurityGroupId": os.environ.get("NGFW_DATA_SECURITY_GROUP_ID", ""),
         "ngfwAmiId": os.environ.get("NGFW_AMI_ID", ""),
         "bootstrapBucket": os.environ.get("NGFW_BOOTSTRAP_BUCKET", ""),
         "ngfwInstanceType": os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
@@ -1248,14 +1292,14 @@ def _set_ngfw_stack_config(env: dict, request_id: str, instance_uuid: str, app_s
         if value:
             subprocess.run(  # noqa: S603
                 ["pulumi", "config", "set", key, value],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
         else:
             subprocess.run(  # noqa: S603
                 ["pulumi", "config", "rm", key],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
@@ -1283,7 +1327,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
 
     result = subprocess.run(
         ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -1300,7 +1344,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     logger.info("Retrieving NGFW stack outputs...")
     outputs = subprocess.run(
         ["pulumi", "stack", "output", "--json"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -1506,7 +1550,7 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
             "--non-interactive",
             "--skip-preview",
         ],
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -1523,7 +1567,7 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
     logger.info(f"Removing NGFW stack: {stack_name}")
     subprocess.run(  # noqa: S603
         ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         check=True,
         capture_output=True,

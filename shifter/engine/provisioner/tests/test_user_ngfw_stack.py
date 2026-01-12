@@ -108,7 +108,7 @@ class TestUserNGFWStackOutputs:
         yield
 
     def test_stack_has_instance_id_output(self):
-        """UserNGFWStack should expose instance_id output."""
+        """UserNGFWStack should expose ec2_instance_id output."""
         from stacks.user_ngfw_stack import UserNGFWStack
 
         stack = UserNGFWStack(
@@ -127,7 +127,7 @@ class TestUserNGFWStackOutputs:
             request_uuid="req-uuid-12345",
             instance_uuid="inst-uuid-12345",
         )
-        assert hasattr(stack, "instance_id")
+        assert hasattr(stack, "ec2_instance_id")
 
     def test_stack_has_management_ip_output(self):
         """UserNGFWStack should expose management_ip output."""

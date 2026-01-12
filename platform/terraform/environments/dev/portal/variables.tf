@@ -413,6 +413,40 @@ variable "guacamole_enable_oidc" {
 }
 
 # ------------------------------------------------------------------------------
+# PgBouncer (Connection Pooling)
+# ------------------------------------------------------------------------------
+
+variable "pgbouncer_cpu" {
+  description = "CPU units for PgBouncer task (256 = 0.25 vCPU)"
+  type        = number
+}
+
+variable "pgbouncer_memory" {
+  description = "Memory in MB for PgBouncer task"
+  type        = number
+}
+
+variable "pgbouncer_desired_count" {
+  description = "Desired number of PgBouncer tasks"
+  type        = number
+}
+
+variable "pgbouncer_pool_mode" {
+  description = "PgBouncer pool mode (transaction, session, statement)"
+  type        = string
+}
+
+variable "pgbouncer_max_client_conn" {
+  description = "Maximum client connections per PgBouncer task"
+  type        = number
+}
+
+variable "pgbouncer_default_pool_size" {
+  description = "Default pool size per user/database pair"
+  type        = number
+}
+
+# ------------------------------------------------------------------------------
 # Messaging (SNS/SQS)
 # ------------------------------------------------------------------------------
 

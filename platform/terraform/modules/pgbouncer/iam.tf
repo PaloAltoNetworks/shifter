@@ -38,7 +38,8 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
         "secretsmanager:GetSecretValue"
       ]
       Resource = [
-        var.db_credentials_secret_arn
+        var.db_credentials_secret_arn,
+        var.auth_user_secret_arn,
       ]
     }]
   })

@@ -13,6 +13,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
+    postgresql = {
+      source  = "cyrilgdn/postgresql"
+      version = "~> 1.21"
+    }
   }
 }
 
@@ -118,6 +122,116 @@ module "rds" {
   log_retention_days = var.log_retention_days
 
   tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# PostgreSQL Provider for PgBouncer Auth User
+# ------------------------------------------------------------------------------
+
+# Read RDS credentials from Secrets Manager
+data "aws_secretsmanager_secret_version" "db_credentials" {
+  secret_id  = module.rds.db_credentials_secret_arn
+  depends_on = [module.rds]
+}
+
+locals {
+  db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)
+}
+
+provider "postgresql" {
+  host     = local.db_credentials.host
+  port     = local.db_credentials.port
+  database = local.db_credentials.dbname
+  username = local.db_credentials.username
+  password = local.db_credentials.password
+  sslmode  = "require"
+}
+
+# PgBouncer auth user - used for auth_query lookups
+resource "random_password" "pgbouncer_auth_password" {
+  length  = 32
+  special = false # Avoid special chars for connection string compatibility
+}
+
+resource "postgresql_role" "pgbouncer_auth" {
+  name     = "pgbouncer_auth"
+  login    = true
+  password = random_password.pgbouncer_auth_password.result
+
+  depends_on = [module.rds]
+}
+
+# Create schema for pgbouncer functions
+resource "postgresql_schema" "pgbouncer" {
+  name     = "pgbouncer"
+  database = var.db_name
+
+  depends_on = [module.rds]
+}
+
+# Auth lookup function - SECURITY DEFINER runs as the owner (rds_superuser)
+# This allows pgbouncer_auth to query pg_shadow without superuser privileges
+resource "postgresql_function" "get_auth" {
+  name     = "get_auth"
+  schema   = postgresql_schema.pgbouncer.name
+  database = var.db_name
+
+  arg {
+    name = "p_username"
+    type = "text"
+  }
+
+  returns = "TABLE(username text, password text)"
+
+  language         = "sql"
+  security_definer = true
+
+  body = <<-EOF
+    SELECT usename::text, passwd::text FROM pg_shadow WHERE usename = p_username
+  EOF
+
+  depends_on = [postgresql_schema.pgbouncer]
+}
+
+# Grant USAGE on pgbouncer schema to auth user
+resource "postgresql_grant" "pgbouncer_schema_usage" {
+  role        = postgresql_role.pgbouncer_auth.name
+  database    = var.db_name
+  schema      = postgresql_schema.pgbouncer.name
+  object_type = "schema"
+  privileges  = ["USAGE"]
+}
+
+# Grant EXECUTE on auth function to pgbouncer_auth user
+resource "postgresql_grant" "pgbouncer_auth_function" {
+  role        = postgresql_role.pgbouncer_auth.name
+  database    = var.db_name
+  schema      = postgresql_schema.pgbouncer.name
+  object_type = "function"
+  objects     = ["get_auth(text)"]
+  privileges  = ["EXECUTE"]
+
+  depends_on = [postgresql_function.get_auth]
+}
+
+# Store pgbouncer auth credentials in Secrets Manager
+# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal MVP
+resource "aws_secretsmanager_secret" "pgbouncer_auth" {
+  name                    = "shifter-${local.name_prefix}-pgbouncer-auth"
+  description             = "PgBouncer auth user credentials for auth_query"
+  recovery_window_in_days = 0
+
+  tags = merge(var.tags, {
+    Name = "shifter-${local.name_prefix}-pgbouncer-auth"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "pgbouncer_auth" {
+  secret_id = aws_secretsmanager_secret.pgbouncer_auth.id
+  secret_string = jsonencode({
+    username = postgresql_role.pgbouncer_auth.name
+    password = random_password.pgbouncer_auth_password.result
+  })
 }
 
 # ------------------------------------------------------------------------------
@@ -587,6 +701,9 @@ module "pgbouncer" {
   db_credentials_secret_arn = module.rds.db_credentials_secret_arn
   db_name                   = var.db_name
 
+  # PgBouncer auth_query configuration (for SCRAM-SHA-256 support)
+  auth_user_secret_arn = aws_secretsmanager_secret.pgbouncer_auth.arn
+
   # ECS configuration
   cpu           = var.pgbouncer_cpu
   memory        = var.pgbouncer_memory
@@ -599,6 +716,8 @@ module "pgbouncer" {
 
   # Logging
   log_retention_days = var.log_retention_days
+
+  depends_on = [postgresql_role.pgbouncer_auth]
 }
 
 # ------------------------------------------------------------------------------

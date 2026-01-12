@@ -112,31 +112,44 @@ resource "aws_ecs_task_definition" "pgbouncer" {
       protocol      = "tcp"
     }]
 
-    # Environment variables for pgbouncer configuration
-    # The edoburu/pgbouncer image uses DATABASE_URL format
+    # Environment variables for bitnami/pgbouncer
+    # https://github.com/bitnami/containers/tree/main/bitnami/pgbouncer
     environment = [
-      { name = "POOL_MODE", value = var.pool_mode },
-      { name = "MAX_CLIENT_CONN", value = tostring(var.max_client_conn) },
-      { name = "DEFAULT_POOL_SIZE", value = tostring(var.default_pool_size) },
-      { name = "MIN_POOL_SIZE", value = tostring(var.min_pool_size) },
-      { name = "RESERVE_POOL_SIZE", value = tostring(var.reserve_pool_size) },
-      { name = "SERVER_LIFETIME", value = "3600" },
-      { name = "SERVER_IDLE_TIMEOUT", value = "600" },
-      { name = "DB_HOST", value = local.rds_host },
-      { name = "DB_PORT", value = local.rds_port },
-      { name = "DB_NAME", value = var.db_name },
+      # Backend PostgreSQL connection
+      { name = "POSTGRESQL_HOST", value = local.rds_host },
+      { name = "POSTGRESQL_PORT", value = local.rds_port },
+      { name = "POSTGRESQL_DATABASE", value = var.db_name },
+      # PgBouncer pool settings
+      { name = "PGBOUNCER_POOL_MODE", value = var.pool_mode },
+      { name = "PGBOUNCER_MAX_CLIENT_CONN", value = tostring(var.max_client_conn) },
+      { name = "PGBOUNCER_DEFAULT_POOL_SIZE", value = tostring(var.default_pool_size) },
+      { name = "PGBOUNCER_MIN_POOL_SIZE", value = tostring(var.min_pool_size) },
+      { name = "PGBOUNCER_RESERVE_POOL_SIZE", value = tostring(var.reserve_pool_size) },
+      { name = "PGBOUNCER_SERVER_LIFETIME", value = "3600" },
+      { name = "PGBOUNCER_SERVER_IDLE_TIMEOUT", value = "600" },
+      # Auth configuration for SCRAM-SHA-256 (PostgreSQL 16 default)
+      { name = "PGBOUNCER_AUTH_TYPE", value = "scram-sha-256" },
+      { name = "PGBOUNCER_AUTH_QUERY", value = "SELECT username, password FROM pgbouncer.get_auth($1)" },
+      # Ignore startup parameters that pgbouncer doesn't support
+      { name = "PGBOUNCER_IGNORE_STARTUP_PARAMETERS", value = "extra_float_digits,options" },
     ]
 
     # Secrets from Secrets Manager
     secrets = [
+      # Backend database credentials (for server connections)
       {
-        name      = "DB_USER"
+        name      = "POSTGRESQL_USERNAME"
         valueFrom = "${var.db_credentials_secret_arn}:username::"
       },
       {
-        name      = "DB_PASSWORD"
+        name      = "POSTGRESQL_PASSWORD"
         valueFrom = "${var.db_credentials_secret_arn}:password::"
-      }
+      },
+      # Auth user credentials (for auth_query lookups)
+      {
+        name      = "PGBOUNCER_AUTH_USER"
+        valueFrom = "${var.auth_user_secret_arn}:username::"
+      },
     ]
 
     logConfiguration = {

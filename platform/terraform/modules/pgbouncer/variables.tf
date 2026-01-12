@@ -133,5 +133,14 @@ variable "reserve_pool_size" {
 variable "pgbouncer_image" {
   description = "PgBouncer Docker image"
   type        = string
-  default     = "edoburu/pgbouncer:latest"
+  default     = "bitnami/pgbouncer:latest"
+}
+
+# ------------------------------------------------------------------------------
+# Auth Query Configuration (for SCRAM-SHA-256 support)
+# ------------------------------------------------------------------------------
+
+variable "auth_user_secret_arn" {
+  description = "ARN of Secrets Manager secret containing pgbouncer auth user credentials (username/password)"
+  type        = string
 }

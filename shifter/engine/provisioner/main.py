@@ -1553,8 +1553,8 @@ if __name__ == "__main__":
     range_parser = subparsers.add_parser("range", help="Range lifecycle operations")
     range_parser.add_argument(
         "operation",
-        choices=["provision", "destroy"],
-        help="Operation to perform: provision (create) or destroy (teardown)",
+        choices=["provision", "destroy", "pause", "resume"],
+        help="Operation to perform: provision (create), destroy (teardown), pause, or resume",
     )
     range_parser.add_argument(
         "--request-id",
@@ -1652,13 +1652,21 @@ if __name__ == "__main__":
         # Handle range operations
         request_id = args.request_id
 
-        # Map Django command names to Pulumi operations
-        operation_map = {"provision": "up", "destroy": "destroy"}
-        pulumi_op = operation_map[args.operation]
-
-        logger.info(f"Starting {pulumi_op} for request_id={request_id}")
+        logger.info(f"Starting range {args.operation} for request_id={request_id}")
         logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
-        run_pulumi(pulumi_op, request_id)
+        if args.operation in ("provision", "destroy"):
+            # Pulumi-based operations
+            operation_map = {"provision": "up", "destroy": "destroy"}
+            pulumi_op = operation_map[args.operation]
+            run_pulumi(pulumi_op, request_id)
+        elif args.operation == "pause":
+            from range_ops import run_range_pause
 
-        logger.info(f"Completed {pulumi_op} for request_id={request_id}")
+            run_range_pause(request_id)
+        elif args.operation == "resume":
+            from range_ops import run_range_resume
+
+            run_range_resume(request_id)
+
+        logger.info(f"Completed range {args.operation} for request_id={request_id}")

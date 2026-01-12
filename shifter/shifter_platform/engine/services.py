@@ -439,14 +439,106 @@ def get_range_status(range_id: int) -> dict[str, Any] | None:
     }
 
 
-def pause_range(range_id: int) -> None:
-    """Pause range instances."""
-    raise NotImplementedError
+def pause_range(request_id: UUID) -> bool:
+    """Pause all instances in a range.
+
+    Stops all EC2 instances belonging to the range. Idempotent - returns
+    True if already paused.
+
+    Args:
+        request_id: UUID of the Request containing the Range.
+
+    Returns:
+        True if pause initiated or already paused.
+        False if range not found or not in pausable state.
+    """
+    from engine.ecs import start_range_operation
+    from engine.models import Range
+
+    logger.debug("pause_range: request_id=%s", request_id)
+
+    range_obj = Range.objects.filter(request__request_id=request_id).first()
+    if not range_obj:
+        logger.warning("pause_range: no range for request_id=%s", request_id)
+        return False
+
+    # Idempotent: already paused or pausing
+    if range_obj.status in (ResourceStatus.PAUSED.value, ResourceStatus.PAUSING.value):
+        logger.info("pause_range: already paused/pausing request_id=%s", request_id)
+        return True
+
+    # Can only pause from READY state
+    if range_obj.status != ResourceStatus.READY.value:
+        logger.warning(
+            "pause_range: cannot pause range in status=%s request_id=%s",
+            range_obj.status,
+            request_id,
+        )
+        return False
+
+    # Update status to PAUSING
+    range_obj.status = ResourceStatus.PAUSING.value
+    range_obj.save(update_fields=["status", "updated_at"])
+
+    # Invoke ECS task
+    task_arn = start_range_operation(request_id, "pause")
+    if task_arn:
+        logger.info("pause_range: started ECS task=%s request_id=%s", task_arn, request_id)
+    else:
+        logger.warning("pause_range: ECS not configured, task not started request_id=%s", request_id)
+
+    return True
 
 
-def resume_range(range_id: int) -> None:
-    """Resume range instances."""
-    raise NotImplementedError
+def resume_range(request_id: UUID) -> bool:
+    """Resume all instances in a range.
+
+    Starts all EC2 instances belonging to the range. Idempotent - returns
+    True if already ready.
+
+    Args:
+        request_id: UUID of the Request containing the Range.
+
+    Returns:
+        True if resume initiated or already ready.
+        False if range not found or not in resumable state.
+    """
+    from engine.ecs import start_range_operation
+    from engine.models import Range
+
+    logger.debug("resume_range: request_id=%s", request_id)
+
+    range_obj = Range.objects.filter(request__request_id=request_id).first()
+    if not range_obj:
+        logger.warning("resume_range: no range for request_id=%s", request_id)
+        return False
+
+    # Idempotent: already ready or resuming
+    if range_obj.status in (ResourceStatus.READY.value, ResourceStatus.RESUMING.value):
+        logger.info("resume_range: already ready/resuming request_id=%s", request_id)
+        return True
+
+    # Can only resume from PAUSED state
+    if range_obj.status != ResourceStatus.PAUSED.value:
+        logger.warning(
+            "resume_range: cannot resume range in status=%s request_id=%s",
+            range_obj.status,
+            request_id,
+        )
+        return False
+
+    # Update status to RESUMING
+    range_obj.status = ResourceStatus.RESUMING.value
+    range_obj.save(update_fields=["status", "updated_at"])
+
+    # Invoke ECS task
+    task_arn = start_range_operation(request_id, "resume")
+    if task_arn:
+        logger.info("resume_range: started ECS task=%s request_id=%s", task_arn, request_id)
+    else:
+        logger.warning("resume_range: ECS not configured, task not started request_id=%s", request_id)
+
+    return True
 
 
 def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:

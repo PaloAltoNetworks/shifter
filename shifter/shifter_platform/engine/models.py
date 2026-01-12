@@ -91,6 +91,7 @@ class Instantiation(models.Model):
     )
     status = models.CharField(max_length=20, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
     destroyed_at = models.DateTimeField(null=True, blank=True)
 

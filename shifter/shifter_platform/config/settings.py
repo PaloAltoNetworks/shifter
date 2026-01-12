@@ -307,6 +307,10 @@ PULUMI_TASK_DEFINITION_ARN = os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
 PULUMI_ECS_SECURITY_GROUP_ID = os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
 PULUMI_PRIVATE_SUBNET_IDS = os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
 
+# Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
+LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
+PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
+
 # Agent upload limits
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
 AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user

@@ -205,6 +205,7 @@ def create_guacamole_rdp_url(
     expires_minutes: int = 5,
     rdp_username: str | None = None,
     rdp_password: str | None = None,
+    api_base_url: str | None = None,
 ) -> str:
     """Create a signed Guacamole URL for RDP access.
 
@@ -214,7 +215,7 @@ def create_guacamole_rdp_url(
     3. Returns a URL that auto-connects to the RDP session
 
     Args:
-        base_url: Base Guacamole URL (e.g., 'https://portal.example.com/guacamole')
+        base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
         secret_key: 32-character hex string (128-bit key)
         username: User's email/username for Guacamole session
         connection_name: Identifier for this connection
@@ -223,6 +224,7 @@ def create_guacamole_rdp_url(
         expires_minutes: Minutes until URL expires
         rdp_username: Windows username for RDP login
         rdp_password: Windows password for RDP login
+        api_base_url: Internal URL for server-to-server API calls (defaults to base_url)
 
     Returns:
         Full Guacamole URL with auth token that auto-connects to RDP
@@ -242,12 +244,14 @@ def create_guacamole_rdp_url(
     payload = create_guacamole_auth_payload(username, connections, expires_minutes)
     encrypted_data = sign_and_encrypt_payload(payload, secret_key)
 
-    # Get auth token from Guacamole API
-    base_url = base_url.rstrip("/")
-    auth_token = get_guacamole_auth_token(base_url, encrypted_data)
+    # Get auth token from Guacamole API (use internal URL if provided)
+    api_url = (api_base_url or base_url).rstrip("/")
+    auth_token = get_guacamole_auth_token(api_url, encrypted_data)
 
     # Build client identifier: connection_name + NULL + "c" + NULL + "json"
     # This tells Guacamole to auto-connect to the specified connection from JSON auth
     client_id = base64.b64encode(f"{connection_name}\0c\0json".encode()).decode().rstrip("=")
 
+    # Return public URL for browser
+    base_url = base_url.rstrip("/")
     return f"{base_url}/#/client/{client_id}?token={auth_token}"

@@ -93,6 +93,16 @@ output "guacd_service_discovery_hostname" {
   value       = "guacd.${aws_service_discovery_private_dns_namespace.guacamole.name}"
 }
 
+output "guacamole_client_service_discovery_hostname" {
+  description = "DNS hostname for guacamole-client service discovery"
+  value       = "guacamole-client.${aws_service_discovery_private_dns_namespace.guacamole.name}"
+}
+
+output "guacamole_client_internal_url" {
+  description = "Internal URL for guacamole-client API calls (for Django backend)"
+  value       = "http://guacamole-client.${aws_service_discovery_private_dns_namespace.guacamole.name}:8080/guacamole"
+}
+
 # ------------------------------------------------------------------------------
 # CloudWatch Log Group Outputs
 # ------------------------------------------------------------------------------

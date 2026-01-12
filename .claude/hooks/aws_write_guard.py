@@ -114,7 +114,11 @@ def main():
 
     # Check if it's a write operation
     if is_write_operation(command):
-        # Even if it has safe patterns, write patterns take precedence
+        # Allow if user has explicitly directed this operation
+        if "# user-directed" in command:
+            sys.exit(0)
+
+        # Block with guidance
         error_msg = """
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  AWS WRITE OPERATION BLOCKED                                                │

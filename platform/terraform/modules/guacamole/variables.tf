@@ -41,6 +41,12 @@ variable "range_vpc_cidr" {
   type        = string
 }
 
+variable "portal_security_group_id" {
+  description = "Security group ID of the Portal EC2 instance (for direct API access to guacamole-client)"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # Shared ALB (Portal ALB)
 # ------------------------------------------------------------------------------

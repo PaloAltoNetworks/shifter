@@ -69,7 +69,13 @@ variable "guacamole_secret_arn" {
 }
 
 variable "guacamole_base_url" {
-  description = "Base URL for Guacamole API (e.g., https://domain.com/guacamole)"
+  description = "Public base URL for Guacamole (browser URL, e.g., https://domain.com/guacamole)"
+  type        = string
+  default     = ""
+}
+
+variable "guacamole_api_base_url" {
+  description = "Internal base URL for Guacamole API calls (e.g., http://guacamole-client.internal:8080/guacamole)"
   type        = string
   default     = ""
 }

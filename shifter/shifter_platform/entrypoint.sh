@@ -20,8 +20,9 @@ print(response['SecretString'])
 ")
 
     # Export DB credentials
-    export DB_HOST=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")
-    export DB_PORT=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")
+    # DB_HOST can be overridden via env var
+    export DB_HOST=${DB_HOST:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")}
+    export DB_PORT=${DB_PORT:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")}
     export DB_NAME=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['dbname'])")
     export DB_USER=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['username'])")
     export DB_PASSWORD=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")

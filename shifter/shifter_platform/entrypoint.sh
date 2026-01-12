@@ -20,7 +20,7 @@ print(response['SecretString'])
 ")
 
     # Export DB credentials
-    # DB_HOST can be overridden via env var (e.g., to use PgBouncer)
+    # DB_HOST can be overridden via env var
     export DB_HOST=${DB_HOST:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")}
     export DB_PORT=${DB_PORT:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")}
     export DB_NAME=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['dbname'])")

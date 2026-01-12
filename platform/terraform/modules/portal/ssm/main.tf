@@ -205,7 +205,7 @@ resource "aws_ssm_parameter" "db_host_override" {
   count = var.db_host_override != "" ? 1 : 0
 
   name        = "${local.ps_prefix}/db-host-override"
-  description = "Database host override (e.g., PgBouncer endpoint)"
+  description = "Database host override"
   type        = "String"
   value       = var.db_host_override
 

@@ -13,6 +13,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -118,6 +122,37 @@ module "rds" {
   log_retention_days = var.log_retention_days
 
   tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# PgBouncer Auth User Credentials
+# ------------------------------------------------------------------------------
+# The password is generated here and stored in Secrets Manager.
+# The actual PostgreSQL user is created via SSM command to portal EC2 (see below).
+# This approach works because portal EC2 has VPC access to RDS while GitHub runner cannot.
+
+resource "random_password" "pgbouncer_auth_password" {
+  length  = 32
+  special = false # Avoid special chars for connection string compatibility
+}
+
+# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal MVP
+resource "aws_secretsmanager_secret" "pgbouncer_auth" {
+  name                    = "shifter-${local.name_prefix}-pgbouncer-auth"
+  description             = "PgBouncer auth user credentials for auth_query"
+  recovery_window_in_days = 7
+
+  tags = merge(var.tags, {
+    Name = "shifter-${local.name_prefix}-pgbouncer-auth"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "pgbouncer_auth" {
+  secret_id = aws_secretsmanager_secret.pgbouncer_auth.id
+  secret_string = jsonencode({
+    username = "pgbouncer_auth"
+    password = random_password.pgbouncer_auth_password.result
+  })
 }
 
 # ------------------------------------------------------------------------------
@@ -294,6 +329,7 @@ module "ec2" {
     aws_secretsmanager_secret.app.arn,
     module.cognito.cognito_secret_arn,
     module.guacamole.json_auth_secret_arn,
+    aws_secretsmanager_secret.pgbouncer_auth.arn,
   ]
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port
@@ -589,6 +625,7 @@ module "pgbouncer" {
   rds_endpoint              = module.rds.db_instance_endpoint
   rds_security_group_id     = module.rds.db_security_group_id
   db_credentials_secret_arn = module.rds.db_credentials_secret_arn
+  auth_user_secret_arn      = aws_secretsmanager_secret.pgbouncer_auth.arn
   db_name                   = var.db_name
 
   # ECS configuration
@@ -603,6 +640,154 @@ module "pgbouncer" {
 
   # Logging
   log_retention_days = var.log_retention_days
+}
+
+# ------------------------------------------------------------------------------
+# PgBouncer Auth User Setup (via SSM to Portal EC2)
+# ------------------------------------------------------------------------------
+# Creates the pgbouncer_auth PostgreSQL user and get_auth() function.
+# Must run via SSM because GitHub runner cannot reach RDS (private subnet).
+# The portal EC2 has VPC access to RDS and psql installed.
+
+resource "null_resource" "pgbouncer_auth_setup" {
+  triggers = {
+    # Re-run if password changes
+    pgbouncer_auth_secret_version = aws_secretsmanager_secret_version.pgbouncer_auth.version_id
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+
+      echo "Creating pgbouncer_auth user via SSM..."
+
+      # Get an instance ID from the portal EC2 (supports both single instance and ASG)
+      INSTANCE_ID=$(aws ec2 describe-instances \
+        --filters "Name=tag:Name,Values=${local.name_prefix}-ec2" \
+                  "Name=instance-state-name,Values=running" \
+        --query "Reservations[0].Instances[0].InstanceId" \
+        --output text \
+        --region ${var.aws_region})
+
+      if [[ "$INSTANCE_ID" == "None" ]] || [[ -z "$INSTANCE_ID" ]]; then
+        echo "ERROR: No running portal EC2 instance found with tag Name=${local.name_prefix}-ec2"
+        exit 1
+      fi
+
+      echo "Found portal instance: $INSTANCE_ID"
+
+      # Wait for instance to be SSM-ready and psql installed (user_data completion)
+      echo "Waiting for instance to be SSM-ready..."
+      for i in {1..60}; do
+        SSM_STATUS=$(aws ssm describe-instance-information \
+          --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+          --query "InstanceInformationList[0].PingStatus" \
+          --output text \
+          --region ${var.aws_region} 2>/dev/null || echo "Unknown")
+
+        if [[ "$SSM_STATUS" == "Online" ]]; then
+          echo "Instance is SSM-ready"
+          break
+        fi
+
+        if [[ $i -eq 60 ]]; then
+          echo "ERROR: Instance not SSM-ready after 5 minutes"
+          exit 1
+        fi
+
+        echo "Waiting for SSM... (status: $SSM_STATUS)"
+        sleep 5
+      done
+
+      # Send SSM command to create pgbouncer_auth user
+      COMMAND_ID=$(aws ssm send-command \
+        --instance-ids "$INSTANCE_ID" \
+        --document-name "AWS-RunShellScript" \
+        --parameters "commands=[
+          'set -euo pipefail',
+          'for i in {1..30}; do which psql && break || sleep 5; done',
+          'which psql || { echo ERROR: psql not found; exit 1; }',
+          'echo Creating pgbouncer_auth user...',
+          'export AWS_DEFAULT_REGION=${var.aws_region}',
+          'DB_SECRET=$(aws secretsmanager get-secret-value --secret-id ${module.rds.db_credentials_secret_arn} --query SecretString --output text)',
+          'DB_HOST=$(echo \$DB_SECRET | jq -r .host)',
+          'DB_PORT=$(echo \$DB_SECRET | jq -r .port)',
+          'DB_NAME=$(echo \$DB_SECRET | jq -r .dbname)',
+          'DB_USER=$(echo \$DB_SECRET | jq -r .username)',
+          'export PGPASSWORD=$(echo \$DB_SECRET | jq -r .password)',
+          'AUTH_SECRET=$(aws secretsmanager get-secret-value --secret-id ${aws_secretsmanager_secret.pgbouncer_auth.arn} --query SecretString --output text)',
+          'AUTH_PASSWORD=$(echo \$AUTH_SECRET | jq -r .password)',
+          'psql -h \$DB_HOST -p \$DB_PORT -U \$DB_USER -d \$DB_NAME -v ON_ERROR_STOP=1 <<SQL',
+          'DO \\$\\$',
+          'BEGIN',
+          '  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ('\''pgbouncer_auth'\'')) THEN',
+          '    EXECUTE format(('\''CREATE ROLE pgbouncer_auth WITH LOGIN PASSWORD %L'\''), ('\'''\$AUTH_PASSWORD'\''));',
+          '  ELSE',
+          '    EXECUTE format(('\''ALTER ROLE pgbouncer_auth WITH PASSWORD %L'\''), ('\'''\$AUTH_PASSWORD'\''));',
+          '  END IF;',
+          'END',
+          '\\$\\$;',
+          'CREATE SCHEMA IF NOT EXISTS pgbouncer AUTHORIZATION pgbouncer_auth;',
+          'CREATE OR REPLACE FUNCTION pgbouncer.get_auth(p_username TEXT)',
+          'RETURNS TABLE(username TEXT, password TEXT) AS',
+          '\\$\\$',
+          'BEGIN',
+          '  RETURN QUERY',
+          '  SELECT usename::TEXT, passwd::TEXT',
+          '  FROM pg_shadow',
+          '  WHERE usename = p_username;',
+          'END;',
+          '\\$\\$ LANGUAGE plpgsql SECURITY DEFINER;',
+          'REVOKE ALL ON FUNCTION pgbouncer.get_auth(TEXT) FROM PUBLIC;',
+          'GRANT EXECUTE ON FUNCTION pgbouncer.get_auth(TEXT) TO pgbouncer_auth;',
+          'SQL',
+          'echo pgbouncer_auth user created successfully'
+        ]" \
+        --query "Command.CommandId" \
+        --output text \
+        --region ${var.aws_region})
+
+      echo "SSM Command ID: $COMMAND_ID"
+
+      # Wait for command to complete (up to 2 minutes)
+      for i in {1..24}; do
+        STATUS=$(aws ssm get-command-invocation \
+          --command-id "$COMMAND_ID" \
+          --instance-id "$INSTANCE_ID" \
+          --query "Status" \
+          --output text \
+          --region ${var.aws_region} 2>/dev/null || echo "Pending")
+
+        if [[ "$STATUS" == "Success" ]]; then
+          echo "pgbouncer_auth user setup completed successfully"
+          exit 0
+        elif [[ "$STATUS" == "Failed" ]] || [[ "$STATUS" == "Cancelled" ]] || [[ "$STATUS" == "TimedOut" ]]; then
+          echo "ERROR: SSM command failed with status: $STATUS"
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "StandardErrorContent" \
+            --output text \
+            --region ${var.aws_region}
+          exit 1
+        fi
+
+        echo "Waiting for SSM command... (status: $STATUS)"
+        sleep 5
+      done
+
+      echo "ERROR: SSM command timed out"
+      exit 1
+    EOT
+  }
+
+  depends_on = [
+    module.ec2,
+    module.rds,
+    module.pgbouncer,
+    aws_secretsmanager_secret_version.pgbouncer_auth,
+  ]
 }
 
 # ------------------------------------------------------------------------------

@@ -56,10 +56,10 @@ complete_lifecycle_action() {
 trap 'echo "Bootstrap failed!"; complete_lifecycle_action ABANDON; exit 1' ERR
 
 # ------------------------------------------------------------------------------
-# Install Docker
+# Install Docker and PostgreSQL client
 # ------------------------------------------------------------------------------
-echo "Installing Docker..."
-dnf install -y docker amazon-ecr-credential-helper
+echo "Installing Docker and PostgreSQL client..."
+dnf install -y docker amazon-ecr-credential-helper postgresql15 jq
 systemctl enable docker
 systemctl start docker
 

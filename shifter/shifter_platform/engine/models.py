@@ -376,7 +376,7 @@ class Range(models.Model):
 
     # Subnet index allocation constants
     # Range VPC uses 10.1.0.0/16 with /28 subnets (16 IPs each)
-    # Capacity: 253 third octets (2-254) × 16 /28 blocks = 4048 subnets
+    # Capacity: 253 third octets (2-254) x 16 /28 blocks = 4048 subnets
     SUBNET_INDEX_MIN = 1
     SUBNET_INDEX_MAX = 4048
 

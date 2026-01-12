@@ -233,6 +233,16 @@ variable "redis_enable_replication" {
 }
 
 # ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+
+variable "log_level" {
+  description = "Django log level (DEBUG, INFO, WARNING, ERROR). Use DEBUG in dev for detailed event tracing."
+  type        = string
+  default     = "INFO"
+}
+
+# ------------------------------------------------------------------------------
 # Log Aggregation
 # ------------------------------------------------------------------------------
 
@@ -467,6 +477,15 @@ variable "messaging_alarm_actions" {
 variable "alarm_email" {
   description = "Email address for CloudWatch alarm notifications"
   type        = string
+}
+
+# ------------------------------------------------------------------------------
+# Bedrock Logging
+# ------------------------------------------------------------------------------
+
+variable "enable_bedrock_logging" {
+  description = "Enable Bedrock model invocation logging to CloudWatch"
+  type        = bool
 }
 
 # ------------------------------------------------------------------------------

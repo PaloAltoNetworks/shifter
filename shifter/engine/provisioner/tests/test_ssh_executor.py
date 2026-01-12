@@ -74,7 +74,7 @@ class TestRunCommandHappyPath:
 
         executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY)
         result = executor.run_command(
-            host="10.0.0.1",
+            instance_id="10.0.0.1",
             script="show panorama-status",
             timeout_seconds=60,
         )

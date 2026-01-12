@@ -1,15 +1,20 @@
 id: basic
 name: Basic Range
 description: A basic attacker-victim range with Kali Linux attacker and user-provided agent on victim.
-
-requirements:
-  required: true
-  os: null
+enabled: true
+ngfw: false
 
 instances:
-  - role: attacker
+  - name: Attacker
+    role: attacker
     os_type: kali
+    xdr_agent: false
 
-  - role: victim
+  - name: Workstation
+    role: victim
     os_type: from_agent
-    agent_slot: primary
+    xdr_agent: true
+
+subnets:
+  - name: core
+    instances: [Attacker, Workstation]

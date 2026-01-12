@@ -50,22 +50,32 @@ class TestLoadConfigEdgeCases:
             return_value={
                 "id": 0,
                 "user_id": 1,
+                "request_uuid": "test-uuid-123",
                 "range_config": {
                     "scenario_id": "basic",
                     "user_id": 1,
-                    "instances": [
-                        {"role": "attacker", "os_type": "kali"},
-                        {"role": "victim", "os_type": "ubuntu"},
+                    "subnets": [
+                        {
+                            "name": "test-subnet",
+                            "uuid": "subnet-uuid-123",
+                            "instances": [
+                                {"role": "attacker", "os_type": "kali", "uuid": "inst-uuid-1"},
+                                {"role": "victim", "os_type": "ubuntu", "uuid": "inst-uuid-2"},
+                            ],
+                            "connected_to": [],
+                        }
                     ],
                 },
                 "ngfw_enabled": False,
+                "gwlb_service_name": "",
             },
         )
 
         result = load_config()
 
         assert result.range_id == 0
-        assert len(result.instances) == 2
+        assert len(result.subnets) == 1
+        assert len(result.subnets[0].instances) == 2
 
     def test_load_config_large_range_id(self, mock_pulumi_config, mocker, mock_boto3_clients):
         mock_pulumi_config.require_int.side_effect = lambda key: {
@@ -77,8 +87,10 @@ class TestLoadConfigEdgeCases:
             return_value={
                 "id": 999999,
                 "user_id": 1,
-                "range_config": {"scenario_id": "basic", "user_id": 1, "instances": []},
+                "request_uuid": "test-uuid-456",
+                "range_config": {"scenario_id": "basic", "user_id": 1, "subnets": []},
                 "ngfw_enabled": False,
+                "gwlb_service_name": "",
             },
         )
 
@@ -87,8 +99,8 @@ class TestLoadConfigEdgeCases:
         assert result.range_id == 999999
 
     def test_load_config_many_instances(self, mock_pulumi_config, mocker, mock_boto3_clients):
-        instances = [{"role": "attacker", "os_type": "kali"}] + [
-            {"role": "victim", "os_type": "ubuntu"} for _ in range(10)
+        instances = [{"role": "attacker", "os_type": "kali", "uuid": "inst-uuid-0"}] + [
+            {"role": "victim", "os_type": "ubuntu", "uuid": f"inst-uuid-{i + 1}"} for i in range(10)
         ]
 
         mocker.patch(
@@ -96,22 +108,36 @@ class TestLoadConfigEdgeCases:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "range_config": {"scenario_id": "basic", "user_id": 1, "instances": instances},
+                "request_uuid": "test-uuid-789",
+                "range_config": {
+                    "scenario_id": "basic",
+                    "user_id": 1,
+                    "subnets": [
+                        {
+                            "name": "main",
+                            "uuid": "subnet-uuid-456",
+                            "instances": instances,
+                            "connected_to": [],
+                        }
+                    ],
+                },
                 "ngfw_enabled": False,
+                "gwlb_service_name": "",
             },
         )
 
         result = load_config()
 
-        assert len(result.instances) == 11
-        assert sum(1 for i in result.instances if i.role == "attacker") == 1
-        assert sum(1 for i in result.instances if i.role == "victim") == 10
+        all_instances = [inst for subnet in result.subnets for inst in subnet.instances]
+        assert len(all_instances) == 11
+        assert sum(1 for i in all_instances if i.role == "attacker") == 1
+        assert sum(1 for i in all_instances if i.role == "victim") == 10
 
     def test_load_config_mixed_os_types(self, mock_pulumi_config, mocker, mock_boto3_clients):
         instances = [
-            {"role": "victim", "os_type": "ubuntu"},
-            {"role": "victim", "os_type": "windows"},
-            {"role": "victim", "os_type": "amazon-linux"},
+            {"role": "victim", "os_type": "ubuntu", "uuid": "inst-uuid-1"},
+            {"role": "victim", "os_type": "windows", "uuid": "inst-uuid-2"},
+            {"role": "victim", "os_type": "amazon-linux", "uuid": "inst-uuid-3"},
         ]
 
         mocker.patch(
@@ -119,26 +145,41 @@ class TestLoadConfigEdgeCases:
             return_value={
                 "id": 42,
                 "user_id": 1,
-                "range_config": {"scenario_id": "basic", "user_id": 1, "instances": instances},
+                "request_uuid": "test-uuid-mixed",
+                "range_config": {
+                    "scenario_id": "basic",
+                    "user_id": 1,
+                    "subnets": [
+                        {
+                            "name": "mixed",
+                            "uuid": "subnet-uuid-mixed",
+                            "instances": instances,
+                            "connected_to": [],
+                        }
+                    ],
+                },
                 "ngfw_enabled": False,
+                "gwlb_service_name": "",
             },
         )
 
         result = load_config()
 
-        os_types = {i.os_type for i in result.instances}
+        all_instances = [inst for subnet in result.subnets for inst in subnet.instances]
+        os_types = {i.os_type for i in all_instances}
         assert os_types == {"ubuntu", "windows", "amazon-linux"}
 
 
 class TestRangeConfigBoundaryValues:
     """RangeConfig should accept boundary values without error."""
 
-    def test_empty_instances_list(self):
+    def test_empty_subnets_list(self):
         config = RangeConfig(
             range_id=42,
             user_id=1,
+            request_uuid="test-uuid",
             environment="dev",
-            instances=[],
+            subnets=[],
             vpc_id="vpc-12345",
             vpc_cidr="10.1.0.0/16",
             route_table_id="rtb-12345",
@@ -151,14 +192,15 @@ class TestRangeConfigBoundaryValues:
             agent_s3_bucket="bucket",
             availability_zone="us-east-2a",
         )
-        assert config.instances == []
+        assert config.subnets == []
 
     def test_user_id_zero(self):
         config = RangeConfig(
             range_id=42,
             user_id=0,
+            request_uuid="test-uuid",
             environment="dev",
-            instances=[],
+            subnets=[],
             vpc_id="vpc-12345",
             vpc_cidr="10.1.0.0/16",
             route_table_id="rtb-12345",
@@ -182,6 +224,7 @@ class TestInstanceConfigBoundaryValues:
             role="victim",
             os_type="ubuntu",
             instance_type="t3.micro",
+            uuid="inst-uuid-test",
         )
         assert config.agent_s3_key is None
         assert config.agent_presigned_url is None

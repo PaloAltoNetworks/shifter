@@ -13,6 +13,9 @@ source "amazon-ebs" "kali" {
   instance_type   = var.instance_type
   region          = var.aws_region
 
+  // Ensure instance is terminated (not just stopped) if Packer exits ungracefully
+  shutdown_behavior = "terminate"
+
   // Official Kali Linux from AWS Marketplace
   // Requires free subscription: https://aws.amazon.com/marketplace/pp/prodview-fznsw3f7mq7to
   // Product code: 7lgvy7mt78lgoi4lant0znp5h

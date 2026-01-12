@@ -5,7 +5,7 @@ set -euo pipefail
 # Fetch secrets from AWS Secrets Manager (prod only)
 # ------------------------------------------------------------------------------
 
-if [ -n "${DB_SECRET_ARN:-}" ] && [ -n "${APP_SECRET_ARN:-}" ]; then
+if [[ -n "${DB_SECRET_ARN:-}" ]] && [[ -n "${APP_SECRET_ARN:-}" ]]; then
     echo "Fetching secrets from AWS Secrets Manager..."
 
     # Fetch DB secret
@@ -20,8 +20,9 @@ print(response['SecretString'])
 ")
 
     # Export DB credentials
-    export DB_HOST=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")
-    export DB_PORT=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")
+    # DB_HOST can be overridden via env var (e.g., to use PgBouncer)
+    export DB_HOST=${DB_HOST:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")}
+    export DB_PORT=${DB_PORT:-$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")}
     export DB_NAME=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['dbname'])")
     export DB_USER=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['username'])")
     export DB_PASSWORD=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
@@ -50,7 +51,7 @@ print(key + '=' * padding)
 ")
 
     # Fetch Cognito secret if ARN provided
-    if [ -n "${COGNITO_SECRET_ARN:-}" ]; then
+    if [[ -n "${COGNITO_SECRET_ARN:-}" ]]; then
         COGNITO_SECRET=$(python -c "
 import boto3
 import json
@@ -66,6 +67,18 @@ print(response['SecretString'])
         export OIDC_RP_CLIENT_SECRET=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_secret'])")
         export OIDC_ISSUER_URL=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['issuer_url'])")
         export OIDC_AUTH_DOMAIN=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['domain'])")
+    fi
+
+    # Fetch Guacamole JSON auth secret if ARN provided (for RDP integration)
+    if [[ -n "${GUACAMOLE_SECRET_ARN:-}" ]]; then
+        export GUACAMOLE_JSON_AUTH_SECRET=$(python -c "
+import boto3
+import os
+
+client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
+response = client.get_secret_value(SecretId=os.environ['GUACAMOLE_SECRET_ARN'])
+print(response['SecretString'])
+")
     fi
 
     echo "Secrets loaded successfully"
@@ -110,7 +123,7 @@ echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
 # Run command passed as arguments, or default to daphne
-if [ $# -gt 0 ]; then
+if [[ $# -gt 0 ]]; then
     echo "Running: $@"
     exec "$@"
 else

@@ -4,6 +4,9 @@ source "amazon-ebs" "windows" {
   instance_type   = var.instance_type
   region          = var.aws_region
 
+  // Ensure instance is terminated (not just stopped) if Packer exits ungracefully
+  shutdown_behavior = "terminate"
+
   // Windows Server 2022 Datacenter from Amazon
   source_ami_filter {
     filters = {

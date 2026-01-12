@@ -17,6 +17,7 @@ platform/
 │   │   ├── range/            # Range VPC and networking
 │   │   ├── pulumi-provisioner/   # ECS Fargate for Engine
 │   │   ├── pulumi-state/         # Pulumi backend (S3 + DynamoDB)
+│   │   ├── guacamole/            # Browser-based RDP (Guacamole)
 │   │   └── log-aggregation/      # Centralized logging
 │   └── environments/
 │       ├── dev/              # Dev environment configs
@@ -35,6 +36,7 @@ platform/
 | **Range** | `platform/terraform/modules/range/` | Range VPC, security groups, Network Firewall |
 | **Portal*** | `platform/terraform/modules/portal/` | ALB, EC2/ASG, RDS, Redis, Cognito, S3 |
 | **Pulumi Provisioner** | `platform/terraform/modules/pulumi-provisioner/` | ECS Fargate task for range provisioning |
+| **Guacamole** | `platform/terraform/modules/guacamole/` | Browser-based RDP access to range instances |
 | **CloudFormation** | `platform/cloudformation/{env}/` | Cortex XDR connector IAM roles (manually deployed) |
 
 *Portal is a legacy name. Deploys Shifter Django infrastructure. Redis uses single-node in dev, HA replication group in prod.
@@ -61,3 +63,4 @@ ElastiCache Redis:
 - [Manual Deployment](manual-deployment.md) - Infrastructure elements deployed without CI/CD
 - [CI/CD](cicd.md) - Deployment pipelines
 - [Networking](networking.md) - VPC architecture and peering
+- [Guacamole](guacamole.md) - Browser-based RDP integration

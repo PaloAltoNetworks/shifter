@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved Bedrock logging and alarms
 - Draft Cortex BYOT scenario template
 - venv enforcer hook for Claude Code
+- Guacamole RDP for Range instances
 
 ### Changed
 - NGFW models and services refactored to use schemas
@@ -35,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard range status updates and styling
 - Better AaC checking in check_layer_imports script
 - Sticky sesesions on Linux terminals: keep history, scrollback, etc when reconnecting
+- tmux now used for Terminal UI sessions
 
 ## [0.10.4] - 2025-01-06
 

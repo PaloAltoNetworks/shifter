@@ -17,6 +17,7 @@ dependencies = [
     "gunicorn",
     "markdown",
     "mozilla-django-oidc",
+    "paramiko",
     "psycopg[binary]",
     "pycurl>=7.45.7",
     "pydantic>=2.12.5",

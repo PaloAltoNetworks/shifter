@@ -56,7 +56,9 @@ services:
       - .env
     environment:
       DB_HOST: pgbouncer
+      DB_PORT: 5432
       REDIS_HOST: redis
+      PROVISIONER_PATH: /engine/provisioner
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -65,6 +67,7 @@ services:
     volumes:
       - .:/app
       - /app/.venv
+      - ../engine/provisioner:/engine/provisioner
 
   # ------------------------------------------------------------------------------
   # SQS Workers

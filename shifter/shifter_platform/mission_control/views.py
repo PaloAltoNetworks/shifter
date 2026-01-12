@@ -77,6 +77,7 @@ def terminal(request):
 
     Uses active_range and has_active_range from context processor.
     Template accesses active_range.range_id for WebSocket connection.
+    OS types for RDP buttons are accessed via active_range.attacker_instance/victim_instances.
     """
     context = {
         "page_title": "Terminal",
@@ -94,6 +95,82 @@ def settings(request):
         "active_nav": "settings",
     }
     return render(request, "mission_control/settings.html", context)
+
+
+# -----------------------------------------------------------------------------
+# Guacamole RDP API
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_POST
+def guacamole_rdp_url(request):
+    """
+    Generate a signed Guacamole URL for RDP access to a range instance.
+
+    Request body (JSON):
+        - instance_uuid: UUID of the instance to connect to
+
+    Response (JSON):
+        - url: Signed Guacamole URL that opens RDP session
+
+    Security:
+        - User must have an active range in READY status
+        - URL is signed with HMAC-SHA256 and expires in 5 minutes
+        - Only works for instances with GUI (kali, windows)
+    """
+    from engine.services import get_rdp_connection_info
+    from mission_control.guacamole import create_guacamole_rdp_url
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    instance_uuid = data.get("instance_uuid", "").strip()
+    if not instance_uuid:
+        return JsonResponse({"error": "instance_uuid is required"}, status=400)
+
+    # Get connection info from engine service
+    try:
+        conn_info = get_rdp_connection_info(request.user, instance_uuid)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    # Get Guacamole secret key from settings
+    secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
+    if not secret_key:
+        logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
+        return JsonResponse({"error": "RDP service not configured"}, status=503)
+
+    # Get Guacamole URLs from settings
+    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+    guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
+
+    # Generate signed URL
+    try:
+        url = create_guacamole_rdp_url(
+            base_url=guacamole_base_url,
+            secret_key=secret_key,
+            username=request.user.email,
+            connection_name=conn_info["connection_name"],
+            hostname=conn_info["private_ip"],
+            expires_minutes=5,
+            rdp_username=conn_info.get("rdp_username"),
+            rdp_password=conn_info.get("rdp_password"),
+            api_base_url=guacamole_api_url,
+        )
+    except ValueError as e:
+        logger.error(f"Failed to generate Guacamole URL: {e}")
+        return JsonResponse({"error": "Failed to generate RDP URL"}, status=500)
+
+    logger.info(
+        "Guacamole RDP URL generated: user=%s instance_uuid=%s",
+        request.user.email,
+        instance_uuid,
+    )
+
+    return JsonResponse({"url": url})
 
 
 @login_required

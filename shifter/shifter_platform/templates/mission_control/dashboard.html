@@ -155,7 +155,7 @@
         <a href="{% url 'mission_control:terminal' %}" class="btn btn-primary" id="open-workspace-btn">
             Open Terminal
         </a>
-        <button class="btn btn-secondary" id="pause-btn" disabled title="Coming soon">
+        <button class="btn btn-secondary" id="pause-btn">
             Pause
         </button>
         <button class="btn btn-danger" id="destroy-btn">
@@ -181,7 +181,7 @@
     </div>
 
     <div class="flex-row gap-md mt-md">
-        <button class="btn btn-primary" id="resume-btn" disabled title="Coming soon">
+        <button class="btn btn-primary" id="resume-btn">
             Resume
         </button>
         <button class="btn btn-danger" id="destroy-paused-btn">
@@ -216,6 +216,8 @@ document.addEventListener('DOMContentLoaded', function() {
         launchUrl: '{% url "mission_control:launch_range" %}',
         cancelUrl: '{% url "mission_control:cancel_range" %}',
         destroyUrl: '{% url "mission_control:destroy_range" %}',
+        pauseUrl: '{% url "mission_control:pause_range" %}',
+        resumeUrl: '{% url "mission_control:resume_range" %}',
         agentsUrl: '{% url "mission_control:list_agents" %}',
         scenariosUrl: '{% url "mission_control:list_scenarios" %}',
         provisioningTimeoutMs: {{ provisioning_timeout_ms }},

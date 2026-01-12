@@ -112,9 +112,7 @@ class SSHExecutor:
         except paramiko.SSHException:
             pass
 
-        raise SSHExecutorError(
-            "Unsupported key type. Only Ed25519 and RSA keys are supported."
-        )
+        raise SSHExecutorError("Unsupported key type. Only Ed25519 and RSA keys are supported.")
 
     def run_command(
         self,

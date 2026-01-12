@@ -9,10 +9,13 @@ This is a stub implementation that follows the Orchestrator protocol.
 Full implementation will be added as needed.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from orchestrators.base import StepResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -69,6 +72,7 @@ class OpsOrchestrator:
             executor: Executor to use for running operations
                      (AWSExecutor, SSMExecutor, etc.)
         """
+        logger.debug("__init__: executor=%s", type(executor).__name__)
         self.executor = executor
 
     def orchestrate(
@@ -89,6 +93,13 @@ class OpsOrchestrator:
         Returns:
             OpsResult with success status and step outputs.
         """
+        plan_name = getattr(plan, "name", type(plan).__name__)
+        logger.debug(
+            "orchestrate: instance_id=%s plan=%s steps=%d",
+            instance_id,
+            plan_name,
+            len(plan.steps),
+        )
         step_results: list[StepResult] = []
 
         # Execute each step in order
@@ -98,8 +109,14 @@ class OpsOrchestrator:
 
             # Stop on first failure
             if not result.success:
+                logger.warning(
+                    "orchestrate: failed plan=%s step=%s",
+                    plan_name,
+                    step.name,
+                )
                 return OpsResult(success=False, step_results=step_results)
 
+        logger.info("orchestrate: completed plan=%s", plan_name)
         return OpsResult(success=True, step_results=step_results)
 
     def _execute_step(
@@ -111,20 +128,32 @@ class OpsOrchestrator:
         """Execute a single operations step.
 
         Args:
-            target_id: Target instance or resource ID.
-            step: Step to execute.
-            context: Template variables.
+            target_id: Target instance or resource ID (for logging/reference).
+            step: Step to execute with action and params attributes.
+            context: Dict containing parameter values for the action.
 
         Returns:
             StepResult with step output.
         """
-        # Execute via the executor
-        # The step's action and params determine what gets executed
-        result = self.executor.run_command(
-            target=target_id,
-            action=getattr(step, "action", ""),
-            params=getattr(step, "params", {}),
-        )
+        action = getattr(step, "action", "")
+        logger.debug("_execute_step: step=%s action=%s", step.name, action)
+
+        # Use execute_action() for AWSExecutor to dispatch to specific methods
+        if hasattr(self.executor, "execute_action"):
+            result = self.executor.execute_action(action, context)
+        else:
+            # Fallback for other executors (SSMExecutor, etc.)
+            result = self.executor.run_command(
+                target=target_id,
+                action=action,
+                params=getattr(step, "params", {}),
+            )
+
+        if result.success:
+            logger.debug("_execute_step: completed step=%s", step.name)
+        else:
+            stderr_preview = result.stderr[:200] if result.stderr else ""
+            logger.warning("_execute_step: failed step=%s stderr=%s", step.name, stderr_preview)
 
         return StepResult(
             step_name=step.name,

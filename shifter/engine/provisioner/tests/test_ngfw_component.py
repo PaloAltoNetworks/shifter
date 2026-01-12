@@ -51,9 +51,16 @@ tplname={{ template_stack }}
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.instance is not None
@@ -68,9 +75,16 @@ tplname={{ template_stack }}
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_type(inst_type):
@@ -88,9 +102,16 @@ tplname={{ template_stack }}
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.mgmt_eni is not None
@@ -105,9 +126,16 @@ tplname={{ template_stack }}
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.data_eni is not None
@@ -122,13 +150,20 @@ tplname={{ template_stack }}
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_source_dest(enabled):
-                assert enabled is False, f"Expected source_dest_check=False, got {enabled}"
+                assert enabled is False, f"source_dest_check should be False, got {enabled}"
 
             component.data_eni.source_dest_check.apply(check_source_dest)
 
@@ -142,9 +177,16 @@ tplname={{ template_stack }}
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.init_cfg is not None
@@ -175,9 +217,16 @@ class TestNGFWComponentOutputs:
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.instance_id is not None
@@ -192,9 +241,16 @@ class TestNGFWComponentOutputs:
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.management_ip is not None
@@ -209,9 +265,16 @@ class TestNGFWComponentOutputs:
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             assert component.dataplane_ip is not None
@@ -242,9 +305,16 @@ class TestNGFWComponentTags:
                 "test-ngfw",
                 user_id=42,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_tags(tags):
@@ -263,9 +333,16 @@ class TestNGFWComponentTags:
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 environment="prod",
             )
 
@@ -306,9 +383,16 @@ vm-auth-key={{ auth_key }}
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             # Verify init_cfg was created
@@ -324,9 +408,16 @@ vm-auth-key={{ auth_key }}
                 "test-ngfw",
                 user_id=1,
                 subnet_id="subnet-12345",
-                security_group_id="sg-ngfw",
+                mgmt_security_group_id="sg-mgmt",
+                data_security_group_id="sg-data",
                 ami_id="ami-vmseries",
                 bootstrap_bucket="shifter-bootstrap",
+                scm_pin_id="pin-123",
+                scm_pin_value="pin-value-456",
+                scm_folder_name="test-folder",
+                authcode="I1234567",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_user_data(user_data):

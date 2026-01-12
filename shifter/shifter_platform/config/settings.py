@@ -328,15 +328,15 @@ GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMO
 SQS_QUEUE_CONFIG = {
     "cms": {
         "url": os.environ.get("SQS_CMS_URL", ""),
-        "handler": "cms.handlers.process_range_event",
+        "handler": "cms.handlers.process_event",
     },
     "engine": {
         "url": os.environ.get("SQS_ENGINE_URL", ""),
-        "handler": "engine.handlers.process_range_event",
+        "handler": "engine.handlers.process_event",
     },
     "mc": {
         "url": os.environ.get("SQS_MC_URL", ""),
-        "handler": "mission_control.handlers.process_range_event",
+        "handler": "mission_control.handlers.process_event",
     },
 }
 
@@ -369,6 +369,10 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 # See config/logging.py for ECSFormatter implementation
 # Import must be inline to avoid E402 (settings.py is special)
 
+# Log level: DEBUG for dev, INFO for production
+# Set LOG_LEVEL=DEBUG in dev to see routing/tracing logs
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -389,12 +393,12 @@ LOGGING = {
     },
     "root": {
         "handlers": ["console"],
-        "level": "INFO",
+        "level": LOG_LEVEL,
     },
     "loggers": {
         "django": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": "INFO",  # Keep Django framework logs at INFO
             "propagate": False,
         },
         "django.request": {
@@ -409,12 +413,22 @@ LOGGING = {
         },
         "mission_control": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "engine": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "cms": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
             "propagate": False,
         },
         "config": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": LOG_LEVEL,
             "propagate": False,
         },
     },

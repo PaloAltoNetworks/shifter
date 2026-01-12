@@ -5,12 +5,15 @@ Loads and validates YAML scenario templates from cms/scenarios/templates/.
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
 
 from cms.scenarios.schema import ScenarioTemplate
+
+logger = logging.getLogger(__name__)
 
 # Directory containing scenario YAML templates
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -29,14 +32,18 @@ def load_scenario(scenario_id: str) -> ScenarioTemplate:
     Raises:
         ValueError: If scenario not found or template is invalid
     """
+    logger.debug("load_scenario: scenario_id=%s", scenario_id)
+
     template_path = TEMPLATES_DIR / f"{scenario_id}.yaml"
 
     if not template_path.exists():
+        logger.warning("load_scenario: not found scenario_id=%s", scenario_id)
         raise ValueError(f"Scenario '{scenario_id}' not found")
 
     with open(template_path) as f:
         data = yaml.safe_load(f)
 
+    logger.debug("load_scenario: loaded scenario_id=%s", scenario_id)
     return ScenarioTemplate(**data)
 
 
@@ -47,9 +54,12 @@ def list_scenario_ids() -> list[str]:
         List of scenario IDs (derived from YAML filenames)
     """
     if not TEMPLATES_DIR.exists():
+        logger.warning("list_scenario_ids: templates directory not found")
         return []
 
-    return sorted([path.stem for path in TEMPLATES_DIR.glob("*.yaml")])
+    ids = sorted([path.stem for path in TEMPLATES_DIR.glob("*.yaml")])
+    logger.debug("list_scenario_ids: found %d scenarios", len(ids))
+    return ids
 
 
 def get_all_scenarios() -> list[ScenarioTemplate]:

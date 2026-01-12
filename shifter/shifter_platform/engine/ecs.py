@@ -4,13 +4,19 @@ This module triggers ECS tasks to provision and teardown range infrastructure.
 The Shifter Engine writes directly to RDS, so no callback endpoint is needed.
 """
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
 
 from shared.enums import ResourceType
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -168,29 +174,163 @@ def start_teardown(range_id: int, user_id: int) -> str | None:
 
     Raises:
         ClientError: If ECS task fails to start
+
+    .. deprecated::
+        Use :func:`start_range_teardown` instead.
     """
     return _start_ecs_task(range_id, user_id, "destroy")
 
 
-def _start_ngfw_ecs_task(ngfw_id: int, command: list[str]) -> str | None:
-    """Start an ECS Fargate task for NGFW operations.
+# =============================================================================
+# Request-based Range ECS Functions (new pattern matching NGFW)
+# =============================================================================
+
+
+def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
+    """Start an ECS Fargate task for Range operations using request_id.
+
+    Matches NGFW pattern - provisioner fetches all data from DB using request_id.
 
     Args:
-        ngfw_id: Database ID of the UserNGFW
-        command: Command list to run (e.g., ["ngfw", "provision", "--user-ngfw-id", "42"])
+        request_id: UUID of the Request to operate on
+        command: Command to run ("provision" or "destroy")
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
 
     Raises:
-        TypeError: If ngfw_id is not an integer or command is not a list
-        ValueError: If ngfw_id is negative or command is empty
+        TypeError: If request_id is None or not a UUID
+        ValueError: If command is invalid
         ClientError: If ECS task fails to start
     """
-    if ngfw_id is None or not isinstance(ngfw_id, int):
-        raise TypeError("ngfw_id must be an integer")
-    if ngfw_id < 0:
-        raise ValueError("ngfw_id must be non-negative")
+    from uuid import UUID as UUIDType
+
+    if request_id is None:
+        raise TypeError("request_id cannot be None")
+    if not isinstance(request_id, UUIDType):
+        raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
+    if command not in ("provision", "destroy"):
+        raise ValueError(f"Invalid command: {command}. Must be 'provision' or 'destroy'.")
+
+    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
+    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
+    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
+    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+
+    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
+        logger.warning(
+            "ECS configuration incomplete, skipping Range ECS task. "
+            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
+            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
+        )
+        return None
+
+    # Parse subnet IDs (comma-separated string)
+    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
+
+    if not subnet_ids:
+        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
+        return None
+
+    command_list = ["range", command, "--request-id", str(request_id)]
+    logger.info(f"Starting Range ECS task for request_id={request_id} command={command}")
+
+    ecs = _get_ecs_client()
+
+    try:
+        response = ecs.run_task(
+            cluster=cluster_arn,
+            taskDefinition=task_definition_arn,
+            launchType="FARGATE",
+            networkConfiguration={
+                "awsvpcConfiguration": {
+                    "subnets": subnet_ids,
+                    "securityGroups": [security_group_id],
+                    "assignPublicIp": "DISABLED",
+                }
+            },
+            overrides={
+                "containerOverrides": [
+                    {
+                        "name": "pulumi-provisioner",
+                        "command": command_list,
+                    }
+                ]
+            },
+        )
+
+        # Check if task was started successfully
+        if not response.get("tasks"):
+            failures = response.get("failures", [])
+            failure_reasons = [f.get("reason", "unknown") for f in failures]
+            logger.error(f"Range ECS task failed to start: {failure_reasons}")
+            raise ClientError(
+                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
+                "RunTask",
+            )
+
+        task_arn = response["tasks"][0]["taskArn"]
+        logger.info(f"Started Range ECS task: request_id={request_id} task_arn={task_arn}")
+        return task_arn
+
+    except ClientError as e:
+        logger.error(f"Failed to start Range ECS task for request_id={request_id}: {e}")
+        raise
+
+
+def start_range_provisioning(request_id: UUID) -> str | None:
+    """Start provisioning a range via ECS Fargate using request_id.
+
+    Args:
+        request_id: UUID of the Request to provision.
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured.
+
+    Raises:
+        TypeError: If request_id is None or not a UUID
+        ClientError: If ECS task fails to start
+    """
+    return _start_range_ecs_task(request_id, "provision")
+
+
+def start_range_teardown(request_id: UUID) -> str | None:
+    """Start teardown of a range via ECS Fargate using request_id.
+
+    Args:
+        request_id: UUID of the Request to teardown.
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured.
+
+    Raises:
+        TypeError: If request_id is None or not a UUID
+        ClientError: If ECS task fails to start
+    """
+    return _start_range_ecs_task(request_id, "destroy")
+
+
+def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
+    """Start an ECS Fargate task for NGFW operations.
+
+    Args:
+        request_id: UUID of the Request to operate on
+        command: Command list to run (e.g., ["ngfw", "provision", "--request-id", "..."])
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured
+
+    Raises:
+        TypeError: If request_id is None or command is not a list
+        ValueError: If command is empty
+        ClientError: If ECS task fails to start
+    """
+    from uuid import UUID
+
+    if request_id is None:
+        raise TypeError("request_id cannot be None")
+    if not isinstance(request_id, UUID):
+        raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
     if command is None or not isinstance(command, list):
         raise TypeError("command must be a list")
     if not command:
@@ -216,7 +356,7 @@ def _start_ngfw_ecs_task(ngfw_id: int, command: list[str]) -> str | None:
         logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
         return None
 
-    logger.info(f"Starting NGFW ECS task for ngfw_id={ngfw_id} command={command}")
+    logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
 
     ecs = _get_ecs_client()
 
@@ -253,71 +393,76 @@ def _start_ngfw_ecs_task(ngfw_id: int, command: list[str]) -> str | None:
             )
 
         task_arn = response["tasks"][0]["taskArn"]
-        logger.info(f"Started NGFW ECS task: ngfw_id={ngfw_id} task_arn={task_arn}")
+        logger.info(f"Started NGFW ECS task: request_id={request_id} task_arn={task_arn}")
         return task_arn
 
     except ClientError as e:
-        logger.error(f"Failed to start NGFW ECS task for ngfw_id={ngfw_id}: {e}")
+        logger.error(f"Failed to start NGFW ECS task for request_id={request_id}: {e}")
         raise
 
 
-def _validate_ngfw_id(ngfw_id: int) -> None:
-    """Validate ngfw_id parameter.
-
-    Args:
-        ngfw_id: Database ID of the UserNGFW
-
-    Raises:
-        TypeError: If ngfw_id is None or wrong type
-        ValueError: If ngfw_id is negative
-    """
-    if ngfw_id is None:
-        raise TypeError("ngfw_id must be an integer, not None")
-    # bool is subclass of int, so check for bool explicitly
-    if isinstance(ngfw_id, bool) or not isinstance(ngfw_id, int):
-        raise TypeError("ngfw_id must be an integer")
-    if ngfw_id < 0:
-        raise ValueError("ngfw_id must be a positive integer")
-
-
-def start_ngfw_provisioning(ngfw_id: int) -> str | None:
+def start_ngfw_provisioning(request_id: UUID) -> str | None:
     """Start provisioning an NGFW via ECS Fargate.
 
     Args:
-        ngfw_id: Database ID of the UserNGFW to provision
+        request_id: UUID of the Request to provision.
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
         (falls back to stub behavior for local dev)
 
     Raises:
-        TypeError: If ngfw_id is None
-        ValueError: If ngfw_id is negative
+        TypeError: If request_id is None or not a UUID
         ClientError: If ECS task fails to start
     """
-    _validate_ngfw_id(ngfw_id)
-    command = ["ngfw", "provision", "--user-ngfw-id", str(ngfw_id)]
-    return _start_ngfw_ecs_task(ngfw_id, command)
+    command = ["ngfw", "provision", "--request-id", str(request_id)]
+    return _start_ngfw_ecs_task(request_id, command)
 
 
-def start_ngfw_teardown(ngfw_id: int) -> str | None:
+def start_ngfw_teardown(request_id: UUID) -> str | None:
     """Start teardown/deprovision of an NGFW via ECS Fargate.
 
     Args:
-        ngfw_id: Database ID of the UserNGFW to deprovision
+        request_id: UUID of the Request to deprovision.
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured
         (falls back to stub behavior for local dev)
 
     Raises:
-        TypeError: If ngfw_id is None
-        ValueError: If ngfw_id is negative
+        TypeError: If request_id is None or not a UUID
         ClientError: If ECS task fails to start
     """
-    _validate_ngfw_id(ngfw_id)
-    command = ["ngfw", "deprovision", "--user-ngfw-id", str(ngfw_id)]
-    return _start_ngfw_ecs_task(ngfw_id, command)
+    command = ["ngfw", "deprovision", "--request-id", str(request_id)]
+    return _start_ngfw_ecs_task(request_id, command)
+
+
+def start_ngfw_operation(request_id: UUID, operation: str) -> str | None:
+    """Start an NGFW runtime operation (start/stop) via ECS Fargate.
+
+    Args:
+        request_id: UUID of the Request containing the NGFW instance.
+        operation: Operation to perform ('start' or 'stop').
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured.
+
+    Raises:
+        TypeError: If request_id is None or not a UUID
+        ValueError: If operation is not 'start' or 'stop'
+        ClientError: If ECS task fails to start
+    """
+    from uuid import UUID
+
+    if request_id is None:
+        raise TypeError("request_id cannot be None")
+    if not isinstance(request_id, UUID):
+        raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
+    if operation not in ("start", "stop"):
+        raise ValueError(f"Invalid operation: {operation}. Must be 'start' or 'stop'.")
+
+    command = ["ngfw", operation, "--request-id", str(request_id)]
+    return _start_ngfw_ecs_task(request_id, command)
 
 
 def get_task_status(task_arn: str) -> dict | None:

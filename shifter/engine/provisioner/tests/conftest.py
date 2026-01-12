@@ -647,12 +647,12 @@ def sample_db_range_row():
     """Sample database row for a range with subnets (new format).
 
     Returns tuple matching get_range_from_db query:
-    (id, user_id, request_uuid, range_config, ngfw_enabled, gwlb_service_name)
+    (id, user_id, uuid, range_config, gwlb_endpoint_id)
     """
     return (
         42,  # id
         1,  # user_id
-        "request-uuid-12345",  # request_uuid
+        "request-uuid-12345",  # uuid
         {  # range_config
             "subnets": [
                 {
@@ -676,18 +676,17 @@ def sample_db_range_row():
                 },
             ]
         },
-        False,  # ngfw_enabled
-        "",  # gwlb_service_name (no NGFW)
+        None,  # gwlb_endpoint_id (no NGFW)
     )
 
 
 @pytest.fixture
 def sample_db_range_row_with_ngfw():
-    """Sample database row for a range with NGFW enabled."""
+    """Sample database row for a range with NGFW enabled (has gwlb_endpoint_id)."""
     return (
         42,  # id
         1,  # user_id
-        "request-uuid-ngfw-12345",  # request_uuid
+        "request-uuid-ngfw-12345",  # uuid
         {  # range_config
             "subnets": [
                 {
@@ -704,8 +703,7 @@ def sample_db_range_row_with_ngfw():
                 },
             ]
         },
-        True,  # ngfw_enabled
-        "com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123",  # gwlb_service_name
+        "gwlbe-12345678901234567",  # gwlb_endpoint_id (indicates NGFW)
     )
 
 
@@ -715,7 +713,7 @@ def sample_db_range_row_no_agent():
     return (
         43,  # id
         2,  # user_id
-        "request-uuid-no-agent",  # request_uuid
+        "request-uuid-no-agent",  # uuid
         {  # range_config
             "subnets": [
                 {
@@ -732,8 +730,7 @@ def sample_db_range_row_no_agent():
                 },
             ]
         },
-        False,  # ngfw_enabled
-        "",  # gwlb_service_name
+        None,  # gwlb_endpoint_id (no NGFW)
     )
 
 
@@ -743,7 +740,7 @@ def sample_db_range_row_multi_subnet():
     return (
         44,  # id
         3,  # user_id
-        "request-uuid-multi-subnet",  # request_uuid
+        "request-uuid-multi-subnet",  # uuid
         {  # range_config
             "subnets": [
                 {
@@ -796,8 +793,7 @@ def sample_db_range_row_multi_subnet():
                 },
             ]
         },
-        True,  # ngfw_enabled
-        "com.amazonaws.vpce.us-east-2.vpce-svc-multi",  # gwlb_service_name
+        "gwlbe-multi-subnet12345",  # gwlb_endpoint_id (indicates NGFW)
     )
 
 

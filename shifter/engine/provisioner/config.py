@@ -224,25 +224,55 @@ class NGFWConfig:
 
 
 def get_db_connection() -> psycopg.Connection:
-    """Get database connection using RDS IAM auth."""
+    """Get database connection.
+
+    Uses password auth if DB_PASSWORD is set (local dev), otherwise RDS IAM auth.
+    """
     db_host = os.environ.get("DB_HOST")
     db_port = int(os.environ.get("DB_PORT", 5432))
     db_user = os.environ.get("DB_USER")
     db_name = os.environ.get("DB_NAME")
+    db_password = os.environ.get("DB_PASSWORD")
+
+    # Local dev mode: use password auth
+    if db_password:
+        if not all([db_host, db_user, db_name]):
+            missing = [
+                k
+                for k, v in [
+                    ("DB_HOST", db_host),
+                    ("DB_USER", db_user),
+                    ("DB_NAME", db_name),
+                ]
+                if not v
+            ]
+            raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
+
+        logger.debug("get_db_connection: password auth to %s:%s/%s", db_host, db_port, db_name)
+        return psycopg.connect(
+            host=db_host,
+            port=db_port,
+            dbname=db_name,
+            user=db_user,
+            password=db_password,
+        )
+
+    # Production mode: use RDS IAM auth
     aws_region = os.environ.get("AWS_REGION")
-
     if not all([db_host, db_user, db_name, aws_region]):
-        env_pairs = [
-            ("DB_HOST", db_host),
-            ("DB_USER", db_user),
-            ("DB_NAME", db_name),
-            ("AWS_REGION", aws_region),
+        missing = [
+            k
+            for k, v in [
+                ("DB_HOST", db_host),
+                ("DB_USER", db_user),
+                ("DB_NAME", db_name),
+                ("AWS_REGION", aws_region),
+            ]
+            if not v
         ]
-        missing = [k for k, v in env_pairs if not v]
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+        raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
-    logger.debug("get_db_connection: connecting to %s:%s/%s", db_host, db_port, db_name)
-
+    logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
     client = boto3.client("rds")
     token = client.generate_db_auth_token(
         DBHostname=db_host,
@@ -285,12 +315,10 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                 SELECT
                     r.id,
                     r.user_id,
-                    r.request_uuid,
+                    r.uuid,
                     r.range_config,
-                    r.ngfw_id IS NOT NULL as ngfw_enabled,
-                    n.gwlb_service_name
+                    r.gwlb_endpoint_id
                 FROM mission_control_range r
-                LEFT JOIN mission_control_userngfw n ON r.ngfw_id = n.id
                 WHERE r.id = %s
                 """,
             (range_id,),
@@ -300,13 +328,15 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             logger.error("Range %d not found in database", range_id)
             raise ValueError(f"Range {range_id} not found")
 
+        # NGFW is now provisioned separately - gwlb_endpoint_id indicates integration
+        gwlb_endpoint_id = row[4] or ""
         result = {
             "id": row[0],
             "user_id": row[1],
             "request_uuid": str(row[2]) if row[2] else "",
             "range_config": row[3],  # Full RangeSpec JSON with subnets
-            "ngfw_enabled": row[4],
-            "gwlb_service_name": row[5] or "",
+            "ngfw_enabled": bool(gwlb_endpoint_id),
+            "gwlb_service_name": "",  # No longer stored on range; NGFW owns this
         }
 
         logger.debug(

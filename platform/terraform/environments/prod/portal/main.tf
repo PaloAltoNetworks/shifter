@@ -583,7 +583,7 @@ module "pgbouncer" {
   vpc_id                               = module.vpc.vpc_id
   private_subnet_ids                   = module.vpc.private_subnet_ids
   portal_security_group_id             = module.ec2.security_group_id
-  additional_client_security_group_ids = [module.pulumi_provisioner.ecs_security_group_id]
+  additional_client_security_group_ids = []
 
   # Database configuration
   rds_endpoint              = module.rds.db_instance_endpoint

@@ -245,11 +245,18 @@ def mock_boto3_clients(mocker):
 
 @pytest.fixture
 def mock_subprocess(mocker):
-    """Fixture providing a mocked subprocess.run.
+    """Fixture providing mocked subprocess.run and shutil.which.
+
+    Mocks both subprocess.run and shutil.which (for pulumi path lookup)
+    to allow tests to run without pulumi being installed.
 
     Returns:
-        MagicMock: Mocked subprocess.run function.
+        tuple: (mock_run, mock_result) for subprocess assertions.
     """
+    # Mock shutil.which to return a fake pulumi path
+    # This is needed because _get_pulumi_path() checks for pulumi before running commands
+    mocker.patch("shutil.which", return_value="/usr/bin/pulumi")
+
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = ""

@@ -27,6 +27,27 @@ services:
       timeout: 5s
       retries: 5
 
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+      MIN_POOL_SIZE: 5
+      RESERVE_POOL_SIZE: 5
+      AUTH_TYPE: scram-sha-256
+    ports:
+      - "6432:5432"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   web:
     build: .
     ports:
@@ -34,10 +55,10 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: db
+      DB_HOST: pgbouncer
       REDIS_HOST: redis
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -57,12 +78,12 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: db
+      DB_HOST: pgbouncer
       AWS_REGION: ${AWS_REGION:-us-east-2}
       SQS_CMS_URL: ${SQS_CMS_URL}
     restart: always
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "find /tmp/worker-cms-heartbeat -mmin -1 | grep -q ."]
@@ -77,12 +98,12 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: db
+      DB_HOST: pgbouncer
       AWS_REGION: ${AWS_REGION:-us-east-2}
       SQS_ENGINE_URL: ${SQS_ENGINE_URL}
     restart: always
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "find /tmp/worker-engine-heartbeat -mmin -1 | grep -q ."]
@@ -97,13 +118,13 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: db
+      DB_HOST: pgbouncer
       AWS_REGION: ${AWS_REGION:-us-east-2}
       SQS_MC_URL: ${SQS_MC_URL}
       REDIS_HOST: ${REDIS_HOST}
     restart: always
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "find /tmp/worker-mc-heartbeat -mmin -1 | grep -q ."]

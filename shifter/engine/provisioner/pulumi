@@ -17,6 +17,24 @@ import json
 import sys
 import uuid
 
+# Track current stack name (set by 'stack select')
+STACK_STATE_FILE = "/tmp/mock-pulumi-stack"  # noqa: S108  # nosec B108 - local dev only
+
+
+def get_current_stack():
+    """Get the currently selected stack name."""
+    try:
+        with open(STACK_STATE_FILE) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def set_current_stack(name):
+    """Set the currently selected stack name."""
+    with open(STACK_STATE_FILE, "w") as f:
+        f.write(name)
+
 
 def mock_stack_output():
     """Return mock stack outputs for range provisioning."""
@@ -52,7 +70,7 @@ def mock_ngfw_output():
     hex17 = uuid.uuid4().hex[:17]
     hex6 = uuid.uuid4().hex[:6]
     outputs = {
-        "instance_id": f"i-{uuid.uuid4().hex[:17]}",
+        "ec2_instance_id": f"i-{uuid.uuid4().hex[:17]}",
         "management_ip": "10.0.1.100",
         "dataplane_ip": "10.0.2.100",
         "service_name": f"com.amazonaws.vpce.us-east-2.vpce-svc-{hex17}",
@@ -80,19 +98,28 @@ def main():
         if len(args) >= 2:
             subcmd = args[1]
             if subcmd == "select":
-                sys.stderr.write(f"[mock-pulumi] Selected stack: {args[2] if len(args) > 2 else 'default'}\n")
+                stack_name = args[2] if len(args) > 2 else "default"
+                set_current_stack(stack_name)
+                sys.stderr.write(f"[mock-pulumi] Selected stack: {stack_name}\n")
                 return 0
             elif subcmd == "init":
-                sys.stderr.write(f"[mock-pulumi] Initialized stack: {args[2] if len(args) > 2 else 'default'}\n")
+                stack_name = args[2] if len(args) > 2 else "default"
+                set_current_stack(stack_name)
+                sys.stderr.write(f"[mock-pulumi] Initialized stack: {stack_name}\n")
                 return 0
             elif subcmd == "rm":
                 sys.stderr.write(f"[mock-pulumi] Removed stack: {args[2] if len(args) > 2 else 'default'}\n")
                 return 0
             elif subcmd == "output":
-                # Check if this looks like NGFW or Range based on context
-                # For now, default to range outputs
                 if "--json" in args:
-                    mock_stack_output()
+                    # Return NGFW outputs for ngfw-* stacks, range outputs otherwise
+                    current = get_current_stack()
+                    if current.startswith("ngfw-"):
+                        sys.stderr.write(f"[mock-pulumi] Returning NGFW outputs for stack: {current}\n")
+                        mock_ngfw_output()
+                    else:
+                        sys.stderr.write(f"[mock-pulumi] Returning Range outputs for stack: {current}\n")
+                        mock_stack_output()
                 return 0
         return 0
 

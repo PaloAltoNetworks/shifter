@@ -20,10 +20,18 @@ class S3Error(Exception):
 
 
 def get_s3_client():
-    """Get boto3 S3 client configured for the region with regional endpoint."""
+    """Get boto3 S3 client configured for the region.
+
+    Supports LocalStack via AWS_ENDPOINT_URL environment variable.
+    """
     from botocore.config import Config
 
     # Use regional endpoint to avoid cross-region redirects that break CORS
+    # For local dev, AWS_ENDPOINT_URL points to LocalStack
+    endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+    if not endpoint_url:
+        endpoint_url = f"https://s3.{settings.AWS_S3_REGION}.amazonaws.com"
+
     config = Config(
         s3={"addressing_style": "virtual"},
         signature_version="s3v4",
@@ -31,7 +39,7 @@ def get_s3_client():
     return boto3.client(
         "s3",
         region_name=settings.AWS_S3_REGION,
-        endpoint_url=f"https://s3.{settings.AWS_S3_REGION}.amazonaws.com",
+        endpoint_url=endpoint_url,
         config=config,
     )
 

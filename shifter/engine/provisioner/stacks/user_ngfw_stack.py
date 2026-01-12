@@ -126,7 +126,7 @@ class UserNGFWStack(pulumi.ComponentResource):
         )
 
         # Expose outputs from child components
-        self.instance_id = self.ngfw.instance_id
+        self.ec2_instance_id = self.ngfw.ec2_instance_id
         self.management_ip = self.ngfw.management_ip
         self.dataplane_ip = self.ngfw.dataplane_ip
         self.data_eni_id = self.ngfw.data_eni.id
@@ -139,7 +139,7 @@ class UserNGFWStack(pulumi.ComponentResource):
         self.register_outputs(
             {
                 "user_id": user_id,
-                "instance_id": self.instance_id,
+                "ec2_instance_id": self.ec2_instance_id,
                 "management_ip": self.management_ip,
                 "dataplane_ip": self.dataplane_ip,
                 "data_eni_id": self.data_eni_id,
@@ -164,7 +164,7 @@ class UserNGFWStack(pulumi.ComponentResource):
         """
         return {
             "user_id": self.user_id,
-            "instance_id": self.instance_id,
+            "ec2_instance_id": self.ec2_instance_id,
             "management_ip": self.management_ip,
             "dataplane_ip": self.dataplane_ip,
             "data_eni_id": self.data_eni_id,

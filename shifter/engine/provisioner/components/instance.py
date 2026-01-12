@@ -10,6 +10,7 @@ All AWS resources are created via Pulumi to ensure proper lifecycle management.
 """
 
 import base64
+import logging
 import os
 import re
 from pathlib import Path
@@ -27,6 +28,8 @@ from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
+
+logger = logging.getLogger(__name__)
 
 
 def validate_s3_path(value: str) -> bool:
@@ -52,6 +55,7 @@ def generate_ssh_keypair() -> tuple[str, str]:
     Returns:
         tuple: (private_key_pem, public_key_openssh)
     """
+    logger.debug("generate_ssh_keypair: generating Ed25519 key pair")
     private_key = ed25519.Ed25519PrivateKey.generate()
 
     private_key_pem = private_key.private_bytes(
@@ -121,6 +125,8 @@ class InstanceComponent(pulumi.ComponentResource):
         security_group_id: str,
         ami_id: str,
         environment: str,
+        request_uuid: str,
+        instance_uuid: str,
         instance_profile_name: str = "",
         agent_s3_bucket: str = "",
         agent_s3_key: str = "",
@@ -144,6 +150,8 @@ class InstanceComponent(pulumi.ComponentResource):
             security_group_id: Security group ID to attach.
             ami_id: AMI ID to use.
             environment: Environment name.
+            request_uuid: UUID of the provisioning request (for tagging/correlation).
+            instance_uuid: UUID of this instance (for tagging/correlation).
             instance_profile_name: IAM instance profile name (optional).
             agent_s3_bucket: S3 bucket for agent installer (for victims).
             agent_s3_key: S3 key for agent installer (for victims).
@@ -152,22 +160,48 @@ class InstanceComponent(pulumi.ComponentResource):
             join_domain: Whether this instance should join a domain (for domain members).
             dc_config_param_name: SSM parameter path for DC config (for domain members).
             opts: Pulumi resource options.
+
+        Raises:
+            ValueError: If required uuid parameters are missing or invalid.
         """
         super().__init__("shifter:range:InstanceComponent", name, None, opts)
 
-        # Store role and os_type for output building (avoids closure issues)
+        logger.debug(
+            "__init__: name=%s range_id=%s role=%s os_type=%s instance_uuid=%s request_uuid=%s",
+            name,
+            range_id,
+            role,
+            os_type,
+            instance_uuid,
+            request_uuid,
+        )
+
+        # Validate required UUID parameters
+        if not request_uuid:
+            raise ValueError("request_uuid is required for InstanceComponent")
+        if not instance_uuid:
+            raise ValueError("instance_uuid is required for InstanceComponent")
+
+        # Store role, os_type, and uuid for output building (avoids closure issues)
         self.role = role
         self.os_type = os_type
+        self._instance_uuid = instance_uuid
 
-        # Common tags for all resources
-        common_tags = {
-            "shifter:range_id": str(range_id),
-            "shifter:user_id": str(user_id),
-            "shifter:environment": environment,
-            "shifter:role": role,
-            "shifter:os": os_type,
-            "ManagedBy": "pulumi",
-        }
+        # Build common tags using shared helper
+        from components.tags import build_common_tags
+
+        common_tags = build_common_tags(
+            user_id=user_id,
+            environment=environment,
+            request_uuid=request_uuid,
+            range_id=range_id,
+            unit_type="instance",
+            unit_uuid=instance_uuid,
+            component="instance",
+        )
+        # Add instance-specific tags
+        common_tags["shifter:role"] = role
+        common_tags["shifter:os"] = os_type
 
         # Generate SSH key pair (pure Python, no AWS calls)
         private_key, public_key = generate_ssh_keypair()
@@ -305,6 +339,13 @@ class InstanceComponent(pulumi.ComponentResource):
         # Export outputs
         self.instance_id = self.instance.id
         self.private_ip = self.instance.private_ip
+
+        logger.info(
+            "__init__: created InstanceComponent name=%s role=%s instance_uuid=%s",
+            name,
+            role,
+            instance_uuid,
+        )
 
         self.register_outputs(
             {
@@ -639,6 +680,15 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         Returns:
             Base64-encoded user data script.
         """
+        logger.debug(
+            "_generate_user_data: role=%s os_type=%s range_id=%s index=%s join_domain=%s",
+            role,
+            os_type,
+            range_id,
+            index,
+            join_domain,
+        )
+
         # Load Jinja2 templates
         # Use TEMPLATES_DIR env var if set, otherwise default to relative path
         templates_dir = os.environ.get(
@@ -677,15 +727,22 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
             context = {}  # No variables needed - template just logs SSM will handle setup
 
         script = template.render(**context)
+        logger.debug("_generate_user_data: rendered template for role=%s os_type=%s", role, os_type)
         return base64.b64encode(script.encode()).decode()
+
+    @property
+    def uuid(self) -> str:
+        """Return the instance UUID for correlation and output building."""
+        return self._instance_uuid
 
     def to_output_dict(self) -> dict:
         """Return instance info as a dictionary for export.
 
         Returns:
-            Dictionary with instance details.
+            Dictionary with instance details including uuid for DB correlation.
         """
         return {
+            "uuid": self._instance_uuid,
             "instance_id": self.instance_id,
             "private_ip": self.private_ip,
             "ssh_key_secret_arn": self.ssh_key_secret_arn,

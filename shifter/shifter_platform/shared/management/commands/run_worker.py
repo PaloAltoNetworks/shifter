@@ -22,8 +22,10 @@ import signal
 import sys
 import tempfile
 import time
+from argparse import ArgumentParser
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import boto3
 from django.conf import settings
@@ -47,14 +49,14 @@ class Command(BaseCommand):
 
     help = "Run SQS worker for a specific queue"
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.shutdown = False
         self.sqs = None
         self.heartbeat_file: Path | None = None
         self.queue_name: str = ""
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: ArgumentParser) -> None:
         queue_choices = list(settings.SQS_QUEUE_CONFIG.keys())
         parser.add_argument(
             "--queue",
@@ -76,7 +78,7 @@ class Command(BaseCommand):
             help="Max messages to receive per poll (default: 10)",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         self.queue_name = options["queue"]
         wait_time = options["wait_time"]
         max_messages = options["max_messages"]
@@ -159,6 +161,7 @@ class Command(BaseCommand):
         max_messages: int,
     ):
         """Main polling loop."""
+        assert self.sqs is not None, "sqs client not initialized"
         while not self.shutdown:
             try:
                 response = self.sqs.receive_message(
@@ -192,6 +195,7 @@ class Command(BaseCommand):
         message: dict,
     ):
         """Process a single SQS message."""
+        assert self.sqs is not None, "sqs client not initialized"
         receipt_handle = message["ReceiptHandle"]
         body = message["Body"]
 

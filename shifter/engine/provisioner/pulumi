@@ -70,7 +70,7 @@ def mock_ngfw_output():
     hex17 = uuid.uuid4().hex[:17]
     hex6 = uuid.uuid4().hex[:6]
     outputs = {
-        "instance_id": f"i-{uuid.uuid4().hex[:17]}",
+        "ec2_instance_id": f"i-{uuid.uuid4().hex[:17]}",
         "management_ip": "10.0.1.100",
         "dataplane_ip": "10.0.2.100",
         "service_name": f"com.amazonaws.vpce.us-east-2.vpce-svc-{hex17}",

@@ -102,7 +102,10 @@ class TestGetRangeFromDb:
     def test_get_range_from_db_with_ngfw(
         self, mock_boto3_clients, mock_env_vars_minimal, sample_db_range_row_with_ngfw
     ):
-        """Range with NGFW should have ngfw_enabled=True and gwlb_service_name."""
+        """Range with gwlb_endpoint_id should have ngfw_enabled=True.
+
+        Note: gwlb_service_name is now always empty - NGFW provisioning is separate.
+        """
         with patch("psycopg.connect") as mock_connect:
             mock_cursor = MagicMock()
             mock_cursor.fetchone.return_value = sample_db_range_row_with_ngfw
@@ -116,7 +119,8 @@ class TestGetRangeFromDb:
             result = get_range_from_db(42)
 
             assert result["ngfw_enabled"] is True
-            assert result["gwlb_service_name"] == "com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123"
+            # gwlb_service_name is no longer stored on range; NGFW owns this
+            assert result["gwlb_service_name"] == ""
 
 
 class TestSubnetConfigDataclass:

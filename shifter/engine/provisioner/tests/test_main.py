@@ -426,7 +426,7 @@ class TestRunProvision:
             "subnet_cidr": "10.1.6.0/24",
             "instances": [{"role": "attacker", "instance_id": "i-kali"}],
             "ngfw": {
-                "instance_id": "i-ngfw12345",
+                "ec2_instance_id": "i-ngfw12345",
                 "untrust_private_ip": "10.1.6.10",
                 "trust_private_ip": "10.1.6.11",
             },
@@ -901,7 +901,7 @@ class TestNgfwProvisionCLI:
             if "output" in cmd and "--json" in cmd:
                 result.stdout = json.dumps(
                     {
-                        "instance_id": "i-ngfw123",
+                        "ec2_instance_id": "i-ngfw123",
                         "management_ip": "10.1.4.10",
                         "dataplane_ip": "10.1.4.11",
                         "service_name": "com.amazonaws.vpce.svc-123",
@@ -957,7 +957,7 @@ class TestNgfwProvisionCLI:
             if "output" in cmd and "--json" in cmd:
                 result.stdout = json.dumps(
                     {
-                        "instance_id": "i-ngfw123",
+                        "ec2_instance_id": "i-ngfw123",
                         "management_ip": "10.1.4.10",
                         "dataplane_ip": "10.1.4.11",
                         "service_name": "com.amazonaws.vpce.svc-123",
@@ -1003,7 +1003,7 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.publish_ngfw_event")
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "dataplane_ip": "10.1.4.11",
             "service_name": "com.amazonaws.vpce.svc-123",
@@ -1063,7 +1063,7 @@ class TestNgfwProvisionCLI:
             if "output" in cmd and "--json" in cmd:
                 result.stdout = json.dumps(
                     {
-                        "instance_id": "i-ngfw123",
+                        "ec2_instance_id": "i-ngfw123",
                         "management_ip": "10.1.4.10",
                         "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
                         "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:ngfw-ssh-key",
@@ -1106,7 +1106,7 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.publish_ngfw_event")
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
@@ -1164,7 +1164,7 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.publish_ngfw_event")
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
@@ -1212,7 +1212,7 @@ class TestNgfwProvisionCLI:
 
         # Missing target_group_arn
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
         }
@@ -1795,7 +1795,7 @@ class TestNgfwProvisionSerialNumber:
         mocker.patch("main.publish_ngfw_event")
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "dataplane_ip": "10.1.4.11",
             "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
@@ -1852,7 +1852,7 @@ class TestNgfwProvisionSerialNumber:
         mock_publish = mocker.patch("main.publish_ngfw_event")
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
@@ -1906,7 +1906,7 @@ class TestNgfwProvisionSerialNumber:
         mocker.patch("main.publish_ngfw_event")
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
@@ -1978,7 +1978,7 @@ class TestNgfwProvisionAutoStop:
         mocker.patch("main.publish_ngfw_event")
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
@@ -2044,7 +2044,7 @@ class TestNgfwProvisionAutoStop:
         mocker.patch("main.run_ngfw_operation", side_effect=track_run_ngfw_operation)
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
@@ -2114,7 +2114,7 @@ class TestNgfwProvisionAutoStop:
         mocker.patch("events.publish_ngfw_event", side_effect=track_publish)
 
         outputs = {
-            "instance_id": "i-ngfw123",
+            "ec2_instance_id": "i-ngfw123",
             "management_ip": "10.1.4.10",
             "target_group_arn": "arn:aws:elbv2:us-east-2:123:tg/test",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",

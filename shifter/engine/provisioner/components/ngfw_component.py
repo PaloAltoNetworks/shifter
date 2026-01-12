@@ -66,7 +66,7 @@ class NGFWComponent(pulumi.ComponentResource):
         authcodes: S3 object for bootstrap license/authcodes.
         key_pair: EC2 key pair for SSH access.
         ssh_key_secret: Secrets Manager secret for SSH private key.
-        instance_id: EC2 instance ID.
+        ec2_instance_id: EC2 instance ID.
         management_ip: Management ENI private IP.
         dataplane_ip: Data plane ENI private IP.
         ssh_key_secret_arn: ARN of the SSH key in Secrets Manager.
@@ -79,7 +79,7 @@ class NGFWComponent(pulumi.ComponentResource):
     authcodes: aws.s3.BucketObject
     key_pair: aws.ec2.KeyPair
     ssh_key_secret: aws.secretsmanager.Secret
-    instance_id: pulumi.Output[str]
+    ec2_instance_id: pulumi.Output[str]
     management_ip: pulumi.Output[str]
     dataplane_ip: pulumi.Output[str]
     ssh_key_secret_arn: pulumi.Output[str]
@@ -303,7 +303,7 @@ class NGFWComponent(pulumi.ComponentResource):
         )
 
         # Export outputs
-        self.instance_id = self.instance.id
+        self.ec2_instance_id = self.instance.id
         self.management_ip = self.mgmt_eni.private_ip
         self.dataplane_ip = self.data_eni.private_ip
 
@@ -317,7 +317,7 @@ class NGFWComponent(pulumi.ComponentResource):
         # Register outputs
         self.register_outputs(
             {
-                "instanceId": self.instance_id,
+                "ec2InstanceId": self.ec2_instance_id,
                 "managementIp": self.management_ip,
                 "dataplaneIp": self.dataplane_ip,
                 "sshKeySecretArn": self.ssh_key_secret_arn,

@@ -29,10 +29,10 @@ describe('DashboardManager destroyRange', () => {
             agentsUrl: '/agents',
         });
 
-        dashboard.currentRange = { range_id: 42, status: 'ready' };
+        dashboard.currentRange = { request_id: 'abc-123-def', status: 'ready' };
     });
 
-    test('sends range_id in request body', async () => {
+    test('sends request_id in request body', async () => {
         await dashboard.destroyRange();
 
         expect(fetchMock).toHaveBeenCalledWith('/destroy', {
@@ -41,7 +41,7 @@ describe('DashboardManager destroyRange', () => {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': 'test-csrf-token',
             },
-            body: JSON.stringify({ range_id: 42 }),
+            body: JSON.stringify({ request_id: 'abc-123-def' }),
         });
     });
 

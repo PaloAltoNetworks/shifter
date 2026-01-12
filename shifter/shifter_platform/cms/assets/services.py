@@ -8,6 +8,7 @@ This module handles agent (asset) management:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from django.db.models import Sum
@@ -24,6 +25,8 @@ from shared.exceptions import AssetError
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+logger = logging.getLogger(__name__)
+
 
 def get_storage_used(user: User) -> int:
     """Get total bytes used by a user's active agents.
@@ -35,7 +38,9 @@ def get_storage_used(user: User) -> int:
         int: Total bytes used by active agents (0 if none)
     """
     result = AgentConfig.active_for_user(user).aggregate(total=Sum("file_size_bytes"))
-    return result["total"] or 0
+    total = result["total"] or 0
+    logger.debug("get_storage_used: user_id=%s total=%d bytes", user.id, total)
+    return total
 
 
 def create_agent(
@@ -66,9 +71,18 @@ def create_agent(
     Raises:
         AssetError: If the operating system is not found
     """
+    logger.debug(
+        "create_agent: user_id=%s name=%s os_slug=%s file_size=%d",
+        user.id,
+        name,
+        os_slug,
+        file_size,
+    )
+
     # Look up OS
     os_obj = OperatingSystem.objects.filter(slug=os_slug).first()
     if not os_obj:
+        logger.error("create_agent: OS not found os_slug=%s", os_slug)
         raise AssetError(f"Operating system '{os_slug}' not found")
 
     # Create database record
@@ -100,6 +114,7 @@ def create_agent(
         **log_metadata,
     )
 
+    logger.info("create_agent: success agent_id=%s user_id=%s", agent.id, user.id)
     return agent
 
 
@@ -115,10 +130,13 @@ def delete_agent(agent: AgentConfig) -> None:
     Raises:
         AssetError: If S3 delete fails
     """
+    logger.debug("delete_agent: agent_id=%s s3_key=%s", agent.id, agent.s3_key)
+
     # Delete from S3 first - fail fast before touching DB
     try:
         s3_delete(agent.s3_key)
     except S3Error as e:
+        logger.error("delete_agent: S3 delete failed agent_id=%s error=%s", agent.id, e)
         raise AssetError(f"Failed to delete agent from storage: {e}") from e
 
     # Soft delete the database record
@@ -132,3 +150,5 @@ def delete_agent(agent: AgentConfig) -> None:
         agent_id=agent.id,
         agent_name=agent.name,
     )
+
+    logger.info("delete_agent: success agent_id=%s", agent.id)

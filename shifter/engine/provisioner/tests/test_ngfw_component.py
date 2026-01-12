@@ -209,7 +209,7 @@ class TestNGFWComponentOutputs:
 
     @pulumi.runtime.test
     def test_outputs_instance_id(self, temp_templates):
-        """NGFWComponent should output instance_id."""
+        """NGFWComponent should output ec2_instance_id."""
         from components.ngfw_component import NGFWComponent
 
         with patch.dict("os.environ", {"TEMPLATES_DIR": str(temp_templates)}):
@@ -229,7 +229,7 @@ class TestNGFWComponentOutputs:
                 instance_uuid="inst-uuid-12345",
             )
 
-            assert component.instance_id is not None
+            assert component.ec2_instance_id is not None
 
     @pulumi.runtime.test
     def test_outputs_management_ip(self, temp_templates):

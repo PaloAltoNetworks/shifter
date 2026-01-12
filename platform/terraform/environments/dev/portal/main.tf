@@ -266,6 +266,9 @@ module "ssm" {
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
   redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
 
+  # Database endpoint (direct RDS connection)
+  db_host_override = module.rds.db_instance_endpoint
+
   # Logging level (DEBUG for dev, INFO for prod)
   log_level = var.log_level
 }
@@ -435,8 +438,8 @@ module "pulumi_provisioner" {
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
 
-  # Database
-  db_host        = module.rds.db_instance_address
+  # Database (direct RDS connection)
+  db_host        = module.rds.db_instance_endpoint
   db_port        = 5432
   db_name        = var.db_name
   db_resource_id = module.rds.db_resource_id

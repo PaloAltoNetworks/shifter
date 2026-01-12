@@ -19,6 +19,7 @@ class TestGetSNSClient:
     def test_creates_sns_client_with_region_from_env(self, monkeypatch):
         """Client is created with AWS_REGION from environment."""
         monkeypatch.setenv("AWS_REGION", "us-west-2")
+        monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
 
         from events import _get_sns_client
 
@@ -26,11 +27,12 @@ class TestGetSNSClient:
             mock_boto.return_value = MagicMock()
             _get_sns_client()
 
-            mock_boto.assert_called_once_with("sns", region_name="us-west-2")
+            mock_boto.assert_called_once_with("sns", region_name="us-west-2", endpoint_url=None)
 
     def test_uses_default_region_when_not_set(self, monkeypatch):
         """Client uses us-east-2 as default region."""
         monkeypatch.delenv("AWS_REGION", raising=False)
+        monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
 
         from events import _get_sns_client
 
@@ -38,7 +40,7 @@ class TestGetSNSClient:
             mock_boto.return_value = MagicMock()
             _get_sns_client()
 
-            mock_boto.assert_called_once_with("sns", region_name="us-east-2")
+            mock_boto.assert_called_once_with("sns", region_name="us-east-2", endpoint_url=None)
 
 
 class TestGetSNSTopicARN:

@@ -38,10 +38,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sticky sesesions on Linux terminals: keep history, scrollback, etc when reconnecting
 - tmux now used for Terminal UI sessions
 
+## [0.10.6] - 2025-01-09
+
+### Added
+- Guacamole RDP for Range instances
+
+### Fixed
+- tmux now used for Terminal UI sessions
+
+## [0.10.5] - 2025-01-06
+
+### Changed
+- Added tmux install to Kali and Ubuntu AMIs
+
 ## [0.10.4] - 2025-01-06
 
 ### Fixed
-- Hotfix for Home subnet CIDR conflict detection-
+- Hotfix for Home subnet CIDR conflict detection
 
 ## [0.10.3] - 2025-01-04
 

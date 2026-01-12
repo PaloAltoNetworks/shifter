@@ -43,27 +43,6 @@ services:
       timeout: 5s
       retries: 5
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    environment:
-      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: 1000
-      DEFAULT_POOL_SIZE: 20
-      MIN_POOL_SIZE: 5
-      RESERVE_POOL_SIZE: 5
-      AUTH_TYPE: scram-sha-256
-    ports:
-      - "6432:5432"
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   web:
     build: .
     ports:
@@ -71,7 +50,7 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: pgbouncer
+      DB_HOST: db
       DB_PORT: 5432
       REDIS_HOST: redis
       PROVISIONER_PATH: /engine/provisioner
@@ -79,7 +58,7 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       AWS_ENDPOINT_URL: http://localstack:4566
     depends_on:
-      pgbouncer:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -102,7 +81,7 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: pgbouncer
+      DB_HOST: db
       DB_PORT: 5432
       AWS_REGION: ${AWS_REGION:-us-east-2}
       AWS_ACCESS_KEY_ID: test
@@ -111,7 +90,7 @@ services:
       SQS_CMS_URL: http://sqs.us-east-2.localhost.localstack.cloud:4566/000000000000/shifter-cms
     restart: always
     depends_on:
-      pgbouncer:
+      db:
         condition: service_healthy
       localstack:
         condition: service_healthy
@@ -128,7 +107,7 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: pgbouncer
+      DB_HOST: db
       DB_PORT: 5432
       AWS_REGION: ${AWS_REGION:-us-east-2}
       AWS_ACCESS_KEY_ID: test
@@ -137,7 +116,7 @@ services:
       SQS_ENGINE_URL: http://sqs.us-east-2.localhost.localstack.cloud:4566/000000000000/shifter-engine
     restart: always
     depends_on:
-      pgbouncer:
+      db:
         condition: service_healthy
       localstack:
         condition: service_healthy
@@ -154,7 +133,7 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: pgbouncer
+      DB_HOST: db
       DB_PORT: 5432
       AWS_REGION: ${AWS_REGION:-us-east-2}
       AWS_ACCESS_KEY_ID: test
@@ -164,7 +143,7 @@ services:
       REDIS_HOST: redis
     restart: always
     depends_on:
-      pgbouncer:
+      db:
         condition: service_healthy
       localstack:
         condition: service_healthy

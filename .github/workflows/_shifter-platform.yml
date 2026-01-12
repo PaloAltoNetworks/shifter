@@ -62,7 +62,7 @@ jobs:
     if: |
       always() &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
-      (github.event_name != 'pull_request' || inputs.environment == 'dev')
+      github.event_name != 'pull_request'
     env:
       GUACD_REPO: ${{ inputs.is_dev && 'shifter-dev-guacd' || 'shifter-guacd' }}
       GUACAMOLE_CLIENT_REPO: ${{ inputs.is_dev && 'shifter-dev-guacamole-client' || 'shifter-guacamole-client' }}
@@ -116,7 +116,7 @@ jobs:
       always() &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
       (needs.push-guacamole-images.result == 'success' || needs.push-guacamole-images.result == 'skipped') &&
-      (github.event_name != 'pull_request' || inputs.environment == 'dev')
+      github.event_name != 'pull_request'
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
@@ -217,7 +217,7 @@ jobs:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
     needs: apply
-    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
+    if: github.event_name != 'pull_request'
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:
@@ -256,7 +256,7 @@ jobs:
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
     needs: build
-    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
+    if: github.event_name != 'pull_request'
     env:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}

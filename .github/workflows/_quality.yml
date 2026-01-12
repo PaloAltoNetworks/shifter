@@ -492,6 +492,8 @@ jobs:
         working-directory: shifter/shifter_platform
         env:
           TESTING: "1"
+          DJANGO_DEBUG: "true"
+          DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
           DB_HOST: localhost
           DB_PORT: 5432
           DB_NAME: shifter

@@ -26,19 +26,23 @@ exit
 """
 
 # PAN-OS configure mode commands for log forwarding profile (Step 13 from steps.md)
-CREATE_LOG_FORWARDING_PROFILE_INPUT = """configure
-set shared log-settings profiles XDR-Forward match-list all-traffic log-type traffic filter "All Logs" send-to-panorama yes
-set shared log-settings profiles XDR-Forward enhanced-application-logging yes
-commit
-exit
-"""
+CREATE_LOG_FORWARDING_PROFILE_INPUT = (
+    "configure\n"
+    "set shared log-settings profiles XDR-Forward match-list all-traffic log-type traffic "
+    'filter "All Logs" send-to-panorama yes\n'
+    "set shared log-settings profiles XDR-Forward enhanced-application-logging yes\n"
+    "commit\n"
+    "exit\n"
+)
 
 # PAN-OS configure mode commands for security policy (Step 14 from steps.md)
-CREATE_SECURITY_POLICY_INPUT = """configure
-set rulebase security rules allow-all from any to any source any destination any application any service any action allow log-end yes log-setting XDR-Forward
-commit
-exit
-"""
+CREATE_SECURITY_POLICY_INPUT = (
+    "configure\n"
+    "set rulebase security rules allow-all from any to any source any destination any "
+    "application any service any action allow log-end yes log-setting XDR-Forward\n"
+    "commit\n"
+    "exit\n"
+)
 
 
 class NGFWProvisionPlan:

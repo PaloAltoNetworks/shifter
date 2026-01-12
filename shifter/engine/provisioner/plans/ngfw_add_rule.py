@@ -12,11 +12,14 @@ from plans.base import SetupStep
 
 # PAN-OS configure mode commands for adding a security rule
 # Variables: {{ rule_name }}, {{ src_address }}, {{ dst_address }}
-ADD_RULE_INPUT = """configure
-set rulebase security rules {{ rule_name }} from any to any source {{ src_address }} destination {{ dst_address }} application any service any action allow log-end yes log-setting XDR-Forward
-commit
-exit
-"""
+ADD_RULE_INPUT = (
+    "configure\n"
+    "set rulebase security rules {{ rule_name }} from any to any source {{ src_address }} "
+    "destination {{ dst_address }} application any service any action allow log-end yes "
+    "log-setting XDR-Forward\n"
+    "commit\n"
+    "exit\n"
+)
 
 
 class NGFWAddRulePlan:

@@ -120,13 +120,13 @@ jobs:
           uv run ruff format --check .
 
   # ===========================================================================
-  # Architecture as Code
+  # Type Checking (non-blocking quality gate)
   # ===========================================================================
 
-  check-layer-imports-arch:
-    name: Architecture (layer imports)
+  shifter-platform-typecheck:
+    name: Type Check (shifter_platform)
     runs-on: self-hosted
-    continue-on-error: true
+    continue-on-error: true  # Non-blocking - quality signal only
     steps:
       - uses: actions/checkout@v4
 
@@ -137,8 +137,32 @@ jobs:
         working-directory: shifter/shifter_platform
         run: uv sync --group dev
 
+      - name: Run mypy
+        working-directory: shifter/shifter_platform
+        run: |
+          uv run mypy . --no-error-summary || true
+          echo "::notice::Type checking complete - see above for any type errors"
+
+  # ===========================================================================
+  # Architecture as Code (hard fail - zero tolerance)
+  # ===========================================================================
+
+  check-layer-imports-arch:
+    name: Architecture (layer imports)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: scripts/check_layer_imports
+        run: uv sync
+
       - name: Check layer imports
-        run: python scripts/check_layer_imports/check_layer_imports.py
+        working-directory: scripts/check_layer_imports
+        run: uv run python check_layer_imports.py
 
   # ===========================================================================
   # SAST
@@ -440,7 +464,6 @@ jobs:
   model-fks-arch:
     name: Architecture (model FKs)
     runs-on: self-hosted
-    continue-on-error: true
     services:
       postgres:
         image: postgres:16
@@ -469,6 +492,8 @@ jobs:
         working-directory: shifter/shifter_platform
         env:
           TESTING: "1"
+          DJANGO_DEBUG: "true"
+          DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
           DB_HOST: localhost
           DB_PORT: 5432
           DB_NAME: shifter

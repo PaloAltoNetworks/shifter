@@ -19,7 +19,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from components.network import _find_free_subnet, _publish_subnet_exhaustion_alarm
+from components.network import (
+    _find_free_subnet,
+    _generate_slash24_candidates,
+    _generate_slash28_candidates,
+    _publish_subnet_exhaustion_alarm,
+)
 
 # =============================================================================
 # Unit Tests for _publish_subnet_exhaustion_alarm
@@ -34,7 +39,7 @@ class TestPublishSubnetExhaustionAlarm:
         mock_cloudwatch = MagicMock()
 
         with patch("components.network.boto3.client", return_value=mock_cloudwatch):
-            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1")
+            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1", 24)
 
         mock_cloudwatch.put_metric_data.assert_called_once()
         call_args = mock_cloudwatch.put_metric_data.call_args
@@ -47,11 +52,22 @@ class TestPublishSubnetExhaustionAlarm:
         mock_cloudwatch = MagicMock()
 
         with patch("components.network.boto3.client", return_value=mock_cloudwatch):
-            _publish_subnet_exhaustion_alarm("vpc-my-test-vpc", "10.1")
+            _publish_subnet_exhaustion_alarm("vpc-my-test-vpc", "10.1", 24)
 
         call_args = mock_cloudwatch.put_metric_data.call_args
         dimensions = call_args[1]["MetricData"][0]["Dimensions"]
         assert {"Name": "VpcId", "Value": "vpc-my-test-vpc"} in dimensions
+
+    def test_metric_includes_subnet_size_dimension(self):
+        """Metric includes SubnetSize as a dimension."""
+        mock_cloudwatch = MagicMock()
+
+        with patch("components.network.boto3.client", return_value=mock_cloudwatch):
+            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1", 28)
+
+        call_args = mock_cloudwatch.put_metric_data.call_args
+        dimensions = call_args[1]["MetricData"][0]["Dimensions"]
+        assert {"Name": "SubnetSize", "Value": "28"} in dimensions
 
     def test_uses_aws_region_env_var(self):
         """Uses AWS_REGION environment variable."""
@@ -61,7 +77,7 @@ class TestPublishSubnetExhaustionAlarm:
             patch("components.network.boto3.client", return_value=mock_cloudwatch) as mock_client,
             patch.dict("os.environ", {"AWS_REGION": "eu-west-1"}),
         ):
-            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1")
+            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1", 24)
 
         mock_client.assert_called_with("cloudwatch", region_name="eu-west-1")
 
@@ -73,7 +89,7 @@ class TestPublishSubnetExhaustionAlarm:
             patch("components.network.boto3.client", return_value=mock_cloudwatch) as mock_client,
             patch.dict("os.environ", {}, clear=True),
         ):
-            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1")
+            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1", 24)
 
         mock_client.assert_called_with("cloudwatch", region_name="us-east-2")
 
@@ -370,27 +386,139 @@ class TestFindFreeSubnetAWSErrors:
 
 
 # =============================================================================
+# Unit Tests for CIDR Candidate Generators
+# =============================================================================
+
+
+class TestGenerateSlash24Candidates:
+    """Tests for /24 CIDR candidate generation."""
+
+    def test_generates_correct_range(self):
+        """Should generate .2.0/24 through .254.0/24."""
+        candidates = _generate_slash24_candidates("10.1")
+        assert candidates[0] == "10.1.2.0/24"
+        assert candidates[-1] == "10.1.254.0/24"
+        assert len(candidates) == 253  # 2-254 inclusive
+
+    def test_different_prefix(self):
+        """Works with different CIDR prefixes."""
+        candidates = _generate_slash24_candidates("172.16")
+        assert candidates[0] == "172.16.2.0/24"
+        assert "172.16.100.0/24" in candidates
+
+
+class TestGenerateSlash28Candidates:
+    """Tests for /28 CIDR candidate generation."""
+
+    def test_first_candidate_starts_at_2_0(self):
+        """First /28 should be 10.1.2.0/28 (skip .0 and .1)."""
+        candidates = _generate_slash28_candidates("10.1")
+        assert candidates[0] == "10.1.2.0/28"
+
+    def test_correct_step_size(self):
+        """Should step by 16 in fourth octet."""
+        candidates = _generate_slash28_candidates("10.1")
+        # First 16 candidates in .2.x
+        assert candidates[0] == "10.1.2.0/28"
+        assert candidates[1] == "10.1.2.16/28"
+        assert candidates[2] == "10.1.2.32/28"
+        assert candidates[15] == "10.1.2.240/28"
+        # Then moves to .3.x
+        assert candidates[16] == "10.1.3.0/28"
+
+    def test_total_candidates(self):
+        """Should generate correct number of /28 blocks."""
+        candidates = _generate_slash28_candidates("10.1")
+        # 253 third octets (2-254) * 16 /28 blocks each = 4048
+        assert len(candidates) == 253 * 16
+
+    def test_all_valid_cidrs(self):
+        """All candidates should be valid /28 CIDRs."""
+        import ipaddress
+
+        candidates = _generate_slash28_candidates("10.1")
+        for cidr in candidates[:100]:  # Check first 100
+            network = ipaddress.ip_network(cidr)
+            assert network.prefixlen == 28
+
+
+class TestFindFreeSubnetSlash28:
+    """/28 subnet allocation tests."""
+
+    def test_finds_first_free_slash28(self):
+        """No existing subnets, returns first /28 (.2.0/28)."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
+
+        assert result == "10.1.2.0/28"
+
+    def test_skips_existing_slash28(self):
+        """Skips occupied /28 and finds next free."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {"CidrBlock": "10.1.2.0/28"},
+            ]
+        }
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
+
+        assert result == "10.1.2.16/28"
+
+    def test_skips_multiple_slash28s(self):
+        """Skips multiple occupied /28s."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {"CidrBlock": "10.1.2.0/28"},
+                {"CidrBlock": "10.1.2.16/28"},
+                {"CidrBlock": "10.1.2.32/28"},
+            ]
+        }
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
+
+        assert result == "10.1.2.48/28"
+
+    def test_slash28_overlaps_with_larger_block(self):
+        """A /24 blocks all /28s within it."""
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_subnets.return_value = {
+            "Subnets": [
+                {"CidrBlock": "10.1.2.0/24"},  # Blocks all .2.x/28
+            ]
+        }
+
+        with patch("components.network.boto3.client", return_value=mock_ec2):
+            result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
+
+        assert result == "10.1.3.0/28"
+
+    def test_invalid_subnet_size_raises(self):
+        """Invalid subnet_size raises ValueError."""
+        with pytest.raises(ValueError, match="subnet_size must be 24 or 28"):
+            _find_free_subnet("vpc-12345", "10.1", subnet_size=26)
+
+
+# =============================================================================
 # NetworkComponent Pulumi Tests
 # =============================================================================
 
 
 @pytest.fixture
 def mock_find_free_subnet():
-    """Mock _find_free_subnet for NetworkComponent tests.
-
-    The function makes real AWS API calls, which we don't want
-    during Pulumi component tests.
-    """
+    """Mock _find_free_subnet for NetworkComponent tests."""
     with patch("components.network._find_free_subnet", return_value="10.1.8.0/24") as mock:
         yield mock
 
 
 class TestNetworkComponentWithPulumiMocks:
-    """Tests for NetworkComponent using Pulumi runtime mocks.
-
-    These tests actually instantiate the real NetworkComponent class
-    and verify its behavior using Pulumi's mocking framework.
-    """
+    """Tests for NetworkComponent using Pulumi runtime mocks."""
 
     @pytest.fixture(autouse=True)
     def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet):
@@ -408,10 +536,11 @@ class TestNetworkComponentWithPulumiMocks:
             range_id=42,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         # Verify subnet was created
@@ -420,8 +549,8 @@ class TestNetworkComponentWithPulumiMocks:
         assert component.subnet_cidr is not None
 
     @pulumi.runtime.test
-    def test_uses_find_free_subnet_result(self):
-        """Subnet CIDR should come from _find_free_subnet, not calculation."""
+    def test_creates_security_group(self):
+        """NetworkComponent should create a security group."""
         from components.network import NetworkComponent
 
         component = NetworkComponent(
@@ -429,14 +558,54 @@ class TestNetworkComponentWithPulumiMocks:
             range_id=42,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
+        )
+
+        assert component.security_group is not None
+        assert component.security_group_id is not None
+
+    @pulumi.runtime.test
+    def test_creates_route_table(self):
+        """NetworkComponent should create a route table."""
+        from components.network import NetworkComponent
+
+        component = NetworkComponent(
+            name="test-network",
+            range_id=42,
+            user_id=1,
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            cidr_prefix="10.1",
+            environment="dev",
+            availability_zone="us-east-2a",
+            request_uuid="req-test-123",
+        )
+
+        assert component.route_table is not None
+        assert component.route_table_id is not None
+
+    @pulumi.runtime.test
+    def test_uses_find_free_subnet_result(self):
+        """Subnet CIDR should come from _find_free_subnet."""
+        from components.network import NetworkComponent
+
+        component = NetworkComponent(
+            name="test-network",
+            range_id=42,
+            user_id=1,
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            cidr_prefix="10.1",
+            environment="dev",
+            availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_cidr(cidr):
-            # Should use the mocked value from _find_free_subnet
             assert cidr == "10.1.8.0/24"
 
         component.subnet.cidr_block.apply(check_cidr)
@@ -451,10 +620,11 @@ class TestNetworkComponentWithPulumiMocks:
             range_id=42,
             user_id=1,
             vpc_id="vpc-my-specific-vpc",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_vpc_id(vpc_id):
@@ -472,10 +642,11 @@ class TestNetworkComponentWithPulumiMocks:
             range_id=42,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-west-2b",
+            request_uuid="req-test-123",
         )
 
         def check_az(az):
@@ -484,8 +655,8 @@ class TestNetworkComponentWithPulumiMocks:
         component.subnet.availability_zone.apply(check_az)
 
     @pulumi.runtime.test
-    def test_subnet_has_correct_name_tag(self):
-        """Subnet should have Name tag: shifter-range-{range_id}."""
+    def test_subnet_has_correct_name_tag_legacy(self):
+        """Subnet without subnet_name uses legacy naming."""
         from components.network import NetworkComponent
 
         component = NetworkComponent(
@@ -493,14 +664,39 @@ class TestNetworkComponentWithPulumiMocks:
             range_id=42,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
             assert tags.get("Name") == "shifter-range-42"
+
+        component.subnet.tags.apply(check_tags)
+
+    @pulumi.runtime.test
+    def test_subnet_has_correct_name_tag_with_subnet_name(self):
+        """Subnet with subnet_name uses new naming convention."""
+        from components.network import NetworkComponent
+
+        component = NetworkComponent(
+            name="test-network",
+            range_id=42,
+            user_id=1,
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            cidr_prefix="10.1",
+            environment="dev",
+            availability_zone="us-east-2a",
+            subnet_name="attack",
+            subnet_uuid="uuid-attack-123",
+            request_uuid="req-test-123",
+        )
+
+        def check_tags(tags):
+            assert tags.get("Name") == "shifter-attack-1"
 
         component.subnet.tags.apply(check_tags)
 
@@ -514,46 +710,25 @@ class TestNetworkComponentWithPulumiMocks:
             range_id=42,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
             assert tags.get("shifter:range_id") == "42"
             assert tags.get("shifter:user_id") == "1"
             assert tags.get("shifter:environment") == "dev"
+            assert tags.get("shifter:system") == "shifter"
             assert tags.get("ManagedBy") == "pulumi"
 
         component.subnet.tags.apply(check_tags)
 
     @pulumi.runtime.test
-    def test_subnet_prod_environment_tags(self):
-        """Subnet in prod should have prod environment tag."""
-        from components.network import NetworkComponent
-
-        component = NetworkComponent(
-            name="test-network",
-            range_id=99,
-            user_id=5,
-            vpc_id="vpc-12345",
-            cidr_prefix="10.1",
-            route_table_id="rtb-12345",
-            environment="prod",
-            availability_zone="us-east-2a",
-        )
-
-        def check_tags(tags):
-            assert tags.get("shifter:environment") == "prod"
-            assert tags.get("shifter:range_id") == "99"
-            assert tags.get("shifter:user_id") == "5"
-
-        component.subnet.tags.apply(check_tags)
-
-    @pulumi.runtime.test
-    def test_outputs_are_registered(self):
-        """NetworkComponent should register subnetId and subnetCidr outputs."""
+    def test_subnet_with_optional_tags(self):
+        """Subnet with optional tags includes them."""
         from components.network import NetworkComponent
 
         component = NetworkComponent(
@@ -561,15 +736,64 @@ class TestNetworkComponentWithPulumiMocks:
             range_id=42,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            subnet_name="attack",
+            subnet_uuid="uuid-123",
+            request_uuid="req-456",
         )
 
-        # These should be Pulumi Output objects
+        def check_tags(tags):
+            assert tags.get("shifter:subnet_name") == "attack"
+            assert tags.get("shifter:subnet_uuid") == "uuid-123"
+            assert tags.get("shifter:request_uuid") == "req-456"
+
+        component.subnet.tags.apply(check_tags)
+
+    @pulumi.runtime.test
+    def test_outputs_are_registered(self):
+        """NetworkComponent should register all outputs."""
+        from components.network import NetworkComponent
+
+        component = NetworkComponent(
+            name="test-network",
+            range_id=42,
+            user_id=1,
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            cidr_prefix="10.1",
+            environment="dev",
+            availability_zone="us-east-2a",
+            request_uuid="req-test-123",
+        )
+
+        # Verify all outputs exist
         assert hasattr(component, "subnet_id")
         assert hasattr(component, "subnet_cidr")
+        assert hasattr(component, "security_group_id")
+        assert hasattr(component, "route_table_id")
+        assert hasattr(component, "gwlb_endpoint_id")
+
+    @pulumi.runtime.test
+    def test_no_gwlb_endpoint_without_service_name(self):
+        """No GWLB endpoint when gwlb_service_name not provided."""
+        from components.network import NetworkComponent
+
+        component = NetworkComponent(
+            name="test-network",
+            range_id=42,
+            user_id=1,
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            cidr_prefix="10.1",
+            environment="dev",
+            availability_zone="us-east-2a",
+            request_uuid="req-test-123",
+        )
+
+        assert component.gwlb_endpoint is None
 
 
 class TestNetworkComponentEdgeCases:
@@ -590,10 +814,11 @@ class TestNetworkComponentEdgeCases:
             range_id=0,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
@@ -612,10 +837,11 @@ class TestNetworkComponentEdgeCases:
             range_id=999999,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         def check_tags(tags):
@@ -643,10 +869,11 @@ class TestResourceCreationVerification:
             range_id=42,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         # Verify subnet has an ID output (via Pulumi mocks)
@@ -666,19 +893,132 @@ class TestResourceCreationVerification:
             range_id=42,
             user_id=1,
             vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
             cidr_prefix="10.1",
-            route_table_id="rtb-12345",
             environment="dev",
             availability_zone="us-east-2a",
+            request_uuid="req-test-123",
         )
 
         # Verify component has expected outputs
         assert component.subnet is not None
         assert component.subnet_id is not None
         assert component.subnet_cidr is not None
+        assert component.security_group is not None
+        assert component.security_group_id is not None
+        assert component.route_table is not None
+        assert component.route_table_id is not None
 
         # Verify subnet_cidr output value comes from _find_free_subnet
         def check_cidr(cidr):
             assert cidr == "10.1.8.0/24"
 
         component.subnet_cidr.apply(check_cidr)
+
+
+class TestGWLBEndpointCreation:
+    """Tests for GWLB endpoint creation in NetworkComponent."""
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks, mock_find_free_subnet):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pulumi.runtime.test
+    def test_creates_gwlb_endpoint_when_service_name_provided(self):
+        """GWLB endpoint created when gwlb_service_name is provided."""
+        from components.network import NetworkComponent
+
+        component = NetworkComponent(
+            name="test-network",
+            range_id=42,
+            user_id=1,
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            cidr_prefix="10.1",
+            environment="dev",
+            availability_zone="us-east-2a",
+            gwlb_service_name="com.amazonaws.vpce.us-east-2.vpce-svc-123",
+            request_uuid="req-test-123",
+        )
+
+        assert component.gwlb_endpoint is not None
+        assert component.gwlb_endpoint_id is not None
+
+    @pulumi.runtime.test
+    def test_gwlb_endpoint_id_is_empty_string_when_no_service_name(self):
+        """gwlb_endpoint_id returns empty string when no endpoint created."""
+        from components.network import NetworkComponent
+
+        component = NetworkComponent(
+            name="test-network",
+            range_id=42,
+            user_id=1,
+            vpc_id="vpc-12345",
+            vpc_cidr="10.1.0.0/16",
+            cidr_prefix="10.1",
+            environment="dev",
+            availability_zone="us-east-2a",
+            request_uuid="req-test-123",
+        )
+
+        def check_empty(endpoint_id):
+            assert endpoint_id == ""
+
+        component.gwlb_endpoint_id.apply(check_empty)
+
+
+class TestSubnetSizeParameter:
+    """Tests for subnet_size parameter in NetworkComponent."""
+
+    @pytest.fixture(autouse=True)
+    def setup_pulumi_mocks(self, pulumi_mocks):
+        """Set up Pulumi mocks for each test."""
+        self.mocks = pulumi_mocks
+
+    @pulumi.runtime.test
+    def test_slash28_subnet_creation(self):
+        """NetworkComponent creates /28 subnet when subnet_size=28."""
+        with patch("components.network._find_free_subnet", return_value="10.1.2.0/28"):
+            from components.network import NetworkComponent
+
+            component = NetworkComponent(
+                name="test-network",
+                range_id=42,
+                user_id=1,
+                vpc_id="vpc-12345",
+                vpc_cidr="10.1.0.0/16",
+                cidr_prefix="10.1",
+                environment="dev",
+                availability_zone="us-east-2a",
+                subnet_size=28,
+                request_uuid="req-test-123",
+            )
+
+            def check_cidr(cidr):
+                assert cidr == "10.1.2.0/28"
+
+            component.subnet_cidr.apply(check_cidr)
+
+    @pulumi.runtime.test
+    def test_slash24_subnet_creation_default(self):
+        """NetworkComponent creates /24 subnet by default."""
+        with patch("components.network._find_free_subnet", return_value="10.1.2.0/24"):
+            from components.network import NetworkComponent
+
+            component = NetworkComponent(
+                name="test-network",
+                range_id=42,
+                user_id=1,
+                vpc_id="vpc-12345",
+                vpc_cidr="10.1.0.0/16",
+                cidr_prefix="10.1",
+                environment="dev",
+                availability_zone="us-east-2a",
+                request_uuid="req-test-123",
+            )
+
+            def check_cidr(cidr):
+                assert cidr == "10.1.2.0/24"
+
+            component.subnet_cidr.apply(check_cidr)

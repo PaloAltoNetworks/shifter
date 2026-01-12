@@ -11,6 +11,11 @@ on:
           - kali
           - ubuntu
           - windows
+      ref:
+        description: 'Branch to build from'
+        required: false
+        type: string
+        default: 'dev'
 
 permissions:
   id-token: write
@@ -27,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -85,3 +92,21 @@ jobs:
         with:
           name: ${{ inputs.ami_type }}-manifest
           path: shifter/packer/${{ inputs.ami_type }}-manifest.json
+
+      - name: Cleanup Packer builder instances
+        if: always()
+        run: |
+          echo "Terminating any packer-builder-${{ inputs.ami_type }} instances..."
+          INSTANCE_IDS=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=packer-builder-${{ inputs.ami_type }}" \
+                      "Name=instance-state-name,Values=running,pending,stopping,stopped" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text)
+
+          if [ -n "$INSTANCE_IDS" ]; then
+            echo "Terminating: $INSTANCE_IDS"
+            aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
+            echo "- **Cleanup:** Terminated builder instance(s)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No orphaned instances found"
+          fi

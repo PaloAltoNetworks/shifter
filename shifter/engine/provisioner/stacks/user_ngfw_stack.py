@@ -6,10 +6,15 @@ This stack composes NGFWComponent + GWLBComponent to provide:
 - VPC Endpoint Service for range connectivity
 """
 
+import logging
+from typing import Any
+
 import pulumi
 
 from components.gwlb_component import GWLBComponent
 from components.ngfw_component import NGFWComponent
+
+logger = logging.getLogger(__name__)
 
 
 class UserNGFWStack(pulumi.ComponentResource):
@@ -28,9 +33,16 @@ class UserNGFWStack(pulumi.ComponentResource):
         user_id: int,
         vpc_id: str,
         ngfw_subnet_id: str,
-        ngfw_security_group_id: str,
+        ngfw_mgmt_security_group_id: str,
+        ngfw_data_security_group_id: str,
         ami_id: str,
         bootstrap_bucket: str,
+        scm_pin_id: str,
+        scm_pin_value: str,
+        scm_folder_name: str,
+        authcode: str,
+        request_uuid: str,
+        instance_uuid: str,
         instance_type: str = "m5.xlarge",
         environment: str = "dev",
         instance_profile_name: str | None = None,
@@ -43,26 +55,58 @@ class UserNGFWStack(pulumi.ComponentResource):
             user_id: User ID for this NGFW stack
             vpc_id: VPC ID where resources are created
             ngfw_subnet_id: Subnet ID for NGFW ENIs
-            ngfw_security_group_id: Security group ID for NGFW
+            ngfw_mgmt_security_group_id: Security group for management ENI
+            ngfw_data_security_group_id: Security group for data ENI
             ami_id: VM-Series AMI ID
             bootstrap_bucket: S3 bucket for bootstrap configuration
+            scm_pin_id: SCM auto-registration PIN ID
+            scm_pin_value: SCM auto-registration PIN value
+            scm_folder_name: SCM folder name (dgname)
+            authcode: VM-Series authcode for licensing
+            request_uuid: UUID of the provisioning request (for tagging/correlation)
+            instance_uuid: UUID of this NGFW instance (for tagging/correlation)
             instance_type: EC2 instance type (default: m5.xlarge)
             environment: Environment name for tagging
             instance_profile_name: IAM instance profile name (optional)
             opts: Pulumi resource options
+
+        Raises:
+            ValueError: If required uuid parameters are missing.
         """
         super().__init__("shifter:stacks:UserNGFWStack", name, None, opts)
 
+        logger.debug(
+            "__init__: name=%s user_id=%s instance_uuid=%s request_uuid=%s",
+            name,
+            user_id,
+            instance_uuid,
+            request_uuid,
+        )
+
+        # Validate required UUID parameters
+        if not request_uuid:
+            raise ValueError("request_uuid is required for UserNGFWStack")
+        if not instance_uuid:
+            raise ValueError("instance_uuid is required for UserNGFWStack")
+
         self.user_id = user_id
+        self._instance_uuid = instance_uuid
 
         # Create NGFW Component
         self.ngfw = NGFWComponent(
             f"{name}-ngfw",
             user_id=user_id,
             subnet_id=ngfw_subnet_id,
-            security_group_id=ngfw_security_group_id,
+            mgmt_security_group_id=ngfw_mgmt_security_group_id,
+            data_security_group_id=ngfw_data_security_group_id,
             ami_id=ami_id,
             bootstrap_bucket=bootstrap_bucket,
+            scm_pin_id=scm_pin_id,
+            scm_pin_value=scm_pin_value,
+            scm_folder_name=scm_folder_name,
+            authcode=authcode,
+            request_uuid=request_uuid,
+            instance_uuid=instance_uuid,
             instance_type=instance_type,
             environment=environment,
             instance_profile_name=instance_profile_name,
@@ -75,6 +119,8 @@ class UserNGFWStack(pulumi.ComponentResource):
             user_id=user_id,
             subnet_ids=[ngfw_subnet_id],
             vpc_id=vpc_id,
+            request_uuid=request_uuid,
+            instance_uuid=instance_uuid,
             environment=environment,
             opts=pulumi.ResourceOptions(parent=self),
         )
@@ -103,7 +149,14 @@ class UserNGFWStack(pulumi.ComponentResource):
             }
         )
 
-    def get_outputs(self) -> dict:
+        logger.info(
+            "__init__: created UserNGFWStack name=%s user_id=%s instance_uuid=%s",
+            name,
+            user_id,
+            instance_uuid,
+        )
+
+    def get_outputs(self) -> dict[str, Any]:
         """Get stack outputs as a dictionary.
 
         Returns:
@@ -120,7 +173,7 @@ class UserNGFWStack(pulumi.ComponentResource):
             "service_name": self.service_name,
         }
 
-    def run_provision(self, orchestrator):
+    def run_provision(self, orchestrator) -> Any:
         """Post-Pulumi provisioning via SetupOrchestrator.
 
         Wait for SSH, verify device cert, configure XDR logging.
@@ -131,6 +184,8 @@ class UserNGFWStack(pulumi.ComponentResource):
         Returns:
             Result from orchestrator
         """
+        logger.debug("run_provision: starting for user_id=%s", self.user_id)
+
         from plans.gwlb_setup import GWLBSetupPlan
         from plans.ngfw_provision import NGFWProvisionPlan
 
@@ -147,7 +202,7 @@ class UserNGFWStack(pulumi.ComponentResource):
 
         return gwlb_result
 
-    def run_deprovision(self, orchestrator):
+    def run_deprovision(self, orchestrator) -> Any:
         """Cleanup with license deactivation.
 
         Deactivates VM-Series license before termination.
@@ -158,12 +213,14 @@ class UserNGFWStack(pulumi.ComponentResource):
         Returns:
             Result from orchestrator
         """
+        logger.debug("run_deprovision: starting for user_id=%s", self.user_id)
+
         from plans.ngfw_deprovision import NGFWDeprovisionPlan
 
         deprovision_plan = NGFWDeprovisionPlan()
         return orchestrator.orchestrate(deprovision_plan, self)
 
-    def run_ops(self, operation: str, orchestrator, **kwargs):
+    def run_ops(self, operation: str, orchestrator, **kwargs: Any) -> Any:
         """Runtime operations via OpsOrchestrator.
 
         Operations: start, stop, add-route, remove-route, reconcile, sweep
@@ -179,6 +236,8 @@ class UserNGFWStack(pulumi.ComponentResource):
         Raises:
             ValueError: If unknown operation requested
         """
+        logger.debug("run_ops: operation=%s user_id=%s", operation, self.user_id)
+
         operation_plans = {
             "start": "plans.ngfw_start.NGFWStartPlan",
             "stop": "plans.ngfw_stop.NGFWStopPlan",

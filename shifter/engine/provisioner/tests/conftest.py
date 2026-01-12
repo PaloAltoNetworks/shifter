@@ -12,7 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,6 +20,29 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import InstanceConfig, RangeConfig, SubnetConfig
+
+# =============================================================================
+# Global Mocks (autouse - applies to all tests)
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def mock_pulumi_executable():
+    """Always mock shutil.which for pulumi to avoid CI failures.
+
+    This fixture runs automatically for ALL tests. It ensures that
+    _get_pulumi_path() returns a fake path instead of failing when
+    pulumi isn't installed (like in CI environments).
+
+    We patch both the module and where it's used in main.py to ensure
+    the mock is applied regardless of import order.
+    """
+    with (
+        patch("shutil.which", return_value="/usr/bin/pulumi"),
+        patch("main.shutil.which", return_value="/usr/bin/pulumi"),
+    ):
+        yield
+
 
 # =============================================================================
 # Pulumi Mocking Infrastructure
@@ -245,18 +268,14 @@ def mock_boto3_clients(mocker):
 
 @pytest.fixture
 def mock_subprocess(mocker):
-    """Fixture providing mocked subprocess.run and shutil.which.
+    """Fixture providing mocked subprocess.run.
 
-    Mocks both subprocess.run and shutil.which (for pulumi path lookup)
-    to allow tests to run without pulumi being installed.
+    Note: shutil.which is already mocked by the autouse mock_pulumi_executable
+    fixture, so tests don't need to worry about pulumi path lookup.
 
     Returns:
         tuple: (mock_run, mock_result) for subprocess assertions.
     """
-    # Mock shutil.which to return a fake pulumi path
-    # This is needed because _get_pulumi_path() checks for pulumi before running commands
-    mocker.patch("shutil.which", return_value="/usr/bin/pulumi")
-
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = ""

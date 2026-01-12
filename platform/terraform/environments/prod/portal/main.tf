@@ -159,6 +159,10 @@ module "redis" {
   engine_version      = var.redis_engine_version
   enable_replication  = var.redis_enable_replication
 
+  # CloudWatch Alarms
+  enable_alarms = var.alarm_email != ""
+  alarm_actions = var.alarm_email != "" ? [aws_sns_topic.alerts.arn] : []
+
   tags = var.tags
 }
 

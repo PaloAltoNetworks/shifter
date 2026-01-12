@@ -77,6 +77,14 @@ def _run_local_provisioner(command: list[str]) -> str | None:
     env.setdefault("PULUMI_BACKEND_URL", pulumi_backend)
     env.setdefault("PULUMI_SECRETS_PROVIDER", pulumi_secrets)
 
+    # SNS config (for event publishing - LocalStack support)
+    sns_arn = getattr(settings, "SNS_RANGE_EVENTS_ARN", "")
+    aws_endpoint = getattr(settings, "AWS_ENDPOINT_URL", "")
+    if sns_arn:
+        env.setdefault("SNS_RANGE_EVENTS_ARN", sns_arn)
+    if aws_endpoint:
+        env.setdefault("AWS_ENDPOINT_URL", aws_endpoint)
+
     # Put mock-pulumi first in PATH to intercept real pulumi
     # This prevents any actual infrastructure from being created
     mock_pulumi_dir = provisioner_path

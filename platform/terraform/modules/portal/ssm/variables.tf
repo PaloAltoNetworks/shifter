@@ -143,6 +143,12 @@ variable "redis_endpoint" {
   default     = ""
 }
 
+variable "db_host_override" {
+  description = "Override database host. If empty, uses RDS host from secret."
+  type        = string
+  default     = ""
+}
+
 variable "log_level" {
   description = "Django log level (DEBUG, INFO, WARNING, ERROR). Use DEBUG in dev for detailed event tracing."
   type        = string

@@ -314,7 +314,10 @@ AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 # Must match the JSON_SECRET_KEY configured in Guacamole's ECS task definition
 # This is a 32-character hex string (128-bit key) stored in Secrets Manager
 GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
+# Public URL for browser (returned to client)
 GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
+# Internal URL for server-to-server API calls (defaults to base URL if not set)
+GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMOLE_BASE_URL
 
 # ------------------------------------------------------------------------------
 # SQS Worker Configuration

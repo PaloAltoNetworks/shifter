@@ -143,8 +143,9 @@ def guacamole_rdp_url(request):
         logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
         return JsonResponse({"error": "RDP service not configured"}, status=503)
 
-    # Get Guacamole base URL from settings
+    # Get Guacamole URLs from settings
     guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+    guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
     # Generate signed URL
     try:
@@ -157,6 +158,7 @@ def guacamole_rdp_url(request):
             expires_minutes=5,
             rdp_username=conn_info.get("rdp_username"),
             rdp_password=conn_info.get("rdp_password"),
+            api_base_url=guacamole_api_url,
         )
     except ValueError as e:
         logger.error(f"Failed to generate Guacamole URL: {e}")

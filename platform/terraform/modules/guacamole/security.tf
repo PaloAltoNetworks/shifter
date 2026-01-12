@@ -23,6 +23,19 @@ resource "aws_security_group_rule" "guacamole_client_from_alb" {
   description              = "HTTP from Portal ALB"
 }
 
+# Ingress from Portal EC2 on port 8080 (direct API calls for token generation)
+resource "aws_security_group_rule" "guacamole_client_from_portal" {
+  count = var.portal_security_group_id != "" ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = var.portal_security_group_id
+  security_group_id        = aws_security_group.guacamole_client.id
+  description              = "HTTP from Portal EC2 (token API)"
+}
+
 # Egress to guacd on port 4822
 resource "aws_security_group_rule" "guacamole_client_to_guacd" {
   type                     = "egress"

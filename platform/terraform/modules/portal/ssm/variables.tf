@@ -144,7 +144,7 @@ variable "redis_endpoint" {
 }
 
 variable "db_host_override" {
-  description = "Override database host (e.g., PgBouncer endpoint). If empty, uses RDS host from secret."
+  description = "Override database host. If empty, uses RDS host from secret."
   type        = string
   default     = ""
 }

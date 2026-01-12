@@ -173,7 +173,7 @@ if [ -n "$GUACAMOLE_API_BASE_URL" ]; then
   COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
 fi
 
-# Add DB host override if configured (e.g., PgBouncer endpoint)
+# Add DB host override if configured
 if [ -n "$DB_HOST_OVERRIDE" ]; then
   COMMON_ENV="$COMMON_ENV -e DB_HOST=$DB_HOST_OVERRIDE"
 fi

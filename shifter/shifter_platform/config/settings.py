@@ -144,11 +144,8 @@ else:
             "PASSWORD": os.environ.get("DB_PASSWORD"),
             "HOST": os.environ.get("DB_HOST", "localhost"),
             "PORT": os.environ.get("DB_PORT", "5432"),
-            # PgBouncer compatibility: let pgbouncer handle connection pooling
-            # CONN_MAX_AGE=0 closes Django connection after each request
-            # DISABLE_SERVER_SIDE_CURSORS required for transaction pooling mode
+            # Connection settings (can tune CONN_MAX_AGE for connection reuse)
             "CONN_MAX_AGE": 0,
-            "DISABLE_SERVER_SIDE_CURSORS": True,
             "OPTIONS": {
                 "connect_timeout": 10,
             },

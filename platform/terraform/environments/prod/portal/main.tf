@@ -266,8 +266,8 @@ module "ssm" {
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
   redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
 
-  # PgBouncer endpoint (for connection pooling)
-  db_host_override = module.pgbouncer.service_discovery_endpoint
+  # Database endpoint (direct RDS connection)
+  db_host_override = module.rds.db_instance_endpoint
 
   # Logging level (DEBUG for dev, INFO for prod)
   log_level = var.log_level
@@ -438,14 +438,14 @@ module "pulumi_provisioner" {
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
 
-  # Database (via PgBouncer for connection pooling)
-  db_host        = module.pgbouncer.service_discovery_endpoint
+  # Database (direct RDS connection)
+  db_host        = module.rds.db_instance_endpoint
   db_port        = 5432
   db_name        = var.db_name
   db_resource_id = module.rds.db_resource_id
 
-  # PgBouncer security group (for adding ingress rule)
-  rds_security_group_id = module.pgbouncer.security_group_id
+  # RDS security group (for adding ingress rule)
+  rds_security_group_id = module.rds.db_security_group_id
 
   # Pulumi state (from Range environment)
   pulumi_state_bucket          = data.terraform_remote_state.range.outputs.pulumi_state_bucket_name
@@ -566,43 +566,6 @@ module "guacamole" {
   cognito_domain       = module.cognito.cognito_domain
   aws_region           = var.aws_region
   domain_name          = var.domain_name
-}
-
-# ------------------------------------------------------------------------------
-# PgBouncer (Database Connection Pooling)
-# ------------------------------------------------------------------------------
-
-module "pgbouncer" {
-  source = "../../../modules/pgbouncer"
-
-  name_prefix = local.name_prefix
-  environment = var.environment
-  tags        = var.tags
-
-  # Networking (Portal VPC)
-  vpc_id                               = module.vpc.vpc_id
-  private_subnet_ids                   = module.vpc.private_subnet_ids
-  portal_security_group_id             = module.ec2.security_group_id
-  additional_client_security_group_ids = [module.pulumi_provisioner.ecs_security_group_id]
-
-  # Database configuration
-  rds_endpoint              = module.rds.db_instance_endpoint
-  rds_security_group_id     = module.rds.db_security_group_id
-  db_credentials_secret_arn = module.rds.db_credentials_secret_arn
-  db_name                   = var.db_name
-
-  # ECS configuration
-  cpu           = var.pgbouncer_cpu
-  memory        = var.pgbouncer_memory
-  desired_count = var.pgbouncer_desired_count
-
-  # PgBouncer configuration
-  pool_mode         = var.pgbouncer_pool_mode
-  max_client_conn   = var.pgbouncer_max_client_conn
-  default_pool_size = var.pgbouncer_default_pool_size
-
-  # Logging
-  log_retention_days = var.log_retention_days
 }
 
 # ------------------------------------------------------------------------------

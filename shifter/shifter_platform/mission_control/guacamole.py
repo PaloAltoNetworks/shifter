@@ -132,6 +132,14 @@ def create_rdp_connection_params(
         "ignore-cert": "true" if ignore_cert else "false",
         "security": security,
         "resize-method": "display-update",
+        # Clipboard support
+        "disable-copy": "false",
+        "disable-paste": "false",
+        # Drive/file transfer support (drag and drop)
+        "enable-drive": "true",
+        "drive-name": "Shared",
+        "drive-path": "/var/lib/guacamole/drive",
+        "create-drive-path": "true",
         # Performance optimizations - reduce bandwidth and server-side rendering load
         "color-depth": "16",
         "disable-audio": "true",

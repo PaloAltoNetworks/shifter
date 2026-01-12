@@ -16,11 +16,10 @@ from pathlib import Path
 
 import pulumi
 import pulumi_aws as aws
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from jinja2 import Environment, FileSystemLoader
 
 from executors.ssm_executor import SSMExecutor
+from utils.crypto import generate_ssh_keypair
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.bootstrap import BootstrapPlan
 from plans.domain_join import DomainJoinPlan
@@ -42,34 +41,6 @@ def validate_s3_path(value: str) -> bool:
     # This covers valid S3 bucket names and common key patterns
     safe_pattern = re.compile(r"^[a-zA-Z0-9._/=-]+$")
     return bool(safe_pattern.match(value))
-
-
-def generate_ssh_keypair() -> tuple[str, str]:
-    """Generate an Ed25519 SSH key pair.
-
-    This is a pure Python operation with no AWS calls, safe to run at any time.
-
-    Returns:
-        tuple: (private_key_pem, public_key_openssh)
-    """
-    private_key = ed25519.Ed25519PrivateKey.generate()
-
-    private_key_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode("utf-8")
-
-    public_key_openssh = (
-        private_key.public_key()
-        .public_bytes(
-            encoding=serialization.Encoding.OpenSSH,
-            format=serialization.PublicFormat.OpenSSH,
-        )
-        .decode("utf-8")
-    )
-
-    return private_key_pem, public_key_openssh
 
 
 class InstanceComponent(pulumi.ComponentResource):

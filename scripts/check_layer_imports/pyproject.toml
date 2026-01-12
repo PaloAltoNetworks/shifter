@@ -3,7 +3,9 @@ name = "check-layer-imports"
 version = "0.1.0"
 description = "Check cross-layer imports between Shifter service layers"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0",
+]
 
 [dependency-groups]
 dev = [

@@ -308,6 +308,17 @@ AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
 AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 
+# Guacamole RDP Integration
+# ------------------------------------------------------------------------------
+# JSON auth secret key for signing RDP session URLs
+# Must match the JSON_SECRET_KEY configured in Guacamole's ECS task definition
+# This is a 32-character hex string (128-bit key) stored in Secrets Manager
+GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
+# Public URL for browser (returned to client)
+GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
+# Internal URL for server-to-server API calls (defaults to base URL if not set)
+GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMOLE_BASE_URL
+
 # ------------------------------------------------------------------------------
 # SQS Worker Configuration
 # ------------------------------------------------------------------------------

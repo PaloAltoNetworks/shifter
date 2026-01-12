@@ -95,9 +95,16 @@ class GWLBComponent(pulumi.ComponentResource):
         )
         tags["Name"] = name
 
+        # Generate short names for AWS resources (max 32 chars for LB/TG)
+        # Use first 8 chars of instance_uuid for uniqueness
+        short_id = instance_uuid[:8] if instance_uuid else "unknown"
+        short_lb_name = f"ngfw-{short_id}-gwlb"  # 18 chars
+        short_tg_name = f"ngfw-{short_id}-tg"  # 15 chars
+
         # Create Gateway Load Balancer
         self.gwlb = aws.lb.LoadBalancer(
             f"{name}-gwlb",
+            name=short_lb_name,
             load_balancer_type="gateway",
             subnets=subnet_ids,
             tags=tags,
@@ -107,6 +114,7 @@ class GWLBComponent(pulumi.ComponentResource):
         # Create target group with GENEVE protocol (port 6081)
         self.target_group = aws.lb.TargetGroup(
             f"{name}-tg",
+            name=short_tg_name,
             port=6081,
             protocol="GENEVE",
             vpc_id=vpc_id,

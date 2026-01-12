@@ -119,3 +119,24 @@ resource "aws_service_discovery_service" "guacd" {
 
   tags = local.common_tags
 }
+
+resource "aws_service_discovery_service" "guacamole_client" {
+  name = "guacamole-client"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.guacamole.id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+
+  tags = local.common_tags
+}

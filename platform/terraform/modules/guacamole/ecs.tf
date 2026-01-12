@@ -216,6 +216,10 @@ resource "aws_ecs_service" "guacamole_client" {
     container_port   = 8080
   }
 
+  service_registries {
+    registry_arn = aws_service_discovery_service.guacamole_client.arn
+  }
+
   deployment_circuit_breaker {
     enable   = true
     rollback = true

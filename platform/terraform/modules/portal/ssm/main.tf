@@ -114,9 +114,20 @@ resource "aws_ssm_parameter" "guacamole_base_url" {
   count = var.guacamole_base_url != "" ? 1 : 0
 
   name        = "${local.ps_prefix}/guacamole-base-url"
-  description = "Guacamole base URL for API calls (e.g., https://domain.com/guacamole)"
+  description = "Guacamole public URL for browser (e.g., https://domain.com/guacamole)"
   type        = "String"
   value       = var.guacamole_base_url
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "guacamole_api_base_url" {
+  count = var.guacamole_api_base_url != "" ? 1 : 0
+
+  name        = "${local.ps_prefix}/guacamole-api-base-url"
+  description = "Guacamole internal URL for API calls (e.g., http://guacamole-client.internal:8080/guacamole)"
+  type        = "String"
+  value       = var.guacamole_api_base_url
 
   tags = local.common_tags
 }
@@ -312,6 +323,7 @@ resource "aws_ssm_document" "portal_deploy" {
             "REDIS_ENDPOINT=$(get_param \"$PS_PREFIX/redis-endpoint\")",
             "GUACAMOLE_SECRET_ARN=$(get_param \"$PS_PREFIX/guacamole-secret-arn\" 2>/dev/null || echo \"\")",
             "GUACAMOLE_BASE_URL=$(get_param \"$PS_PREFIX/guacamole-base-url\" 2>/dev/null || echo \"\")",
+            "GUACAMOLE_API_BASE_URL=$(get_param \"$PS_PREFIX/guacamole-api-base-url\" 2>/dev/null || echo \"\")",
             "",
             "IMAGE=\"$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG\"",
             "echo \"Deploying image: $IMAGE\"",
@@ -346,6 +358,9 @@ resource "aws_ssm_document" "portal_deploy" {
             "fi",
             "if [ -n \"$GUACAMOLE_BASE_URL\" ]; then",
             "  COMMON_ENV=\"$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL\"",
+            "fi",
+            "if [ -n \"$GUACAMOLE_API_BASE_URL\" ]; then",
+            "  COMMON_ENV=\"$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL\"",
             "fi",
             "",
             "# ------------------------------------------------------------------------------",

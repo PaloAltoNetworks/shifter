@@ -243,11 +243,12 @@ module "ssm" {
   ecr_repository_name = split("/", data.terraform_remote_state.foundation.outputs.portal_ecr_url)[1]
 
   # Secrets Manager ARNs
-  db_secret_arn        = module.rds.db_credentials_secret_arn
-  app_secret_arn       = aws_secretsmanager_secret.app.arn
-  cognito_secret_arn   = module.cognito.cognito_secret_arn
-  guacamole_secret_arn = module.guacamole.json_auth_secret_arn
-  guacamole_base_url   = "https://${var.domain_name}/guacamole"
+  db_secret_arn          = module.rds.db_credentials_secret_arn
+  app_secret_arn         = aws_secretsmanager_secret.app.arn
+  cognito_secret_arn     = module.cognito.cognito_secret_arn
+  guacamole_secret_arn   = module.guacamole.json_auth_secret_arn
+  guacamole_base_url     = "https://${var.domain_name}/guacamole"
+  guacamole_api_base_url = module.guacamole.guacamole_client_internal_url
 
   # Application configuration
   domain_name    = var.domain_name
@@ -503,9 +504,10 @@ module "guacamole" {
   tags        = var.tags
 
   # Networking (Portal VPC)
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-  range_vpc_cidr     = data.terraform_remote_state.range.outputs.vpc_cidr
+  vpc_id                   = module.vpc.vpc_id
+  private_subnet_ids       = module.vpc.private_subnet_ids
+  range_vpc_cidr           = data.terraform_remote_state.range.outputs.vpc_cidr
+  portal_security_group_id = module.ec2.security_group_id
 
   # Shared ALB (from Portal ALB module)
   alb_listener_arn      = module.alb.https_listener_arn

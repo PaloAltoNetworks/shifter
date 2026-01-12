@@ -1354,6 +1354,23 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     logger.info(f"NGFW Stack outputs: {json.dumps(output_data, indent=2)}")
 
     # Run post-Pulumi configuration (wait for SSH, configure cloud logging, etc.)
+    # Skip in local dev mode (DB_PASSWORD set) - post-Pulumi config requires real AWS resources
+    if os.environ.get("DB_PASSWORD"):
+        logger.info("LOCAL DEV MODE: Skipping post-Pulumi NGFW configuration")
+        # Update state with mock outputs and mark as ready
+        update_instance_state(
+            request_id,
+            STATUS_READY,
+            state=output_data,
+        )
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_id,
+            app_id=app_id,
+            status=STATUS_READY,
+        )
+        return
+
     logger.info("Running post-Pulumi NGFW configuration...")
 
     # Get SSH private key from Secrets Manager

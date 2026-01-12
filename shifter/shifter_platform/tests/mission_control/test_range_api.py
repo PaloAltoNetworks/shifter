@@ -230,11 +230,13 @@ class TestLaunchRange:
             from django.conf import settings
 
             # Set ECS config
+            orig_local_provisioner = getattr(settings, "LOCAL_PROVISIONER", None)
             orig_cluster = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
             orig_task_def = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", "")
             orig_sg = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
             orig_subnets = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
 
+            settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
             settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
             settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
             settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
@@ -258,6 +260,7 @@ class TestLaunchRange:
                 range_obj = Range.objects.get(request__request_id=request_id)
                 assert range_obj.step_function_execution_arn == task_arn
             finally:
+                settings.LOCAL_PROVISIONER = orig_local_provisioner
                 settings.PULUMI_ECS_CLUSTER_ARN = orig_cluster
                 settings.PULUMI_TASK_DEFINITION_ARN = orig_task_def
                 settings.PULUMI_ECS_SECURITY_GROUP_ID = orig_sg

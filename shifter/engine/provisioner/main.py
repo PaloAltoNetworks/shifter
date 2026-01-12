@@ -1361,13 +1361,22 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         update_instance_state(
             request_id,
             STATUS_READY,
-            state=output_data,
+            **output_data,
         )
         publish_ngfw_event(
             request_id=request_id,
             instance_id=instance_id,
             app_id=app_id,
             status=STATUS_READY,
+        )
+        # Auto-stop: In local dev, just update status (no real EC2 to stop)
+        logger.info("LOCAL DEV MODE: Setting NGFW status to stopped: request_id=%s", request_id)
+        update_instance_state(request_id, "stopped")
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_id,
+            app_id=app_id,
+            status="stopped",
         )
         return
 
@@ -1398,7 +1407,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         pass
 
     context = NGFWContext()
-    context.ec2_instance_id = output_data.get("instance_id")
+    context.ec2_instance_id = output_data.get("ec2_instance_id")
     context.management_ip = management_ip
     context.dataplane_ip = output_data.get("dataplane_ip")
     context.service_name = output_data.get("service_name")
@@ -1437,14 +1446,14 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     aws_executor = AWSExecutor()
     gwlb_plan = GWLBSetupPlan()
 
-    # Build context for GWLB setup - needs target_group_arn and instance_id (EC2)
-    ec2_instance_id = output_data.get("instance_id")
+    # Build context for GWLB setup - needs target_group_arn and ec2_instance_id
+    ec2_instance_id = output_data.get("ec2_instance_id")
     target_group_arn = output_data.get("target_group_arn")
 
     if not target_group_arn:
         raise RuntimeError("NGFW stack missing target_group_arn output")
     if not ec2_instance_id:
-        raise RuntimeError("NGFW stack missing instance_id output")
+        raise RuntimeError("NGFW stack missing ec2_instance_id output")
 
     # Execute GWLB setup steps directly via AWSExecutor
     gwlb_context = {
@@ -1463,7 +1472,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
 
     # Build state dict with all outputs
     state = {
-        "ec2_instance_id": output_data.get("instance_id"),
+        "ec2_instance_id": output_data.get("ec2_instance_id"),
         "management_ip": output_data.get("management_ip"),
         "dataplane_ip": output_data.get("dataplane_ip"),
         "service_name": output_data.get("service_name"),
@@ -1491,7 +1500,11 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     # Auto-stop NGFW after provisioning to save costs
     # NGFW will be started on-demand when ranges link to it
     logger.info("Auto-stopping NGFW after provisioning: request_id=%s", request_id)
-    run_ngfw_operation("stop", request_id)
+    try:
+        run_ngfw_operation("stop", request_id)
+        logger.info("Auto-stop completed successfully: request_id=%s", request_id)
+    except Exception:
+        logger.exception("Auto-stop FAILED: request_id=%s - NGFW remains running (cost impact)", request_id)
 
 
 def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:

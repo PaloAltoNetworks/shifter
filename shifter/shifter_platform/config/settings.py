@@ -300,6 +300,10 @@ PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
 AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
 AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
+AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
+
+# SNS Topic for publishing events (provisioner -> workers)
+SNS_RANGE_EVENTS_ARN = os.environ.get("SNS_RANGE_EVENTS_ARN", "")
 
 # Shifter Engine (ECS Fargate)
 PULUMI_ECS_CLUSTER_ARN = os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")

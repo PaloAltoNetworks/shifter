@@ -15,6 +15,8 @@ class DashboardManager {
         this.launchUrl = options.launchUrl;
         this.cancelUrl = options.cancelUrl;
         this.destroyUrl = options.destroyUrl;
+        this.pauseUrl = options.pauseUrl;
+        this.resumeUrl = options.resumeUrl;
         this.agentsUrl = options.agentsUrl;
         this.scenariosUrl = options.scenariosUrl;
         this.loginUrl = options.loginUrl || '/oidc/authenticate/';
@@ -179,6 +181,16 @@ class DashboardManager {
         }
         if (this.destroyPausedBtn) {
             this.destroyPausedBtn.addEventListener('click', () => this.destroyRange());
+        }
+
+        // Pause button
+        if (this.pauseBtn) {
+            this.pauseBtn.addEventListener('click', () => this.pauseRange());
+        }
+
+        // Resume button
+        if (this.resumeBtn) {
+            this.resumeBtn.addEventListener('click', () => this.resumeRange());
         }
 
         // Dismiss error button
@@ -421,7 +433,7 @@ class DashboardManager {
     }
 
     _isTransitionalState(status) {
-        return ['pending', 'provisioning', 'resuming'].includes(status);
+        return ['pending', 'provisioning', 'pausing', 'resuming'].includes(status);
     }
 
     _updateUI() {
@@ -455,6 +467,11 @@ class DashboardManager {
             case 'paused':
                 this.pausedRangeState.style.display = 'block';
                 this._updatePausedState();
+                break;
+
+            case 'pausing':
+                this.provisioningState.style.display = 'block';
+                this._updateProvisioningState('Pausing Range', 'Stopping instances...');
                 break;
 
             case 'resuming':
@@ -659,6 +676,68 @@ class DashboardManager {
             this._closeStatusSocket();
             this.currentRange = null;
             this._updateUI();
+
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    async pauseRange() {
+        if (!confirm('Are you sure you want to pause this range? Instances will be stopped.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(this.pauseUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': this.csrfToken,
+                },
+                body: JSON.stringify({ request_id: this.currentRange.request_id }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to pause range');
+            }
+
+            // Update local state to pausing and connect WebSocket for updates
+            this.currentRange.status = 'pausing';
+            this._updateUI();
+            this._connectStatusSocket(this.currentRange.request_id);
+
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    async resumeRange() {
+        if (!confirm('Are you sure you want to resume this range?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(this.resumeUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': this.csrfToken,
+                },
+                body: JSON.stringify({ request_id: this.currentRange.request_id }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to resume range');
+            }
+
+            // Update local state to resuming and connect WebSocket for updates
+            this.currentRange.status = 'resuming';
+            this._updateUI();
+            this._connectStatusSocket(this.currentRange.request_id);
 
         } catch (error) {
             alert(error.message);

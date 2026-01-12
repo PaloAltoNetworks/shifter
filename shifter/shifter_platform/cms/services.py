@@ -19,6 +19,8 @@ from cms.models import AgentConfig, RangeInstance
 from engine import cancel_range_by_request as engine_cancel_range_by_request
 from engine import create_range as engine_create_range
 from engine import destroy_range_by_request as engine_destroy_range_by_request
+from engine import pause_range as engine_pause_range
+from engine import resume_range as engine_resume_range
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.enums import ResourceStatus
 
@@ -1973,19 +1975,409 @@ def cancel_range_by_request_id(user: User, request_id: str) -> None:
 
 
 def pause_range(user: User, range_id: int) -> None:
-    """Pause range.
+    """Pause a running range.
 
-    Note: Deferred feature - not implemented in current scope.
+    Fetches RangeInstance, verifies ownership, updates CMS status to PAUSING,
+    then delegates to engine.services.pause_range.
+
+    Args:
+        user: User requesting pause
+        range_id: ID of the range to pause
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None, invalid type, or range_id is invalid type
+        ValueError: If user has no ID (unsaved) or range_id is invalid
+        CMSError: If range not found, not owned by user, or not in pausable state
     """
-    raise NotImplementedError("pause_range is not yet implemented")
+    # Input validation - user
+    if user is None:
+        logger.error("pause_range called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "pause_range called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if user.id is None:
+        logger.error("pause_range called with unsaved user (id=None)")
+        raise ValueError(USER_MUST_BE_SAVED)
+
+    # Input validation - range_id
+    if range_id is None:
+        logger.error(
+            "pause_range called with None range_id for user_id=%s",
+            user.id,
+        )
+        raise TypeError("range_id cannot be None")
+
+    if not isinstance(range_id, int):
+        logger.error(
+            "pause_range called with invalid range_id type: %s",
+            type(range_id).__name__,
+        )
+        msg = f"range_id must be an int, got {type(range_id).__name__}"
+        raise TypeError(msg)
+
+    if range_id < 0:
+        logger.error(
+            "pause_range called with negative range_id=%s for user_id=%s",
+            range_id,
+            user.id,
+        )
+        raise ValueError("range_id must be non-negative")
+
+    logger.debug(
+        "pause_range called for user_id=%s, range_id=%s",
+        user.id,
+        range_id,
+    )
+
+    # Fetch range instance directly and verify ownership
+    try:
+        instance = RangeInstance.objects.get(range_id=range_id)
+    except RangeInstance.DoesNotExist:
+        logger.warning(
+            "pause_range: range not found for user_id=%s, range_id=%s",
+            user.id,
+            range_id,
+        )
+        raise CMSError(f"Range {range_id} not found") from None
+
+    # Verify ownership
+    if instance.user_id != user.id:
+        logger.error(
+            "pause_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
+            range_id,
+            instance.user_id,
+            user.id,
+        )
+        raise CMSError(f"Range {range_id} not found")
+
+    try:
+        # Get request_id from request FK and call Engine
+        request_id = instance.request.request_id if instance.request else None
+        if request_id is None:
+            logger.error(
+                "pause_range: no request_id for range_id=%s, cannot pause",
+                range_id,
+            )
+            raise CMSError("Range has no associated request")
+
+        # Call engine - it will update DB status and trigger ECS task
+        if not engine_pause_range(request_id):
+            logger.warning(
+                "pause_range: engine returned False for range_id=%s",
+                range_id,
+            )
+            raise CMSError("Range cannot be paused in current state")
+
+        logger.info(
+            "pause_range completed: range_id=%s user_id=%s",
+            range_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in pause_range: user_id=%s range_id=%s",
+            user.id,
+            range_id,
+        )
+        raise
+
+
+def pause_range_by_request_id(user: User, request_id: str) -> None:
+    """Pause a running range by request_id.
+
+    Fetches RangeInstance by request_id, verifies ownership, then delegates
+    to engine.services.pause_range.
+
+    Args:
+        user: User requesting pause
+        request_id: UUID string of the request
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None or invalid type
+        CMSError: If range not found, not owned by user, or not in pausable state
+    """
+    # Input validation
+    if user is None:
+        logger.error("pause_range_by_request_id called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "pause_range_by_request_id called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if not request_id:
+        logger.error("pause_range_by_request_id called with empty request_id")
+        raise CMSError("request_id is required")
+
+    logger.debug(
+        "pause_range_by_request_id called: user_id=%s request_id=%s",
+        user.id,
+        request_id,
+    )
+
+    # Fetch range instance by request_id
+    instance = RangeInstance.objects.filter(
+        request__request_id=request_id,
+        user_id=user.id,
+    ).first()
+
+    if not instance:
+        logger.warning(
+            "pause_range_by_request_id: not found: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+        raise CMSError("Range not found")
+
+    # The filter guarantees instance.request exists
+    if instance.request is None:
+        raise CMSError("Range has no associated request")
+
+    try:
+        # Call engine - it will update DB status and trigger ECS task
+        if not engine_pause_range(instance.request.request_id):
+            logger.warning(
+                "pause_range_by_request_id: engine returned False for request_id=%s",
+                request_id,
+            )
+            raise CMSError("Range cannot be paused in current state")
+
+        logger.info(
+            "pause_range_by_request_id completed: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in pause_range_by_request_id: user_id=%s request_id=%s",
+            user.id,
+            request_id,
+        )
+        raise
 
 
 def resume_range(user: User, range_id: int) -> None:
-    """Resume range.
+    """Resume a paused range.
 
-    Note: Deferred feature - not implemented in current scope.
+    Fetches RangeInstance, verifies ownership, updates CMS status to RESUMING,
+    then delegates to engine.services.resume_range.
+
+    Args:
+        user: User requesting resume
+        range_id: ID of the range to resume
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None, invalid type, or range_id is invalid type
+        ValueError: If user has no ID (unsaved) or range_id is invalid
+        CMSError: If range not found, not owned by user, or not in resumable state
     """
-    raise NotImplementedError("resume_range is not yet implemented")
+    # Input validation - user
+    if user is None:
+        logger.error("resume_range called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "resume_range called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if user.id is None:
+        logger.error("resume_range called with unsaved user (id=None)")
+        raise ValueError(USER_MUST_BE_SAVED)
+
+    # Input validation - range_id
+    if range_id is None:
+        logger.error(
+            "resume_range called with None range_id for user_id=%s",
+            user.id,
+        )
+        raise TypeError("range_id cannot be None")
+
+    if not isinstance(range_id, int):
+        logger.error(
+            "resume_range called with invalid range_id type: %s",
+            type(range_id).__name__,
+        )
+        msg = f"range_id must be an int, got {type(range_id).__name__}"
+        raise TypeError(msg)
+
+    if range_id < 0:
+        logger.error(
+            "resume_range called with negative range_id=%s for user_id=%s",
+            range_id,
+            user.id,
+        )
+        raise ValueError("range_id must be non-negative")
+
+    logger.debug(
+        "resume_range called for user_id=%s, range_id=%s",
+        user.id,
+        range_id,
+    )
+
+    # Fetch range instance directly and verify ownership
+    try:
+        instance = RangeInstance.objects.get(range_id=range_id)
+    except RangeInstance.DoesNotExist:
+        logger.warning(
+            "resume_range: range not found for user_id=%s, range_id=%s",
+            user.id,
+            range_id,
+        )
+        raise CMSError(f"Range {range_id} not found") from None
+
+    # Verify ownership
+    if instance.user_id != user.id:
+        logger.error(
+            "resume_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
+            range_id,
+            instance.user_id,
+            user.id,
+        )
+        raise CMSError(f"Range {range_id} not found")
+
+    try:
+        # Get request_id from request FK and call Engine
+        request_id = instance.request.request_id if instance.request else None
+        if request_id is None:
+            logger.error(
+                "resume_range: no request_id for range_id=%s, cannot resume",
+                range_id,
+            )
+            raise CMSError("Range has no associated request")
+
+        # Call engine - it will update DB status and trigger ECS task
+        if not engine_resume_range(request_id):
+            logger.warning(
+                "resume_range: engine returned False for range_id=%s",
+                range_id,
+            )
+            raise CMSError("Range cannot be resumed in current state")
+
+        logger.info(
+            "resume_range completed: range_id=%s user_id=%s",
+            range_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in resume_range: user_id=%s range_id=%s",
+            user.id,
+            range_id,
+        )
+        raise
+
+
+def resume_range_by_request_id(user: User, request_id: str) -> None:
+    """Resume a paused range by request_id.
+
+    Fetches RangeInstance by request_id, verifies ownership, then delegates
+    to engine.services.resume_range.
+
+    Args:
+        user: User requesting resume
+        request_id: UUID string of the request
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None or invalid type
+        CMSError: If range not found, not owned by user, or not in resumable state
+    """
+    # Input validation
+    if user is None:
+        logger.error("resume_range_by_request_id called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "resume_range_by_request_id called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if not request_id:
+        logger.error("resume_range_by_request_id called with empty request_id")
+        raise CMSError("request_id is required")
+
+    logger.debug(
+        "resume_range_by_request_id called: user_id=%s request_id=%s",
+        user.id,
+        request_id,
+    )
+
+    # Fetch range instance by request_id
+    instance = RangeInstance.objects.filter(
+        request__request_id=request_id,
+        user_id=user.id,
+    ).first()
+
+    if not instance:
+        logger.warning(
+            "resume_range_by_request_id: not found: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+        raise CMSError("Range not found")
+
+    # The filter guarantees instance.request exists
+    if instance.request is None:
+        raise CMSError("Range has no associated request")
+
+    try:
+        # Call engine - it will update DB status and trigger ECS task
+        if not engine_resume_range(instance.request.request_id):
+            logger.warning(
+                "resume_range_by_request_id: engine returned False for request_id=%s",
+                request_id,
+            )
+            raise CMSError("Range cannot be resumed in current state")
+
+        logger.info(
+            "resume_range_by_request_id completed: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in resume_range_by_request_id: user_id=%s request_id=%s",
+            user.id,
+            request_id,
+        )
+        raise
 
 
 # =============================================================================

@@ -50,10 +50,24 @@ class TerminalManager {
      * Initialize both terminals
      */
     init() {
+        this.attachUuidsToPanes();
         this.createTerminals();
         this.setupDividerResize();
         this.setupWindowResize();
         this.connectWebSockets();
+    }
+
+    /**
+     * Attach instance UUIDs to terminal panes for reference by other components (e.g., RDP buttons)
+     */
+    attachUuidsToPanes() {
+        this.instances.forEach(inst => {
+            const paneId = inst.role === 'attacker' ? 'kali-pane' : 'victim-pane';
+            const pane = document.getElementById(paneId);
+            if (pane) {
+                pane.dataset.uuid = inst.uuid;
+            }
+        });
     }
 
     /**

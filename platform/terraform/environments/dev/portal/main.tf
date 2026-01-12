@@ -243,9 +243,12 @@ module "ssm" {
   ecr_repository_name = split("/", data.terraform_remote_state.foundation.outputs.portal_ecr_url)[1]
 
   # Secrets Manager ARNs
-  db_secret_arn      = module.rds.db_credentials_secret_arn
-  app_secret_arn     = aws_secretsmanager_secret.app.arn
-  cognito_secret_arn = module.cognito.cognito_secret_arn
+  db_secret_arn          = module.rds.db_credentials_secret_arn
+  app_secret_arn         = aws_secretsmanager_secret.app.arn
+  cognito_secret_arn     = module.cognito.cognito_secret_arn
+  guacamole_secret_arn   = module.guacamole.json_auth_secret_arn
+  guacamole_base_url     = "https://${var.domain_name}/guacamole"
+  guacamole_api_base_url = module.guacamole.guacamole_client_internal_url
 
   # Application configuration
   domain_name    = var.domain_name
@@ -287,6 +290,7 @@ module "ec2" {
     module.rds.db_credentials_secret_arn,
     aws_secretsmanager_secret.app.arn,
     module.cognito.cognito_secret_arn,
+    module.guacamole.json_auth_secret_arn,
   ]
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port
@@ -491,6 +495,73 @@ module "pulumi_provisioner" {
 }
 
 # ------------------------------------------------------------------------------
+# Guacamole (Remote Desktop Gateway)
+# ------------------------------------------------------------------------------
+
+module "guacamole" {
+  source = "../../../modules/guacamole"
+
+  name_prefix = local.name_prefix
+  environment = var.environment
+  tags        = var.tags
+
+  # Networking (Portal VPC)
+  vpc_id                   = module.vpc.vpc_id
+  private_subnet_ids       = module.vpc.private_subnet_ids
+  range_vpc_cidr           = data.terraform_remote_state.range.outputs.vpc_cidr
+  portal_security_group_id = module.ec2.security_group_id
+
+  # Shared ALB (from Portal ALB module)
+  alb_listener_arn      = module.alb.https_listener_arn
+  alb_security_group_id = module.alb.security_group_id
+
+  # ECR (from foundation remote state)
+  guacd_ecr_repository_url            = data.terraform_remote_state.foundation.outputs.guacd_ecr_url
+  guacd_ecr_repository_arn            = data.terraform_remote_state.foundation.outputs.guacd_ecr_arn
+  guacamole_client_ecr_repository_url = data.terraform_remote_state.foundation.outputs.guacamole_client_ecr_url
+  guacamole_client_ecr_repository_arn = data.terraform_remote_state.foundation.outputs.guacamole_client_ecr_arn
+
+  # Logging (shared with portal)
+  log_retention_days = var.log_retention_days
+
+  # Container configuration
+  guacd_image_tag                = var.guacd_image_tag
+  guacamole_client_image_tag     = var.guacamole_client_image_tag
+  guacd_cpu                      = var.guacd_cpu
+  guacd_memory                   = var.guacd_memory
+  guacamole_client_cpu           = var.guacamole_client_cpu
+  guacamole_client_memory        = var.guacamole_client_memory
+  guacd_desired_count            = var.guacd_desired_count
+  guacamole_client_desired_count = var.guacamole_client_desired_count
+
+  # Database configuration
+  db_instance_class        = var.guacamole_db_instance_class
+  db_allocated_storage     = var.guacamole_db_allocated_storage
+  db_max_allocated_storage = var.guacamole_db_max_allocated_storage
+  db_engine_version        = var.guacamole_db_engine_version
+  db_multi_az              = var.guacamole_db_multi_az
+  db_backup_retention_days = var.guacamole_db_backup_retention_days
+  db_deletion_protection   = var.guacamole_db_deletion_protection
+  db_skip_final_snapshot   = var.guacamole_db_skip_final_snapshot
+
+  # Autoscaling
+  enable_autoscaling       = var.guacamole_enable_autoscaling
+  autoscaling_min_capacity = var.guacamole_autoscaling_min_capacity
+  autoscaling_max_capacity = var.guacamole_autoscaling_max_capacity
+  autoscaling_cpu_target   = var.guacamole_autoscaling_cpu_target
+
+  # Secrets
+  secrets_recovery_window_days = var.guacamole_secrets_recovery_window_days
+
+  # OIDC/Cognito authentication
+  enable_oidc          = var.guacamole_enable_oidc
+  cognito_user_pool_id = module.cognito.user_pool_id
+  cognito_domain       = module.cognito.cognito_domain
+  aws_region           = var.aws_region
+  domain_name          = var.domain_name
+}
+
+# ------------------------------------------------------------------------------
 # Log Aggregation (S3, SQS, Firehose for internal observability)
 # Note: XDR CloudTrail integration is managed via CloudFormation, not Terraform
 # ------------------------------------------------------------------------------
@@ -517,6 +588,8 @@ module "log_aggregation" {
     var.enable_rds_log_exports ? module.rds.log_group_names : [],
     # Pulumi provisioner logs
     module.pulumi_provisioner.log_group_names,
+    # Guacamole logs
+    module.guacamole.log_group_names,
   ) : []
 
   tags = var.tags

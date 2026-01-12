@@ -505,3 +505,79 @@ class TestConnectTerminal:
         ):
             result = connect_terminal(mock_user, 42, "win-uuid-123")
             assert result.username == "Administrator"
+
+    # -------------------------------------------------------------------------
+    # Persistent tmux sessions (session_id)
+    # -------------------------------------------------------------------------
+
+    def test_sets_session_id_for_kali_instances(self):
+        """Service sets session_id for Kali instances (tmux persistent session)."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "kali-uuid-789",
+            "role": "attacker",
+            "os_type": "kali",
+            "private_ip": "10.1.1.10",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "kali-uuid-789")
+            assert result.session_id == "kali-uuid-789"
+
+    def test_sets_session_id_for_ubuntu_instances(self):
+        """Service sets session_id for Ubuntu instances (tmux persistent session)."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "ubuntu-uuid-789",
+            "role": "victim",
+            "os_type": "ubuntu",
+            "private_ip": "10.1.1.20",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "ubuntu-uuid-789")
+            assert result.session_id == "ubuntu-uuid-789"
+
+    def test_no_session_id_for_windows_instances(self):
+        """Service does NOT set session_id for Windows instances (no tmux)."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "windows-uuid-789",
+            "role": "victim",
+            "os_type": "windows",
+            "private_ip": "10.1.1.60",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "get", return_value=mock_range),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, 42, "windows-uuid-789")
+            assert result.session_id is None

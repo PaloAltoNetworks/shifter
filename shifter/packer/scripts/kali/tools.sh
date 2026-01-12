@@ -20,6 +20,7 @@ apt-get install -y \
   build-essential \
   git \
   curl \
-  wget
+  wget \
+  tmux
 
 echo "=== Tools setup complete ==="

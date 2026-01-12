@@ -449,6 +449,78 @@ def resume_range(range_id: int) -> None:
     raise NotImplementedError
 
 
+def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
+    """Get connection info for RDP access to a range instance.
+
+    Args:
+        user: Authenticated user requesting connection
+        instance_uuid: UUID of the instance to connect to
+
+    Returns:
+        Dict with keys: private_ip, os_type, connection_name
+
+    Raises:
+        ValueError: If no active range, range not READY, instance not found,
+            or instance has no GUI (ubuntu)
+        PermissionError: If user doesn't own the range
+    """
+    from engine.models import Range
+
+    if user is None:
+        raise ValueError("user is required")
+    if not instance_uuid:
+        raise ValueError("instance_uuid is required")
+
+    logger.debug("get_rdp_connection_info: user=%s instance_uuid=%s", user.id, instance_uuid)
+
+    # Get user's active range
+    range_obj = Range.get_active_for_user(user)
+    if not range_obj:
+        raise ValueError("No active range found")
+
+    # Verify range is ready
+    if range_obj.status != Range.Status.READY:
+        raise ValueError(f"Range is not ready (status: {range_obj.status})")
+
+    # Find instance by UUID
+    instance = range_obj.get_instance_by_uuid(instance_uuid)
+    if not instance:
+        raise ValueError(f"Instance {instance_uuid} not found in range")
+
+    # Check if instance has GUI
+    os_type = instance.get("os_type", "")
+    if os_type not in ("kali", "windows"):
+        raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
+
+    # Get IP
+    private_ip = instance.get("private_ip")
+    if not private_ip:
+        raise ValueError(f"Instance {instance_uuid} has no IP address")
+
+    # Build connection name from role and range ID
+    role = instance.get("role", "instance")
+    connection_name = f"{role}-{range_obj.id}"
+
+    # Get RDP credentials based on OS type
+    # TODO: Move instance default passwords to CMS (#542)
+    rdp_username = None
+    rdp_password = None
+    if os_type == "windows":
+        rdp_username = "Administrator"
+        rdp_password = "CortexSavesTheDay!"  # nosec B105 - demo environment
+    elif os_type == "kali":
+        rdp_username = "kali"
+        rdp_password = "kali"  # nosec B105 - Kali OS default
+
+    return {
+        "private_ip": private_ip,
+        "os_type": os_type,
+        "connection_name": connection_name,
+        "rdp_username": rdp_username,
+        "rdp_password": rdp_password,
+    }
+
+
 def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnection:
     """Get SSH connection to instance.
 
@@ -529,10 +601,17 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     else:
         username = "ubuntu"  # Default for ubuntu and other Linux distros
 
+    # Use tmux for persistent sessions on Linux instances
+    # Windows doesn't have tmux, so skip session_id for Windows
+    session_id = None
+    if os_type != "windows":
+        session_id = instance_uuid
+
     return SSHConnection(
         host=host,
         username=username,
         private_key=ssh_key,
+        session_id=session_id,
     )
 
 

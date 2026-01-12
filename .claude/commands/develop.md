@@ -21,3 +21,8 @@ The following are important to the user:
 - Defensive programming patterns
 - Exception handling
 - No gigantic files or functions; keep them small and focused. Use modules, classes, and helper functions to keep code organized.
+
+Common mistakes to avoid:
+- Forgetting db grants for new tables, columns, or db consumers
+- Function signatures that are not compatible with the existing codebase
+- Not checked the django shared/ library for existing patterns and conventions

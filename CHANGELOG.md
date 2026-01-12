@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sticky sesesions on Linux terminals: keep history, scrollback, etc when reconnecting
 - tmux now used for Terminal UI sessions
 - RDP copy/paste not working
+- Packer does not clean up EC2 instance after build
 
 ## [0.10.6] - 2025-01-09
 

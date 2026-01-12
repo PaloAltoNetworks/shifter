@@ -147,16 +147,6 @@ output "ngfw_subnet_cidr" {
   value       = module.vpc.ngfw_subnet_cidr
 }
 
-output "ngfw_mgmt_security_group_id" {
-  description = "ID of the NGFW management security group (null if NGFW infrastructure disabled)"
-  value       = module.vpc.ngfw_mgmt_security_group_id
-}
-
-output "ngfw_data_security_group_id" {
-  description = "ID of the NGFW dataplane security group (null if NGFW infrastructure disabled)"
-  value       = module.vpc.ngfw_data_security_group_id
-}
-
 output "ngfw_instance_role_arn" {
   description = "ARN of the IAM role for NGFW instances (null if NGFW infrastructure disabled)"
   value       = module.vpc.ngfw_instance_role_arn

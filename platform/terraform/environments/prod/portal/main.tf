@@ -484,6 +484,7 @@ module "pulumi_provisioner" {
   # S3
   agent_s3_bucket     = module.s3.bucket_name
   agent_s3_bucket_arn = module.s3.bucket_arn
+  s3_endpoint_id      = data.terraform_remote_state.range.outputs.s3_endpoint_id
 
   # NGFW (VM-Series) - from Range VPC outputs
   ngfw_mgmt_security_group_id = data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id : ""

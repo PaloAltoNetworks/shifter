@@ -895,6 +895,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "windowsAmiId": os.environ.get("WINDOWS_AMI_ID", ""),
         "dcAmiId": os.environ.get("DC_AMI_ID", ""),
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
+        "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
     }
 
     for key, value in config_values.items():
@@ -1149,9 +1150,11 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
         plan = plan_class()
 
         # Build context dict with EC2 instance ID and any additional kwargs
-        # Note: Plans use "instance_id" for the EC2 instance ID parameter
+        # NOTE ON NAMING: Plans use "instance_id" key for the AWS EC2 Instance ID
+        # (e.g., "i-099ee928142d5f092"), NOT the Django Instance UUID.
+        # This is a legacy naming convention that should eventually be renamed.
         context = {
-            "instance_id": ec2_instance_id,
+            "instance_id": ec2_instance_id,  # AWS EC2 Instance ID (e.g., "i-...")
             **kwargs,
         }
 
@@ -1206,6 +1209,8 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
 
     # Get NGFW data from database (needed for correlation IDs and credentials)
     ngfw_data = get_ngfw_data_by_request_id(request_id)
+    # NOTE: "instance_id" here is the Django Instance UUID (e.g., "5eb96281-a4a8-...")
+    # NOT the AWS EC2 Instance ID. Variable named for event publishing compatibility.
     instance_id = ngfw_data["instance_id"]
     app_id = ngfw_data["app_id"]
     app_spec = ngfw_data.get("app_spec", {})
@@ -1310,7 +1315,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
 
     Args:
         request_id: UUID string of the Request.
-        instance_id: UUID string of the Instance.
+        instance_id: Django Instance UUID (e.g., "5eb96281-a4a8-..."), NOT AWS EC2 ID.
         app_id: UUID string of the App (NGFW).
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
@@ -1419,6 +1424,8 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     from plans.ngfw_provision import NGFWProvisionPlan
 
     provision_plan = NGFWProvisionPlan()
+    # NOTE: SetupOrchestrator.orchestrate() uses "instance_id" as the SSH target.
+    # For SSH-based plans, this is the management IP address, not a UUID or EC2 ID.
     provision_result = orchestrator.orchestrate(
         instance_id=management_ip,
         plan=provision_plan,
@@ -1512,7 +1519,7 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
 
     Args:
         request_id: UUID string of the Request.
-        instance_id: UUID string of the Instance.
+        instance_id: Django Instance UUID (e.g., "5eb96281-a4a8-..."), NOT AWS EC2 ID.
         app_id: UUID string of the App (NGFW).
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
@@ -1557,6 +1564,7 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
             context = NGFWContext()
             context.management_ip = management_ip
 
+            # NOTE: SetupOrchestrator uses "instance_id" as the SSH target (IP address here).
             deprovision_result = orchestrator.orchestrate(
                 instance_id=management_ip,
                 plan=deprovision_plan,

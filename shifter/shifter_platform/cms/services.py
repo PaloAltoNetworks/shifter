@@ -1228,6 +1228,7 @@ def get_active_range(user: User) -> RangeContext | None:
             instance_contexts = [
                 InstanceContext(
                     uuid=spec.get("uuid"),
+                    name=spec.get("name"),
                     role=spec["role"],
                     os_type=spec["os_type"],
                     join_domain=spec.get("join_domain", False),
@@ -1331,6 +1332,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
         instance_contexts = [
             InstanceContext(
                 uuid=spec.get("uuid"),
+                name=spec.get("name"),
                 role=spec["role"],
                 os_type=spec["os_type"],
                 join_domain=spec.get("join_domain", False),
@@ -1534,6 +1536,7 @@ def create_range(
         instance_contexts = [
             InstanceContext(
                 uuid=spec.uuid,
+                name=spec.name,
                 role=spec.role,
                 os_type=spec.os_type,
                 join_domain=spec.join_domain,

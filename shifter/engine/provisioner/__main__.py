@@ -80,9 +80,11 @@ def _provision_ngfw() -> None:
     logger.info("_provision_ngfw: UserNGFWStack created for request_id=%s", config.request_id)
 
     # Export outputs for main.py to read after pulumi up
-    pulumi.export("instance_id", ngfw_stack.instance_id)
+    # Keys must match what main.py reads via output_data.get()
+    pulumi.export("ec2_instance_id", ngfw_stack.ec2_instance_id)
     pulumi.export("management_ip", ngfw_stack.management_ip)
     pulumi.export("dataplane_ip", ngfw_stack.dataplane_ip)
+    pulumi.export("ssh_key_secret_arn", ngfw_stack.ssh_key_secret_arn)
     pulumi.export("gwlb_arn", ngfw_stack.gwlb_arn)
     pulumi.export("target_group_arn", ngfw_stack.target_group_arn)
     pulumi.export("service_name", ngfw_stack.service_name)

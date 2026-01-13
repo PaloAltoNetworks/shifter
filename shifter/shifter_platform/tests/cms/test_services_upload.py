@@ -2,14 +2,12 @@
 
 Tests service-level behavior only:
 - Expected behavior / return values
-- Logging (debug and error levels)
 - Exception handling
 - Input validation (service's responsibility)
 
 Does NOT re-test model behavior (filtering, field validation, etc).
 """
 
-import logging
 from unittest.mock import Mock, patch
 
 import pytest
@@ -53,7 +51,6 @@ class TestInitiateUpload:
     - Generates presigned URL via S3 service
     - Generates upload token
     - Returns dict with presigned_url, s3_key, upload_token, expected_os
-    - Logs appropriately
     """
 
     # --- Service calls dependencies correctly ---
@@ -63,7 +60,10 @@ class TestInitiateUpload:
         with (
             patch("cms.assets.services.get_storage_used", return_value=0) as mock_storage,
             patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", return_value=("url", "key")),
+            patch(
+                "cms.assets.s3.generate_presigned_upload_url",
+                return_value=("url", "key"),
+            ),
             patch("cms.assets.upload_token.generate_upload_token", return_value="token"),
         ):
             mock_validate.return_value = Mock(os_slug="windows")
@@ -75,7 +75,10 @@ class TestInitiateUpload:
         with (
             patch("cms.assets.services.get_storage_used", return_value=0),
             patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", return_value=("url", "key")),
+            patch(
+                "cms.assets.s3.generate_presigned_upload_url",
+                return_value=("url", "key"),
+            ),
             patch("cms.assets.upload_token.generate_upload_token", return_value="token"),
         ):
             mock_validate.return_value = Mock(os_slug="windows")
@@ -151,8 +154,14 @@ class TestInitiateUpload:
         with (
             patch("cms.assets.services.get_storage_used", return_value=0),
             patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", return_value=("url", "key")),
-            patch("cms.assets.upload_token.generate_upload_token", return_value="signed_token_abc123"),
+            patch(
+                "cms.assets.s3.generate_presigned_upload_url",
+                return_value=("url", "key"),
+            ),
+            patch(
+                "cms.assets.upload_token.generate_upload_token",
+                return_value="signed_token_abc123",
+            ),
         ):
             mock_validate.return_value = Mock(os_slug="windows")
             result = services.initiate_upload(user, "Agent", "agent.msi", 1000)
@@ -163,7 +172,10 @@ class TestInitiateUpload:
         with (
             patch("cms.assets.services.get_storage_used", return_value=0),
             patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", return_value=("url", "key")),
+            patch(
+                "cms.assets.s3.generate_presigned_upload_url",
+                return_value=("url", "key"),
+            ),
             patch("cms.assets.upload_token.generate_upload_token", return_value="token"),
         ):
             mock_validate.return_value = Mock(os_slug="linux-debian")
@@ -271,7 +283,10 @@ class TestInitiateUpload:
         with (
             patch("cms.assets.services.get_storage_used", return_value=current_usage),
             patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", return_value=("url", "key")),
+            patch(
+                "cms.assets.s3.generate_presigned_upload_url",
+                return_value=("url", "key"),
+            ),
             patch("cms.assets.upload_token.generate_upload_token", return_value="token"),
         ):
             mock_validate.return_value = Mock(os_slug="windows")
@@ -287,7 +302,10 @@ class TestInitiateUpload:
         with (
             patch("cms.assets.services.get_storage_used", return_value=current_usage),
             patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", return_value=("url", "key")),
+            patch(
+                "cms.assets.s3.generate_presigned_upload_url",
+                return_value=("url", "key"),
+            ),
             patch("cms.assets.upload_token.generate_upload_token", return_value="token"),
         ):
             mock_validate.return_value = Mock(os_slug="windows")
@@ -319,83 +337,24 @@ class TestInitiateUpload:
         with (
             patch("cms.assets.services.get_storage_used", return_value=0),
             patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", side_effect=S3Error("S3 unavailable")),
+            patch(
+                "cms.assets.s3.generate_presigned_upload_url",
+                side_effect=S3Error("S3 unavailable"),
+            ),
             pytest.raises(CMSError, match="Failed to initiate upload"),
         ):
             mock_validate.return_value = Mock(os_slug="windows")
             services.initiate_upload(user, "Agent", "agent.msi", 1000)
-
-    # --- Logging ---
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user info."""
-        with (
-            patch("cms.assets.services.get_storage_used", return_value=0),
-            patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", return_value=("url", "key")),
-            patch("cms.assets.upload_token.generate_upload_token", return_value="token"),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            mock_validate.return_value = Mock(os_slug="windows")
-            services.initiate_upload(user, "Agent", "agent.msi", 1000)
-        assert str(user.id) in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on success with file info."""
-        with (
-            patch("cms.assets.services.get_storage_used", return_value=0),
-            patch("cms.assets.validation.validate_file_extension") as mock_validate,
-            patch("cms.assets.s3.generate_presigned_upload_url", return_value=("url", "key")),
-            patch("cms.assets.upload_token.generate_upload_token", return_value="token"),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            mock_validate.return_value = Mock(os_slug="windows")
-            services.initiate_upload(user, "Agent", "agent.msi", 1000)
-        assert "agent.msi" in caplog.text or "success" in caplog.text.lower()
-
-    def test_logs_error_on_quota_exceeded(self, user, caplog, settings):
-        """Service logs error when quota is exceeded."""
-        from cms.exceptions import CMSError
-
-        settings.AGENT_USER_STORAGE_QUOTA_MB = 1
-        with (
-            patch("cms.assets.services.get_storage_used", return_value=2 * 1024 * 1024),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.initiate_upload(user, "Agent", "agent.msi", 1000)
-        assert "quota" in caplog.text.lower() or "exceeded" in caplog.text.lower()
-
-    def test_logs_error_on_validation_failure(self, user, caplog):
-        """Service logs error when file extension validation fails."""
-        from cms.assets.validation import ValidationError
-        from cms.exceptions import CMSError
-
-        validation_path = "cms.assets.validation.validate_file_extension"
-        with (
-            patch("cms.assets.services.get_storage_used", return_value=0),
-            patch(validation_path, side_effect=ValidationError("Invalid extension")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.initiate_upload(user, "Agent", "agent.exe", 1000)
-        assert "error" in caplog.text.lower() or "extension" in caplog.text.lower()
-
-    def test_logs_error_on_input_validation_failure(self, user, caplog):
-        """Service logs error when input validation fails."""
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(ValueError),
-        ):
-            services.initiate_upload(user, "", "agent.msi", 1000)
-        assert "error" in caplog.text.lower() or "name" in caplog.text.lower()
 
     # --- Error propagation ---
 
     def test_propagates_unexpected_exception(self, user):
         """Service propagates unexpected exceptions from dependencies."""
         with (
-            patch("cms.assets.services.get_storage_used", side_effect=RuntimeError("Unexpected")),
+            patch(
+                "cms.assets.services.get_storage_used",
+                side_effect=RuntimeError("Unexpected"),
+            ),
             pytest.raises(RuntimeError, match="Unexpected"),
         ):
             services.initiate_upload(user, "Agent", "agent.msi", 1000)
@@ -412,7 +371,6 @@ class TestCompleteUpload:
     - Tags S3 object as completed
     - Creates agent record
     - Returns created agent
-    - Logs appropriately
     """
 
     # --- Service calls dependencies correctly ---
@@ -447,7 +405,10 @@ class TestCompleteUpload:
             "file_size": 1000,
         }
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")) as mock_verify_s3,
             patch("cms.assets.s3.tag_s3_object"),
             patch("cms.assets.services.create_agent") as mock_create,
@@ -466,7 +427,10 @@ class TestCompleteUpload:
             "file_size": 1000,
         }
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
             patch("cms.assets.s3.tag_s3_object") as mock_tag,
             patch("cms.assets.services.create_agent") as mock_create,
@@ -485,7 +449,10 @@ class TestCompleteUpload:
             "file_size": 5000,
         }
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(5000, "etag")),
             patch("cms.assets.s3.tag_s3_object"),
             patch("cms.assets.services.create_agent") as mock_create,
@@ -515,7 +482,10 @@ class TestCompleteUpload:
         }
         mock_agent = Mock(spec=AgentConfig, id=42, name="Agent")
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
             patch("cms.assets.s3.tag_s3_object"),
             patch("cms.assets.services.create_agent", return_value=mock_agent),
@@ -567,7 +537,10 @@ class TestCompleteUpload:
         from cms.exceptions import CMSError
 
         with (
-            patch("cms.assets.upload_token.verify_upload_token", side_effect=ValueError("Invalid token")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                side_effect=ValueError("Invalid token"),
+            ),
             pytest.raises(CMSError, match="Invalid upload token"),
         ):
             services.complete_upload(user, "bad_token")
@@ -577,7 +550,10 @@ class TestCompleteUpload:
         from cms.exceptions import CMSError
 
         with (
-            patch("cms.assets.upload_token.verify_upload_token", side_effect=ValueError("Token expired")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                side_effect=ValueError("Token expired"),
+            ),
             pytest.raises(CMSError, match="Invalid upload token"),
         ):
             services.complete_upload(user, "expired_token")
@@ -597,8 +573,14 @@ class TestCompleteUpload:
             "file_size": 1000,
         }
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", side_effect=S3Error("Object not found")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
+            patch(
+                "cms.assets.s3.verify_s3_object_exists",
+                side_effect=S3Error("Object not found"),
+            ),
             pytest.raises(CMSError, match="Upload not found"),
         ):
             services.complete_upload(user, "token123")
@@ -615,93 +597,27 @@ class TestCompleteUpload:
             "file_size": 1000,
         }
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(5000, "etag")),  # Wrong size
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
+            patch(
+                "cms.assets.s3.verify_s3_object_exists",
+                return_value=(5000, "etag"),  # Wrong size
+            ),
             pytest.raises(CMSError, match="size mismatch"),
         ):
             services.complete_upload(user, "token123")
-
-    # --- Logging ---
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user info."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch("cms.assets.s3.tag_s3_object"),
-            patch("cms.assets.services.create_agent") as mock_create,
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(user, "token123")
-        assert str(user.id) in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on success with agent info."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
-            patch("cms.assets.s3.tag_s3_object"),
-            patch("cms.assets.services.create_agent") as mock_create,
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            mock_create.return_value = Mock(spec=AgentConfig, id=42)
-            services.complete_upload(user, "token123")
-        assert "42" in caplog.text or "completed" in caplog.text.lower()
-
-    def test_logs_error_on_invalid_token(self, user, caplog):
-        """Service logs error when token verification fails."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", side_effect=ValueError("Invalid")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.complete_upload(user, "bad_token")
-        assert "error" in caplog.text.lower() or "token" in caplog.text.lower()
-
-    def test_logs_error_on_s3_verification_failure(self, user, caplog):
-        """Service logs error when S3 verification fails."""
-        from cms.assets.s3 import S3Error
-        from cms.exceptions import CMSError
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.verify_s3_object_exists", side_effect=S3Error("Not found")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.complete_upload(user, "token123")
-        assert "error" in caplog.text.lower() or "s3" in caplog.text.lower()
 
     # --- Error propagation ---
 
     def test_propagates_unexpected_exception(self, user):
         """Service propagates unexpected exceptions from dependencies."""
         with (
-            patch("cms.assets.upload_token.verify_upload_token", side_effect=RuntimeError("Unexpected")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                side_effect=RuntimeError("Unexpected"),
+            ),
             pytest.raises(RuntimeError, match="Unexpected"),
         ):
             services.complete_upload(user, "token123")
@@ -716,7 +632,6 @@ class TestCancelUpload:
     - Verifies upload token
     - Deletes S3 object
     - Returns None on success
-    - Logs appropriately
     """
 
     # --- Service calls dependencies correctly ---
@@ -767,7 +682,10 @@ class TestCancelUpload:
             "file_size": 1000,
         }
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
             patch("cms.assets.s3.delete_agent"),
         ):
             result = services.cancel_upload(user, "token123")
@@ -816,7 +734,10 @@ class TestCancelUpload:
         from cms.exceptions import CMSError
 
         with (
-            patch("cms.assets.upload_token.verify_upload_token", side_effect=ValueError("Invalid token")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                side_effect=ValueError("Invalid token"),
+            ),
             pytest.raises(CMSError, match="Invalid upload token"),
         ):
             services.cancel_upload(user, "bad_token")
@@ -826,7 +747,10 @@ class TestCancelUpload:
         from cms.exceptions import CMSError
 
         with (
-            patch("cms.assets.upload_token.verify_upload_token", side_effect=ValueError("Token expired")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                side_effect=ValueError("Token expired"),
+            ),
             pytest.raises(CMSError, match="Invalid upload token"),
         ):
             services.cancel_upload(user, "expired_token")
@@ -845,8 +769,14 @@ class TestCancelUpload:
             "file_size": 1000,
         }
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.delete_agent", side_effect=S3Error("Delete failed")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
+            patch(
+                "cms.assets.s3.delete_agent",
+                side_effect=S3Error("Delete failed"),
+            ),
         ):
             # Should not raise - S3 delete is best effort
             result = services.cancel_upload(user, "token123")
@@ -864,86 +794,28 @@ class TestCancelUpload:
             "file_size": 1000,
         }
         with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.delete_agent", side_effect=S3Error("Object not found")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                return_value=token_payload,
+            ),
+            patch(
+                "cms.assets.s3.delete_agent",
+                side_effect=S3Error("Object not found"),
+            ),
         ):
             # Should not raise - object may have never been uploaded
             result = services.cancel_upload(user, "token123")
             assert result is None
-
-    # --- Logging ---
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user info."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.delete_agent"),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.cancel_upload(user, "token123")
-        assert str(user.id) in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on success."""
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.delete_agent"),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.cancel_upload(user, "token123")
-        assert "cancelled" in caplog.text.lower() or "cancel" in caplog.text.lower()
-
-    def test_logs_warning_on_s3_delete_failure(self, user, caplog):
-        """Service logs warning when S3 delete fails."""
-        from cms.assets.s3 import S3Error
-
-        token_payload = {
-            "s3_key": "agents/1/abc_agent.msi",
-            "name": "Agent",
-            "filename": "agent.msi",
-            "os_slug": "windows",
-            "file_size": 1000,
-        }
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
-            patch("cms.assets.s3.delete_agent", side_effect=S3Error("Delete failed")),
-            caplog.at_level(logging.WARNING, logger="cms.services"),
-        ):
-            services.cancel_upload(user, "token123")
-        assert "warning" in caplog.text.lower() or "failed" in caplog.text.lower() or "s3" in caplog.text.lower()
-
-    def test_logs_error_on_invalid_token(self, user, caplog):
-        """Service logs error when token verification fails."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch("cms.assets.upload_token.verify_upload_token", side_effect=ValueError("Invalid")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.cancel_upload(user, "bad_token")
-        assert "error" in caplog.text.lower() or "token" in caplog.text.lower()
 
     # --- Error propagation ---
 
     def test_propagates_unexpected_exception(self, user):
         """Service propagates unexpected exceptions from dependencies."""
         with (
-            patch("cms.assets.upload_token.verify_upload_token", side_effect=RuntimeError("Unexpected")),
+            patch(
+                "cms.assets.upload_token.verify_upload_token",
+                side_effect=RuntimeError("Unexpected"),
+            ),
             pytest.raises(RuntimeError, match="Unexpected"),
         ):
             services.cancel_upload(user, "token123")

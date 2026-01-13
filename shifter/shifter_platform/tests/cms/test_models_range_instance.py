@@ -112,16 +112,17 @@ class TestRangeInstanceModel:
         )
         assert ri.created_at is not None
 
-    def test_range_id_required(self, db):
-        """RangeInstance requires a range_id."""
+    def test_range_id_is_optional(self, db):
+        """RangeInstance allows range_id to be None (for Request-based pattern)."""
         from cms.models import RangeInstance
 
-        with pytest.raises(IntegrityError):
-            RangeInstance.objects.create(
-                range_id=None,
-                scenario_id="basic",
-                user_id=1,
-            )
+        ri = RangeInstance.objects.create(
+            range_id=None,
+            scenario_id="basic",
+            user_id=1,
+        )
+        assert ri.id is not None
+        assert ri.range_id is None
 
     def test_scenario_id_required(self, db):
         """RangeInstance requires a scenario_id."""

@@ -1,0 +1,11 @@
+encryptionsalt: v1:M0L1qCvnh3Q=:v1:pVQx9EVbr11TEsaE:9Smx8aPjWDmj7/ABInSlCZQ7kpTaTg==
+config:
+  shifter-engine:authcode: TEST-AUTH-CODE
+  shifter-engine:environment: dev
+  shifter-engine:instanceUuid: 22222222-2222-2222-2222-222222222222
+  shifter-engine:ngfwInstanceType: m5.xlarge
+  shifter-engine:requestId: 11111111-1111-1111-1111-111111111111
+  shifter-engine:scmFolderName: test-folder
+  shifter-engine:scmPinId: test-pin-id
+  shifter-engine:scmPinValue: test-pin-value
+  shifter-engine:userId: "1"

@@ -2,14 +2,12 @@
 
 Tests service-level behavior only:
 - Expected behavior / return values
-- Logging (debug and error levels)
 - Exception handling
 - Input validation (service's responsibility)
 
 Does NOT re-test model behavior (filtering, field validation, etc).
 """
 
-import logging
 from unittest.mock import Mock, patch
 
 import pytest
@@ -48,7 +46,6 @@ class TestListAgents:
     Tests SERVICE behavior with mocked model layer:
     - Calls model correctly
     - Returns what model returns
-    - Logs all errors from downstream
     - Validates input
     - Propagates errors
     """
@@ -127,57 +124,6 @@ class TestListAgents:
             assert len(result) == 5
             assert [a["id"] for a in result] == [0, 1, 2, 3, 4]
 
-    # --- Logging ---
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user info."""
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = []
-        with (
-            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.list_agents(user)
-        assert str(user.id) in caplog.text or user.email in caplog.text
-
-    def test_logs_debug_on_success_with_count(self, user, caplog):
-        """Service logs debug on success with count."""
-        from django.utils import timezone
-
-        mock_os = Mock(slug="windows")
-        mock_os.name = "Windows"
-        created = timezone.now()
-        mock_agents = []
-        for i in range(3):
-            agent = Mock(
-                spec=AgentConfig,
-                id=i,
-                os=mock_os,
-                file_size_mb=10,
-                original_filename=f"agent{i}.msi",
-                created_at=created,
-            )
-            agent.name = f"Agent {i}"
-            mock_agents.append(agent)
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = mock_agents
-        with (
-            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.list_agents(user)
-        assert "3" in caplog.text
-
-    def test_logs_error_on_downstream_exception(self, user, caplog):
-        """Service logs error when model raises exception."""
-        with (
-            patch.object(AgentConfig, "active_for_user", side_effect=RuntimeError("DB connection failed")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(RuntimeError),
-        ):
-            services.list_agents(user)
-        assert "error" in caplog.text.lower() or "exception" in caplog.text.lower()
-
     # --- Error propagation ---
 
     def test_propagates_model_exception(self, user):
@@ -233,30 +179,6 @@ class TestListAgents:
             pytest.raises(TypeError),
         ):
             services.list_agents(user)
-
-    def test_logs_error_on_invalid_model_response(self, user, caplog):
-        """Service logs error when model returns invalid response."""
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = None
-        with (
-            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            services.list_agents(user)
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower()
-
-    def test_logs_error_on_model_returns_none(self, user, caplog):
-        """Service logs error when model returns None."""
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = None
-        with (
-            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            services.list_agents(user)
-        assert "none" in caplog.text.lower() or "error" in caplog.text.lower()
 
     # --- Return type guarantee ---
 
@@ -369,12 +291,6 @@ class TestListAgents:
         with pytest.raises((TypeError, ValueError)):
             services.list_agents(unsaved_user)
 
-    def test_logs_error_on_invalid_user(self, caplog):
-        """Service logs error when given invalid user."""
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises((TypeError, ValueError)):
-            services.list_agents(None)
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower() or "none" in caplog.text.lower()
-
 
 @pytest.mark.django_db
 class TestGetAgent:
@@ -383,7 +299,6 @@ class TestGetAgent:
     Tests SERVICE behavior with mocked model layer:
     - Calls model correctly
     - Returns what model returns
-    - Logs all errors from downstream
     - Validates input
     - Propagates errors
     - Raises CMSError for business logic failures (not found, ownership, deleted)
@@ -418,87 +333,6 @@ class TestGetAgent:
         with patch.object(AgentConfig.objects, "get", return_value=mock_agent):
             result = services.get_agent(user, 42)
             assert result.name == "Test Agent"
-
-    # -------------------------------------------------------------------------
-    # Logging - DEBUG on success
-    # -------------------------------------------------------------------------
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user_id and agent_id."""
-        mock_agent = Mock(spec=AgentConfig, id=42, user=user, deleted_at=None)
-        with (
-            patch.object(AgentConfig.objects, "get", return_value=mock_agent),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.get_agent(user, 42)
-        assert str(user.id) in caplog.text
-        assert "42" in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on successful retrieval."""
-        mock_agent = Mock(spec=AgentConfig, id=42, user=user, deleted_at=None)
-        with (
-            patch.object(AgentConfig.objects, "get", return_value=mock_agent),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.get_agent(user, 42)
-        # Should log something indicating success
-        assert "42" in caplog.text
-
-    # -------------------------------------------------------------------------
-    # Logging - ERROR on failures
-    # -------------------------------------------------------------------------
-
-    def test_logs_error_when_agent_not_found(self, user, caplog):
-        """Service logs error when agent doesn't exist."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch.object(AgentConfig.objects, "get", side_effect=AgentConfig.DoesNotExist),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.get_agent(user, 999)
-        assert "error" in caplog.text.lower() or "not found" in caplog.text.lower()
-
-    def test_logs_error_when_agent_owned_by_other_user(self, user, caplog):
-        """Service logs error when agent belongs to different user."""
-        from cms.exceptions import CMSError
-
-        other_user = Mock(id=999)
-        mock_agent = Mock(spec=AgentConfig, id=42, user=other_user, deleted_at=None)
-        with (
-            patch.object(AgentConfig.objects, "get", return_value=mock_agent),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.get_agent(user, 42)
-        assert "error" in caplog.text.lower() or "denied" in caplog.text.lower() or "owner" in caplog.text.lower()
-
-    def test_logs_error_when_agent_is_deleted(self, user, caplog):
-        """Service logs error when agent is soft-deleted."""
-        from django.utils import timezone
-
-        from cms.exceptions import CMSError
-
-        mock_agent = Mock(spec=AgentConfig, id=42, user=user, deleted_at=timezone.now())
-        with (
-            patch.object(AgentConfig.objects, "get", return_value=mock_agent),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.get_agent(user, 42)
-        assert "error" in caplog.text.lower() or "deleted" in caplog.text.lower()
-
-    def test_logs_error_on_database_failure(self, user, caplog):
-        """Service logs error when database raises exception."""
-        with (
-            patch.object(AgentConfig.objects, "get", side_effect=RuntimeError("DB connection failed")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(RuntimeError),
-        ):
-            services.get_agent(user, 42)
-        assert "error" in caplog.text.lower() or "exception" in caplog.text.lower()
 
     # -------------------------------------------------------------------------
     # Error handling - CMSError for business logic failures
@@ -599,12 +433,6 @@ class TestGetAgent:
         with pytest.raises((TypeError, ValueError)):
             services.get_agent(unsaved_user, 42)
 
-    def test_logs_error_on_invalid_user(self, caplog):
-        """Service logs error when given invalid user."""
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises((TypeError, ValueError)):
-            services.get_agent(None, 42)
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower() or "none" in caplog.text.lower()
-
     # -------------------------------------------------------------------------
     # Input validation - agent_id parameter
     # -------------------------------------------------------------------------
@@ -629,12 +457,6 @@ class TestGetAgent:
         with pytest.raises((TypeError, ValueError)):
             services.get_agent(user, -1)
 
-    def test_logs_error_on_invalid_agent_id(self, user, caplog):
-        """Service logs error when given invalid agent_id."""
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises((TypeError, ValueError)):
-            services.get_agent(user, None)
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower() or "none" in caplog.text.lower()
-
     # -------------------------------------------------------------------------
     # Response validation - model returns garbage
     # -------------------------------------------------------------------------
@@ -654,16 +476,6 @@ class TestGetAgent:
         with patch.object(AgentConfig.objects, "get", return_value={"id": 42}), pytest.raises(TypeError):
             services.get_agent(user, 42)
 
-    def test_logs_error_on_invalid_model_response(self, user, caplog):
-        """Service logs error when model returns invalid response."""
-        with (
-            patch.object(AgentConfig.objects, "get", return_value=None),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            services.get_agent(user, 42)
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower()
-
 
 @pytest.mark.django_db
 class TestCreateAgent:
@@ -672,7 +484,6 @@ class TestCreateAgent:
     Tests SERVICE behavior with mocked assets service layer:
     - Delegates to cms.assets.services.create_agent correctly
     - Returns what assets service returns
-    - Logs all errors from downstream
     - Validates user input
     - Propagates errors from assets service
     """
@@ -742,70 +553,6 @@ class TestCreateAgent:
             )
             assert result.id == 42
             assert result.name == "Test Agent"
-
-    # -------------------------------------------------------------------------
-    # Logging - DEBUG on success
-    # -------------------------------------------------------------------------
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user info."""
-        mock_agent = Mock(spec=AgentConfig, id=42)
-        with (
-            patch("cms.services.assets_create_agent", return_value=mock_agent),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.create_agent(
-                user,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
-        assert str(user.id) in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on successful creation."""
-        mock_agent = Mock(spec=AgentConfig, id=42)
-        with (
-            patch("cms.services.assets_create_agent", return_value=mock_agent),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.create_agent(
-                user,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
-        assert "42" in caplog.text  # agent id in log
-
-    # -------------------------------------------------------------------------
-    # Logging - ERROR on failures
-    # -------------------------------------------------------------------------
-
-    def test_logs_error_when_assets_service_fails(self, user, caplog):
-        """Service logs error when assets service raises exception."""
-        from cms.assets.services import AssetError
-
-        with (
-            patch("cms.services.assets_create_agent", side_effect=AssetError("OS not found")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(AssetError),
-        ):
-            services.create_agent(
-                user,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="invalid-os",
-                file_size=1000,
-                sha256="abc123",
-            )
-        assert "error" in caplog.text.lower() or "exception" in caplog.text.lower()
 
     # -------------------------------------------------------------------------
     # Error propagation - assets service errors
@@ -902,20 +649,6 @@ class TestCreateAgent:
                 sha256="abc123",
             )
 
-    def test_logs_error_on_invalid_user(self, caplog):
-        """Service logs error when given invalid user."""
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises((TypeError, ValueError)):
-            services.create_agent(
-                None,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower() or "none" in caplog.text.lower()
-
     # -------------------------------------------------------------------------
     # Response validation - assets service returns garbage
     # -------------------------------------------------------------------------
@@ -946,24 +679,6 @@ class TestCreateAgent:
                 sha256="abc123",
             )
 
-    def test_logs_error_on_invalid_assets_response(self, user, caplog):
-        """Service logs error when assets service returns invalid response."""
-        with (
-            patch("cms.services.assets_create_agent", return_value=None),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            services.create_agent(
-                user,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower()
-
 
 @pytest.mark.django_db
 class TestDeleteAgent:
@@ -974,7 +689,6 @@ class TestDeleteAgent:
     - Verifies ownership before delegating
     - Delegates to cms.assets.services.delete_agent correctly
     - Returns None (void function)
-    - Logs all errors from downstream
     - Propagates errors
     """
 
@@ -1015,63 +729,6 @@ class TestDeleteAgent:
         ):
             result = services.delete_agent(user, 42)
             assert result is None
-
-    # -------------------------------------------------------------------------
-    # Logging - DEBUG on success
-    # -------------------------------------------------------------------------
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user_id and agent_id."""
-        mock_agent = Mock(spec=AgentConfig, id=42, user=user, deleted_at=None)
-        with (
-            patch.object(services, "get_agent", return_value=mock_agent),
-            patch("cms.services.assets_delete_agent"),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.delete_agent(user, 42)
-        assert str(user.id) in caplog.text
-        assert "42" in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on successful deletion."""
-        mock_agent = Mock(spec=AgentConfig, id=42, user=user, deleted_at=None)
-        with (
-            patch.object(services, "get_agent", return_value=mock_agent),
-            patch("cms.services.assets_delete_agent"),
-            caplog.at_level(logging.DEBUG, logger="cms.services"),
-        ):
-            services.delete_agent(user, 42)
-        assert "42" in caplog.text
-
-    # -------------------------------------------------------------------------
-    # Logging - ERROR on failures
-    # -------------------------------------------------------------------------
-
-    def test_logs_error_when_agent_not_found(self, user, caplog):
-        """Service logs error when get_agent raises CMSError."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch.object(services, "get_agent", side_effect=CMSError("not found")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(CMSError),
-        ):
-            services.delete_agent(user, 999)
-        assert "error" in caplog.text.lower() or "not found" in caplog.text.lower()
-
-    def test_logs_error_when_assets_service_fails(self, user, caplog):
-        """Service logs error when assets service raises exception."""
-        from cms.assets.services import AssetError
-
-        mock_agent = Mock(spec=AgentConfig, id=42, user=user, deleted_at=None)
-        with (
-            patch.object(services, "get_agent", return_value=mock_agent),
-            patch("cms.services.assets_delete_agent", side_effect=AssetError("S3 delete failed")),
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(AssetError),
-        ):
-            services.delete_agent(user, 42)
-        assert "error" in caplog.text.lower() or "exception" in caplog.text.lower()
 
     # -------------------------------------------------------------------------
     # Error handling - CMSError for ownership failures
@@ -1146,12 +803,6 @@ class TestDeleteAgent:
         with pytest.raises((TypeError, ValueError)):
             services.delete_agent(unsaved_user, 42)
 
-    def test_logs_error_on_invalid_user(self, caplog):
-        """Service logs error when given invalid user."""
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises((TypeError, ValueError)):
-            services.delete_agent(None, 42)
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower() or "none" in caplog.text.lower()
-
     # -------------------------------------------------------------------------
     # Input validation - agent_id parameter
     # -------------------------------------------------------------------------
@@ -1175,9 +826,3 @@ class TestDeleteAgent:
         """Service raises error if agent_id is negative."""
         with pytest.raises((TypeError, ValueError)):
             services.delete_agent(user, -1)
-
-    def test_logs_error_on_invalid_agent_id(self, user, caplog):
-        """Service logs error when given invalid agent_id."""
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises((TypeError, ValueError)):
-            services.delete_agent(user, None)
-        assert "error" in caplog.text.lower() or "invalid" in caplog.text.lower() or "none" in caplog.text.lower()

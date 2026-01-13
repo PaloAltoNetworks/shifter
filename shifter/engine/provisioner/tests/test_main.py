@@ -340,7 +340,12 @@ class TestRunProvision:
                 }
             },
             "instances": [
-                {"uuid": "inst-uuid-1", "role": "attacker", "instance_id": "i-123", "private_ip": "10.1.6.10"}
+                {
+                    "uuid": "inst-uuid-1",
+                    "role": "attacker",
+                    "instance_id": "i-123",
+                    "private_ip": "10.1.6.10",
+                }
             ],
         }
 
@@ -357,7 +362,10 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_status_update") as mock_status, patch("main.publish_ready") as mock_ready:
+        with (
+            patch("main.publish_status_update") as mock_status,
+            patch("main.publish_ready") as mock_ready,
+        ):
             from main import _run_provision
 
             env = os.environ.copy()
@@ -365,7 +373,10 @@ class TestRunProvision:
 
             # Verify status update event was published
             mock_status.assert_called_once_with(
-                request_id=self.TEST_REQUEST_ID, range_id=42, user_id=7, new_status="provisioning"
+                request_id=self.TEST_REQUEST_ID,
+                range_id=42,
+                user_id=7,
+                new_status="provisioning",
             )
             # Verify ready event was published with instance details
             mock_ready.assert_called_once()
@@ -402,7 +413,12 @@ class TestRunProvision:
                 "request_id": self.TEST_REQUEST_ID,
                 "range_id": 42,
                 "user_id": 7,
-                "spec": {"subnets": [{"name": "attack", "connected_to": []}, {"name": "target", "connected_to": []}]},
+                "spec": {
+                    "subnets": [
+                        {"name": "attack", "connected_to": []},
+                        {"name": "target", "connected_to": []},
+                    ]
+                },
                 "subnet_index": 6,
                 "status": "provisioning",
             },
@@ -431,8 +447,18 @@ class TestRunProvision:
                 },
             },
             "instances": [
-                {"uuid": "inst-uuid-1", "role": "attacker", "instance_id": "i-kali", "private_ip": "10.1.6.10"},
-                {"uuid": "inst-uuid-2", "role": "victim", "instance_id": "i-victim", "private_ip": "10.1.7.10"},
+                {
+                    "uuid": "inst-uuid-1",
+                    "role": "attacker",
+                    "instance_id": "i-kali",
+                    "private_ip": "10.1.6.10",
+                },
+                {
+                    "uuid": "inst-uuid-2",
+                    "role": "victim",
+                    "instance_id": "i-victim",
+                    "private_ip": "10.1.7.10",
+                },
             ],
         }
 
@@ -449,7 +475,10 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_status_update"), patch("main.publish_ready") as mock_ready:
+        with (
+            patch("main.publish_status_update"),
+            patch("main.publish_ready") as mock_ready,
+        ):
             from main import _run_provision
 
             env = os.environ.copy()
@@ -494,7 +523,15 @@ class TestRunProvision:
                     "gwlb_endpoint_id": "",
                 }
             },
-            "instances": [{"uuid": "inst-uuid-1", "role": "attacker", "instance_id": "i-kali", "private_ip": "10.1.6.10"}],
+            "instances": [
+                {
+                    "uuid": "inst-uuid-1",
+                    "role": "attacker",
+                    "instance_id": "i-kali",
+                    "private_ip": "10.1.6.10",
+                    "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123456789012:secret:test-key-1234567890",
+                },
+            ],
             "ngfw": {
                 "ec2_instance_id": "i-ngfw12345",
                 "untrust_private_ip": "10.1.6.10",
@@ -515,7 +552,10 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_status_update"), patch("main.publish_ready") as mock_ready:
+        with (
+            patch("main.publish_status_update"),
+            patch("main.publish_ready") as mock_ready,
+        ):
             from main import _run_provision
 
             env = os.environ.copy()
@@ -758,7 +798,10 @@ class TestRunPulumi:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
+        with (
+            patch("main.publish_failed") as mock_publish,
+            patch("main.publish_status_update"),
+        ):
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
@@ -786,7 +829,10 @@ class TestRunPulumi:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
+        with (
+            patch("main.publish_failed") as mock_publish,
+            patch("main.publish_status_update"),
+        ):
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
@@ -874,7 +920,14 @@ class TestMainEntryPoint:
         # Note: request_id is a string (UUID), so we just verify the CLI accepts it
         # and fails on actual execution due to missing DB/environment
         result = subprocess.run(  # noqa: S603
-            [sys.executable, "main.py", "range", "provision", "--request-id", "test-uuid"],
+            [
+                sys.executable,
+                "main.py",
+                "range",
+                "provision",
+                "--request-id",
+                "test-uuid",
+            ],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
@@ -1457,7 +1510,12 @@ class TestEventPublishing:
                 }
             },
             "instances": [
-                {"uuid": "inst-uuid-1", "role": "attacker", "instance_id": "i-123", "private_ip": "10.1.1.10"}
+                {
+                    "uuid": "inst-uuid-1",
+                    "role": "attacker",
+                    "instance_id": "i-123",
+                    "private_ip": "10.1.1.10",
+                }
             ],
         }
 

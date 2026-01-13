@@ -130,6 +130,7 @@ class UserNGFWStack(pulumi.ComponentResource):
         self.management_ip = self.ngfw.management_ip
         self.dataplane_ip = self.ngfw.dataplane_ip
         self.data_eni_id = self.ngfw.data_eni.id
+        self.ssh_key_secret_arn = self.ngfw.ssh_key_secret_arn
 
         self.gwlb_arn = self.gwlb.gwlb_arn
         self.target_group_arn = self.gwlb.target_group_arn
@@ -143,6 +144,7 @@ class UserNGFWStack(pulumi.ComponentResource):
                 "management_ip": self.management_ip,
                 "dataplane_ip": self.dataplane_ip,
                 "data_eni_id": self.data_eni_id,
+                "ssh_key_secret_arn": self.ssh_key_secret_arn,
                 "gwlb_arn": self.gwlb_arn,
                 "target_group_arn": self.target_group_arn,
                 "service_name": self.service_name,
@@ -168,6 +170,7 @@ class UserNGFWStack(pulumi.ComponentResource):
             "management_ip": self.management_ip,
             "dataplane_ip": self.dataplane_ip,
             "data_eni_id": self.data_eni_id,
+            "ssh_key_secret_arn": self.ssh_key_secret_arn,
             "gwlb_arn": self.gwlb_arn,
             "target_group_arn": self.target_group_arn,
             "service_name": self.service_name,

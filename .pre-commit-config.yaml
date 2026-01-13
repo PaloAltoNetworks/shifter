@@ -22,8 +22,9 @@ repos:
         exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/) # Tests check key format strings
 
   # Python - Ruff (linting + formatting)
+  # Note: Ruff handles import sorting via "I" rules - no separate isort needed
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.9
+    rev: v0.14.10
     hooks:
       - id: ruff
         name: ruff (shifter_platform)
@@ -142,14 +143,28 @@ repos:
           [--quiet, --compact, --directory, platform/terraform/, --soft-fail]
 
   # =============================================================================
-  # STAGE 3: Architecture checks (informational - non-blocking)
+  # STAGE 3: Type Checking
+  # =============================================================================
+
+  - repo: local
+    hooks:
+      - id: mypy-shifter-platform
+        name: mypy (shifter_platform)
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && mypy .'
+        language: system
+        files: ^shifter/shifter_platform/
+        pass_filenames: false
+        types: [python]
+
+  # =============================================================================
+  # STAGE 4: Architecture checks (hard fail - zero tolerance)
   # =============================================================================
 
   - repo: local
     hooks:
       - id: check-layer-imports
         name: architecture (layer imports)
-        entry: bash -c 'python scripts/check_layer_imports/check_layer_imports.py || true'
+        entry: bash -c 'cd scripts/check_layer_imports && uv run python check_layer_imports.py -q'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
@@ -157,14 +172,14 @@ repos:
 
       - id: check-model-fks
         name: architecture (model FKs)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python manage.py check_model_fks || true'
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python manage.py check_model_fks -q'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
         verbose: true
 
   # =============================================================================
-  # STAGE 4: Tests (slowest - run last, shifter_platform last of all)
+  # STAGE 5: Tests (slowest - run last, shifter_platform last of all)
   # =============================================================================
 
   # Packer tests

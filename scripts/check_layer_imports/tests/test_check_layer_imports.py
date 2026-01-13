@@ -9,11 +9,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from check_layer_imports import (
     ALL_LAYERS,
     IMPORT_PATTERN,
-    LAYER_INDEX,
     analyze_imports,
     compute_stats,
     get_imports,
-    is_violation,
+    is_import_allowed,
+    load_allowed_imports,
 )
 
 
@@ -27,13 +27,6 @@ class TestLayerConfiguration:
         assert "cms" in ALL_LAYERS
         assert "management" in ALL_LAYERS
         assert "mission_control" in ALL_LAYERS
-
-    def test_layer_order(self):
-        """Layers are ordered from lowest to highest."""
-        assert LAYER_INDEX["shared"] < LAYER_INDEX["engine"]
-        assert LAYER_INDEX["engine"] < LAYER_INDEX["cms"]
-        assert LAYER_INDEX["cms"] < LAYER_INDEX["management"]
-        assert LAYER_INDEX["management"] < LAYER_INDEX["mission_control"]
 
 
 class TestImportPattern:
@@ -76,34 +69,65 @@ class TestImportPattern:
         assert len(matches) == 0
 
 
-class TestIsViolation:
-    """Tests for the is_violation function."""
+class TestIsImportAllowed:
+    """Tests for the is_import_allowed function."""
 
-    def test_shared_importing_higher_is_violation(self):
-        """shared importing from higher layers is a violation."""
-        assert is_violation("shared", "engine") is True
-        assert is_violation("shared", "cms") is True
-        assert is_violation("shared", "management") is True
-        assert is_violation("shared", "mission_control") is True
+    def test_allowed_import_exact_match(self):
+        """Exact match in allowed list is allowed."""
+        allowed = {"cms": ["shared", "engine"]}
+        assert is_import_allowed("cms", "shared", allowed) is True
+        assert is_import_allowed("cms", "engine", allowed) is True
 
-    def test_engine_importing_higher_is_violation(self):
-        """engine importing from higher layers is a violation."""
-        assert is_violation("engine", "cms") is True
-        assert is_violation("engine", "management") is True
-        assert is_violation("engine", "mission_control") is True
+    def test_allowed_import_prefix_match(self):
+        """Submodule of allowed module is allowed."""
+        allowed = {"cms": ["shared"]}
+        assert is_import_allowed("cms", "shared.schemas", allowed) is True
+        assert is_import_allowed("cms", "shared.exceptions.base", allowed) is True
 
-    def test_higher_importing_lower_is_not_violation(self):
-        """Higher layers importing from lower is not a violation."""
-        assert is_violation("mission_control", "cms") is False
-        assert is_violation("cms", "engine") is False
-        assert is_violation("engine", "shared") is False
+    def test_disallowed_import(self):
+        """Import not in allowed list is disallowed."""
+        allowed = {"cms": ["shared"]}
+        assert is_import_allowed("cms", "engine", allowed) is False
+        assert is_import_allowed("cms", "management", allowed) is False
 
-    def test_any_layer_importing_shared_is_not_violation(self):
-        """Any layer importing from shared is not a violation."""
-        assert is_violation("engine", "shared") is False
-        assert is_violation("cms", "shared") is False
-        assert is_violation("management", "shared") is False
-        assert is_violation("mission_control", "shared") is False
+    def test_layer_not_in_config(self):
+        """Layer not in config has no allowed imports."""
+        allowed = {"cms": ["shared"]}
+        assert is_import_allowed("engine", "shared", allowed) is False
+
+    def test_specific_submodule_allowed(self):
+        """Specific submodule allowed but not the whole layer."""
+        allowed = {"cms": ["management.services"]}
+        assert is_import_allowed("cms", "management.services", allowed) is True
+        assert is_import_allowed("cms", "management.services.foo", allowed) is True
+        assert is_import_allowed("cms", "management.models", allowed) is False
+        assert is_import_allowed("cms", "management", allowed) is False
+
+
+class TestLoadAllowedImports:
+    """Tests for load_allowed_imports function."""
+
+    def test_loads_config_from_yaml(self, tmp_path):
+        """Loads allowed imports from YAML config."""
+        config_file = tmp_path / "test_config.yaml"
+        config_file.write_text("""
+allowed:
+  cms:
+    - shared
+    - engine
+  engine:
+    - shared
+""")
+        result = load_allowed_imports(config_file)
+        assert result["cms"] == ["shared", "engine"]
+        assert result["engine"] == ["shared"]
+
+    def test_returns_empty_for_empty_config(self, tmp_path):
+        """Returns empty dict for config without 'allowed' key."""
+        config_file = tmp_path / "empty.yaml"
+        config_file.write_text("other_key: value\n")
+        result = load_allowed_imports(config_file)
+        assert result == {}
 
 
 class TestGetImports:
@@ -144,16 +168,18 @@ class TestComputeStats:
             "cms": {"engine": ["engine"], "shared": ["shared.schemas"]},
             "engine": {},
         }
-        stats = compute_stats(imports)
+        allowed = {"cms": ["shared", "engine"]}
+        stats = compute_stats(imports, allowed)
         assert stats["total_cross_layer_imports"] == 2
 
     def test_counts_violations(self):
         """Counts violations correctly."""
         imports = {
-            "shared": {"engine": ["engine.models"]},  # violation
-            "cms": {"shared": ["shared"]},  # not a violation
+            "shared": {"engine": ["engine.models"]},  # violation - shared can't import
+            "cms": {"shared": ["shared"]},  # allowed
         }
-        stats = compute_stats(imports)
+        allowed = {"cms": ["shared"]}  # shared has no allowed imports
+        stats = compute_stats(imports, allowed)
         assert stats["violations"] == 1
 
     def test_identifies_clean_layers(self):
@@ -163,7 +189,8 @@ class TestComputeStats:
             "engine": {"shared": ["shared"]},
             "cms": {"shared": ["shared"], "engine": ["engine"]},
         }
-        stats = compute_stats(imports)
+        allowed = {"engine": ["shared"], "cms": ["shared", "engine"]}
+        stats = compute_stats(imports, allowed)
         assert "shared" in stats["clean_layers"]
         assert "engine" in stats["clean_layers"]
         assert "cms" in stats["clean_layers"]
@@ -174,7 +201,8 @@ class TestComputeStats:
             "shared": {"engine": ["engine"]},  # violation
             "engine": {"shared": ["shared"]},  # ok
         }
-        stats = compute_stats(imports)
+        allowed = {"engine": ["shared"]}  # shared has no allowed imports
+        stats = compute_stats(imports, allowed)
         assert "shared" in stats["layers_with_violations"]
         assert "engine" not in stats["layers_with_violations"]
 
@@ -183,7 +211,8 @@ class TestComputeStats:
         imports = {
             "engine": {"cms": ["cms.models"]},  # violation
         }
-        stats = compute_stats(imports)
+        allowed = {"engine": ["shared"]}  # engine can't import cms
+        stats = compute_stats(imports, allowed)
         assert len(stats["violation_details"]) == 1
         assert stats["violation_details"][0]["from"] == "engine"
         assert stats["violation_details"][0]["to"] == "cms"

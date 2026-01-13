@@ -14,6 +14,12 @@ function Log-Message {
 
 Log-Message "Victim Windows instance booting..."
 
+# Set Administrator password for RDP access
+# TODO: Move to CMS-managed instance credentials (#542)
+$AdminPassword = "CortexSavesTheDay!"
+net user Administrator $AdminPassword
+Log-Message "Administrator password configured"
+
 # All setup (hostname, SSH, XDR) is handled by SSM plans:
 #   - BootstrapPlan: hostname + SSH configuration
 #   - XDRAgentInstallPlan: XDR agent installation

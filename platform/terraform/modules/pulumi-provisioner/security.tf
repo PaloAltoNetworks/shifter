@@ -59,6 +59,17 @@ resource "aws_security_group_rule" "ecs_to_rds" {
   description              = "PostgreSQL to RDS"
 }
 
+# SSH egress to Range VPC for NGFW provisioning
+resource "aws_security_group_rule" "ecs_ssh_to_range" {
+  type              = "egress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.range_vpc_cidr]
+  security_group_id = aws_security_group.ecs_task.id
+  description       = "SSH to Range VPC for NGFW provisioning"
+}
+
 # ------------------------------------------------------------------------------
 # RDS Ingress Rule (allow ECS to connect)
 # ------------------------------------------------------------------------------

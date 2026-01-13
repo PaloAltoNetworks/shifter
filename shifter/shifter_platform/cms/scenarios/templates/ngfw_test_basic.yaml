@@ -1,0 +1,22 @@
+id: test_ngfw_basic
+name: Basic Range Test
+description: basic range test with ngfw
+enabled: true
+ngfw: true
+
+instances:
+  - name: Attacker
+    role: attacker
+    os_type: kali
+    xdr_agent: false
+
+  - name: Target
+    role: victim
+    os_type: from_agent
+    xdr_agent: true
+
+subnets:
+  - name: attack
+    instances: [Attacker]
+  - name: target
+    instances: [Target]

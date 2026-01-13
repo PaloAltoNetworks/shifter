@@ -747,3 +747,169 @@ class TestAWSExecutorRouteDeleteRoute:
             DestinationCidrBlock="0.0.0.0/0",
         )
         assert result.success is True
+
+
+# =============================================================================
+# Phase 2: execute_action() Dispatcher for OpsOrchestrator Integration
+# =============================================================================
+
+
+class TestAWSExecutorExecuteAction:
+    """Test AWSExecutor.execute_action dispatcher method."""
+
+    def test_execute_action_exists(self):
+        """AWSExecutor has execute_action method."""
+        from executors.aws_executor import AWSExecutor
+
+        assert hasattr(AWSExecutor, "execute_action")
+        assert callable(AWSExecutor.execute_action)
+
+    def test_execute_action_dispatches_start_instance(self):
+        """execute_action dispatches to start_instance method."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        mock_session.client.return_value = mock_client
+        mock_client.start_instances.return_value = {"StartingInstances": [{"InstanceId": "i-12345"}]}
+
+        executor = AWSExecutor(session=mock_session)
+        context = {"instance_id": "i-12345"}
+        result = executor.execute_action("start_instance", context)
+
+        mock_client.start_instances.assert_called_once_with(InstanceIds=["i-12345"])
+        assert result.success is True
+
+    def test_execute_action_dispatches_stop_instance(self):
+        """execute_action dispatches to stop_instance method."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        mock_session.client.return_value = mock_client
+        mock_client.stop_instances.return_value = {"StoppingInstances": [{"InstanceId": "i-12345"}]}
+
+        executor = AWSExecutor(session=mock_session)
+        context = {"instance_id": "i-12345"}
+        result = executor.execute_action("stop_instance", context)
+
+        mock_client.stop_instances.assert_called_once_with(InstanceIds=["i-12345"])
+        assert result.success is True
+
+    def test_execute_action_dispatches_wait_for_running(self):
+        """execute_action dispatches to wait_for_running method."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        mock_waiter = MagicMock()
+        mock_session.client.return_value = mock_client
+        mock_client.get_waiter.return_value = mock_waiter
+
+        executor = AWSExecutor(session=mock_session)
+        context = {"instance_id": "i-12345"}
+        result = executor.execute_action("wait_for_running", context)
+
+        mock_client.get_waiter.assert_called_once_with("instance_running")
+        assert result.success is True
+
+    def test_execute_action_dispatches_wait_for_stopped(self):
+        """execute_action dispatches to wait_for_stopped method."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        mock_waiter = MagicMock()
+        mock_session.client.return_value = mock_client
+        mock_client.get_waiter.return_value = mock_waiter
+
+        executor = AWSExecutor(session=mock_session)
+        context = {"instance_id": "i-12345"}
+        result = executor.execute_action("wait_for_stopped", context)
+
+        mock_client.get_waiter.assert_called_once_with("instance_stopped")
+        assert result.success is True
+
+    def test_execute_action_unknown_action_returns_failure(self):
+        """execute_action returns failure for unknown action."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        executor = AWSExecutor(session=mock_session)
+
+        result = executor.execute_action("unknown_action", {})
+
+        assert result.success is False
+        assert "Unknown action" in result.stderr
+
+    def test_execute_action_missing_param_returns_failure(self):
+        """execute_action returns failure when required param is missing."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        executor = AWSExecutor(session=mock_session)
+
+        # start_instance requires instance_id
+        result = executor.execute_action("start_instance", {})
+
+        assert result.success is False
+        assert "Missing required parameter" in result.stderr
+        assert "instance_id" in result.stderr
+
+    def test_execute_action_dispatches_register_target(self):
+        """execute_action dispatches to register_target method."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        mock_session.client.return_value = mock_client
+        mock_client.register_targets.return_value = {}
+
+        executor = AWSExecutor(session=mock_session)
+        context = {
+            "target_group_arn": "arn:aws:elasticloadbalancing:us-east-1:123:targetgroup/tg-123",
+            "target_id": "eni-12345",
+        }
+        result = executor.execute_action("register_target", context)
+
+        mock_client.register_targets.assert_called_once()
+        assert result.success is True
+
+    def test_execute_action_dispatches_create_route(self):
+        """execute_action dispatches to create_route method."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        mock_session.client.return_value = mock_client
+        mock_client.create_route.return_value = {"Return": True}
+
+        executor = AWSExecutor(session=mock_session)
+        context = {
+            "route_table_id": "rtb-12345",
+            "destination": "0.0.0.0/0",
+            "endpoint_id": "vpce-12345",
+        }
+        result = executor.execute_action("create_route", context)
+
+        mock_client.create_route.assert_called_once()
+        assert result.success is True
+
+    def test_execute_action_dispatches_delete_route(self):
+        """execute_action dispatches to delete_route method."""
+        from executors.aws_executor import AWSExecutor
+
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        mock_session.client.return_value = mock_client
+        mock_client.delete_route.return_value = {}
+
+        executor = AWSExecutor(session=mock_session)
+        context = {
+            "route_table_id": "rtb-12345",
+            "destination": "0.0.0.0/0",
+        }
+        result = executor.execute_action("delete_route", context)
+
+        mock_client.delete_route.assert_called_once()
+        assert result.success is True

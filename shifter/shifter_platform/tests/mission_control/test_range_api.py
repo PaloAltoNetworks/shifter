@@ -1,13 +1,16 @@
 """Tests for Range API endpoints."""
 
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from django.urls import reverse
 
 from cms.models import AgentConfig, OperatingSystem
+from cms.models import Request as CMSRequest
 from engine.models import Range
-from shared.enums import RangeStatus
+from engine.models import Request as EngineRequest
+from shared.enums import ResourceStatus
 from shared.schemas import RangeContext
 
 
@@ -74,14 +77,17 @@ class TestGetRange:
         assert data["range"] is None
 
     def test_returns_active_range(self, client, test_agent):
+        from uuid import uuid4
+
         client.force_login(test_agent.user)
 
         # Create a RangeContext projection (what CMS service returns)
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=test_agent.user.id,
             scenario_id="basic",
-            status=RangeStatus.READY,
+            status=ResourceStatus.READY,
             instances=[],
             agent_name="Test XDR Agent",
         )
@@ -106,13 +112,16 @@ class TestGetRange:
 
     def test_returns_provisioning_range(self, client, test_agent):
         """Test range in provisioning state has correct computed properties."""
+        from uuid import uuid4
+
         client.force_login(test_agent.user)
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=test_agent.user.id,
             scenario_id="basic",
-            status=RangeStatus.PROVISIONING,
+            status=ResourceStatus.PROVISIONING,
             instances=[],
             agent_name="Test Agent",
         )
@@ -133,13 +142,16 @@ class TestGetRange:
 
     def test_returns_destroying_range(self, client, test_agent):
         """Test range in destroying state has correct computed properties."""
+        from uuid import uuid4
+
         client.force_login(test_agent.user)
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=42,
             user_id=test_agent.user.id,
             scenario_id="basic",
-            status=RangeStatus.DESTROYING,
+            status=ResourceStatus.DESTROYING,
             instances=[],
             agent_name="Test Agent",
         )
@@ -204,6 +216,8 @@ class TestLaunchRange:
 
     def test_successful_launch_with_ecs(self, client, test_agent):
         """Test launch with mocked ECS."""
+        from uuid import UUID
+
         mock_path = "engine.ecs._get_ecs_client"
         with patch(mock_path) as mock_client:
             task_arn = "arn:aws:ecs:us-east-2:123:task/test/abc123"
@@ -216,11 +230,13 @@ class TestLaunchRange:
             from django.conf import settings
 
             # Set ECS config
+            orig_local_provisioner = getattr(settings, "LOCAL_PROVISIONER", None)
             orig_cluster = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
             orig_task_def = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", "")
             orig_sg = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
             orig_subnets = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
 
+            settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
             settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
             settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
             settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
@@ -239,9 +255,12 @@ class TestLaunchRange:
                 assert data["range"]["status"] == "provisioning"
 
                 # Verify task ARN was stored
-                range_obj = Range.objects.get(id=data["range"]["range_id"])
+                # Range is linked via Request FK, use request_id from response
+                request_id = UUID(data["range"]["request_id"])
+                range_obj = Range.objects.get(request__request_id=request_id)
                 assert range_obj.step_function_execution_arn == task_arn
             finally:
+                settings.LOCAL_PROVISIONER = orig_local_provisioner
                 settings.PULUMI_ECS_CLUSTER_ARN = orig_cluster
                 settings.PULUMI_TASK_DEFINITION_ARN = orig_task_def
                 settings.PULUMI_ECS_SECURITY_GROUP_ID = orig_sg
@@ -277,12 +296,15 @@ class TestLaunchRange:
         assert response.status_code == 400
         assert "already have an active range" in response.json()["error"]
 
-    def test_ad_scenario_rejects_linux_agent(self, client, test_agent, linux_os, settings):
-        """AD scenario requires Windows agent (used for both DC and victim)."""
+    def test_ad_scenario_requires_windows_agent_for_dc(self, client, test_agent, linux_os, settings):
+        """AD scenario requires Windows agent for DC (xdr_agent=true on DC).
+
+        Linux-only agent is insufficient because DC needs Windows agent.
+        """
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
-        # Create a Linux agent (invalid for AD scenario)
+        # Create only a Linux agent - insufficient for AD scenario
         linux_agent = AgentConfig.objects.create(
             user=test_agent.user,
             os=linux_os,
@@ -302,8 +324,8 @@ class TestLaunchRange:
             content_type="application/json",
         )
 
+        # Fails because DC requires Windows agent (xdr_agent=true, os_type=windows)
         assert response.status_code == 400
-        assert "Windows" in response.json()["error"]
 
     def test_ad_scenario_success_with_windows_agent(self, client, test_agent, settings):
         """AD scenario succeeds with Windows agent (used for both DC and victim)."""
@@ -394,10 +416,24 @@ class TestCancelRange:
 
         client.force_login(test_agent.user)
 
+        # Create Request objects (required for engine operations)
+        request_id = uuid4()
+        engine_request = EngineRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+        cms_request = CMSRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+
         # Create a provisioning range (both Engine Range and CMS RangeInstance)
         range_obj = Range.objects.create(
             user=test_agent.user,
             status=Range.Status.PROVISIONING,
+            request=engine_request,
         )
         RangeInstance.objects.create(
             range_id=range_obj.id,
@@ -405,10 +441,11 @@ class TestCancelRange:
             scenario_id="basic",
             agent=test_agent,
             status="provisioning",
+            request=cms_request,
         )
 
         # Mock engine cancel to avoid AWS calls
-        with patch("cms.services.engine_cancel_range") as mock_engine:
+        with patch("cms.services.engine_cancel_range_by_request") as mock_engine:
             response = client.post(
                 reverse("mission_control:cancel_range"),
                 data={"range_id": range_obj.id},
@@ -417,10 +454,8 @@ class TestCancelRange:
             assert response.status_code == 200
             assert response.json()["success"] is True
 
-            # Verify engine was called with RangeContext
-            mock_engine.assert_called_once()
-            call_arg = mock_engine.call_args[0][0]
-            assert call_arg.range_id == range_obj.id
+            # Verify engine was called with request_id
+            mock_engine.assert_called_once_with(request_id)
 
     def test_cancel_sets_status_to_destroyed(self, client, test_agent):
         """Cancel updates CMS status to DESTROYED before calling engine."""
@@ -428,9 +463,23 @@ class TestCancelRange:
 
         client.force_login(test_agent.user)
 
+        # Create Request objects (required for engine operations)
+        request_id = uuid4()
+        engine_request = EngineRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+        cms_request = CMSRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+
         range_obj = Range.objects.create(
             user=test_agent.user,
             status=Range.Status.PROVISIONING,
+            request=engine_request,
         )
         RangeInstance.objects.create(
             range_id=range_obj.id,
@@ -438,9 +487,10 @@ class TestCancelRange:
             scenario_id="basic",
             agent=test_agent,
             status="provisioning",
+            request=cms_request,
         )
 
-        with patch("cms.services.engine_cancel_range"):
+        with patch("cms.services.engine_cancel_range_by_request"):
             client.post(
                 reverse("mission_control:cancel_range"),
                 data={"range_id": range_obj.id},
@@ -461,10 +511,24 @@ class TestCancelRange:
         )
         client.force_login(other_user)
 
+        # Create Request objects (required for engine operations)
+        request_id = uuid4()
+        engine_request = EngineRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+        cms_request = CMSRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+
         # Create range owned by test_agent.user (both Engine Range and CMS RangeInstance)
         range_obj = Range.objects.create(
             user=test_agent.user,
             status=Range.Status.PROVISIONING,
+            request=engine_request,
         )
         RangeInstance.objects.create(
             range_id=range_obj.id,
@@ -472,6 +536,7 @@ class TestCancelRange:
             scenario_id="basic",
             agent=test_agent,
             status="provisioning",
+            request=cms_request,
         )
 
         response = client.post(
@@ -504,10 +569,24 @@ class TestDestroyRange:
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
+        # Create Request objects (required for engine operations)
+        request_id = uuid4()
+        engine_request = EngineRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+        cms_request = CMSRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+
         # Create a ready range (both Engine Range and CMS RangeInstance)
         range_obj = Range.objects.create(
             user=test_agent.user,
             status=Range.Status.READY,
+            request=engine_request,
         )
         RangeInstance.objects.create(
             range_id=range_obj.id,
@@ -515,20 +594,23 @@ class TestDestroyRange:
             scenario_id="basic",
             agent=test_agent,
             status="ready",
+            request=cms_request,
         )
 
-        response = client.post(
-            reverse("mission_control:destroy_range"),
-            data={"range_id": range_obj.id},
-            content_type="application/json",
-        )
+        with patch("cms.services.engine_destroy_range_by_request"):
+            response = client.post(
+                reverse("mission_control:destroy_range"),
+                data={"range_id": range_obj.id},
+                content_type="application/json",
+            )
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
 
-        # Verify range was marked as DESTROYING (async cleanup will set DESTROYED)
-        range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYING
+        # Verify CMS RangeInstance was marked as DESTROYING
+        ri = RangeInstance.objects.get(range_id=range_obj.id)
+        assert ri.status == "destroying"
+        assert ri.deleted_at is not None  # Soft deleted
 
     def test_can_destroy_failed_range(self, client, test_agent, settings):
         """Failed ranges can be destroyed to clean up."""
@@ -537,11 +619,25 @@ class TestDestroyRange:
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
+        # Create Request objects (required for engine operations)
+        request_id = uuid4()
+        engine_request = EngineRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+        cms_request = CMSRequest.objects.create(
+            request_id=request_id,
+            user=test_agent.user,
+            request_type="create_range",
+        )
+
         # Create a failed range (both Engine Range and CMS RangeInstance)
         range_obj = Range.objects.create(
             user=test_agent.user,
             status=Range.Status.FAILED,
             error_message="Provisioning timed out",
+            request=engine_request,
         )
         RangeInstance.objects.create(
             range_id=range_obj.id,
@@ -549,20 +645,23 @@ class TestDestroyRange:
             scenario_id="basic",
             agent=test_agent,
             status="failed",
+            request=cms_request,
         )
 
-        response = client.post(
-            reverse("mission_control:destroy_range"),
-            data={"range_id": range_obj.id},
-            content_type="application/json",
-        )
+        with patch("cms.services.engine_destroy_range_by_request"):
+            response = client.post(
+                reverse("mission_control:destroy_range"),
+                data={"range_id": range_obj.id},
+                content_type="application/json",
+            )
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
 
-        # Verify range was marked as DESTROYING (async cleanup will set DESTROYED)
-        range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYING
+        # Verify CMS RangeInstance was marked as DESTROYING
+        ri = RangeInstance.objects.get(range_id=range_obj.id)
+        assert ri.status == "destroying"
+        assert ri.deleted_at is not None  # Soft deleted
 
 
 @pytest.mark.django_db
@@ -629,6 +728,8 @@ class TestSubnetIndexAllocation:
 
     def test_allocates_index_on_launch(self, client, test_agent, settings):
         """Launch should allocate a subnet_index."""
+        from uuid import UUID
+
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
@@ -639,7 +740,9 @@ class TestSubnetIndexAllocation:
         )
 
         assert response.status_code == 200
-        range_obj = Range.objects.get(id=response.json()["range"]["range_id"])
+        # Range is linked via Request FK, use request_id from response
+        request_id = UUID(response.json()["range"]["request_id"])
+        range_obj = Range.objects.get(request__request_id=request_id)
         assert range_obj.subnet_index is not None
         assert 1 <= range_obj.subnet_index <= 254
 

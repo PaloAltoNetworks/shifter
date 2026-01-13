@@ -1,9 +1,12 @@
 """WebSocket consumers for terminal SSH connections and range status updates."""
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import json
 import logging
+from typing import Any
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -23,12 +26,12 @@ class SSHConsumer(AsyncWebsocketConsumer):
     URL pattern: ws/terminal/<instance_uuid>/
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.instance_uuid: str | None = None
         self.range_id: int | None = None
-        self.ssh_conn = None
-        self._read_task = None
+        self.ssh_conn: Any = None
+        self._read_task: asyncio.Task[None] | None = None
 
     async def connect(self):
         """Handle WebSocket connection request."""
@@ -203,17 +206,17 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
     Pushes status updates to browser when range lifecycle events occur.
     Uses "hydrate on connect, stream deltas" pattern.
 
-    URL pattern: ws/range-status/<range_id>/
+    URL pattern: ws/range-status/<request_id>/
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.range_id: int | None = None
+        self.request_id: str | None = None
         self.group_name: str | None = None
 
     async def connect(self):
         """Handle WebSocket connection - join range group and send initial state."""
-        from cms import get_range
+        from cms import get_range_by_request_id
         from shared.channels.groups import range_event_group
         from shared.exceptions import CMSError
 
@@ -224,18 +227,18 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
             await self.close(code=WebSocketCloseCode.NOT_AUTHENTICATED)
             return
 
-        # Get range_id from URL
-        self.range_id = int(self.scope["url_route"]["kwargs"]["range_id"])
-        self.group_name = range_event_group(self.range_id)
+        # Get request_id from URL (UUID string)
+        self.request_id = self.scope["url_route"]["kwargs"]["request_id"]
+        self.group_name = range_event_group(self.request_id)
 
         # Verify user owns this range via CMS (handles ownership check)
         try:
-            range_instance = await sync_to_async(get_range)(user, self.range_id)
+            range_instance = await sync_to_async(get_range_by_request_id)(user, self.request_id)
         except CMSError:
             # CMSError covers both not found and permission denied
             logger.warning(
-                "Range %s not found or not owned by user %s",
-                self.range_id,
+                "Range with request_id %s not found or not owned by user %s",
+                self.request_id,
                 user.id,
             )
             await self.close(code=WebSocketCloseCode.NOT_FOUND)
@@ -252,13 +255,13 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
             text_data=json.dumps(
                 {
                     "type": "status",
-                    "range_id": self.range_id,
+                    "request_id": self.request_id,
                     "status": range_instance.status,
                 }
             )
         )
 
-        logger.info("Range status WebSocket connected for range %s", self.range_id)
+        logger.info("Range status WebSocket connected for request %s", self.request_id)
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection - leave range group."""
@@ -266,8 +269,8 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
         logger.info(
-            "Range status WebSocket disconnected for range %s (code: %s)",
-            self.range_id,
+            "Range status WebSocket disconnected for request %s (code: %s)",
+            self.request_id,
             close_code,
         )
 
@@ -280,9 +283,101 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
             text_data=json.dumps(
                 {
                     "type": "status",
-                    "range_id": event.get("range_id"),
+                    "request_id": event.get("request_id"),
                     "status": event.get("new_status"),
                     "error_message": event.get("error_message"),
+                }
+            )
+        )
+
+
+class NGFWStatusConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for real-time NGFW status updates.
+
+    Pushes status updates to browser during NGFW provisioning.
+    Uses "hydrate on connect, stream deltas" pattern.
+    Designed for long provisioning cycles (up to 40 minutes).
+
+    URL pattern: ws/ngfw-status/<app_id>/
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.app_id: str | None = None
+        self.group_name: str | None = None
+
+    async def connect(self):
+        """Handle WebSocket connection - join NGFW group and send initial state."""
+        from cms.services import get_ngfw as cms_get_ngfw
+        from shared.channels.groups import ngfw_event_group
+        from shared.exceptions import CMSError
+
+        # Verify authentication
+        user = self.scope.get("user")
+        if not user or isinstance(user, AnonymousUser):
+            logger.warning("Unauthenticated WebSocket connection attempt to NGFW status")
+            await self.close(code=WebSocketCloseCode.NOT_AUTHENTICATED)
+            return
+
+        # Get app_id from URL (this is the CMS App UUID)
+        self.app_id = self.scope["url_route"]["kwargs"]["app_id"]
+        self.group_name = ngfw_event_group(self.app_id)
+
+        # Verify user owns this NGFW via CMS (handles ownership check)
+        try:
+            ngfw = await sync_to_async(cms_get_ngfw)(user, self.app_id)
+        except CMSError:
+            logger.warning(
+                "NGFW app %s not found or not owned by user %s",
+                self.app_id,
+                user.id,
+            )
+            await self.close(code=WebSocketCloseCode.NOT_FOUND)
+            return
+
+        # Join the NGFW group
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+
+        # Accept the connection
+        await self.accept()
+
+        # Hydrate: send current status immediately
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "status",
+                    "app_id": self.app_id,
+                    "status": ngfw.status,
+                }
+            )
+        )
+
+        logger.info("NGFW status WebSocket connected for app %s", self.app_id)
+
+    async def disconnect(self, close_code):
+        """Handle WebSocket disconnection - leave NGFW group."""
+        if self.group_name:
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+        logger.info(
+            "NGFW status WebSocket disconnected for app %s (code: %s)",
+            self.app_id,
+            close_code,
+        )
+
+    async def ngfw_status(self, event):
+        """Handle NGFW status update from channel layer.
+
+        Called when a status update is broadcast to the NGFW group.
+        """
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "status",
+                    "app_id": event.get("app_id"),
+                    "status": event.get("status"),
+                    "state": event.get("state"),
                 }
             )
         )

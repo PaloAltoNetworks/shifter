@@ -2,49 +2,14 @@
 """Check all cross-layer imports between service layers.
 
 The Shifter platform has five service layers:
-  - shared        (lowest - common schemas, enums, exceptions)
+  - shared        (common schemas, enums, exceptions)
   - engine        (infrastructure provisioning)
-  - cms           (content management, orchestrates engine)
+  - cms           (content management)
   - management    (admin/platform management)
-  - mission_control (highest - presentation/UI layer)
+  - mission_control (presentation/UI layer)
 
-This script shows ALL imports from each layer to every other layer,
-giving a complete picture of the dependency matrix.
-
-## Layer Dependency Rules
-
-Valid directions (higher layers may import from lower):
-  - All layers may import from: shared
-  - cms, management, mission_control may import from: engine (public API only)
-  - mission_control may import from: cms, management
-
-Violations (lower layers should NOT import from higher):
-  - shared should NOT import from any other layer
-  - engine should NOT import from cms, management, mission_control
-  - cms should NOT import from management, mission_control
-
-## Interpreting Output
-
-The output format is:
-  "from_layer": {
-    "to_layer": ["module.path", "module.submodule", ...]
-  }
-
-Example:
-  "cms": {
-    "engine": ["engine"]           # OK: cms calls engine's public API
-    "shared": ["shared.schemas"]   # OK: cms uses shared types
-  }
-
-  "engine": {
-    "cms.models": ["cms.models"]   # VIOLATION: engine reaching into cms internals
-  }
-
-## What to look for
-
-- Imports like "layer" (e.g., "engine") = public API, usually OK
-- Imports like "layer.models" = internal access, often a violation
-- Imports like "layer.submodule.internal" = deep coupling, red flag
+This script validates imports against explicit rules defined in layer_imports.yaml.
+Any import not in the allowed list is a violation.
 
 Usage:
     python scripts/check_layer_imports/check_layer_imports.py
@@ -58,10 +23,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control"]
+import yaml
 
-# Layer hierarchy index (lower = lower in stack)
-LAYER_INDEX = {layer: i for i, layer in enumerate(ALL_LAYERS)}
+ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control"]
 
 # Regex to match imports from our layers (including indented imports in functions)
 # Captures the full module path (e.g., "shared.exceptions" from "from shared.exceptions import X")
@@ -69,6 +33,33 @@ IMPORT_PATTERN = re.compile(
     r"^\s*(?:from|import)\s+((?:shared|engine|cms|management|mission_control)(?:\.\w+)*)",
     re.MULTILINE,
 )
+
+
+def load_allowed_imports(config_path: Path) -> dict[str, list[str]]:
+    """Load allowed imports from YAML config file.
+
+    Returns dict mapping from_layer -> list of allowed import prefixes.
+    """
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    return config.get("allowed", {})
+
+
+def is_import_allowed(from_layer: str, module_path: str, allowed: dict[str, list[str]]) -> bool:
+    """Check if a specific import is allowed by the config.
+
+    Args:
+        from_layer: The layer doing the import
+        module_path: Full module path being imported (e.g., "management.services")
+        allowed: Dict of allowed imports per layer
+
+    Returns:
+        True if this import is explicitly allowed, False otherwise
+    """
+    allowed_prefixes = allowed.get(from_layer, [])
+
+    # Check if module_path matches or starts with any allowed prefix
+    return any(module_path == prefix or module_path.startswith(prefix + ".") for prefix in allowed_prefixes)
 
 
 def get_imports(layer_path: Path) -> dict[str, set[str]]:
@@ -95,14 +86,6 @@ def get_imports(layer_path: Path) -> dict[str, set[str]]:
     return imports
 
 
-def is_violation(from_layer: str, to_layer: str) -> bool:
-    """Check if importing to_layer from from_layer is a violation.
-
-    Violations occur when a lower layer imports from a higher layer.
-    """
-    return LAYER_INDEX[from_layer] < LAYER_INDEX[to_layer]
-
-
 def analyze_imports(base_path: Path) -> dict:
     """Analyze all cross-layer imports and return structured result."""
     result = {}
@@ -125,7 +108,7 @@ def analyze_imports(base_path: Path) -> dict:
     return result
 
 
-def compute_stats(imports: dict) -> dict:
+def compute_stats(imports: dict, allowed: dict[str, list[str]]) -> dict:
     """Compute summary statistics from import analysis."""
     stats = {
         "total_cross_layer_imports": 0,
@@ -141,22 +124,21 @@ def compute_stats(imports: dict) -> dict:
         for to_layer, modules in targets.items():
             stats["total_cross_layer_imports"] += len(modules)
 
-            if is_violation(from_layer, to_layer):
-                stats["violations"] += len(modules)
+            # Find modules that are NOT in the allowed list
+            violation_modules = [m for m in modules if not is_import_allowed(from_layer, m, allowed)]
+            if violation_modules:
+                stats["violations"] += len(violation_modules)
                 layer_has_violation = True
                 stats["violation_details"].append(
                     {
                         "from": from_layer,
                         "to": to_layer,
-                        "modules": modules,
+                        "modules": violation_modules,
                     }
                 )
 
         if layer_has_violation:
             stats["layers_with_violations"].append(from_layer)
-        elif not targets:
-            # Only mark as clean if no outbound imports at all or all are valid
-            pass
 
     # Determine clean layers (no violations)
     for layer in ALL_LAYERS:
@@ -196,6 +178,15 @@ def main():
     args = parser.parse_args()
 
     script_dir = Path(__file__).parent
+    config_path = script_dir / "layer_imports.yaml"
+
+    if not config_path.exists():
+        print(json.dumps({"error": f"Config not found: {config_path}"}), file=sys.stderr)
+        return 1
+
+    # Load allowed imports from config
+    allowed = load_allowed_imports(config_path)
+
     # Go up two levels: check_layer_imports -> scripts -> repo root
     base_path = script_dir.parent.parent / "shifter" / "shifter_platform"
 
@@ -205,7 +196,7 @@ def main():
 
     # Analyze imports
     imports = analyze_imports(base_path)
-    stats = compute_stats(imports)
+    stats = compute_stats(imports, allowed)
 
     # Build output
     output = {

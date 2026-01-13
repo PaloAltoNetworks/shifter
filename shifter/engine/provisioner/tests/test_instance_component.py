@@ -17,7 +17,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import the real functions and classes we're testing
-from components.instance import generate_ssh_keypair, validate_s3_path
+from components.instance import validate_s3_path
+from utils.crypto import generate_ssh_keypair
 
 
 class TestGenerateSshKeypair:
@@ -174,6 +175,8 @@ class TestInstanceComponentWithPulumiMocks:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             # Verify secret was created
@@ -198,6 +201,8 @@ class TestInstanceComponentWithPulumiMocks:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             # Verify instance was created
@@ -223,6 +228,8 @@ class TestInstanceComponentWithPulumiMocks:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             # Check the secret name pattern in the mock
@@ -250,6 +257,8 @@ class TestInstanceComponentWithPulumiMocks:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_secret_name(name):
@@ -275,6 +284,8 @@ class TestInstanceComponentWithPulumiMocks:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 instance_profile_name="my-profile",
             )
 
@@ -301,10 +312,13 @@ class TestInstanceComponentWithPulumiMocks:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             output_dict = component.to_output_dict()
 
+            assert "uuid" in output_dict
             assert "instance_id" in output_dict
             assert "private_ip" in output_dict
             assert "ssh_key_secret_arn" in output_dict
@@ -350,6 +364,8 @@ class TestDCInstanceComponent:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
             )
 
@@ -375,6 +391,8 @@ class TestDCInstanceComponent:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
             )
 
@@ -399,6 +417,8 @@ class TestDCInstanceComponent:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
             )
 
@@ -428,6 +448,8 @@ class TestDCInstanceComponent:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
             )
 
@@ -468,6 +490,8 @@ class TestDCInstanceComponent:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             # Victim should NOT have DC config parameter
@@ -501,6 +525,8 @@ class TestUserDataGeneration:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_user_data(user_data_b64):
@@ -527,6 +553,8 @@ class TestUserDataGeneration:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_user_data(user_data_b64):
@@ -555,6 +583,8 @@ class TestUserDataGeneration:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
             )
 
             def check_user_data(user_data_b64):
@@ -583,6 +613,8 @@ class TestUserDataGeneration:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 agent_presigned_url="https://s3.example.com/signed-agent-url",
                 agent_s3_key="agents/xdr.tar.gz",
             )
@@ -617,6 +649,8 @@ class TestUserDataGeneration:
                     security_group_id="sg-12345",
                     ami_id="ami-12345",
                     environment="dev",
+                    request_uuid="req-uuid-12345",
+                    instance_uuid="inst-uuid-12345",
                     agent_s3_key="; rm -rf /",  # Shell injection attempt
                 )
 
@@ -668,6 +702,8 @@ class TestJoinDomainFlag:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 join_domain=True,
             )
 
@@ -692,6 +728,8 @@ class TestJoinDomainFlag:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 join_domain=False,
             )
 
@@ -716,6 +754,8 @@ class TestJoinDomainFlag:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 # No join_domain parameter - should default to False
             )
 
@@ -760,6 +800,8 @@ class TestRunSetupSignature:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 join_domain=True,
             )
 
@@ -792,6 +834,8 @@ class TestRunSetupSignature:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 join_domain=False,
             )
 
@@ -848,6 +892,8 @@ class TestRunDCSetupSignature:
                 security_group_id="sg-12345",
                 ami_id="ami-12345",
                 environment="dev",
+                request_uuid="req-uuid-12345",
+                instance_uuid="inst-uuid-12345",
                 dc_config={"domain_name": "internal.shifter", "netbios_name": "SHIFTER"},
             )
 

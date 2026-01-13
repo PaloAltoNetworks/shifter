@@ -52,6 +52,12 @@ class TestEngineExports:
 
         assert callable(connect_terminal)
 
+    def test_exports_create_ngfw(self):
+        """create_ngfw should be importable from engine."""
+        from engine import create_ngfw
+
+        assert callable(create_ngfw)
+
     def test_all_exports_match_declared(self):
         """__all__ should match actual exports."""
         import engine
@@ -59,12 +65,18 @@ class TestEngineExports:
         expected = {
             "EngineError",
             "cancel_range",
+            "cancel_range_by_request",
             "connect_terminal",
+            "create_ngfw",
             "create_range",
+            "destroy_ngfw",
             "destroy_range",
+            "destroy_range_by_request",
             "get_range_status",
             "pause_range",
             "resume_range",
+            "start_ngfw",
+            "stop_ngfw",
         }
         assert set(engine.__all__) == expected
 

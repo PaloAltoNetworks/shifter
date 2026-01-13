@@ -96,8 +96,8 @@ class TestOpsOrchestratorOrchestrate:
         from orchestrators.ops_orchestrator import OpsOrchestrator
 
         mock_executor = MagicMock()
-        # First call succeeds, second fails
-        mock_executor.run_command.side_effect = [
+        # First call succeeds, second fails (using execute_action)
+        mock_executor.execute_action.side_effect = [
             MagicMock(success=True, stdout="ok", stderr=""),
             MagicMock(success=False, stdout="", stderr="Failed"),
         ]
@@ -129,7 +129,7 @@ class TestOpsOrchestratorOrchestrate:
         from orchestrators.ops_orchestrator import OpsOrchestrator
 
         mock_executor = MagicMock()
-        mock_executor.run_command.return_value = MagicMock(success=True, stdout="output", stderr="")
+        mock_executor.execute_action.return_value = MagicMock(success=True, stdout="output", stderr="")
 
         @dataclass
         class MockStep:
@@ -215,3 +215,154 @@ class TestOpsOrchestratorEmptyPlan:
 
         assert result.success is True
         assert len(result.step_results) == 0
+
+
+# =============================================================================
+# Integration Tests: OpsOrchestrator with AWSExecutor.execute_action()
+# =============================================================================
+
+
+class TestOpsOrchestratorAWSExecutorIntegration:
+    """Test OpsOrchestrator uses AWSExecutor.execute_action() when available."""
+
+    def test_uses_execute_action_when_available(self):
+        """OpsOrchestrator uses execute_action() for AWSExecutor."""
+        from orchestrators.ops_orchestrator import OpsOrchestrator
+
+        mock_executor = MagicMock()
+        mock_executor.execute_action.return_value = MagicMock(success=True, stdout="ok", stderr="")
+
+        @dataclass
+        class MockStep:
+            name: str
+            action: str
+            params: list
+
+        plan = MockOpsPlan(steps=[MockStep(name="start", action="start_instance", params=["instance_id"])])
+        context = {"instance_id": "i-12345"}
+
+        orchestrator = OpsOrchestrator(executor=mock_executor)
+        result = orchestrator.orchestrate("i-12345", plan, context)
+
+        mock_executor.execute_action.assert_called_once_with("start_instance", context)
+        assert result.success is True
+
+    def test_passes_context_to_execute_action(self):
+        """OpsOrchestrator passes context dict to execute_action()."""
+        from orchestrators.ops_orchestrator import OpsOrchestrator
+
+        mock_executor = MagicMock()
+        mock_executor.execute_action.return_value = MagicMock(success=True, stdout="ok", stderr="")
+
+        @dataclass
+        class MockStep:
+            name: str
+            action: str
+            params: list
+
+        plan = MockOpsPlan(
+            steps=[
+                MockStep(name="start", action="start_instance", params=["instance_id"]),
+                MockStep(name="wait", action="wait_for_running", params=["instance_id"]),
+            ]
+        )
+        context = {"instance_id": "i-12345", "timeout": 300}
+
+        orchestrator = OpsOrchestrator(executor=mock_executor)
+        result = orchestrator.orchestrate("i-12345", plan, context)
+
+        assert mock_executor.execute_action.call_count == 2
+        # Both calls should receive the same context
+        for call in mock_executor.execute_action.call_args_list:
+            assert call[0][1] == context
+        assert result.success is True
+
+    def test_falls_back_to_run_command_without_execute_action(self):
+        """OpsOrchestrator falls back to run_command() if no execute_action."""
+        from orchestrators.ops_orchestrator import OpsOrchestrator
+
+        mock_executor = MagicMock(spec=["run_command"])  # No execute_action
+        mock_executor.run_command.return_value = MagicMock(success=True, stdout="ok", stderr="")
+
+        @dataclass
+        class MockStep:
+            name: str
+            action: str
+            params: dict
+
+        plan = MockOpsPlan(steps=[MockStep(name="test", action="test_action", params={})])
+
+        orchestrator = OpsOrchestrator(executor=mock_executor)
+        result = orchestrator.orchestrate("target-id", plan, {})
+
+        mock_executor.run_command.assert_called_once()
+        assert result.success is True
+
+    def test_handles_execute_action_failure(self):
+        """OpsOrchestrator handles execute_action() failures properly."""
+        from orchestrators.ops_orchestrator import OpsOrchestrator
+
+        mock_executor = MagicMock()
+        mock_executor.execute_action.return_value = MagicMock(success=False, stdout="", stderr="Instance not found")
+
+        @dataclass
+        class MockStep:
+            name: str
+            action: str
+            params: list
+
+        plan = MockOpsPlan(steps=[MockStep(name="start", action="start_instance", params=["instance_id"])])
+        context = {"instance_id": "i-invalid"}
+
+        orchestrator = OpsOrchestrator(executor=mock_executor)
+        result = orchestrator.orchestrate("i-invalid", plan, context)
+
+        assert result.success is False
+        assert len(result.step_results) == 1
+        assert result.step_results[0].stderr == "Instance not found"
+
+
+class TestOpsOrchestratorWithNGFWPlans:
+    """Test OpsOrchestrator with NGFW start/stop plans."""
+
+    def test_executes_ngfw_start_plan(self):
+        """OpsOrchestrator executes NGFWStartPlan steps."""
+        from orchestrators.ops_orchestrator import OpsOrchestrator
+        from plans.ngfw_start import NGFWStartPlan
+
+        mock_executor = MagicMock()
+        mock_executor.execute_action.return_value = MagicMock(success=True, stdout="ok", stderr="")
+
+        plan = NGFWStartPlan()
+        context = {"instance_id": "i-12345"}
+
+        orchestrator = OpsOrchestrator(executor=mock_executor)
+        result = orchestrator.orchestrate("i-12345", plan, context)
+
+        # NGFWStartPlan has 2 steps: start_instance and wait_for_running
+        assert mock_executor.execute_action.call_count == 2
+        actions = [call[0][0] for call in mock_executor.execute_action.call_args_list]
+        assert "start_instance" in actions
+        assert "wait_for_running" in actions
+        assert result.success is True
+
+    def test_executes_ngfw_stop_plan(self):
+        """OpsOrchestrator executes NGFWStopPlan steps."""
+        from orchestrators.ops_orchestrator import OpsOrchestrator
+        from plans.ngfw_stop import NGFWStopPlan
+
+        mock_executor = MagicMock()
+        mock_executor.execute_action.return_value = MagicMock(success=True, stdout="ok", stderr="")
+
+        plan = NGFWStopPlan()
+        context = {"instance_id": "i-12345"}
+
+        orchestrator = OpsOrchestrator(executor=mock_executor)
+        result = orchestrator.orchestrate("i-12345", plan, context)
+
+        # NGFWStopPlan has 2 steps: stop_instance and wait_for_stopped
+        assert mock_executor.execute_action.call_count == 2
+        actions = [call[0][0] for call in mock_executor.execute_action.call_args_list]
+        assert "stop_instance" in actions
+        assert "wait_for_stopped" in actions
+        assert result.success is True

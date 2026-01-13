@@ -8,7 +8,7 @@ from .enums import (
     ACTIVE_STATUSES,
     CANCELLABLE_STATUSES,
     TERMINAL_STATUSES,
-    RangeStatus,
+    ResourceStatus,
     WebSocketCloseCode,
 )
 from .exceptions import AssetError, CMSError
@@ -19,6 +19,6 @@ __all__ = [
     "TERMINAL_STATUSES",
     "AssetError",
     "CMSError",
-    "RangeStatus",
+    "ResourceStatus",
     "WebSocketCloseCode",
 ]

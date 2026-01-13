@@ -103,6 +103,16 @@ resource "aws_security_group_rule" "victim_ssh_from_portal" {
   description       = "SSH from Portal VPC (browser terminal)"
 }
 
+resource "aws_security_group_rule" "victim_rdp_from_portal" {
+  type              = "ingress"
+  from_port         = 3389
+  to_port           = 3389
+  protocol          = "tcp"
+  cidr_blocks       = [var.portal_vpc_cidr]
+  security_group_id = aws_security_group.victim.id
+  description       = "RDP from Portal VPC (Guacamole)"
+}
+
 resource "aws_security_group_rule" "victim_from_kali" {
   type                     = "ingress"
   from_port                = 0
@@ -343,6 +353,16 @@ resource "aws_security_group_rule" "kali_ssh_from_portal" {
   cidr_blocks       = [var.portal_vpc_cidr]
   security_group_id = aws_security_group.kali.id
   description       = "SSH from Portal VPC (browser terminal)"
+}
+
+resource "aws_security_group_rule" "kali_rdp_from_portal" {
+  type              = "ingress"
+  from_port         = 3389
+  to_port           = 3389
+  protocol          = "tcp"
+  cidr_blocks       = [var.portal_vpc_cidr]
+  security_group_id = aws_security_group.kali.id
+  description       = "RDP from Portal VPC (Guacamole)"
 }
 
 resource "aws_security_group_rule" "kali_from_victim" {

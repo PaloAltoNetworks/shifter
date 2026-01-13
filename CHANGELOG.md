@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-01-12
+
+### Added
+- Add CloudWatch alarms for Redis memory usage and connections
+
+### Changed
+- Upgrade Redis prod to support ~1000 concurrent connections
+
 ## [1.0.4] - 2026-01-12
 
 ### Changed

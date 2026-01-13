@@ -236,18 +236,52 @@ body.xdr-dark-theme {
     font-family: monospace;
 }
 
-/* Status */
+/* Status indicators */
+.status {
+    display: inline-flex;
+    align-items: center;
+}
+
 .status-dot {
     display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     margin-right: 8px;
+    flex-shrink: 0;
 }
 
-.status-online .status-dot { background: #00d26a; }
-.status-offline .status-dot { background: #707070; }
-.status-error .status-dot { background: #ff4d4f; }
+.status-online .status-dot,
+.status-active .status-dot {
+    background: #00d26a;
+    box-shadow: 0 0 6px rgb(0, 210, 106, 0.6);
+}
+
+.status-offline .status-dot,
+.status-paused .status-dot { background: #707070; }
+
+.status-error .status-dot {
+    background: #ff4d4f;
+    box-shadow: 0 0 6px rgb(255, 77, 79, 0.6);
+}
+
+.status-provisioning .status-dot {
+    background: #faad14;
+    box-shadow: 0 0 8px rgb(250, 173, 20, 0.8);
+    animation: pulse-glow 1.5s infinite;
+}
+
+@keyframes pulse-glow {
+    0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 8px rgb(250, 173, 20, 0.8);
+    }
+
+    50% {
+        opacity: 0.7;
+        box-shadow: 0 0 12px rgb(250, 173, 20, 1);
+    }
+}
 
 /* Empty State */
 .empty-state {
@@ -335,3 +369,39 @@ a:hover {
 ::-webkit-scrollbar-thumb:hover {
     background: #575757;
 }
+
+/* Utility Classes */
+
+/* Text utilities */
+.text-muted { color: var(--xdr-text-secondary); }
+.text-small { font-size: 12px; }
+.text-right { text-align: right; }
+
+/* Margin utilities */
+.mt-sm { margin-top: 8px; }
+.mt-md { margin-top: 12px; }
+.mt-lg { margin-top: 16px; }
+.mb-sm { margin-bottom: 8px; }
+.mb-md { margin-bottom: 12px; }
+.mb-lg { margin-bottom: 16px; }
+
+/* Padding utilities */
+.pl-lg { padding-left: 16px; }
+
+/* Flexbox utilities */
+.flex-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+/* Gap utilities */
+.gap-sm { gap: 8px; }
+.gap-md { gap: 12px; }
+.gap-lg { gap: 16px; }

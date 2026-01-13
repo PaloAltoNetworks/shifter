@@ -74,7 +74,7 @@ user_storage_bucket = "shifter-dev-user-storage-e3462f0c"
 # AMI IDs are now managed via SSM Parameter Store (/shifter/ami/*)
 # See shifter/packer/ for AMI build configuration
 
-victim_instance_type = "t3.medium"
+victim_instance_type = "t3.large"
 kali_instance_type   = "t3.medium"
 
 # ------------------------------------------------------------------------------
@@ -95,6 +95,12 @@ scale_down_threshold = 30
 redis_node_type          = "cache.t3.micro"
 redis_engine_version     = "7.1"
 redis_enable_replication = true
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+
+log_level = "DEBUG"
 
 # ------------------------------------------------------------------------------
 # Log Aggregation
@@ -125,6 +131,41 @@ dc_domain_name = "internal.shifter"
 dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
 
 # ------------------------------------------------------------------------------
+# Guacamole
+# ------------------------------------------------------------------------------
+
+guacd_image_tag                = "1.5.5"
+guacamole_client_image_tag     = "1.5.5"
+guacd_cpu                      = 512
+guacd_memory                   = 1024
+guacamole_client_cpu           = 512
+guacamole_client_memory        = 1024
+guacd_desired_count            = 1
+guacamole_client_desired_count = 1
+
+# Database
+guacamole_db_instance_class        = "db.t3.small"
+guacamole_db_allocated_storage     = 20
+guacamole_db_max_allocated_storage = 50
+guacamole_db_engine_version        = "16"
+guacamole_db_multi_az              = false
+guacamole_db_backup_retention_days = 7
+guacamole_db_deletion_protection   = false
+guacamole_db_skip_final_snapshot   = true
+
+# Autoscaling (disabled for initial testing)
+guacamole_enable_autoscaling       = false
+guacamole_autoscaling_min_capacity = 1
+guacamole_autoscaling_max_capacity = 4
+guacamole_autoscaling_cpu_target   = 70
+
+# Secrets
+guacamole_secrets_recovery_window_days = 0
+
+# OIDC/Cognito authentication
+guacamole_enable_oidc = true
+
+# ------------------------------------------------------------------------------
 # Messaging (SNS/SQS)
 # ------------------------------------------------------------------------------
 
@@ -149,6 +190,12 @@ messaging_alarm_actions               = [] # Populated by main.tf from shared SN
 # ------------------------------------------------------------------------------
 
 alarm_email = "bedwards@paloaltonetworks.com"
+
+# ------------------------------------------------------------------------------
+# Bedrock Logging
+# ------------------------------------------------------------------------------
+
+enable_bedrock_logging = true
 
 # ------------------------------------------------------------------------------
 # CI Testing (not used by Terraform, extracted by quality.yml workflow)

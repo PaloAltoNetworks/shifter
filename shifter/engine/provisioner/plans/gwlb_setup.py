@@ -1,7 +1,7 @@
 """GWLB Setup Plan for target registration after NGFW provisioning.
 
 This plan runs after NGFW is provisioned to:
-- Register NGFW data ENI as target in GWLB target group
+- Register NGFW instance as target in GWLB target group
 - Wait for target to become healthy
 
 Uses AWSExecutor methods for AWS API calls (not bash scripts).
@@ -30,7 +30,7 @@ class GWLBSetupPlan:
     """Setup plan for GWLB target registration.
 
     Steps:
-    1. Register NGFW data ENI in GWLB target group
+    1. Register NGFW instance in GWLB target group
     2. Wait for target to become healthy
 
     Uses AWSExecutor methods for AWS API calls.
@@ -55,7 +55,7 @@ class GWLBSetupPlan:
         """Get context variables for GWLB setup.
 
         Args:
-            instance: Instance with target_group_arn and ngfw_data_eni_id/ngfw_instance_id
+            instance: Instance with target_group_arn and instance_id attributes
 
         Returns:
             Dict with context variables for AWSExecutor methods
@@ -67,19 +67,13 @@ class GWLBSetupPlan:
         if not target_group_arn:
             raise ValueError("Instance missing required 'target_group_arn' attribute")
 
-        # Prefer data ENI ID over instance ID for GWLB target
-        # GWLB targets should use ENI for traffic inspection
-        ngfw_data_eni_id = getattr(instance, "ngfw_data_eni_id", None)
-        ngfw_instance_id = getattr(instance, "ngfw_instance_id", None)
-
-        if ngfw_data_eni_id:
-            target_id = ngfw_data_eni_id
-        elif ngfw_instance_id:
-            target_id = ngfw_instance_id
-        else:
-            raise ValueError("Instance missing 'ngfw_data_eni_id' or 'ngfw_instance_id' - target ID required")
+        # Use instance_id for target registration
+        # (target_type="instance" in target group)
+        instance_id = getattr(instance, "instance_id", None)
+        if not instance_id:
+            raise ValueError("Instance missing 'instance_id' - required for target registration")
 
         return {
             "target_group_arn": target_group_arn,
-            "target_id": target_id,
+            "target_id": instance_id,
         }

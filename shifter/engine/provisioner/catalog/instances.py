@@ -11,6 +11,7 @@ Instance types (EC2 sizes like t3.medium) are configured via environment variabl
 """
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -50,8 +51,8 @@ class InstanceType:
     role: str  # "attacker", "victim", or "dc"
     user_data_template: str
     description: str
-    _instance_type_getter: callable  # Function to get default instance type
-    ami_lookup: dict | None = None  # For dynamic AMI lookup
+    _instance_type_getter: Callable[[], str]  # Function to get default instance type
+    ami_lookup: dict[str, str] | None = None  # For dynamic AMI lookup
     requires_agent: bool = False
     ssh_user: str = "ubuntu"  # Default SSH user for the OS
 

@@ -110,6 +110,7 @@ class SSMExecutor:
         script: str,
         timeout_seconds: int = 300,
         document_name: str = "AWS-RunPowerShellScript",
+        stdin_input: str | None = None,
     ) -> CommandResult:
         """Run a script on an EC2 instance via SSM Run Command.
 
@@ -118,6 +119,7 @@ class SSMExecutor:
             script: Script content to execute
             timeout_seconds: Maximum time to wait for completion
             document_name: SSM document to use (default: PowerShell)
+            stdin_input: Ignored. For executor interface compatibility with SSHExecutor.
 
         Returns:
             CommandResult with success status, exit code, stdout, stderr

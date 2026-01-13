@@ -99,6 +99,24 @@ class TestPublishSubnetExhaustionAlarm:
 # =============================================================================
 
 
+@pytest.fixture(autouse=True)
+def mock_db_connection():
+    """Mock the database connection for advisory lock.
+
+    The advisory lock was added to prevent concurrent subnet allocations.
+    In tests, we mock the DB connection to avoid needing a real database.
+    """
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+    with patch("components.network._get_db_connection", return_value=mock_conn):
+        yield mock_conn
+
+
 class TestFindFreeSubnetHappyPath:
     """Happy path tests for _find_free_subnet."""
 

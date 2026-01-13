@@ -261,17 +261,19 @@ class TestGetActiveRange:
 
     def test_extracts_instances_from_nested_subnets_format(self):
         """Extracts instances from range_spec with nested subnets format."""
+        from django.contrib.auth import get_user_model
+
         from cms.models import RangeInstance, Request
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 42
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser_nested", password="testpass")
 
         # Create request for the FK
         request = Request.objects.create(
-            request_id="test-uuid-123",
+            request_id="11111111-1111-1111-1111-111111111111",
             request_type="range",
-            user_id=42,
+            user=user,
         )
 
         # New nested format: instances under subnets
@@ -291,7 +293,7 @@ class TestGetActiveRange:
             request=request,
             range_id=100,
             scenario_id="basic",
-            user_id=42,
+            user_id=user.id,
             status="ready",
             range_spec=range_spec,
         )
@@ -307,16 +309,18 @@ class TestGetActiveRange:
 
     def test_extracts_instances_from_legacy_flat_format(self):
         """Extracts instances from range_spec with legacy flat format."""
+        from django.contrib.auth import get_user_model
+
         from cms.models import RangeInstance, Request
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 43
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser_legacy", password="testpass")
 
         request = Request.objects.create(
-            request_id="test-uuid-456",
+            request_id="22222222-2222-2222-2222-222222222222",
             request_type="range",
-            user_id=43,
+            user=user,
         )
 
         # Legacy flat format: instances directly at top level
@@ -330,7 +334,7 @@ class TestGetActiveRange:
             request=request,
             range_id=101,
             scenario_id="basic",
-            user_id=43,
+            user_id=user.id,
             status="ready",
             range_spec=range_spec,
         )

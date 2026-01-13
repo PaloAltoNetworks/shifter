@@ -1,0 +1,317 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<style>
+    /* Back link */
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+        margin-bottom: 16px;
+    }
+
+    .back-link:hover {
+        color: var(--xdr-text);
+        text-decoration: none;
+    }
+
+    /* Danger container */
+    .deprovision-container {
+        max-width: 560px;
+    }
+
+    /* Warning header */
+    .warning-header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 24px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--xdr-border);
+    }
+
+    .warning-icon {
+        width: 48px;
+        height: 48px;
+        background: rgba(255, 77, 79, 0.1);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .warning-icon svg {
+        width: 24px;
+        height: 24px;
+        color: #ff4d4f;
+    }
+
+    .warning-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--xdr-text);
+        margin: 0 0 4px;
+    }
+
+    .warning-subtitle {
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+        margin: 0;
+    }
+
+    /* Impact list */
+    .impact-list {
+        margin: 0 0 24px;
+        padding: 0;
+        list-style: none;
+    }
+
+    .impact-list li {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 10px 0;
+        font-size: 13px;
+        color: var(--xdr-text);
+        border-bottom: 1px solid var(--xdr-border);
+    }
+
+    .impact-list li:last-child {
+        border-bottom: none;
+    }
+
+    .impact-icon {
+        color: #ff4d4f;
+        font-size: 16px;
+        line-height: 1;
+    }
+
+    /* Linked ranges warning */
+    .linked-ranges-warning {
+        background: rgba(255, 77, 79, 0.08);
+        border: 1px solid rgba(255, 77, 79, 0.3);
+        border-radius: 4px;
+        padding: 16px;
+        margin-bottom: 24px;
+    }
+
+    .linked-ranges-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #ff4d4f;
+        margin: 0 0 12px;
+    }
+
+    .linked-ranges-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .linked-ranges-list li {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        font-size: 12px;
+        color: var(--xdr-text-secondary);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .linked-ranges-list li:last-child {
+        border-bottom: none;
+    }
+
+    /* Confirmation form */
+    .confirmation-form {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+        padding: 16px;
+    }
+
+    .confirmation-label {
+        display: block;
+        font-size: 13px;
+        color: var(--xdr-text);
+        margin-bottom: 8px;
+    }
+
+    .confirmation-label strong {
+        color: #ff4d4f;
+    }
+
+    .form-input {
+        width: 100%;
+        padding: 8px 12px;
+        background: transparent;
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+        color: var(--xdr-text);
+        font-size: 14px;
+        font-family: inherit;
+    }
+
+    .form-input:focus {
+        outline: none;
+        border-color: #ff4d4f;
+    }
+
+    /* Buttons */
+    .btn-danger {
+        background: #ff4d4f;
+        color: #fff;
+        border: none;
+    }
+
+    .btn-danger:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 12px;
+        margin-top: 16px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}" class="back-link">
+    <span>&larr;</span> Back to {{ ngfw.name }}
+</a>
+
+<div class="deprovision-container">
+    <div class="card">
+        <div class="warning-header">
+            <div class="warning-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="warning-title">Deprovision {{ ngfw.name }}</h1>
+                <p class="warning-subtitle">This action cannot be undone</p>
+            </div>
+        </div>
+
+        <p style="color: var(--xdr-text-secondary); font-size: 13px; margin: 0 0 24px;">
+            You are about to permanently deprovision this NGFW. Please review the impact before proceeding.
+        </p>
+
+        <ul class="impact-list">
+            <li>
+                <span class="impact-icon">&#10005;</span>
+                <span>The EC2 instance and all associated AWS resources will be terminated</span>
+            </li>
+            <li>
+                <span class="impact-icon">&#10005;</span>
+                <span>The NGFW license will be deactivated and credits returned to your pool</span>
+            </li>
+            <li>
+                <span class="impact-icon">&#10005;</span>
+                <span>Traffic logging to XDR will stop for any ranges using this NGFW</span>
+            </li>
+            <li>
+                <span class="impact-icon">&#10005;</span>
+                <span>The GWLB and endpoint service will be deleted</span>
+            </li>
+        </ul>
+
+        {% if linked_ranges %}
+        <div class="linked-ranges-warning">
+            <h3 class="linked-ranges-title">
+                Warning: {{ linked_ranges|length }} range{% if linked_ranges|length != 1 %}s{% endif %} currently using this NGFW
+            </h3>
+            <ul class="linked-ranges-list">
+                {% for range in linked_ranges %}
+                <li>
+                    <span>Range #{{ range.id }}</span>
+                    <span>{{ range.get_status_display }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            <p style="font-size: 12px; color: var(--xdr-text-secondary); margin: 12px 0 0;">
+                These ranges will lose their NGFW routing. You should destroy them first or assign a different NGFW.
+            </p>
+        </div>
+        {% endif %}
+
+        <div class="confirmation-form">
+            <label class="confirmation-label">
+                To confirm, type <strong>{{ ngfw.name }}</strong> below:
+            </label>
+            <input type="text" class="form-input" id="confirm-input" placeholder="{{ ngfw.name }}" autocomplete="off">
+        </div>
+
+        <div class="action-buttons">
+            <a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}" class="btn btn-secondary">Cancel</a>
+            <button type="button" class="btn btn-danger" id="deprovision-btn" disabled>
+                Deprovision NGFW
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const csrfToken = '{{ csrf_token }}';
+    const ngfwId = '{{ ngfw.app_id }}';
+    const ngfwName = '{{ ngfw.name|escapejs }}';
+
+    const confirmInput = document.getElementById('confirm-input');
+    const deprovisionBtn = document.getElementById('deprovision-btn');
+
+    // Enable button when name matches
+    confirmInput.addEventListener('input', function() {
+        const matches = this.value.trim() === ngfwName;
+        deprovisionBtn.disabled = !matches;
+    });
+
+    // Handle deprovision
+    deprovisionBtn.addEventListener('click', function() {
+        if (confirmInput.value.trim() !== ngfwName) {
+            return;
+        }
+
+        deprovisionBtn.disabled = true;
+        deprovisionBtn.textContent = 'Deprovisioning...';
+
+        fetch(`/mission-control/api/ngfw/${ngfwId}/destroy/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                confirm_name: confirmInput.value.trim()
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert(data.error);
+                deprovisionBtn.disabled = false;
+                deprovisionBtn.textContent = 'Deprovision NGFW';
+            } else {
+                // Redirect to list page
+                window.location.href = '{% url "mission_control:ngfw_list" %}';
+            }
+        })
+        .catch(err => {
+            alert('An error occurred. Please try again.');
+            deprovisionBtn.disabled = false;
+            deprovisionBtn.textContent = 'Deprovision NGFW';
+        });
+    });
+});
+</script>
+{% endblock %}

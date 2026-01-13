@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-01-12
+
+### Changed
+- Extracted ssh key generation to shared library
+
+## [1.0.3] - 2026-01-12
+
+### Added
+- Additional local dev support
+
+### Fixed
+- Provisioner ID mismatch causes range create status update to fail
+
+## [1.0.0] - 2026-01-10
+
+### Added
+- NGFW create/destroy flow and UI
+- NGFW's dynamically add routes for subnets in user ranges
+- NGFW's dynamically pause if user has no active ranges
+- CyberScript (DSL) templates and initial interpreter for all range operations (range, ngfw, dc, etc.)
+- v1.0 of the Cortex BYOT scenario template
+  - Two config options: Automated or Full Manual
+  - Automated: NGFW, DC, 2x Workstations, Server, Attacker, domain join, XDR agent install, subnet routing
+    - Remaining manual (automation coming soon): CIE, XDR Collector, Caldera
+- Improved Bedrock logging and alarms
+- Draft Cortex BYOT scenario template
+- venv enforcer hook for Claude Code
+- Guacamole RDP for Range instances
+
+### Changed
+- NGFW models and services refactored to use schemas
+- Extended DSL and initial DSL interpreter implementation for NGFW flows
+- Templates refactored to use CyberScript DSL
+- Engine refactored to accept RequestSpec and interpret it into Engine models
+- CyberScript subnets align with actual subnets in AWS
+- AaC gate (service layer boundary violations at code or model level) fails will now block PRs
+- AWS assets tagged to requests for cost tracking and cleanup
+- Patched vulnerable urllib3, now on 2.6.3
+
+### Fixed
+- Dashboard range status updates and styling
+- Better AaC checking in check_layer_imports script
+- Sticky sesesions on Linux terminals: keep history, scrollback, etc when reconnecting
+- tmux now used for Terminal UI sessions
+- RDP copy/paste not working
+- Packer does not clean up EC2 instance after build
+
+## [0.10.6] - 2025-01-09
+
+### Added
+- Guacamole RDP for Range instances
+
+### Fixed
+- tmux now used for Terminal UI sessions
+
 ## [0.10.5] - 2025-01-06
 
 ### Changed
@@ -15,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.10.4] - 2025-01-06
 
 ### Fixed
-- Hotfix for Home subnet CIDR conflict detection-
+- Hotfix for Home subnet CIDR conflict detection
 
 ## [0.10.3] - 2025-01-04
 

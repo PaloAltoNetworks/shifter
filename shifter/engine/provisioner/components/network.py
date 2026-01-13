@@ -14,15 +14,89 @@ Without these routes, traffic between 10.1.2.0/28 and 10.1.3.0/28 would use
 the local route and bypass NGFW inspection entirely.
 """
 
+import hashlib
 import ipaddress
 import logging
 import os
 
 import boto3
+import psycopg
 import pulumi
 import pulumi_aws as aws
 
 logger = logging.getLogger(__name__)
+
+
+def _get_db_connection() -> psycopg.Connection:
+    """Get database connection for advisory lock.
+
+    Supports two authentication modes:
+    - If DB_PASSWORD is set: Uses standard password authentication (local dev)
+    - Otherwise: Uses RDS IAM authentication (ECS/production)
+
+    Returns:
+        psycopg.Connection: Active database connection.
+
+    Raises:
+        RuntimeError: If connection fails or required env vars are missing.
+    """
+    db_host = os.environ.get("DB_HOST")
+    db_port = int(os.environ.get("DB_PORT", 5432))
+    db_user = os.environ.get("DB_USER")
+    db_name = os.environ.get("DB_NAME")
+    db_password = os.environ.get("DB_PASSWORD")
+
+    if not all([db_host, db_user, db_name]):
+        raise RuntimeError("Missing DB_HOST, DB_USER, or DB_NAME environment variables")
+
+    # Local dev mode: use password auth
+    if db_password:
+        return psycopg.connect(
+            host=db_host,
+            port=db_port,
+            dbname=db_name,
+            user=db_user,
+            password=db_password,
+        )
+
+    # Production mode: use RDS IAM auth
+    aws_region = os.environ.get("AWS_REGION")
+    if not aws_region:
+        raise RuntimeError("Missing AWS_REGION environment variable for RDS IAM auth")
+
+    client = boto3.client("rds")
+    token = client.generate_db_auth_token(
+        DBHostname=db_host,
+        Port=db_port,
+        DBUsername=db_user,
+        Region=aws_region,
+    )
+    return psycopg.connect(
+        host=db_host,
+        port=db_port,
+        dbname=db_name,
+        user=db_user,
+        password=token,
+        sslmode="require",
+    )
+
+
+def _get_vpc_lock_id(vpc_id: str) -> int:
+    """Generate a consistent lock ID from VPC ID for advisory lock.
+
+    Uses MD5 hash of VPC ID to create a deterministic 32-bit integer
+    that can be used with PostgreSQL advisory locks.
+
+    Args:
+        vpc_id: The VPC ID (e.g., "vpc-1234567890abcdef0").
+
+    Returns:
+        A 32-bit integer suitable for pg_advisory_lock.
+    """
+    # Use first 8 hex chars of MD5 hash as lock ID (32-bit integer)
+    # MD5 is used here for consistent hashing, not cryptographic security
+    hash_hex = hashlib.md5(vpc_id.encode(), usedforsecurity=False).hexdigest()[:8]
+    return int(hash_hex, 16)
 
 
 def _publish_subnet_exhaustion_alarm(vpc_id: str, cidr_prefix: str, subnet_size: int) -> None:
@@ -101,6 +175,10 @@ def _get_existing_subnets(vpc_id: str) -> list[ipaddress.IPv4Network]:
 def _find_free_subnet(vpc_id: str, cidr_prefix: str, subnet_size: int = 24) -> str:
     """Find a free subnet in the VPC by querying AWS.
 
+    Uses a PostgreSQL advisory lock to prevent concurrent provisions from
+    allocating the same CIDR. The lock is scoped to the VPC ID, so provisions
+    in different VPCs can proceed in parallel.
+
     This queries AWS for all existing subnets in the VPC and finds a subnet
     of the requested size that doesn't conflict with any of them.
 
@@ -116,7 +194,7 @@ def _find_free_subnet(vpc_id: str, cidr_prefix: str, subnet_size: int = 24) -> s
         A free CIDR block (e.g., "10.1.8.0/24" or "10.1.2.16/28").
 
     Raises:
-        RuntimeError: If no free subnet can be found.
+        RuntimeError: If no free subnet can be found or DB lock fails.
         ValueError: If subnet_size is not 24 or 28.
     """
     if subnet_size not in (24, 28):
@@ -129,6 +207,47 @@ def _find_free_subnet(vpc_id: str, cidr_prefix: str, subnet_size: int = 24) -> s
         cidr_prefix,
     )
 
+    # Use advisory lock to prevent concurrent subnet allocations in the same VPC
+    lock_id = _get_vpc_lock_id(vpc_id)
+    logger.debug("Acquiring advisory lock %d for VPC %s", lock_id, vpc_id)
+
+    try:
+        with _get_db_connection() as conn, conn.cursor() as cur:
+            # Acquire advisory lock (blocks other allocations for this VPC)
+            cur.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
+            logger.debug("Acquired advisory lock %d", lock_id)
+
+            try:
+                # Now safely find a free subnet with the lock held
+                return _find_free_subnet_internal(vpc_id, cidr_prefix, subnet_size)
+            finally:
+                # Always release the lock
+                cur.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+                logger.debug("Released advisory lock %d", lock_id)
+    except psycopg.Error as e:
+        # If DB connection fails, fall back to unlocked allocation
+        # AWS will reject duplicate CIDRs anyway, so this is safe
+        logger.warning(
+            "Failed to acquire advisory lock for subnet allocation (falling back to unlocked): %s",
+            e,
+        )
+        return _find_free_subnet_internal(vpc_id, cidr_prefix, subnet_size)
+
+
+def _find_free_subnet_internal(vpc_id: str, cidr_prefix: str, subnet_size: int) -> str:
+    """Internal subnet finding logic (called with or without advisory lock).
+
+    Args:
+        vpc_id: The VPC ID to check.
+        cidr_prefix: The CIDR prefix (e.g., "10.1" for 10.1.X.Y/size).
+        subnet_size: The subnet prefix length (24 or 28).
+
+    Returns:
+        A free CIDR block.
+
+    Raises:
+        RuntimeError: If no free subnet can be found.
+    """
     existing_networks = _get_existing_subnets(vpc_id)
     pulumi.log.info(f"Found {len(existing_networks)} existing subnets in VPC {vpc_id}")
 

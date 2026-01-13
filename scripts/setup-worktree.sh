@@ -17,45 +17,73 @@ fi
 
 echo "Setting up worktree: $WORKTREE_ROOT"
 
+# Helper: create or fix symlink
+# Usage: ensure_symlink <target> <link_path> <description>
+ensure_symlink() {
+    local target="$1"
+    local link_path="$2"
+    local desc="$3"
+
+    # Check if target exists
+    if [ ! -e "$target" ]; then
+        echo "Warning: $desc target does not exist: $target"
+        return 1
+    fi
+
+    # Check parent directory exists
+    local parent_dir
+    parent_dir="$(dirname "$link_path")"
+    if [ ! -d "$parent_dir" ]; then
+        echo "Skipping $desc: parent directory does not exist"
+        return 1
+    fi
+
+    # Valid symlink pointing to correct target
+    if [ -L "$link_path" ] && [ -e "$link_path" ] && [ "$(readlink "$link_path")" = "$target" ]; then
+        echo "$desc symlink already exists and is valid"
+        return 0
+    fi
+
+    # Broken symlink - remove and recreate
+    if [ -L "$link_path" ] && [ ! -e "$link_path" ]; then
+        echo "Removing broken $desc symlink..."
+        rm "$link_path"
+    fi
+
+    # Symlink pointing to wrong target - remove and recreate
+    if [ -L "$link_path" ]; then
+        echo "Fixing $desc symlink (wrong target)..."
+        rm "$link_path"
+    fi
+
+    # Regular file or directory - remove and recreate
+    if [ -e "$link_path" ]; then
+        echo "Replacing $desc with symlink..."
+        rm -rf "$link_path"
+    fi
+
+    # Create symlink
+    ln -s "$target" "$link_path"
+    echo "Created $desc symlink"
+}
+
 # Shifter platform venv
-if [ -L "$WORKTREE_ROOT/shifter/shifter_platform/.venv" ]; then
-    echo "shifter/shifter_platform/.venv symlink already exists"
-elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform/.venv" ]; then
-    echo "Removing empty shifter/shifter_platform/.venv directory..."
-    rm -rf "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
-    ln -s "$MAIN_REPO/shifter/shifter_platform/.venv" "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
-    echo "Created shifter/shifter_platform/.venv symlink"
-elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform" ]; then
-    ln -s "$MAIN_REPO/shifter/shifter_platform/.venv" "$WORKTREE_ROOT/shifter/shifter_platform/.venv"
-    echo "Created shifter/shifter_platform/.venv symlink"
-fi
+ensure_symlink \
+    "$MAIN_REPO/shifter/shifter_platform/.venv" \
+    "$WORKTREE_ROOT/shifter/shifter_platform/.venv" \
+    "shifter/shifter_platform/.venv"
 
 # Shifter platform .env file (for Django settings like DJANGO_SECRET_KEY)
-if [ -f "$MAIN_REPO/shifter/shifter_platform/.env" ]; then
-    if [ -L "$WORKTREE_ROOT/shifter/shifter_platform/.env" ]; then
-        echo "shifter/shifter_platform/.env symlink already exists"
-    elif [ -f "$WORKTREE_ROOT/shifter/shifter_platform/.env" ]; then
-        echo "shifter/shifter_platform/.env already exists (not overwriting)"
-    elif [ -d "$WORKTREE_ROOT/shifter/shifter_platform" ]; then
-        ln -s "$MAIN_REPO/shifter/shifter_platform/.env" "$WORKTREE_ROOT/shifter/shifter_platform/.env"
-        echo "Created shifter/shifter_platform/.env symlink"
-    fi
-fi
+ensure_symlink \
+    "$MAIN_REPO/shifter/shifter_platform/.env" \
+    "$WORKTREE_ROOT/shifter/shifter_platform/.env" \
+    "shifter/shifter_platform/.env"
 
 # Engine provisioner venv (if it exists in main repo)
-if [ -d "$MAIN_REPO/shifter/engine/provisioner/.venv" ]; then
-    if [ -L "$WORKTREE_ROOT/shifter/engine/provisioner/.venv" ]; then
-        echo "shifter/engine/provisioner/.venv symlink already exists"
-    elif [ -d "$WORKTREE_ROOT/shifter/engine/provisioner/.venv" ]; then
-        echo "Removing empty shifter/engine/provisioner/.venv directory..."
-        rm -rf "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
-        ln -s "$MAIN_REPO/shifter/engine/provisioner/.venv" "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
-        echo "Created shifter/engine/provisioner/.venv symlink"
-    elif [ -d "$WORKTREE_ROOT/shifter/engine/provisioner" ]; then
-        ln -s "$MAIN_REPO/shifter/engine/provisioner/.venv" "$WORKTREE_ROOT/shifter/engine/provisioner/.venv"
-        echo "Created shifter/engine/provisioner/.venv symlink"
-    fi
-fi
+ensure_symlink \
+    "$MAIN_REPO/shifter/engine/provisioner/.venv" \
+    "$WORKTREE_ROOT/shifter/engine/provisioner/.venv" \
+    "shifter/engine/provisioner/.venv"
 
 # Node modules (for stylelint, prettier, etc.)
 if [ -f "$WORKTREE_ROOT/package.json" ]; then

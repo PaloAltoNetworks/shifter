@@ -1,11 +1,12 @@
 """Tests for mission_control context processors."""
 
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from django.db import DatabaseError
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 
 @pytest.mark.django_db
@@ -26,10 +27,11 @@ class TestActiveRangeContextProcessor:
         mock_request.user.id = 42
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=1,
             user_id=42,
             scenario_id="basic",
-            status=RangeStatus.READY,
+            status=ResourceStatus.READY,
             instances=[],
             agent_name="Test Agent",
         )
@@ -42,7 +44,7 @@ class TestActiveRangeContextProcessor:
 
         assert result["has_active_range"] is True
         assert result["active_range"] is mock_range_context
-        assert result["active_range"].status == RangeStatus.READY
+        assert result["active_range"].status == ResourceStatus.READY
 
     def test_returns_false_for_non_ready_range(self):
         """Returns has_active_range=False when range is not ready."""
@@ -54,10 +56,11 @@ class TestActiveRangeContextProcessor:
         mock_request.user.id = 42
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=1,
             user_id=42,
             scenario_id="basic",
-            status=RangeStatus.PROVISIONING,
+            status=ResourceStatus.PROVISIONING,
             instances=[],
             agent_name="Test Agent",
         )
@@ -70,7 +73,7 @@ class TestActiveRangeContextProcessor:
 
         assert result["has_active_range"] is False
         assert result["active_range"] is mock_range_context
-        assert result["active_range"].status == RangeStatus.PROVISIONING
+        assert result["active_range"].status == ResourceStatus.PROVISIONING
 
     def test_returns_none_when_no_active_range(self):
         """Returns None when user has no active range."""
@@ -209,10 +212,11 @@ class TestActiveRangeContextProcessor:
         mock_request.user.id = 42
 
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=1,
             user_id=42,
             scenario_id="basic",
-            status=RangeStatus.READY,
+            status=ResourceStatus.READY,
             instances=[],
             agent_name="Test Agent",
         )
@@ -291,10 +295,11 @@ class TestActiveRangeContextProcessor:
 
         # Create RangeContext with READY status
         mock_range_context = RangeContext(
+            request_id=uuid4(),
             range_id=1,
             user_id=42,
             scenario_id="basic",
-            status=RangeStatus.READY,
+            status=ResourceStatus.READY,
             instances=[],
             agent_name="Test Agent",
         )
@@ -307,7 +312,7 @@ class TestActiveRangeContextProcessor:
 
         # Verify has_active_range is True for READY status
         assert result["has_active_range"] is True
-        assert result["active_range"].status == RangeStatus.READY
+        assert result["active_range"].status == ResourceStatus.READY
         assert result["active_range"].is_ready is True
 
     def test_terminal_range_not_considered_active(self):
@@ -319,8 +324,9 @@ class TestActiveRangeContextProcessor:
         mock_request.user.is_authenticated = True
         mock_request.user.id = 42
 
-        for status in [RangeStatus.DESTROYED, RangeStatus.FAILED]:
+        for status in [ResourceStatus.DESTROYED, ResourceStatus.FAILED]:
             mock_range_context = RangeContext(
+                request_id=uuid4(),
                 range_id=1,
                 user_id=42,
                 scenario_id="basic",

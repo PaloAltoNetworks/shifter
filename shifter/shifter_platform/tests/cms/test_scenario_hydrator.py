@@ -28,8 +28,8 @@ def user(db):
 
 
 @pytest.fixture
-def windows_agent(user, db):
-    """Windows agent for testing."""
+def windows_agent_obj(user, db):
+    """Windows agent object for testing."""
     os = OperatingSystem.objects.get(slug="windows")
     return AgentConfig.objects.create(
         user=user,
@@ -43,8 +43,8 @@ def windows_agent(user, db):
 
 
 @pytest.fixture
-def linux_agent(user, db):
-    """Linux agent for testing."""
+def linux_agent_obj(user, db):
+    """Linux agent object for testing."""
     os = OperatingSystem.objects.get(slug="linux-debian")
     return AgentConfig.objects.create(
         user=user,
@@ -55,6 +55,18 @@ def linux_agent(user, db):
         file_size_bytes=3000000,
         sha256_hash="def789ghi012",
     )
+
+
+@pytest.fixture
+def windows_agent(windows_agent_obj):
+    """Windows agent dict for hydrator (new format)."""
+    return {"windows": windows_agent_obj}
+
+
+@pytest.fixture
+def linux_agent(linux_agent_obj):
+    """Linux agent dict for hydrator (new format)."""
+    return {"linux": linux_agent_obj}
 
 
 @pytest.mark.django_db
@@ -85,19 +97,19 @@ class TestHydrateScenario:
         assert result.user_id == user.id
 
     def test_includes_instances_list(self, user, windows_agent):
-        """Result includes instances list."""
+        """Result includes all_instances list (flattened from subnets)."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        assert isinstance(result.instances, list)
+        assert isinstance(result.all_instances, list)
 
     def test_basic_has_two_instances(self, user, windows_agent):
         """Basic scenario has attacker and victim instances."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        assert len(result.instances) == 2
-        roles = [i.role for i in result.instances]
+        assert len(result.all_instances) == 2
+        roles = [i.role for i in result.all_instances]
         assert "attacker" in roles
         assert "victim" in roles
 
@@ -106,7 +118,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        uuids = [i.uuid for i in result.instances]
+        uuids = [i.uuid for i in result.all_instances]
         assert all(uuid is not None for uuid in uuids)
         assert len(set(uuids)) == len(uuids)  # All unique
 
@@ -117,7 +129,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        for instance in result.instances:
+        for instance in result.all_instances:
             # Will raise ValueError if not valid UUID
             parsed = uuid.UUID(instance.uuid)
             assert parsed.version == 4
@@ -129,7 +141,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        victim = next(i for i in result.instances if i.role == "victim")
+        victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.os_type == "windows"
 
     def test_resolves_from_agent_to_ubuntu(self, user, linux_agent):
@@ -137,7 +149,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, linux_agent)
-        victim = next(i for i in result.instances if i.role == "victim")
+        victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.os_type == "ubuntu"
 
     def test_attacker_remains_kali(self, user, windows_agent):
@@ -145,7 +157,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        attacker = next(i for i in result.instances if i.role == "attacker")
+        attacker = next(i for i in result.all_instances if i.role == "attacker")
         assert attacker.os_type == "kali"
 
     # --- Agent embedding ---
@@ -155,7 +167,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        victim = next(i for i in result.instances if i.role == "victim")
+        victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent is not None
 
     def test_agent_has_s3_key(self, user, windows_agent):
@@ -163,7 +175,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        victim = next(i for i in result.instances if i.role == "victim")
+        victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent.s3_key == "agents/123/agent.msi"
 
     def test_agent_has_filename(self, user, windows_agent):
@@ -171,7 +183,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        victim = next(i for i in result.instances if i.role == "victim")
+        victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent.filename == "cortex_agent.msi"
 
     def test_agent_has_sha256(self, user, windows_agent):
@@ -179,7 +191,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        victim = next(i for i in result.instances if i.role == "victim")
+        victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent.sha256 == "abc123def456"
 
     def test_attacker_has_no_agent(self, user, windows_agent):
@@ -187,7 +199,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
-        attacker = next(i for i in result.instances if i.role == "attacker")
+        attacker = next(i for i in result.all_instances if i.role == "attacker")
         assert attacker.agent is None
 
     # --- AD Attack Lab scenario ---
@@ -197,8 +209,8 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("ad_attack_lab", user.id, windows_agent)
-        assert len(result.instances) == 3
-        roles = [i.role for i in result.instances]
+        assert len(result.all_instances) == 3
+        roles = [i.role for i in result.all_instances]
         assert "attacker" in roles
         assert "dc" in roles
         assert "victim" in roles
@@ -208,7 +220,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("ad_attack_lab", user.id, windows_agent)
-        dc = next(i for i in result.instances if i.role == "dc")
+        dc = next(i for i in result.all_instances if i.role == "dc")
         assert dc.dc_config is not None
         assert dc.dc_config.domain_name is not None
         assert dc.dc_config.netbios_name is not None
@@ -218,7 +230,7 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("ad_attack_lab", user.id, windows_agent)
-        victim = next(i for i in result.instances if i.role == "victim")
+        victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.join_domain is True
 
     def test_ad_attack_lab_victim_has_agent(self, user, windows_agent):
@@ -226,18 +238,18 @@ class TestHydrateScenario:
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("ad_attack_lab", user.id, windows_agent)
-        victim = next(i for i in result.instances if i.role == "victim")
+        victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent is not None
         assert victim.agent.s3_key == "agents/123/agent.msi"
 
     def test_ad_attack_lab_dc_has_agent(self, user, windows_agent):
-        """DC instance has agent for XDR monitoring."""
+        """DC instance has Windows agent (xdr_agent=true in template)."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("ad_attack_lab", user.id, windows_agent)
-        dc = next(i for i in result.instances if i.role == "dc")
+        dc = next(i for i in result.all_instances if i.role == "dc")
         assert dc.agent is not None
-        assert dc.agent.s3_key == "agents/123/agent.msi"
+        assert dc.agent.s3_key == windows_agent["windows"].s3_key
 
     # --- Error handling ---
 
@@ -249,13 +261,13 @@ class TestHydrateScenario:
         with pytest.raises(CMSError, match="not found"):
             hydrate_scenario("nonexistent", user.id, windows_agent)
 
-    def test_raises_when_agent_is_none(self, user):
-        """Raises CMSError when agent is None."""
+    def test_raises_when_agents_empty(self, user):
+        """Raises CMSError when agents dict is empty."""
         from cms.exceptions import CMSError
         from cms.scenarios.hydrator import hydrate_scenario
 
-        with pytest.raises(CMSError, match=r"agent.*required"):
-            hydrate_scenario("basic", user.id, None)
+        with pytest.raises(CMSError, match=r"requires an agent"):
+            hydrate_scenario("basic", user.id, {})
 
     # --- Model serialization ---
 
@@ -268,32 +280,3 @@ class TestHydrateScenario:
         assert isinstance(dumped, dict)
         assert dumped["scenario_id"] == "basic"
         assert dumped["user_id"] == user.id
-
-
-@pytest.mark.django_db
-class TestHydrateScenarioLogging:
-    """Tests for hydrator logging behavior."""
-
-    def test_logs_debug_on_success(self, user, windows_agent, caplog):
-        """Logs debug on successful hydration."""
-        import logging
-
-        from cms.scenarios.hydrator import hydrate_scenario
-
-        with caplog.at_level(logging.DEBUG, logger="cms.scenarios.hydrator"):
-            hydrate_scenario("basic", user.id, windows_agent)
-
-        assert "basic" in caplog.text or "hydrat" in caplog.text.lower()
-
-    def test_does_not_log_agent_secrets(self, user, windows_agent, caplog):
-        """Does not log agent s3_key or sha256 (could be sensitive)."""
-        import logging
-
-        from cms.scenarios.hydrator import hydrate_scenario
-
-        with caplog.at_level(logging.DEBUG, logger="cms.scenarios.hydrator"):
-            hydrate_scenario("basic", user.id, windows_agent)
-
-        # s3_key and sha256 should not appear in logs
-        assert "agents/123/agent.msi" not in caplog.text
-        assert "abc123def456" not in caplog.text

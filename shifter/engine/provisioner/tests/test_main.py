@@ -309,15 +309,39 @@ class TestRunProvision:
 
     def test_run_provision_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker):
         """pulumi up success, outputs parsed, events published."""
-        # Mock database connection
+        # Mock database connection and related functions
         mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         mock_run, _mock_result = mock_subprocess
 
+        # Updated output structure to match new validation requirements
         outputs = {
-            "subnet_id": "subnet-12345",
-            "subnet_cidr": "10.1.6.0/24",
-            "instances": [{"role": "attacker", "instance_id": "i-123"}],
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
+                    "subnet_id": "subnet-12345",
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                }
+            },
+            "instances": [
+                {"uuid": "inst-uuid-1", "role": "attacker", "instance_id": "i-123", "private_ip": "10.1.6.10"}
+            ],
         }
 
         def side_effect(*args, **kwargs):
@@ -372,19 +396,43 @@ class TestRunProvision:
         mocker.patch("main.get_db_connection")
         mocker.patch("main.write_provisioned_state")
         mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}, {"name": "target", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         mock_run, _mock_result = mock_subprocess
 
+        # Updated output structure with required fields (uuid, subnet_id, subnet_cidr)
         outputs = {
             "subnets": {
-                "subnet-uuid-1": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
                     "subnet_id": "subnet-12345",
-                    "cidr": "10.1.6.0/24",
-                }
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                },
+                "target": {
+                    "uuid": "subnet-uuid-2",
+                    "subnet_id": "subnet-67890",
+                    "subnet_cidr": "10.1.7.0/24",
+                    "security_group_id": "sg-67890",
+                    "route_table_id": "rtb-67890",
+                    "gwlb_endpoint_id": "",
+                },
             },
             "instances": [
-                {"role": "attacker", "instance_id": "i-kali"},
-                {"role": "victim", "instance_id": "i-victim"},
+                {"uuid": "inst-uuid-1", "role": "attacker", "instance_id": "i-kali", "private_ip": "10.1.6.10"},
+                {"uuid": "inst-uuid-2", "role": "victim", "instance_id": "i-victim", "private_ip": "10.1.7.10"},
             ],
         }
 
@@ -416,15 +464,37 @@ class TestRunProvision:
 
     def test_run_provision_ignores_ngfw_outputs(self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker):
         """NGFW outputs should be ignored (stored in UserNGFW model, not Range)."""
-        # Mock database connection
+        # Mock database connection and related functions
         mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         mock_run, _mock_result = mock_subprocess
 
+        # Updated output structure with required fields
         outputs = {
-            "subnet_id": "subnet-12345",
-            "subnet_cidr": "10.1.6.0/24",
-            "instances": [{"role": "attacker", "instance_id": "i-kali"}],
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
+                    "subnet_id": "subnet-12345",
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                }
+            },
+            "instances": [{"uuid": "inst-uuid-1", "role": "attacker", "instance_id": "i-kali", "private_ip": "10.1.6.10"}],
             "ngfw": {
                 "ec2_instance_id": "i-ngfw12345",
                 "untrust_private_ip": "10.1.6.10",
@@ -1288,13 +1358,39 @@ class TestEventPublishing:
         self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch, mocker
     ):
         """Provision flow should publish status update events via SNS."""
-        # Mock database connection
+        # Mock database connection and related functions
         mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
         mock_run, _mock_result = mock_subprocess
-        outputs = {"subnet_id": "subnet-12345", "instances": []}
+        # Updated output structure with required fields
+        outputs = {
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
+                    "subnet_id": "subnet-12345",
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                }
+            },
+            "instances": [],
+        }
 
         def side_effect(*args, **kwargs):
             cmd = args[0]
@@ -1329,15 +1425,40 @@ class TestEventPublishing:
         self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch, mocker
     ):
         """Provision success should publish ready event with instances."""
-        # Mock database connection
+        # Mock database connection and related functions
         mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
         mock_run, _mock_result = mock_subprocess
+        # Updated output structure with required fields
         outputs = {
-            "subnet_id": "subnet-12345",
-            "instances": [{"role": "attacker", "ip": "10.1.1.10"}],
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
+                    "subnet_id": "subnet-12345",
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                }
+            },
+            "instances": [
+                {"uuid": "inst-uuid-1", "role": "attacker", "instance_id": "i-123", "private_ip": "10.1.1.10"}
+            ],
         }
 
         def side_effect(*args, **kwargs):

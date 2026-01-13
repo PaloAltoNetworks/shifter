@@ -163,6 +163,77 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
         conn.commit()
 
 
+def _validate_pulumi_output_schema(output_data: dict) -> None:
+    """Validate Pulumi stack outputs have expected structure.
+
+    Args:
+        output_data: Parsed JSON from `pulumi stack output --json`.
+
+    Raises:
+        ValueError: If required keys are missing or have wrong types.
+    """
+    if "subnets" not in output_data:
+        raise ValueError("Pulumi outputs missing 'subnets' key")
+    if not isinstance(output_data["subnets"], dict):
+        raise ValueError("Pulumi 'subnets' must be a dict")
+
+    if "instances" not in output_data:
+        raise ValueError("Pulumi outputs missing 'instances' key")
+    if not isinstance(output_data["instances"], list):
+        raise ValueError("Pulumi 'instances' must be a list")
+
+
+def _validate_provisioned_outputs(
+    subnets: dict[str, dict],
+    instances: list[dict],
+    expected_subnet_names: set[str] | None = None,
+) -> None:
+    """Validate Pulumi outputs have required fields before DB write.
+
+    Args:
+        subnets: Dict of subnet_name -> subnet details.
+        instances: List of instance dicts.
+        expected_subnet_names: Optional set of expected subnet names from spec.
+
+    Raises:
+        ValueError: If required fields are missing or empty.
+    """
+    # Validate subnet data
+    for subnet_name, subnet_data in subnets.items():
+        subnet_uuid = subnet_data.get("uuid")
+        if not subnet_uuid:
+            raise ValueError(f"Subnet '{subnet_name}' missing required 'uuid'")
+
+        subnet_id = subnet_data.get("subnet_id")
+        if not subnet_id:
+            raise ValueError(f"Subnet '{subnet_name}' missing 'subnet_id'")
+
+        subnet_cidr = subnet_data.get("subnet_cidr")
+        if not subnet_cidr:
+            raise ValueError(f"Subnet '{subnet_name}' missing 'subnet_cidr'")
+
+    # Validate instance data
+    for i, inst in enumerate(instances):
+        instance_uuid = inst.get("uuid")
+        if not instance_uuid:
+            raise ValueError(f"Instance[{i}] (role={inst.get('role')}) missing 'uuid'")
+
+        instance_id = inst.get("instance_id")
+        if not instance_id:
+            raise ValueError(f"Instance[{i}] missing 'instance_id'")
+
+    # Validate expected subnets were created
+    if expected_subnet_names:
+        actual_subnets = set(subnets.keys())
+        missing = expected_subnet_names - actual_subnets
+        if missing:
+            raise ValueError(f"Expected subnets not created: {missing}")
+
+        extra = actual_subnets - expected_subnet_names
+        if extra:
+            logger.warning("Unexpected subnets in output: %s", extra)
+
+
 def write_provisioned_state(
     range_id: int,
     subnets: dict[str, dict],
@@ -203,6 +274,8 @@ def write_provisioned_state(
                     """,
                     (json.dumps(state), subnet_uuid, range_id),
                 )
+                if cur.rowcount == 0:
+                    raise ValueError(f"No engine_subnet record found for uuid={subnet_uuid}, range_id={range_id}")
                 logger.debug("Updated engine_subnet state: uuid=%s", subnet_uuid)
 
             # Update engine_instance records with provisioned state
@@ -232,6 +305,8 @@ def write_provisioned_state(
                     """,
                     (json.dumps(instance_state), instance_uuid),
                 )
+                if cur.rowcount == 0:
+                    raise ValueError(f"No engine_instance record found for uuid={instance_uuid}")
                 logger.debug("Updated engine_instance state: uuid=%s", instance_uuid)
 
                 # Also build legacy provisioned_instances for Range.provisioned_instances
@@ -256,6 +331,8 @@ def write_provisioned_state(
                 """,
                 (json.dumps(provisioned_instances), range_id),
             )
+            if cur.rowcount == 0:
+                raise ValueError(f"No mission_control_range record found for id={range_id}")
             logger.debug(
                 "Updated Range.provisioned_instances: range_id=%s count=%d",
                 range_id,
@@ -271,44 +348,43 @@ def write_provisioned_state(
     )
 
 
-def mark_range_instances_destroyed(range_id: int) -> None:
+def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
     """Mark all engine_instance and engine_subnet records for a range as destroyed.
+
+    Uses single UPDATE statements with subqueries to avoid race conditions between
+    SELECT and UPDATE operations.
 
     Called after Pulumi destroy succeeds to update Instance and Subnet status.
 
     Args:
         range_id: The range ID that was destroyed.
+
+    Returns:
+        Tuple of (instance_count, subnet_count) marked as destroyed.
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # Get all instance UUIDs for this range via engine_subnet
+            # Single UPDATE with subquery - no race window between SELECT and UPDATE
             cur.execute(
                 """
-                SELECT DISTINCT i.uuid
-                FROM engine_instance i
-                JOIN engine_request r ON i.request_id = r.id
-                JOIN mission_control_range rng ON rng.request_id = r.id
-                WHERE rng.id = %s
+                UPDATE engine_instance
+                SET status = 'destroyed', destroyed_at = NOW()
+                WHERE uuid IN (
+                    SELECT DISTINCT i.uuid
+                    FROM engine_instance i
+                    JOIN engine_request r ON i.request_id = r.id
+                    JOIN mission_control_range rng ON rng.request_id = r.id
+                    WHERE rng.id = %s
+                )
                 """,
                 (range_id,),
             )
-            instance_uuids = [row[0] for row in cur.fetchall()]
-
-            # Update engine_instance records
-            if instance_uuids:
-                cur.execute(
-                    """
-                    UPDATE engine_instance
-                    SET status = 'destroyed', destroyed_at = NOW()
-                    WHERE uuid = ANY(%s)
-                    """,
-                    (instance_uuids,),
-                )
-                logger.debug(
-                    "Marked %d engine_instance records as destroyed for range_id=%s",
-                    len(instance_uuids),
-                    range_id,
-                )
+            instance_count = cur.rowcount
+            logger.debug(
+                "Marked %d engine_instance records as destroyed for range_id=%s",
+                instance_count,
+                range_id,
+            )
 
             # Update engine_subnet records
             cur.execute(
@@ -319,9 +395,21 @@ def mark_range_instances_destroyed(range_id: int) -> None:
                 """,
                 (range_id,),
             )
+            subnet_count = cur.rowcount
+            logger.debug(
+                "Marked %d engine_subnet records as destroyed for range_id=%s",
+                subnet_count,
+                range_id,
+            )
 
         conn.commit()
-    logger.info("Marked engine records as destroyed: range_id=%s", range_id)
+    logger.info(
+        "Marked engine records as destroyed: range_id=%s instances=%d subnets=%d",
+        range_id,
+        instance_count,
+        subnet_count,
+    )
+    return instance_count, subnet_count
 
 
 def get_user_ngfw_data(user_id: int) -> dict | None:
@@ -920,6 +1008,15 @@ def _set_stack_config(env: dict, range_id: int) -> None:
 def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str, env: dict) -> None:
     """Run Pulumi up to provision the range.
 
+    The sequence is:
+    1. Run Pulumi up
+    2. Validate outputs (fail early if incomplete)
+    3. Configure NGFW (fail before marking ready)
+    4. Write to DB (mark as ready)
+    5. Publish ready event
+
+    This ensures the range is NOT marked ready if NGFW configuration fails.
+
     Args:
         request_id: UUID string of the Request.
         range_id: The range ID being provisioned.
@@ -959,35 +1056,51 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     output_data = json.loads(outputs.stdout)
     logger.info(f"Stack outputs: {json.dumps(output_data, indent=2)}")
 
-    # Write provisioned state directly to DB (follows NGFW pattern)
-    subnets_output = output_data.get("subnets", {})
-    write_provisioned_state(
-        range_id=range_id,
-        subnets=subnets_output,
-        instances=output_data.get("instances", []),
-    )
+    # Validate output schema
+    _validate_pulumi_output_schema(output_data)
 
-    # Configure user's NGFW with subnet addresses and security rules
-    # Build subnet list with CIDRs for NGFW configuration
+    subnets_output = output_data.get("subnets", {})
+    instances_output = output_data.get("instances", [])
+
+    # Get range spec for validation and NGFW config
     range_data = get_range_data_by_request_id(request_id)
     range_spec = range_data.get("spec", {})
     spec_subnets = range_spec.get("subnets", [])
+    expected_subnet_names = {s.get("name") for s in spec_subnets}
 
-    # Merge CIDRs from Pulumi output into subnet specs
+    # Validate outputs have all required fields
+    _validate_provisioned_outputs(
+        subnets=subnets_output,
+        instances=instances_output,
+        expected_subnet_names=expected_subnet_names,
+    )
+
+    # Configure NGFW BEFORE marking range as ready
+    # If NGFW config fails, the range should NOT be marked ready
     subnets_for_ngfw = []
     for subnet_spec in spec_subnets:
         subnet_name = subnet_spec.get("name")
         subnet_output = subnets_output.get(subnet_name, {})
+        cidr = subnet_output.get("subnet_cidr", "")
+        if not cidr:
+            raise ValueError(f"Subnet '{subnet_name}' has no CIDR - cannot configure NGFW")
         subnets_for_ngfw.append(
             {
                 "name": subnet_name,
-                "cidr": subnet_output.get("subnet_cidr", ""),
+                "cidr": cidr,
                 "connected_to": subnet_spec.get("connected_to", []),
             }
         )
 
     if subnets_for_ngfw:
         configure_ngfw_subnets(user_id, subnets_for_ngfw, range_id)
+
+    # Write provisioned state to DB - only after NGFW is configured
+    write_provisioned_state(
+        range_id=range_id,
+        subnets=subnets_output,
+        instances=instances_output,
+    )
 
     # Publish notification-only ready event
     publish_ready(
@@ -1000,6 +1113,12 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
 def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, env: dict) -> None:
     """Run Pulumi destroy to tear down the range.
 
+    This function is designed to be idempotent: if Pulumi destroy succeeds,
+    the database records are marked as destroyed even if subsequent steps fail.
+
+    Pre-destroy validation ensures we don't attempt to destroy ranges that are
+    already in a terminal state or don't exist.
+
     Args:
         request_id: UUID string of the Request.
         range_id: The range ID being destroyed.
@@ -1007,11 +1126,23 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
-    # Engine already set status to DESTROYING before launching ECS task
+    # Pre-destroy validation: verify range exists and is in a destroyable state
+    try:
+        range_data = get_range_data_by_request_id(request_id)
+    except ValueError as e:
+        logger.warning("Range not found for request %s, skipping destroy: %s", request_id, e)
+        return
 
-    # Remove NGFW subnet config BEFORE destroying AWS resources
-    # Get subnet specs from range_config for removal
-    range_data = get_range_data_by_request_id(request_id)
+    current_status = range_data.get("status")
+    if current_status in ("destroyed", "failed"):
+        logger.info(
+            "Range %d already in terminal state '%s', skipping destroy",
+            range_id,
+            current_status,
+        )
+        return
+
+    # Get subnet specs from range_config for NGFW removal
     range_spec = range_data.get("spec", {})
     spec_subnets = range_spec.get("subnets", [])
 
@@ -1024,51 +1155,62 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
 
     logger.info("Running pulumi destroy...")
 
-    result = subprocess.run(  # noqa: S603
-        [
-            _get_pulumi_path(),
-            "destroy",
-            "--yes",
-            "--non-interactive",
-            "--skip-preview",
-        ],
-        cwd=_get_working_dir(),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    pulumi_succeeded = False
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                _get_pulumi_path(),
+                "destroy",
+                "--yes",
+                "--non-interactive",
+                "--skip-preview",
+            ],
+            cwd=_get_working_dir(),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
 
-    logger.info(f"Pulumi stdout:\n{result.stdout}")
-    if result.stderr:
-        logger.warning(f"Pulumi stderr:\n{result.stderr}")
+        logger.info(f"Pulumi stdout:\n{result.stdout}")
+        if result.stderr:
+            logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Pulumi destroy failed: {result.stderr}")
+        if result.returncode != 0:
+            raise RuntimeError(f"Pulumi destroy failed: {result.stderr}")
 
-    # Remove stack
-    logger.info(f"Removing stack: {stack_name}")
-    subprocess.run(  # noqa: S603
-        ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
-        cwd=_get_working_dir(),
-        env=env,
-        check=True,
-        capture_output=True,
-    )
+        pulumi_succeeded = True
 
-    # Mark engine_instance and engine_subnet records as destroyed
-    mark_range_instances_destroyed(range_id)
+        # Remove stack
+        logger.info(f"Removing stack: {stack_name}")
+        subprocess.run(  # noqa: S603
+            ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
+            cwd=_get_working_dir(),
+            env=env,
+            check=True,
+            capture_output=True,
+        )
 
-    # If this was the user's last active range, stop their NGFW to save costs
-    if not user_has_active_ranges(user_id, range_id):
-        ngfw_data = get_user_ngfw_data(user_id)
-        if ngfw_data and ngfw_data["status"] == "active":
-            logger.info("No other active ranges for user %s, stopping NGFW", user_id)
+    finally:
+        # Always mark DB records as destroyed if Pulumi succeeded
+        # This ensures DB state is updated even if stack removal fails
+        if pulumi_succeeded:
             try:
-                run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
+                mark_range_instances_destroyed(range_id)
             except Exception as e:
-                logger.warning("Failed to stop NGFW (non-fatal): %s", e)
+                logger.error("Failed to mark range %d as destroyed in DB: %s", range_id, e)
+                # Don't raise - AWS resources are gone, DB inconsistency is better than stuck
 
-    # Publish destroyed event
+        # Always attempt NGFW auto-stop (soft fail)
+        try:
+            if not user_has_active_ranges(user_id, range_id):
+                ngfw_data = get_user_ngfw_data(user_id)
+                if ngfw_data and ngfw_data["status"] == "active":
+                    logger.info("No other active ranges for user %s, stopping NGFW", user_id)
+                    run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
+        except Exception as e:
+            logger.warning("Failed to stop NGFW (non-fatal): %s", e)
+
+    # Publish destroyed event only on full success
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 
 

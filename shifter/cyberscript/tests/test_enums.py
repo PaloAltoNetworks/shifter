@@ -10,49 +10,49 @@ class TestResourceStatus:
 
     def test_has_pending_status(self):
         """ResourceStatus has PENDING value."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.PENDING == "pending"
 
     def test_has_provisioning_status(self):
         """ResourceStatus has PROVISIONING value."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.PROVISIONING == "provisioning"
 
     def test_has_ready_status(self):
         """ResourceStatus has READY value."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.READY == "ready"
 
     def test_has_paused_status(self):
         """ResourceStatus has PAUSED value."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.PAUSED == "paused"
 
     def test_has_resuming_status(self):
         """ResourceStatus has RESUMING value."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.RESUMING == "resuming"
 
     def test_has_destroying_status(self):
         """ResourceStatus has DESTROYING value."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.DESTROYING == "destroying"
 
     def test_has_destroyed_status(self):
         """ResourceStatus has DESTROYED value."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.DESTROYED == "destroyed"
 
     def test_has_failed_status(self):
         """ResourceStatus has FAILED value."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.FAILED == "failed"
 
@@ -62,7 +62,7 @@ class TestResourceStatus:
 
     def test_is_string_enum(self):
         """ResourceStatus values are strings for JSON serialization."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert isinstance(ResourceStatus.PENDING, str)
         # Value is the string "pending", direct comparison works
@@ -70,7 +70,7 @@ class TestResourceStatus:
 
     def test_string_comparison(self):
         """ResourceStatus can be compared directly with strings."""
-        from shared.enums import ResourceStatus
+        from cyberscript.enums import ResourceStatus
 
         assert ResourceStatus.READY == "ready"
         assert ResourceStatus.READY == "ready"
@@ -81,7 +81,7 @@ class TestResourceStatus:
 
     def test_active_statuses_group(self):
         """ACTIVE_STATUSES contains non-terminal states."""
-        from shared.enums import ACTIVE_STATUSES, ResourceStatus
+        from cyberscript.enums import ACTIVE_STATUSES, ResourceStatus
 
         expected = {
             ResourceStatus.PENDING,
@@ -95,7 +95,7 @@ class TestResourceStatus:
 
     def test_terminal_statuses_group(self):
         """TERMINAL_STATUSES contains end states."""
-        from shared.enums import TERMINAL_STATUSES, ResourceStatus
+        from cyberscript.enums import TERMINAL_STATUSES, ResourceStatus
 
         expected = {
             ResourceStatus.DESTROYED,
@@ -105,7 +105,7 @@ class TestResourceStatus:
 
     def test_cancellable_statuses_group(self):
         """CANCELLABLE_STATUSES contains states that can be cancelled."""
-        from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
+        from cyberscript.enums import CANCELLABLE_STATUSES, ResourceStatus
 
         expected = {
             ResourceStatus.PENDING,

@@ -175,7 +175,19 @@ class SSHExecutor:
                 stdin.write(stdin_input)
                 stdin.channel.shutdown_write()
 
-            exit_code = stdout.channel.recv_exit_status()
+            # Poll for command completion with timeout
+            # recv_exit_status() blocks indefinitely, so we poll exit_status_ready()
+            channel = stdout.channel
+            start_time = time.time()
+            while not channel.exit_status_ready():
+                elapsed = time.time() - start_time
+                if elapsed > timeout_seconds:
+                    raise TimeoutError(
+                        f"Command timed out after {timeout_seconds}s on {host}"
+                    )
+                time.sleep(1)
+
+            exit_code = channel.recv_exit_status()
             stdout_text = stdout.read().decode("utf-8")
             stderr_text = stderr.read().decode("utf-8")
 

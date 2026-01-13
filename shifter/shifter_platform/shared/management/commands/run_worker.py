@@ -18,12 +18,15 @@ from __future__ import annotations
 import contextlib
 import importlib
 import logging
+import os
 import signal
 import sys
 import tempfile
 import time
+from argparse import ArgumentParser
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import boto3
 from django.conf import settings
@@ -47,14 +50,14 @@ class Command(BaseCommand):
 
     help = "Run SQS worker for a specific queue"
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.shutdown = False
         self.sqs = None
         self.heartbeat_file: Path | None = None
         self.queue_name: str = ""
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: ArgumentParser) -> None:
         queue_choices = list(settings.SQS_QUEUE_CONFIG.keys())
         parser.add_argument(
             "--queue",
@@ -76,7 +79,7 @@ class Command(BaseCommand):
             help="Max messages to receive per poll (default: 10)",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         self.queue_name = options["queue"]
         wait_time = options["wait_time"]
         max_messages = options["max_messages"]
@@ -96,7 +99,9 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
-        self.sqs = boto3.client("sqs", region_name=settings.AWS_REGION)
+        # Support LocalStack via AWS_ENDPOINT_URL
+        endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+        self.sqs = boto3.client("sqs", region_name=settings.AWS_REGION, endpoint_url=endpoint_url)
 
         # Log startup with structured fields for CloudWatch filtering
         logger.info(
@@ -159,6 +164,7 @@ class Command(BaseCommand):
         max_messages: int,
     ):
         """Main polling loop."""
+        assert self.sqs is not None, "sqs client not initialized"
         while not self.shutdown:
             try:
                 response = self.sqs.receive_message(
@@ -192,6 +198,7 @@ class Command(BaseCommand):
         message: dict,
     ):
         """Process a single SQS message."""
+        assert self.sqs is not None, "sqs client not initialized"
         receipt_handle = message["ReceiptHandle"]
         body = message["Body"]
 

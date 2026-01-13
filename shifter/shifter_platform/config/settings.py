@@ -144,7 +144,8 @@ else:
             "PASSWORD": os.environ.get("DB_PASSWORD"),
             "HOST": os.environ.get("DB_HOST", "localhost"),
             "PORT": os.environ.get("DB_PORT", "5432"),
-            "CONN_MAX_AGE": 60,
+            # Connection settings (can tune CONN_MAX_AGE for connection reuse)
+            "CONN_MAX_AGE": 0,
             "OPTIONS": {
                 "connect_timeout": 10,
             },
@@ -296,6 +297,10 @@ PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
 AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
 AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
+AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
+
+# SNS Topic for publishing events (provisioner -> workers)
+SNS_RANGE_EVENTS_ARN = os.environ.get("SNS_RANGE_EVENTS_ARN", "")
 
 # Shifter Engine (ECS Fargate)
 PULUMI_ECS_CLUSTER_ARN = os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
@@ -303,10 +308,25 @@ PULUMI_TASK_DEFINITION_ARN = os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
 PULUMI_ECS_SECURITY_GROUP_ID = os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
 PULUMI_PRIVATE_SUBNET_IDS = os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
 
+# Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
+LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
+PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
+
 # Agent upload limits
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
 AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+
+# Guacamole RDP Integration
+# ------------------------------------------------------------------------------
+# JSON auth secret key for signing RDP session URLs
+# Must match the JSON_SECRET_KEY configured in Guacamole's ECS task definition
+# This is a 32-character hex string (128-bit key) stored in Secrets Manager
+GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
+# Public URL for browser (returned to client)
+GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
+# Internal URL for server-to-server API calls (defaults to base URL if not set)
+GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMOLE_BASE_URL
 
 # ------------------------------------------------------------------------------
 # SQS Worker Configuration
@@ -317,15 +337,15 @@ AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 SQS_QUEUE_CONFIG = {
     "cms": {
         "url": os.environ.get("SQS_CMS_URL", ""),
-        "handler": "cms.handlers.process_range_event",
+        "handler": "cms.handlers.process_event",
     },
     "engine": {
         "url": os.environ.get("SQS_ENGINE_URL", ""),
-        "handler": "engine.handlers.process_range_event",
+        "handler": "engine.handlers.process_event",
     },
     "mc": {
         "url": os.environ.get("SQS_MC_URL", ""),
-        "handler": "mission_control.handlers.process_range_event",
+        "handler": "mission_control.handlers.process_event",
     },
 }
 
@@ -358,6 +378,10 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 # See config/logging.py for ECSFormatter implementation
 # Import must be inline to avoid E402 (settings.py is special)
 
+# Log level: DEBUG for dev, INFO for production
+# Set LOG_LEVEL=DEBUG in dev to see routing/tracing logs
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -378,12 +402,12 @@ LOGGING = {
     },
     "root": {
         "handlers": ["console"],
-        "level": "INFO",
+        "level": LOG_LEVEL,
     },
     "loggers": {
         "django": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": "INFO",  # Keep Django framework logs at INFO
             "propagate": False,
         },
         "django.request": {
@@ -398,12 +422,22 @@ LOGGING = {
         },
         "mission_control": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "engine": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "cms": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
             "propagate": False,
         },
         "config": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": LOG_LEVEL,
             "propagate": False,
         },
     },

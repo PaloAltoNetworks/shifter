@@ -54,6 +54,7 @@ jobs:
               - '.github/workflows/deploy.yml'
             shifter_platform:
               - 'platform/terraform/modules/portal/**'
+              - 'platform/terraform/modules/guacamole/**'
               - 'platform/terraform/environments/*/portal/**'
               - 'shifter/**'
               - '.github/workflows/_shifter-platform.yml'
@@ -163,10 +164,11 @@ jobs:
 
   shifter_platform:
     name: Shifter Platform
-    needs: [changes, quality, range, shifter-engine]
+    needs: [changes, quality, core, range, shifter-engine]
     if: |
       always() &&
       (needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.core.result == 'success' || needs.core.result == 'skipped') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&
       (needs.shifter-engine.result == 'success' || needs.shifter-engine.result == 'skipped') &&
       (needs.quality.result == 'success' || needs.quality.result == 'skipped')

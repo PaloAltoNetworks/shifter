@@ -35,6 +35,8 @@ class TestGWLBComponentCreation:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         # Verify GWLB was created
@@ -50,6 +52,8 @@ class TestGWLBComponentCreation:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         def check_type(lb_type):
@@ -67,6 +71,8 @@ class TestGWLBComponentCreation:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         # Verify target group was created
@@ -82,6 +88,8 @@ class TestGWLBComponentCreation:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         def check_port(port):
@@ -99,6 +107,8 @@ class TestGWLBComponentCreation:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         # Verify listener was created
@@ -114,6 +124,8 @@ class TestGWLBComponentCreation:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         # Verify endpoint service was created
@@ -129,6 +141,8 @@ class TestGWLBComponentCreation:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         def check_acceptance(required):
@@ -155,6 +169,8 @@ class TestGWLBComponentOutputs:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         assert component.gwlb_arn is not None
@@ -169,6 +185,8 @@ class TestGWLBComponentOutputs:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         assert component.target_group_arn is not None
@@ -183,6 +201,8 @@ class TestGWLBComponentOutputs:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         assert component.service_name is not None
@@ -206,6 +226,8 @@ class TestGWLBComponentTags:
             user_id=42,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
         )
 
         def check_tags(tags):
@@ -224,6 +246,8 @@ class TestGWLBComponentTags:
             user_id=1,
             subnet_ids=["subnet-12345"],
             vpc_id="vpc-12345",
+            request_uuid="req-uuid-12345",
+            instance_uuid="inst-uuid-12345",
             environment="dev",
         )
 

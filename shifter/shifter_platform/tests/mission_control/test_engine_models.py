@@ -1,6 +1,6 @@
 """Tests for Engine models.
 
-These tests verify that Range and UserNGFW models are properly located
+These tests verify that Range model is properly located
 in engine.models as per the architecture documentation.
 """
 
@@ -47,17 +47,17 @@ class TestRangeModel:
 
     def test_terminal_statuses_defined(self):
         """shared.enums.TERMINAL_STATUSES contains terminal states."""
-        from shared.enums import TERMINAL_STATUSES, RangeStatus
+        from shared.enums import TERMINAL_STATUSES, ResourceStatus
 
-        assert RangeStatus.DESTROYED in TERMINAL_STATUSES
-        assert RangeStatus.FAILED in TERMINAL_STATUSES
+        assert ResourceStatus.DESTROYED in TERMINAL_STATUSES
+        assert ResourceStatus.FAILED in TERMINAL_STATUSES
 
     def test_cancellable_statuses_defined(self):
         """shared.enums.CANCELLABLE_STATUSES contains cancellable states."""
-        from shared.enums import CANCELLABLE_STATUSES, RangeStatus
+        from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
 
-        assert RangeStatus.PENDING in CANCELLABLE_STATUSES
-        assert RangeStatus.PROVISIONING in CANCELLABLE_STATUSES
+        assert ResourceStatus.PENDING in CANCELLABLE_STATUSES
+        assert ResourceStatus.PROVISIONING in CANCELLABLE_STATUSES
 
     # -------------------------------------------------------------------------
     # Model method tests
@@ -170,98 +170,6 @@ class TestRangeModel:
 
         ready_range = Range.objects.create(user=user, status=Range.Status.READY)
         assert ready_range.is_terminal is False
-
-
-@pytest.mark.django_db
-class TestUserNGFWModel:
-    """Tests for UserNGFW model in cms.models.
-
-    Note: UserNGFW was moved from engine.models to cms.models as part of
-    the architecture refactor to enforce clean layer boundaries.
-    """
-
-    @pytest.fixture
-    def user(self):
-        return User.objects.create_user(
-            username="ngfwtest@example.com",
-            email="ngfwtest@example.com",
-        )
-
-    # -------------------------------------------------------------------------
-    # Import tests - UserNGFW should be importable from cms.models
-    # -------------------------------------------------------------------------
-
-    def test_userngfw_importable_from_engine(self):
-        """UserNGFW model can be imported from cms.models."""
-        from cms.models import UserNGFW
-
-        assert UserNGFW is not None
-
-    def test_userngfw_status_enum_exists(self):
-        """UserNGFW.Status enum exists with expected values."""
-        from cms.models import UserNGFW
-
-        assert hasattr(UserNGFW, "Status")
-        assert UserNGFW.Status.NOT_PROVISIONED == "not_provisioned"
-        assert UserNGFW.Status.PROVISIONING == "provisioning"
-        assert UserNGFW.Status.READY == "ready"
-        assert UserNGFW.Status.STARTING == "starting"
-        assert UserNGFW.Status.ACTIVE == "active"
-        assert UserNGFW.Status.STOPPING == "stopping"
-        assert UserNGFW.Status.STOPPED == "stopped"
-        assert UserNGFW.Status.DEPROVISIONING == "deprovisioning"
-        assert UserNGFW.Status.FAILED == "failed"
-
-    # -------------------------------------------------------------------------
-    # Model method tests
-    # -------------------------------------------------------------------------
-
-    def test_active_for_user_excludes_deleted(self, user):
-        """active_for_user excludes soft-deleted NGFWs."""
-        from django.utils import timezone
-
-        from cms.models import UserNGFW
-
-        active_ngfw = UserNGFW.objects.create(user=user, name="Active NGFW")
-        UserNGFW.objects.create(
-            user=user,
-            name="Deleted NGFW",
-            deleted_at=timezone.now(),
-        )
-
-        result = list(UserNGFW.active_for_user(user))
-        assert len(result) == 1
-        assert result[0] == active_ngfw
-
-    def test_active_for_user_filters_by_user(self, user):
-        """active_for_user only returns NGFWs for specified user."""
-        from cms.models import UserNGFW
-
-        other_user = User.objects.create_user(
-            username="other@example.com",
-            email="other@example.com",
-        )
-
-        my_ngfw = UserNGFW.objects.create(user=user, name="My NGFW")
-        UserNGFW.objects.create(user=other_user, name="Other NGFW")
-
-        result = list(UserNGFW.active_for_user(user))
-        assert len(result) == 1
-        assert result[0] == my_ngfw
-
-    def test_default_status_is_not_provisioned(self, user):
-        """Default status is NOT_PROVISIONED."""
-        from cms.models import UserNGFW
-
-        ngfw = UserNGFW.objects.create(user=user, name="New NGFW")
-        assert ngfw.status == UserNGFW.Status.NOT_PROVISIONED
-
-    def test_str_returns_name(self, user):
-        """__str__ returns the NGFW name."""
-        from cms.models import UserNGFW
-
-        ngfw = UserNGFW(user=user, name="Test NGFW")
-        assert str(ngfw) == "Test NGFW"
 
 
 @pytest.mark.django_db

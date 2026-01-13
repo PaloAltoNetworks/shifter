@@ -1,6 +1,7 @@
 """S3 storage service for agent uploads."""
 
 import hashlib
+import logging
 import os
 import re
 import uuid
@@ -8,6 +9,8 @@ import uuid
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class S3Error(Exception):
@@ -17,10 +20,18 @@ class S3Error(Exception):
 
 
 def get_s3_client():
-    """Get boto3 S3 client configured for the region with regional endpoint."""
+    """Get boto3 S3 client configured for the region.
+
+    Supports LocalStack via AWS_ENDPOINT_URL environment variable.
+    """
     from botocore.config import Config
 
     # Use regional endpoint to avoid cross-region redirects that break CORS
+    # For local dev, AWS_ENDPOINT_URL points to LocalStack
+    endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+    if not endpoint_url:
+        endpoint_url = f"https://s3.{settings.AWS_S3_REGION}.amazonaws.com"
+
     config = Config(
         s3={"addressing_style": "virtual"},
         signature_version="s3v4",
@@ -28,7 +39,7 @@ def get_s3_client():
     return boto3.client(
         "s3",
         region_name=settings.AWS_S3_REGION,
-        endpoint_url=f"https://s3.{settings.AWS_S3_REGION}.amazonaws.com",
+        endpoint_url=endpoint_url,
         config=config,
     )
 
@@ -75,7 +86,10 @@ def upload_agent(file_obj, user_id: int, filename: str) -> tuple[str, str, int]:
     Raises:
         S3Error: If upload fails
     """
+    logger.debug("upload_agent: user_id=%s filename=%s", user_id, filename)
+
     if not settings.AWS_S3_BUCKET_NAME:
+        logger.error("upload_agent: AWS_S3_BUCKET_NAME is not configured")
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     # Generate unique key
@@ -105,8 +119,10 @@ def upload_agent(file_obj, user_id: int, filename: str) -> tuple[str, str, int]:
             ExtraArgs={"ContentType": "application/octet-stream"},
         )
     except ClientError as e:
+        logger.error("upload_agent: failed user_id=%s s3_key=%s error=%s", user_id, s3_key, e)
         raise S3Error(f"Failed to upload to S3: {e}") from e
 
+    logger.info("upload_agent: success user_id=%s s3_key=%s size=%d", user_id, s3_key, file_size)
     return s3_key, sha256_hash, file_size
 
 
@@ -120,14 +136,20 @@ def delete_agent(s3_key: str) -> None:
     Raises:
         S3Error: If delete fails
     """
+    logger.debug("delete_agent: s3_key=%s", s3_key)
+
     if not settings.AWS_S3_BUCKET_NAME:
+        logger.error("delete_agent: AWS_S3_BUCKET_NAME is not configured")
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
         client = get_s3_client()
         client.delete_object(Bucket=settings.AWS_S3_BUCKET_NAME, Key=s3_key)
     except ClientError as e:
+        logger.error("delete_agent: failed s3_key=%s error=%s", s3_key, e)
         raise S3Error(f"Failed to delete from S3: {e}") from e  # nosec B608
+
+    logger.info("delete_agent: success s3_key=%s", s3_key)
 
 
 def generate_presigned_upload_url(
@@ -149,7 +171,10 @@ def generate_presigned_upload_url(
     Raises:
         S3Error: If URL generation fails
     """
+    logger.debug("generate_presigned_upload_url: user_id=%s filename=%s", user_id, filename)
+
     if not settings.AWS_S3_BUCKET_NAME:
+        logger.error("generate_presigned_upload_url: AWS_S3_BUCKET_NAME is not configured")
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     # Sanitize filename and generate unique key
@@ -169,8 +194,10 @@ def generate_presigned_upload_url(
             ExpiresIn=settings.AGENT_UPLOAD_URL_EXPIRES,
         )
     except ClientError as e:
+        logger.error("generate_presigned_upload_url: failed user_id=%s error=%s", user_id, e)
         raise S3Error(f"Failed to generate presigned URL: {e}") from e
 
+    logger.debug("generate_presigned_upload_url: success user_id=%s s3_key=%s", user_id, s3_key)
     return presigned_url, s3_key
 
 
@@ -187,7 +214,10 @@ def verify_s3_object_exists(s3_key: str) -> tuple[int, str]:
     Raises:
         S3Error: If object doesn't exist or verification fails
     """
+    logger.debug("verify_s3_object_exists: s3_key=%s", s3_key)
+
     if not settings.AWS_S3_BUCKET_NAME:
+        logger.error("verify_s3_object_exists: AWS_S3_BUCKET_NAME is not configured")
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
@@ -196,10 +226,15 @@ def verify_s3_object_exists(s3_key: str) -> tuple[int, str]:
             Bucket=settings.AWS_S3_BUCKET_NAME,
             Key=s3_key,
         )
-        return response["ContentLength"], response["ETag"].strip('"')
+        size = response["ContentLength"]
+        etag = response["ETag"].strip('"')
+        logger.debug("verify_s3_object_exists: success s3_key=%s size=%d", s3_key, size)
+        return size, etag
     except ClientError as e:
         if e.response["Error"]["Code"] == "404":
+            logger.warning("verify_s3_object_exists: not found s3_key=%s", s3_key)
             raise S3Error(f"Object not found: {s3_key}") from e
+        logger.error("verify_s3_object_exists: failed s3_key=%s error=%s", s3_key, e)
         raise S3Error(f"Failed to verify S3 object: {e}") from e
 
 
@@ -214,7 +249,10 @@ def tag_s3_object(s3_key: str, tags: dict[str, str]) -> None:
     Raises:
         S3Error: If tagging fails
     """
+    logger.debug("tag_s3_object: s3_key=%s tags=%s", s3_key, tags)
+
     if not settings.AWS_S3_BUCKET_NAME:
+        logger.error("tag_s3_object: AWS_S3_BUCKET_NAME is not configured")
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
@@ -225,4 +263,7 @@ def tag_s3_object(s3_key: str, tags: dict[str, str]) -> None:
             Tagging={"TagSet": [{"Key": k, "Value": v} for k, v in tags.items()]},
         )
     except ClientError as e:
+        logger.error("tag_s3_object: failed s3_key=%s error=%s", s3_key, e)
         raise S3Error(f"Failed to tag S3 object: {e}") from e
+
+    logger.debug("tag_s3_object: success s3_key=%s", s3_key)

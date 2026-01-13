@@ -62,7 +62,7 @@ jobs:
     if: |
       always() &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
-      (github.event_name != 'pull_request' || inputs.environment == 'dev')
+      github.event_name != 'pull_request'
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}

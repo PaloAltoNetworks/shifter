@@ -17,8 +17,6 @@ from pathlib import Path
 
 import pulumi
 import pulumi_aws as aws
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from jinja2 import Environment, FileSystemLoader
 
 from executors.ssm_executor import SSMExecutor
@@ -28,6 +26,7 @@ from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
+from utils.crypto import generate_ssh_keypair
 
 logger = logging.getLogger(__name__)
 
@@ -45,35 +44,6 @@ def validate_s3_path(value: str) -> bool:
     # This covers valid S3 bucket names and common key patterns
     safe_pattern = re.compile(r"^[a-zA-Z0-9._/=-]+$")
     return bool(safe_pattern.match(value))
-
-
-def generate_ssh_keypair() -> tuple[str, str]:
-    """Generate an Ed25519 SSH key pair.
-
-    This is a pure Python operation with no AWS calls, safe to run at any time.
-
-    Returns:
-        tuple: (private_key_pem, public_key_openssh)
-    """
-    logger.debug("generate_ssh_keypair: generating Ed25519 key pair")
-    private_key = ed25519.Ed25519PrivateKey.generate()
-
-    private_key_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode("utf-8")
-
-    public_key_openssh = (
-        private_key.public_key()
-        .public_bytes(
-            encoding=serialization.Encoding.OpenSSH,
-            format=serialization.PublicFormat.OpenSSH,
-        )
-        .decode("utf-8")
-    )
-
-    return private_key_pem, public_key_openssh
 
 
 class InstanceComponent(pulumi.ComponentResource):
@@ -404,7 +374,7 @@ class InstanceComponent(pulumi.ComponentResource):
                 # Clean stale DNS records from prebaked AMI
                 # The AMI contains A records from the build environment that must be removed
                 pulumi.log.info(f"Cleaning stale DNS records on DC {instance_id}...")
-                dns_cleanup_script = f'''
+                dns_cleanup_script = f"""
 $ErrorActionPreference = "Stop"
 $currentIP = "{private_ip}"
 $zone = "{dc_domain_name}"
@@ -443,7 +413,7 @@ Register-DnsClient
 ipconfig /registerdns | Out-Null
 
 Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
-'''
+"""
                 result = executor.run_command(
                     instance_id=instance_id,
                     script=dns_cleanup_script,
@@ -566,7 +536,10 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                         bootstrap_plan = LinuxBootstrapPlan()
                         bootstrap_ctx = bootstrap_plan.get_context(ctx)
                         result = orchestrator.orchestrate(
-                            instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name
+                            instance_id,
+                            bootstrap_plan,
+                            bootstrap_ctx,
+                            document_name=document_name,
                         )
                         if not result.success:
                             raise SetupError(f"Linux bootstrap failed: {result.error}")
@@ -577,7 +550,10 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                             xdr_plan = LinuxXDRAgentInstallPlan()
                             xdr_ctx = xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
                             result = orchestrator.orchestrate(
-                                instance_id, xdr_plan, xdr_ctx, document_name=document_name
+                                instance_id,
+                                xdr_plan,
+                                xdr_ctx,
+                                document_name=document_name,
                             )
                             if not result.success:
                                 raise SetupError(f"Linux XDR install failed: {result.error}")
@@ -590,7 +566,10 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                         bootstrap_plan = BootstrapPlan()
                         bootstrap_ctx = bootstrap_plan.get_context(ctx)
                         result = orchestrator.orchestrate(
-                            instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name
+                            instance_id,
+                            bootstrap_plan,
+                            bootstrap_ctx,
+                            document_name=document_name,
                         )
                         if not result.success:
                             raise SetupError(f"Windows bootstrap failed: {result.error}")
@@ -601,7 +580,10 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                             xdr_plan = XDRAgentInstallPlan()
                             xdr_ctx = xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
                             result = orchestrator.orchestrate(
-                                instance_id, xdr_plan, xdr_ctx, document_name=document_name
+                                instance_id,
+                                xdr_plan,
+                                xdr_ctx,
+                                document_name=document_name,
                             )
                             if not result.success:
                                 raise SetupError(f"Windows XDR install failed: {result.error}")
@@ -727,7 +709,6 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
             context = {}  # No variables needed - template just logs SSM will handle setup
 
         script = template.render(**context)
-        logger.debug("_generate_user_data: rendered template for role=%s os_type=%s", role, os_type)
         return base64.b64encode(script.encode()).decode()
 
     @property

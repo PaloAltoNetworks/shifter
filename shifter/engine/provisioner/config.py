@@ -175,6 +175,8 @@ class RangeConfig:
     ngfw_ami_id: str = ""
     ngfw_instance_type: str = "m5.xlarge"
     ngfw_security_group_id: str = ""
+    # S3 VPC endpoint for agent downloads (Gateway endpoint ID)
+    s3_endpoint_id: str = ""
 
 
 @dataclass
@@ -571,6 +573,8 @@ def load_config() -> RangeConfig:
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
         ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+        # S3 VPC endpoint for agent downloads
+        s3_endpoint_id=config.get("s3EndpointId") or "",
     )
 
 

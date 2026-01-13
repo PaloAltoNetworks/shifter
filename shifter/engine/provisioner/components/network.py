@@ -244,6 +244,7 @@ class NetworkComponent(pulumi.ComponentResource):
         request_uuid: str = "",
         subnet_size: int = 24,
         gwlb_service_name: str = "",
+        s3_endpoint_id: str = "",
         opts: pulumi.ResourceOptions | None = None,
     ):
         """Create network infrastructure for a logical subnet.
@@ -262,9 +263,11 @@ class NetworkComponent(pulumi.ComponentResource):
             request_uuid: Request UUID for correlation.
             subnet_size: Subnet prefix length (24 or 28). Default 24.
             gwlb_service_name: GWLB VPC Endpoint Service name. Empty = no NGFW.
+            s3_endpoint_id: S3 Gateway VPC Endpoint ID for agent downloads.
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NetworkComponent", name, None, opts)
+        self._s3_endpoint_id = s3_endpoint_id
 
         logger.info(
             "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, gwlb=%s",
@@ -295,6 +298,9 @@ class NetworkComponent(pulumi.ComponentResource):
 
         # Create route table for this subnet
         self._create_route_table(name, vpc_id, common_tags)
+
+        # Associate route table with S3 VPC endpoint for agent downloads
+        self._associate_s3_endpoint(name)
 
         # Create GWLB endpoint if service name provided
         self._create_gwlb_endpoint(name, vpc_id, gwlb_service_name, common_tags)
@@ -485,6 +491,37 @@ class NetworkComponent(pulumi.ComponentResource):
         self.route_table_id = self.route_table.id
 
         logger.debug("Created route table for subnet %s", name)
+
+    def _associate_s3_endpoint(self, name: str) -> None:
+        """Associate route table with S3 VPC Gateway endpoint.
+
+        This allows instances in the subnet to access S3 for agent downloads
+        without requiring internet access or NAT. The S3 Gateway endpoint
+        automatically adds routes for S3 prefix lists to associated route tables.
+
+        Args:
+            name: Resource name prefix for the association resource.
+        """
+        if not self._s3_endpoint_id:
+            logger.debug("No S3 endpoint ID provided, skipping S3 endpoint association")
+            return
+
+        logger.info(
+            "Associating route table with S3 endpoint %s",
+            self._s3_endpoint_id,
+        )
+
+        aws.ec2.VpcEndpointRouteTableAssociation(
+            f"{name}-s3-endpoint-assoc",
+            vpc_endpoint_id=self._s3_endpoint_id,
+            route_table_id=self.route_table.id,
+            opts=pulumi.ResourceOptions(
+                parent=self,
+                depends_on=[self.route_table],
+            ),
+        )
+
+        logger.debug("Associated route table with S3 endpoint for subnet %s", name)
 
     def _create_gwlb_endpoint(
         self,

@@ -142,10 +142,12 @@ def _provision_range() -> None:
     for inst, subnet_name in range_stack.instances:
         instances_output.append(
             {
-                "uuid": inst.uuid,
+                "uuid": inst.uuid,  # Django Instance UUID
                 "role": inst.role,
                 "os": inst.os_type,
                 "subnet_name": subnet_name,
+                # NOTE: "instance_id" key here is the AWS EC2 Instance ID (e.g., "i-...")
+                # This is read by main.py write_provisioned_state() and stored in DB state.
                 "instance_id": inst.instance_id,
                 "private_ip": inst.private_ip,
                 "ssh_key_secret_arn": inst.ssh_key_secret_arn,

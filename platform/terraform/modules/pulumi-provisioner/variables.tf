@@ -291,6 +291,12 @@ variable "ngfw_instance_profile_name" {
   default     = ""
 }
 
+variable "ngfw_instance_role_arn" {
+  description = "IAM role ARN for NGFW instances (required for iam:PassRole)"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # Alarms Configuration
 # ------------------------------------------------------------------------------

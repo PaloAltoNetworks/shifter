@@ -130,6 +130,10 @@ SQS_CMS_URL=$(get_param "$PS_PREFIX/sqs-cms-url")
 SQS_ENGINE_URL=$(get_param "$PS_PREFIX/sqs-engine-url")
 SQS_MC_URL=$(get_param "$PS_PREFIX/sqs-mc-url")
 REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
+GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" 2>/dev/null || echo "")
+GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" 2>/dev/null || echo "")
+GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" 2>/dev/null || echo "")
+DB_HOST_OVERRIDE=$(get_param "$PS_PREFIX/db-host-override" 2>/dev/null || echo "")
 
 IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 echo "Deploying image: $IMAGE"
@@ -156,6 +160,22 @@ COMMON_ENV="$COMMON_ENV -e SQS_MC_URL=$SQS_MC_URL"
 # Add Redis if configured
 if [ -n "$REDIS_ENDPOINT" ]; then
   COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
+fi
+
+# Add Guacamole config if configured (for RDP integration)
+if [ -n "$GUACAMOLE_SECRET_ARN" ]; then
+  COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
+fi
+if [ -n "$GUACAMOLE_BASE_URL" ]; then
+  COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
+fi
+if [ -n "$GUACAMOLE_API_BASE_URL" ]; then
+  COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
+fi
+
+# Add DB host override if configured
+if [ -n "$DB_HOST_OVERRIDE" ]; then
+  COMMON_ENV="$COMMON_ENV -e DB_HOST=$DB_HOST_OVERRIDE"
 fi
 
 # ------------------------------------------------------------------------------

@@ -16,10 +16,12 @@ class SetupStep:
 
     Attributes:
         name: Unique identifier for this step
-        script: Script content to execute
+        script: Script content to execute (single command or script)
         timeout_seconds: Maximum time to wait for step completion
         requires_reboot: If True, orchestrator will reboot after this step
         is_verification: If True, this is a check not an action
+        stdin_input: Multi-line input to pipe via stdin (for interactive modes
+            like PAN-OS configure). If set, script may be empty.
     """
 
     name: str
@@ -27,6 +29,7 @@ class SetupStep:
     timeout_seconds: int = 300
     requires_reboot: bool = False
     is_verification: bool = False
+    stdin_input: str = ""
 
 
 class SetupPlan(Protocol):

@@ -182,9 +182,7 @@ class SSHExecutor:
             while not channel.exit_status_ready():
                 elapsed = time.time() - start_time
                 if elapsed > timeout_seconds:
-                    raise TimeoutError(
-                        f"Command timed out after {timeout_seconds}s on {host}"
-                    )
+                    raise TimeoutError(f"Command timed out after {timeout_seconds}s on {host}")
                 time.sleep(1)
 
             exit_code = channel.recv_exit_status()

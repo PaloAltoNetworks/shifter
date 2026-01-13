@@ -35,6 +35,10 @@ from orchestrators.setup_orchestrator import SetupOrchestrator
 
 logger = logging.getLogger(__name__)
 
+# Default timeout for waiting for NGFW SSH to become available (seconds)
+# PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
+NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 3600  # 60 minutes
+
 
 def _get_pulumi_path() -> str:
     """Get the full path to the pulumi executable."""
@@ -1543,8 +1547,9 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
 
     # Create SSH executor and wait for NGFW to be ready (15-25 min boot time)
     ssh_executor = SSHExecutor(private_key=private_key)
+    ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
     logger.info(f"Waiting for SSH on NGFW at {management_ip}...")
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=1800)
+    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
 
     # Create orchestrator with SSH executor
     orchestrator = SetupOrchestrator(ssh_executor)

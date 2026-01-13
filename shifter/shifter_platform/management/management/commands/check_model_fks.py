@@ -2,24 +2,22 @@
 
 This management command inspects Django models across the platform's
 service layers and detects FK/OneToOne/M2M relationships that cross
-layer boundaries in the wrong direction.
+layer boundaries.
 
-## Layer Hierarchy
+## Layer Boundaries
 
-  - shared (0)        - lowest, common utilities
-  - engine (1)        - infrastructure provisioning
-  - cms (2)           - content management
-  - management (3)    - platform administration
-  - mission_control (4) - presentation layer (highest)
+  - shared        - common utilities
+  - engine        - infrastructure provisioning
+  - cms           - content management
+  - management    - platform administration
+  - mission_control - presentation layer
 
 ## Rules
 
-Lower layers should NOT have FKs to higher layers:
-  - engine models should not FK to cms, management, mission_control
-  - cms models should not FK to management, mission_control
-  - etc.
+NO cross-layer FKs allowed. Zero coupling between layers.
+Each layer's models can only FK to models within the same layer.
 
-FKs to Django's auth.User are allowed (special case).
+FKs to Django's auth.User and other built-in apps are allowed.
 
 Usage:
     python manage.py check_model_fks
@@ -29,13 +27,13 @@ Usage:
 
 import json
 import sys
+from typing import Any
 
 from django.apps import apps
 from django.core.management.base import BaseCommand
 
-# Layer hierarchy - index represents position in stack (lower = lower layer)
+# All service layers
 ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control"]
-LAYER_INDEX = {layer: i for i, layer in enumerate(ALL_LAYERS)}
 
 # Apps that are allowed to be referenced from any layer
 ALLOWED_EXTERNAL_APPS = {"auth", "contenttypes", "sessions", "admin"}
@@ -47,11 +45,11 @@ REVERSE_RELATION_TYPES = {"ManyToOneRel", "OneToOneRel", "ManyToManyRel"}
 def is_violation(from_layer: str, to_layer: str) -> bool:
     """Check if a FK from from_layer to to_layer is a violation.
 
-    Violations occur when a lower layer has a FK to a higher layer.
+    ANY cross-layer FK is a violation. Zero coupling between layers.
     """
-    if from_layer not in LAYER_INDEX or to_layer not in LAYER_INDEX:
+    if from_layer not in ALL_LAYERS or to_layer not in ALL_LAYERS:
         return False
-    return LAYER_INDEX[from_layer] < LAYER_INDEX[to_layer]
+    return from_layer != to_layer  # Any cross-layer FK is a violation
 
 
 def get_layer_for_app(app_label: str) -> str | None:
@@ -113,9 +111,9 @@ class Command(BaseCommand):
         if stats["violations"] > 0:
             sys.exit(1)
 
-    def analyze_fks(self) -> dict:
+    def analyze_fks(self) -> dict[str, list[dict[str, Any]]]:
         """Analyze all FK relationships across layers."""
-        results = {layer: [] for layer in ALL_LAYERS}
+        results: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
 
         for layer in ALL_LAYERS:
             try:
@@ -133,7 +131,12 @@ class Command(BaseCommand):
                     if not hasattr(field, "related_model") or not field.related_model:
                         continue
 
-                    related_app = field.related_model._meta.app_label
+                    # Skip self-referential string relations
+                    related_model = field.related_model
+                    if isinstance(related_model, str):
+                        continue
+
+                    related_app = related_model._meta.app_label
 
                     # Skip allowed external apps
                     if related_app in ALLOWED_EXTERNAL_APPS:
@@ -148,7 +151,7 @@ class Command(BaseCommand):
                         "model": model.__name__,
                         "field": field.name,
                         "field_type": type(field).__name__,
-                        "references": f"{related_layer}.{field.related_model.__name__}",
+                        "references": f"{related_layer}.{related_model.__name__}",
                         "to_layer": related_layer,
                         "is_violation": is_violation(layer, related_layer),
                     }
@@ -156,9 +159,9 @@ class Command(BaseCommand):
 
         return results
 
-    def compute_stats(self, results: dict) -> dict:
+    def compute_stats(self, results: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         """Compute summary statistics."""
-        stats = {
+        stats: dict[str, Any] = {
             "total_cross_layer_fks": 0,
             "violations": 0,
             "clean_layers": [],

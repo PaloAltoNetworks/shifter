@@ -6,11 +6,16 @@ connect, receive status updates, disconnect.
 
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 from django.contrib.auth.models import AnonymousUser
 
-from shared.enums import RangeStatus, WebSocketCloseCode
+from shared.enums import ResourceStatus, WebSocketCloseCode
+
+# Test UUID for request_id
+TEST_REQUEST_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+TEST_REQUEST_UUID = UUID(TEST_REQUEST_ID)
 
 
 @pytest.fixture
@@ -36,7 +41,7 @@ def authenticated_scope():
     return {
         "type": "websocket",
         "user": user,
-        "url_route": {"kwargs": {"range_id": "42"}},
+        "url_route": {"kwargs": {"request_id": TEST_REQUEST_ID}},
     }
 
 
@@ -46,7 +51,7 @@ def unauthenticated_scope():
     return {
         "type": "websocket",
         "user": AnonymousUser(),
-        "url_route": {"kwargs": {"range_id": "42"}},
+        "url_route": {"kwargs": {"request_id": TEST_REQUEST_ID}},
     }
 
 
@@ -70,7 +75,7 @@ class TestRangeStatusConsumerConnect:
 
         consumer.scope = authenticated_scope
 
-        with patch("cms.get_range", side_effect=CMSError("Not found")):
+        with patch("cms.get_range_by_request_id", side_effect=CMSError("Not found")):
             await consumer.connect()
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
@@ -79,9 +84,9 @@ class TestRangeStatusConsumerConnect:
     async def test_accepts_and_hydrates_on_success(self, consumer, authenticated_scope):
         """Successful connect accepts WebSocket and sends initial status."""
         consumer.scope = authenticated_scope
-        mock_range = MagicMock(status=RangeStatus.READY.value)
+        mock_range = MagicMock(status=ResourceStatus.READY.value)
 
-        with patch("cms.get_range", return_value=mock_range):
+        with patch("cms.get_range_by_request_id", return_value=mock_range):
             await consumer.connect()
 
         # Should accept connection
@@ -94,8 +99,8 @@ class TestRangeStatusConsumerConnect:
         consumer.send.assert_awaited_once()
         message = json.loads(consumer.send.call_args[1]["text_data"])
         assert message["type"] == "status"
-        assert message["range_id"] == 42
-        assert message["status"] == RangeStatus.READY.value
+        assert message["request_id"] == TEST_REQUEST_ID
+        assert message["status"] == ResourceStatus.READY.value
 
 
 class TestRangeStatusConsumerDisconnect:
@@ -104,12 +109,12 @@ class TestRangeStatusConsumerDisconnect:
     @pytest.mark.asyncio
     async def test_leaves_channel_group(self, consumer):
         """Disconnect leaves the channel group."""
-        consumer.range_id = 42
-        consumer.group_name = "range_status_42"
+        consumer.request_id = TEST_REQUEST_ID
+        consumer.group_name = f"range_status_{TEST_REQUEST_ID}"
 
         await consumer.disconnect(close_code=1000)
 
-        consumer.channel_layer.group_discard.assert_awaited_once_with("range_status_42", "test-channel")
+        consumer.channel_layer.group_discard.assert_awaited_once_with(f"range_status_{TEST_REQUEST_ID}", "test-channel")
 
     @pytest.mark.asyncio
     async def test_handles_disconnect_without_connect(self, consumer):
@@ -127,12 +132,12 @@ class TestRangeStatusConsumerRangeStatus:
     @pytest.mark.asyncio
     async def test_sends_status_update(self, consumer):
         """range_status() sends formatted status update to WebSocket."""
-        consumer.range_id = 42
+        consumer.request_id = TEST_REQUEST_ID
 
         event = {
             "type": "range_status",
-            "range_id": 42,
-            "new_status": RangeStatus.READY.value,
+            "request_id": TEST_REQUEST_ID,
+            "new_status": ResourceStatus.READY.value,
             "error_message": None,
         }
         await consumer.range_status(event)
@@ -141,24 +146,24 @@ class TestRangeStatusConsumerRangeStatus:
         message = json.loads(consumer.send.call_args[1]["text_data"])
         assert message == {
             "type": "status",
-            "range_id": 42,
-            "status": RangeStatus.READY.value,
+            "request_id": TEST_REQUEST_ID,
+            "status": ResourceStatus.READY.value,
             "error_message": None,
         }
 
     @pytest.mark.asyncio
     async def test_includes_error_message_on_failure(self, consumer):
         """range_status() includes error message for failed ranges."""
-        consumer.range_id = 42
+        consumer.request_id = TEST_REQUEST_ID
 
         event = {
             "type": "range_status",
-            "range_id": 42,
-            "new_status": RangeStatus.FAILED.value,
+            "request_id": TEST_REQUEST_ID,
+            "new_status": ResourceStatus.FAILED.value,
             "error_message": "EC2 limit exceeded",
         }
         await consumer.range_status(event)
 
         message = json.loads(consumer.send.call_args[1]["text_data"])
-        assert message["status"] == RangeStatus.FAILED.value
+        assert message["status"] == ResourceStatus.FAILED.value
         assert message["error_message"] == "EC2 limit exceeded"

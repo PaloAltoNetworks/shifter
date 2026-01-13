@@ -48,7 +48,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    if: github.event_name != 'pull_request' || inputs.is_dev
+    if: github.event_name != 'pull_request'
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:
@@ -93,7 +93,7 @@ jobs:
     permissions:
       id-token: write
     needs: build
-    if: github.event_name != 'pull_request' || inputs.is_dev
+    if: github.event_name != 'pull_request'
     env:
       TASK_FAMILY: ${{ inputs.is_dev && 'dev-portal-pulumi-provisioner' || 'prod-portal-pulumi-provisioner' }}
     steps:

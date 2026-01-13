@@ -1,6 +1,6 @@
-"""Engine handlers for processing SNS/SQS range events.
+"""Engine handlers for processing SNS/SQS events.
 
-These handlers process range status updates from the Shifter Engine provisioner.
+These handlers process range and NGFW status updates from the Shifter Engine provisioner.
 """
 
 from __future__ import annotations
@@ -11,10 +11,37 @@ import logging
 from django.utils import timezone
 
 from engine.models import Range
-from shared.enums import RangeStatus
-from shared.messages.events import EVENT_TYPE_PROVISIONED, EVENT_TYPE_STATUS_UPDATED
+from shared.enums import ResourceStatus
+from shared.messages.events import (
+    EVENT_TYPE_NGFW,
+    EVENT_TYPE_PROVISIONED,
+    EVENT_TYPE_STATUS_UPDATED,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def process_event(message: str | dict) -> None:
+    """Route event to appropriate handler based on event_type.
+
+    This is the main entry point for the SQS worker. It dispatches
+    to range or NGFW handlers based on the event_type prefix.
+
+    Args:
+        message: SNS-wrapped message containing event data.
+    """
+    event = parse_sns_message(message)
+    event_type = event.get("event_type", "")
+    event_id = event.get("event_id", "unknown")
+
+    if event_type.startswith("range."):
+        logger.debug("Routing to range handler: event_type=%s event_id=%s", event_type, event_id)
+        process_range_event(message)
+    elif event_type.startswith("ngfw."):
+        logger.debug("Routing to NGFW handler: event_type=%s event_id=%s", event_type, event_id)
+        process_ngfw_event(message)
+    else:
+        logger.debug("Ignoring unknown event_type=%s event_id=%s", event_type, event_id)
 
 
 def parse_sns_message(message: str | dict) -> dict:
@@ -73,6 +100,11 @@ def _handle_status_updated(event: dict) -> None:
     user_id = event.get("user_id")
     new_status = event.get("new_status")
     error_message = event.get("error_message")
+    event_id = event.get("event_id", "unknown")
+
+    if range_id is None or new_status is None:
+        logger.warning("Missing range_id or new_status in event")
+        return
 
     try:
         range_obj = Range.objects.get(id=range_id)
@@ -93,15 +125,15 @@ def _handle_status_updated(event: dict) -> None:
     range_obj.status = new_status
     update_fields = ["status"]
 
-    if new_status == RangeStatus.READY.value:
+    if new_status == ResourceStatus.READY.value:
         range_obj.ready_at = timezone.now()
         update_fields.append("ready_at")
 
-    if new_status == RangeStatus.FAILED.value and error_message:
+    if new_status == ResourceStatus.FAILED.value and error_message:
         range_obj.error_message = error_message
         update_fields.append("error_message")
 
-    if new_status == RangeStatus.DESTROYED.value:
+    if new_status == ResourceStatus.DESTROYED.value:
         range_obj.destroyed_at = timezone.now()
         update_fields.append("destroyed_at")
 
@@ -112,92 +144,89 @@ def _handle_status_updated(event: dict) -> None:
         return
 
     logger.info(
-        "Engine updated Range: range_id=%s status=%s->%s",
+        "Engine updated Range: range_id=%s status=%s->%s event_id=%s",
         range_id,
         previous_status,
         new_status,
+        event_id,
     )
 
 
 def _handle_provisioned(event: dict) -> None:
-    """Handle range.provisioned event - update provisioned_instances.
+    """Handle range.provisioned event notification - log only, no DB updates.
 
-    Merges instance details from provisioner with UUIDs from range_config.
-    The provisioner provides: role, os, instance_id, private_ip, ssh_key_secret_arn
-    The range_config contains: uuid, role, os_type (from CMS hydration)
+    The provisioner writes all state directly to the database (instances,
+    subnets). This handler serves as an audit trail for provisioning events.
 
     Args:
-        event: Event payload with range_id, user_id, instances, subnet_id, etc.
+        event: Event payload with range_id, user_id, request_id.
     """
+    event_id = event.get("event_id", "unknown")
+    request_id = event.get("request_id")
     range_id = event.get("range_id")
     user_id = event.get("user_id")
-    instances = event.get("instances", [])
-    subnet_id = event.get("subnet_id")
-    subnet_cidr = event.get("subnet_cidr")
-    pulumi_stack = event.get("pulumi_stack")
 
-    try:
-        range_obj = Range.objects.get(id=range_id)
-    except Range.DoesNotExist:
-        logger.warning("Range not found for provisioned event: range_id=%s", range_id)
-        return
-
-    if range_obj.user_id != user_id:
-        logger.error(
-            "user_id mismatch in provisioned event: message=%s, range=%s (range_id=%s)",
-            user_id,
-            range_obj.user_id,
-            range_id,
-        )
-        return
-
-    # Build UUID lookup from range_config (CMS-provided UUIDs)
-    uuid_by_role = {}
-    if range_obj.range_config and "instances" in range_obj.range_config:
-        for spec in range_obj.range_config["instances"]:
-            role = spec.get("role")
-            uuid = spec.get("uuid")
-            if role and uuid:
-                uuid_by_role[role] = uuid
-
-    # Merge provisioner instance data with CMS UUIDs
-    provisioned_instances = []
-    for inst in instances:
-        role = inst.get("role")
-        merged = {
-            "uuid": uuid_by_role.get(role),  # From CMS
-            "role": role,
-            "os_type": inst.get("os"),
-            "instance_id": inst.get("instance_id"),
-            "private_ip": inst.get("private_ip"),
-            "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
-        }
-        provisioned_instances.append(merged)
-
-    # Update range with provisioned data
-    update_fields = ["provisioned_instances"]
-    range_obj.provisioned_instances = provisioned_instances
-
-    if subnet_id:
-        range_obj.subnet_id = subnet_id
-        update_fields.append("subnet_id")
-
-    if subnet_cidr:
-        range_obj.subnet_cidr = subnet_cidr
-        update_fields.append("subnet_cidr")
-
-    if pulumi_stack:
-        range_obj.pulumi_stack = pulumi_stack
-        update_fields.append("pulumi_stack")
-
-    try:
-        range_obj.save(update_fields=update_fields)
-    except Exception:
-        logger.exception("DB error saving provisioned instances: range_id=%s", range_id)
-        return
-
+    # Log the event for audit purposes
     logger.info(
-        "Engine updated provisioned_instances: range_id=%s instances=%d",
+        "Engine received range.provisioned: request_id=%s range_id=%s user_id=%s event_id=%s",
+        request_id,
         range_id,
-        len(provisioned_instances),
+        user_id,
+        event_id,
+    )
+
+
+# =============================================================================
+# NGFW Event Handlers
+# =============================================================================
+
+
+def process_ngfw_event(message: str | dict) -> None:
+    """Process NGFW lifecycle notification from SNS/SQS.
+
+    This is a notification-only handler. All state updates are performed
+    directly by the provisioner - this handler just logs receipt for
+    audit/debugging purposes.
+
+    Args:
+        message: SNS-wrapped message containing NGFW event notification.
+
+    Returns:
+        None. Errors are logged and handled gracefully.
+    """
+    event = parse_sns_message(message)
+    event_type = event.get("event_type")
+
+    if event_type != EVENT_TYPE_NGFW:
+        logger.debug("Ignoring NGFW event_type=%s", event_type)
+        return
+
+    _handle_ngfw_event(event)
+
+
+def _handle_ngfw_event(event: dict) -> None:
+    """Handle NGFW event notification - log only, no DB updates.
+
+    The provisioner writes all state directly to the database.
+    This handler serves as:
+    - Audit trail for NGFW lifecycle events
+    - Notification consumer for other services (MC, CMS)
+
+    Args:
+        event: Event payload with request_id, instance_id, app_id, status.
+    """
+    event_id = event.get("event_id", "unknown")
+    request_id = event.get("request_id")
+    instance_id = event.get("instance_id")
+    app_id = event.get("app_id")
+    status = event.get("status")
+
+    # Log the event for audit purposes
+    logger.info(
+        "Engine received NGFW event: request_id=%s instance_id=%s app_id=%s status=%s event_id=%s",
+        request_id,
+        instance_id,
+        app_id,
+        status,
+        event_id,
     )

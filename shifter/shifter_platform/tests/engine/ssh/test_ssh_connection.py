@@ -39,6 +39,21 @@ class TestSSHConnectionInit:
         assert conn.term_type == "vt100"
         assert conn.term_size == (120, 40)
 
+    def test_accepts_session_id(self, valid_connection_params):
+        """Constructor accepts session_id for persistent tmux sessions."""
+        conn = SSHConnection(
+            **valid_connection_params,
+            session_id="test-session-123",
+        )
+
+        assert conn.session_id == "test-session-123"
+
+    def test_session_id_defaults_to_none(self, valid_connection_params):
+        """session_id defaults to None when not provided."""
+        conn = SSHConnection(**valid_connection_params)
+
+        assert conn.session_id is None
+
 
 class TestSSHConnectionConnect:
     """Tests for connect() method."""
@@ -71,8 +86,9 @@ class TestSSHConnectionConnect:
                 client_keys=[mock_key],
                 known_hosts=None,
             )
-            # PTY process created
+            # PTY process created with no command (default shell)
             mock_asyncssh_connection.create_process.assert_called_once_with(
+                None,  # No command = default shell
                 term_type="xterm-256color",
                 term_size=(80, 24),
                 encoding=None,
@@ -96,6 +112,53 @@ class TestSSHConnectionConnect:
             await conn.connect()
 
             assert mock_asyncssh.connect.call_args[1]["port"] == 2222
+
+    @pytest.mark.asyncio
+    async def test_connect_with_session_id_uses_tmux(
+        self,
+        valid_connection_params,
+        mock_asyncssh_connection,
+        mock_asyncssh_process,
+    ):
+        """Connect with session_id runs tmux new-session command."""
+        conn = SSHConnection(**valid_connection_params, session_id="test-uuid-1234")
+
+        with patch("engine.ssh.asyncssh") as mock_asyncssh:
+            mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
+            mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
+            mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
+
+            await conn.connect()
+
+            # Verify tmux command is passed
+            mock_asyncssh_connection.create_process.assert_called_once_with(
+                "tmux new-session -A -s test-uuid-1234",
+                term_type="xterm-256color",
+                term_size=(80, 24),
+                encoding=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_connect_sanitizes_session_id(
+        self,
+        valid_connection_params,
+        mock_asyncssh_connection,
+        mock_asyncssh_process,
+    ):
+        """Connect sanitizes session_id to alphanumeric and hyphens only."""
+        # Session ID with special characters that could be problematic
+        conn = SSHConnection(**valid_connection_params, session_id="test/session;rm -rf")
+
+        with patch("engine.ssh.asyncssh") as mock_asyncssh:
+            mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
+            mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
+            mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
+
+            await conn.connect()
+
+            # Verify special chars are replaced with hyphens
+            call_args = mock_asyncssh_connection.create_process.call_args[0]
+            assert call_args[0] == "tmux new-session -A -s test-session-rm--rf"
 
     @pytest.mark.asyncio
     async def test_connect_permission_denied(self, valid_connection_params):

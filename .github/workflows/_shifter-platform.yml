@@ -55,14 +55,68 @@ jobs:
               body: `#### Terraform Plan - Platform (${{ inputs.environment }})\n<details><summary>Show Plan</summary>\n\n\`\`\`terraform\n${plan.substring(0, 60000)}\n\`\`\`\n\n</details>`
             });
 
-  apply:
-    name: Apply (${{ inputs.environment }})
+  push-guacamole-images:
+    name: Push Guacamole Images (${{ inputs.environment }})
     runs-on: self-hosted
     needs: plan
     if: |
       always() &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
-      (github.event_name != 'pull_request' || inputs.environment == 'dev')
+      github.event_name != 'pull_request'
+    env:
+      GUACD_REPO: ${{ inputs.is_dev && 'shifter-dev-guacd' || 'shifter-guacd' }}
+      GUACAMOLE_CLIENT_REPO: ${{ inputs.is_dev && 'shifter-dev-guacamole-client' || 'shifter-guacamole-client' }}
+      GUACAMOLE_VERSION: "1.5.5"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.is_dev && secrets.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push guacd image (with RDP file transfer support)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./shifter/engine/guacd
+          push: true
+          build-args: |
+            GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUACAMOLE_VERSION }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:latest
+          cache-from: type=local,src=/tmp/.buildx-cache-guacd
+          cache-to: type=local,dest=/tmp/.buildx-cache-guacd-new,mode=max
+      - name: Build and push guacamole-client image (with OIDC extension)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./shifter/engine/guacamole
+          push: true
+          build-args: |
+            GUACAMOLE_VERSION=${{ env.GUACAMOLE_VERSION }}
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:latest
+          cache-from: type=local,src=/tmp/.buildx-cache-guacamole
+          cache-to: type=local,dest=/tmp/.buildx-cache-guacamole-new,mode=max
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache-guacd /tmp/.buildx-cache-guacamole
+          mv /tmp/.buildx-cache-guacd-new /tmp/.buildx-cache-guacd || true
+          mv /tmp/.buildx-cache-guacamole-new /tmp/.buildx-cache-guacamole || true
+
+  apply:
+    name: Apply (${{ inputs.environment }})
+    runs-on: self-hosted
+    needs: [plan, push-guacamole-images]
+    if: |
+      always() &&
+      (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
+      (needs.push-guacamole-images.result == 'success' || needs.push-guacamole-images.result == 'skipped') &&
+      github.event_name != 'pull_request'
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
@@ -76,13 +130,94 @@ jobs:
         with:
           terraform_version: "1.7.1"
       - run: terraform init
+      - name: Handle Service Discovery replacement
+        env:
+          ENV: ${{ inputs.environment }}
+        run: |
+          # Check if Service Discovery service needs replacement
+          echo "Running terraform plan to check for Service Discovery changes..."
+          terraform plan -detailed-exitcode -out=tfplan 2>&1 || PLAN_EXIT=$?
+
+          echo "Plan exit code: ${PLAN_EXIT:-0}"
+
+          # Exit code 2 means there are changes
+          if [ "${PLAN_EXIT:-0}" = "2" ]; then
+            # Check if service discovery service is being deleted/replaced
+            echo "Checking plan for Service Discovery changes..."
+            if terraform show -json tfplan | jq -e '.resource_changes[]? | select(.address | contains("service_discovery_service")) | select(.change.actions | index("delete"))' > /dev/null 2>&1; then
+              echo "Service Discovery service deletion detected - scaling down ECS services first"
+
+              # Find the Guacamole ECS cluster using AWS CLI directly (pattern: {env}-portal-guacamole)
+              CLUSTER_NAME="${ENV}-portal-guacamole"
+              echo "Looking for Guacamole cluster: $CLUSTER_NAME"
+
+              # Verify cluster exists
+              if aws ecs describe-clusters --clusters "$CLUSTER_NAME" --query "clusters[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
+                echo "Found active Guacamole cluster: $CLUSTER_NAME"
+
+                # Scale down guacd service to deregister from Service Discovery
+                GUACD_SERVICE="${ENV}-portal-guacd"
+                echo "Scaling down guacd service: $GUACD_SERVICE"
+
+                if aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
+                  echo "Scaling guacd service to 0..."
+                  aws ecs update-service --cluster "$CLUSTER_NAME" --service "$GUACD_SERVICE" --desired-count 0 --no-cli-pager
+
+                  # Wait for tasks to drain (max 2 minutes)
+                  for i in $(seq 1 24); do
+                    RUNNING=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$GUACD_SERVICE" --query "services[0].runningCount" --output text 2>/dev/null || echo "0")
+                    if [ "$RUNNING" = "0" ]; then
+                      echo "All guacd tasks stopped"
+                      break
+                    fi
+                    echo "Waiting for tasks to stop... ($RUNNING running)"
+                    sleep 5
+                  done
+
+                  # Give Service Discovery time to deregister
+                  echo "Waiting for Service Discovery to deregister instances..."
+                  sleep 15
+                else
+                  echo "guacd service not found or not active"
+                fi
+              else
+                echo "Guacamole cluster not found or not active"
+              fi
+            else
+              echo "No Service Discovery deletion in plan"
+            fi
+          else
+            echo "No changes detected or plan succeeded without changes"
+          fi
+
+          rm -f tfplan
       - run: terraform apply -auto-approve
+      - name: Wait for Guacamole ECS services to stabilize
+        env:
+          ENV: ${{ inputs.environment }}
+        run: |
+          CLUSTER_NAME="${ENV}-portal-guacamole"
+
+          # Check if cluster exists
+          if ! aws ecs describe-clusters --clusters "$CLUSTER_NAME" --query "clusters[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
+            echo "Guacamole cluster not found, skipping stability check"
+            exit 0
+          fi
+
+          echo "Waiting for Guacamole ECS services to stabilize..."
+
+          # Wait for both services (10 min timeout is default)
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER_NAME" \
+            --services "${ENV}-portal-guacd" "${ENV}-portal-guacamole-client"
+
+          echo "Guacamole ECS services are stable"
 
   build:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
     needs: apply
-    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
+    if: github.event_name != 'pull_request'
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:
@@ -121,7 +256,7 @@ jobs:
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
     needs: build
-    if: github.event_name != 'pull_request' || inputs.environment == 'dev'
+    if: github.event_name != 'pull_request'
     env:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}
@@ -216,6 +351,9 @@ jobs:
           DB_SECRET_ARN=$(get_param "$PS_PREFIX/db-secret-arn")
           APP_SECRET_ARN=$(get_param "$PS_PREFIX/app-secret-arn")
           COGNITO_SECRET_ARN=$(get_param "$PS_PREFIX/cognito-secret-arn")
+          GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" || echo "")
+          GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" || echo "")
+          GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" || echo "")
           PULUMI_ECS_CLUSTER_ARN=$(get_param "$PS_PREFIX/pulumi-ecs-cluster-arn")
           PULUMI_TASK_DEFINITION_ARN=$(get_param "$PS_PREFIX/pulumi-task-definition-arn")
           PULUMI_ECS_SECURITY_GROUP_ID=$(get_param "$PS_PREFIX/pulumi-ecs-security-group-id")
@@ -230,6 +368,9 @@ jobs:
 
           COMMON_ENV="-e AWS_REGION=$AWS_REGION -e AWS_S3_BUCKET_NAME=$S3_BUCKET -e DB_SECRET_ARN=$DB_SECRET_ARN"
           COMMON_ENV="$COMMON_ENV -e APP_SECRET_ARN=$APP_SECRET_ARN -e COGNITO_SECRET_ARN=$COGNITO_SECRET_ARN"
+          [ -n "$GUACAMOLE_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
+          [ -n "$GUACAMOLE_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
+          [ -n "$GUACAMOLE_API_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
           COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
           COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME -e PULUMI_ECS_CLUSTER_ARN=$PULUMI_ECS_CLUSTER_ARN"
           COMMON_ENV="$COMMON_ENV -e PULUMI_TASK_DEFINITION_ARN=$PULUMI_TASK_DEFINITION_ARN"

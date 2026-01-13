@@ -379,5 +379,10 @@ Thumbs.db
 # Notes, scratchpad, etc
 temp/
 
+risks/
+
+# GitHub Runner
+platform/terraform/global/github-runner/*.zip
+
 # Central test coverage directory
 coverage/

@@ -20,6 +20,7 @@ class MockGWLBInstance:
     target_group_arn: str = "arn:aws:elasticloadbalancing:us-east-2:123456789012:targetgroup/test"
     ngfw_data_eni_id: str = "eni-12345"
     ngfw_instance_id: str = "i-12345"
+    instance_id: str = "i-12345"  # Used by GWLBSetupPlan.get_context()
 
 
 class TestGWLBSetupPlanSteps:
@@ -142,25 +143,26 @@ class TestGWLBSetupPlanContext:
         assert context["target_group_arn"] == "arn:aws:test"
 
     def test_get_context_returns_target_id(self):
-        """get_context should return target ID (ENI or instance)."""
+        """get_context should return target ID from instance_id."""
         from plans.gwlb_setup import GWLBSetupPlan
 
         plan = GWLBSetupPlan()
-        instance = MockGWLBInstance(ngfw_data_eni_id="eni-99999")
+        instance = MockGWLBInstance(instance_id="i-99999")
         context = plan.get_context(instance)
 
         assert "target_id" in context
+        assert context["target_id"] == "i-99999"
 
-    def test_get_context_prefers_eni_over_instance(self):
-        """get_context should prefer data ENI ID over instance ID for GWLB target."""
+    def test_get_context_uses_instance_id_for_target(self):
+        """get_context should use instance_id for target registration."""
         from plans.gwlb_setup import GWLBSetupPlan
 
         plan = GWLBSetupPlan()
-        instance = MockGWLBInstance(ngfw_data_eni_id="eni-99999", ngfw_instance_id="i-12345")
+        instance = MockGWLBInstance(instance_id="i-12345")
         context = plan.get_context(instance)
 
-        # GWLB targets should use ENI for traffic inspection
-        assert context["target_id"] == "eni-99999"
+        # GWLB targets use instance_id (target_type="instance" in target group)
+        assert context["target_id"] == "i-12345"
 
     def test_get_context_missing_target_group_raises(self):
         """get_context should raise if target_group_arn is missing."""
@@ -174,15 +176,14 @@ class TestGWLBSetupPlanContext:
             plan.get_context(instance)
 
     def test_get_context_missing_target_id_raises(self):
-        """get_context should raise if both ENI and instance ID are missing."""
+        """get_context should raise if instance_id is missing."""
         from plans.gwlb_setup import GWLBSetupPlan
 
         plan = GWLBSetupPlan()
         instance = MockGWLBInstance()
-        instance.ngfw_data_eni_id = None
-        instance.ngfw_instance_id = None
+        instance.instance_id = None
 
-        with pytest.raises(ValueError, match="target"):
+        with pytest.raises(ValueError, match="instance_id"):
             plan.get_context(instance)
 
 

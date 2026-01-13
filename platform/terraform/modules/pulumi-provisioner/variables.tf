@@ -251,6 +251,12 @@ variable "agent_s3_bucket_arn" {
   type        = string
 }
 
+variable "s3_endpoint_id" {
+  description = "VPC Gateway Endpoint ID for S3 access from range subnets"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # NGFW (VM-Series) Configuration
 # ------------------------------------------------------------------------------

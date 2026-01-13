@@ -62,6 +62,24 @@ variable "cognito_secret_arn" {
   type        = string
 }
 
+variable "guacamole_secret_arn" {
+  description = "ARN of Guacamole JSON auth secret for RDP integration"
+  type        = string
+  default     = ""
+}
+
+variable "guacamole_base_url" {
+  description = "Public base URL for Guacamole (browser URL, e.g., https://domain.com/guacamole)"
+  type        = string
+  default     = ""
+}
+
+variable "guacamole_api_base_url" {
+  description = "Internal base URL for Guacamole API calls (e.g., http://guacamole-client.internal:8080/guacamole)"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # Application Configuration
 # ------------------------------------------------------------------------------
@@ -123,6 +141,18 @@ variable "redis_endpoint" {
   description = "Redis endpoint for Django Channels (empty string if not using Redis)"
   type        = string
   default     = ""
+}
+
+variable "db_host_override" {
+  description = "Override database host. If empty, uses RDS host from secret."
+  type        = string
+  default     = ""
+}
+
+variable "log_level" {
+  description = "Django log level (DEBUG, INFO, WARNING, ERROR). Use DEBUG in dev for detailed event tracing."
+  type        = string
+  default     = "INFO"
 }
 
 # ------------------------------------------------------------------------------

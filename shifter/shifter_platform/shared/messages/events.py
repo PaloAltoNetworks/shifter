@@ -12,13 +12,16 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
-# Event type constants
+# Event type constants - Range
 EVENT_TYPE_STATUS_UPDATED = "range.status.updated"
 EVENT_TYPE_PROVISIONED = "range.provisioned"
 EVENT_TYPE_DESTROYED = "range.destroyed"
 EVENT_TYPE_CANCELLED = "range.cancelled"
+
+# Event type constants - NGFW
+EVENT_TYPE_NGFW = "ngfw.event"
 
 
 class BaseEvent(BaseModel):
@@ -42,9 +45,10 @@ class RangeStatusUpdatedEvent(BaseEvent):
     - Mission Control: Pushes to browser WebSocket
     """
 
-    range_id: int
+    request_id: UUID  # Primary correlation key
+    range_id: int  # Engine uses this for DB lookup
     user_id: int
-    new_status: RangeStatus
+    new_status: ResourceStatus
     error_message: str | None = None
 
 
@@ -54,14 +58,19 @@ class RangeProvisionedEvent(BaseEvent):
     Contains the complete list of provisioned instances with their details.
     """
 
+    request_id: UUID  # Primary correlation key
     range_id: int
     user_id: int
     instances: list[dict[str, Any]]
+    subnet_id: str | None = None
+    subnet_cidr: str | None = None
+    pulumi_stack: str | None = None
 
 
 class RangeDestroyedEvent(BaseEvent):
     """Event published when a range is fully destroyed."""
 
+    request_id: UUID  # Primary correlation key
     range_id: int
     user_id: int
 
@@ -69,5 +78,33 @@ class RangeDestroyedEvent(BaseEvent):
 class RangeCancelledEvent(BaseEvent):
     """Event published when a range provisioning is cancelled."""
 
+    request_id: UUID  # Primary correlation key
     range_id: int
     user_id: int
+
+
+# =============================================================================
+# NGFW Events
+# =============================================================================
+
+
+class NGFWEvent(BaseEvent):
+    """Unified event for NGFW lifecycle changes.
+
+    Published by the provisioner during NGFW lifecycle transitions.
+    Consumed by:
+    - Engine: Updates NGFW/Instantiation status
+    - CMS: Updates NGFW model status
+    - Mission Control: Pushes to browser WebSocket
+
+    The state dict contains context-specific data such as:
+    - Provisioned: instance_id, management_ip, dataplane_ip, service_name, etc.
+    - Destroyed: (typically empty)
+    - Failed: error_message
+    """
+
+    request_id: UUID
+    instance_id: UUID
+    app_id: UUID
+    status: ResourceStatus | None = None
+    state: dict[str, Any] | None = None

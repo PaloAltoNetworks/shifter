@@ -2,6 +2,7 @@
 
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -14,6 +15,30 @@ from risk_register.models import (
     Status,
     StrideCategory,
 )
+
+
+def _get_user_id(request: HttpRequest) -> int:
+    """Get authenticated user ID, raising if not authenticated.
+
+    All views using this are protected by @staff_member_required,
+    so the user is guaranteed to be authenticated.
+    """
+    user_id = request.user.id
+    if user_id is None:
+        raise ValueError("User is not authenticated")
+    return user_id
+
+
+def _get_user(request: HttpRequest) -> User:
+    """Get authenticated user, raising if not authenticated.
+
+    All views using this are protected by @staff_member_required,
+    so the user is guaranteed to be an authenticated User instance.
+    """
+    user = request.user
+    if not isinstance(user, User):
+        raise ValueError("User is not authenticated")
+    return user
 
 
 @staff_member_required
@@ -113,7 +138,7 @@ def risk_create(request: HttpRequest) -> HttpResponse:
             entity_id=risk.id,
             action=AuditLog.Action.CREATE,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
             new_state=_risk_to_dict(risk),
         )
 
@@ -161,7 +186,7 @@ def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
             entity_id=risk.id,
             action=AuditLog.Action.UPDATE,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
             previous_state=previous_state,
             new_state=_risk_to_dict(risk),
         )
@@ -194,7 +219,7 @@ def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
             entity_id=risk.id,
             action=AuditLog.Action.DELETE,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
             previous_state=previous_state,
             new_state=_risk_to_dict(risk),
         )
@@ -219,7 +244,7 @@ def risk_restore(request: HttpRequest, pk: int) -> HttpResponse:
             entity_id=risk.id,
             action=AuditLog.Action.RESTORE,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
             previous_state=previous_state,
             new_state=_risk_to_dict(risk),
         )
@@ -247,7 +272,7 @@ def risk_close(request: HttpRequest, pk: int) -> HttpResponse:
             entity_id=risk.id,
             action=AuditLog.Action.CLOSE,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
             previous_state=previous_state,
             new_state=_risk_to_dict(risk),
             context=resolution_reason,
@@ -273,7 +298,7 @@ def risk_reopen(request: HttpRequest, pk: int) -> HttpResponse:
             entity_id=risk.id,
             action=AuditLog.Action.REOPEN,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
             previous_state=previous_state,
             new_state=_risk_to_dict(risk),
         )
@@ -295,7 +320,7 @@ def comment_add(request: HttpRequest, risk_pk: int) -> HttpResponse:
             comment = Comment.objects.create(
                 risk=risk,
                 content=content,
-                author_user=request.user,
+                author_user=_get_user(request),
             )
 
             AuditLog.log(
@@ -303,7 +328,7 @@ def comment_add(request: HttpRequest, risk_pk: int) -> HttpResponse:
                 entity_id=comment.id,
                 action=AuditLog.Action.CREATE,
                 actor_type=AuditLog.ActorType.USER,
-                actor_id=request.user.id,
+                actor_id=_get_user_id(request),
                 new_state={"risk_id": risk.id, "content": content},
             )
 
@@ -327,7 +352,7 @@ def comment_delete(request: HttpRequest, risk_pk: int, pk: int) -> HttpResponse:
             entity_id=comment.id,
             action=AuditLog.Action.DELETE,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
         )
 
         messages.success(request, "Comment deleted.")
@@ -339,7 +364,7 @@ def comment_delete(request: HttpRequest, risk_pk: int, pk: int) -> HttpResponse:
 def apikey_list(request: HttpRequest) -> HttpResponse:
     """List API keys for the current user."""
     # Show all keys for staff, own keys for regular users
-    keys = APIKey.objects.all() if request.user.is_staff else APIKey.objects.filter(created_by=request.user)
+    keys = APIKey.objects.all() if request.user.is_staff else APIKey.objects.filter(created_by=_get_user(request))
 
     context = {
         "keys": keys,
@@ -366,7 +391,7 @@ def apikey_create(request: HttpRequest) -> HttpResponse:
             entity_id=api_key.id,
             action=AuditLog.Action.CREATE,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
             new_state={"name": name, "prefix": api_key.prefix},
         )
 
@@ -400,7 +425,7 @@ def apikey_revoke(request: HttpRequest, pk: int) -> HttpResponse:
             entity_id=api_key.id,
             action=AuditLog.Action.DELETE,
             actor_type=AuditLog.ActorType.USER,
-            actor_id=request.user.id,
+            actor_id=_get_user_id(request),
         )
 
         messages.success(request, f"API key '{api_key.name}' revoked.")

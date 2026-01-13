@@ -66,12 +66,12 @@ get_instance_id() {
         --profile "$PROFILE"
 }
 
-# Get RDS endpoint
+# Get RDS endpoint (Django DB, not Guacamole)
 get_rds_endpoint() {
     aws rds describe-db-instances \
         --region "$REGION" \
         --profile "$PROFILE" \
-        --query "DBInstances[?contains(DBInstanceIdentifier, \`${ENV}-portal\`)].Endpoint.Address" \
+        --query "DBInstances[?DBInstanceIdentifier==\`${ENV}-portal-db\`].Endpoint.Address" \
         --output text
 }
 

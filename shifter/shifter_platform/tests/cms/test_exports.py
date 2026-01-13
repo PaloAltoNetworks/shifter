@@ -168,6 +168,34 @@ class TestCMSExports:
 
         assert callable(validate_scenario_requirements)
 
+    # --- NGFW service exports ---
+
+    def test_exports_list_ngfws(self):
+        """list_ngfws should be importable from cms."""
+        from cms import list_ngfws
+
+        assert callable(list_ngfws)
+
+    def test_exports_get_ngfw(self):
+        """get_ngfw should be importable from cms."""
+        from cms import get_ngfw
+
+        assert callable(get_ngfw)
+
+    def test_exports_create_ngfw(self):
+        """create_ngfw should be importable from cms."""
+        from cms import create_ngfw
+
+        assert callable(create_ngfw)
+
+    # --- Range service exports (new) ---
+
+    def test_exports_get_range_by_request_id(self):
+        """get_range_by_request_id should be importable from cms."""
+        from cms import get_range_by_request_id
+
+        assert callable(get_range_by_request_id)
+
     # --- __all__ verification ---
 
     def test_all_exports_match_declared(self):
@@ -181,6 +209,7 @@ class TestCMSExports:
             "complete_upload",
             "create_agent",
             "create_credential",
+            "create_ngfw",
             "create_range",
             "delete_agent",
             "delete_credential",
@@ -189,12 +218,15 @@ class TestCMSExports:
             "get_agent",
             "get_allowed_extensions",
             "get_credential",
+            "get_ngfw",
             "get_range",
+            "get_range_by_request_id",
             "get_scenario",
             "get_storage_used",
             "initiate_upload",
             "list_agents",
             "list_credentials",
+            "list_ngfws",
             "list_ranges",
             "list_scenarios",
             "pause_range",

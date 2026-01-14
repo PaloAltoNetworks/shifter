@@ -760,6 +760,69 @@ def parse_serial_number(system_info_output: str) -> str | None:
     return serial
 
 
+def poll_for_serial_number(
+    ssh_executor: "SSHExecutor",
+    host: str,
+    timeout_seconds: int = 600,
+    poll_interval: int = 30,
+) -> str:
+    """Poll NGFW for serial number until it appears or timeout.
+
+    License registration with Palo Alto CSP can take 10-20 minutes after boot.
+    This function polls 'show system info' until a valid serial number appears.
+
+    Args:
+        ssh_executor: SSHExecutor instance for running commands.
+        host: NGFW management IP address.
+        timeout_seconds: Maximum time to wait for serial (default 10 min).
+        poll_interval: Seconds between poll attempts (default 30s).
+
+    Returns:
+        Serial number string.
+
+    Raises:
+        RuntimeError: If serial not found within timeout.
+    """
+    import time
+
+    start_time = time.time()
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed > timeout_seconds:
+            raise RuntimeError(
+                f"NGFW serial number not found after {timeout_seconds}s - license registration may have failed"
+            )
+
+        logger.info(
+            "Polling for NGFW serial number... (%.0fs / %ds)",
+            elapsed,
+            timeout_seconds,
+        )
+
+        try:
+            result = ssh_executor.run_command(
+                instance_id=host,
+                script="show system info",
+                timeout_seconds=60,
+            )
+            serial = parse_serial_number(result.stdout)
+            if serial:
+                logger.info(
+                    "NGFW serial number found after %.0fs: %s",
+                    elapsed,
+                    serial,
+                )
+                return serial
+
+            logger.info("Serial not yet available, retrying in %ds...", poll_interval)
+
+        except Exception as e:
+            logger.warning("Error polling for serial (will retry): %s", e)
+
+        time.sleep(poll_interval)
+
+
 def update_instance_state(request_id: str, status: str, **state_updates) -> None:
     """Update NGFW Instance and App status/state in Engine database.
 
@@ -1577,15 +1640,14 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
 
-    # Extract serial number from verify_device_cert step output
-    serial_number = None
-    for step_result in provision_result.step_results:
-        if step_result.step_name == "verify_device_cert":
-            serial_number = parse_serial_number(step_result.stdout)
-            break
-
-    if not serial_number:
-        raise RuntimeError("NGFW serial number not found - CSP registration may have failed")
+    # Poll for serial number - license registration can take up to 30 min after boot
+    logger.info("Polling for NGFW serial number (license registration)...")
+    serial_number = poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=1800,  # 30 min - CSP registration can take time
+        poll_interval=30,
+    )
 
     # Run GWLB setup (register target, wait for healthy)
     # This uses AWSExecutor directly since GWLBSetupPlan expects AWS API calls

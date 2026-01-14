@@ -1,7 +1,6 @@
 """NGFW Provision Plan for post-Pulumi NGFW configuration.
 
 This plan runs after the NGFW EC2 instance is created to configure:
-- Verify device certificate
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
 - Create security policy (allow-all rule with logging)
@@ -9,7 +8,9 @@ This plan runs after the NGFW EC2 instance is created to configure:
 Commands are executed via SSHExecutor to the NGFW management interface.
 All PAN-OS CLI commands have been validated against PAN-OS 11.x.
 
-Note: SSH wait is done in main.py before calling this plan.
+Note: SSH wait and serial number polling are handled by main.py.
+Serial polling happens AFTER this plan completes, giving the device
+time to complete license registration with the Palo Alto CSP.
 """
 
 from typing import Any, ClassVar
@@ -49,25 +50,19 @@ class NGFWProvisionPlan:
     """Provision plan for NGFW post-Pulumi configuration.
 
     Steps:
-    1. Verify device certificate (show system info)
-    2. Enable cloud logging (Strata Logging Service)
-    3. Create log forwarding profile (XDR-Forward)
-    4. Create security policy (allow-all rule)
+    1. Enable cloud logging (Strata Logging Service)
+    2. Create log forwarding profile (XDR-Forward)
+    3. Create security policy (allow-all rule)
 
     All commands are executed via SSHExecutor to the NGFW management interface.
     SSH wait is handled by main.py before this plan runs.
+    Serial number polling happens after this plan completes (in main.py).
     """
 
     name: ClassVar[str] = "ngfw_provision"
 
     steps: ClassVar[list[SetupStep]] = [
-        # Step 16: Check device certificate and SCM registration
-        SetupStep(
-            name="verify_device_cert",
-            script="show system info",
-            timeout_seconds=60,
-        ),
-        # Step 12: Enable cloud logging
+        # Enable cloud logging
         SetupStep(
             name="enable_cloud_logging",
             script="",  # Empty - commands sent via stdin
@@ -93,7 +88,7 @@ class NGFWProvisionPlan:
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ngfw_config",
         script="show running security-policy",
-        timeout_seconds=60,
+        timeout_seconds=600,  # 10 min - verification can be slow after multiple commits
         is_verification=True,
     )
 

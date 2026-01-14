@@ -262,12 +262,14 @@ class InstanceContextBase(BaseModel):
 
     Attributes:
         uuid: Unique identifier for this instance.
+        name: User-friendly display name for this instance.
         role: Instance role (attacker, victim, dc, or ngfw).
         os_type: Operating system type (kali, ubuntu, windows, or panos).
         join_domain: Whether instance should join the domain.
     """
 
     uuid: str | None = None
+    name: str = ""
     role: Literal["attacker", "victim", "dc", "ngfw"]
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
     join_domain: bool = False

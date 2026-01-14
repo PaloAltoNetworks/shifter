@@ -1,80 +1,43 @@
 /**
- * Terminal Manager - Handles dual SSH terminal connections via WebSocket
+ * Terminal Manager - Handles N SSH terminal connections via WebSocket
  *
+ * Supports tabbed and split view layouts with lazy WebSocket connections.
  * Uses xterm.js for terminal rendering and WebSocket for SSH communication.
  */
+/* global Split */
 
 class TerminalManager {
     constructor(options) {
         this.instances = options.instances || [];
         this.connectionUrls = options.connectionUrls || [];
-        this.kaliContainerId = options.kaliContainerId;
-        this.victimContainerId = options.victimContainerId;
         this.wsProtocol = options.wsProtocol || 'ws:';
         this.wsHost = options.wsHost || window.location.host;
 
-        // Terminal instances
-        this.kaliTerminal = null;
-        this.victimTerminal = null;
+        // Terminal storage: Map<uuid, {terminal, fitAddon, socket, retries, retryTimeout}>
+        this.terminals = new Map();
 
-        // WebSocket connections
-        this.kaliSocket = null;
-        this.victimSocket = null;
+        // Lazy connection tracking
+        this.connectedUuids = new Set();
 
-        // Fit addons
-        this.kaliFitAddon = null;
-        this.victimFitAddon = null;
+        // Layout state
+        this.layoutMode = 'tabs';  // 'tabs' or 'split'
+        this.activeTerminalUuid = null;
 
-        // Divider state
-        this.isDragging = false;
-        this.startX = 0;
-        this.startLeftWidth = 0;
+        // Split mode state
+        this.leftPaneUuid = null;
+        this.rightPaneUuid = null;
+        this.splitInstance = null;
 
         // Retry configuration
         this.retryConfig = {
             maxRetries: 5,
             baseDelayMs: 1000,
             maxDelayMs: 10000,
-            // Close codes that should NOT trigger retry (user/auth issues)
             noRetryCodes: [4001, 4003],
         };
 
-        // Retry state per connection
-        this.kaliRetries = 0;
-        this.victimRetries = 0;
-        this.kaliRetryTimeout = null;
-        this.victimRetryTimeout = null;
-    }
-
-    /**
-     * Initialize both terminals
-     */
-    init() {
-        this.attachUuidsToPanes();
-        this.createTerminals();
-        this.setupDividerResize();
-        this.setupWindowResize();
-        this.connectWebSockets();
-    }
-
-    /**
-     * Attach instance UUIDs to terminal panes for reference by other components (e.g., RDP buttons)
-     */
-    attachUuidsToPanes() {
-        this.instances.forEach(inst => {
-            const paneId = inst.role === 'attacker' ? 'kali-pane' : 'victim-pane';
-            const pane = document.getElementById(paneId);
-            if (pane) {
-                pane.dataset.uuid = inst.uuid;
-            }
-        });
-    }
-
-    /**
-     * Create xterm.js terminal instances
-     */
-    createTerminals() {
-        const terminalOptions = {
+        // Terminal options
+        this.terminalOptions = {
             theme: {
                 background: '#0d0d0d',
                 foreground: '#eaebeb',
@@ -106,45 +69,439 @@ class TerminalManager {
             scrollback: 5000,
             allowProposedApi: true,
         };
-
-        // Create Kali terminal
-        this.kaliTerminal = new Terminal(terminalOptions);
-        this.kaliFitAddon = new FitAddon.FitAddon();
-        const kaliWebLinksAddon = new WebLinksAddon.WebLinksAddon();
-        this.kaliTerminal.loadAddon(this.kaliFitAddon);
-        this.kaliTerminal.loadAddon(kaliWebLinksAddon);
-
-        const kaliContainer = document.getElementById(this.kaliContainerId);
-        this.kaliTerminal.open(kaliContainer);
-        // Delay fit to ensure DOM layout is complete
-        setTimeout(() => this.kaliFitAddon.fit(), 0);
-
-        // Create Victim terminal
-        this.victimTerminal = new Terminal(terminalOptions);
-        this.victimFitAddon = new FitAddon.FitAddon();
-        const victimWebLinksAddon = new WebLinksAddon.WebLinksAddon();
-        this.victimTerminal.loadAddon(this.victimFitAddon);
-        this.victimTerminal.loadAddon(victimWebLinksAddon);
-
-        const victimContainer = document.getElementById(this.victimContainerId);
-        this.victimTerminal.open(victimContainer);
-        // Delay fit to ensure DOM layout is complete
-        setTimeout(() => this.victimFitAddon.fit(), 0);
-
-        // Setup input handlers
-        this.kaliTerminal.onData((data) => this.sendInput('kali', data));
-        this.victimTerminal.onData((data) => this.sendInput('victim', data));
-
-        // Setup resize handlers
-        this.kaliTerminal.onResize(({ cols, rows }) => this.sendResize('kali', cols, rows));
-        this.victimTerminal.onResize(({ cols, rows }) => this.sendResize('victim', cols, rows));
     }
 
     /**
-     * Find instance by role
+     * Initialize the terminal manager
      */
-    _getInstanceByRole(role) {
-        return this.instances.find(inst => inst.role === role);
+    init() {
+        console.log(`TerminalManager: Initializing with ${this.instances.length} instances`);
+        this.loadLayoutPreference();
+        this.createTerminalInstances();
+        this.createTabs();
+        this.createPaneDropdowns();
+        this.setupLayoutToggle();
+        this.setupWindowResize();
+        this.applyLayoutMode();
+
+        // Activate first terminal in tab mode
+        if (this.instances.length > 0) {
+            this.activateTerminal(this.activeTerminalUuid || this.instances[0].uuid);
+        }
+        console.log(`TerminalManager: Initialized in ${this.layoutMode} mode`);
+    }
+
+    /**
+     * Load layout preference from localStorage
+     */
+    loadLayoutPreference() {
+        this.layoutMode = localStorage.getItem('terminal-layout') || 'tabs';
+        this.leftPaneUuid = localStorage.getItem('terminal-left-pane') || this.instances[0]?.uuid;
+        this.rightPaneUuid = localStorage.getItem('terminal-right-pane') || this.instances[1]?.uuid || this.instances[0]?.uuid;
+        this.activeTerminalUuid = localStorage.getItem('terminal-active-tab') || this.instances[0]?.uuid;
+    }
+
+    /**
+     * Check if an instance is RDP-only (no SSH access)
+     */
+    isRdpOnly(instance) {
+        // Domain Controllers and certain Windows instances are RDP-only
+        return instance.osType === 'windows' && instance.role === 'dc';
+    }
+
+    /**
+     * Create xterm.js terminal instances for all instances (but don't connect yet)
+     */
+    createTerminalInstances() {
+        this.instances.forEach(instance => {
+            const containerId = `terminal-${instance.uuid}`;
+            const container = document.getElementById(containerId);
+
+            if (!container) {
+                console.warn(`TerminalManager: Container not found: ${containerId}`);
+                return;
+            }
+
+            // Check if this is an RDP-only instance
+            if (this.isRdpOnly(instance)) {
+                this.createRdpOnlyPlaceholder(instance, container);
+                return;
+            }
+
+            // Create terminal instance
+            const terminal = new Terminal(this.terminalOptions);
+            const fitAddon = new FitAddon.FitAddon();
+            const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+
+            terminal.loadAddon(fitAddon);
+            terminal.loadAddon(webLinksAddon);
+            terminal.open(container);
+
+            // Store terminal data
+            this.terminals.set(instance.uuid, {
+                terminal,
+                fitAddon,
+                socket: null,
+                retries: 0,
+                retryTimeout: null,
+                instance,
+                isRdpOnly: false,
+            });
+
+            // Setup input handler (will queue if not connected)
+            terminal.onData((data) => this.sendInput(instance.uuid, data));
+            terminal.onResize(({ cols, rows }) => this.sendResize(instance.uuid, cols, rows));
+        });
+    }
+
+    /**
+     * Create RDP-only placeholder for instances without SSH access
+     */
+    createRdpOnlyPlaceholder(instance, container) {
+        // Clear container and add placeholder
+        container.innerHTML = `
+            <div class="rdp-only-message">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="opacity: 0.5;">
+                    <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                    <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <p>This instance is accessible via RDP only.</p>
+                <button class="pane-action-btn rdp-btn" data-uuid="${instance.uuid}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>Open RDP Session</span>
+                </button>
+            </div>
+        `;
+
+        // Store minimal data for RDP-only instances
+        this.terminals.set(instance.uuid, {
+            terminal: null,
+            fitAddon: null,
+            socket: null,
+            retries: 0,
+            retryTimeout: null,
+            instance,
+            isRdpOnly: true,
+        });
+    }
+
+    /**
+     * Create tab buttons in the tab bar
+     */
+    createTabs() {
+        const tabsContainer = document.getElementById('terminal-tabs');
+        if (!tabsContainer) return;
+
+        tabsContainer.innerHTML = '';
+
+        this.instances.forEach(instance => {
+            const tab = document.createElement('button');
+            tab.className = 'terminal-tab';
+            tab.dataset.uuid = instance.uuid;
+
+            if (instance.uuid === this.activeTerminalUuid) {
+                tab.classList.add('active');
+            }
+
+            tab.innerHTML = `
+                <span class="tab-status"></span>
+                <span class="tab-label">${this._escapeHtml(instance.name)}</span>
+            `;
+
+            tab.addEventListener('click', () => this.activateTerminal(instance.uuid));
+            tabsContainer.appendChild(tab);
+        });
+    }
+
+    /**
+     * Populate pane dropdown selectors for split mode
+     */
+    createPaneDropdowns() {
+        ['left', 'right'].forEach(side => {
+            const dropdown = document.getElementById(`${side}-pane-select`);
+            if (!dropdown) return;
+
+            dropdown.innerHTML = '';
+
+            this.instances.forEach(instance => {
+                const option = document.createElement('option');
+                option.value = instance.uuid;
+                option.textContent = instance.name;
+                dropdown.appendChild(option);
+            });
+
+            // Set initial value
+            const initialUuid = side === 'left' ? this.leftPaneUuid : this.rightPaneUuid;
+            if (initialUuid) {
+                dropdown.value = initialUuid;
+            }
+
+            dropdown.addEventListener('change', (e) => this.onPaneSelectChange(side, e.target.value));
+        });
+    }
+
+    /**
+     * Setup layout toggle button handlers
+     */
+    setupLayoutToggle() {
+        const toggleContainer = document.getElementById('layout-toggle');
+        if (!toggleContainer) return;
+
+        toggleContainer.querySelectorAll('.toggle-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.mode;
+                if (mode && mode !== this.layoutMode) {
+                    this.setLayoutMode(mode);
+                }
+            });
+        });
+
+        // Set initial active state
+        this.updateToggleButtons();
+    }
+
+    /**
+     * Update toggle button active states
+     */
+    updateToggleButtons() {
+        const toggleContainer = document.getElementById('layout-toggle');
+        if (!toggleContainer) return;
+
+        toggleContainer.querySelectorAll('.toggle-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === this.layoutMode);
+        });
+    }
+
+    /**
+     * Set layout mode and apply changes
+     */
+    setLayoutMode(mode) {
+        console.log(`TerminalManager: Switching to ${mode} mode`);
+        this.layoutMode = mode;
+        localStorage.setItem('terminal-layout', mode);
+
+        this.applyLayoutMode();
+        this.updateToggleButtons();
+
+        // In split mode, ensure both pane terminals are connected
+        if (mode === 'split') {
+            this.connectIfNeeded(this.leftPaneUuid);
+            this.connectIfNeeded(this.rightPaneUuid);
+            this.mountSplitPaneTerminals();
+            this.initSplitJs();
+        }
+
+        // Refit visible terminals after layout change
+        setTimeout(() => this.fitVisibleTerminals(), 50);
+    }
+
+    /**
+     * Apply CSS classes for current layout mode
+     */
+    applyLayoutMode() {
+        const container = document.getElementById('terminal-container');
+        if (!container) return;
+
+        container.classList.remove('mode-tabs', 'mode-split');
+        container.classList.add(`mode-${this.layoutMode}`);
+
+        // Show/hide tabs bar
+        const tabsBar = document.getElementById('terminal-tabs');
+        if (tabsBar) {
+            tabsBar.style.display = this.layoutMode === 'tabs' ? 'flex' : 'none';
+        }
+    }
+
+    /**
+     * Activate a terminal (tab mode) - show it and connect if needed
+     */
+    activateTerminal(uuid) {
+        if (!uuid || !this.terminals.has(uuid)) return;
+
+        const instance = this.instances.find(i => i.uuid === uuid);
+        console.log(`TerminalManager: Activating terminal ${instance?.name || uuid}`);
+
+        this.activeTerminalUuid = uuid;
+        localStorage.setItem('terminal-active-tab', uuid);
+
+        // Update tab styling
+        document.querySelectorAll('.terminal-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.uuid === uuid);
+        });
+
+        // Update pane visibility (tab mode)
+        document.querySelectorAll('.terminal-pane').forEach(pane => {
+            pane.classList.toggle('active', pane.dataset.uuid === uuid);
+        });
+
+        // Lazy connect (unless RDP-only)
+        this.connectIfNeeded(uuid);
+
+        // Fit and focus (only if it has a terminal)
+        const termData = this.terminals.get(uuid);
+        if (termData && termData.terminal && termData.fitAddon) {
+            setTimeout(() => {
+                termData.fitAddon.fit();
+                termData.terminal.focus();
+            }, 50);
+        }
+    }
+
+    /**
+     * Handle pane dropdown selection change (split mode)
+     */
+    onPaneSelectChange(side, uuid) {
+        if (side === 'left') {
+            this.leftPaneUuid = uuid;
+            localStorage.setItem('terminal-left-pane', uuid);
+        } else {
+            this.rightPaneUuid = uuid;
+            localStorage.setItem('terminal-right-pane', uuid);
+        }
+
+        // Lazy connect
+        this.connectIfNeeded(uuid);
+
+        // Mount terminal to pane
+        this.mountTerminalToSplitPane(side, uuid);
+
+        // Fit terminals
+        setTimeout(() => this.fitVisibleTerminals(), 50);
+    }
+
+    /**
+     * Mount terminals to split panes
+     */
+    mountSplitPaneTerminals() {
+        this.mountTerminalToSplitPane('left', this.leftPaneUuid);
+        this.mountTerminalToSplitPane('right', this.rightPaneUuid);
+    }
+
+    /**
+     * Mount a terminal to a split pane
+     */
+    mountTerminalToSplitPane(side, uuid) {
+        const wrapper = document.getElementById(`${side}-terminal-wrapper`);
+        if (!wrapper) return;
+
+        // Clear existing content
+        wrapper.innerHTML = '';
+
+        const termData = this.terminals.get(uuid);
+        if (!termData) return;
+
+        // Get the terminal's container element
+        const terminalContainer = document.getElementById(`terminal-${uuid}`);
+        if (terminalContainer) {
+            if (termData.isRdpOnly) {
+                // For RDP-only, copy the placeholder content
+                const rdpMessage = terminalContainer.querySelector('.rdp-only-message');
+                if (rdpMessage) {
+                    wrapper.appendChild(rdpMessage.cloneNode(true));
+                }
+            } else {
+                // For regular terminals, move the xterm element
+                const xtermElement = terminalContainer.querySelector('.xterm');
+                if (xtermElement) {
+                    wrapper.appendChild(xtermElement);
+                }
+            }
+        }
+
+        // Update status in split pane header
+        this.updateSplitPaneStatus(side, uuid);
+    }
+
+    /**
+     * Update split pane status indicator
+     */
+    updateSplitPaneStatus(side, uuid) {
+        const statusEl = document.getElementById(`${side}-pane-status`);
+        if (!statusEl) return;
+
+        const termData = this.terminals.get(uuid);
+        if (!termData) return;
+
+        const indicator = statusEl.querySelector('.status-indicator');
+        const text = statusEl.querySelector('.status-text');
+
+        // RDP-only instances don't have socket status
+        if (termData.isRdpOnly) {
+            if (indicator) {
+                indicator.className = 'status-indicator';
+                indicator.style.display = 'none';
+            }
+            if (text) {
+                text.textContent = 'RDP Only';
+            }
+            return;
+        }
+
+        // Get current status based on socket state
+        let status = 'disconnected';
+        if (termData.socket) {
+            if (termData.socket.readyState === WebSocket.OPEN) {
+                status = 'connected';
+            } else if (termData.socket.readyState === WebSocket.CONNECTING) {
+                status = 'connecting';
+            }
+        }
+
+        if (indicator) {
+            indicator.style.display = '';
+            indicator.className = 'status-indicator ' + status;
+        }
+
+        if (text) {
+            const statusText = {
+                'connecting': 'Connecting...',
+                'connected': 'Connected',
+                'disconnected': 'Not connected',
+            };
+            text.textContent = statusText[status] || 'Not connected';
+        }
+    }
+
+    /**
+     * Initialize Split.js for split mode
+     */
+    initSplitJs() {
+        // Destroy existing instance
+        if (this.splitInstance) {
+            this.splitInstance.destroy();
+            this.splitInstance = null;
+        }
+
+        const leftPane = document.getElementById('left-pane');
+        const rightPane = document.getElementById('right-pane');
+
+        if (!leftPane || !rightPane || typeof Split === 'undefined') return;
+
+        this.splitInstance = Split(['#left-pane', '#right-pane'], {
+            sizes: [50, 50],
+            minSize: 300,
+            gutterSize: 6,
+            onDragEnd: () => this.fitVisibleTerminals(),
+        });
+    }
+
+    /**
+     * Connect WebSocket if not already connected
+     */
+    connectIfNeeded(uuid) {
+        if (!uuid || this.connectedUuids.has(uuid)) return;
+
+        // Skip RDP-only instances
+        const termData = this.terminals.get(uuid);
+        if (termData?.isRdpOnly) return;
+
+        this.connectWebSocket(uuid);
+        this.connectedUuids.add(uuid);
     }
 
     /**
@@ -156,216 +513,187 @@ class TerminalManager {
     }
 
     /**
-     * Connect WebSockets for both terminals
+     * Connect WebSocket for a terminal
      */
-    connectWebSockets() {
-        this.connectKali();
-        this.connectVictim();
-    }
+    connectWebSocket(uuid) {
+        const termData = this.terminals.get(uuid);
+        if (!termData) return;
 
-    /**
-     * Connect Kali (attacker) WebSocket
-     */
-    connectKali() {
-        const instance = this._getInstanceByRole('attacker');
-        if (!instance) {
-            console.error('No attacker instance found');
-            this.updateStatus('kali', 'failed');
-            return;
-        }
-        const terminalUrl = this._getTerminalUrl(instance.uuid);
+        const terminalUrl = this._getTerminalUrl(uuid);
         if (!terminalUrl) {
-            console.error('No terminal URL found for attacker instance');
-            this.updateStatus('kali', 'failed');
+            console.error(`TerminalManager: No terminal URL found for instance ${uuid}`);
+            this.updateStatus(uuid, 'failed');
             return;
         }
+
+        this.updateStatus(uuid, 'connecting');
+
         const url = `${this.wsProtocol}//${this.wsHost}${terminalUrl}`;
-        this.kaliSocket = new WebSocket(url);
+        console.log(`TerminalManager: Connecting WebSocket to ${url}`);
+        const socket = new WebSocket(url);
 
-        this.kaliSocket.onopen = () => {
-            this.updateStatus('kali', 'connected');
-            this.kaliFitAddon.fit();
-            this.kaliTerminal.focus();
+        socket.onopen = () => {
+            console.log(`TerminalManager: WebSocket connected for ${termData.instance?.name || uuid}`);
+            this.updateStatus(uuid, 'connected');
+            termData.retries = 0;
+            termData.fitAddon.fit();
+
             // Send initial size
-            const { cols, rows } = this.kaliTerminal;
-            this.sendResize('kali', cols, rows);
-        };
+            const { cols, rows } = termData.terminal;
+            this.sendResize(uuid, cols, rows);
 
-        this.kaliSocket.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            if (message.type === 'output') {
-                this.kaliTerminal.write(message.data);
+            // Focus if this is the active terminal
+            if (uuid === this.activeTerminalUuid && this.layoutMode === 'tabs') {
+                termData.terminal.focus();
             }
         };
 
-        this.kaliSocket.onclose = (event) => {
-            // Try to reconnect if it's a retriable error
-            if (!this._scheduleRetry('kali', event.code)) {
-                this.updateStatus('kali', 'disconnected');
-                this.kaliTerminal.write('\r\n\x1b[31mConnection closed.\x1b[0m\r\n');
+        socket.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type === 'output') {
+                    termData.terminal.write(message.data);
+                }
+            } catch (e) {
+                console.error('TerminalManager: Failed to parse WebSocket message:', e);
             }
         };
 
-        this.kaliSocket.onerror = (error) => {
-            this.updateStatus('kali', 'disconnected');
-            console.error('Kali WebSocket error:', error);
-        };
-    }
-
-    /**
-     * Connect Victim WebSocket
-     */
-    connectVictim() {
-        const instance = this._getInstanceByRole('victim');
-        if (!instance) {
-            console.error('No victim instance found');
-            this.updateStatus('victim', 'failed');
-            return;
-        }
-        const terminalUrl = this._getTerminalUrl(instance.uuid);
-        if (!terminalUrl) {
-            console.error('No terminal URL found for victim instance');
-            this.updateStatus('victim', 'failed');
-            return;
-        }
-        const url = `${this.wsProtocol}//${this.wsHost}${terminalUrl}`;
-        this.victimSocket = new WebSocket(url);
-
-        this.victimSocket.onopen = () => {
-            this.updateStatus('victim', 'connected');
-            this.victimFitAddon.fit();
-            // Send initial size
-            const { cols, rows } = this.victimTerminal;
-            this.sendResize('victim', cols, rows);
-        };
-
-        this.victimSocket.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            if (message.type === 'output') {
-                this.victimTerminal.write(message.data);
+        socket.onclose = (event) => {
+            if (!this._scheduleRetry(uuid, event.code)) {
+                this.updateStatus(uuid, 'disconnected');
+                termData.terminal.write('\r\n\x1b[31mConnection closed.\x1b[0m\r\n');
             }
         };
 
-        this.victimSocket.onclose = (event) => {
-            // Try to reconnect if it's a retriable error
-            if (!this._scheduleRetry('victim', event.code)) {
-                this.updateStatus('victim', 'disconnected');
-                this.victimTerminal.write('\r\n\x1b[31mConnection closed.\x1b[0m\r\n');
-            }
+        socket.onerror = (error) => {
+            console.error(`TerminalManager: WebSocket error for ${termData.instance?.name || uuid}:`, error);
         };
 
-        this.victimSocket.onerror = (error) => {
-            this.updateStatus('victim', 'disconnected');
-            console.error('Victim WebSocket error:', error);
-        };
+        termData.socket = socket;
     }
 
     /**
      * Send terminal input to WebSocket
      */
-    sendInput(instance, data) {
-        const socket = instance === 'kali' ? this.kaliSocket : this.victimSocket;
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'input', data: data }));
+    sendInput(uuid, data) {
+        const termData = this.terminals.get(uuid);
+        if (termData?.socket?.readyState === WebSocket.OPEN) {
+            termData.socket.send(JSON.stringify({ type: 'input', data }));
         }
     }
 
     /**
      * Send terminal resize to WebSocket
      */
-    sendResize(instance, cols, rows) {
-        const socket = instance === 'kali' ? this.kaliSocket : this.victimSocket;
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'resize', cols: cols, rows: rows }));
+    sendResize(uuid, cols, rows) {
+        const termData = this.terminals.get(uuid);
+        if (termData?.socket?.readyState === WebSocket.OPEN) {
+            termData.socket.send(JSON.stringify({ type: 'resize', cols, rows }));
         }
     }
 
     /**
      * Update connection status indicator
      */
-    updateStatus(instance, status, retryCount = null) {
-        const statusEl = document.getElementById(`${instance}-status`);
-        if (!statusEl) return;
+    updateStatus(uuid, status, retryCount = null) {
+        // Update pane status (tab mode)
+        const statusEl = document.getElementById(`status-${uuid}`);
+        if (statusEl) {
+            const indicator = statusEl.querySelector('.status-indicator');
+            const text = statusEl.querySelector('.status-text');
 
-        const indicator = statusEl.querySelector('.status-indicator');
-        const text = statusEl.querySelector('span:last-child');
+            if (indicator) {
+                indicator.className = 'status-indicator ' + status;
+            }
 
-        indicator.className = 'status-indicator ' + status;
-
-        switch (status) {
-            case 'connecting':
-                text.textContent = 'Connecting...';
-                break;
-            case 'connected':
-                text.textContent = 'Connected';
-                // Reset retry counter on successful connection
-                if (instance === 'kali') {
-                    this.kaliRetries = 0;
-                } else {
-                    this.victimRetries = 0;
+            if (text) {
+                switch (status) {
+                    case 'connecting':
+                        text.textContent = 'Connecting...';
+                        break;
+                    case 'connected':
+                        text.textContent = 'Connected';
+                        break;
+                    case 'disconnected':
+                        text.textContent = 'Disconnected';
+                        break;
+                    case 'retrying':
+                        text.textContent = `Retrying (${retryCount}/${this.retryConfig.maxRetries})...`;
+                        break;
+                    case 'failed':
+                        text.textContent = 'Failed';
+                        break;
+                    default:
+                        text.textContent = 'Not connected';
                 }
-                break;
-            case 'disconnected':
-                text.textContent = 'Disconnected';
-                break;
-            case 'retrying':
-                text.textContent = `Retrying (${retryCount}/${this.retryConfig.maxRetries})...`;
-                break;
-            case 'failed':
-                text.textContent = 'Failed';
-                break;
+            }
+        }
+
+        // Update tab status
+        const tab = document.querySelector(`.terminal-tab[data-uuid="${uuid}"]`);
+        if (tab) {
+            const tabStatus = tab.querySelector('.tab-status');
+            if (tabStatus) {
+                tabStatus.className = 'tab-status ' + status;
+            }
+        }
+
+        // Update split pane status if applicable
+        if (uuid === this.leftPaneUuid) {
+            this.updateSplitPaneStatus('left', uuid);
+        }
+        if (uuid === this.rightPaneUuid) {
+            this.updateSplitPaneStatus('right', uuid);
         }
     }
 
     /**
-     * Setup divider drag-to-resize
+     * Calculate retry delay with exponential backoff
      */
-    setupDividerResize() {
-        const divider = document.getElementById('terminal-divider');
-        const container = document.getElementById('terminal-container');
-        const kaliPane = document.getElementById('kali-pane');
-        const victimPane = document.getElementById('victim-pane');
+    _getRetryDelay(retryCount) {
+        return Math.min(
+            this.retryConfig.baseDelayMs * Math.pow(2, retryCount),
+            this.retryConfig.maxDelayMs
+        );
+    }
 
-        if (!divider || !container) return;
+    /**
+     * Check if we should retry based on close code
+     */
+    _shouldRetry(closeCode, retryCount) {
+        if (retryCount >= this.retryConfig.maxRetries) return false;
+        if (this.retryConfig.noRetryCodes.includes(closeCode)) return false;
+        if (closeCode === 1000) return false;
+        return true;
+    }
 
-        divider.addEventListener('mousedown', (e) => {
-            this.isDragging = true;
-            this.startX = e.clientX;
-            this.startLeftWidth = kaliPane.offsetWidth;
+    /**
+     * Schedule a retry for the given instance
+     */
+    _scheduleRetry(uuid, closeCode) {
+        const termData = this.terminals.get(uuid);
+        if (!termData) return false;
 
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!this.isDragging) return;
-
-            const containerWidth = container.offsetWidth;
-            const dividerWidth = divider.offsetWidth;
-            const minWidth = 300;
-            const maxWidth = containerWidth - minWidth - dividerWidth;
-
-            let newLeftWidth = this.startLeftWidth + (e.clientX - this.startX);
-            newLeftWidth = Math.max(minWidth, Math.min(maxWidth, newLeftWidth));
-
-            const leftPercent = (newLeftWidth / containerWidth) * 100;
-            const rightPercent = ((containerWidth - newLeftWidth - dividerWidth) / containerWidth) * 100;
-
-            kaliPane.style.flex = `0 0 ${leftPercent}%`;
-            victimPane.style.flex = `0 0 ${rightPercent}%`;
-
-            // Refit terminals
-            this.kaliFitAddon.fit();
-            this.victimFitAddon.fit();
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (this.isDragging) {
-                this.isDragging = false;
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
+        if (!this._shouldRetry(closeCode, termData.retries)) {
+            this.updateStatus(uuid, 'failed');
+            if (termData.retries >= this.retryConfig.maxRetries) {
+                termData.terminal.write('\r\n\x1b[31mConnection failed after 5 attempts. Refresh page to retry.\x1b[0m\r\n');
             }
-        });
+            return false;
+        }
+
+        const delay = this._getRetryDelay(termData.retries);
+        this.updateStatus(uuid, 'retrying', termData.retries + 1);
+
+        termData.terminal.write(`\r\n\x1b[33mRetrying in ${delay/1000}s... (attempt ${termData.retries + 1}/${this.retryConfig.maxRetries})\x1b[0m\r\n`);
+
+        termData.retryTimeout = setTimeout(() => {
+            termData.retries++;
+            this.connectWebSocket(uuid);
+        }, delay);
+
+        return true;
     }
 
     /**
@@ -376,102 +704,66 @@ class TerminalManager {
         window.addEventListener('resize', () => {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(() => {
-                this.kaliFitAddon.fit();
-                this.victimFitAddon.fit();
+                this.fitVisibleTerminals();
             }, 100);
         });
     }
 
     /**
-     * Calculate retry delay with exponential backoff
+     * Fit all visible terminals
      */
-    _getRetryDelay(retryCount) {
-        const delay = Math.min(
-            this.retryConfig.baseDelayMs * Math.pow(2, retryCount),
-            this.retryConfig.maxDelayMs
-        );
-        return delay;
+    fitVisibleTerminals() {
+        if (this.layoutMode === 'tabs') {
+            // Fit only active terminal (if it has one - skip RDP-only)
+            const termData = this.terminals.get(this.activeTerminalUuid);
+            if (termData && termData.fitAddon) {
+                termData.fitAddon.fit();
+            }
+        } else {
+            // Fit both split pane terminals (skip RDP-only)
+            [this.leftPaneUuid, this.rightPaneUuid].forEach(uuid => {
+                const termData = this.terminals.get(uuid);
+                if (termData && termData.fitAddon) {
+                    termData.fitAddon.fit();
+                }
+            });
+        }
     }
 
     /**
-     * Check if we should retry based on close code
+     * Escape HTML to prevent XSS
      */
-    _shouldRetry(closeCode, retryCount) {
-        // Don't retry if we've exceeded max retries
-        if (retryCount >= this.retryConfig.maxRetries) {
-            return false;
-        }
-        // Don't retry for auth/access issues
-        if (this.retryConfig.noRetryCodes.includes(closeCode)) {
-            return false;
-        }
-        // Don't retry for normal closure
-        if (closeCode === 1000) {
-            return false;
-        }
-        // Retry for all other cases (timing issues, SSH failures, etc.)
-        return true;
-    }
-
-    /**
-     * Schedule a retry for the given instance
-     */
-    _scheduleRetry(instance, closeCode) {
-        const retries = instance === 'kali' ? this.kaliRetries : this.victimRetries;
-
-        if (!this._shouldRetry(closeCode, retries)) {
-            this.updateStatus(instance, 'failed');
-            const terminal = instance === 'kali' ? this.kaliTerminal : this.victimTerminal;
-            if (retries >= this.retryConfig.maxRetries) {
-                terminal.write('\r\n\x1b[31mConnection failed after 5 attempts. Refresh page to retry.\x1b[0m\r\n');
-            }
-            return false;
-        }
-
-        const delay = this._getRetryDelay(retries);
-        this.updateStatus(instance, 'retrying', retries + 1);
-
-        const terminal = instance === 'kali' ? this.kaliTerminal : this.victimTerminal;
-        terminal.write(`\r\n\x1b[33mRetrying in ${delay/1000}s... (attempt ${retries + 1}/${this.retryConfig.maxRetries})\x1b[0m\r\n`);
-
-        const timeoutRef = instance === 'kali' ? 'kaliRetryTimeout' : 'victimRetryTimeout';
-        this[timeoutRef] = setTimeout(() => {
-            if (instance === 'kali') {
-                this.kaliRetries++;
-                this.connectKali();
-            } else {
-                this.victimRetries++;
-                this.connectVictim();
-            }
-        }, delay);
-
-        return true;
+    _escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     /**
      * Cleanup - close connections and clear retry timeouts
      */
     destroy() {
-        // Clear retry timeouts
-        if (this.kaliRetryTimeout) {
-            clearTimeout(this.kaliRetryTimeout);
-        }
-        if (this.victimRetryTimeout) {
-            clearTimeout(this.victimRetryTimeout);
+        // Destroy Split.js instance
+        if (this.splitInstance) {
+            this.splitInstance.destroy();
+            this.splitInstance = null;
         }
 
-        if (this.kaliSocket) {
-            this.kaliSocket.close();
-        }
-        if (this.victimSocket) {
-            this.victimSocket.close();
-        }
-        if (this.kaliTerminal) {
-            this.kaliTerminal.dispose();
-        }
-        if (this.victimTerminal) {
-            this.victimTerminal.dispose();
-        }
+        // Clean up all terminals
+        this.terminals.forEach((termData, _uuid) => {
+            if (termData.retryTimeout) {
+                clearTimeout(termData.retryTimeout);
+            }
+            if (termData.socket) {
+                termData.socket.close();
+            }
+            if (termData.terminal) {
+                termData.terminal.dispose();
+            }
+        });
+
+        this.terminals.clear();
+        this.connectedUuids.clear();
     }
 }
 

@@ -488,6 +488,7 @@ module "pulumi_provisioner" {
   # S3
   agent_s3_bucket     = module.s3.bucket_name
   agent_s3_bucket_arn = module.s3.bucket_arn
+  s3_endpoint_id      = data.terraform_remote_state.range.outputs.s3_endpoint_id
 
   # NGFW (VM-Series) - from Range VPC outputs
   ngfw_mgmt_security_group_id = data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id : ""
@@ -496,6 +497,7 @@ module "pulumi_provisioner" {
   ngfw_instance_type          = data.terraform_remote_state.range.outputs.vm_series_instance_type
   ngfw_subnet_id              = data.terraform_remote_state.range.outputs.ngfw_subnet_id != null ? data.terraform_remote_state.range.outputs.ngfw_subnet_id : ""
   ngfw_instance_profile_name  = data.terraform_remote_state.range.outputs.ngfw_instance_profile_name != null ? data.terraform_remote_state.range.outputs.ngfw_instance_profile_name : ""
+  ngfw_instance_role_arn      = data.terraform_remote_state.range.outputs.ngfw_instance_role_arn != null ? data.terraform_remote_state.range.outputs.ngfw_instance_role_arn : ""
 
   # Messaging (SNS topic for range event publishing)
   sns_topic_arn = module.messaging.sns_topic_arn

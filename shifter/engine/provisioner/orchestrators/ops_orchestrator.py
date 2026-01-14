@@ -85,7 +85,11 @@ class OpsOrchestrator:
         """Execute an operations plan.
 
         Args:
-            instance_id: Target instance or resource ID.
+            instance_id: Target for the operation. The semantic meaning varies
+                by operation type:
+                - Start/Stop: AWS EC2 Instance ID (e.g., "i-099ee928142d5f092")
+                - Route operations: May be different resource IDs
+                Used primarily for logging; actual parameters come from context.
             plan: OpsPlan defining steps to execute.
             context: Template variables for the plan.
             **kwargs: Additional arguments for specific executors.

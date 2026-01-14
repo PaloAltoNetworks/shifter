@@ -6,7 +6,7 @@ class TestRangeEventGroup:
 
     def test_returns_range_group_name(self):
         """Function returns correctly formatted group name."""
-        from shared.channels.groups import range_event_group
+        from cyberscript.channels.groups import range_event_group
 
         result = range_event_group(123)
 
@@ -14,7 +14,7 @@ class TestRangeEventGroup:
 
     def test_accepts_integer_range_id(self):
         """Function works with integer range_id."""
-        from shared.channels.groups import range_event_group
+        from cyberscript.channels.groups import range_event_group
 
         result = range_event_group(1)
 
@@ -26,7 +26,7 @@ class TestUserEventGroup:
 
     def test_returns_user_group_name(self):
         """Function returns correctly formatted group name."""
-        from shared.channels.groups import user_event_group
+        from cyberscript.channels.groups import user_event_group
 
         result = user_event_group(42)
 
@@ -34,7 +34,7 @@ class TestUserEventGroup:
 
     def test_accepts_integer_user_id(self):
         """Function works with integer user_id."""
-        from shared.channels.groups import user_event_group
+        from cyberscript.channels.groups import user_event_group
 
         result = user_event_group(1)
 

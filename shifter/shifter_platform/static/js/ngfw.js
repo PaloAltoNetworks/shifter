@@ -164,11 +164,8 @@ class NGFWWizardManager {
     }
 
     setInitialState() {
-        // Set OTP as the initial selected method
-        const otpOption = document.querySelector('.radio-option[data-method="otp"]');
-        if (otpOption) {
-            otpOption.classList.add('selected');
-        }
+        // PIN is the default method (set in HTML as selected/checked)
+        // Nothing extra needed here since OTP option is hidden
     }
 
     goToStep(step) {

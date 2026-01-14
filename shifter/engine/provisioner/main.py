@@ -902,6 +902,9 @@ def poll_for_serial_and_cert(
                 timeout_seconds=60,
             )
 
+            # Debug: log raw output to diagnose parsing issues
+            logger.debug("Raw SSH output (first 500 chars): %r", result.stdout[:500])
+
             # Parse both values from output
             serial_value = parse_serial_number(result.stdout)
             cert_status = parse_device_certificate_status(result.stdout)

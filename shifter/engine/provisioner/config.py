@@ -170,6 +170,7 @@ class RangeConfig:
     dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
     dc_security_group_id: str = ""  # Security group for Domain Controller instances
     portal_vpc_cidr: str = ""
+    portal_vpc_peering_id: str = ""  # VPC peering connection ID for portal route
     # NGFW (VM-Series) configuration
     ngfw_enabled: bool = False
     ngfw_ami_id: str = ""
@@ -567,6 +568,7 @@ def load_config() -> RangeConfig:
         gwlb_service_name=gwlb_service_name,
         dc_ami_id=config.get("dcAmiId") or "",
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
+        portal_vpc_peering_id=config.get("portalVpcPeeringId") or "",
         dc_security_group_id=config.get("dcSecurityGroupId") or "",
         # NGFW (VM-Series) configuration - enabled from DB, config from env vars
         ngfw_enabled=ngfw_enabled,

@@ -172,6 +172,7 @@ class TestDataclassDefaults:
         assert config.ngfw_enabled is False
         assert config.dc_ami_id == ""
         assert config.portal_vpc_cidr == "10.0.0.0/16"
+        assert config.portal_vpc_peering_id == ""
 
 
 class TestBuildInstanceConfig:

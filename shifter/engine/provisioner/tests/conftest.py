@@ -825,6 +825,7 @@ def mock_pulumi_config(mocker):
         "dcSecurityGroupId": "sg-dc-test",
         "rangeInstanceProfileName": "test-profile",
         "portalVpcCidr": "10.0.0.0/16",
+        "portalVpcPeeringId": "pcx-test123",
     }.get(key)
 
     mocker.patch("pulumi.Config", return_value=mock_config)

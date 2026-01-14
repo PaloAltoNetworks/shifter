@@ -92,12 +92,6 @@ class TestProcessEvent:
             mock_range_handler.assert_not_called()
             mock_ngfw_handler.assert_not_called()
 
-    def test_dispatcher_is_callable(self):
-        """Dispatcher is a callable function."""
-        from mission_control.handlers import process_event
-
-        assert callable(process_event)
-
 
 @pytest.mark.django_db
 class TestParseSnsMessage:
@@ -385,16 +379,6 @@ class TestProcessRangeEvent:
 
         # Should NOT have broadcast
         mock_async_to_sync.assert_not_called()
-
-    # ---------------------------------------------------------------------
-    # Handler is callable
-    # ---------------------------------------------------------------------
-
-    def test_handler_is_callable(self):
-        """Handler is a callable function."""
-        from mission_control.handlers import process_range_event
-
-        assert callable(process_range_event)
 
     # ---------------------------------------------------------------------
     # Group name

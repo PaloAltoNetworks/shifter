@@ -565,13 +565,14 @@ class NetworkComponent(pulumi.ComponentResource):
             ),
         ]
 
-        # Add SSH access from portal VPC if configured
+        # Add SSH and RDP access from portal VPC if configured
         if portal_vpc_cidr:
             logger.debug(
-                "Adding SSH ingress rule from portal VPC CIDR %s for subnet %s",
+                "Adding SSH/RDP ingress rules from portal VPC CIDR %s for subnet %s",
                 portal_vpc_cidr,
                 name,
             )
+            # SSH for terminal access
             ingress_rules.append(
                 aws.ec2.SecurityGroupIngressArgs(
                     protocol="tcp",
@@ -581,9 +582,19 @@ class NetworkComponent(pulumi.ComponentResource):
                     description="Allow SSH from portal for terminal access",
                 ),
             )
+            # RDP for Guacamole access
+            ingress_rules.append(
+                aws.ec2.SecurityGroupIngressArgs(
+                    protocol="tcp",
+                    from_port=3389,
+                    to_port=3389,
+                    cidr_blocks=[portal_vpc_cidr],
+                    description="Allow RDP from portal for Guacamole access",
+                ),
+            )
         else:
             logger.warning(
-                "No portal_vpc_cidr configured for subnet %s - terminal SSH access will not work",
+                "No portal_vpc_cidr configured for subnet %s - terminal SSH/RDP access will not work",
                 name,
             )
 

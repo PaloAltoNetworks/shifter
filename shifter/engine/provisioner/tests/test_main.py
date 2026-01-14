@@ -309,15 +309,44 @@ class TestRunProvision:
 
     def test_run_provision_success(self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker):
         """pulumi up success, outputs parsed, events published."""
-        # Mock database connection
+        # Mock database connection and related functions
         mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         mock_run, _mock_result = mock_subprocess
 
+        # Updated output structure to match new validation requirements
         outputs = {
-            "subnet_id": "subnet-12345",
-            "subnet_cidr": "10.1.6.0/24",
-            "instances": [{"role": "attacker", "instance_id": "i-123"}],
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
+                    "subnet_id": "subnet-12345",
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                }
+            },
+            "instances": [
+                {
+                    "uuid": "inst-uuid-1",
+                    "role": "attacker",
+                    "instance_id": "i-123",
+                    "private_ip": "10.1.6.10",
+                }
+            ],
         }
 
         def side_effect(*args, **kwargs):
@@ -333,7 +362,10 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_status_update") as mock_status, patch("main.publish_ready") as mock_ready:
+        with (
+            patch("main.publish_status_update") as mock_status,
+            patch("main.publish_ready") as mock_ready,
+        ):
             from main import _run_provision
 
             env = os.environ.copy()
@@ -341,7 +373,10 @@ class TestRunProvision:
 
             # Verify status update event was published
             mock_status.assert_called_once_with(
-                request_id=self.TEST_REQUEST_ID, range_id=42, user_id=7, new_status="provisioning"
+                request_id=self.TEST_REQUEST_ID,
+                range_id=42,
+                user_id=7,
+                new_status="provisioning",
             )
             # Verify ready event was published with instance details
             mock_ready.assert_called_once()
@@ -372,19 +407,58 @@ class TestRunProvision:
         mocker.patch("main.get_db_connection")
         mocker.patch("main.write_provisioned_state")
         mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {
+                    "subnets": [
+                        {"name": "attack", "connected_to": []},
+                        {"name": "target", "connected_to": []},
+                    ]
+                },
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         mock_run, _mock_result = mock_subprocess
 
+        # Updated output structure with required fields (uuid, subnet_id, subnet_cidr)
         outputs = {
             "subnets": {
-                "subnet-uuid-1": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
                     "subnet_id": "subnet-12345",
-                    "cidr": "10.1.6.0/24",
-                }
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                },
+                "target": {
+                    "uuid": "subnet-uuid-2",
+                    "subnet_id": "subnet-67890",
+                    "subnet_cidr": "10.1.7.0/24",
+                    "security_group_id": "sg-67890",
+                    "route_table_id": "rtb-67890",
+                    "gwlb_endpoint_id": "",
+                },
             },
             "instances": [
-                {"role": "attacker", "instance_id": "i-kali"},
-                {"role": "victim", "instance_id": "i-victim"},
+                {
+                    "uuid": "inst-uuid-1",
+                    "role": "attacker",
+                    "instance_id": "i-kali",
+                    "private_ip": "10.1.6.10",
+                },
+                {
+                    "uuid": "inst-uuid-2",
+                    "role": "victim",
+                    "instance_id": "i-victim",
+                    "private_ip": "10.1.7.10",
+                },
             ],
         }
 
@@ -401,7 +475,10 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_status_update"), patch("main.publish_ready") as mock_ready:
+        with (
+            patch("main.publish_status_update"),
+            patch("main.publish_ready") as mock_ready,
+        ):
             from main import _run_provision
 
             env = os.environ.copy()
@@ -416,15 +493,45 @@ class TestRunProvision:
 
     def test_run_provision_ignores_ngfw_outputs(self, mock_subprocess, mock_env_vars, mock_boto3_clients, mocker):
         """NGFW outputs should be ignored (stored in UserNGFW model, not Range)."""
-        # Mock database connection
+        # Mock database connection and related functions
         mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         mock_run, _mock_result = mock_subprocess
 
+        # Updated output structure with required fields
         outputs = {
-            "subnet_id": "subnet-12345",
-            "subnet_cidr": "10.1.6.0/24",
-            "instances": [{"role": "attacker", "instance_id": "i-kali"}],
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
+                    "subnet_id": "subnet-12345",
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                }
+            },
+            "instances": [
+                {
+                    "uuid": "inst-uuid-1",
+                    "role": "attacker",
+                    "instance_id": "i-kali",
+                    "private_ip": "10.1.6.10",
+                    "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123456789012:secret:test-key-1234567890",
+                },
+            ],
             "ngfw": {
                 "ec2_instance_id": "i-ngfw12345",
                 "untrust_private_ip": "10.1.6.10",
@@ -445,7 +552,10 @@ class TestRunProvision:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_status_update"), patch("main.publish_ready") as mock_ready:
+        with (
+            patch("main.publish_status_update"),
+            patch("main.publish_ready") as mock_ready,
+        ):
             from main import _run_provision
 
             env = os.environ.copy()
@@ -688,7 +798,10 @@ class TestRunPulumi:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
+        with (
+            patch("main.publish_failed") as mock_publish,
+            patch("main.publish_status_update"),
+        ):
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
@@ -716,7 +829,10 @@ class TestRunPulumi:
 
         mock_run.side_effect = side_effect
 
-        with patch("main.publish_failed") as mock_publish, patch("main.publish_status_update"):
+        with (
+            patch("main.publish_failed") as mock_publish,
+            patch("main.publish_status_update"),
+        ):
             from main import run_pulumi
 
             with pytest.raises(RuntimeError):
@@ -804,7 +920,14 @@ class TestMainEntryPoint:
         # Note: request_id is a string (UUID), so we just verify the CLI accepts it
         # and fails on actual execution due to missing DB/environment
         result = subprocess.run(  # noqa: S603
-            [sys.executable, "main.py", "range", "provision", "--request-id", "test-uuid"],
+            [
+                sys.executable,
+                "main.py",
+                "range",
+                "provision",
+                "--request-id",
+                "test-uuid",
+            ],
             cwd=str(Path(__file__).parent.parent),
             capture_output=True,
             text=True,
@@ -921,12 +1044,12 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock the orchestrator for post-Pulumi config
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -976,12 +1099,12 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1029,12 +1152,12 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1080,12 +1203,12 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1130,12 +1253,12 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1188,12 +1311,12 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan (succeeds)
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor - register_target fails
         mock_aws_executor = MagicMock()
@@ -1235,12 +1358,12 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan (succeeds)
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor (created before validation)
         mock_aws_executor = MagicMock()
@@ -1288,13 +1411,39 @@ class TestEventPublishing:
         self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch, mocker
     ):
         """Provision flow should publish status update events via SNS."""
-        # Mock database connection
+        # Mock database connection and related functions
         mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
         mock_run, _mock_result = mock_subprocess
-        outputs = {"subnet_id": "subnet-12345", "instances": []}
+        # Updated output structure with required fields
+        outputs = {
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
+                    "subnet_id": "subnet-12345",
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                }
+            },
+            "instances": [],
+        }
 
         def side_effect(*args, **kwargs):
             cmd = args[0]
@@ -1329,15 +1478,45 @@ class TestEventPublishing:
         self, mock_subprocess, mock_env_vars, mock_boto3_clients, monkeypatch, mocker
     ):
         """Provision success should publish ready event with instances."""
-        # Mock database connection
+        # Mock database connection and related functions
         mocker.patch("main.get_db_connection")
+        mocker.patch("main.write_provisioned_state")
+        mocker.patch("main.configure_ngfw_subnets")
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={
+                "request_id": self.TEST_REQUEST_ID,
+                "range_id": 42,
+                "user_id": 7,
+                "spec": {"subnets": [{"name": "attack", "connected_to": []}]},
+                "subnet_index": 6,
+                "status": "provisioning",
+            },
+        )
 
         monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:us-east-2:123:test-topic")
 
         mock_run, _mock_result = mock_subprocess
+        # Updated output structure with required fields
         outputs = {
-            "subnet_id": "subnet-12345",
-            "instances": [{"role": "attacker", "ip": "10.1.1.10"}],
+            "subnets": {
+                "attack": {
+                    "uuid": "subnet-uuid-1",
+                    "subnet_id": "subnet-12345",
+                    "subnet_cidr": "10.1.6.0/24",
+                    "security_group_id": "sg-12345",
+                    "route_table_id": "rtb-12345",
+                    "gwlb_endpoint_id": "",
+                }
+            },
+            "instances": [
+                {
+                    "uuid": "inst-uuid-1",
+                    "role": "attacker",
+                    "instance_id": "i-123",
+                    "private_ip": "10.1.1.10",
+                }
+            ],
         }
 
         def side_effect(*args, **kwargs):
@@ -1758,8 +1937,92 @@ management-address: 10.1.4.10/24
         assert serial == "007200001267"
 
 
+class TestPollForSerialNumber:
+    """Tests for poll_for_serial_number function."""
+
+    def test_returns_serial_on_first_attempt(self, mocker):
+        """poll_for_serial_number returns serial immediately when available."""
+        from main import poll_for_serial_number
+
+        mock_ssh = MagicMock()
+        mock_ssh.run_command.return_value = MagicMock(stdout="serial: 007200001267\nhostname: PA-VM")
+
+        serial = poll_for_serial_number(
+            ssh_executor=mock_ssh,
+            host="10.1.4.10",
+            timeout_seconds=60,
+            poll_interval=5,
+        )
+
+        assert serial == "007200001267"
+        assert mock_ssh.run_command.call_count == 1
+
+    def test_retries_until_serial_appears(self, mocker):
+        """poll_for_serial_number retries when serial is 'unknown'."""
+        mocker.patch("time.sleep")  # Don't actually sleep in tests
+        from main import poll_for_serial_number
+
+        mock_ssh = MagicMock()
+        # First 2 calls return unknown, third returns real serial
+        mock_ssh.run_command.side_effect = [
+            MagicMock(stdout="serial: unknown\nhostname: PA-VM"),
+            MagicMock(stdout="serial: unknown\nhostname: PA-VM"),
+            MagicMock(stdout="serial: 007200001267\nhostname: PA-VM"),
+        ]
+
+        serial = poll_for_serial_number(
+            ssh_executor=mock_ssh,
+            host="10.1.4.10",
+            timeout_seconds=600,
+            poll_interval=30,
+        )
+
+        assert serial == "007200001267"
+        assert mock_ssh.run_command.call_count == 3
+
+    def test_raises_after_timeout(self, mocker):
+        """poll_for_serial_number raises RuntimeError after timeout."""
+        mocker.patch("time.sleep")
+
+        from main import poll_for_serial_number
+
+        mock_ssh = MagicMock()
+        mock_ssh.run_command.return_value = MagicMock(stdout="serial: unknown")
+
+        # Use a very short timeout to trigger the error quickly
+        with pytest.raises(RuntimeError, match="serial number not found after 0s"):
+            poll_for_serial_number(
+                ssh_executor=mock_ssh,
+                host="10.1.4.10",
+                timeout_seconds=0,  # Immediate timeout
+                poll_interval=30,
+            )
+
+    def test_handles_ssh_errors_gracefully(self, mocker):
+        """poll_for_serial_number retries on SSH errors."""
+        mocker.patch("time.sleep")
+        from main import poll_for_serial_number
+
+        mock_ssh = MagicMock()
+        # First call fails, second succeeds
+        mock_ssh.run_command.side_effect = [
+            Exception("SSH connection failed"),
+            MagicMock(stdout="serial: 007200001267"),
+        ]
+
+        serial = poll_for_serial_number(
+            ssh_executor=mock_ssh,
+            host="10.1.4.10",
+            timeout_seconds=600,
+            poll_interval=30,
+        )
+
+        assert serial == "007200001267"
+        assert mock_ssh.run_command.call_count == 2
+
+
 class TestNgfwProvisionSerialNumber:
-    """Tests for serial number extraction during NGFW provisioning."""
+    """Tests for serial number polling during NGFW provisioning."""
 
     TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
 
@@ -1789,8 +2052,8 @@ class TestNgfwProvisionSerialNumber:
         """Mock run_ngfw_operation for auto-stop (not tested here)."""
         return mocker.patch("main.run_ngfw_operation")
 
-    def test_ngfw_provision_extracts_serial_number(self, mock_boto3_clients, mock_env_vars, mocker):
-        """NGFW provision should extract serial number from verify_device_cert step."""
+    def test_ngfw_provision_polls_for_serial_number(self, mock_boto3_clients, mock_env_vars, mocker):
+        """NGFW provision should poll for serial number after config steps."""
         mock_update = mocker.patch("main.update_instance_state")
         mocker.patch("main.publish_ngfw_event")
 
@@ -1819,17 +2082,13 @@ class TestNgfwProvisionSerialNumber:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        # Mock orchestrator with step_results containing serial number
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "hostname: PA-VM\nserial: 007200001267\n"
-
+        # Mock orchestrator (no longer extracts serial from steps)
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="007200001267")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1874,17 +2133,13 @@ class TestNgfwProvisionSerialNumber:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        # Mock orchestrator with step_results containing serial number
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: ABC123XYZ789"
-
+        # Mock orchestrator (no longer extracts serial from steps)
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="ABC123XYZ789")
 
         mock_aws_executor = MagicMock()
         mock_aws_executor.register_target.return_value = MagicMock(success=True)
@@ -1928,17 +2183,16 @@ class TestNgfwProvisionSerialNumber:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        # Mock orchestrator with step_results but NO serial number in output
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "hostname: PA-VM\n"  # No serial line
-
+        # Mock orchestrator (config steps succeed)
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to raise error (license registration failed)
+        mocker.patch(
+            "main.poll_for_serial_number",
+            side_effect=RuntimeError("NGFW serial number not found after 600s - license registration may have failed"),
+        )
 
         from main import run_ngfw_pulumi
 
@@ -2000,16 +2254,12 @@ class TestNgfwProvisionAutoStop:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: 007200001267"
-
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="007200001267")
 
         mock_aws_executor = MagicMock()
         mock_aws_executor.register_target.return_value = MagicMock(success=True)
@@ -2066,16 +2316,12 @@ class TestNgfwProvisionAutoStop:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: 007200001267"
-
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="007200001267")
 
         mock_aws_executor = MagicMock()
         mock_aws_executor.register_target.return_value = MagicMock(success=True)
@@ -2136,16 +2382,12 @@ class TestNgfwProvisionAutoStop:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: 007200001267"
-
         mock_setup_orchestrator = MagicMock()
-        mock_setup_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_setup_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_setup_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="007200001267")
 
         mock_aws_executor = MagicMock()
         mock_aws_executor.register_target.return_value = MagicMock(success=True)

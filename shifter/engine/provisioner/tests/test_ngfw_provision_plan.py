@@ -27,7 +27,7 @@ class TestNGFWProvisionPlanStructure:
     """Test NGFWProvisionPlan step definitions and verification."""
 
     def test_plan_structure(self):
-        """Plan should have 3 steps with proper attributes and a verification step."""
+        """Plan should have 3 steps with proper attributes."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
@@ -41,9 +41,9 @@ class TestNGFWProvisionPlanStructure:
             assert step.script or step.stdin_input, f"Step {step.name} must have content"
             assert step.timeout_seconds > 0, f"Step {step.name} must have positive timeout"
 
-        # Verification step
-        assert plan.verify_step is not None
-        assert plan.verify_step.is_verification is True
+        # NGFW verification is handled by poll_for_serial_and_cert() in main.py,
+        # not via a verify_step (serial + cert polling happens after plan completes)
+        assert plan.verify_step is None
 
     def test_steps_in_correct_order(self):
         """Steps must be in correct order: logging before profile."""

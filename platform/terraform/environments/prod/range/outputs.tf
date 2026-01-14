@@ -75,6 +75,11 @@ output "nat_gateway_id" {
   value       = module.vpc.nat_gateway_id
 }
 
+output "s3_endpoint_id" {
+  description = "ID of the S3 Gateway Endpoint for range subnet S3 access"
+  value       = module.vpc.s3_endpoint_id
+}
+
 output "firewall_arn" {
   description = "ARN of the Network Firewall (null if disabled)"
   value       = module.vpc.firewall_arn

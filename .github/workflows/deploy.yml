@@ -63,7 +63,8 @@ jobs:
         id: env
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
-            ENV="${{ github.base_ref == 'dev' && 'dev' || 'prod' }}"
+            # Only PRs to main use prod; all others (dev, feature branches) use dev
+            ENV="${{ github.base_ref == 'main' && 'prod' || 'dev' }}"
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # Manual runs always target dev for safety
             ENV="dev"

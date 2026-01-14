@@ -100,8 +100,8 @@
             </p>
 
             <div class="radio-group">
-                <label class="radio-option" data-method="pin">
-                    <input type="radio" name="registration_method" value="pin">
+                <label class="radio-option selected" data-method="pin">
+                    <input type="radio" name="registration_method" value="pin" checked>
                     <div class="radio-option-content">
                         <h4 class="radio-option-title">Use Stored PIN</h4>
                         <p class="radio-option-desc">
@@ -110,19 +110,20 @@
                     </div>
                 </label>
 
-                <label class="radio-option" data-method="otp">
-                    <input type="radio" name="registration_method" value="otp" checked>
+                {# OTP method temporarily hidden - no backend flow implemented yet #}
+                {# <label class="radio-option" data-method="otp">
+                    <input type="radio" name="registration_method" value="otp">
                     <div class="radio-option-content">
                         <h4 class="radio-option-title">Enter One-Time Password (OTP)</h4>
                         <p class="radio-option-desc">
                             Enter a single-use OTP from SCM. Valid for 60 minutes. Good for one-off setups.
                         </p>
                     </div>
-                </label>
+                </label> #}
             </div>
 
             <!-- PIN method fields -->
-            <div class="conditional-fields" id="pin-fields">
+            <div class="conditional-fields visible" id="pin-fields">
                 <div class="form-group">
                     <label class="form-label">
                         SCM Credential <span class="required">*</span>
@@ -154,8 +155,8 @@
                 </div>
             </div>
 
-            <!-- OTP method fields -->
-            <div class="conditional-fields visible" id="otp-fields">
+            <!-- OTP method fields (hidden - no backend flow yet) -->
+            <div class="conditional-fields" id="otp-fields">
                 <div class="form-group">
                     <label class="form-label" for="otp-value">
                         One-Time Password <span class="required">*</span>

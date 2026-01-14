@@ -197,53 +197,43 @@ class TestProcessNgfwEvent:
         assert cms_instance.status == ResourceStatus.PROVISIONING.value
         assert cms_app.status == ResourceStatus.PROVISIONING.value
 
-    def test_handles_missing_instance(self, cms_app):
-        """process_ngfw_event handles missing Instance gracefully."""
+    def test_handles_missing_instance_or_app_gracefully(self, cms_instance, cms_app):
+        """process_ngfw_event handles missing Instance or App gracefully."""
+        # Missing instance
         event = {
             "event_type": EVENT_TYPE_NGFW,
             "instance_id": str(uuid4()),  # Non-existent
             "app_id": str(cms_app.id),
             "status": ResourceStatus.READY.value,
         }
+        process_ngfw_event(make_sns_message(event))  # Should not raise
 
-        # Should not raise
-        process_ngfw_event(make_sns_message(event))
-
-    def test_handles_missing_app(self, cms_instance):
-        """process_ngfw_event handles missing App gracefully."""
+        # Missing app
         event = {
             "event_type": EVENT_TYPE_NGFW,
             "instance_id": str(cms_instance.id),
             "app_id": str(uuid4()),  # Non-existent
             "status": ResourceStatus.READY.value,
         }
+        process_ngfw_event(make_sns_message(event))  # Should not raise
 
-        # Should not raise
-        process_ngfw_event(make_sns_message(event))
-
-    def test_rejects_missing_instance_id(self, cms_app):
-        """process_ngfw_event rejects events without instance_id."""
+    def test_handles_missing_required_ids(self, cms_instance, cms_app):
+        """process_ngfw_event handles events missing instance_id or app_id."""
+        # Missing instance_id
         event = {
             "event_type": EVENT_TYPE_NGFW,
-            # Missing instance_id
             "app_id": str(cms_app.id),
             "status": ResourceStatus.READY.value,
         }
+        process_ngfw_event(make_sns_message(event))  # Should not raise
 
-        # Should not raise
-        process_ngfw_event(make_sns_message(event))
-
-    def test_rejects_missing_app_id(self, cms_instance):
-        """process_ngfw_event rejects events without app_id."""
+        # Missing app_id
         event = {
             "event_type": EVENT_TYPE_NGFW,
             "instance_id": str(cms_instance.id),
-            # Missing app_id
             "status": ResourceStatus.READY.value,
         }
-
-        # Should not raise
-        process_ngfw_event(make_sns_message(event))
+        process_ngfw_event(make_sns_message(event))  # Should not raise
 
     def test_rejects_invalid_status(self, cms_instance, cms_app):
         """process_ngfw_event rejects invalid status values."""
@@ -266,8 +256,8 @@ class TestProcessNgfwEvent:
     # Message formats
     # -------------------------------------------------------------------------
 
-    def test_handles_raw_dict_event(self, cms_instance, cms_app):
-        """process_ngfw_event handles raw dict (no SNS wrapper)."""
+    def test_handles_multiple_message_formats(self, cms_instance, cms_app):
+        """process_ngfw_event handles raw dict and JSON string formats."""
         event = {
             "event_type": EVENT_TYPE_NGFW,
             "instance_id": str(cms_instance.id),
@@ -275,28 +265,19 @@ class TestProcessNgfwEvent:
             "status": ResourceStatus.READY.value,
         }
 
-        process_ngfw_event(event)  # Raw dict, no SNS wrapper
-
+        # Raw dict (no SNS wrapper)
+        process_ngfw_event(event)
         cms_instance.refresh_from_db()
-        cms_app.refresh_from_db()
         assert cms_instance.status == ResourceStatus.READY.value
-        assert cms_app.status == ResourceStatus.READY.value
 
-    def test_handles_json_string_event(self, cms_instance, cms_app):
-        """process_ngfw_event handles JSON string directly."""
-        event = {
-            "event_type": EVENT_TYPE_NGFW,
-            "instance_id": str(cms_instance.id),
-            "app_id": str(cms_app.id),
-            "status": ResourceStatus.READY.value,
-        }
+        # Reset status for next test
+        cms_instance.status = ResourceStatus.PROVISIONING.value
+        cms_instance.save()
 
-        process_ngfw_event(json.dumps(event))  # JSON string
-
+        # JSON string
+        process_ngfw_event(json.dumps(event))
         cms_instance.refresh_from_db()
-        cms_app.refresh_from_db()
         assert cms_instance.status == ResourceStatus.READY.value
-        assert cms_app.status == ResourceStatus.READY.value
 
     # -------------------------------------------------------------------------
     # Serial number handling

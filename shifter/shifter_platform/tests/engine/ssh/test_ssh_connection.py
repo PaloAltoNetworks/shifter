@@ -314,33 +314,24 @@ class TestSSHConnectionResize:
 class TestSSHConnectionIsConnected:
     """Tests for is_connected property."""
 
-    def test_returns_false_when_no_connection(self, valid_connection_params):
-        """is_connected returns False when _conn is None."""
-        conn = SSHConnection(**valid_connection_params)
-        assert conn.is_connected is False
-
-    def test_returns_false_when_closed(
+    def test_reflects_connection_state(
         self,
         valid_connection_params,
         mock_asyncssh_connection,
     ):
-        """is_connected returns False when connection is closed."""
+        """is_connected reflects actual connection state."""
         conn = SSHConnection(**valid_connection_params)
+
+        # False when no connection
+        assert conn.is_connected is False
+
+        # False when connection is closed
         conn._conn = mock_asyncssh_connection
         mock_asyncssh_connection.is_closed.return_value = True
-
         assert conn.is_connected is False
 
-    def test_returns_true_when_active(
-        self,
-        valid_connection_params,
-        mock_asyncssh_connection,
-    ):
-        """is_connected returns True when connection is active."""
-        conn = SSHConnection(**valid_connection_params)
-        conn._conn = mock_asyncssh_connection
+        # True when connection is active
         mock_asyncssh_connection.is_closed.return_value = False
-
         assert conn.is_connected is True
 
 
@@ -348,13 +339,13 @@ class TestSSHConnectionContextManager:
     """Tests for async context manager."""
 
     @pytest.mark.asyncio
-    async def test_connects_on_enter(
+    async def test_connects_and_disconnects(
         self,
         valid_connection_params,
         mock_asyncssh_connection,
         mock_asyncssh_process,
     ):
-        """Context manager calls connect on entry."""
+        """Context manager connects on entry and disconnects on exit."""
         with patch("engine.ssh.asyncssh") as mock_asyncssh:
             mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
             mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
@@ -362,21 +353,5 @@ class TestSSHConnectionContextManager:
 
             async with SSHConnection(**valid_connection_params) as conn:
                 assert conn._conn is not None
-
-    @pytest.mark.asyncio
-    async def test_disconnects_on_exit(
-        self,
-        valid_connection_params,
-        mock_asyncssh_connection,
-        mock_asyncssh_process,
-    ):
-        """Context manager calls disconnect on exit."""
-        with patch("engine.ssh.asyncssh") as mock_asyncssh:
-            mock_asyncssh.import_private_key = MagicMock(return_value=MagicMock())
-            mock_asyncssh.connect = AsyncMock(return_value=mock_asyncssh_connection)
-            mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
-
-            async with SSHConnection(**valid_connection_params):
-                pass
 
             mock_asyncssh_connection.close.assert_called_once()

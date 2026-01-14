@@ -17,40 +17,6 @@ MIIEowIBAAKCAQEAvL0000000000000000000000000000000000000000000000
 -----END RSA PRIVATE KEY-----"""
 
 
-class TestSSHExecutorImports:
-    """Test that SSHExecutor can be imported."""
-
-    def test_import_ssh_executor(self):
-        """SSHExecutor module should be importable."""
-        from executors.ssh_executor import SSHExecutor
-
-        assert SSHExecutor is not None
-
-    def test_import_command_result(self):
-        """CommandResult dataclass should be importable."""
-        from executors.ssh_executor import CommandResult
-
-        assert CommandResult is not None
-
-    def test_import_exceptions(self):
-        """Exception classes should be importable."""
-        from executors.ssh_executor import (
-            CommandError,
-            SSHExecutorError,
-        )
-        from executors.ssh_executor import (
-            ConnectionError as SSHConnectionError,
-        )
-        from executors.ssh_executor import (
-            TimeoutError as SSHTimeoutError,
-        )
-
-        assert SSHExecutorError is not None
-        assert CommandError is not None
-        assert SSHTimeoutError is not None
-        assert SSHConnectionError is not None
-
-
 class TestRunCommandHappyPath:
     """Test successful SSH command execution."""
 
@@ -305,8 +271,8 @@ class TestSSHExecutorInitialization:
     """Test SSHExecutor initialization and configuration."""
 
     @patch("paramiko.RSAKey.from_private_key")
-    def test_initialization_parses_private_key(self, mock_rsa_key):
-        """SSHExecutor parses the provided private key."""
+    def test_initialization_with_defaults(self, mock_rsa_key):
+        """SSHExecutor parses private key and sets default username to 'admin'."""
         from executors.ssh_executor import SSHExecutor
 
         mock_rsa_key.return_value = MagicMock()
@@ -314,40 +280,19 @@ class TestSSHExecutorInitialization:
         executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY)
 
         mock_rsa_key.assert_called_once()
-        assert executor is not None
+        assert executor._username == "admin"
 
     @patch("paramiko.RSAKey.from_private_key")
-    def test_initialization_custom_port(self, mock_rsa_key):
-        """SSHExecutor accepts custom SSH port."""
+    def test_initialization_custom_options(self, mock_rsa_key):
+        """SSHExecutor accepts custom port and username."""
         from executors.ssh_executor import SSHExecutor
 
         mock_rsa_key.return_value = MagicMock()
 
-        executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY, port=2222)
+        executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY, port=2222, username="paloalto")
 
         assert executor._port == 2222
-
-    @patch("paramiko.RSAKey.from_private_key")
-    def test_initialization_custom_username(self, mock_rsa_key):
-        """SSHExecutor accepts custom username."""
-        from executors.ssh_executor import SSHExecutor
-
-        mock_rsa_key.return_value = MagicMock()
-
-        executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY, username="paloalto")
-
         assert executor._username == "paloalto"
-
-    @patch("paramiko.RSAKey.from_private_key")
-    def test_initialization_default_username_is_admin(self, mock_rsa_key):
-        """SSHExecutor defaults to 'admin' username for PAN-OS."""
-        from executors.ssh_executor import SSHExecutor
-
-        mock_rsa_key.return_value = MagicMock()
-
-        executor = SSHExecutor(private_key=MOCK_PRIVATE_KEY)
-
-        assert executor._username == "admin"
 
 
 class TestCommandResultDataclass:

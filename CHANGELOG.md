@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.8] - 2026-01-13
+
+### Fixed
+- Django build does not include cyberscript shared library
+
 ## [0.10.7] - 2026-01-12
 
 ### Changed

@@ -827,6 +827,121 @@ def poll_for_serial_number(
         time.sleep(poll_interval)
 
 
+def parse_device_certificate_status(system_info_output: str) -> str | None:
+    """Extract device certificate status from PAN-OS 'show system info' output.
+
+    PAN-OS format includes a line like:
+        device-certificate-status: Valid
+
+    Args:
+        system_info_output: stdout from 'show system info' command.
+
+    Returns:
+        Certificate status string if found (e.g., "Valid"), None otherwise.
+    """
+    import re
+
+    match = re.search(r"device-certificate-status:\s*(\S+)", system_info_output, re.IGNORECASE)
+    if not match:
+        return None
+
+    return match.group(1).strip()
+
+
+def poll_for_serial_and_cert(
+    ssh_executor: "SSHExecutor",
+    host: str,
+    timeout_seconds: int = 1800,
+    poll_interval: int = 30,
+) -> str:
+    """Poll NGFW until both serial number AND device certificate are present.
+
+    License registration and certificate provisioning can take 10-30 minutes
+    after boot. This function polls until both are valid, tracking each
+    independently since they may appear at different times.
+
+    Args:
+        ssh_executor: SSHExecutor instance for running commands.
+        host: NGFW management IP address.
+        timeout_seconds: Maximum time to wait (default 30 min).
+        poll_interval: Seconds between poll attempts (default 30s).
+
+    Returns:
+        Serial number string when both serial and cert are valid.
+
+    Raises:
+        RuntimeError: If either check fails within timeout, with details
+            on which check(s) failed.
+    """
+    import time
+
+    start_time = time.time()
+    serial_value = None
+    cert_status = None
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed > timeout_seconds:
+            missing = []
+            if not serial_value:
+                missing.append("serial number")
+            if cert_status != "Valid":
+                missing.append(f"device certificate (status: {cert_status or 'not found'})")
+            raise RuntimeError(f"NGFW verification failed after {timeout_seconds}s - missing: {', '.join(missing)}")
+
+        logger.info(
+            "Polling for NGFW serial and certificate... (%.0fs / %ds)",
+            elapsed,
+            timeout_seconds,
+        )
+
+        try:
+            result = ssh_executor.run_command(
+                instance_id=host,
+                script='show system info | match "serial|device-certificate"',
+                timeout_seconds=60,
+            )
+
+            # Parse both values from output
+            serial_value = parse_serial_number(result.stdout)
+            cert_status = parse_device_certificate_status(result.stdout)
+
+            # Log current state
+            serial_ok = bool(serial_value)
+            cert_ok = cert_status == "Valid"
+
+            if serial_ok and cert_ok:
+                logger.info(
+                    "NGFW verification complete after %.0fs: serial=%s, cert=%s",
+                    elapsed,
+                    serial_value,
+                    cert_status,
+                )
+                return serial_value
+
+            # Log what's still missing
+            status_parts = []
+            if serial_ok:
+                status_parts.append(f"serial={serial_value}")
+            else:
+                status_parts.append("serial=waiting")
+            if cert_ok:
+                status_parts.append(f"cert={cert_status}")
+            else:
+                status_parts.append(f"cert={cert_status or 'waiting'}")
+
+            logger.info(
+                "NGFW not ready (%s), retrying in %ds...",
+                ", ".join(status_parts),
+                poll_interval,
+            )
+
+        except Exception as e:
+            logger.warning("Error polling NGFW (will retry): %s", e)
+
+        time.sleep(poll_interval)
+
+
 def update_instance_state(request_id: str, status: str, **state_updates) -> None:
     """Update NGFW Instance and App status/state in Engine database.
 
@@ -1051,6 +1166,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "dcAmiId": os.environ.get("DC_AMI_ID", ""),
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
         "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
+        "portalVpcCidr": os.environ.get("PORTAL_VPC_CIDR", ""),
     }
 
     for key, value in config_values.items():
@@ -1643,9 +1759,9 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
 
-    # Poll for serial number - license registration can take up to 30 min after boot
-    logger.info("Polling for NGFW serial number (license registration)...")
-    serial_number = poll_for_serial_number(
+    # Poll for serial AND certificate - both required for NGFW to be ready
+    logger.info("Polling for NGFW serial number and device certificate...")
+    serial_number = poll_for_serial_and_cert(
         ssh_executor=ssh_executor,
         host=management_ip,
         timeout_seconds=1800,  # 30 min - CSP registration can take time

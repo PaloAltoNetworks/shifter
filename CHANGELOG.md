@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Django build does not include cyberscript shared library
+- Extend and streamline NGFW stand up plan
+- Dynamic subnet creation for ranges misses Shifter Platform creation
 
 ## [0.10.7] - 2026-01-12
 

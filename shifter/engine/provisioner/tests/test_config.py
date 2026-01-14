@@ -279,6 +279,53 @@ class TestRangeConfigDataclass:
         assert config.ngfw_enabled is True
         assert config.gwlb_service_name == "com.amazonaws.vpce.us-east-2.vpce-svc-ngfw"
 
+    def test_range_config_with_portal_vpc_cidr(self):
+        """RangeConfig should support portal_vpc_cidr for SSH access."""
+        config = RangeConfig(
+            range_id=42,
+            user_id=1,
+            request_uuid="request-uuid-123",
+            environment="dev",
+            subnets=[],
+            vpc_id="vpc-123",
+            vpc_cidr="10.1.0.0/16",
+            route_table_id="rtb-123",
+            kali_security_group_id="sg-kali",
+            victim_security_group_id="sg-victim",
+            instance_profile_name="profile",
+            kali_ami_id="ami-kali",
+            victim_ami_id="ami-victim",
+            windows_ami_id="ami-windows",
+            agent_s3_bucket="bucket",
+            availability_zone="us-east-2a",
+            portal_vpc_cidr="10.0.0.0/16",
+        )
+
+        assert config.portal_vpc_cidr == "10.0.0.0/16"
+
+    def test_range_config_portal_vpc_cidr_defaults_to_empty(self):
+        """RangeConfig portal_vpc_cidr should default to empty string."""
+        config = RangeConfig(
+            range_id=42,
+            user_id=1,
+            request_uuid="request-uuid-123",
+            environment="dev",
+            subnets=[],
+            vpc_id="vpc-123",
+            vpc_cidr="10.1.0.0/16",
+            route_table_id="rtb-123",
+            kali_security_group_id="sg-kali",
+            victim_security_group_id="sg-victim",
+            instance_profile_name="profile",
+            kali_ami_id="ami-kali",
+            victim_ami_id="ami-victim",
+            windows_ami_id="ami-windows",
+            agent_s3_bucket="bucket",
+            availability_zone="us-east-2a",
+        )
+
+        assert config.portal_vpc_cidr == ""
+
 
 class TestBuildInstanceConfig:
     """Tests for _build_instance_config helper function."""

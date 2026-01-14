@@ -106,8 +106,9 @@ class TestGetRangeFromDb:
 class TestDataclassDefaults:
     """Tests for dataclass default values and field handling."""
 
-    def test_instance_config_defaults(self):
-        """Optional fields should have correct defaults."""
+    def test_instance_config_defaults_and_dc_fields(self):
+        """InstanceConfig optional fields should have correct defaults and accept dc_config."""
+        # Test defaults
         config = InstanceConfig(
             uuid="inst-uuid-001",
             role="victim",
@@ -119,18 +120,16 @@ class TestDataclassDefaults:
         assert config.dc_config is None
         assert config.join_domain is False
 
-    def test_instance_config_dc_fields(self):
-        """DC instance should accept dc_config dict."""
-        config = InstanceConfig(
+        # Test DC instance with dc_config
+        dc_config = InstanceConfig(
             uuid="inst-uuid-002",
             role="dc",
             os_type="windows",
             instance_type="t3.large",
             dc_config={"domain_name": "test.local", "netbios_name": "TEST"},
-            join_domain=False,
         )
-        assert config.dc_config["domain_name"] == "test.local"
-        assert config.dc_config["netbios_name"] == "TEST"
+        assert dc_config.dc_config["domain_name"] == "test.local"
+        assert dc_config.dc_config["netbios_name"] == "TEST"
 
     def test_subnet_config_connected_to_default(self):
         """SubnetConfig connected_to should default to empty list."""
@@ -148,7 +147,7 @@ class TestDataclassDefaults:
         )
         assert config.connected_to == []
 
-    def test_range_config_optional_fields(self):
+    def test_range_config_defaults_and_optional_fields(self):
         """RangeConfig optional fields should have correct defaults."""
         config = RangeConfig(
             range_id=42,
@@ -167,33 +166,11 @@ class TestDataclassDefaults:
             windows_ami_id="ami-windows",
             agent_s3_bucket="bucket",
             availability_zone="us-east-2a",
+            portal_vpc_cidr="10.0.0.0/16",
         )
         assert config.gwlb_service_name == ""
         assert config.ngfw_enabled is False
-        assert config.portal_vpc_cidr == ""
         assert config.dc_ami_id == ""
-
-    def test_range_config_with_portal_vpc_cidr(self):
-        """RangeConfig should accept portal_vpc_cidr for SSH access."""
-        config = RangeConfig(
-            range_id=42,
-            user_id=1,
-            request_uuid="request-uuid-002",
-            environment="dev",
-            subnets=[],
-            vpc_id="vpc-123",
-            vpc_cidr="10.1.0.0/16",
-            route_table_id="rtb-123",
-            kali_security_group_id="sg-kali",
-            victim_security_group_id="sg-victim",
-            instance_profile_name="profile",
-            kali_ami_id="ami-kali",
-            victim_ami_id="ami-victim",
-            windows_ami_id="ami-windows",
-            agent_s3_bucket="bucket",
-            availability_zone="us-east-2a",
-            portal_vpc_cidr="10.0.0.0/16",
-        )
         assert config.portal_vpc_cidr == "10.0.0.0/16"
 
 

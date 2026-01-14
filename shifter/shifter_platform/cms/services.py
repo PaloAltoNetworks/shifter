@@ -1223,17 +1223,32 @@ def get_active_range(user: User) -> RangeContext | None:
         from shared.schemas import InstanceContext
 
         # Get instance data from stored range_spec
+        # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
+        # Legacy format: instances directly at range_spec["instances"]
         instance_contexts = []
-        if instance.range_spec and "instances" in instance.range_spec:
-            instance_contexts = [
-                InstanceContext(
-                    uuid=spec.get("uuid"),
-                    role=spec["role"],
-                    os_type=spec["os_type"],
-                    join_domain=spec.get("join_domain", False),
-                )
-                for spec in instance.range_spec["instances"]
-            ]
+        if instance.range_spec:
+            if "subnets" in instance.range_spec:
+                for subnet in instance.range_spec["subnets"]:
+                    for spec in subnet.get("instances", []):
+                        instance_contexts.append(
+                            InstanceContext(
+                                uuid=spec.get("uuid"),
+                                role=spec["role"],
+                                os_type=spec["os_type"],
+                                join_domain=spec.get("join_domain", False),
+                            )
+                        )
+            elif "instances" in instance.range_spec:
+                # Legacy flat format for backward compatibility with existing prod data
+                for spec in instance.range_spec["instances"]:
+                    instance_contexts.append(
+                        InstanceContext(
+                            uuid=spec.get("uuid"),
+                            role=spec["role"],
+                            os_type=spec["os_type"],
+                            join_domain=spec.get("join_domain", False),
+                        )
+                    )
 
         # Get agent_name from FK if exists
         agent_name = instance.agent.name if instance.agent else None
@@ -1326,17 +1341,32 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
         raise CMSError("Range has no associated request")
 
     # Build instance contexts from range_spec
+    # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
+    # Legacy format: instances directly at range_spec["instances"]
     instance_contexts = []
-    if instance.range_spec and "instances" in instance.range_spec:
-        instance_contexts = [
-            InstanceContext(
-                uuid=spec.get("uuid"),
-                role=spec["role"],
-                os_type=spec["os_type"],
-                join_domain=spec.get("join_domain", False),
-            )
-            for spec in instance.range_spec["instances"]
-        ]
+    if instance.range_spec:
+        if "subnets" in instance.range_spec:
+            for subnet in instance.range_spec["subnets"]:
+                for spec in subnet.get("instances", []):
+                    instance_contexts.append(
+                        InstanceContext(
+                            uuid=spec.get("uuid"),
+                            role=spec["role"],
+                            os_type=spec["os_type"],
+                            join_domain=spec.get("join_domain", False),
+                        )
+                    )
+        elif "instances" in instance.range_spec:
+            # Legacy flat format for backward compatibility with existing prod data
+            for spec in instance.range_spec["instances"]:
+                instance_contexts.append(
+                    InstanceContext(
+                        uuid=spec.get("uuid"),
+                        role=spec["role"],
+                        os_type=spec["os_type"],
+                        join_domain=spec.get("join_domain", False),
+                    )
+                )
 
     # Get agent_name from FK if exists
     agent_name = instance.agent.name if instance.agent else None

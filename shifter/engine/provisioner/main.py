@@ -35,6 +35,10 @@ from orchestrators.setup_orchestrator import SetupOrchestrator
 
 logger = logging.getLogger(__name__)
 
+# Default timeout for waiting for NGFW SSH to become available (seconds)
+# PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
+NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 3600  # 60 minutes
+
 
 def _get_pulumi_path() -> str:
     """Get the full path to the pulumi executable."""
@@ -1606,24 +1610,23 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
 
     # Create SSH executor and wait for NGFW to be ready (15-25 min boot time)
     ssh_executor = SSHExecutor(private_key=private_key)
+    ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
     logger.info(f"Waiting for SSH on NGFW at {management_ip}...")
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=1800)
+    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
 
     # Create orchestrator with SSH executor
     orchestrator = SetupOrchestrator(ssh_executor)
 
-    # Create context object with the stack outputs
-    class NGFWContext:
-        pass
-
-    context = NGFWContext()
-    context.ec2_instance_id = output_data.get("ec2_instance_id")
-    context.management_ip = management_ip
-    context.dataplane_ip = output_data.get("dataplane_ip")
-    context.service_name = output_data.get("service_name")
-    context.gwlb_arn = output_data.get("gwlb_arn")
-    context.target_group_arn = output_data.get("target_group_arn")
-    context.sls_region = os.environ.get("AWS_REGION", "us-east-2")
+    # Create context dict with the stack outputs for template rendering
+    context = {
+        "ec2_instance_id": output_data.get("ec2_instance_id"),
+        "management_ip": management_ip,
+        "dataplane_ip": output_data.get("dataplane_ip"),
+        "service_name": output_data.get("service_name"),
+        "gwlb_arn": output_data.get("gwlb_arn"),
+        "target_group_arn": output_data.get("target_group_arn"),
+        "sls_region": os.environ.get("AWS_REGION", "us-east-2"),
+    }
 
     # Import and run the NGFW provision plan
     from plans.ngfw_provision import NGFWProvisionPlan
@@ -1761,12 +1764,8 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
 
             deprovision_plan = NGFWDeprovisionPlan()
 
-            # Create context with management_ip from stored state
-            class NGFWContext:
-                pass
-
-            context = NGFWContext()
-            context.management_ip = management_ip
+            # Create context dict with management_ip from stored state
+            context = {"management_ip": management_ip}
 
             # NOTE: SetupOrchestrator uses "instance_id" as the SSH target (IP address here).
             deprovision_result = orchestrator.orchestrate(

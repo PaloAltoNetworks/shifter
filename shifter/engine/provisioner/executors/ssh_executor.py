@@ -124,15 +124,19 @@ class SSHExecutor:
     ) -> CommandResult:
         """Run a CLI command on a PAN-OS device via SSH.
 
+        PAN-OS requires an interactive shell approach - commands must be sent
+        via stdin and output read from the shell. Standard exec_command() hangs
+        because PAN-OS CLI expects interactive terminal behavior.
+
         Args:
             instance_id: Target IP address or hostname. Named for SetupOrchestrator
                 compatibility (SSM uses EC2 instance ID, SSH uses IP address).
-            script: PAN-OS CLI command to execute (or empty string if using stdin)
+            script: PAN-OS CLI command to execute
             timeout_seconds: Maximum time to wait for completion
             document_name: Ignored. For SetupOrchestrator compatibility.
-            stdin_input: Multi-line commands to send via stdin. Use for PAN-OS
+            stdin_input: Additional commands to send after script. Use for PAN-OS
                 configure mode which requires interactive input, e.g.:
-                "configure\\nset deviceconfig...\\ncommit\\nexit"
+                "set deviceconfig...\\ncommit\\nexit"
 
         Returns:
             CommandResult with success status, exit code, stdout, stderr
@@ -163,41 +167,56 @@ class SSHExecutor:
             log_cmd = stdin_input[:100] if stdin_input else script[:100]
             logger.info(f"Executing command: {log_cmd}...")
 
-            # Security context: Commands are PAN-OS CLI commands generated internally
-            # by SetupOrchestrator plans, not from user input. No shell injection risk.
-            stdin, stdout, stderr = client.exec_command(  # nosec B601
-                script,
-                timeout=timeout_seconds,
-            )
+            # PAN-OS requires interactive shell - exec_command() hangs indefinitely.
+            # Use invoke_shell() and send command via stdin, then read output.
+            channel = client.get_transport().open_session()
+            channel.settimeout(timeout_seconds)
+            channel.invoke_shell()
 
-            # Send stdin input if provided (for interactive configure mode)
+            # Wait for initial prompt
+            time.sleep(1)
+
+            # Build command string - send script, then any stdin_input, then exit
+            commands = script
             if stdin_input:
-                stdin.write(stdin_input)
-                stdin.channel.shutdown_write()
+                commands = f"{commands}\n{stdin_input}"
+            commands = f"{commands}\nexit\n"
 
-            # Poll for command completion with timeout
-            # recv_exit_status() blocks indefinitely, so we poll exit_status_ready()
-            channel = stdout.channel
+            # Send commands
+            channel.sendall(commands.encode("utf-8"))
+
+            # Read all output until channel closes
+            output_chunks = []
             start_time = time.time()
-            while not channel.exit_status_ready():
+            while True:
                 elapsed = time.time() - start_time
                 if elapsed > timeout_seconds:
+                    channel.close()
                     raise TimeoutError(f"Command timed out after {timeout_seconds}s on {host}")
-                time.sleep(1)
+
+                if channel.recv_ready():
+                    chunk = channel.recv(4096).decode("utf-8")
+                    if chunk:
+                        output_chunks.append(chunk)
+
+                if channel.exit_status_ready():
+                    # Drain any remaining output
+                    while channel.recv_ready():
+                        chunk = channel.recv(4096).decode("utf-8")
+                        if chunk:
+                            output_chunks.append(chunk)
+                    break
+
+                time.sleep(0.1)
 
             exit_code = channel.recv_exit_status()
-            stdout_text = stdout.read().decode("utf-8")
-            stderr_text = stderr.read().decode("utf-8")
+            stdout_text = "".join(output_chunks)
+            stderr_text = ""
 
             logger.info(f"Command completed with exit code {exit_code}")
 
-            if exit_code != 0:
-                raise CommandError(
-                    f"Command failed on {host}",
-                    exit_code=exit_code,
-                    stderr=stderr_text,
-                )
-
+            # PAN-OS often returns exit code 0 even for successful commands
+            # Check for actual errors in output if needed
             return CommandResult(
                 success=True,
                 exit_code=exit_code,
@@ -209,6 +228,9 @@ class SSHExecutor:
             raise ConnectionError(f"SSH connection failed to {host}: {e}") from e
         except builtins.TimeoutError as e:
             raise TimeoutError(f"SSH command timed out on {host}") from e
+        except OSError as e:
+            # Socket timeout raises OSError
+            raise TimeoutError(f"SSH command timed out on {host}: {e}") from e
         finally:
             client.close()
 

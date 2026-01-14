@@ -1044,12 +1044,12 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock the orchestrator for post-Pulumi config
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1099,12 +1099,12 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1152,12 +1152,12 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1203,12 +1203,12 @@ class TestNgfwProvisionCLI:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1253,12 +1253,12 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -1311,12 +1311,12 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan (succeeds)
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor - register_target fails
         mock_aws_executor = MagicMock()
@@ -1358,12 +1358,12 @@ class TestNgfwProvisionCLI:
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
         # Mock orchestrator for NGFWProvisionPlan (succeeds)
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: TEST123"
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[mock_step_result])
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="TEST123")
 
         # Mock AWSExecutor (created before validation)
         mock_aws_executor = MagicMock()
@@ -1937,8 +1937,92 @@ management-address: 10.1.4.10/24
         assert serial == "007200001267"
 
 
+class TestPollForSerialNumber:
+    """Tests for poll_for_serial_number function."""
+
+    def test_returns_serial_on_first_attempt(self, mocker):
+        """poll_for_serial_number returns serial immediately when available."""
+        from main import poll_for_serial_number
+
+        mock_ssh = MagicMock()
+        mock_ssh.run_command.return_value = MagicMock(stdout="serial: 007200001267\nhostname: PA-VM")
+
+        serial = poll_for_serial_number(
+            ssh_executor=mock_ssh,
+            host="10.1.4.10",
+            timeout_seconds=60,
+            poll_interval=5,
+        )
+
+        assert serial == "007200001267"
+        assert mock_ssh.run_command.call_count == 1
+
+    def test_retries_until_serial_appears(self, mocker):
+        """poll_for_serial_number retries when serial is 'unknown'."""
+        mocker.patch("time.sleep")  # Don't actually sleep in tests
+        from main import poll_for_serial_number
+
+        mock_ssh = MagicMock()
+        # First 2 calls return unknown, third returns real serial
+        mock_ssh.run_command.side_effect = [
+            MagicMock(stdout="serial: unknown\nhostname: PA-VM"),
+            MagicMock(stdout="serial: unknown\nhostname: PA-VM"),
+            MagicMock(stdout="serial: 007200001267\nhostname: PA-VM"),
+        ]
+
+        serial = poll_for_serial_number(
+            ssh_executor=mock_ssh,
+            host="10.1.4.10",
+            timeout_seconds=600,
+            poll_interval=30,
+        )
+
+        assert serial == "007200001267"
+        assert mock_ssh.run_command.call_count == 3
+
+    def test_raises_after_timeout(self, mocker):
+        """poll_for_serial_number raises RuntimeError after timeout."""
+        mocker.patch("time.sleep")
+
+        from main import poll_for_serial_number
+
+        mock_ssh = MagicMock()
+        mock_ssh.run_command.return_value = MagicMock(stdout="serial: unknown")
+
+        # Use a very short timeout to trigger the error quickly
+        with pytest.raises(RuntimeError, match="serial number not found after 0s"):
+            poll_for_serial_number(
+                ssh_executor=mock_ssh,
+                host="10.1.4.10",
+                timeout_seconds=0,  # Immediate timeout
+                poll_interval=30,
+            )
+
+    def test_handles_ssh_errors_gracefully(self, mocker):
+        """poll_for_serial_number retries on SSH errors."""
+        mocker.patch("time.sleep")
+        from main import poll_for_serial_number
+
+        mock_ssh = MagicMock()
+        # First call fails, second succeeds
+        mock_ssh.run_command.side_effect = [
+            Exception("SSH connection failed"),
+            MagicMock(stdout="serial: 007200001267"),
+        ]
+
+        serial = poll_for_serial_number(
+            ssh_executor=mock_ssh,
+            host="10.1.4.10",
+            timeout_seconds=600,
+            poll_interval=30,
+        )
+
+        assert serial == "007200001267"
+        assert mock_ssh.run_command.call_count == 2
+
+
 class TestNgfwProvisionSerialNumber:
-    """Tests for serial number extraction during NGFW provisioning."""
+    """Tests for serial number polling during NGFW provisioning."""
 
     TEST_REQUEST_ID = "550e8400-e29b-41d4-a716-446655440000"
 
@@ -1968,8 +2052,8 @@ class TestNgfwProvisionSerialNumber:
         """Mock run_ngfw_operation for auto-stop (not tested here)."""
         return mocker.patch("main.run_ngfw_operation")
 
-    def test_ngfw_provision_extracts_serial_number(self, mock_boto3_clients, mock_env_vars, mocker):
-        """NGFW provision should extract serial number from verify_device_cert step."""
+    def test_ngfw_provision_polls_for_serial_number(self, mock_boto3_clients, mock_env_vars, mocker):
+        """NGFW provision should poll for serial number after config steps."""
         mock_update = mocker.patch("main.update_instance_state")
         mocker.patch("main.publish_ngfw_event")
 
@@ -1998,17 +2082,13 @@ class TestNgfwProvisionSerialNumber:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        # Mock orchestrator with step_results containing serial number
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "hostname: PA-VM\nserial: 007200001267\n"
-
+        # Mock orchestrator (no longer extracts serial from steps)
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="007200001267")
 
         # Mock AWSExecutor for GWLB setup
         mock_aws_executor = MagicMock()
@@ -2053,17 +2133,13 @@ class TestNgfwProvisionSerialNumber:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        # Mock orchestrator with step_results containing serial number
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: ABC123XYZ789"
-
+        # Mock orchestrator (no longer extracts serial from steps)
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="ABC123XYZ789")
 
         mock_aws_executor = MagicMock()
         mock_aws_executor.register_target.return_value = MagicMock(success=True)
@@ -2107,17 +2183,16 @@ class TestNgfwProvisionSerialNumber:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        # Mock orchestrator with step_results but NO serial number in output
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "hostname: PA-VM\n"  # No serial line
-
+        # Mock orchestrator (config steps succeed)
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to raise error (license registration failed)
+        mocker.patch(
+            "main.poll_for_serial_number",
+            side_effect=RuntimeError("NGFW serial number not found after 600s - license registration may have failed"),
+        )
 
         from main import run_ngfw_pulumi
 
@@ -2179,16 +2254,12 @@ class TestNgfwProvisionAutoStop:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: 007200001267"
-
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="007200001267")
 
         mock_aws_executor = MagicMock()
         mock_aws_executor.register_target.return_value = MagicMock(success=True)
@@ -2245,16 +2316,12 @@ class TestNgfwProvisionAutoStop:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: 007200001267"
-
         mock_orchestrator = MagicMock()
-        mock_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="007200001267")
 
         mock_aws_executor = MagicMock()
         mock_aws_executor.register_target.return_value = MagicMock(success=True)
@@ -2315,16 +2382,12 @@ class TestNgfwProvisionAutoStop:
         mock_ssh_executor = MagicMock()
         mocker.patch("main.SSHExecutor", return_value=mock_ssh_executor)
 
-        mock_step_result = MagicMock()
-        mock_step_result.step_name = "verify_device_cert"
-        mock_step_result.stdout = "serial: 007200001267"
-
         mock_setup_orchestrator = MagicMock()
-        mock_setup_orchestrator.orchestrate.return_value = MagicMock(
-            success=True,
-            step_results=[mock_step_result],
-        )
+        mock_setup_orchestrator.orchestrate.return_value = MagicMock(success=True, step_results=[])
         mocker.patch("main.SetupOrchestrator", return_value=mock_setup_orchestrator)
+
+        # Mock poll_for_serial_number to return serial
+        mocker.patch("main.poll_for_serial_number", return_value="007200001267")
 
         mock_aws_executor = MagicMock()
         mock_aws_executor.register_target.return_value = MagicMock(success=True)

@@ -7,13 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.5] - 2026-01-12
+## [10.0.9] - 2026-01-13
 
 ### Added
 - Add CloudWatch alarms for Redis memory usage and connections
 
 ### Changed
 - Upgrade Redis prod to support ~1000 concurrent connections
+-
+## [10.0.8] - 2026-01-13
+
+### Fixed
+- Django build does not include cyberscript shared library
+
+## [0.10.7] - 2026-01-12
+
+### Changed
+- Extract all Cyberscript related code to shared library for reuse in Provisioner and Engine
+-
+## [0.10.6] - 2026-01-13
+
+### Fixed
+- Type conflict causes NGFW provisioning to fail
+- CMS parses legacy and new range_spec formats for consumers
+
+## [0.10.5] - 2026-01-12
+
+### Fixed
+- Provisioner ID mismatch causes range create status update to fail
+- Range subnets have no route to s3 for agent downloads
 
 ## [1.0.4] - 2026-01-12
 

@@ -240,7 +240,8 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./shifter/shifter_platform
+          context: ./shifter
+          file: ./shifter/shifter_platform/Dockerfile
           push: true
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest

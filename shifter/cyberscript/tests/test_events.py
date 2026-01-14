@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from shared.enums import ResourceStatus
+from cyberscript.enums import ResourceStatus
 
 
 class TestResourceStatusUpdatedEvent:
@@ -15,7 +15,7 @@ class TestResourceStatusUpdatedEvent:
 
     def test_creates_with_required_fields(self):
         """Event creates successfully with required fields."""
-        from shared.messages.events import ResourceStatusUpdatedEvent
+        from cyberscript.messages.events import ResourceStatusUpdatedEvent
 
         event = ResourceStatusUpdatedEvent(
             range_id=1,
@@ -30,7 +30,7 @@ class TestResourceStatusUpdatedEvent:
 
     def test_auto_generates_event_id(self):
         """Event auto-generates UUID for event_id."""
-        from shared.messages.events import ResourceStatusUpdatedEvent
+        from cyberscript.messages.events import ResourceStatusUpdatedEvent
 
         event = ResourceStatusUpdatedEvent(
             range_id=1,
@@ -42,7 +42,7 @@ class TestResourceStatusUpdatedEvent:
 
     def test_auto_generates_timestamp(self):
         """Event auto-generates timestamp."""
-        from shared.messages.events import ResourceStatusUpdatedEvent
+        from cyberscript.messages.events import ResourceStatusUpdatedEvent
 
         before = datetime.now(UTC)
         event = ResourceStatusUpdatedEvent(
@@ -56,7 +56,7 @@ class TestResourceStatusUpdatedEvent:
 
     def test_accepts_optional_error_message(self):
         """Event accepts error_message for failure events."""
-        from shared.messages.events import ResourceStatusUpdatedEvent
+        from cyberscript.messages.events import ResourceStatusUpdatedEvent
 
         event = ResourceStatusUpdatedEvent(
             range_id=1,
@@ -71,7 +71,7 @@ class TestResourceStatusUpdatedEvent:
         """Event accepts optional correlation_id for tracing."""
         from uuid import uuid4
 
-        from shared.messages.events import ResourceStatusUpdatedEvent
+        from cyberscript.messages.events import ResourceStatusUpdatedEvent
 
         correlation_id = uuid4()
         event = ResourceStatusUpdatedEvent(
@@ -89,7 +89,7 @@ class TestResourceStatusUpdatedEvent:
 
     def test_serializes_to_dict(self):
         """Event serializes to dictionary."""
-        from shared.messages.events import ResourceStatusUpdatedEvent
+        from cyberscript.messages.events import ResourceStatusUpdatedEvent
 
         event = ResourceStatusUpdatedEvent(
             range_id=1,
@@ -105,7 +105,7 @@ class TestResourceStatusUpdatedEvent:
 
     def test_serializes_to_json(self):
         """Event serializes to JSON string."""
-        from shared.messages.events import ResourceStatusUpdatedEvent
+        from cyberscript.messages.events import ResourceStatusUpdatedEvent
 
         event = ResourceStatusUpdatedEvent(
             range_id=1,
@@ -122,7 +122,7 @@ class TestResourceStatusUpdatedEvent:
         """Event deserializes from dictionary."""
         from uuid import uuid4
 
-        from shared.messages.events import ResourceStatusUpdatedEvent
+        from cyberscript.messages.events import ResourceStatusUpdatedEvent
 
         event_id = uuid4()
         timestamp = datetime.now(UTC)
@@ -145,7 +145,7 @@ class TestRangeProvisionedEvent:
 
     def test_creates_with_instances(self):
         """Event stores provisioned instance details."""
-        from shared.messages.events import RangeProvisionedEvent
+        from cyberscript.messages.events import RangeProvisionedEvent
 
         instances = [
             {"uuid": "abc-123", "role": "attacker", "private_ip": "10.0.0.5"},
@@ -165,7 +165,7 @@ class TestRangeProvisionedEvent:
 
     def test_serializes_instances(self):
         """Event correctly serializes instance list."""
-        from shared.messages.events import RangeProvisionedEvent
+        from cyberscript.messages.events import RangeProvisionedEvent
 
         instances = [{"uuid": "abc-123", "role": "attacker"}]
         event = RangeProvisionedEvent(
@@ -184,7 +184,7 @@ class TestRangeDestroyedEvent:
 
     def test_creates_with_range_id(self):
         """Event creates with range_id."""
-        from shared.messages.events import RangeDestroyedEvent
+        from cyberscript.messages.events import RangeDestroyedEvent
 
         event = RangeDestroyedEvent(range_id=1, user_id=42)
 
@@ -197,7 +197,7 @@ class TestRangeCancelledEvent:
 
     def test_creates_with_range_id(self):
         """Event creates with range_id."""
-        from shared.messages.events import RangeCancelledEvent
+        from cyberscript.messages.events import RangeCancelledEvent
 
         event = RangeCancelledEvent(range_id=1, user_id=42)
 
@@ -210,7 +210,7 @@ class TestEventType:
 
     def test_event_types_defined(self):
         """All event types have string constants."""
-        from shared.messages import events
+        from cyberscript.messages import events
 
         assert events.EVENT_TYPE_STATUS_UPDATED == "range.status.updated"
         assert events.EVENT_TYPE_PROVISIONED == "range.provisioned"

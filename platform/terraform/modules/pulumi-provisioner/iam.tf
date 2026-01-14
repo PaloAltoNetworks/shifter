@@ -247,10 +247,15 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Resource = "*"
       },
       {
-        Sid      = "PassRoleToInstances"
-        Effect   = "Allow"
-        Action   = "iam:PassRole"
-        Resource = var.range_instance_role_arn
+        # PassRole for range instances and NGFW instances
+        # compact() filters out empty strings when NGFW is not enabled
+        Sid    = "PassRoleToInstances"
+        Effect = "Allow"
+        Action = "iam:PassRole"
+        Resource = compact([
+          var.range_instance_role_arn,
+          var.ngfw_instance_role_arn
+        ])
       }
     ]
   })

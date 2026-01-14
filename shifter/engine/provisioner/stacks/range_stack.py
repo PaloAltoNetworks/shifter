@@ -351,6 +351,7 @@ class RangeStack(pulumi.ComponentResource):
                 request_uuid=config.request_uuid,
                 subnet_size=28,  # All range subnets use /28
                 gwlb_service_name=config.gwlb_service_name,
+                s3_endpoint_id=config.s3_endpoint_id,
                 opts=pulumi.ResourceOptions(parent=self),
             )
             self.networks[subnet_config.name] = network

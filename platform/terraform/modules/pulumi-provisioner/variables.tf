@@ -258,6 +258,22 @@ variable "s3_endpoint_id" {
 }
 
 # ------------------------------------------------------------------------------
+# Portal VPC Configuration (for terminal SSH access)
+# ------------------------------------------------------------------------------
+
+variable "portal_vpc_cidr" {
+  description = "CIDR block of the Portal VPC for SSH access routing"
+  type        = string
+  default     = ""
+}
+
+variable "portal_vpc_peering_id" {
+  description = "VPC peering connection ID between Portal and Range VPCs"
+  type        = string
+  default     = ""
+}
+
+# ------------------------------------------------------------------------------
 # NGFW (VM-Series) Configuration
 # ------------------------------------------------------------------------------
 

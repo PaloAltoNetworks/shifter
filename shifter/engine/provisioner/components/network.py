@@ -365,6 +365,7 @@ class NetworkComponent(pulumi.ComponentResource):
         gwlb_service_name: str = "",
         s3_endpoint_id: str = "",
         portal_vpc_cidr: str = "",
+        portal_vpc_peering_id: str = "",
         opts: pulumi.ResourceOptions | None = None,
     ):
         """Create network infrastructure for a logical subnet.
@@ -385,11 +386,13 @@ class NetworkComponent(pulumi.ComponentResource):
             gwlb_service_name: GWLB VPC Endpoint Service name. Empty = no NGFW.
             s3_endpoint_id: S3 Gateway VPC Endpoint ID for agent downloads.
             portal_vpc_cidr: Portal VPC CIDR block for SSH access. Empty = no portal access.
+            portal_vpc_peering_id: VPC peering connection ID for portal route. Empty = no route.
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NetworkComponent", name, None, opts)
         self._s3_endpoint_id = s3_endpoint_id
         self._portal_vpc_cidr = portal_vpc_cidr
+        self._portal_vpc_peering_id = portal_vpc_peering_id
 
         logger.info(
             "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, gwlb=%s",
@@ -620,6 +623,7 @@ class NetworkComponent(pulumi.ComponentResource):
 
         The route table starts with just the local VPC route (implicit).
         GWLB route is added separately if NGFW is enabled.
+        Portal VPC route is added if portal_vpc_cidr and portal_vpc_peering_id are set.
 
         Args:
             name: Resource name prefix.
@@ -639,6 +643,25 @@ class NetworkComponent(pulumi.ComponentResource):
         )
 
         self.route_table_id = self.route_table.id
+
+        # Add route to portal VPC for SSH terminal access
+        if self._portal_vpc_cidr and self._portal_vpc_peering_id:
+            aws.ec2.Route(
+                f"{name}-portal-route",
+                route_table_id=self.route_table.id,
+                destination_cidr_block=self._portal_vpc_cidr,
+                vpc_peering_connection_id=self._portal_vpc_peering_id,
+                opts=pulumi.ResourceOptions(
+                    parent=self,
+                    depends_on=[self.route_table],
+                ),
+            )
+            logger.debug("Added portal VPC route to route table for subnet %s", name)
+        elif self._portal_vpc_cidr:
+            logger.warning(
+                "Portal VPC CIDR configured but no peering ID - terminal SSH routing will not work for subnet %s",
+                name,
+            )
 
         logger.debug("Created route table for subnet %s", name)
 

@@ -185,19 +185,22 @@ class NGFWComponent(pulumi.ComponentResource):
         private_key, public_key = _generate_ssh_keypair()
 
         # Create EC2 KeyPair with the public key
+        # Use instance_uuid to ensure uniqueness across multiple provisioning attempts
+        instance_uuid_short = instance_uuid[:8]
         self.key_pair = aws.ec2.KeyPair(
             f"{name}-keypair",
-            key_name=f"ngfw-user-{user_id}",
+            key_name=f"ngfw-{instance_uuid_short}",
             public_key=public_key,
             tags=tags,
             opts=pulumi.ResourceOptions(parent=self),
         )
 
         # Store private key in Secrets Manager
+        # Use instance_uuid to ensure uniqueness across multiple provisioning attempts
         self.ssh_key_secret = aws.secretsmanager.Secret(
             f"{name}-ssh-secret",
-            name=f"shifter/{environment}/ngfw/{user_id}/ssh-key",
-            description=f"SSH private key for NGFW user {user_id}",
+            name=f"shifter/{environment}/ngfw/{instance_uuid}/ssh-key",
+            description=f"SSH private key for NGFW instance {instance_uuid}",
             recovery_window_in_days=0,  # Immediate delete for cleanup
             tags=tags,
             opts=pulumi.ResourceOptions(parent=self),

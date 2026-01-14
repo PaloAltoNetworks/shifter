@@ -16,7 +16,7 @@ class NGFWWizardManager {
             name: '',
             deployment_profile_id: null,
             deployment_profile_name: '',
-            registration_method: 'otp',
+            registration_method: 'pin',  // Default to PIN (OTP hidden in UI for now)
             scm_credential_id: null,
             scm_credential_name: '',
             otp_value: '',

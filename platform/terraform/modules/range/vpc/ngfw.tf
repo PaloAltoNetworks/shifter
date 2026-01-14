@@ -178,6 +178,8 @@ resource "aws_iam_role" "ngfw_instance" {
 }
 
 # S3 read access for bootstrap configuration
+# CRITICAL: PAN-OS VM-Series requires both GetObject AND ListBucket permissions
+# to discover and read bootstrap files. Without ListBucket, bootstrap silently fails.
 resource "aws_iam_role_policy" "ngfw_instance_s3" {
   count = var.enable_ngfw_infrastructure ? 1 : 0
 
@@ -188,11 +190,25 @@ resource "aws_iam_role_policy" "ngfw_instance_s3" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "GetBootstrapObjects"
         Effect = "Allow"
         Action = [
           "s3:GetObject"
         ]
         Resource = "arn:aws:s3:::${var.agent_s3_bucket}/bootstrap/ngfw/*"
+      },
+      {
+        Sid    = "ListBootstrapBucket"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = "arn:aws:s3:::${var.agent_s3_bucket}"
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["bootstrap/ngfw/*"]
+          }
+        }
       }
     ]
   })

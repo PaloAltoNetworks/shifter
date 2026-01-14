@@ -134,6 +134,35 @@ resource "aws_networkfirewall_rule_group" "kali_domains" {
 }
 
 # ------------------------------------------------------------------------------
+# NGFW Subnet Bypass - Allow all egress for SCM/licensing
+# ------------------------------------------------------------------------------
+
+resource "aws_networkfirewall_rule_group" "ngfw_bypass" {
+  count = var.enable_network_firewall && var.enable_ngfw_infrastructure ? 1 : 0
+
+  capacity = 10
+  name     = "${var.name_prefix}-ngfw-bypass"
+  type     = "STATEFUL"
+
+  rule_group {
+    rules_source {
+      # Pass all traffic from NGFW subnet - needed for SCM registration, licensing, content updates
+      rules_string = <<-EOT
+        pass ip ${cidrsubnet(var.vpc_cidr, 6, 1)} any -> any any (msg:"Allow NGFW subnet all egress"; sid:1000010; rev:1;)
+      EOT
+    }
+
+    stateful_rule_options {
+      rule_order = "DEFAULT_ACTION_ORDER"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-ngfw-bypass"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Block Direct IP Connections (no hostname/SNI bypass)
 # ------------------------------------------------------------------------------
 
@@ -199,6 +228,14 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 
     # With DEFAULT_ACTION_ORDER, unmatched traffic is dropped after rules are evaluated
     # This allows the domain allowlist to work properly
+
+    # NGFW bypass - allow all egress for SCM/licensing (must be first)
+    dynamic "stateful_rule_group_reference" {
+      for_each = var.enable_ngfw_infrastructure ? [1] : []
+      content {
+        resource_arn = aws_networkfirewall_rule_group.ngfw_bypass[0].arn
+      }
+    }
 
     # Block direct IP connections
     stateful_rule_group_reference {

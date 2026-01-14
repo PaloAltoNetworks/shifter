@@ -81,7 +81,12 @@ class SetupOrchestrator:
         """Execute a setup plan on an instance.
 
         Args:
-            instance_id: Target EC2 instance ID
+            instance_id: Target for command execution. The semantic meaning varies
+                by executor type:
+                - SSMExecutor: AWS EC2 Instance ID (e.g., "i-099ee928142d5f092")
+                - SSHExecutor: IP address or hostname (e.g., "10.0.1.5")
+                This parameter is named generically; callers must provide the
+                appropriate value for their executor.
             plan: SetupPlan defining steps to execute
             context: Template variables for rendering scripts
             document_name: SSM document to use (AWS-RunShellScript for Linux,

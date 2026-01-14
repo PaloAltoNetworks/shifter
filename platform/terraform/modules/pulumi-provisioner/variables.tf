@@ -251,6 +251,12 @@ variable "agent_s3_bucket_arn" {
   type        = string
 }
 
+variable "s3_endpoint_id" {
+  description = "VPC Gateway Endpoint ID for S3 access from range subnets"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # NGFW (VM-Series) Configuration
 # ------------------------------------------------------------------------------
@@ -287,6 +293,12 @@ variable "ngfw_subnet_id" {
 
 variable "ngfw_instance_profile_name" {
   description = "IAM instance profile name for VM-Series NGFW instances (for S3 bootstrap access)"
+  type        = string
+  default     = ""
+}
+
+variable "ngfw_instance_role_arn" {
+  description = "IAM role ARN for NGFW instances (required for iam:PassRole)"
   type        = string
   default     = ""
 }

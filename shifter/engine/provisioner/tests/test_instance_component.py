@@ -17,7 +17,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import the real functions and classes we're testing
-from components.instance import generate_ssh_keypair, validate_s3_path
+from components.instance import validate_s3_path
+from utils.crypto import generate_ssh_keypair
 
 
 class TestGenerateSshKeypair:

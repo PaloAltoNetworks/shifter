@@ -1,12 +1,12 @@
 """Tests for NGFWProvisionPlan - TDD: Write tests first, all must fail initially.
 
 NGFWProvisionPlan handles post-Pulumi NGFW configuration via SSH:
-- Verify device certificate
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
 - Create security policy (allow-all rule with logging)
 
 Note: SSH wait is handled by main.py before this plan runs.
+Serial number polling is also in main.py (after plan completes).
 Commands use stdin_input for PAN-OS configure mode.
 """
 
@@ -27,21 +27,21 @@ class TestNGFWProvisionPlanSteps:
     """Test NGFWProvisionPlan step definitions."""
 
     def test_has_expected_steps(self):
-        """NGFWProvisionPlan should have 4 steps (SSH wait is in main.py)."""
+        """NGFWProvisionPlan should have 3 steps (SSH wait and serial polling in main.py)."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
-        assert len(plan.steps) == 4
+        assert len(plan.steps) == 3
 
     def test_steps_in_correct_order(self):
-        """Steps must be in correct order: cert, logging, profile, policy."""
+        """Steps must be in correct order: logging, profile, policy."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
         step_names = [s.name for s in plan.steps]
 
-        # Device cert should be first
-        assert "device_cert" in step_names[0]
+        # Cloud logging should be first
+        assert "cloud_logging" in step_names[0]
         # Cloud logging before profile
         cloud_logging_idx = next(i for i, n in enumerate(step_names) if "cloud_logging" in n)
         profile_idx = next(i for i, n in enumerate(step_names) if "log_forwarding" in n)

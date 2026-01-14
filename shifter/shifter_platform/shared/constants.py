@@ -1,8 +1,14 @@
-"""Shared constants for Shifter platform."""
+"""Shared constants for Shifter platform.
 
-# =============================================================================
-# System constants - DO NOT TRANSLATE
-# =============================================================================
+Re-exports from cyberscript for Django compatibility.
+"""
 
-USER_CANNOT_BE_NONE = "user cannot be None"
-USER_MUST_BE_SAVED = "user must be saved (have an ID)"
+from cyberscript.constants import (
+    USER_CANNOT_BE_NONE,
+    USER_MUST_BE_SAVED,
+)
+
+__all__ = [
+    "USER_CANNOT_BE_NONE",
+    "USER_MUST_BE_SAVED",
+]

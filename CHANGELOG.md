@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.7] - 2026-01-12
+
+### Changed
+- Extract all Cyberscript related code to shared library for reuse in Provisioner and Engine
+-
 ## [0.10.6] - 2026-01-13
 
 ### Fixed

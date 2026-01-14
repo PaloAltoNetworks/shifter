@@ -364,6 +364,7 @@ class NetworkComponent(pulumi.ComponentResource):
         subnet_size: int = 24,
         gwlb_service_name: str = "",
         s3_endpoint_id: str = "",
+        portal_vpc_cidr: str = "",
         opts: pulumi.ResourceOptions | None = None,
     ):
         """Create network infrastructure for a logical subnet.
@@ -383,10 +384,12 @@ class NetworkComponent(pulumi.ComponentResource):
             subnet_size: Subnet prefix length (24 or 28). Default 24.
             gwlb_service_name: GWLB VPC Endpoint Service name. Empty = no NGFW.
             s3_endpoint_id: S3 Gateway VPC Endpoint ID for agent downloads.
+            portal_vpc_cidr: Portal VPC CIDR block for SSH access. Empty = no portal access.
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NetworkComponent", name, None, opts)
         self._s3_endpoint_id = s3_endpoint_id
+        self._portal_vpc_cidr = portal_vpc_cidr
 
         logger.info(
             "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, gwlb=%s",
@@ -413,7 +416,7 @@ class NetworkComponent(pulumi.ComponentResource):
         self._create_subnet(name, vpc_id, allocated_cidr, availability_zone, common_tags)
 
         # Create security group for this subnet
-        self._create_security_group(name, vpc_id, vpc_cidr, allocated_cidr, common_tags)
+        self._create_security_group(name, vpc_id, vpc_cidr, allocated_cidr, common_tags, self._portal_vpc_cidr)
 
         # Create route table for this subnet
         self._create_route_table(name, vpc_id, common_tags)
@@ -519,12 +522,14 @@ class NetworkComponent(pulumi.ComponentResource):
         vpc_cidr: str,
         subnet_cidr: str,
         common_tags: dict[str, str],
+        portal_vpc_cidr: str = "",
     ) -> None:
         """Create security group for this subnet.
 
         Rules:
         - Inbound: Allow ALL from same subnet CIDR (intra-subnet unrestricted)
         - Inbound: Allow ALL from VPC CIDR (for GWLB return traffic)
+        - Inbound: Allow SSH (port 22) from portal VPC CIDR (for terminal access)
         - Outbound: Allow ALL
 
         Args:
@@ -533,31 +538,57 @@ class NetworkComponent(pulumi.ComponentResource):
             vpc_cidr: VPC CIDR block for return traffic rule.
             subnet_cidr: This subnet's CIDR block.
             common_tags: Common tags dict.
+            portal_vpc_cidr: Portal VPC CIDR for SSH access. Empty = no portal access.
         """
         subnet_name_tag = common_tags.get("shifter:subnet_name", "default")
+
+        # Build ingress rules
+        ingress_rules: list[aws.ec2.SecurityGroupIngressArgs] = [
+            # Allow all intra-subnet traffic
+            aws.ec2.SecurityGroupIngressArgs(
+                protocol="-1",
+                from_port=0,
+                to_port=0,
+                cidr_blocks=[subnet_cidr],
+                description="Allow all intra-subnet traffic",
+            ),
+            # Allow all from VPC (GWLB return traffic)
+            aws.ec2.SecurityGroupIngressArgs(
+                protocol="-1",
+                from_port=0,
+                to_port=0,
+                cidr_blocks=[vpc_cidr],
+                description="Allow GWLB return traffic from VPC",
+            ),
+        ]
+
+        # Add SSH access from portal VPC if configured
+        if portal_vpc_cidr:
+            logger.debug(
+                "Adding SSH ingress rule from portal VPC CIDR %s for subnet %s",
+                portal_vpc_cidr,
+                name,
+            )
+            ingress_rules.append(
+                aws.ec2.SecurityGroupIngressArgs(
+                    protocol="tcp",
+                    from_port=22,
+                    to_port=22,
+                    cidr_blocks=[portal_vpc_cidr],
+                    description="Allow SSH from portal for terminal access",
+                ),
+            )
+        else:
+            logger.warning(
+                "No portal_vpc_cidr configured for subnet %s - terminal SSH access will not work",
+                name,
+            )
 
         self.security_group = aws.ec2.SecurityGroup(
             f"{name}-sg",
             vpc_id=vpc_id,
             description=f"Security group for {subnet_name_tag} subnet",
-            ingress=[
-                # Allow all intra-subnet traffic
-                aws.ec2.SecurityGroupIngressArgs(
-                    protocol="-1",
-                    from_port=0,
-                    to_port=0,
-                    cidr_blocks=[subnet_cidr],
-                    description="Allow all intra-subnet traffic",
-                ),
-                # Allow all from VPC (GWLB return traffic)
-                aws.ec2.SecurityGroupIngressArgs(
-                    protocol="-1",
-                    from_port=0,
-                    to_port=0,
-                    cidr_blocks=[vpc_cidr],
-                    description="Allow GWLB return traffic from VPC",
-                ),
-            ],
+            ingress=ingress_rules,
             egress=[
                 # Allow all outbound
                 aws.ec2.SecurityGroupEgressArgs(

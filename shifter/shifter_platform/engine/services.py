@@ -521,22 +521,24 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     }
 
 
-def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnection:
+def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
     """Get SSH connection to instance.
+
+    Looks up the Range containing the instance by searching provisioned_instances
+    JSONB for matching UUID. This supports the new request_id-based provisioning
+    pattern where range_id may not be populated in CMS.
 
     Args:
         user: Authenticated user requesting connection
-        range_id: ID of the range containing the instance
         instance_uuid: UUID of the instance to connect to
 
     Returns:
         SSHConnection configured for the instance
 
     Raises:
-        ValueError: If user is None, range_id invalid, instance_uuid invalid,
+        ValueError: If user is None, instance_uuid invalid,
             range not READY, or instance not found
         PermissionError: If user doesn't own the range
-        Range.DoesNotExist: If range not found
     """
     # Lazy imports to avoid circular dependencies
     from engine.models import Range
@@ -546,34 +548,43 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     # Input validation
     if user is None:
         raise ValueError("user is required")
-    if range_id is None or not isinstance(range_id, int) or range_id < 0:
-        raise ValueError("range_id must be a positive integer")
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
-    logger.debug("connect_terminal: range_id=%s instance_uuid=%s", range_id, instance_uuid)
+    logger.debug("connect_terminal: user_id=%s instance_uuid=%s", user.id, instance_uuid)
 
-    # Fetch range
-    try:
-        range_obj = Range.objects.get(id=range_id)
-    except Range.DoesNotExist:
-        logger.error("Range not found: range_id=%s", range_id)
-        raise
+    # Find Range containing this instance by searching provisioned_instances JSONB
+    # PostgreSQL JSONB containment query: find where array contains object with uuid
+    range_obj = Range.objects.filter(
+        provisioned_instances__contains=[{"uuid": instance_uuid}],
+        user=user,
+    ).first()
 
-    # Verify ownership
-    if range_obj.user.id != user.id:
-        logger.error("Permission denied: user=%s does not own range=%s", user.id, range_id)
-        raise PermissionError("User does not own this range")
+    if not range_obj:
+        logger.error(
+            "Range not found for instance: user_id=%s instance_uuid=%s",
+            user.id,
+            instance_uuid,
+        )
+        raise ValueError(f"No range found containing instance {instance_uuid}")
 
     # Verify range is ready
     if range_obj.status != Range.Status.READY:
-        logger.error("Range not ready: range_id=%s status=%s", range_id, range_obj.status)
+        logger.error(
+            "Range not ready: range_id=%s status=%s",
+            range_obj.id,
+            range_obj.status,
+        )
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
     # Find instance by UUID
     instance = range_obj.get_instance_by_uuid(instance_uuid)
     if instance is None:
-        logger.error("Instance not found: range_id=%s instance_uuid=%s", range_id, instance_uuid)
+        logger.error(
+            "Instance not found: range_id=%s instance_uuid=%s",
+            range_obj.id,
+            instance_uuid,
+        )
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     # Get SSH key from secrets

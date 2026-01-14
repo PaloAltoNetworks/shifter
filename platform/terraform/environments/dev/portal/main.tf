@@ -486,6 +486,10 @@ module "pulumi_provisioner" {
   agent_s3_bucket_arn = module.s3.bucket_arn
   s3_endpoint_id      = data.terraform_remote_state.range.outputs.s3_endpoint_id
 
+  # Portal VPC configuration (for terminal SSH routing)
+  portal_vpc_cidr       = module.vpc.vpc_cidr
+  portal_vpc_peering_id = aws_vpc_peering_connection.portal_to_range.id
+
   # NGFW (VM-Series) - from Range VPC outputs
   ngfw_mgmt_security_group_id = data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id : ""
   ngfw_data_security_group_id = data.terraform_remote_state.range.outputs.ngfw_data_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_data_security_group_id : ""

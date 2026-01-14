@@ -85,12 +85,9 @@ class NGFWProvisionPlan:
         ),
     ]
 
-    verify_step: ClassVar[SetupStep] = SetupStep(
-        name="verify_ngfw_config",
-        script="show running security-policy",
-        timeout_seconds=600,  # 10 min - verification can be slow after multiple commits
-        is_verification=True,
-    )
+    # No verify_step - verification is handled by poll_for_serial_and_cert()
+    # in main.py which polls for both serial AND device certificate
+    verify_step: ClassVar[SetupStep | None] = None
 
     def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for NGFW provision steps.

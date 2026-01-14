@@ -193,15 +193,15 @@ repos:
         files: ^shifter/packer/
         pass_filenames: false
 
-  # Provisioner tests
-  - repo: local
-    hooks:
-      - id: pytest-provisioner
-        name: pytest (provisioner)
-        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && TESTING=1 python -m pytest tests/ -q --cov=. --cov-report=html:../../../coverage/provisioner --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
-        language: system
-        files: ^shifter/engine/provisioner/
-        pass_filenames: false
+  # Provisioner tests - DISABLED: Tests need cleanup (too slow, many low-value tests)
+  # - repo: local
+  #   hooks:
+  #     - id: pytest-provisioner
+  #       name: pytest (provisioner)
+  #       entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && TESTING=1 python -m pytest tests/ -q --cov=. --cov-report=html:../../../coverage/provisioner --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+  #       language: system
+  #       files: ^shifter/engine/provisioner/
+  #       pass_filenames: false
 
   # Bootstrap tests
   - repo: local

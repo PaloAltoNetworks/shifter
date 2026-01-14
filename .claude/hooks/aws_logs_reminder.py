@@ -9,6 +9,7 @@ Purpose: Provide context about which log groups to check for different issues
 import json
 import sys
 
+
 def main():
     # Read hook input
     input_data = json.loads(sys.stdin.read())
@@ -38,6 +39,7 @@ def main():
 └─────────────────────────────────────────────────────────────────────────────┘
 """
     print(reminder, file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()

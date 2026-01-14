@@ -2,13 +2,20 @@
 
 import logging
 import os
+import sys
 from pathlib import Path
+
+# Add shifter/ to path so 'cyberscript' package is importable
+# Must be done before Django loads settings
+SHIFTER_DIR = Path(__file__).resolve().parent.parent.parent
+if str(SHIFTER_DIR) not in sys.path:
+    sys.path.insert(0, str(SHIFTER_DIR))
 
 # Set testing flag before Django loads settings
 os.environ["TESTING"] = "1"
 
-import pytest
-from django.test import Client
+import pytest  # noqa: E402
+from django.test import Client  # noqa: E402
 
 TESTS_DIR = Path(__file__).parent
 

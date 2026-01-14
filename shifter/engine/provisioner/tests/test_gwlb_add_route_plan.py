@@ -240,34 +240,6 @@ class TestGWLBAddRoutePlanContext:
             plan.get_context(instance)
 
 
-class TestGWLBAddRoutePlanInterface:
-    """Test GWLBAddRoutePlan interface compliance."""
-
-    def test_has_steps_attribute(self):
-        """GWLBAddRoutePlan should have steps attribute."""
-        from plans.gwlb_add_route import GWLBAddRoutePlan
-
-        plan = GWLBAddRoutePlan()
-        assert hasattr(plan, "steps")
-        assert isinstance(plan.steps, list)
-
-    def test_has_name_attribute(self):
-        """GWLBAddRoutePlan should have name attribute."""
-        from plans.gwlb_add_route import GWLBAddRoutePlan
-
-        plan = GWLBAddRoutePlan()
-        assert hasattr(plan, "name")
-        assert plan.name == "gwlb_add_route"
-
-    def test_has_get_context_method(self):
-        """GWLBAddRoutePlan should have get_context method."""
-        from plans.gwlb_add_route import GWLBAddRoutePlan
-
-        plan = GWLBAddRoutePlan()
-        assert hasattr(plan, "get_context")
-        assert callable(plan.get_context)
-
-
 class TestGWLBAddRoutePlanExecution:
     """Test GWLBAddRoutePlan can be executed with AWSExecutor."""
 

@@ -84,21 +84,45 @@ class TerminalManager {
         this.setupWindowResize();
         this.applyLayoutMode();
 
-        // Activate first terminal in tab mode
         if (this.instances.length > 0) {
-            this.activateTerminal(this.activeTerminalUuid || this.instances[0].uuid);
+            if (this.layoutMode === 'split') {
+                // In split mode, connect both panes and set up split view
+                this.connectIfNeeded(this.leftPaneUuid);
+                this.connectIfNeeded(this.rightPaneUuid);
+                this.mountSplitPaneTerminals();
+                this.initSplitJs();
+            } else {
+                // In tabs mode, activate and connect the active terminal
+                this.activateTerminal(this.activeTerminalUuid || this.instances[0].uuid);
+            }
         }
         console.log(`TerminalManager: Initialized in ${this.layoutMode} mode`);
     }
 
     /**
      * Load layout preference from localStorage
+     * Validates that stored UUIDs exist in current instances (handles range changes)
      */
     loadLayoutPreference() {
         this.layoutMode = localStorage.getItem('terminal-layout') || 'tabs';
-        this.leftPaneUuid = localStorage.getItem('terminal-left-pane') || this.instances[0]?.uuid;
-        this.rightPaneUuid = localStorage.getItem('terminal-right-pane') || this.instances[1]?.uuid || this.instances[0]?.uuid;
-        this.activeTerminalUuid = localStorage.getItem('terminal-active-tab') || this.instances[0]?.uuid;
+
+        // Get valid UUIDs from current instances
+        const validUuids = new Set(this.instances.map(i => i.uuid));
+
+        // Validate stored UUIDs - fall back to current instances if stale
+        const storedLeftPane = localStorage.getItem('terminal-left-pane');
+        const storedRightPane = localStorage.getItem('terminal-right-pane');
+        const storedActiveTab = localStorage.getItem('terminal-active-tab');
+
+        this.leftPaneUuid = (storedLeftPane && validUuids.has(storedLeftPane))
+            ? storedLeftPane
+            : this.instances[0]?.uuid;
+        this.rightPaneUuid = (storedRightPane && validUuids.has(storedRightPane))
+            ? storedRightPane
+            : this.instances[1]?.uuid || this.instances[0]?.uuid;
+        this.activeTerminalUuid = (storedActiveTab && validUuids.has(storedActiveTab))
+            ? storedActiveTab
+            : this.instances[0]?.uuid;
     }
 
     /**
@@ -288,16 +312,54 @@ class TerminalManager {
         this.applyLayoutMode();
         this.updateToggleButtons();
 
-        // In split mode, ensure both pane terminals are connected
         if (mode === 'split') {
+            // In split mode, ensure both pane terminals are connected
             this.connectIfNeeded(this.leftPaneUuid);
             this.connectIfNeeded(this.rightPaneUuid);
             this.mountSplitPaneTerminals();
             this.initSplitJs();
+        } else {
+            // Switching to tabs mode - destroy split instance and restore terminals
+            this.restoreTerminalsToTabPanes();
+            // Activate the current active terminal (connect if needed, show and fit)
+            this.activateTerminal(this.activeTerminalUuid || this.instances[0]?.uuid);
         }
 
         // Refit visible terminals after layout change
         setTimeout(() => this.fitVisibleTerminals(), 50);
+    }
+
+    /**
+     * Restore terminals from split panes back to their tab pane containers
+     */
+    restoreTerminalsToTabPanes() {
+        // Destroy Split.js instance
+        if (this.splitInstance) {
+            this.splitInstance.destroy();
+            this.splitInstance = null;
+        }
+
+        // Move xterm elements back from split pane wrappers to their original containers
+        [this.leftPaneUuid, this.rightPaneUuid].forEach((uuid, index) => {
+            const side = index === 0 ? 'left' : 'right';
+            const wrapper = document.getElementById(`${side}-terminal-wrapper`);
+            if (!wrapper) return;
+
+            const xtermElement = wrapper.querySelector('.xterm');
+            if (!xtermElement) return;
+
+            // Find the original tab container for this terminal
+            const tabContainer = document.getElementById(`terminal-${uuid}`);
+            if (tabContainer && !tabContainer.querySelector('.xterm')) {
+                tabContainer.appendChild(xtermElement);
+            }
+        });
+
+        // Clear split pane wrappers
+        ['left-terminal-wrapper', 'right-terminal-wrapper'].forEach(id => {
+            const wrapper = document.getElementById(id);
+            if (wrapper) wrapper.innerHTML = '';
+        });
     }
 
     /**

@@ -11,7 +11,7 @@
         <div class="terminal-header-left">
             <h1 class="terminal-title">Terminal</h1>
             {% if has_active_range %}
-            <span class="terminal-range-info">Range #{{ active_range.range_id }}</span>
+            <span class="terminal-range-info">{{ scenario_name|default:active_range.scenario_id }}</span>
             {% else %}
             <span class="terminal-range-info text-muted">No active range</span>
             {% endif %}

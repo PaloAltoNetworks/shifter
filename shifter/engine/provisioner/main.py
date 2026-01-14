@@ -1167,6 +1167,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
         "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
         "portalVpcCidr": os.environ.get("PORTAL_VPC_CIDR", ""),
+        "portalVpcPeeringId": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
     }
 
     for key, value in config_values.items():

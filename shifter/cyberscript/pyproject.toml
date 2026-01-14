@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyberscript"
@@ -11,5 +11,6 @@ dependencies = [
     "pydantic>=2.0",
 ]
 
-[tool.hatch.build.targets.wheel]
-packages = ["."]
+[tool.setuptools]
+packages = ["cyberscript", "cyberscript.channels", "cyberscript.messages", "cyberscript.schemas"]
+package-dir = {"cyberscript" = "."}

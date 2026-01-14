@@ -5,12 +5,17 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 WORKDIR /app
 
+# Copy cyberscript library first (better layer caching)
+COPY cyberscript /cyberscript
+
 # Copy dependency files
-COPY pyproject.toml uv.lock ./
+COPY shifter_platform/pyproject.toml shifter_platform/uv.lock ./
 
 # Export requirements and install dependencies into system Python
+# Install cyberscript as a local package
 RUN uv export --no-hashes --no-emit-project --frozen > requirements.txt && \
-    uv pip install --system --no-cache -r requirements.txt
+    uv pip install --system --no-cache -r requirements.txt && \
+    uv pip install --system --no-cache /cyberscript
 
 # Production stage
 FROM python:3.12-slim-bookworm AS production
@@ -30,8 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin/gunicorn /usr/local/bin/daphne /usr/local/bin/django-admin /usr/local/bin/
 
-# Copy application code
-COPY --chown=appuser:appgroup . .
+# Copy application code (context is now shifter/, so path is shifter_platform)
+COPY --chown=appuser:appgroup shifter_platform .
 
 # Create staticfiles directory for collectstatic
 RUN mkdir -p /app/staticfiles && chown appuser:appgroup /app/staticfiles

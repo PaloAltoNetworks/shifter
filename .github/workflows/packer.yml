@@ -11,6 +11,7 @@ on:
           - kali
           - ubuntu
           - windows
+          - dc
       ref:
         description: 'Branch to build from'
         required: false

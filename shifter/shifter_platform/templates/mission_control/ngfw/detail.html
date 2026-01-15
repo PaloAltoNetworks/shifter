@@ -161,6 +161,25 @@
     .danger-zone .card-title {
         color: #ff4d4f;
     }
+
+    /* Refresh button styling */
+    .ngfw-refresh-btn {
+        background: transparent !important;
+        border: none !important;
+        cursor: pointer;
+        color: var(--xdr-text-secondary);
+        transition: color 0.2s ease;
+    }
+
+    .ngfw-refresh-btn:hover {
+        color: var(--xdr-text);
+    }
+
+    .ngfw-refresh-btn svg {
+        display: block;
+        fill: currentColor;
+        stroke: currentColor;
+    }
 </style>
 {% endblock %}
 

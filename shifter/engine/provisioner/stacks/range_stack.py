@@ -14,7 +14,7 @@ from typing import Any
 import pulumi
 
 from components.instance import InstanceComponent
-from components.network import NetworkComponent
+from components.network import NetworkComponent, allocate_subnets
 from config import InstanceConfig, RangeConfig
 
 logger = logging.getLogger(__name__)
@@ -311,6 +311,10 @@ class RangeStack(pulumi.ComponentResource):
         Creates one NetworkComponent per logical subnet, each with its own
         security group, route table, and optional GWLB endpoint.
 
+        Pre-allocates all subnet CIDRs atomically before creating any
+        NetworkComponent to prevent race conditions where multiple subnets
+        get the same CIDR.
+
         After all networks are created, adds inter-subnet routes to force
         all inter-subnet traffic through the GWLB/NGFW.
 
@@ -320,20 +324,38 @@ class RangeStack(pulumi.ComponentResource):
         """
         self.networks = {}
         cidr_prefix = self._extract_cidr_prefix(config.vpc_cidr)
+        subnet_count = len(config.subnets)
 
         logger.info(
             "Creating %d networks for range %d",
-            len(config.subnets),
+            subnet_count,
             config.range_id,
         )
 
-        for subnet_config in config.subnets:
+        # Pre-allocate all subnet CIDRs atomically to prevent race conditions
+        # This holds the advisory lock for the entire allocation
+        allocated_cidrs = allocate_subnets(
+            vpc_id=config.vpc_id,
+            cidr_prefix=cidr_prefix,
+            count=subnet_count,
+            subnet_size=28,  # All range subnets use /28
+        )
+
+        logger.info(
+            "Pre-allocated %d CIDRs: %s",
+            len(allocated_cidrs),
+            allocated_cidrs,
+        )
+
+        for idx, subnet_config in enumerate(config.subnets):
             network_name = f"{name}-{subnet_config.name}"
+            subnet_cidr = allocated_cidrs[idx]
 
             logger.debug(
-                "Creating network %s (uuid=%s, gwlb=%s)",
+                "Creating network %s (uuid=%s, cidr=%s, gwlb=%s)",
                 network_name,
                 subnet_config.uuid,
+                subnet_cidr,
                 "enabled" if config.gwlb_service_name else "disabled",
             )
 
@@ -354,6 +376,7 @@ class RangeStack(pulumi.ComponentResource):
                 s3_endpoint_id=config.s3_endpoint_id,
                 portal_vpc_cidr=config.portal_vpc_cidr,
                 portal_vpc_peering_id=config.portal_vpc_peering_id,
+                allocated_cidr=subnet_cidr,
                 opts=pulumi.ResourceOptions(parent=self),
             )
             self.networks[subnet_config.name] = network

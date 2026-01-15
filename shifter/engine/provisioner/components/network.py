@@ -172,8 +172,127 @@ def _get_existing_subnets(vpc_id: str) -> list[ipaddress.IPv4Network]:
     return existing_networks
 
 
+def allocate_subnets(vpc_id: str, cidr_prefix: str, count: int, subnet_size: int = 28) -> list[str]:
+    """Allocate multiple subnets atomically with a single lock.
+
+    This is the preferred method for allocating subnets for a range with multiple
+    logical subnets. It holds the advisory lock for the entire allocation, preventing
+    race conditions where multiple subnets in the same range get the same CIDR.
+
+    Args:
+        vpc_id: The VPC ID to allocate subnets in.
+        cidr_prefix: The CIDR prefix (e.g., "10.1" for 10.1.X.Y/size).
+        count: Number of subnets to allocate.
+        subnet_size: The subnet prefix length (24 or 28). Default 28.
+
+    Returns:
+        List of allocated CIDR blocks (e.g., ["10.1.2.0/28", "10.1.2.16/28"]).
+
+    Raises:
+        RuntimeError: If not enough free subnets can be found.
+        ValueError: If subnet_size is not 24 or 28, or count < 1.
+    """
+    if subnet_size not in (24, 28):
+        raise ValueError(f"subnet_size must be 24 or 28, got {subnet_size}")
+    if count < 1:
+        raise ValueError(f"count must be at least 1, got {count}")
+
+    logger.info(
+        "Allocating %d /%d subnets in VPC %s with prefix %s",
+        count,
+        subnet_size,
+        vpc_id,
+        cidr_prefix,
+    )
+
+    # Use advisory lock to prevent concurrent subnet allocations in the same VPC
+    lock_id = _get_vpc_lock_id(vpc_id)
+    logger.debug("Acquiring advisory lock %d for VPC %s", lock_id, vpc_id)
+
+    try:
+        with _get_db_connection() as conn, conn.cursor() as cur:
+            # Acquire advisory lock (blocks other allocations for this VPC)
+            cur.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
+            logger.debug("Acquired advisory lock %d", lock_id)
+
+            try:
+                # Allocate all subnets with the lock held
+                return _allocate_subnets_internal(vpc_id, cidr_prefix, count, subnet_size)
+            finally:
+                # Always release the lock
+                cur.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+                logger.debug("Released advisory lock %d", lock_id)
+    except psycopg.Error as e:
+        # If DB connection fails, fall back to unlocked allocation
+        # This is riskier but AWS will reject duplicate CIDRs anyway
+        logger.warning(
+            "Failed to acquire advisory lock for subnet allocation (falling back to unlocked): %s",
+            e,
+        )
+        return _allocate_subnets_internal(vpc_id, cidr_prefix, count, subnet_size)
+
+
+def _allocate_subnets_internal(vpc_id: str, cidr_prefix: str, count: int, subnet_size: int) -> list[str]:
+    """Internal multi-subnet allocation (called with advisory lock held).
+
+    Args:
+        vpc_id: The VPC ID to check.
+        cidr_prefix: The CIDR prefix (e.g., "10.1" for 10.1.X.Y/size).
+        count: Number of subnets to allocate.
+        subnet_size: The subnet prefix length (24 or 28).
+
+    Returns:
+        List of allocated CIDR blocks.
+
+    Raises:
+        RuntimeError: If not enough free subnets can be found.
+    """
+    existing_networks = _get_existing_subnets(vpc_id)
+    pulumi.log.info(f"Found {len(existing_networks)} existing subnets in VPC {vpc_id}")
+
+    # Generate candidate CIDRs based on subnet size
+    if subnet_size == 24:
+        candidates = _generate_slash24_candidates(cidr_prefix)
+    else:
+        candidates = _generate_slash28_candidates(cidr_prefix)
+
+    allocated: list[str] = []
+    allocated_networks: list[ipaddress.IPv4Network] = []
+
+    for candidate_cidr in candidates:
+        if len(allocated) >= count:
+            break
+
+        candidate_network = ipaddress.ip_network(candidate_cidr)
+
+        # Check against existing AWS subnets
+        has_aws_conflict = any(candidate_network.overlaps(existing) for existing in existing_networks)
+
+        # Check against already-allocated subnets in this batch
+        has_batch_conflict = any(candidate_network.overlaps(already) for already in allocated_networks)
+
+        if not has_aws_conflict and not has_batch_conflict:
+            logger.info("Allocated subnet: %s", candidate_cidr)
+            pulumi.log.info(f"Allocated subnet: {candidate_cidr}")
+            allocated.append(candidate_cidr)
+            allocated_networks.append(candidate_network)
+
+    if len(allocated) < count:
+        # Not enough free subnets - critical infrastructure issue
+        _publish_subnet_exhaustion_alarm(vpc_id, cidr_prefix, subnet_size)
+        raise RuntimeError(
+            f"Could not allocate {count} /{subnet_size} subnets in VPC {vpc_id}. "
+            f"Only {len(allocated)} free subnets available in prefix {cidr_prefix}."
+        )
+
+    return allocated
+
+
 def _find_free_subnet(vpc_id: str, cidr_prefix: str, subnet_size: int = 24) -> str:
     """Find a free subnet in the VPC by querying AWS.
+
+    NOTE: For ranges with multiple subnets, use allocate_subnets() instead to
+    avoid race conditions. This function is kept for backwards compatibility.
 
     Uses a PostgreSQL advisory lock to prevent concurrent provisions from
     allocating the same CIDR. The lock is scoped to the VPC ID, so provisions
@@ -366,6 +485,7 @@ class NetworkComponent(pulumi.ComponentResource):
         s3_endpoint_id: str = "",
         portal_vpc_cidr: str = "",
         portal_vpc_peering_id: str = "",
+        allocated_cidr: str = "",
         opts: pulumi.ResourceOptions | None = None,
     ):
         """Create network infrastructure for a logical subnet.
@@ -387,6 +507,8 @@ class NetworkComponent(pulumi.ComponentResource):
             s3_endpoint_id: S3 Gateway VPC Endpoint ID for agent downloads.
             portal_vpc_cidr: Portal VPC CIDR block for SSH access. Empty = no portal access.
             portal_vpc_peering_id: VPC peering connection ID for portal route. Empty = no route.
+            allocated_cidr: Pre-allocated CIDR block. If provided, skips allocation.
+                Use allocate_subnets() to get CIDRs for multi-subnet ranges.
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NetworkComponent", name, None, opts)
@@ -395,15 +517,19 @@ class NetworkComponent(pulumi.ComponentResource):
         self._portal_vpc_peering_id = portal_vpc_peering_id
 
         logger.info(
-            "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, gwlb=%s",
+            "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, gwlb=%s, cidr=%s",
             name,
             subnet_name,
             subnet_size,
             "enabled" if gwlb_service_name else "disabled",
+            allocated_cidr or "auto",
         )
 
-        # Find a free subnet by querying AWS directly
-        allocated_cidr = _find_free_subnet(vpc_id, cidr_prefix, subnet_size)
+        # Use pre-allocated CIDR if provided, otherwise find one
+        if allocated_cidr:
+            logger.debug("Using pre-allocated CIDR: %s", allocated_cidr)
+        else:
+            allocated_cidr = _find_free_subnet(vpc_id, cidr_prefix, subnet_size)
 
         # Build common tags for all resources
         common_tags = self._build_common_tags(

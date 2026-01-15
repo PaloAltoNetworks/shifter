@@ -124,8 +124,7 @@ class SSHExecutor:
     ) -> CommandResult:
         """Run a CLI command on a PAN-OS device via SSH.
 
-        Uses paramiko exec_command with stdin piping for clean output.
-        Commands are written to stdin and EOF is sent to signal completion.
+        Uses paramiko exec_command for direct execution.
 
         Args:
             instance_id: Target IP address or hostname. Named for SetupOrchestrator
@@ -147,7 +146,9 @@ class SSHExecutor:
         client = paramiko.SSHClient()
         # Security context: AutoAddPolicy is acceptable because we connect to freshly
         # provisioned PAN-OS VMs in isolated VPC subnets. Host keys change on reprovision.
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507  # noqa: S507
+        client.set_missing_host_key_policy(
+            paramiko.AutoAddPolicy()  # noqa: S507
+        )  # nosec B507
 
         # Build the full command to send via stdin
         commands = script
@@ -169,19 +170,12 @@ class SSHExecutor:
             log_cmd = commands[:100]
             logger.info(f"Executing command: {log_cmd}...")
 
-            # Use exec_command with stdin piping - cleaner than invoke_shell
-            # This mimics: echo 'commands' | ssh user@host
-            # Security: empty command string is intentional - input comes from internal
-            # provisioning logic, not user input. Commands are PAN-OS CLI commands.
+            # Execute the command directly
+            # Security: commands are from internal provisioning logic, not user input.
             stdin, stdout, stderr = client.exec_command(  # nosec B601
-                "", timeout=timeout_seconds
+                commands, timeout=timeout_seconds
             )
-
-            # Write commands to stdin with newline (PAN-OS requires it)
-            if not commands.endswith("\n"):
-                commands = commands + "\n"
-            stdin.write(commands)
-            # Send EOF to signal we're done - critical for PAN-OS to process input
+            # Close stdin as we're not sending additional input
             stdin.channel.shutdown_write()
 
             # Read output
@@ -247,7 +241,9 @@ class SSHExecutor:
         try:
             client = paramiko.SSHClient()
             # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507  # noqa: S507
+            client.set_missing_host_key_policy(
+                paramiko.AutoAddPolicy()  # noqa: S507
+            )  # nosec B507
             client.connect(
                 hostname=host,
                 port=self._port,
@@ -299,3 +295,4 @@ class SSHExecutor:
         # Wait for SSH to come back up
         logger.info("Waiting for device to come back online...")
         return self.wait_for_agent(host, timeout_seconds=timeout_seconds - 60)
+        logger.info("Waiting for device to go offline...")

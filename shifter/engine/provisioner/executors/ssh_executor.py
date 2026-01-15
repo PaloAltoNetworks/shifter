@@ -174,6 +174,7 @@ class SSHExecutor:
 
             # Send commands
             logger.info(f"Sending command: {commands[:100]}")
+            channel.send("set cli pager off\n")  # nosec B601 - disable pager for full output
             channel.send(commands + "\n")  # nosec B601
             channel.send("exit\n")
             channel.shutdown_write()

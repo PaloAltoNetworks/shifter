@@ -113,6 +113,7 @@ def create_rdp_connection_params(
     ignore_cert: bool = True,
     security: str = "any",
     sftp_root_directory: str | None = None,
+    sftp_private_key: str | None = None,
 ) -> dict[str, str]:
     """Create RDP connection parameters for Guacamole.
 
@@ -124,6 +125,7 @@ def create_rdp_connection_params(
         ignore_cert: Whether to ignore certificate errors
         security: Security mode ('any', 'nla', 'tls', 'rdp')
         sftp_root_directory: Root directory for SFTP file transfers
+        sftp_private_key: PEM-encoded private key for SFTP (used instead of password)
 
     Returns:
         Dictionary of RDP parameters for Guacamole
@@ -150,12 +152,16 @@ def create_rdp_connection_params(
 
     # SFTP file transfer - works reliably for both Windows and Linux (xrdp)
     # Uses SSH connection for file transfers via Guacamole menu (Ctrl+Alt+Shift)
-    if username and password:
+    if username and (password or sftp_private_key):
         params["enable-sftp"] = "true"
         params["sftp-hostname"] = hostname
         params["sftp-port"] = "22"
         params["sftp-username"] = username
-        params["sftp-password"] = password
+        # Prefer key-based auth (required for Windows OpenSSH)
+        if sftp_private_key:
+            params["sftp-private-key"] = sftp_private_key
+        elif password:
+            params["sftp-password"] = password
         if sftp_root_directory:
             params["sftp-root-directory"] = sftp_root_directory
 
@@ -215,6 +221,7 @@ def create_guacamole_rdp_url(
     rdp_password: str | None = None,
     api_base_url: str | None = None,
     sftp_root_directory: str | None = None,
+    sftp_private_key: str | None = None,
 ) -> str:
     """Create a signed Guacamole URL for RDP access.
 
@@ -235,6 +242,7 @@ def create_guacamole_rdp_url(
         rdp_password: Password for RDP login
         api_base_url: Internal URL for server-to-server API calls (defaults to base_url)
         sftp_root_directory: Root directory for SFTP file transfers
+        sftp_private_key: PEM-encoded private key for SFTP (used instead of password)
 
     Returns:
         Full Guacamole URL with auth token that auto-connects to RDP
@@ -252,6 +260,7 @@ def create_guacamole_rdp_url(
                 username=rdp_username,
                 password=rdp_password,
                 sftp_root_directory=sftp_root_directory,
+                sftp_private_key=sftp_private_key,
             ),
         }
     }

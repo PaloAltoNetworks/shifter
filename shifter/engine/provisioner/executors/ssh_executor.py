@@ -184,28 +184,51 @@ class SSHExecutor:
             channel.send("exit\n")
             channel.shutdown_write()
 
-            # Read all output from the channel
+            # Read all output from the channel using idle timeout strategy
+            # PAN-OS is slow to close the shell, so we consider the command done
+            # after a few seconds of no new data (like ssh binary does)
             output = ""
             start_time = time.time()
+            last_data_time = time.time()
             chunk_count = 0
+            idle_threshold = 3.0  # seconds without data = command complete
+
+            logger.info(f"Reading output with {idle_threshold}s idle threshold")
+
             while True:
                 if channel.recv_ready():
                     chunk = channel.recv(4096).decode("utf-8", errors="replace")
                     chunk_count += 1
-                    logger.debug(f"Received chunk {chunk_count} ({len(chunk)} bytes)")
+                    last_data_time = time.time()
+                    logger.info(f"Chunk {chunk_count}: {len(chunk)} bytes")
+                    logger.info(f"Chunk {chunk_count} content: {chunk!r}")
                     output += chunk
 
-                # Check if channel is closed
-                if channel.exit_status_ready():
-                    # Read any remaining data
+                # Check for idle timeout - no data for N seconds
+                idle_time = time.time() - last_data_time
+                if idle_time > idle_threshold:
+                    logger.info(f"Idle for {idle_time:.1f}s - considering command complete")
+                    # Read any remaining buffered data
                     while channel.recv_ready():
                         chunk = channel.recv(4096).decode("utf-8", errors="replace")
                         chunk_count += 1
-                        logger.debug(f"Received final chunk {chunk_count} ({len(chunk)} bytes)")
+                        logger.info(f"Final buffered chunk {chunk_count}: {len(chunk)} bytes")
+                        logger.info(f"Final chunk {chunk_count} content: {chunk!r}")
                         output += chunk
                     break
 
-                # Timeout check
+                # Also check if channel naturally closed (unlikely but handle it)
+                if channel.exit_status_ready():
+                    logger.info("Channel exit status ready")
+                    while channel.recv_ready():
+                        chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                        chunk_count += 1
+                        logger.info(f"Exit-status chunk {chunk_count}: {len(chunk)} bytes")
+                        logger.info(f"Exit-status chunk {chunk_count} content: {chunk!r}")
+                        output += chunk
+                    break
+
+                # Overall timeout check
                 elapsed = time.time() - start_time
                 if elapsed > timeout_seconds:
                     logger.error(f"Command timed out after {elapsed:.1f}s (received {chunk_count} chunks, {len(output)} bytes)")
@@ -213,34 +236,53 @@ class SSHExecutor:
 
                 time.sleep(0.1)
 
-            exit_code = channel.recv_exit_status()
-            logger.info(f"Command completed with exit code {exit_code}, received {len(output)} bytes in {chunk_count} chunks")
-            logger.debug(f"Raw output (first 500 chars): {output[:500]!r}")
+            # Try to get exit code, but don't block if not ready
+            exit_code = -1
+            if channel.exit_status_ready():
+                exit_code = channel.recv_exit_status()
+                logger.info(f"Exit code: {exit_code}")
+            else:
+                logger.warning("Exit status not ready - using -1")
+
+            elapsed = time.time() - start_time
+            logger.info(f"Command completed in {elapsed:.1f}s, received {len(output)} bytes in {chunk_count} chunks")
+            logger.info(f"Raw output (ALL {len(output)} bytes):")
+            logger.info(output)
+            logger.info("="*70)
 
             # Clean up output: remove command echo and prompts
             # PAN-OS prompt format: "admin@ngfw-user-X> "
             lines = output.split("\n")
-            logger.debug(f"Split output into {len(lines)} lines")
+            logger.info(f"Split output into {len(lines)} lines, cleaning...")
             clean_lines = []
-            for line in lines:
+            skipped_count = 0
+            for idx, line in enumerate(lines):
                 # Skip empty lines, prompts, and command echo
                 stripped = line.strip()
                 if not stripped:
+                    skipped_count += 1
+                    logger.debug(f"Line {idx}: SKIP (empty)")
                     continue
                 if stripped.startswith(self._username + "@"):
-                    logger.debug(f"Skipping prompt line: {stripped[:50]}")
+                    skipped_count += 1
+                    logger.info(f"Line {idx}: SKIP (prompt): {stripped!r}")
                     continue
                 if stripped == commands.strip():
-                    logger.debug(f"Skipping command echo: {stripped[:50]}")
+                    skipped_count += 1
+                    logger.info(f"Line {idx}: SKIP (command echo): {stripped!r}")
                     continue
                 if stripped == "exit":
-                    logger.debug("Skipping 'exit' command")
+                    skipped_count += 1
+                    logger.info(f"Line {idx}: SKIP (exit): {stripped!r}")
                     continue
+                logger.info(f"Line {idx}: KEEP: {line.rstrip()!r}")
                 clean_lines.append(line.rstrip())
 
             stdout_text = "\n".join(clean_lines)
-            logger.info(f"Cleaned output: {len(clean_lines)} lines, {len(stdout_text)} bytes")
-            logger.debug(f"Cleaned output (first 500 chars): {stdout_text[:500]!r}")
+            logger.info(f"Cleaning complete: kept {len(clean_lines)} lines, skipped {skipped_count} lines")
+            logger.info(f"Final cleaned output (ALL {len(stdout_text)} bytes):")
+            logger.info(stdout_text)
+            logger.info("="*70)
 
             return CommandResult(
                 success=exit_code == 0,

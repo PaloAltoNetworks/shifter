@@ -99,6 +99,20 @@ Set-Service -Name sshd -StartupType Automatic
 # Set default shell to PowerShell
 New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force
 
+# Enable password authentication for SSH/SFTP
+$sshdConfigPath = "C:\ProgramData\ssh\sshd_config"
+if (Test-Path $sshdConfigPath) {
+    $sshdConfig = Get-Content $sshdConfigPath
+    # Enable password authentication
+    $sshdConfig = $sshdConfig -replace '^#?PasswordAuthentication\s+.*', 'PasswordAuthentication yes'
+    # Ensure it's added if not present
+    if ($sshdConfig -notmatch 'PasswordAuthentication') {
+        $sshdConfig += "`nPasswordAuthentication yes"
+    }
+    Set-Content -Path $sshdConfigPath -Value $sshdConfig
+    Write-Host "Enabled password authentication in sshd_config"
+}
+
 # Ensure ssh-agent is available
 Set-Service -Name ssh-agent -StartupType Automatic -ErrorAction SilentlyContinue
 

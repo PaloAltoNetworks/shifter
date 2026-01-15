@@ -18,6 +18,16 @@ echo "=== Installing OpenSSH Server ==="
 # Usually pre-installed, but ensure it's there
 apt-get install -y openssh-server
 
+# Set ubuntu user password for SSH/SFTP
+echo "ubuntu:ubuntu" | chpasswd
+
+# Enable SSH password authentication for SFTP file transfers via Guacamole
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+# Ensure it exists in config
+if ! grep -q '^PasswordAuthentication' /etc/ssh/sshd_config; then
+    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+fi
+
 echo "=== Installing vsftpd (FTP server) ==="
 apt-get install -y vsftpd
 

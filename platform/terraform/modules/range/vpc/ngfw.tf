@@ -86,6 +86,19 @@ resource "aws_security_group_rule" "ngfw_mgmt_https_from_portal" {
   description       = "HTTPS from Portal VPC (management web UI)"
 }
 
+# HTTPS from Range VPC (GWLB health checks)
+resource "aws_security_group_rule" "ngfw_mgmt_https_from_range_vpc" {
+  count = var.enable_ngfw_infrastructure ? 1 : 0
+
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.ngfw_mgmt[0].id
+  description       = "HTTPS from Range VPC (GWLB health checks)"
+}
+
 # Outbound: All (for SCM/licensing communication)
 resource "aws_security_group_rule" "ngfw_mgmt_egress_all" {
   count = var.enable_ngfw_infrastructure ? 1 : 0

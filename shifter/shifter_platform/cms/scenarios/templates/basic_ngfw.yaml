@@ -1,5 +1,5 @@
 id: basic_ngfw
-name: Basic Range
+name: Basic Range with NGFW
 description: A basic attacker-victim range with Kali Linux attacker and user-provided agent on victim.
 enabled: true
 ngfw: true

@@ -317,9 +317,10 @@ class DashboardManager {
         this._initScenarioDropdown();
         this._initDropdown(this.osDropdown);
 
-        // Load scenarios, agents and current status in parallel
+        // Load scenarios first (needs to complete before agents for _onScenarioChange)
+        // Then load agents and range status in parallel
+        await this.loadScenarios();
         await Promise.all([
-            this.loadScenarios(),
             this.loadAgents(),
             this.loadRange(),
         ]);
@@ -343,9 +344,57 @@ class DashboardManager {
             return;
         }
 
-        // Cache agent requirements by scenario ID
-        for (const scenario of data.scenarios) {
-            this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
+        // Cache agent requirements and populate dropdown
+        const scenarioItems = document.getElementById('scenario-items');
+        if (scenarioItems && data.scenarios.length > 0) {
+            scenarioItems.innerHTML = '';
+
+            for (const scenario of data.scenarios) {
+                // Cache requirements
+                this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
+
+                // Create dropdown item
+                const li = document.createElement('li');
+                li.className = 'xdr-dropdown-item';
+                li.dataset.value = scenario.id;
+
+                const label = document.createElement('span');
+                label.className = 'item-label';
+                label.textContent = scenario.name;
+                li.appendChild(label);
+
+                const desc = document.createElement('span');
+                desc.className = 'item-description';
+                desc.textContent = scenario.description;
+                li.appendChild(desc);
+
+                scenarioItems.appendChild(li);
+            }
+
+            // Select first scenario by default
+            const firstScenario = data.scenarios[0];
+            if (firstScenario && this.scenarioSelect) {
+                this.scenarioSelect.value = firstScenario.id;
+                // Update dropdown display
+                const trigger = this.scenarioDropdown?.querySelector('.xdr-dropdown-value');
+                if (trigger) {
+                    trigger.textContent = firstScenario.name;
+                    trigger.classList.remove('placeholder');
+                }
+                // Mark first item as selected
+                const firstItem = scenarioItems.querySelector('.xdr-dropdown-item');
+                if (firstItem) {
+                    firstItem.classList.add('selected');
+                }
+            }
+
+            // Re-init dropdown to bind events to new items
+            this._initDropdown(this.scenarioDropdown);
+        } else {
+            // Still cache requirements even if dropdown doesn't exist
+            for (const scenario of data.scenarios) {
+                this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
+            }
         }
     }
 

@@ -124,7 +124,7 @@ class SSHExecutor:
     ) -> CommandResult:
         """Run a CLI command on a PAN-OS device via SSH.
 
-        Uses paramiko exec_command for direct execution.
+        Uses paramiko invoke_shell() to send commands to the PAN-OS CLI.
 
         Args:
             instance_id: Target IP address or hostname. Named for SetupOrchestrator
@@ -170,26 +170,83 @@ class SSHExecutor:
             log_cmd = commands[:100]
             logger.info(f"Executing command: {log_cmd}...")
 
-            # Execute the command directly
+            # PAN-OS requires invoke_shell() instead of exec_command()
+            # exec_command() doesn't trigger the CLI, just shows the login banner
+            logger.info("Opening interactive shell with invoke_shell()")
+            channel = client.invoke_shell()
+            channel.settimeout(timeout_seconds)
+
+            # Send commands via stdin
             # Security: commands are from internal provisioning logic, not user input.
-            stdin, stdout, stderr = client.exec_command(  # nosec B601
-                commands, timeout=timeout_seconds
-            )
-            # Close stdin as we're not sending additional input
-            stdin.channel.shutdown_write()
+            logger.info(f"Sending command to shell: {commands[:100]}")
+            channel.send(commands + "\n")  # nosec B601
+            logger.info("Sending 'exit' to close shell")
+            channel.send("exit\n")
+            channel.shutdown_write()
 
-            # Read output
-            stdout_text = stdout.read().decode("utf-8")
-            stderr_text = stderr.read().decode("utf-8")
-            exit_code = stdout.channel.recv_exit_status()
+            # Read all output from the channel
+            output = ""
+            start_time = time.time()
+            chunk_count = 0
+            while True:
+                if channel.recv_ready():
+                    chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                    chunk_count += 1
+                    logger.debug(f"Received chunk {chunk_count} ({len(chunk)} bytes)")
+                    output += chunk
 
-            logger.info(f"Command completed with exit code {exit_code}")
+                # Check if channel is closed
+                if channel.exit_status_ready():
+                    # Read any remaining data
+                    while channel.recv_ready():
+                        chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                        chunk_count += 1
+                        logger.debug(f"Received final chunk {chunk_count} ({len(chunk)} bytes)")
+                        output += chunk
+                    break
+
+                # Timeout check
+                elapsed = time.time() - start_time
+                if elapsed > timeout_seconds:
+                    logger.error(f"Command timed out after {elapsed:.1f}s (received {chunk_count} chunks, {len(output)} bytes)")
+                    raise TimeoutError(f"Command timed out after {timeout_seconds}s")
+
+                time.sleep(0.1)
+
+            exit_code = channel.recv_exit_status()
+            logger.info(f"Command completed with exit code {exit_code}, received {len(output)} bytes in {chunk_count} chunks")
+            logger.debug(f"Raw output (first 500 chars): {output[:500]!r}")
+
+            # Clean up output: remove command echo and prompts
+            # PAN-OS prompt format: "admin@ngfw-user-X> "
+            lines = output.split("\n")
+            logger.debug(f"Split output into {len(lines)} lines")
+            clean_lines = []
+            for line in lines:
+                # Skip empty lines, prompts, and command echo
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped.startswith(self._username + "@"):
+                    logger.debug(f"Skipping prompt line: {stripped[:50]}")
+                    continue
+                if stripped == commands.strip():
+                    logger.debug(f"Skipping command echo: {stripped[:50]}")
+                    continue
+                if stripped == "exit":
+                    logger.debug("Skipping 'exit' command")
+                    continue
+                clean_lines.append(line.rstrip())
+
+            stdout_text = "\n".join(clean_lines)
+            logger.info(f"Cleaned output: {len(clean_lines)} lines, {len(stdout_text)} bytes")
+            logger.debug(f"Cleaned output (first 500 chars): {stdout_text[:500]!r}")
 
             return CommandResult(
                 success=exit_code == 0,
                 exit_code=exit_code,
                 stdout=stdout_text,
-                stderr=stderr_text,
+                stderr="",  # invoke_shell() doesn't separate stderr
             )
 
         except paramiko.SSHException as e:

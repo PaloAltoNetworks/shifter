@@ -155,6 +155,69 @@ class SSHExecutor:
         if stdin_input:
             commands = f"{commands}\n{stdin_input}"
 
+        # Test all three completion detection strategies
+        results = []
+
+        # Strategy 1: Idle timeout
+        logger.info("=" * 70)
+        logger.info("STRATEGY 1: IDLE TIMEOUT (3s without data)")
+        logger.info("=" * 70)
+        try:
+            result = self._test_idle_timeout(host, commands, timeout_seconds)
+            results.append(("idle_timeout", result))
+            logger.info(f"✓ idle_timeout succeeded: {len(result.stdout)} bytes")
+        except Exception as e:
+            logger.error(f"✗ idle_timeout failed: {e}")
+            results.append(("idle_timeout", None))
+
+        # Strategy 2: Prompt detection
+        logger.info("=" * 70)
+        logger.info("STRATEGY 2: PROMPT DETECTION (look for admin@ prompt)")
+        logger.info("=" * 70)
+        try:
+            result = self._test_prompt_detect(host, commands, timeout_seconds)
+            results.append(("prompt_detect", result))
+            logger.info(f"✓ prompt_detect succeeded: {len(result.stdout)} bytes")
+        except Exception as e:
+            logger.error(f"✗ prompt_detect failed: {e}")
+            results.append(("prompt_detect", None))
+
+        # Strategy 3: Subprocess with native ssh
+        logger.info("=" * 70)
+        logger.info("STRATEGY 3: SUBPROCESS (native ssh binary)")
+        logger.info("=" * 70)
+        try:
+            result = self._test_subprocess(host, commands, timeout_seconds)
+            results.append(("subprocess", result))
+            logger.info(f"✓ subprocess succeeded: {len(result.stdout)} bytes")
+        except Exception as e:
+            logger.error(f"✗ subprocess failed: {e}")
+            results.append(("subprocess", None))
+
+        # Summary
+        logger.info("=" * 70)
+        logger.info("STRATEGY COMPARISON SUMMARY")
+        logger.info("=" * 70)
+        for strategy, result in results:
+            if result:
+                logger.info(f"{strategy}: SUCCESS - {len(result.stdout)} bytes, exit_code={result.exit_code}")
+            else:
+                logger.info(f"{strategy}: FAILED")
+
+        # Return first successful result
+        for strategy, result in results:
+            if result and result.success:
+                logger.info(f"Using result from: {strategy}")
+                return result
+
+        # If none succeeded, raise error
+        raise CommandError("All strategies failed")
+
+    def _test_idle_timeout(self, host: str, commands: str, timeout_seconds: int) -> CommandResult:
+        """Test idle timeout strategy - consider done after 3s without data."""
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507 nosec B507
+
         try:
             logger.info(f"Connecting to {host}:{self._port} as {self._username}")
             client.connect(
@@ -167,139 +230,204 @@ class SSHExecutor:
                 look_for_keys=False,
             )
 
-            log_cmd = commands[:100]
-            logger.info(f"Executing command: {log_cmd}...")
-
-            # PAN-OS requires invoke_shell() instead of exec_command()
-            # exec_command() doesn't trigger the CLI, just shows the login banner
-            logger.info("Opening interactive shell with invoke_shell()")
+            logger.info("Opening shell, sending command")
             channel = client.invoke_shell()
             channel.settimeout(timeout_seconds)
-
-            # Send commands via stdin
-            # Security: commands are from internal provisioning logic, not user input.
-            logger.info(f"Sending command to shell: {commands[:100]}")
             channel.send(commands + "\n")  # nosec B601
-            logger.info("Sending 'exit' to close shell")
             channel.send("exit\n")
             channel.shutdown_write()
 
-            # Read all output from the channel using idle timeout strategy
-            # PAN-OS is slow to close the shell, so we consider the command done
-            # after a few seconds of no new data (like ssh binary does)
             output = ""
             start_time = time.time()
             last_data_time = time.time()
             chunk_count = 0
-            idle_threshold = 3.0  # seconds without data = command complete
-
-            logger.info(f"Reading output with {idle_threshold}s idle threshold")
+            idle_threshold = 3.0
 
             while True:
                 if channel.recv_ready():
                     chunk = channel.recv(4096).decode("utf-8", errors="replace")
                     chunk_count += 1
                     last_data_time = time.time()
-                    logger.info(f"Chunk {chunk_count}: {len(chunk)} bytes")
-                    logger.info(f"Chunk {chunk_count} content: {chunk!r}")
+                    logger.info(f"[IDLE] Chunk {chunk_count}: {len(chunk)}b")
+                    logger.info(f"[IDLE] Content: {chunk!r}")
                     output += chunk
 
-                # Check for idle timeout - no data for N seconds
                 idle_time = time.time() - last_data_time
                 if idle_time > idle_threshold:
-                    logger.info(f"Idle for {idle_time:.1f}s - considering command complete")
-                    # Read any remaining buffered data
+                    logger.info(f"[IDLE] Idle {idle_time:.1f}s - done")
                     while channel.recv_ready():
                         chunk = channel.recv(4096).decode("utf-8", errors="replace")
-                        chunk_count += 1
-                        logger.info(f"Final buffered chunk {chunk_count}: {len(chunk)} bytes")
-                        logger.info(f"Final chunk {chunk_count} content: {chunk!r}")
                         output += chunk
                     break
 
-                # Also check if channel naturally closed (unlikely but handle it)
                 if channel.exit_status_ready():
-                    logger.info("Channel exit status ready")
+                    logger.info("[IDLE] Exit status ready")
                     while channel.recv_ready():
                         chunk = channel.recv(4096).decode("utf-8", errors="replace")
-                        chunk_count += 1
-                        logger.info(f"Exit-status chunk {chunk_count}: {len(chunk)} bytes")
-                        logger.info(f"Exit-status chunk {chunk_count} content: {chunk!r}")
                         output += chunk
                     break
 
-                # Overall timeout check
-                elapsed = time.time() - start_time
-                if elapsed > timeout_seconds:
-                    logger.error(f"Command timed out after {elapsed:.1f}s (received {chunk_count} chunks, {len(output)} bytes)")
-                    raise TimeoutError(f"Command timed out after {timeout_seconds}s")
+                if time.time() - start_time > timeout_seconds:
+                    raise TimeoutError(f"idle_timeout strategy timed out")
 
                 time.sleep(0.1)
 
-            # Try to get exit code, but don't block if not ready
-            exit_code = -1
-            if channel.exit_status_ready():
-                exit_code = channel.recv_exit_status()
-                logger.info(f"Exit code: {exit_code}")
-            else:
-                logger.warning("Exit status not ready - using -1")
-
+            exit_code = channel.recv_exit_status() if channel.exit_status_ready() else -1
             elapsed = time.time() - start_time
-            logger.info(f"Command completed in {elapsed:.1f}s, received {len(output)} bytes in {chunk_count} chunks")
-            logger.info(f"Raw output (ALL {len(output)} bytes):")
-            logger.info(output)
-            logger.info("="*70)
+            logger.info(f"[IDLE] Complete: {elapsed:.1f}s, {len(output)}b, exit={exit_code}")
+            logger.info(f"[IDLE] Raw output:\n{output}")
 
-            # Clean up output: remove command echo and prompts
-            # PAN-OS prompt format: "admin@ngfw-user-X> "
-            lines = output.split("\n")
-            logger.info(f"Split output into {len(lines)} lines, cleaning...")
-            clean_lines = []
-            skipped_count = 0
-            for idx, line in enumerate(lines):
-                # Skip empty lines, prompts, and command echo
-                stripped = line.strip()
-                if not stripped:
-                    skipped_count += 1
-                    logger.debug(f"Line {idx}: SKIP (empty)")
-                    continue
-                if stripped.startswith(self._username + "@"):
-                    skipped_count += 1
-                    logger.info(f"Line {idx}: SKIP (prompt): {stripped!r}")
-                    continue
-                if stripped == commands.strip():
-                    skipped_count += 1
-                    logger.info(f"Line {idx}: SKIP (command echo): {stripped!r}")
-                    continue
-                if stripped == "exit":
-                    skipped_count += 1
-                    logger.info(f"Line {idx}: SKIP (exit): {stripped!r}")
-                    continue
-                logger.info(f"Line {idx}: KEEP: {line.rstrip()!r}")
-                clean_lines.append(line.rstrip())
+            cleaned = self._clean_output(output, commands)
+            logger.info(f"[IDLE] Cleaned output:\n{cleaned}")
 
-            stdout_text = "\n".join(clean_lines)
-            logger.info(f"Cleaning complete: kept {len(clean_lines)} lines, skipped {skipped_count} lines")
-            logger.info(f"Final cleaned output (ALL {len(stdout_text)} bytes):")
-            logger.info(stdout_text)
-            logger.info("="*70)
+            return CommandResult(success=True, exit_code=exit_code, stdout=cleaned, stderr="")
 
-            return CommandResult(
-                success=exit_code == 0,
-                exit_code=exit_code,
-                stdout=stdout_text,
-                stderr="",  # invoke_shell() doesn't separate stderr
-            )
-
-        except paramiko.SSHException as e:
-            raise ConnectionError(f"SSH connection failed to {host}: {e}") from e
-        except builtins.TimeoutError as e:
-            raise TimeoutError(f"SSH command timed out on {host}") from e
-        except OSError as e:
-            # Socket timeout raises OSError
-            raise TimeoutError(f"SSH command timed out on {host}: {e}") from e
         finally:
             client.close()
+
+    def _test_prompt_detect(self, host: str, commands: str, timeout_seconds: int) -> CommandResult:
+        """Test prompt detection strategy - look for admin@ prompt."""
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507 nosec B507
+
+        try:
+            logger.info(f"Connecting to {host}:{self._port} as {self._username}")
+            client.connect(
+                hostname=host,
+                port=self._port,
+                username=self._username,
+                pkey=self._pkey,
+                timeout=30,
+                allow_agent=False,
+                look_for_keys=False,
+            )
+
+            logger.info("Opening shell, sending command")
+            channel = client.invoke_shell()
+            channel.settimeout(timeout_seconds)
+            channel.send(commands + "\n")  # nosec B601
+            channel.send("exit\n")
+            channel.shutdown_write()
+
+            output = ""
+            start_time = time.time()
+            chunk_count = 0
+
+            while True:
+                if channel.recv_ready():
+                    chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                    chunk_count += 1
+                    logger.info(f"[PROMPT] Chunk {chunk_count}: {len(chunk)}b")
+                    logger.info(f"[PROMPT] Content: {chunk!r}")
+                    output += chunk
+
+                    # Check for prompt in recent output
+                    if "admin@" in output[-200:] and ">" in output[-50:]:
+                        logger.info("[PROMPT] Detected prompt - done")
+                        time.sleep(0.5)
+                        while channel.recv_ready():
+                            chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                            output += chunk
+                        break
+
+                if channel.exit_status_ready():
+                    logger.info("[PROMPT] Exit status ready")
+                    while channel.recv_ready():
+                        chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                        output += chunk
+                    break
+
+                if time.time() - start_time > timeout_seconds:
+                    raise TimeoutError(f"prompt_detect strategy timed out")
+
+                time.sleep(0.1)
+
+            exit_code = channel.recv_exit_status() if channel.exit_status_ready() else -1
+            elapsed = time.time() - start_time
+            logger.info(f"[PROMPT] Complete: {elapsed:.1f}s, {len(output)}b, exit={exit_code}")
+            logger.info(f"[PROMPT] Raw output:\n{output}")
+
+            cleaned = self._clean_output(output, commands)
+            logger.info(f"[PROMPT] Cleaned output:\n{cleaned}")
+
+            return CommandResult(success=True, exit_code=exit_code, stdout=cleaned, stderr="")
+
+        finally:
+            client.close()
+
+    def _test_subprocess(self, host: str, commands: str, timeout_seconds: int) -> CommandResult:
+        """Test subprocess strategy - use native ssh binary."""
+        import subprocess
+        import tempfile
+
+        logger.info(f"Using native ssh binary to connect to {host}")
+
+        # Write private key to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False) as f:
+            f.write(self._private_key)
+            key_path = f.name
+
+        try:
+            import os
+            os.chmod(key_path, 0o600)
+
+            # Build ssh command
+            ssh_cmd = [
+                'ssh',
+                '-i', key_path,
+                '-o', 'StrictHostKeyChecking=no',
+                '-o', 'UserKnownHostsFile=/dev/null',
+                '-o', f'ConnectTimeout={min(30, timeout_seconds)}',
+                f'{self._username}@{host}',
+                commands
+            ]
+
+            logger.info(f"[SUBPROCESS] Running: {' '.join(ssh_cmd[:3])} ... {self._username}@{host} <command>")
+
+            start_time = time.time()
+            result = subprocess.run(
+                ssh_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False
+            )
+            elapsed = time.time() - start_time
+
+            logger.info(f"[SUBPROCESS] Complete: {elapsed:.1f}s, exit={result.returncode}")
+            logger.info(f"[SUBPROCESS] Stdout ({len(result.stdout)}b):\n{result.stdout}")
+            logger.info(f"[SUBPROCESS] Stderr ({len(result.stderr)}b):\n{result.stderr}")
+
+            return CommandResult(
+                success=result.returncode == 0,
+                exit_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr
+            )
+
+        finally:
+            import os
+            try:
+                os.unlink(key_path)
+            except Exception:
+                pass
+
+    def _clean_output(self, output: str, commands: str) -> str:
+        """Clean output by removing prompts and command echo."""
+        lines = output.split("\n")
+        clean_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(self._username + "@"):
+                continue
+            if stripped == commands.strip():
+                continue
+            if stripped == "exit":
+                continue
+            clean_lines.append(line.rstrip())
+        return "\n".join(clean_lines)
 
     def wait_for_agent(
         self,

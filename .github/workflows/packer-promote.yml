@@ -11,6 +11,7 @@ on:
           - kali
           - ubuntu
           - windows
+          - dc
 
 permissions:
   id-token: write

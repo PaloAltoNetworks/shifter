@@ -187,3 +187,40 @@
 </div>
 {% endif %}
 {% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.ngfw-refresh-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const ngfwId = this.dataset.ngfwId;
+            const icon = this.querySelector('svg');
+
+            // Spin animation
+            icon.style.transition = 'transform 0.5s ease';
+            icon.style.transform = 'rotate(360deg)';
+            this.disabled = true;
+
+            try {
+                const response = await fetch('{% url "mission_control:api_ngfw_list" %}');
+                const data = await response.json();
+
+                // Find this NGFW in the response
+                const ngfw = data.ngfws.find(n => n.id === ngfwId);
+                if (ngfw) {
+                    // Reload page to show updated status
+                    window.location.reload();
+                }
+            } catch (err) {
+                console.error('Refresh failed:', err);
+            } finally {
+                setTimeout(() => {
+                    icon.style.transform = 'rotate(0deg)';
+                    this.disabled = false;
+                }, 500);
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

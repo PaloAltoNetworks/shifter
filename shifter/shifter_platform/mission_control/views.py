@@ -175,6 +175,15 @@ def guacamole_rdp_url(request):
     guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
     # Generate signed URL
+    # Set SFTP root directory based on OS type for file transfers
+    os_type = conn_info.get("os_type")
+    if os_type == "kali":
+        sftp_root_directory = "/home/kali"
+    elif os_type == "windows":
+        sftp_root_directory = "C:\\Users\\Administrator"
+    else:
+        sftp_root_directory = None
+
     try:
         url = create_guacamole_rdp_url(
             base_url=guacamole_base_url,
@@ -186,6 +195,7 @@ def guacamole_rdp_url(request):
             rdp_username=conn_info.get("rdp_username"),
             rdp_password=conn_info.get("rdp_password"),
             api_base_url=guacamole_api_url,
+            sftp_root_directory=sftp_root_directory,
         )
     except ValueError as e:
         logger.error(f"Failed to generate Guacamole URL: {e}")

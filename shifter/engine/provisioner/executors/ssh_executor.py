@@ -177,7 +177,9 @@ class SSHExecutor:
                 "", timeout=timeout_seconds
             )
 
-            # Write commands to stdin
+            # Write commands to stdin with newline (PAN-OS requires it)
+            if not commands.endswith("\n"):
+                commands = commands + "\n"
             stdin.write(commands)
             # Send EOF to signal we're done - critical for PAN-OS to process input
             stdin.channel.shutdown_write()

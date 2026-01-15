@@ -898,7 +898,7 @@ def poll_for_serial_and_cert(
         try:
             result = ssh_executor.run_command(
                 instance_id=host,
-                script='show system info | match "serial|device-certificate"',
+                script="show system info",
                 timeout_seconds=60,
             )
 

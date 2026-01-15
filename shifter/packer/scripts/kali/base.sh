@@ -60,8 +60,15 @@ chmod +x /etc/xrdp/startwm.sh
 # Add kali user to ssl-cert group (required for xrdp)
 usermod -aG ssl-cert kali
 
-# Set kali user password for RDP login
+# Set kali user password for RDP login and SSH
 echo "kali:kali" | chpasswd
+
+# Enable SSH password authentication for SFTP file transfers via Guacamole
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+# Ensure it exists in config
+if ! grep -q '^PasswordAuthentication' /etc/ssh/sshd_config; then
+    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+fi
 
 # Fix polkit for xrdp sessions (allows shutdown/restart from desktop)
 cat > /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla << 'EOF'

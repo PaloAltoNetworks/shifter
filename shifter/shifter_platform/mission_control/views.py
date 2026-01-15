@@ -176,11 +176,12 @@ def guacamole_rdp_url(request):
 
     # Generate signed URL
     # Set SFTP root directory based on OS type for file transfers
+    # Note: SFTP paths use forward slashes even on Windows
     os_type = conn_info.get("os_type")
     if os_type == "kali":
         sftp_root_directory = "/home/kali"
     elif os_type == "windows":
-        sftp_root_directory = "C:\\Users\\Administrator"
+        sftp_root_directory = "/C:/Users/Administrator"
     else:
         sftp_root_directory = None
 

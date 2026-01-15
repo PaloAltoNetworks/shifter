@@ -2,6 +2,12 @@ name: Quality
 
 on:
   workflow_call:
+    inputs:
+      skip_tests:
+        description: 'Skip test jobs (linting still runs)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -125,7 +131,7 @@ jobs:
 
   shifter-platform-typecheck:
     name: Type Check (shifter_platform)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
     continue-on-error: true  # Non-blocking - quality signal only
     steps:
@@ -150,7 +156,7 @@ jobs:
 
   check-layer-imports-arch:
     name: Architecture (layer imports)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -252,7 +258,7 @@ jobs:
 
   shifter-platform-tests:
     name: Tests (shifter_platform)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
     runs-on: self-hosted
     services:
@@ -296,7 +302,7 @@ jobs:
 
   shifter-engine-tests:
     name: Tests (provisioner)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     needs: [provisioner-lint, provisioner-sast]
     runs-on: self-hosted
     steps:
@@ -317,7 +323,7 @@ jobs:
 
   packer-tests:
     name: Tests (packer)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     needs: [packer-lint]
     runs-on: self-hosted
     steps:
@@ -336,7 +342,7 @@ jobs:
 
   bootstrap-tests:
     name: Tests (bootstrap)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     needs: [bootstrap-lint]
     runs-on: self-hosted
     steps:
@@ -355,7 +361,7 @@ jobs:
 
   check-layer-imports-tests:
     name: Tests (check_layer_imports)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     needs: [check-layer-imports-lint]
     runs-on: self-hosted
     steps:
@@ -378,7 +384,7 @@ jobs:
 
   shifter-platform-js-tests:
     name: Tests JavaScript (shifter_platform)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     needs: [shifter-platform-lint-js]
     runs-on: self-hosted
     steps:
@@ -429,7 +435,7 @@ jobs:
 
   model-fks-arch:
     name: Architecture (model FKs)
-    if: false  # SKIP: Debugging
+    if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
     services:
       postgres:

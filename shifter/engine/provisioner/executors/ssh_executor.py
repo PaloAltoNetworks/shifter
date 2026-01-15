@@ -4,12 +4,13 @@ SSHExecutor uses SSH to execute CLI commands on PAN-OS devices (VM-Series).
 Provides same interface as SSMExecutor for use with SetupOrchestrator.
 """
 
+import builtins
+import io
 import logging
-import os
-import subprocess
-import tempfile
 import time
 from dataclasses import dataclass
+
+import paramiko
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class CommandResult:
 class SSHExecutor:
     """SSH command executor for PAN-OS devices.
 
-    Executes CLI commands on VM-Series via SSH using subprocess.
+    Executes CLI commands on VM-Series via SSH using paramiko.
     Same interface as SSMExecutor for orchestrator compatibility.
     """
 
@@ -81,26 +82,37 @@ class SSHExecutor:
         self._port = port
         self._poll_interval = poll_interval_seconds
 
-        # Write the private key to a temp file for use with ssh command
-        self._key_file_path = self._write_key_file(private_key)
+        # Parse the private key (supports RSA and Ed25519)
+        self._pkey = self._load_private_key(private_key)
 
-    def _write_key_file(self, private_key: str) -> str:
-        """Write private key to a temp file and return the path."""
-        fd, path = tempfile.mkstemp(suffix=".pem")
-        try:
-            os.write(fd, private_key.encode())
-        finally:
-            os.close(fd)
-        os.chmod(path, 0o600)
-        return path
+    def _load_private_key(self, private_key: str) -> paramiko.PKey:
+        """Load a private key, detecting type automatically.
 
-    def __del__(self):
-        """Clean up the temp key file."""
+        Args:
+            private_key: PEM-encoded private key string
+
+        Returns:
+            Paramiko key object (RSAKey or Ed25519Key)
+
+        Raises:
+            SSHExecutorError: If key type is unsupported or parsing fails
+        """
+        key_file = io.StringIO(private_key)
+
+        # Try Ed25519 first (our default for NGFW)
         try:
-            if hasattr(self, "_key_file_path") and os.path.exists(self._key_file_path):
-                os.unlink(self._key_file_path)
-        except Exception:
-            logger.debug("Failed to clean up temp key file")
+            return paramiko.Ed25519Key.from_private_key(file_obj=key_file)
+        except paramiko.SSHException:
+            pass
+
+        # Try RSA
+        key_file.seek(0)
+        try:
+            return paramiko.RSAKey.from_private_key(file_obj=key_file)
+        except paramiko.SSHException:
+            pass
+
+        raise SSHExecutorError("Unsupported key type. Only Ed25519 and RSA keys are supported.")
 
     def run_command(
         self,
@@ -112,10 +124,12 @@ class SSHExecutor:
     ) -> CommandResult:
         """Run a CLI command on a PAN-OS device via SSH.
 
-        Uses subprocess with echo pipe to ssh for clean, predictable output.
+        Uses paramiko exec_command with stdin piping for clean output.
+        Commands are written to stdin and EOF is sent to signal completion.
 
         Args:
-            instance_id: Target IP address or hostname.
+            instance_id: Target IP address or hostname. Named for SetupOrchestrator
+                compatibility (SSM uses EC2 instance ID, SSH uses IP address).
             script: PAN-OS CLI command to execute
             timeout_seconds: Maximum time to wait for completion
             document_name: Ignored. For SetupOrchestrator compatibility.
@@ -130,56 +144,67 @@ class SSHExecutor:
             ConnectionError: If SSH connection fails
         """
         host = instance_id
+        client = paramiko.SSHClient()
+        # Security context: AutoAddPolicy is acceptable because we connect to freshly
+        # provisioned PAN-OS VMs in isolated VPC subnets. Host keys change on reprovision.
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507  # noqa: S507
 
-        # Build the full command to send
+        # Build the full command to send via stdin
         commands = script
         if stdin_input:
             commands = f"{commands}\n{stdin_input}"
 
-        log_cmd = commands[:100]
-        logger.info(f"Executing command on {host}: {log_cmd}...")
-
-        # Build SSH command
-        ssh_cmd = [
-            "ssh",
-            "-i",
-            self._key_file_path,
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            f"ConnectTimeout={min(30, timeout_seconds)}",
-            "-p",
-            str(self._port),
-            f"{self._username}@{host}",
-        ]
-
         try:
-            # Pipe commands through stdin without shell=True
-            result = subprocess.run(  # noqa: S603
-                ssh_cmd,
-                input=commands,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
+            logger.info(f"Connecting to {host}:{self._port} as {self._username}")
+            client.connect(
+                hostname=host,
+                port=self._port,
+                username=self._username,
+                pkey=self._pkey,
+                timeout=30,
+                allow_agent=False,
+                look_for_keys=False,
             )
 
-            logger.info(f"Command completed with exit code {result.returncode}")
+            log_cmd = commands[:100]
+            logger.info(f"Executing command: {log_cmd}...")
+
+            # Use exec_command with stdin piping - cleaner than invoke_shell
+            # This mimics: echo 'commands' | ssh user@host
+            # Security: empty command string is intentional - input comes from internal
+            # provisioning logic, not user input. Commands are PAN-OS CLI commands.
+            stdin, stdout, stderr = client.exec_command(  # nosec B601
+                "", timeout=timeout_seconds
+            )
+
+            # Write commands to stdin
+            stdin.write(commands)
+            # Send EOF to signal we're done - critical for PAN-OS to process input
+            stdin.channel.shutdown_write()
+
+            # Read output
+            stdout_text = stdout.read().decode("utf-8")
+            stderr_text = stderr.read().decode("utf-8")
+            exit_code = stdout.channel.recv_exit_status()
+
+            logger.info(f"Command completed with exit code {exit_code}")
 
             return CommandResult(
-                success=result.returncode == 0,
-                exit_code=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                success=exit_code == 0,
+                exit_code=exit_code,
+                stdout=stdout_text,
+                stderr=stderr_text,
             )
 
-        except subprocess.TimeoutExpired as e:
-            raise TimeoutError(f"Command timed out after {timeout_seconds}s on {host}") from e
-        except OSError as e:
+        except paramiko.SSHException as e:
             raise ConnectionError(f"SSH connection failed to {host}: {e}") from e
+        except builtins.TimeoutError as e:
+            raise TimeoutError(f"SSH command timed out on {host}") from e
+        except OSError as e:
+            # Socket timeout raises OSError
+            raise TimeoutError(f"SSH command timed out on {host}: {e}") from e
+        finally:
+            client.close()
 
     def wait_for_agent(
         self,
@@ -218,33 +243,20 @@ class SSHExecutor:
     def _check_ssh_available(self, host: str) -> bool:
         """Check if SSH port is accepting connections and auth works."""
         try:
-            ssh_cmd = [
-                "ssh",
-                "-i",
-                self._key_file_path,
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=10",
-                "-p",
-                str(self._port),
-                f"{self._username}@{host}",
-                "echo ok",
-            ]
-
-            result = subprocess.run(  # noqa: S603
-                ssh_cmd,
-                capture_output=True,
-                text=True,
-                timeout=15,
+            client = paramiko.SSHClient()
+            # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507  # noqa: S507
+            client.connect(
+                hostname=host,
+                port=self._port,
+                username=self._username,
+                pkey=self._pkey,
+                timeout=10,
+                allow_agent=False,
+                look_for_keys=False,
             )
-
-            return result.returncode == 0
-
+            client.close()
+            return True
         except Exception:
             return False
 

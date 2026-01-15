@@ -1,8 +1,17 @@
-# Base system configuration for Windows victim AMI
-# SSM Agent, Windows Firewall, and WinRM setup
+# Base system configuration for Windows AMI (victim or DC)
+# SSM Agent, RDP, Windows Firewall, WinRM, and optionally AD DS feature
+#
+# Usage:
+#   .\base.ps1           - Victim configuration (default)
+#   .\base.ps1 -Role dc  - Domain Controller configuration
+param(
+    [ValidateSet("victim", "dc")]
+    [string]$Role = "victim"
+)
+
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Starting base system configuration ==="
+Write-Host "=== Starting base system configuration (Role: $Role) ==="
 
 # ------------------------------------------------------------------------------
 # SSM Agent
@@ -20,6 +29,34 @@ if ($ssmService) {
 }
 
 # ------------------------------------------------------------------------------
+# Enable Remote Desktop (RDP)
+# ------------------------------------------------------------------------------
+Write-Host "=== Enabling Remote Desktop ==="
+
+# Enable RDP
+Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+
+# Enable Network Level Authentication (more secure)
+Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 1
+
+# Ensure Remote Desktop Services is set to start automatically
+Set-Service -Name "TermService" -StartupType Automatic
+Start-Service -Name "TermService" -ErrorAction SilentlyContinue
+
+Write-Host "Remote Desktop enabled"
+
+# ------------------------------------------------------------------------------
+# Set Administrator Password
+# ------------------------------------------------------------------------------
+Write-Host "=== Setting Administrator password ==="
+
+$admin = [ADSI]"WinNT://./Administrator,user"
+$admin.SetPassword("CortexSavesTheDay!")
+$admin.SetInfo()
+
+Write-Host "Administrator password set"
+
+# ------------------------------------------------------------------------------
 # Windows Firewall
 # ------------------------------------------------------------------------------
 Write-Host "=== Configuring Windows Firewall ==="
@@ -27,23 +64,34 @@ Write-Host "=== Configuring Windows Firewall ==="
 # Enable firewall on all profiles
 Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
 
-# Allow common inbound rules for victim services
-# HTTP
-New-NetFirewallRule -DisplayName "HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -ErrorAction SilentlyContinue
-# HTTPS
-New-NetFirewallRule -DisplayName "HTTPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -ErrorAction SilentlyContinue
-# MySQL
-New-NetFirewallRule -DisplayName "MySQL Inbound" -Direction Inbound -Protocol TCP -LocalPort 3306 -Action Allow -ErrorAction SilentlyContinue
-# FTP
-New-NetFirewallRule -DisplayName "FTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 21 -Action Allow -ErrorAction SilentlyContinue
-# FTP Passive
-New-NetFirewallRule -DisplayName "FTP Passive Inbound" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Action Allow -ErrorAction SilentlyContinue
-# SSH
+# Common rules for both victim and DC
+New-NetFirewallRule -DisplayName "RDP Inbound" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "SSH Inbound" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue
-# WinRM HTTP
 New-NetFirewallRule -DisplayName "WinRM HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue
-# WinRM HTTPS
 New-NetFirewallRule -DisplayName "WinRM HTTPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 5986 -Action Allow -ErrorAction SilentlyContinue
+
+if ($Role -eq "victim") {
+    # Victim-specific rules
+    New-NetFirewallRule -DisplayName "HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "HTTPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "MySQL Inbound" -Direction Inbound -Protocol TCP -LocalPort 3306 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "FTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 21 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "FTP Passive Inbound" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Action Allow -ErrorAction SilentlyContinue
+} else {
+    # DC-specific rules
+    New-NetFirewallRule -DisplayName "DNS TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 53 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "DNS UDP Inbound" -Direction Inbound -Protocol UDP -LocalPort 53 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "Kerberos TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 88 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "Kerberos UDP Inbound" -Direction Inbound -Protocol UDP -LocalPort 88 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "LDAP TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 389 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "LDAP UDP Inbound" -Direction Inbound -Protocol UDP -LocalPort 389 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "LDAPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 636 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "GC Inbound" -Direction Inbound -Protocol TCP -LocalPort 3268 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "GC SSL Inbound" -Direction Inbound -Protocol TCP -LocalPort 3269 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "SMB Inbound" -Direction Inbound -Protocol TCP -LocalPort 445 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "RPC Endpoint Mapper Inbound" -Direction Inbound -Protocol TCP -LocalPort 135 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "RPC Dynamic Inbound" -Direction Inbound -Protocol TCP -LocalPort 49152-65535 -Action Allow -ErrorAction SilentlyContinue
+}
 
 Write-Host "Firewall rules configured"
 
@@ -77,5 +125,30 @@ Write-Host "=== Enabling Windows features ==="
 
 # .NET Framework (required by many applications)
 Enable-WindowsOptionalFeature -Online -FeatureName NetFx4-AdvSrvs -All -NoRestart -ErrorAction SilentlyContinue
+
+if ($Role -eq "dc") {
+    # Install AD DS feature (but do NOT promote - that happens at runtime)
+    Write-Host "=== Installing AD DS Feature ==="
+    Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
+
+    $addsFeature = Get-WindowsFeature -Name AD-Domain-Services
+    if ($addsFeature.Installed) {
+        Write-Host "AD DS feature installed successfully"
+    } else {
+        Write-Error "AD DS feature installation failed"
+        exit 1
+    }
+
+    # Also install DNS (required for DC)
+    Install-WindowsFeature -Name DNS -IncludeManagementTools
+
+    $dnsFeature = Get-WindowsFeature -Name DNS
+    if ($dnsFeature.Installed) {
+        Write-Host "DNS feature installed successfully"
+    } else {
+        Write-Error "DNS feature installation failed"
+        exit 1
+    }
+}
 
 Write-Host "=== Base system configuration complete ==="

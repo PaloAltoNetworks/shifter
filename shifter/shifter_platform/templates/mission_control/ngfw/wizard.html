@@ -110,16 +110,7 @@
                     </div>
                 </label>
 
-                {# OTP method temporarily hidden - no backend flow implemented yet #}
-                {# <label class="radio-option" data-method="otp">
-                    <input type="radio" name="registration_method" value="otp">
-                    <div class="radio-option-content">
-                        <h4 class="radio-option-title">Enter One-Time Password (OTP)</h4>
-                        <p class="radio-option-desc">
-                            Enter a single-use OTP from SCM. Valid for 60 minutes. Good for one-off setups.
-                        </p>
-                    </div>
-                </label> #}
+                {% comment %}OTP method temporarily hidden - no backend flow implemented yet{% endcomment %}
             </div>
 
             <!-- PIN method fields -->
@@ -155,52 +146,7 @@
                 </div>
             </div>
 
-            {# OTP method fields (hidden - no backend flow yet) #}
-            {# <div class="conditional-fields" id="otp-fields">
-                <div class="form-group">
-                    <label class="form-label" for="otp-value">
-                        One-Time Password <span class="required">*</span>
-                    </label>
-                    <input type="text" class="form-input" id="otp-value" placeholder="e.g., ABC123XYZ" maxlength="50">
-                    <p class="form-hint">
-                        Get this from SCM: Workflows &rarr; NGFWs &rarr; Onboarding &rarr; Create OTP
-                    </p>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label" for="otp-folder">
-                        SCM Folder Name <span class="required">*</span>
-                    </label>
-                    <input type="text" class="form-input" id="otp-folder" placeholder="e.g., My Firewalls" maxlength="255">
-                    <p class="form-hint">
-                        The folder in SCM where this NGFW will be registered
-                    </p>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">
-                        Strata Logging Service Region <span class="required">*</span>
-                    </label>
-                    <div class="xdr-dropdown full-width" id="region-dropdown">
-                        <input type="hidden" name="sls_region" id="region-select-value" value="americas">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value">Americas</span>
-                            <span class="xdr-dropdown-chevron"></span>
-                        </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="region-items">
-                                <li class="xdr-dropdown-item selected" data-value="americas">Americas</li>
-                                <li class="xdr-dropdown-item" data-value="europe">Europe</li>
-                                <li class="xdr-dropdown-item" data-value="japan">Japan</li>
-                                <li class="xdr-dropdown-item" data-value="asiapacific">Asia Pacific</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <p class="form-hint">
-                        Must match your Strata Logging Service tenant region
-                    </p>
-                </div>
-            </div> #}
+            {% comment %}OTP method fields hidden - no backend flow yet{% endcomment %}
 
             <div class="wizard-nav">
                 <div class="wizard-nav-left">

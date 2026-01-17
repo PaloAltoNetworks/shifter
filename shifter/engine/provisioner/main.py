@@ -515,8 +515,8 @@ def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> 
     # Execute steps manually since they're dynamically generated
     for step in steps:
         logger.info("Executing NGFW config step: %s", step.name)
-        result = ssh_executor.execute(
-            host=management_ip,
+        result = ssh_executor.run_command(
+            instance_id=management_ip,
             script=step.script,
             stdin_input=step.stdin_input,
             timeout_seconds=step.timeout_seconds,
@@ -586,8 +586,8 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     # Execute steps manually since they're dynamically generated
     for step in steps:
         logger.info("Executing NGFW remove step: %s", step.name)
-        result = ssh_executor.execute(
-            host=management_ip,
+        result = ssh_executor.run_command(
+            instance_id=management_ip,
             script=step.script,
             stdin_input=step.stdin_input,
             timeout_seconds=step.timeout_seconds,

@@ -1169,6 +1169,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "dcAmiId": os.environ.get("DC_AMI_ID", ""),
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
         "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
+        "firewallEndpointId": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
         "portalVpcCidr": os.environ.get("PORTAL_VPC_CIDR", ""),
         "portalVpcPeeringId": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
     }
@@ -1780,19 +1781,20 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     aws_executor = AWSExecutor()
     gwlb_plan = GWLBSetupPlan()
 
-    # Build context for GWLB setup - needs target_group_arn and ec2_instance_id
-    ec2_instance_id = output_data.get("ec2_instance_id")
+    # Build context for GWLB setup - needs target_group_arn and dataplane_ip
+    # VM-Series requires GENEVE traffic on data ENI, not management ENI
+    dataplane_ip = output_data.get("dataplane_ip")
     target_group_arn = output_data.get("target_group_arn")
 
     if not target_group_arn:
         raise RuntimeError("NGFW stack missing target_group_arn output")
-    if not ec2_instance_id:
-        raise RuntimeError("NGFW stack missing ec2_instance_id output")
+    if not dataplane_ip:
+        raise RuntimeError("NGFW stack missing dataplane_ip output")
 
     # Execute GWLB setup steps directly via AWSExecutor
     gwlb_context = {
         "target_group_arn": target_group_arn,
-        "target_id": ec2_instance_id,
+        "target_id": dataplane_ip,
     }
 
     for step in gwlb_plan.steps:

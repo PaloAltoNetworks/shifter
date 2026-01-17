@@ -18,6 +18,7 @@ instances:
 subnets:
   - name: attack
     instances: [Attacker]
+    connected_to: [target]
 
   - name: target
     instances: [Workstation]

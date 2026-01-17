@@ -934,6 +934,35 @@ class NetworkComponent(pulumi.ComponentResource):
             opts=opts or pulumi.ResourceOptions(parent=self),
         )
 
+    def add_blackhole_route(
+        self,
+        name: str,
+        destination_cidr: pulumi.Output[str],
+        opts: pulumi.ResourceOptions | None = None,
+    ) -> aws.ec2.Route:
+        """Add a blackhole route to drop traffic to a destination.
+
+        Creates a route that drops all traffic to the specified CIDR,
+        preventing direct communication between non-connected subnets.
+
+        Args:
+            name: Unique resource name for this route.
+            destination_cidr: The destination CIDR block to blackhole.
+            opts: Optional Pulumi resource options.
+
+        Returns:
+            The created Route resource.
+        """
+        logger.debug("Adding blackhole route %s", name)
+
+        return aws.ec2.Route(
+            name,
+            route_table_id=self.route_table.id,
+            destination_cidr_block=destination_cidr,
+            opts=opts or pulumi.ResourceOptions(parent=self),
+            # No target = blackhole route
+        )
+
     def _register_outputs(self) -> None:
         """Register Pulumi outputs."""
         self.register_outputs(

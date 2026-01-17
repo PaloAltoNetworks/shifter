@@ -67,13 +67,13 @@ class GWLBSetupPlan:
         if not target_group_arn:
             raise ValueError("Instance missing required 'target_group_arn' attribute")
 
-        # Use instance_id for target registration
-        # (target_type="instance" in target group)
-        instance_id = getattr(instance, "instance_id", None)
-        if not instance_id:
-            raise ValueError("Instance missing 'instance_id' - required for target registration")
+        # Use dataplane_ip for target registration (target_type="ip" in target group)
+        # VM-Series NGFW requires GENEVE traffic on data ENI, not management ENI
+        dataplane_ip = getattr(instance, "dataplane_ip", None)
+        if not dataplane_ip:
+            raise ValueError("Instance missing 'dataplane_ip' - required for IP-based target registration")
 
         return {
             "target_group_arn": target_group_arn,
-            "target_id": instance_id,
+            "target_id": dataplane_ip,
         }

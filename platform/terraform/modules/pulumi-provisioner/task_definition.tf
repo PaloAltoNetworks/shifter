@@ -41,6 +41,7 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "DC_DOMAIN_PASSWORD", value = var.dc_domain_password },
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
       { name = "S3_ENDPOINT_ID", value = var.s3_endpoint_id },
+      { name = "FIREWALL_ENDPOINT_ID", value = var.firewall_endpoint_id },
       { name = "PORTAL_VPC_CIDR", value = var.portal_vpc_cidr },
       { name = "PORTAL_VPC_PEERING_ID", value = var.portal_vpc_peering_id },
       { name = "KALI_INSTANCE_TYPE", value = var.kali_instance_type },

@@ -257,6 +257,12 @@ variable "s3_endpoint_id" {
   default     = ""
 }
 
+variable "firewall_endpoint_id" {
+  description = "AWS Network Firewall endpoint ID for internet egress from range subnets"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # Portal VPC Configuration (for terminal SSH access)
 # ------------------------------------------------------------------------------

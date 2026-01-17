@@ -54,10 +54,10 @@ def _get_user(request: HttpRequest) -> User:
 @login_required
 @require_GET
 def dashboard(request: HttpRequest) -> HttpResponse:
-    """Main dashboard - launch and manage ranges."""
+    """Ranges page - launch and manage cyber ranges."""
     context = {
-        "page_title": "Dashboard",
-        "active_nav": "dashboard",
+        "page_title": "Ranges",
+        "active_nav": "ranges",
         "provisioning_timeout_ms": django_settings.PROVISIONING_TIMEOUT_MS,
     }
     return render(request, "mission_control/dashboard.html", context)

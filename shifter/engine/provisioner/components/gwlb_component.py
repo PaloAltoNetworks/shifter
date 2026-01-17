@@ -144,10 +144,10 @@ class GWLBComponent(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self, depends_on=[self.gwlb, self.target_group]),
         )
 
-        # Create VPC Endpoint Service with acceptance required
+        # Create VPC Endpoint Service with auto-accept (same account)
         self.endpoint_service = aws.ec2.VpcEndpointService(
             f"{name}-vpce-svc",
-            acceptance_required=True,
+            acceptance_required=False,
             gateway_load_balancer_arns=[self.gwlb.arn],
             tags=tags,
             opts=pulumi.ResourceOptions(parent=self, depends_on=[self.gwlb]),

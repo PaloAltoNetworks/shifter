@@ -374,6 +374,7 @@ class RangeStack(pulumi.ComponentResource):
                 subnet_size=28,  # All range subnets use /28
                 gwlb_service_name=config.gwlb_service_name,
                 s3_endpoint_id=config.s3_endpoint_id,
+                firewall_endpoint_id=config.firewall_endpoint_id,
                 portal_vpc_cidr=config.portal_vpc_cidr,
                 portal_vpc_peering_id=config.portal_vpc_peering_id,
                 allocated_cidr=subnet_cidr,

@@ -20,7 +20,7 @@ class MockGWLBInstance:
     target_group_arn: str = "arn:aws:elasticloadbalancing:us-east-2:123456789012:targetgroup/test"
     ngfw_data_eni_id: str = "eni-12345"
     ngfw_instance_id: str = "i-12345"
-    instance_id: str = "i-12345"  # Used by GWLBSetupPlan.get_context()
+    dataplane_ip: str = "10.0.2.100"  # Used by GWLBSetupPlan.get_context() for IP-based target
 
 
 class TestGWLBSetupPlanSteps:
@@ -143,26 +143,27 @@ class TestGWLBSetupPlanContext:
         assert context["target_group_arn"] == "arn:aws:test"
 
     def test_get_context_returns_target_id(self):
-        """get_context should return target ID from instance_id."""
+        """get_context should return target ID from dataplane_ip."""
         from plans.gwlb_setup import GWLBSetupPlan
 
         plan = GWLBSetupPlan()
-        instance = MockGWLBInstance(instance_id="i-99999")
+        instance = MockGWLBInstance(dataplane_ip="10.0.2.50")
         context = plan.get_context(instance)
 
         assert "target_id" in context
-        assert context["target_id"] == "i-99999"
+        assert context["target_id"] == "10.0.2.50"
 
-    def test_get_context_uses_instance_id_for_target(self):
-        """get_context should use instance_id for target registration."""
+    def test_get_context_uses_dataplane_ip_for_target(self):
+        """get_context should use dataplane_ip for target registration."""
         from plans.gwlb_setup import GWLBSetupPlan
 
         plan = GWLBSetupPlan()
-        instance = MockGWLBInstance(instance_id="i-12345")
+        instance = MockGWLBInstance(dataplane_ip="10.0.2.100")
         context = plan.get_context(instance)
 
-        # GWLB targets use instance_id (target_type="instance" in target group)
-        assert context["target_id"] == "i-12345"
+        # GWLB targets use dataplane_ip (target_type="ip" in target group)
+        # VM-Series requires GENEVE traffic on data ENI, not management ENI
+        assert context["target_id"] == "10.0.2.100"
 
     def test_get_context_missing_target_group_raises(self):
         """get_context should raise if target_group_arn is missing."""
@@ -176,14 +177,14 @@ class TestGWLBSetupPlanContext:
             plan.get_context(instance)
 
     def test_get_context_missing_target_id_raises(self):
-        """get_context should raise if instance_id is missing."""
+        """get_context should raise if dataplane_ip is missing."""
         from plans.gwlb_setup import GWLBSetupPlan
 
         plan = GWLBSetupPlan()
         instance = MockGWLBInstance()
-        instance.instance_id = None
+        instance.dataplane_ip = None
 
-        with pytest.raises(ValueError, match="instance_id"):
+        with pytest.raises(ValueError, match="dataplane_ip"):
             plan.get_context(instance)
 
 

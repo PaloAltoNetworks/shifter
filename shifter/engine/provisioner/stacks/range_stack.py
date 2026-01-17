@@ -499,6 +499,74 @@ class RangeStack(pulumi.ComponentResource):
             len(connected_pairs),
         )
 
+        # Add blackhole routes for non-connected pairs
+        self._add_blackhole_routes(name, config, connected_pairs)
+
+    def _add_blackhole_routes(
+        self,
+        name: str,
+        config: RangeConfig,
+        connected_pairs: list[tuple[str, str]],
+    ) -> None:
+        """Add blackhole routes for non-connected subnet pairs.
+
+        For subnets that are NOT in connected_to, adds routes that drop
+        traffic, preventing direct communication via VPC local routing.
+
+        Args:
+            name: Pulumi resource name prefix.
+            config: Range configuration with subnets.
+            connected_pairs: List of connected (subnet_a, subnet_b) tuples.
+        """
+        if len(self.networks) < 2:
+            return
+
+        # Build set of connected pairs for O(1) lookup
+        connected_set = {frozenset(pair) for pair in connected_pairs}
+
+        # Get all possible pairs
+        subnet_names = list(self.networks.keys())
+        blackhole_count = 0
+
+        for i, subnet_a in enumerate(subnet_names):
+            for subnet_b in subnet_names[i + 1 :]:
+                pair_key = frozenset([subnet_a, subnet_b])
+                if pair_key in connected_set:
+                    continue  # Connected pair, skip
+
+                network_a = self.networks[subnet_a]
+                network_b = self.networks[subnet_b]
+
+                # Blackhole A → B
+                route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-blackhole"
+                network_a.add_blackhole_route(
+                    route_ab_name,
+                    network_b.subnet_cidr,
+                    opts=pulumi.ResourceOptions(
+                        parent=self,
+                        depends_on=[network_a.route_table, network_b.subnet],
+                    ),
+                )
+                blackhole_count += 1
+
+                # Blackhole B → A
+                route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-blackhole"
+                network_b.add_blackhole_route(
+                    route_ba_name,
+                    network_a.subnet_cidr,
+                    opts=pulumi.ResourceOptions(
+                        parent=self,
+                        depends_on=[network_b.route_table, network_a.subnet],
+                    ),
+                )
+                blackhole_count += 1
+
+        if blackhole_count > 0:
+            logger.info(
+                "Added %d blackhole routes for non-connected subnet pairs",
+                blackhole_count,
+            )
+
     def _validate_config(self, config: RangeConfig) -> None:
         """Validate config has required fields for instance types present.
 

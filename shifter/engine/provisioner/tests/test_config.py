@@ -84,13 +84,17 @@ class TestGetRangeFromDb:
             with pytest.raises(ValueError, match="Range 999 not found"):
                 get_range_from_db(999)
 
-    def test_ngfw_flag_from_gwlb_endpoint(
+    def test_ngfw_flag_from_range_config(
         self, mock_boto3_clients, mock_env_vars_minimal, sample_db_range_row_with_ngfw
     ):
-        """Range with gwlb_endpoint_id should have ngfw_enabled=True."""
+        """Range with ngfw: true in range_config should have ngfw_enabled=True."""
         with patch("psycopg.connect") as mock_connect:
             mock_cursor = MagicMock()
-            mock_cursor.fetchone.return_value = sample_db_range_row_with_ngfw
+            # First call returns range row, second call returns NGFW service name
+            mock_cursor.fetchone.side_effect = [
+                sample_db_range_row_with_ngfw,
+                ("com.amazonaws.vpce.us-east-2.vpce-svc-test123",),  # NGFW lookup
+            ]
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
             mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
@@ -101,6 +105,7 @@ class TestGetRangeFromDb:
             result = get_range_from_db(42)
 
             assert result["ngfw_enabled"] is True
+            assert result["gwlb_service_name"] == "com.amazonaws.vpce.us-east-2.vpce-svc-test123"
 
 
 class TestDataclassDefaults:

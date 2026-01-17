@@ -348,7 +348,7 @@ class RangeStack(pulumi.ComponentResource):
         )
 
         for idx, subnet_config in enumerate(config.subnets):
-            network_name = f"{name}-{subnet_config.name}"
+            network_name = f"{name}-net-{subnet_config.name}"
             subnet_cidr = allocated_cidrs[idx]
 
             logger.debug(
@@ -461,8 +461,8 @@ class RangeStack(pulumi.ComponentResource):
                 )
                 continue
 
-            # Route A → B (in A's route table, destination is B's CIDR)
-            route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-route"
+            # Route A → B (in A's route table, destination is B's CIDR, via GWLB)
+            route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-gwlb"
             network_a.add_route_to_subnet(
                 route_ab_name,
                 network_b.subnet_cidr,
@@ -477,8 +477,8 @@ class RangeStack(pulumi.ComponentResource):
             )
             route_count += 1
 
-            # Route B → A (in B's route table, destination is A's CIDR)
-            route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-route"
+            # Route B → A (in B's route table, destination is A's CIDR, via GWLB)
+            route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-gwlb"
             network_b.add_route_to_subnet(
                 route_ba_name,
                 network_a.subnet_cidr,
@@ -537,8 +537,8 @@ class RangeStack(pulumi.ComponentResource):
                 network_a = self.networks[subnet_a]
                 network_b = self.networks[subnet_b]
 
-                # Blackhole A → B
-                route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-blackhole"
+                # Blackhole A → B (drop traffic from A to B)
+                route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-drop"
                 network_a.add_blackhole_route(
                     route_ab_name,
                     network_b.subnet_cidr,
@@ -549,8 +549,8 @@ class RangeStack(pulumi.ComponentResource):
                 )
                 blackhole_count += 1
 
-                # Blackhole B → A
-                route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-blackhole"
+                # Blackhole B → A (drop traffic from B to A)
+                route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-drop"
                 network_b.add_blackhole_route(
                     route_ba_name,
                     network_a.subnet_cidr,

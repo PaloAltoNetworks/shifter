@@ -103,9 +103,9 @@ def _provision_range() -> None:
         len(config.subnets),
     )
 
-    # Create the range stack
+    # Create the range stack (rng{id} prefix for shorter, clearer resource names)
     range_stack = RangeStack(
-        f"range-{config.range_id}",
+        f"rng{config.range_id}",
         config=config,
     )
 

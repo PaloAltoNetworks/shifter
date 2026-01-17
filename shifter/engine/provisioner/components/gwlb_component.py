@@ -118,7 +118,7 @@ class GWLBComponent(pulumi.ComponentResource):
             port=6081,
             protocol="GENEVE",
             vpc_id=vpc_id,
-            target_type="instance",
+            target_type="ip",  # VM-Series requires data ENI IP, not instance ID
             health_check=aws.lb.TargetGroupHealthCheckArgs(
                 port="443",
                 protocol="HTTPS",

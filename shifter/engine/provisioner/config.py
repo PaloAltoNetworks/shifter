@@ -178,6 +178,8 @@ class RangeConfig:
     ngfw_security_group_id: str = ""
     # S3 VPC endpoint for agent downloads (Gateway endpoint ID)
     s3_endpoint_id: str = ""
+    # AWS Network Firewall endpoint ID for internet egress from range subnets
+    firewall_endpoint_id: str = ""
 
 
 @dataclass
@@ -613,6 +615,8 @@ def load_config() -> RangeConfig:
         ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
         # S3 VPC endpoint for agent downloads
         s3_endpoint_id=config.get("s3EndpointId") or "",
+        # AWS Network Firewall endpoint for internet egress
+        firewall_endpoint_id=config.get("firewallEndpointId") or "",
     )
 
 

@@ -85,6 +85,11 @@ output "firewall_arn" {
   value       = module.vpc.firewall_arn
 }
 
+output "firewall_endpoint_id" {
+  description = "ID of the Network Firewall endpoint (null if firewall disabled)"
+  value       = module.vpc.firewall_endpoint_id
+}
+
 # ------------------------------------------------------------------------------
 # Pulumi State Backend
 # ------------------------------------------------------------------------------

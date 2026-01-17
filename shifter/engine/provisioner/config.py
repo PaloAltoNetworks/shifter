@@ -298,7 +298,8 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
 
     Returns range data with the new schema where range_config contains
     the full RangeSpec (scenario_id, user_id, subnets with instances).
-    Also looks up gwlb_service_name from the linked UserNGFW if present.
+    Also looks up gwlb_service_name from the user's active NGFW if the
+    scenario has ngfw: true.
 
     Args:
         range_id: Database ID of the range.
@@ -319,8 +320,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                     r.id,
                     r.user_id,
                     r.uuid,
-                    r.range_config,
-                    r.gwlb_endpoint_id
+                    r.range_config
                 FROM mission_control_range r
                 WHERE r.id = %s
                 """,
@@ -332,20 +332,24 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             raise ValueError(f"Range {range_id} not found")
 
         user_id = row[1]
-        gwlb_endpoint_id = row[4] or ""
+        range_config = row[3] or {}
 
-        # Look up gwlb_service_name from user's active NGFW
+        # Check if scenario requires NGFW (ngfw: true in range_config)
+        ngfw_enabled = range_config.get("ngfw", False)
+
+        # Look up gwlb_service_name from user's active NGFW in engine_instance
         gwlb_service_name = ""
-        if gwlb_endpoint_id:
+        if ngfw_enabled:
             cur.execute(
                 """
-                SELECT gwlb_service_name
-                FROM mission_control_userngfw
-                WHERE user_id = %s
-                  AND status IN ('ready', 'active')
-                  AND gwlb_service_name != ''
-                  AND deleted_at IS NULL
-                ORDER BY created_at DESC
+                SELECT ei.state->>'service_name'
+                FROM engine_instance ei
+                JOIN engine_request er ON ei.request_id = er.id
+                WHERE er.user_id = %s
+                  AND ei.role = 'ngfw'
+                  AND ei.status = 'active'
+                  AND ei.state->>'service_name' IS NOT NULL
+                ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,
                 (user_id,),
@@ -360,7 +364,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                 )
             else:
                 logger.warning(
-                    "Range %d has gwlb_endpoint_id but no active NGFW found for user %d",
+                    "Range %d has ngfw=true but no active NGFW found for user %d",
                     range_id,
                     user_id,
                 )
@@ -369,8 +373,8 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             "id": row[0],
             "user_id": user_id,
             "request_uuid": str(row[2]) if row[2] else "",
-            "range_config": row[3],  # Full RangeSpec JSON with subnets
-            "ngfw_enabled": bool(gwlb_endpoint_id),
+            "range_config": range_config,
+            "ngfw_enabled": ngfw_enabled,
             "gwlb_service_name": gwlb_service_name,
         }
 

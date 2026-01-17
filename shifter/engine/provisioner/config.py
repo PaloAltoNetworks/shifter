@@ -331,15 +331,47 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             logger.error("Range %d not found in database", range_id)
             raise ValueError(f"Range {range_id} not found")
 
-        # NGFW is now provisioned separately - gwlb_endpoint_id indicates integration
+        user_id = row[1]
         gwlb_endpoint_id = row[4] or ""
+
+        # Look up gwlb_service_name from user's active NGFW
+        gwlb_service_name = ""
+        if gwlb_endpoint_id:
+            cur.execute(
+                """
+                SELECT gwlb_service_name
+                FROM mission_control_userngfw
+                WHERE user_id = %s
+                  AND status IN ('ready', 'active')
+                  AND gwlb_service_name != ''
+                  AND deleted_at IS NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            ngfw_row = cur.fetchone()
+            if ngfw_row:
+                gwlb_service_name = ngfw_row[0] or ""
+                logger.debug(
+                    "Found gwlb_service_name=%s for user %d",
+                    gwlb_service_name,
+                    user_id,
+                )
+            else:
+                logger.warning(
+                    "Range %d has gwlb_endpoint_id but no active NGFW found for user %d",
+                    range_id,
+                    user_id,
+                )
+
         result = {
             "id": row[0],
-            "user_id": row[1],
+            "user_id": user_id,
             "request_uuid": str(row[2]) if row[2] else "",
             "range_config": row[3],  # Full RangeSpec JSON with subnets
             "ngfw_enabled": bool(gwlb_endpoint_id),
-            "gwlb_service_name": "",  # No longer stored on range; NGFW owns this
+            "gwlb_service_name": gwlb_service_name,
         }
 
         logger.debug(

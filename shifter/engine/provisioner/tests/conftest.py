@@ -647,7 +647,7 @@ def sample_db_range_row():
     """Sample database row for a range with subnets (new format).
 
     Returns tuple matching get_range_from_db query:
-    (id, user_id, uuid, range_config, gwlb_endpoint_id)
+    (id, user_id, uuid, range_config)
     """
     return (
         42,  # id
@@ -676,18 +676,18 @@ def sample_db_range_row():
                 },
             ]
         },
-        None,  # gwlb_endpoint_id (no NGFW)
     )
 
 
 @pytest.fixture
 def sample_db_range_row_with_ngfw():
-    """Sample database row for a range with NGFW enabled (has gwlb_endpoint_id)."""
+    """Sample database row for a range with NGFW enabled (ngfw: true in range_config)."""
     return (
         42,  # id
         1,  # user_id
         "request-uuid-ngfw-12345",  # uuid
         {  # range_config
+            "ngfw": True,  # Indicates NGFW scenario
             "subnets": [
                 {
                     "name": "attack",
@@ -701,9 +701,8 @@ def sample_db_range_row_with_ngfw():
                     "instances": [{"uuid": "inst-uuid-002", "role": "victim", "os_type": "ubuntu"}],
                     "connected_to": [],
                 },
-            ]
+            ],
         },
-        "gwlbe-12345678901234567",  # gwlb_endpoint_id (indicates NGFW)
     )
 
 
@@ -730,7 +729,6 @@ def sample_db_range_row_no_agent():
                 },
             ]
         },
-        None,  # gwlb_endpoint_id (no NGFW)
     )
 
 
@@ -742,6 +740,7 @@ def sample_db_range_row_multi_subnet():
         3,  # user_id
         "request-uuid-multi-subnet",  # uuid
         {  # range_config
+            "ngfw": True,  # Indicates NGFW scenario
             "subnets": [
                 {
                     "name": "attack",
@@ -791,9 +790,8 @@ def sample_db_range_row_multi_subnet():
                     ],
                     "connected_to": [],
                 },
-            ]
+            ],
         },
-        "gwlbe-multi-subnet12345",  # gwlb_endpoint_id (indicates NGFW)
     )
 
 

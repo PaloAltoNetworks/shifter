@@ -384,21 +384,55 @@ class RangeStack(pulumi.ComponentResource):
         # Add inter-subnet routes to force all inter-subnet traffic through GWLB
         self._add_inter_subnet_routes(name, config)
 
+    def _get_connected_pairs(self, config: RangeConfig) -> list[tuple[str, str]]:
+        """Build deduplicated list of connected subnet pairs from config.
+
+        Connection is symmetric: if A lists B in connected_to OR B lists A,
+        they're connected bidirectionally. Uses frozenset for O(1) deduplication.
+
+        Args:
+            config: Range configuration with subnets.
+
+        Returns:
+            List of (subnet_a, subnet_b) tuples, sorted alphabetically,
+            with no duplicates.
+        """
+        subnet_names = {s.name for s in config.subnets}
+        seen: set[frozenset[str]] = set()
+        pairs: list[tuple[str, str]] = []
+
+        for subnet in config.subnets:
+            src = subnet.name
+            for dst in subnet.connected_to:
+                if dst not in subnet_names:
+                    logger.warning(
+                        "Subnet '%s' references unknown subnet '%s' in connected_to",
+                        src,
+                        dst,
+                    )
+                    continue  # Skip invalid references
+                pair_key = frozenset([src, dst])
+                if pair_key not in seen:
+                    seen.add(pair_key)
+                    # Sort for consistent naming
+                    a, b = sorted([src, dst])
+                    pairs.append((a, b))
+
+        return pairs
+
     def _add_inter_subnet_routes(self, name: str, config: RangeConfig) -> None:
-        """Add routes from each subnet to all other subnets through GWLB.
+        """Add bidirectional routes between connected subnets through GWLB.
 
-        This forces ALL inter-subnet traffic through the NGFW, overriding
-        AWS's implicit local VPC route. Without these explicit routes,
-        traffic between subnets (e.g., 10.1.2.0/28 → 10.1.3.0/28) would
-        use the local route and bypass the NGFW entirely.
+        Only creates routes between subnets that are connected via the
+        connected_to relationship. This forces inter-subnet traffic through
+        the NGFW for inspection, overriding AWS's implicit local VPC route.
 
-        The NGFW policies (based on connected_to) determine what traffic
-        is allowed; this routing ensures ALL inter-subnet traffic is
-        inspected by the NGFW first.
+        Connection is symmetric: if A lists B in connected_to OR B lists A,
+        routes are created in both directions (A→B and B→A).
 
         Args:
             name: Pulumi resource name prefix.
-            config: Range configuration.
+            config: Range configuration with subnets and connected_to.
         """
         if not config.gwlb_service_name:
             logger.debug("No GWLB configured, skipping inter-subnet routes")
@@ -408,38 +442,61 @@ class RangeStack(pulumi.ComponentResource):
             logger.debug("Only one subnet, no inter-subnet routes needed")
             return
 
-        subnet_names = list(self.networks.keys())
+        connected_pairs = self._get_connected_pairs(config)
+        if not connected_pairs:
+            logger.debug("No connected subnet pairs, skipping inter-subnet routes")
+            return
+
         route_count = 0
 
-        for src_name in subnet_names:
-            src_network = self.networks[src_name]
+        for subnet_a, subnet_b in connected_pairs:
+            network_a = self.networks.get(subnet_a)
+            network_b = self.networks.get(subnet_b)
 
-            for dst_name in subnet_names:
-                if src_name == dst_name:
-                    continue  # Skip routes to self
-
-                dst_network = self.networks[dst_name]
-
-                # Add route from src subnet to dst subnet's CIDR via GWLB
-                route_name = f"{name}-{src_name}-to-{dst_name}-route"
-                src_network.add_route_to_subnet(
-                    route_name,
-                    dst_network.subnet_cidr,
-                    opts=pulumi.ResourceOptions(
-                        parent=self,
-                        depends_on=[
-                            src_network.route_table,
-                            src_network.gwlb_endpoint,
-                            dst_network.subnet,
-                        ],
-                    ),
+            if not network_a or not network_b:
+                logger.warning(
+                    "Skipping route pair %s<->%s: network not found",
+                    subnet_a,
+                    subnet_b,
                 )
-                route_count += 1
+                continue
+
+            # Route A → B (in A's route table, destination is B's CIDR)
+            route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-route"
+            network_a.add_route_to_subnet(
+                route_ab_name,
+                network_b.subnet_cidr,
+                opts=pulumi.ResourceOptions(
+                    parent=self,
+                    depends_on=[
+                        network_a.route_table,
+                        network_a.gwlb_endpoint,
+                        network_b.subnet,
+                    ],
+                ),
+            )
+            route_count += 1
+
+            # Route B → A (in B's route table, destination is A's CIDR)
+            route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-route"
+            network_b.add_route_to_subnet(
+                route_ba_name,
+                network_a.subnet_cidr,
+                opts=pulumi.ResourceOptions(
+                    parent=self,
+                    depends_on=[
+                        network_b.route_table,
+                        network_b.gwlb_endpoint,
+                        network_a.subnet,
+                    ],
+                ),
+            )
+            route_count += 1
 
         logger.info(
-            "Added %d inter-subnet routes for %d subnets",
+            "Added %d inter-subnet routes for %d connected pairs",
             route_count,
-            len(subnet_names),
+            len(connected_pairs),
         )
 
     def _validate_config(self, config: RangeConfig) -> None:

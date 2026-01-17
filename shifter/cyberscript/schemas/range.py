@@ -244,9 +244,11 @@ class RangeSpec(RangeSpecBase):
 
     Attributes:
         range_type: Discriminator field, always 'demo'.
+        ngfw: Whether this range requires NGFW traffic inspection.
     """
 
     range_type: Literal["demo"] = "demo"
+    ngfw: bool = False
 
 
 # =============================================================================

@@ -309,12 +309,12 @@ class AWSExecutor:
             logger.exception("wait_for_running: unexpected error instance_id=%s", instance_id)
             return CommandResult(success=False, stdout="", stderr=str(e))
 
-    def wait_for_stopped(self, instance_id: str, timeout: int = 300) -> CommandResult:
+    def wait_for_stopped(self, instance_id: str, timeout: int = 900) -> CommandResult:
         """Wait for an EC2 instance to reach the 'stopped' state.
 
         Args:
             instance_id: The EC2 instance ID to wait for.
-            timeout: Maximum time to wait in seconds (default 300).
+            timeout: Maximum time to wait in seconds (default 900 for NGFW graceful shutdown).
 
         Returns:
             CommandResult with success status.

@@ -242,6 +242,7 @@ def write_provisioned_state(
     range_id: int,
     subnets: dict[str, dict],
     instances: list[dict],
+    ngfw_instance_id: int | None = None,
 ) -> None:
     """Write provisioned infrastructure state directly to database.
 
@@ -252,6 +253,7 @@ def write_provisioned_state(
         range_id: The range ID being provisioned.
         subnets: Dict of subnet_name -> subnet details with uuid and AWS resource IDs.
         instances: List of instance dicts with uuid, instance_id, private_ip, etc.
+        ngfw_instance_id: ID of the NGFW Instance this range is attached to (if any).
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -326,14 +328,14 @@ def write_provisioned_state(
                     }
                 )
 
-            # Update Range.provisioned_instances for backwards compatibility
+            # Update Range.provisioned_instances and ngfw_instance_id
             cur.execute(
                 """
                 UPDATE mission_control_range
-                SET provisioned_instances = %s, updated_at = NOW()
+                SET provisioned_instances = %s, ngfw_instance_id = %s, updated_at = NOW()
                 WHERE id = %s
                 """,
-                (json.dumps(provisioned_instances), range_id),
+                (json.dumps(provisioned_instances), ngfw_instance_id, range_id),
             )
             if cur.rowcount == 0:
                 raise ValueError(f"No mission_control_range record found for id={range_id}")
@@ -699,6 +701,7 @@ def get_range_data_by_request_id(request_id: str) -> dict:
             - spec: JSON dict (range_config)
             - subnet_index: Allocated subnet index
             - status: Current Range status
+            - ngfw_instance_id: ID of the NGFW Instance if ngfw is enabled and available
 
     Raises:
         ValueError: If Request or Range not found.
@@ -722,13 +725,39 @@ def get_range_data_by_request_id(request_id: str) -> dict:
         row = cur.fetchone()
         if not row:
             raise ValueError(f"Range request not found: {request_id}")
+
+        range_config = row[3] if row[3] else {}
+        user_id = row[2]
+        ngfw_instance_id = None
+
+        # Look up NGFW instance ID if ngfw is enabled
+        if range_config.get("ngfw", False):
+            cur.execute(
+                """
+                SELECT ei.id
+                FROM engine_instance ei
+                JOIN engine_request er ON ei.request_id = er.id
+                WHERE er.user_id = %s
+                  AND ei.role = 'ngfw'
+                  AND ei.status = 'active'
+                  AND ei.state->>'service_name' IS NOT NULL
+                ORDER BY ei.created_at DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            ngfw_row = cur.fetchone()
+            if ngfw_row:
+                ngfw_instance_id = ngfw_row[0]
+
         return {
             "request_id": str(row[0]),
             "range_id": row[1],
-            "user_id": row[2],
-            "spec": row[3] if row[3] else {},
+            "user_id": user_id,
+            "spec": range_config,
             "subnet_index": row[4],
             "status": row[5],
+            "ngfw_instance_id": ngfw_instance_id,
         }
 
 
@@ -1288,6 +1317,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
         range_id=range_id,
         subnets=subnets_output,
         instances=instances_output,
+        ngfw_instance_id=range_data.get("ngfw_instance_id"),
     )
 
     # Publish notification-only ready event

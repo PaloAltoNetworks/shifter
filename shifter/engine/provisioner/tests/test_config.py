@@ -93,7 +93,7 @@ class TestGetRangeFromDb:
             # First call returns range row, second call returns NGFW service name
             mock_cursor.fetchone.side_effect = [
                 sample_db_range_row_with_ngfw,
-                ("com.amazonaws.vpce.us-east-2.vpce-svc-test123",),  # NGFW lookup
+                ("com.amazonaws.vpce.us-east-2.vpce-svc-test123", 123),  # NGFW lookup: (service_name, instance_id)
             ]
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)

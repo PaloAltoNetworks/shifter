@@ -208,6 +208,51 @@ resource "aws_networkfirewall_rule_group" "block_ip_sni" {
 }
 
 # ------------------------------------------------------------------------------
+# Drop All Unmatched Traffic (default deny)
+# ------------------------------------------------------------------------------
+
+resource "aws_networkfirewall_rule_group" "drop_all" {
+  count = var.enable_network_firewall ? 1 : 0
+
+  capacity = 10
+  name     = "${var.name_prefix}-drop-all"
+  type     = "STATEFUL"
+
+  rule_group {
+    rule_variables {
+      ip_sets {
+        key = "HOME_NET"
+        ip_set {
+          definition = [var.vpc_cidr]
+        }
+      }
+      ip_sets {
+        key = "EXTERNAL_NET"
+        ip_set {
+          definition = ["0.0.0.0/0"]
+        }
+      }
+    }
+
+    rules_source {
+      # Drop all outbound traffic that wasn't explicitly allowed by previous rules
+      # This enforces the allowlist - only traffic to allowed domains passes
+      rules_string = <<-EOT
+        drop ip $HOME_NET any -> $EXTERNAL_NET any (msg:"Drop all unmatched egress"; sid:9999999; rev:1;)
+      EOT
+    }
+
+    stateful_rule_options {
+      rule_order = "DEFAULT_ACTION_ORDER"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-drop-all"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Network Firewall Policy
 # ------------------------------------------------------------------------------
 
@@ -226,8 +271,12 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       rule_order = "DEFAULT_ACTION_ORDER"
     }
 
-    # With DEFAULT_ACTION_ORDER, unmatched traffic is dropped after rules are evaluated
-    # This allows the domain allowlist to work properly
+    # Rule evaluation order (DEFAULT_ACTION_ORDER evaluates all rules):
+    # 1. NGFW bypass - pass all from NGFW subnet
+    # 2. Block IP SNI - reject TLS with IP as SNI
+    # 3. Victim domains - allow listed domains
+    # 4. Kali domains - allow listed domains (if configured)
+    # 5. Drop all - drop everything else (default deny)
 
     # NGFW bypass - allow all egress for SCM/licensing (must be first)
     dynamic "stateful_rule_group_reference" {
@@ -253,6 +302,11 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       content {
         resource_arn = aws_networkfirewall_rule_group.kali_domains[0].arn
       }
+    }
+
+    # Drop all unmatched traffic (default deny - must be last)
+    stateful_rule_group_reference {
+      resource_arn = aws_networkfirewall_rule_group.drop_all[0].arn
     }
   }
 

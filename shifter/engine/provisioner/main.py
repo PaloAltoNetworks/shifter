@@ -1563,12 +1563,11 @@ def _run_complete_setup(request_id: str) -> None:
     has manually associated the device in Strata Cloud Manager and XDR.
 
     Flow:
-    1. Start NGFW if stopped (AWS)
+    1. Start NGFW if stopped, wait if in transitional state (AWS)
     2. Wait for SSH connectivity
     3. Fetch license (SSH) - retrieves Logging Service license from CDL
-    4. Wait 10 minutes for CSP certificate sync
-    5. Poll for valid device certificate (SSH)
-    6. Mark NGFW as ready and auto-stop
+    4. Poll for valid device certificate (SSH)
+    5. Mark NGFW as ready and auto-stop
 
     Args:
         request_id: UUID string of the Request.
@@ -1576,19 +1575,19 @@ def _run_complete_setup(request_id: str) -> None:
     Raises:
         RuntimeError: If any step fails.
     """
-    import time
 
     logger.info("_run_complete_setup: starting request_id=%s", request_id)
 
     # Get NGFW data from database
     ngfw_data = get_ngfw_data_by_request_id(request_id)
-    instance_uuid = ngfw_data["instance_id"]
-    app_id = ngfw_data["app_id"]
-    state = ngfw_data.get("state", {})
+    instance_uuid: str = ngfw_data["instance_id"]
+    app_id: str | None = ngfw_data["app_id"]
+    state: dict = ngfw_data.get("state", {})
+    current_status: str = ngfw_data.get("status", "")
 
-    ec2_instance_id = state.get("ec2_instance_id")
-    management_ip = state.get("management_ip")
-    ssh_key_secret_arn = state.get("ssh_key_secret_arn")
+    ec2_instance_id: str | None = state.get("ec2_instance_id")
+    management_ip: str | None = state.get("management_ip")
+    ssh_key_secret_arn: str | None = state.get("ssh_key_secret_arn")
 
     if not ec2_instance_id:
         raise RuntimeError(f"EC2 instance ID not found in state for request: {request_id}")
@@ -1596,6 +1595,14 @@ def _run_complete_setup(request_id: str) -> None:
         raise RuntimeError(f"Management IP not found in state for request: {request_id}")
     if not ssh_key_secret_arn:
         raise RuntimeError(f"SSH key secret ARN not found in state for request: {request_id}")
+
+    # Warn if already in configuring state (possible retry of failed attempt)
+    if current_status == "configuring":
+        logger.warning(
+            "_run_complete_setup: NGFW already in 'configuring' status, "
+            "possibly retrying after previous failure: request_id=%s",
+            request_id,
+        )
 
     # Update status to configuring
     update_instance_state(request_id, "configuring")
@@ -1607,24 +1614,49 @@ def _run_complete_setup(request_id: str) -> None:
     )
 
     try:
-        # 1. Start NGFW if stopped
+        # 1. Start NGFW if stopped, wait if in transitional state
         aws_executor = AWSExecutor()
-        instance_info = aws_executor.describe_instance(ec2_instance_id)
-        current_state = instance_info.get("state", "unknown")
-        logger.info("_run_complete_setup: EC2 instance state=%s", current_state)
+        result = aws_executor.describe_instance(ec2_instance_id)
+        if not result.success:
+            raise RuntimeError(f"Failed to describe instance: {result.stderr}")
+        instance_data = json.loads(result.stdout)
+        ec2_state: str = (
+            instance_data.get("Reservations", [{}])[0].get("Instances", [{}])[0].get("State", {}).get("Name", "unknown")
+        )
+        logger.info("_run_complete_setup: EC2 instance state=%s", ec2_state)
 
-        if current_state == "stopped":
+        if ec2_state == "stopped":
             logger.info("_run_complete_setup: Starting stopped NGFW instance")
             aws_executor.start_instance(ec2_instance_id)
             aws_executor.wait_for_running(ec2_instance_id)
-        elif current_state != "running":
-            raise RuntimeError(f"NGFW instance in unexpected state: {current_state}")
+        elif ec2_state in ("pending", "stopping", "shutting-down"):
+            # Instance is in a transitional state - wait for it to stabilize
+            logger.info(
+                "_run_complete_setup: Instance in transitional state '%s', waiting for stable state",
+                ec2_state,
+            )
+            if ec2_state == "pending":
+                aws_executor.wait_for_running(ec2_instance_id)
+            elif ec2_state == "stopping":
+                aws_executor.wait_for_stopped(ec2_instance_id)
+                # Now start it
+                logger.info("_run_complete_setup: Starting NGFW after it finished stopping")
+                aws_executor.start_instance(ec2_instance_id)
+                aws_executor.wait_for_running(ec2_instance_id)
+            else:  # shutting-down
+                raise RuntimeError(f"NGFW instance is shutting down (terminating): {ec2_instance_id}")
+        elif ec2_state == "running":
+            logger.info("_run_complete_setup: NGFW instance already running")
+        elif ec2_state == "terminated":
+            raise RuntimeError(f"NGFW instance has been terminated: {ec2_instance_id}")
+        else:
+            raise RuntimeError(f"NGFW instance in unexpected state: {ec2_state}")
 
         # 2. Wait for SSH connectivity
         logger.info("_run_complete_setup: Waiting for SSH on %s", management_ip)
         secrets_client = boto3.client("secretsmanager")
         secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-        private_key = secret_response["SecretString"]
+        private_key: str = secret_response["SecretString"]
 
         ssh_executor = SSHExecutor(private_key=private_key)
         ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
@@ -1641,25 +1673,25 @@ def _run_complete_setup(request_id: str) -> None:
             logger.warning("License fetch returned non-success: %s", license_result.stderr)
             # Don't fail - license fetch may report errors even when successful
 
-        logger.info("License fetch output: %s", license_result.stdout[:500] if license_result.stdout else "")
+        logger.info(
+            "License fetch output: %s",
+            license_result.stdout[:500] if license_result.stdout else "(empty)",
+        )
 
-        # 4. Wait 10 minutes for CSP certificate sync
-        wait_minutes = int(os.environ.get("NGFW_CSP_SYNC_WAIT_MINUTES", 10))
-        logger.info("_run_complete_setup: Waiting %d minutes for CSP certificate sync...", wait_minutes)
-        time.sleep(wait_minutes * 60)
-
-        # 5. Poll for valid device certificate
+        # 4. Poll for valid device certificate
+        # CSP certificate sync typically takes 10-30 minutes after license fetch.
+        # Rather than sleeping a fixed time, poll with appropriate timeout.
         logger.info("_run_complete_setup: Polling for valid device certificate")
+        poll_timeout = int(os.environ.get("NGFW_CERT_POLL_TIMEOUT", 2400))  # 40 min default
         serial_number = poll_for_serial_and_cert(
             ssh_executor=ssh_executor,
             host=management_ip,
-            timeout_seconds=1800,  # 30 min - cert validation can take time
+            timeout_seconds=poll_timeout,
             poll_interval=30,
         )
 
-        # 6. Update state and mark ready
-        state["serial_number"] = serial_number
-        update_instance_state(request_id, STATUS_READY, **state)
+        # 5. Update state and mark ready (only pass serial_number, not entire state)
+        update_instance_state(request_id, STATUS_READY, serial_number=serial_number)
         publish_ngfw_event(
             request_id=request_id,
             instance_id=instance_uuid,
@@ -1668,15 +1700,25 @@ def _run_complete_setup(request_id: str) -> None:
             serial_number=serial_number,
         )
 
-        # 7. Auto-stop NGFW to save costs
+        logger.info("_run_complete_setup: NGFW marked as ready, serial=%s", serial_number)
+
+        # 6. Auto-stop NGFW to save costs (soft failure - setup already succeeded)
         logger.info("_run_complete_setup: Auto-stopping NGFW")
-        run_ngfw_operation("stop", request_id)
+        try:
+            run_ngfw_operation("stop", request_id)
+            logger.info("_run_complete_setup: Auto-stop completed successfully")
+        except Exception:
+            logger.exception(
+                "_run_complete_setup: Auto-stop failed (non-fatal) - NGFW remains running: request_id=%s",
+                request_id,
+            )
+            # Don't re-raise - setup succeeded, stop failure is non-fatal
 
         logger.info("_run_complete_setup: Complete setup finished successfully")
 
-    except Exception as e:
-        error_msg = str(e)[:1000]
-        logger.error("_run_complete_setup failed: %s", error_msg)
+    except Exception:
+        logger.exception("_run_complete_setup failed: request_id=%s", request_id)
+        error_msg = "Complete setup failed - check logs for details"
         update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
         publish_ngfw_event(
             request_id=request_id,

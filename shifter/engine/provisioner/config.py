@@ -339,7 +339,8 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
         # Check if scenario requires NGFW (ngfw: true in range_config)
         ngfw_enabled = range_config.get("ngfw", False)
 
-        # Look up data_eni_id and ngfw_instance_id from user's active NGFW
+        # Look up data_eni_id and ngfw_instance_id from user's NGFW
+        # NGFW can be in any provisioned state - the ENI exists regardless of running state
         ngfw_data_eni_id = ""
         ngfw_instance_id = None
         if ngfw_enabled:
@@ -350,7 +351,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status = 'active'
+                  AND ei.status IN ('active', 'ready', 'stopped', 'awaiting_association')
                   AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
@@ -365,12 +366,6 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                     "Found ngfw_data_eni_id=%s, ngfw_instance_id=%s for user %d",
                     ngfw_data_eni_id,
                     ngfw_instance_id,
-                    user_id,
-                )
-            else:
-                logger.warning(
-                    "Range %d has ngfw=true but no active NGFW found for user %d",
-                    range_id,
                     user_id,
                 )
 
@@ -577,9 +572,9 @@ def load_config() -> RangeConfig:
     ngfw_enabled = bool(range_data.get("ngfw_enabled", False))
 
     if ngfw_enabled and not ngfw_data_eni_id:
-        logger.warning(
-            "Range %d has NGFW enabled but no ngfw_data_eni_id found",
-            range_id,
+        raise ValueError(
+            f"Range {range_id} requires NGFW but no NGFW with data_eni_id found for user. "
+            "User must have a provisioned NGFW before creating NGFW-enabled ranges."
         )
 
     logger.info(

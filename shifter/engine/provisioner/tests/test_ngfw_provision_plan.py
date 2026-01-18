@@ -1,6 +1,7 @@
 """Tests for NGFWProvisionPlan.
 
 NGFWProvisionPlan handles post-Pulumi NGFW configuration via SSH:
+- Configure data interface (ethernet1/1 as L3 DHCP for ENI routing)
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
 - Create security policy (allow-all rule with logging)
@@ -27,13 +28,13 @@ class TestNGFWProvisionPlanStructure:
     """Test NGFWProvisionPlan step definitions and verification."""
 
     def test_plan_structure(self):
-        """Plan should have 3 steps with proper attributes."""
+        """Plan should have 4 steps with proper attributes."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
 
-        # Should have 3 steps
-        assert len(plan.steps) == 3
+        # Should have 4 steps (interface config + logging + profile + policy)
+        assert len(plan.steps) == 4
 
         # All steps must have required attributes
         for step in plan.steps:
@@ -46,11 +47,15 @@ class TestNGFWProvisionPlanStructure:
         assert plan.verify_step is None
 
     def test_steps_in_correct_order(self):
-        """Steps must be in correct order: logging before profile."""
+        """Steps must be in correct order: interface config first, then logging before profile."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
         step_names = [s.name for s in plan.steps]
+
+        # Interface config must come first
+        interface_idx = next(i for i, n in enumerate(step_names) if "data_interface" in n)
+        assert interface_idx == 0
 
         # Cloud logging must come before log forwarding profile
         cloud_logging_idx = next(i for i, n in enumerate(step_names) if "cloud_logging" in n)

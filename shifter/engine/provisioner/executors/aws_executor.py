@@ -5,7 +5,6 @@ wrapping boto3 clients with error handling and result formatting.
 
 This executor provides specific methods for NGFW lifecycle operations:
 - EC2: start_instance, stop_instance, wait_for_running, wait_for_stopped, describe_instance
-- GWLB: register_target, deregister_target
 - VPC Endpoints: create_endpoint, delete_endpoint, describe_endpoint, wait_for_endpoint_available
 - Route Table: create_route, delete_route
 """
@@ -157,13 +156,6 @@ class AWSExecutor:
             "wait_for_running": (self.wait_for_running, ["instance_id"]),
             "wait_for_stopped": (self.wait_for_stopped, ["instance_id"]),
             "describe_instance": (self.describe_instance, ["instance_id"]),
-            # GWLB operations
-            "register_target": (self.register_target, ["target_group_arn", "target_id"]),
-            "deregister_target": (self.deregister_target, ["target_group_arn", "target_id"]),
-            "wait_for_target_healthy": (
-                self.wait_for_target_healthy,
-                ["target_group_arn", "target_id"],
-            ),
             # VPC endpoint operations
             "create_endpoint": (self.create_endpoint, ["vpc_id", "service_name", "subnet_ids"]),
             "delete_endpoint": (self.delete_endpoint, ["endpoint_id"]),
@@ -394,148 +386,7 @@ class AWSExecutor:
             return CommandResult(success=False, stdout="", stderr=str(e))
 
     # =========================================================================
-    # GWLB Operations
-    # =========================================================================
-
-    def register_target(self, target_group_arn: str, target_id: str) -> CommandResult:
-        """Register a target with a GWLB target group.
-
-        Args:
-            target_group_arn: The ARN of the target group.
-            target_id: The target ID (ENI ID for GWLB).
-
-        Returns:
-            CommandResult with success status.
-        """
-        logger.debug("register_target: target_group_arn=%s target_id=%s", target_group_arn, target_id)
-        try:
-            client = self.get_client("elbv2")
-            response = client.register_targets(
-                TargetGroupArn=target_group_arn,
-                Targets=[{"Id": target_id}],
-            )
-            logger.info("register_target: registered target_id=%s", target_id)
-            return CommandResult(
-                success=True,
-                stdout=json.dumps(response, default=str),
-                stderr="",
-            )
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("register_target: failed target_id=%s code=%s", target_id, error_code)
-            return CommandResult(
-                success=False,
-                stdout="",
-                stderr=f"{error_code}: {error_message}",
-            )
-        except Exception as e:
-            logger.exception("register_target: unexpected error target_id=%s", target_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
-
-    def deregister_target(self, target_group_arn: str, target_id: str) -> CommandResult:
-        """Deregister a target from a GWLB target group.
-
-        Args:
-            target_group_arn: The ARN of the target group.
-            target_id: The target ID (ENI ID for GWLB).
-
-        Returns:
-            CommandResult with success status.
-        """
-        logger.debug("deregister_target: target_group_arn=%s target_id=%s", target_group_arn, target_id)
-        try:
-            client = self.get_client("elbv2")
-            response = client.deregister_targets(
-                TargetGroupArn=target_group_arn,
-                Targets=[{"Id": target_id}],
-            )
-            logger.info("deregister_target: deregistered target_id=%s", target_id)
-            return CommandResult(
-                success=True,
-                stdout=json.dumps(response, default=str),
-                stderr="",
-            )
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("deregister_target: failed target_id=%s code=%s", target_id, error_code)
-            return CommandResult(
-                success=False,
-                stdout="",
-                stderr=f"{error_code}: {error_message}",
-            )
-        except Exception as e:
-            logger.exception("deregister_target: unexpected error target_id=%s", target_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
-
-    def wait_for_target_healthy(
-        self,
-        target_group_arn: str,
-        target_id: str,
-        timeout: int = 900,
-    ) -> CommandResult:
-        """Wait for a target to become healthy in a target group.
-
-        Args:
-            target_group_arn: The ARN of the target group.
-            target_id: The target ID (IP address for GWLB with target_type=ip).
-            timeout: Maximum time to wait in seconds (default 900 / 15 min).
-
-        Returns:
-            CommandResult with success status.
-        """
-        logger.debug("wait_for_target_healthy: target_id=%s timeout=%d", target_id, timeout)
-        try:
-            client = self.get_client("elbv2")
-            start_time = time.time()
-            poll_interval = 10  # seconds
-
-            while time.time() - start_time < timeout:
-                response = client.describe_target_health(
-                    TargetGroupArn=target_group_arn,
-                    Targets=[{"Id": target_id}],
-                )
-                health_descriptions = response.get("TargetHealthDescriptions", [])
-                if health_descriptions:
-                    state = health_descriptions[0].get("TargetHealth", {}).get("State", "")
-                    if state == "healthy":
-                        logger.info("wait_for_target_healthy: target_id=%s is healthy", target_id)
-                        return CommandResult(
-                            success=True,
-                            stdout=f"Target {target_id} is now healthy",
-                            stderr="",
-                        )
-                    elif state in ("draining", "unavailable"):
-                        logger.warning("wait_for_target_healthy: target_id=%s terminal state=%s", target_id, state)
-                        return CommandResult(
-                            success=False,
-                            stdout="",
-                            stderr=f"Target reached terminal state: {state}",
-                        )
-                time.sleep(poll_interval)
-
-            logger.warning("wait_for_target_healthy: timeout target_id=%s", target_id)
-            return CommandResult(
-                success=False,
-                stdout="",
-                stderr=f"Timeout waiting for target {target_id} to become healthy",
-            )
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("wait_for_target_healthy: failed target_id=%s code=%s", target_id, error_code)
-            return CommandResult(
-                success=False,
-                stdout="",
-                stderr=f"{error_code}: {error_message}",
-            )
-        except Exception as e:
-            logger.exception("wait_for_target_healthy: unexpected error target_id=%s", target_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
-
-    # =========================================================================
-    # VPC Endpoint Operations
+    # VPC Endpoint Operations (for cleanup of legacy GWLB endpoints)
     # =========================================================================
 
     def create_endpoint(
@@ -544,11 +395,11 @@ class AWSExecutor:
         service_name: str,
         subnet_ids: list[str],
     ) -> CommandResult:
-        """Create a VPC endpoint for GWLB.
+        """Create a VPC endpoint.
 
         Args:
             vpc_id: The VPC ID where the endpoint will be created.
-            service_name: The GWLB endpoint service name.
+            service_name: The endpoint service name.
             subnet_ids: List of subnet IDs for the endpoint.
 
         Returns:

@@ -482,6 +482,7 @@ class NetworkComponent(pulumi.ComponentResource):
         portal_vpc_cidr: str = "",
         portal_vpc_peering_id: str = "",
         allocated_cidr: str = "",
+        ngfw_security_group_id: str = "",
         opts: pulumi.ResourceOptions | None = None,
     ):
         """Create network infrastructure for a logical subnet.
@@ -505,6 +506,8 @@ class NetworkComponent(pulumi.ComponentResource):
             portal_vpc_peering_id: VPC peering connection ID for portal route. Empty = no route.
             allocated_cidr: Pre-allocated CIDR block. If provided, skips allocation.
                 Use allocate_subnets() to get CIDRs for multi-subnet ranges.
+            ngfw_security_group_id: NGFW data ENI security group ID for allowing return traffic.
+                If provided, adds ingress rule from NGFW SG.
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NetworkComponent", name, None, opts)
@@ -512,6 +515,7 @@ class NetworkComponent(pulumi.ComponentResource):
         self._firewall_endpoint_id = firewall_endpoint_id
         self._portal_vpc_cidr = portal_vpc_cidr
         self._portal_vpc_peering_id = portal_vpc_peering_id
+        self._ngfw_security_group_id = ngfw_security_group_id
 
         logger.info(
             "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, cidr=%s",
@@ -541,7 +545,9 @@ class NetworkComponent(pulumi.ComponentResource):
         self._create_subnet(name, vpc_id, allocated_cidr, availability_zone, common_tags)
 
         # Create security group for this subnet
-        self._create_security_group(name, vpc_id, vpc_cidr, allocated_cidr, common_tags, self._portal_vpc_cidr)
+        self._create_security_group(
+            name, vpc_id, allocated_cidr, common_tags, self._portal_vpc_cidr, self._ngfw_security_group_id
+        )
 
         # Create route table for this subnet
         self._create_route_table(name, vpc_id, common_tags)
@@ -641,30 +647,33 @@ class NetworkComponent(pulumi.ComponentResource):
         self,
         name: str,
         vpc_id: str,
-        vpc_cidr: str,
         subnet_cidr: str,
         common_tags: dict[str, str],
         portal_vpc_cidr: str = "",
+        ngfw_security_group_id: str = "",
     ) -> None:
         """Create security group for this subnet.
 
         Rules:
         - Inbound: Allow ALL from same subnet CIDR (intra-subnet unrestricted)
-        - Inbound: Allow ALL from VPC CIDR (for NGFW return traffic)
-        - Inbound: Allow SSH (port 22) from portal VPC CIDR (for terminal access)
+        - Inbound: Allow SSH/RDP from portal VPC CIDR (for terminal access)
         - Outbound: Allow ALL
+
+        After SG creation, adds self-referencing rule for intra-range traffic
+        and NGFW SG rule for return traffic from NGFW inspection.
 
         Args:
             name: Resource name prefix.
             vpc_id: VPC ID.
-            vpc_cidr: VPC CIDR block for return traffic rule.
             subnet_cidr: This subnet's CIDR block.
             common_tags: Common tags dict.
-            portal_vpc_cidr: Portal VPC CIDR for SSH access. Empty = no portal access.
+            portal_vpc_cidr: Portal VPC CIDR for SSH access. Empty = no access.
+            ngfw_security_group_id: NGFW data SG ID for return traffic rule.
         """
         subnet_name_tag = common_tags.get("shifter:subnet_name", "default")
 
-        # Build ingress rules
+        # Build initial ingress rules (CIDR-based only)
+        # Self-referencing SG rule added after creation
         ingress_rules: list[aws.ec2.SecurityGroupIngressArgs] = [
             # Allow all intra-subnet traffic
             aws.ec2.SecurityGroupIngressArgs(
@@ -674,46 +683,36 @@ class NetworkComponent(pulumi.ComponentResource):
                 cidr_blocks=[subnet_cidr],
                 description="Allow all intra-subnet traffic",
             ),
-            # Allow all from VPC (NGFW return traffic for inter-subnet inspection)
-            aws.ec2.SecurityGroupIngressArgs(
-                protocol="-1",
-                from_port=0,
-                to_port=0,
-                cidr_blocks=[vpc_cidr],
-                description="Allow NGFW return traffic from VPC",
-            ),
         ]
 
         # Add SSH and RDP access from portal VPC if configured
         if portal_vpc_cidr:
             logger.debug(
-                "Adding SSH/RDP ingress rules from portal VPC CIDR %s for subnet %s",
+                "Adding SSH/RDP ingress from portal VPC %s for %s",
                 portal_vpc_cidr,
                 name,
             )
-            # SSH for terminal access
             ingress_rules.append(
                 aws.ec2.SecurityGroupIngressArgs(
                     protocol="tcp",
                     from_port=22,
                     to_port=22,
                     cidr_blocks=[portal_vpc_cidr],
-                    description="Allow SSH from portal for terminal access",
+                    description="Allow SSH from portal",
                 ),
             )
-            # RDP for Guacamole access
             ingress_rules.append(
                 aws.ec2.SecurityGroupIngressArgs(
                     protocol="tcp",
                     from_port=3389,
                     to_port=3389,
                     cidr_blocks=[portal_vpc_cidr],
-                    description="Allow RDP from portal for Guacamole access",
+                    description="Allow RDP from portal",
                 ),
             )
         else:
             logger.warning(
-                "No portal_vpc_cidr configured for subnet %s - terminal SSH/RDP access will not work",
+                "No portal_vpc_cidr for %s - terminal access won't work",
                 name,
             )
 
@@ -723,7 +722,6 @@ class NetworkComponent(pulumi.ComponentResource):
             description=f"Security group for {subnet_name_tag} subnet",
             ingress=ingress_rules,
             egress=[
-                # Allow all outbound
                 aws.ec2.SecurityGroupEgressArgs(
                     protocol="-1",
                     from_port=0,
@@ -740,6 +738,27 @@ class NetworkComponent(pulumi.ComponentResource):
         )
 
         self.security_group_id = self.security_group.id
+
+        # Add rule for NGFW return traffic if NGFW is enabled
+        # Traffic flow: Subnet A -> NGFW -> Subnet B
+        # NGFW forwards packets using its SG, so B must allow from NGFW SG
+        if ngfw_security_group_id:
+            logger.debug(
+                "Adding NGFW SG rule for %s from %s",
+                name,
+                ngfw_security_group_id,
+            )
+            aws.ec2.SecurityGroupRule(
+                f"{name}-sg-ngfw",
+                type="ingress",
+                security_group_id=self.security_group.id,
+                source_security_group_id=ngfw_security_group_id,
+                protocol="-1",
+                from_port=0,
+                to_port=0,
+                description="Allow return traffic from NGFW",
+                opts=pulumi.ResourceOptions(parent=self),
+            )
 
         logger.debug("Created security group for subnet %s", name)
 

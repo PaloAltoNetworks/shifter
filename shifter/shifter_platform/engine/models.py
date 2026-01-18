@@ -219,13 +219,19 @@ class Range(models.Model):
         blank=True,
         help_text="User ID from CMS (may differ from Django user.id)",
     )
-    # NOTE: Range.ngfw FK removed - Engine NGFW model is standalone
-    # GWLB endpoint linking is done via gwlb_endpoint_id below
+    ngfw_instance = models.ForeignKey(
+        "Instance",
+        on_delete=models.SET_NULL,
+        related_name="attached_ranges",
+        null=True,
+        blank=True,
+        help_text="NGFW Instance this range is attached to (for egress filtering)",
+    )
     gwlb_endpoint_id = models.CharField(
         max_length=32,
         blank=True,
         default="",
-        help_text="GWLB endpoint ID for this range's NGFW",
+        help_text="GWLB endpoint ID for this range's NGFW (AWS resource ID)",
     )
     status = models.CharField(
         max_length=20,

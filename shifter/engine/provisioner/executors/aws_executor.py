@@ -473,14 +473,14 @@ class AWSExecutor:
         self,
         target_group_arn: str,
         target_id: str,
-        timeout: int = 300,
+        timeout: int = 900,
     ) -> CommandResult:
         """Wait for a target to become healthy in a target group.
 
         Args:
             target_group_arn: The ARN of the target group.
-            target_id: The target ID (ENI ID for GWLB).
-            timeout: Maximum time to wait in seconds (default 300).
+            target_id: The target ID (IP address for GWLB with target_type=ip).
+            timeout: Maximum time to wait in seconds (default 900 / 15 min).
 
         Returns:
             CommandResult with success status.

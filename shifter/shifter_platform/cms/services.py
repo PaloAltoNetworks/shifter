@@ -2986,21 +2986,26 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
         )
         raise ValueError("Name confirmation does not match")
 
+    instance = app.instance
+    assert instance is not None, "App must have an instance"
+    request_id = instance.request.request_id
+
+    # Call engine to tear down infrastructure BEFORE status changes
+    # Engine validates no attached ranges exist
+    try:
+        engine_services.destroy_ngfw(request_id)
+    except engine_services.EngineError as e:
+        raise CMSError(str(e)) from e
+
     # Update status to deprovisioning for both App and Instance
     now = timezone.now()
     app.status = ResourceStatus.DESTROYING.value
     app.deleted_at = now
     app.save(update_fields=["status", "deleted_at"])
 
-    instance = app.instance
-    assert instance is not None, "App must have an instance"
     instance.status = ResourceStatus.DESTROYING.value
     instance.deleted_at = now
     instance.save(update_fields=["status", "deleted_at"])
-
-    # Call engine to tear down infrastructure using request_id
-    request_id = instance.request.request_id
-    engine_services.destroy_ngfw(request_id)
 
     logger.info(
         "destroy_ngfw: started deprovisioning App id=%s, request_id=%s",

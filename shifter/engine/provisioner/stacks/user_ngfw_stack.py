@@ -1,9 +1,9 @@
 """UserNGFWStack - Composed stack for persistent per-user NGFW lifecycle.
 
-This stack composes NGFWComponent + GWLBComponent to provide:
+This stack provides:
 - Persistent NGFW EC2 instance with management and data ENIs
-- Gateway Load Balancer for traffic steering
-- VPC Endpoint Service for range connectivity
+- Data ENI with source_dest_check=false for traffic inspection
+- Direct ENI routing for inter-subnet traffic (no GWLB)
 """
 
 import logging
@@ -11,20 +11,19 @@ from typing import Any
 
 import pulumi
 
-from components.gwlb_component import GWLBComponent
 from components.ngfw_component import NGFWComponent
 
 logger = logging.getLogger(__name__)
 
 
 class UserNGFWStack(pulumi.ComponentResource):
-    """Composed stack for user NGFW with GWLB.
+    """Stack for user NGFW with direct ENI routing.
 
     Creates:
     - NGFWComponent: EC2 instance with dual ENIs for NGFW
-    - GWLBComponent: Gateway Load Balancer with endpoint service
 
-    The NGFW data ENI is registered as a target in the GWLB target group.
+    The NGFW data ENI is used directly as a route target for inter-subnet
+    traffic inspection (no GWLB intermediary).
     """
 
     def __init__(
@@ -113,28 +112,12 @@ class UserNGFWStack(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        # Create GWLB Component
-        self.gwlb = GWLBComponent(
-            f"{name}-gwlb",
-            user_id=user_id,
-            subnet_ids=[ngfw_subnet_id],
-            vpc_id=vpc_id,
-            request_uuid=request_uuid,
-            instance_uuid=instance_uuid,
-            environment=environment,
-            opts=pulumi.ResourceOptions(parent=self),
-        )
-
-        # Expose outputs from child components
+        # Expose outputs from NGFW component
         self.ec2_instance_id = self.ngfw.ec2_instance_id
         self.management_ip = self.ngfw.management_ip
         self.dataplane_ip = self.ngfw.dataplane_ip
         self.data_eni_id = self.ngfw.data_eni.id
         self.ssh_key_secret_arn = self.ngfw.ssh_key_secret_arn
-
-        self.gwlb_arn = self.gwlb.gwlb_arn
-        self.target_group_arn = self.gwlb.target_group_arn
-        self.service_name = self.gwlb.service_name
 
         # Register outputs
         self.register_outputs(
@@ -145,9 +128,6 @@ class UserNGFWStack(pulumi.ComponentResource):
                 "dataplane_ip": self.dataplane_ip,
                 "data_eni_id": self.data_eni_id,
                 "ssh_key_secret_arn": self.ssh_key_secret_arn,
-                "gwlb_arn": self.gwlb_arn,
-                "target_group_arn": self.target_group_arn,
-                "service_name": self.service_name,
             }
         )
 
@@ -171,15 +151,12 @@ class UserNGFWStack(pulumi.ComponentResource):
             "dataplane_ip": self.dataplane_ip,
             "data_eni_id": self.data_eni_id,
             "ssh_key_secret_arn": self.ssh_key_secret_arn,
-            "gwlb_arn": self.gwlb_arn,
-            "target_group_arn": self.target_group_arn,
-            "service_name": self.service_name,
         }
 
     def run_provision(self, orchestrator) -> Any:
         """Post-Pulumi provisioning via SetupOrchestrator.
 
-        Wait for SSH, verify device cert, configure XDR logging.
+        Wait for SSH, configure interfaces, verify device cert, configure XDR logging.
 
         Args:
             orchestrator: SetupOrchestrator instance to execute provisioning plans
@@ -189,21 +166,11 @@ class UserNGFWStack(pulumi.ComponentResource):
         """
         logger.debug("run_provision: starting for user_id=%s", self.user_id)
 
-        from plans.gwlb_setup import GWLBSetupPlan
         from plans.ngfw_provision import NGFWProvisionPlan
 
-        # Run NGFW provision plan (wait for SSH, configure XDR)
+        # Run NGFW provision plan (configure interfaces, wait for SSH, configure XDR)
         provision_plan = NGFWProvisionPlan()
-        provision_result = orchestrator.orchestrate(provision_plan, self)
-
-        if not provision_result.success:
-            return provision_result
-
-        # Run GWLB setup plan (register target)
-        gwlb_plan = GWLBSetupPlan()
-        gwlb_result = orchestrator.orchestrate(gwlb_plan, self)
-
-        return gwlb_result
+        return orchestrator.orchestrate(provision_plan, self)
 
     def run_deprovision(self, orchestrator) -> Any:
         """Cleanup with license deactivation.
@@ -226,10 +193,10 @@ class UserNGFWStack(pulumi.ComponentResource):
     def run_ops(self, operation: str, orchestrator, **kwargs: Any) -> Any:
         """Runtime operations via OpsOrchestrator.
 
-        Operations: start, stop, add-route, remove-route, reconcile, sweep
+        Operations: start, stop, reconcile, sweep
 
         Args:
-            operation: Operation name (start, stop, add-route, remove-route, reconcile, sweep)
+            operation: Operation name (start, stop, reconcile, sweep)
             orchestrator: OpsOrchestrator instance to execute ops plans
             **kwargs: Additional parameters for the operation
 
@@ -244,8 +211,6 @@ class UserNGFWStack(pulumi.ComponentResource):
         operation_plans = {
             "start": "plans.ngfw_start.NGFWStartPlan",
             "stop": "plans.ngfw_stop.NGFWStopPlan",
-            "add-route": "plans.gwlb_add_route.GWLBAddRoutePlan",
-            "remove-route": "plans.gwlb_remove_route.GWLBRemoveRoutePlan",
             "reconcile": "plans.ngfw_reconcile.NGFWReconcilePlan",
             "sweep": "plans.user_ngfw_stack_sweep.UserNGFWStackSweepPlan",
         }

@@ -1,6 +1,7 @@
 """NGFW Provision Plan for post-Pulumi NGFW configuration.
 
 This plan runs after the NGFW EC2 instance is created to configure:
+- Configure data interface (ethernet1/1) as Layer 3 DHCP for ENI routing
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
 - Create security policy (allow-all rule with logging)
@@ -16,6 +17,16 @@ time to complete license registration with the Palo Alto CSP.
 from typing import Any, ClassVar
 
 from plans.base import SetupStep
+
+# PAN-OS configure mode commands for data interface setup
+# Configures ethernet1/1 as Layer 3 DHCP for direct ENI routing (no GWLB/GENEVE)
+CONFIGURE_DATA_INTERFACE_INPUT = """configure
+set network interface ethernet ethernet1/1 layer3 dhcp-client
+set zone untrust network layer3 ethernet1/1
+set network virtual-router default interface ethernet1/1
+commit
+exit
+"""
 
 # PAN-OS configure mode commands for cloud logging (Step 12 from steps.md)
 # Variables: {{ sls_region }}
@@ -50,9 +61,10 @@ class NGFWProvisionPlan:
     """Provision plan for NGFW post-Pulumi configuration.
 
     Steps:
-    1. Enable cloud logging (Strata Logging Service)
-    2. Create log forwarding profile (XDR-Forward)
-    3. Create security policy (allow-all rule)
+    1. Configure data interface (ethernet1/1 as L3 DHCP for ENI routing)
+    2. Enable cloud logging (Strata Logging Service)
+    3. Create log forwarding profile (XDR-Forward)
+    4. Create security policy (allow-all rule)
 
     All commands are executed via SSHExecutor to the NGFW management interface.
     SSH wait is handled by main.py before this plan runs.
@@ -62,21 +74,28 @@ class NGFWProvisionPlan:
     name: ClassVar[str] = "ngfw_provision"
 
     steps: ClassVar[list[SetupStep]] = [
+        # Configure data interface for direct ENI routing
+        SetupStep(
+            name="configure_data_interface",
+            script="",  # Empty - commands sent via stdin
+            stdin_input=CONFIGURE_DATA_INTERFACE_INPUT,
+            timeout_seconds=300,  # 5 min - config + commit
+        ),
         # Enable cloud logging
         SetupStep(
             name="enable_cloud_logging",
-            script="",  # Empty - commands sent via stdin
+            script="",
             stdin_input=ENABLE_CLOUD_LOGGING_INPUT,
             timeout_seconds=300,  # 5 min - config + commit
         ),
-        # Step 13: Create log forwarding profile
+        # Create log forwarding profile
         SetupStep(
             name="create_log_forwarding_profile",
             script="",
             stdin_input=CREATE_LOG_FORWARDING_PROFILE_INPUT,
             timeout_seconds=300,  # 5 min - config + commit
         ),
-        # Step 14: Create security policy
+        # Create security policy
         SetupStep(
             name="create_security_policy",
             script="",

@@ -39,6 +39,7 @@ class ResourceStatus(str, Enum):
 
     PENDING = "pending"
     PROVISIONING = "provisioning"
+    AWAITING_ASSOCIATION = "awaiting_association"  # User must associate in SCM/XDR
     READY = "ready"
     PAUSED = "paused"
     RESUMING = "resuming"
@@ -51,6 +52,7 @@ class ResourceStatus(str, Enum):
 ACTIVE_STATUSES: set[ResourceStatus] = {
     ResourceStatus.PENDING,
     ResourceStatus.PROVISIONING,
+    ResourceStatus.AWAITING_ASSOCIATION,
     ResourceStatus.READY,
     ResourceStatus.PAUSED,
     ResourceStatus.RESUMING,

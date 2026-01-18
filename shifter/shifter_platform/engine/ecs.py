@@ -547,18 +547,18 @@ def start_ngfw_teardown(request_id: UUID) -> str | None:
 
 
 def start_ngfw_operation(request_id: UUID, operation: str) -> str | None:
-    """Start an NGFW runtime operation (start/stop) via ECS Fargate.
+    """Start an NGFW runtime operation (start/stop/complete-setup) via ECS Fargate.
 
     Args:
         request_id: UUID of the Request containing the NGFW instance.
-        operation: Operation to perform ('start' or 'stop').
+        operation: Operation to perform ('start', 'stop', or 'complete-setup').
 
     Returns:
         ECS task ARN if successful, None if ECS is not configured.
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ValueError: If operation is not 'start' or 'stop'
+        ValueError: If operation is not 'start', 'stop', or 'complete-setup'
         ClientError: If ECS task fails to start
     """
     from uuid import UUID
@@ -567,8 +567,8 @@ def start_ngfw_operation(request_id: UUID, operation: str) -> str | None:
         raise TypeError("request_id cannot be None")
     if not isinstance(request_id, UUID):
         raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
-    if operation not in ("start", "stop"):
-        raise ValueError(f"Invalid operation: {operation}. Must be 'start' or 'stop'.")
+    if operation not in ("start", "stop", "complete-setup"):
+        raise ValueError(f"Invalid operation: {operation}. Must be 'start', 'stop', or 'complete-setup'.")
 
     command = ["ngfw", operation, "--request-id", str(request_id)]
     return _start_ngfw_ecs_task(request_id, command)

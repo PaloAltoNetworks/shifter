@@ -339,12 +339,13 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
         # Check if scenario requires NGFW (ngfw: true in range_config)
         ngfw_enabled = range_config.get("ngfw", False)
 
-        # Look up gwlb_service_name from user's active NGFW in engine_instance
+        # Look up gwlb_service_name and ngfw_instance_id from user's active NGFW
         gwlb_service_name = ""
+        ngfw_instance_id = None
         if ngfw_enabled:
             cur.execute(
                 """
-                SELECT ei.state->>'service_name'
+                SELECT ei.state->>'service_name', ei.id
                 FROM engine_instance ei
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
@@ -359,9 +360,11 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             ngfw_row = cur.fetchone()
             if ngfw_row:
                 gwlb_service_name = ngfw_row[0] or ""
+                ngfw_instance_id = ngfw_row[1]
                 logger.debug(
-                    "Found gwlb_service_name=%s for user %d",
+                    "Found gwlb_service_name=%s, ngfw_instance_id=%s for user %d",
                     gwlb_service_name,
+                    ngfw_instance_id,
                     user_id,
                 )
             else:
@@ -378,6 +381,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             "range_config": range_config,
             "ngfw_enabled": ngfw_enabled,
             "gwlb_service_name": gwlb_service_name,
+            "ngfw_instance_id": ngfw_instance_id,
         }
 
         logger.debug(

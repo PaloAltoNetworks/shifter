@@ -382,6 +382,7 @@ class RangeStack(pulumi.ComponentResource):
                 portal_vpc_cidr=config.portal_vpc_cidr,
                 portal_vpc_peering_id=config.portal_vpc_peering_id,
                 allocated_cidr=subnet_cidr,
+                ngfw_security_group_id=config.ngfw_security_group_id,
                 opts=pulumi.ResourceOptions(parent=self),
             )
             self.networks[subnet_config.name] = network

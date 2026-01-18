@@ -709,9 +709,12 @@ def destroy_ngfw(request_id: UUID) -> bool:
 
     Returns:
         True if teardown initiated, False if request/instance not found.
+
+    Raises:
+        EngineError: If ranges are still attached to this NGFW.
     """
     from engine.ecs import start_ngfw_teardown
-    from engine.models import Instance, Request
+    from engine.models import Instance, Range, Request
 
     logger.debug("destroy_ngfw: request_id=%s", request_id)
 
@@ -726,6 +729,24 @@ def destroy_ngfw(request_id: UUID) -> bool:
     if not ngfw_instance:
         logger.warning("destroy_ngfw: no NGFW instance found for request_id=%s", request_id)
         return False
+
+    # Check for attached ranges - must be deleted before NGFW can be destroyed
+    attached_ranges = Range.objects.filter(
+        ngfw_instance=ngfw_instance,
+        status__in=[
+            Range.Status.READY,
+            Range.Status.PENDING,
+            Range.Status.PROVISIONING,
+            Range.Status.PAUSED,
+            Range.Status.RESUMING,
+        ],
+    )
+    if attached_ranges.exists():
+        count = attached_ranges.count()
+        range_ids = list(attached_ranges.values_list("id", flat=True)[:5])
+        raise EngineError(
+            f"Cannot delete NGFW: {count} range(s) are still attached. Delete these ranges first: {range_ids}"
+        )
 
     task_arn = start_ngfw_teardown(request_id)
 

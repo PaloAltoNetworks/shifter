@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [10.0.8] - 2026-01-13
 
+### Changed
+- Dashboard renamed to Ranges
+- Ranges view uses multiple tiles for launch and active ranges
+
 ### Fixed
 - Django build does not include cyberscript shared library
 - Extend and streamline NGFW stand up plan
 - Dynamic subnet creation for ranges misses Shifter Platform creation
 - Missing VPC route for kali
+- VPC Internet egress not enforcing drop rule
+- Kali RDP not working due to permissions on logs
 
 ## [0.10.7] - 2026-01-12
 

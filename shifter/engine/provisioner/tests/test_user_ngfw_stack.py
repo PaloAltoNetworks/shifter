@@ -1,7 +1,7 @@
 """Tests for UserNGFWStack.
 
-UserNGFWStack composes NGFWComponent + GWLBComponent for persistent
-per-user NGFW lifecycle management.
+UserNGFWStack creates the NGFWComponent for persistent
+per-user NGFW lifecycle management with direct ENI routing.
 """
 
 from unittest.mock import MagicMock

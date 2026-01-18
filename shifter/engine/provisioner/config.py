@@ -146,7 +146,7 @@ class RangeConfig:
         subnets: List of logical subnets with their instances.
         vpc_id: AWS VPC ID for range deployment.
         vpc_cidr: VPC CIDR block (e.g., '10.1.0.0/16').
-        gwlb_service_name: GWLB VPC Endpoint Service name (from UserNGFW).
+        ngfw_data_eni_id: NGFW data ENI ID for inter-subnet routing.
             Empty string if no NGFW attached to this range.
     """
 
@@ -166,7 +166,7 @@ class RangeConfig:
     windows_ami_id: str
     agent_s3_bucket: str
     availability_zone: str
-    gwlb_service_name: str = ""  # GWLB endpoint service name from UserNGFW
+    ngfw_data_eni_id: str = ""  # NGFW data ENI ID for inter-subnet routing
     dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
     dc_security_group_id: str = ""  # Security group for Domain Controller instances
     portal_vpc_cidr: str = ""
@@ -300,7 +300,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
 
     Returns range data with the new schema where range_config contains
     the full RangeSpec (scenario_id, user_id, subnets with instances).
-    Also looks up gwlb_service_name from the user's active NGFW if the
+    Also looks up ngfw_data_eni_id from the user's active NGFW if the
     scenario has ngfw: true.
 
     Args:
@@ -308,7 +308,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
 
     Returns:
         Dict with keys: id, user_id, request_uuid, range_config, ngfw_enabled,
-        gwlb_service_name.
+        ngfw_data_eni_id.
 
     Raises:
         ValueError: If range not found.
@@ -339,19 +339,19 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
         # Check if scenario requires NGFW (ngfw: true in range_config)
         ngfw_enabled = range_config.get("ngfw", False)
 
-        # Look up gwlb_service_name and ngfw_instance_id from user's active NGFW
-        gwlb_service_name = ""
+        # Look up data_eni_id and ngfw_instance_id from user's active NGFW
+        ngfw_data_eni_id = ""
         ngfw_instance_id = None
         if ngfw_enabled:
             cur.execute(
                 """
-                SELECT ei.state->>'service_name', ei.id
+                SELECT ei.state->>'data_eni_id', ei.id
                 FROM engine_instance ei
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
                   AND ei.status = 'active'
-                  AND ei.state->>'service_name' IS NOT NULL
+                  AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,
@@ -359,11 +359,11 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             )
             ngfw_row = cur.fetchone()
             if ngfw_row:
-                gwlb_service_name = ngfw_row[0] or ""
+                ngfw_data_eni_id = ngfw_row[0] or ""
                 ngfw_instance_id = ngfw_row[1]
                 logger.debug(
-                    "Found gwlb_service_name=%s, ngfw_instance_id=%s for user %d",
-                    gwlb_service_name,
+                    "Found ngfw_data_eni_id=%s, ngfw_instance_id=%s for user %d",
+                    ngfw_data_eni_id,
                     ngfw_instance_id,
                     user_id,
                 )
@@ -380,15 +380,15 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             "request_uuid": str(row[2]) if row[2] else "",
             "range_config": range_config,
             "ngfw_enabled": ngfw_enabled,
-            "gwlb_service_name": gwlb_service_name,
+            "ngfw_data_eni_id": ngfw_data_eni_id,
             "ngfw_instance_id": ngfw_instance_id,
         }
 
         logger.debug(
-            "Loaded range %d: ngfw_enabled=%s, gwlb_service_name=%s",
+            "Loaded range %d: ngfw_enabled=%s, ngfw_data_eni_id=%s",
             range_id,
             result["ngfw_enabled"],
-            "present" if result["gwlb_service_name"] else "none",
+            "present" if result["ngfw_data_eni_id"] else "none",
         )
 
         return result
@@ -538,7 +538,7 @@ def load_config() -> RangeConfig:
     environment = config.require("environment")
     logger.debug("Loading range_id=%d, environment=%s", range_id, environment)
 
-    # Load range data from database (includes gwlb_service_name lookup)
+    # Load range data from database (includes ngfw_data_eni_id lookup)
     range_data = get_range_from_db(range_id)
 
     # Extract request_uuid with defensive handling
@@ -572,13 +572,13 @@ def load_config() -> RangeConfig:
     # Build subnets with their instances
     subnets = _build_subnet_configs(spec_subnets, get_presigned_url)
 
-    # Extract gwlb_service_name with defensive handling
-    gwlb_service_name = str(range_data.get("gwlb_service_name") or "")
+    # Extract ngfw_data_eni_id with defensive handling
+    ngfw_data_eni_id = str(range_data.get("ngfw_data_eni_id") or "")
     ngfw_enabled = bool(range_data.get("ngfw_enabled", False))
 
-    if ngfw_enabled and not gwlb_service_name:
+    if ngfw_enabled and not ngfw_data_eni_id:
         logger.warning(
-            "Range %d has NGFW enabled but no gwlb_service_name found",
+            "Range %d has NGFW enabled but no ngfw_data_eni_id found",
             range_id,
         )
 
@@ -607,7 +607,7 @@ def load_config() -> RangeConfig:
         windows_ami_id=config.get("windowsAmiId") or "",
         agent_s3_bucket=config.get("agentS3Bucket") or "",
         availability_zone=config.require("availabilityZone"),
-        gwlb_service_name=gwlb_service_name,
+        ngfw_data_eni_id=ngfw_data_eni_id,
         dc_ami_id=config.get("dcAmiId") or "",
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
         portal_vpc_peering_id=config.get("portalVpcPeeringId") or "",

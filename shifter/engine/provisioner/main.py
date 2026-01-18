@@ -270,7 +270,6 @@ def write_provisioned_state(
                     "aws_cidr": subnet_data.get("subnet_cidr"),
                     "aws_security_group_id": subnet_data.get("security_group_id"),
                     "aws_route_table_id": subnet_data.get("route_table_id"),
-                    "aws_gwlb_endpoint_id": subnet_data.get("gwlb_endpoint_id"),
                 }
 
                 cur.execute(
@@ -987,7 +986,7 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
         status: New status value (e.g., 'provisioning', 'ready', 'failed', 'destroyed').
         **state_updates: Key-value pairs to merge into Instance.state JSON.
             Common keys: ec2_instance_id, management_ip, dataplane_ip,
-            service_name, gwlb_arn, target_group_arn, pulumi_stack, error_message.
+            service_name, data_eni_id, pulumi_stack, error_message.
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -1434,14 +1433,14 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
 
 
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
-    """Run NGFW runtime operation (start/stop/route management/complete-setup).
+    """Run NGFW runtime operation (start/stop/complete-setup).
 
     Retrieves EC2 instance ID from the Instance.state (populated during Pulumi
     provisioning), executes the operation plan, and publishes events for status
     updates.
 
     Args:
-        operation: Operation name (start, stop, add-route, remove-route, complete-setup).
+        operation: Operation name (start, stop, complete-setup).
         request_id: UUID string of the Request.
         **kwargs: Operation-specific parameters (overrides for context).
 
@@ -1464,8 +1463,6 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     status_map = {
         "start": ("starting", "active"),
         "stop": ("stopping", "stopped"),
-        "add-route": ("configuring", "active"),
-        "remove-route": ("configuring", "active"),
     }
 
     if operation not in status_map:
@@ -1502,8 +1499,6 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
         plan_map = {
             "start": "plans.ngfw_start.NGFWStartPlan",
             "stop": "plans.ngfw_stop.NGFWStopPlan",
-            "add-route": "plans.gwlb_add_route.GWLBAddRoutePlan",
-            "remove-route": "plans.gwlb_remove_route.GWLBRemoveRoutePlan",
         }
 
         plan_path = plan_map[operation]
@@ -1911,9 +1906,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         "ec2_instance_id": output_data.get("ec2_instance_id"),
         "management_ip": management_ip,
         "dataplane_ip": output_data.get("dataplane_ip"),
-        "service_name": output_data.get("service_name"),
-        "gwlb_arn": output_data.get("gwlb_arn"),
-        "target_group_arn": output_data.get("target_group_arn"),
+        "data_eni_id": output_data.get("data_eni_id"),
         "sls_region": os.environ.get("AWS_REGION", "us-east-2"),
     }
 
@@ -1942,47 +1935,12 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         poll_interval=30,
     )
 
-    # Run GWLB setup (register target, wait for healthy)
-    # This uses AWSExecutor directly since GWLBSetupPlan expects AWS API calls
-    logger.info("Running GWLB target registration...")
-    from plans.gwlb_setup import GWLBSetupPlan
-
-    aws_executor = AWSExecutor()
-    gwlb_plan = GWLBSetupPlan()
-
-    # Build context for GWLB setup - needs target_group_arn and dataplane_ip
-    # VM-Series requires GENEVE traffic on data ENI, not management ENI
-    dataplane_ip = output_data.get("dataplane_ip")
-    target_group_arn = output_data.get("target_group_arn")
-
-    if not target_group_arn:
-        raise RuntimeError("NGFW stack missing target_group_arn output")
-    if not dataplane_ip:
-        raise RuntimeError("NGFW stack missing dataplane_ip output")
-
-    # Execute GWLB setup steps directly via AWSExecutor
-    gwlb_context = {
-        "target_group_arn": target_group_arn,
-        "target_id": dataplane_ip,
-    }
-
-    for step in gwlb_plan.steps:
-        step_params = {k: gwlb_context[k] for k in step.params}
-        logger.info(f"Executing GWLB step: {step.name}")
-        method = getattr(aws_executor, step.action)
-        step_result = method(**step_params)
-        if not step_result.success:
-            raise RuntimeError(f"GWLB setup step '{step.name}' failed: {step_result.stderr}")
-        logger.info(f"GWLB step '{step.name}' completed successfully")
-
-    # Build state dict with all outputs
+    # Build state dict with all outputs including data_eni_id for range routing
     state = {
         "ec2_instance_id": output_data.get("ec2_instance_id"),
         "management_ip": output_data.get("management_ip"),
         "dataplane_ip": output_data.get("dataplane_ip"),
-        "service_name": output_data.get("service_name"),
-        "gwlb_arn": output_data.get("gwlb_arn"),
-        "target_group_arn": output_data.get("target_group_arn"),
+        "data_eni_id": output_data.get("data_eni_id"),
         "ssh_key_secret_arn": ssh_key_secret_arn,
         "pulumi_stack": stack_name,
         "serial_number": serial_number,
@@ -2149,8 +2107,6 @@ if __name__ == "__main__":
             "deprovision",
             "start",
             "stop",
-            "add-route",
-            "remove-route",
             "complete-setup",
         ],
         help="NGFW operation to perform",
@@ -2167,31 +2123,6 @@ if __name__ == "__main__":
         type=str,
         help="EC2 instance ID (for start/stop)",
     )
-    ngfw_parser.add_argument(
-        "--subnet-id",
-        type=str,
-        help="Subnet ID (for add-route)",
-    )
-    ngfw_parser.add_argument(
-        "--service-name",
-        type=str,
-        help="VPC Endpoint Service name (for add-route)",
-    )
-    ngfw_parser.add_argument(
-        "--vpc-id",
-        type=str,
-        help="VPC ID (for add-route)",
-    )
-    ngfw_parser.add_argument(
-        "--route-table-id",
-        type=str,
-        help="Route table ID (for add-route)",
-    )
-    ngfw_parser.add_argument(
-        "--endpoint-id",
-        type=str,
-        help="VPC Endpoint ID (for remove-route)",
-    )
 
     args = parser.parse_args()
 
@@ -2206,20 +2137,10 @@ if __name__ == "__main__":
             pulumi_op = "up" if args.operation == "provision" else "destroy"
             run_ngfw_pulumi(pulumi_op, args.request_id)
         else:
-            # Runtime operations (start, stop, add-route, remove-route)
+            # Runtime operations (start, stop, complete-setup)
             kwargs = {}
             if args.ec2_instance_id:
                 kwargs["ec2_instance_id"] = args.ec2_instance_id
-            if args.subnet_id:
-                kwargs["subnet_id"] = args.subnet_id
-            if args.service_name:
-                kwargs["service_name"] = args.service_name
-            if args.vpc_id:
-                kwargs["vpc_id"] = args.vpc_id
-            if args.route_table_id:
-                kwargs["route_table_id"] = args.route_table_id
-            if args.endpoint_id:
-                kwargs["endpoint_id"] = args.endpoint_id
 
             run_ngfw_operation(args.operation, args.request_id, **kwargs)
 

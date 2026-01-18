@@ -323,6 +323,7 @@ class NGFWComponent(pulumi.ComponentResource):
                 "ec2InstanceId": self.ec2_instance_id,
                 "managementIp": self.management_ip,
                 "dataplaneIp": self.dataplane_ip,
+                "dataEniId": self.data_eni.id,
                 "sshKeySecretArn": self.ssh_key_secret_arn,
             }
         )

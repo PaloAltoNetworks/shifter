@@ -2,7 +2,6 @@
 
 This plan runs after NGFW is provisioned to:
 - Register NGFW instance as target in GWLB target group
-- Wait for target to become healthy
 
 Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
@@ -31,7 +30,6 @@ class GWLBSetupPlan:
 
     Steps:
     1. Register NGFW instance in GWLB target group
-    2. Wait for target to become healthy
 
     Uses AWSExecutor methods for AWS API calls.
     """
@@ -42,11 +40,6 @@ class GWLBSetupPlan:
         GWLBSetupStep(
             name="register_target",
             action="register_target",
-            params=["target_group_arn", "target_id"],
-        ),
-        GWLBSetupStep(
-            name="wait_for_healthy",
-            action="wait_for_target_healthy",
             params=["target_group_arn", "target_id"],
         ),
     ]

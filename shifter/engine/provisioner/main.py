@@ -17,6 +17,7 @@ import boto3
 import psycopg
 
 from events import (
+    STATUS_AWAITING_ASSOCIATION,
     STATUS_DESTROYED,
     STATUS_DESTROYING,
     STATUS_FAILED,
@@ -1433,14 +1434,14 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
 
 
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
-    """Run NGFW runtime operation (start/stop/route management).
+    """Run NGFW runtime operation (start/stop/route management/complete-setup).
 
     Retrieves EC2 instance ID from the Instance.state (populated during Pulumi
     provisioning), executes the operation plan, and publishes events for status
     updates.
 
     Args:
-        operation: Operation name (start, stop, add-route, remove-route).
+        operation: Operation name (start, stop, add-route, remove-route, complete-setup).
         request_id: UUID string of the Request.
         **kwargs: Operation-specific parameters (overrides for context).
 
@@ -1451,6 +1452,11 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     logger.info("run_ngfw_operation: starting operation=%s request_id=%s", operation, request_id)
     if kwargs:
         logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
+
+    # Handle complete-setup as special case (requires AWS + SSH hybrid execution)
+    if operation == "complete-setup":
+        _run_complete_setup(request_id)
+        return
 
     from events import publish_ngfw_event
 
@@ -1544,6 +1550,138 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
 
     except Exception as e:
         error_msg = str(e)[:1000]
+        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_FAILED,
+        )
+        raise
+
+
+def _run_complete_setup(request_id: str) -> None:
+    """Complete NGFW setup after user associates device in SCM/XDR.
+
+    This hybrid operation combines AWS (start instance) and SSH (license fetch,
+    certificate verification) to finalize NGFW configuration after the user
+    has manually associated the device in Strata Cloud Manager and XDR.
+
+    Flow:
+    1. Start NGFW if stopped (AWS)
+    2. Wait for SSH connectivity
+    3. Fetch license (SSH) - retrieves Logging Service license from CDL
+    4. Wait 10 minutes for CSP certificate sync
+    5. Poll for valid device certificate (SSH)
+    6. Mark NGFW as ready and auto-stop
+
+    Args:
+        request_id: UUID string of the Request.
+
+    Raises:
+        RuntimeError: If any step fails.
+    """
+    import time
+
+    logger.info("_run_complete_setup: starting request_id=%s", request_id)
+
+    # Get NGFW data from database
+    ngfw_data = get_ngfw_data_by_request_id(request_id)
+    instance_uuid = ngfw_data["instance_id"]
+    app_id = ngfw_data["app_id"]
+    state = ngfw_data.get("state", {})
+
+    ec2_instance_id = state.get("ec2_instance_id")
+    management_ip = state.get("management_ip")
+    ssh_key_secret_arn = state.get("ssh_key_secret_arn")
+
+    if not ec2_instance_id:
+        raise RuntimeError(f"EC2 instance ID not found in state for request: {request_id}")
+    if not management_ip:
+        raise RuntimeError(f"Management IP not found in state for request: {request_id}")
+    if not ssh_key_secret_arn:
+        raise RuntimeError(f"SSH key secret ARN not found in state for request: {request_id}")
+
+    # Update status to configuring
+    update_instance_state(request_id, "configuring")
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_uuid,
+        app_id=app_id,
+        status="configuring",
+    )
+
+    try:
+        # 1. Start NGFW if stopped
+        aws_executor = AWSExecutor()
+        instance_info = aws_executor.describe_instance(ec2_instance_id)
+        current_state = instance_info.get("state", "unknown")
+        logger.info("_run_complete_setup: EC2 instance state=%s", current_state)
+
+        if current_state == "stopped":
+            logger.info("_run_complete_setup: Starting stopped NGFW instance")
+            aws_executor.start_instance(ec2_instance_id)
+            aws_executor.wait_for_running(ec2_instance_id)
+        elif current_state != "running":
+            raise RuntimeError(f"NGFW instance in unexpected state: {current_state}")
+
+        # 2. Wait for SSH connectivity
+        logger.info("_run_complete_setup: Waiting for SSH on %s", management_ip)
+        secrets_client = boto3.client("secretsmanager")
+        secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+        private_key = secret_response["SecretString"]
+
+        ssh_executor = SSHExecutor(private_key=private_key)
+        ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
+        ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
+
+        # 3. Fetch license (retrieves Logging Service license after SCM association)
+        logger.info("_run_complete_setup: Fetching license")
+        license_result = ssh_executor.run_command(
+            instance_id=management_ip,
+            script="request license fetch",
+            timeout_seconds=120,
+        )
+        if not license_result.success:
+            logger.warning("License fetch returned non-success: %s", license_result.stderr)
+            # Don't fail - license fetch may report errors even when successful
+
+        logger.info("License fetch output: %s", license_result.stdout[:500] if license_result.stdout else "")
+
+        # 4. Wait 10 minutes for CSP certificate sync
+        wait_minutes = int(os.environ.get("NGFW_CSP_SYNC_WAIT_MINUTES", 10))
+        logger.info("_run_complete_setup: Waiting %d minutes for CSP certificate sync...", wait_minutes)
+        time.sleep(wait_minutes * 60)
+
+        # 5. Poll for valid device certificate
+        logger.info("_run_complete_setup: Polling for valid device certificate")
+        serial_number = poll_for_serial_and_cert(
+            ssh_executor=ssh_executor,
+            host=management_ip,
+            timeout_seconds=1800,  # 30 min - cert validation can take time
+            poll_interval=30,
+        )
+
+        # 6. Update state and mark ready
+        state["serial_number"] = serial_number
+        update_instance_state(request_id, STATUS_READY, **state)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_READY,
+            serial_number=serial_number,
+        )
+
+        # 7. Auto-stop NGFW to save costs
+        logger.info("_run_complete_setup: Auto-stopping NGFW")
+        run_ngfw_operation("stop", request_id)
+
+        logger.info("_run_complete_setup: Complete setup finished successfully")
+
+    except Exception as e:
+        error_msg = str(e)[:1000]
+        logger.error("_run_complete_setup failed: %s", error_msg)
         update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
         publish_ngfw_event(
             request_id=request_id,
@@ -1794,12 +1932,13 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
 
-    # Poll for serial AND certificate - both required for NGFW to be ready
-    logger.info("Polling for NGFW serial number and device certificate...")
-    serial_number = poll_for_serial_and_cert(
+    # Poll for serial number only - user must associate in SCM before cert is available
+    # Serial becomes available quickly after SSH is ready (embedded in VM)
+    logger.info("Polling for NGFW serial number...")
+    serial_number = poll_for_serial_number(
         ssh_executor=ssh_executor,
         host=management_ip,
-        timeout_seconds=1800,  # 30 min - CSP registration can take time
+        timeout_seconds=600,  # 10 min - serial should appear quickly
         poll_interval=30,
     )
 
@@ -1849,23 +1988,23 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         "serial_number": serial_number,
     }
 
-    # Update local DB with provisioned resources
-    update_instance_state(request_id, STATUS_READY, **state)
+    # Update local DB with provisioned resources - awaiting user association
+    # User must: 1) Associate device in SCM, 2) Connect to XDR/XSIAM
+    update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION, **state)
 
-    # Emit ready event notification for CMS/Engine handlers
-    # Note: Full state is already in DB - this is just a notification
-    # Serial number included so consumers can verify CSP registration
+    # Emit awaiting_association event for UI to show user action prompt
+    # Serial number included so users can copy it for SCM device association
     publish_ngfw_event(
         request_id=request_id,
         instance_id=instance_id,
         app_id=app_id,
-        status=STATUS_READY,
+        status=STATUS_AWAITING_ASSOCIATION,
         serial_number=serial_number,
     )
 
-    # Auto-stop NGFW after provisioning to save costs
-    # NGFW will be started on-demand when ranges link to it
-    logger.info("Auto-stopping NGFW after provisioning: request_id=%s", request_id)
+    # Auto-stop NGFW to save costs while user completes association
+    # NGFW will be started when user triggers "complete-setup" operation
+    logger.info("Auto-stopping NGFW after provisioning (awaiting association): request_id=%s", request_id)
     try:
         run_ngfw_operation("stop", request_id)
         logger.info("Auto-stop completed successfully: request_id=%s", request_id)
@@ -2012,6 +2151,7 @@ if __name__ == "__main__":
             "stop",
             "add-route",
             "remove-route",
+            "complete-setup",
         ],
         help="NGFW operation to perform",
     )

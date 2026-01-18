@@ -55,15 +55,7 @@ def main():
 
     command = data.get("tool_input", {}).get("command", "")
 
-    needs_reminder = False
-
-    if is_aws_command(command) and not has_aws_profile(command):
-        needs_reminder = True
-
-    if is_terraform_command(command) and not has_terraform_profile(command):
-        needs_reminder = True
-
-    if needs_reminder:
+    if "aws" in command:
         reminder = """
 +-----------------------------------------------------------------------------+
 |  AWS PROFILE REMINDER                                                       |

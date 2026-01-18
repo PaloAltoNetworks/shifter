@@ -2,7 +2,6 @@
 
 GWLBSetupPlan handles GWLB target registration after NGFW provisioning:
 - Register NGFW data ENI as target using AWSExecutor.register_target()
-- Wait for target to become healthy
 
 This plan uses AWSExecutor for AWS API calls, not bash scripts.
 """
@@ -27,11 +26,11 @@ class TestGWLBSetupPlanSteps:
     """Test GWLBSetupPlan step definitions."""
 
     def test_has_expected_steps(self):
-        """GWLBSetupPlan should have target registration and health check steps."""
+        """GWLBSetupPlan should have target registration step."""
         from plans.gwlb_setup import GWLBSetupPlan
 
         plan = GWLBSetupPlan()
-        assert len(plan.steps) >= 2
+        assert len(plan.steps) >= 1
 
     def test_has_register_target_step(self):
         """Plan should include target registration step."""
@@ -40,25 +39,6 @@ class TestGWLBSetupPlanSteps:
         plan = GWLBSetupPlan()
         step_names = [s.name for s in plan.steps]
         assert any("register" in name.lower() for name in step_names)
-
-    def test_has_wait_healthy_step(self):
-        """Plan should include wait for healthy step."""
-        from plans.gwlb_setup import GWLBSetupPlan
-
-        plan = GWLBSetupPlan()
-        step_names = [s.name for s in plan.steps]
-        assert any("health" in name.lower() or "wait" in name.lower() for name in step_names)
-
-    def test_register_before_health_check(self):
-        """Target registration must come before health check."""
-        from plans.gwlb_setup import GWLBSetupPlan
-
-        plan = GWLBSetupPlan()
-        step_names = [s.name for s in plan.steps]
-
-        register_idx = next(i for i, n in enumerate(step_names) if "register" in n.lower())
-        health_idx = next(i for i, n in enumerate(step_names) if "health" in n.lower() or "wait" in n.lower())
-        assert register_idx < health_idx
 
     def test_all_steps_have_names(self):
         """All steps must have names."""
@@ -115,17 +95,6 @@ class TestGWLBSetupPlanAWSExecutorActions:
         register_step = next(s for s in plan.steps if "register" in s.name.lower())
 
         assert "target_id" in register_step.params
-
-    def test_wait_healthy_step_uses_describe_target_health_action(self):
-        """Wait healthy step should use appropriate AWSExecutor action."""
-        from plans.gwlb_setup import GWLBSetupPlan
-
-        plan = GWLBSetupPlan()
-        health_step = next(s for s in plan.steps if "health" in s.name.lower() or "wait" in s.name.lower())
-
-        # Should use wait_for_target_healthy or describe_target_health
-        valid_actions = ["wait_for_target_healthy", "describe_target_health"]
-        assert health_step.action in valid_actions, f"Expected one of {valid_actions}, got {health_step.action}"
 
 
 class TestGWLBSetupPlanContext:

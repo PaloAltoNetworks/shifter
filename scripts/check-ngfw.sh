@@ -1,10 +1,11 @@
 #!/bin/bash
 set -e
 
-PROFILE="${AWS_PROFILE:-panw-shifter-dev-workstation}"
+PROFILE="panw-shifter-dev-workstation"
 REGION="us-east-2"
 
 echo "=== Finding NGFW instance ==="
+# shellcheck disable=SC2016 # Backticks are JMESPath syntax, not shell expansion
 NGFW_INFO=$(aws ec2 describe-instances \
   --profile "$PROFILE" \
   --region "$REGION" \
@@ -30,7 +31,7 @@ echo "Key Name: $KEY_NAME"
 echo ""
 echo "=== Finding SSH key secret ==="
 # Extract UUID from key name (format: ngfw-{uuid})
-UUID_PREFIX=$(echo "$KEY_NAME" | sed 's/ngfw-//')
+UUID_PREFIX=${KEY_NAME#ngfw-}
 
 # Find the secret with matching UUID
 SECRET_ARN=$(aws secretsmanager list-secrets \
@@ -109,7 +110,7 @@ echo "Command ID: $CMD_ID"
 echo "Waiting for command to complete..."
 
 # Poll for completion
-for i in {1..30}; do
+for _ in {1..30}; do
   sleep 2
   STATUS=$(aws ssm get-command-invocation \
     --profile "$PROFILE" \

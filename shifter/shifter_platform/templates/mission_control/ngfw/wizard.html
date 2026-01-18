@@ -248,6 +248,60 @@
                 </div>
             </div>
 
+            <!-- Awaiting Association State - shown when infrastructure is ready but user needs to associate in SCM -->
+            <div class="awaiting-association-state" id="awaiting-association-state" style="display: none;">
+                <div class="warning-icon">!</div>
+                <h2 class="warning-title">Action Required</h2>
+                <p class="warning-subtitle">
+                    Your NGFW infrastructure is ready. Complete these steps to finish setup:
+                </p>
+
+                <div class="setup-instructions">
+                    <div class="setup-step">
+                        <span class="setup-step-number">1</span>
+                        <div class="setup-step-content">
+                            <h4>Associate Device in Strata Cloud Manager</h4>
+                            <p>Go to <strong>Strata Cloud Manager &rarr; Configuration &rarr; Device Associations</strong> and click <strong>Add Device</strong>.</p>
+                            <p class="serial-number-row">
+                                Serial Number: <code id="ngfw-serial">Loading...</code>
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="setup-step">
+                        <span class="setup-step-number">2</span>
+                        <div class="setup-step-content">
+                            <h4>Connect to XDR/XSIAM</h4>
+                            <p>Go to <strong>XDR/XSIAM &rarr; Settings &rarr; NGFW &rarr; Add New Instance</strong> and connect the firewall.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="setup-note">
+                    Once you've completed both steps above, click the button below to finish configuration:
+                </p>
+
+                <button type="button" class="btn btn-primary" id="complete-setup-btn">
+                    Complete Setup
+                </button>
+
+                <p class="setup-timing-note">
+                    This will configure logging service and may take up to 15 minutes.
+                </p>
+            </div>
+
+            <!-- Configuring State - shown while complete-setup is running -->
+            <div class="configuring-state" id="configuring-state" style="display: none;">
+                <div class="progress-spinner"></div>
+                <h2 class="progress-title">Completing Setup</h2>
+                <p class="progress-subtitle">
+                    Configuring logging service and verifying connection...
+                </p>
+                <p class="progress-subtitle" style="color: var(--xdr-text-tertiary);">
+                    This may take up to 15 minutes. Please don't close this page.
+                </p>
+            </div>
+
             <div class="success-state" id="success-state" style="display: none;">
                 <div class="success-icon">&#10003;</div>
                 <h2 class="success-title">NGFW Provisioned Successfully!</h2>

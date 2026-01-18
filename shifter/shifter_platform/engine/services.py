@@ -858,3 +858,65 @@ def stop_ngfw(request_id: UUID) -> bool:
         )
 
     return task_arn is not None
+
+
+def complete_ngfw_setup(request_id: UUID) -> bool:
+    """Complete NGFW setup after user associates device in SCM/XDR.
+
+    Validates the Instance is in awaiting_association or stopped status,
+    then triggers ECS to run the complete-setup operation.
+
+    The complete-setup operation will:
+    1. Start the NGFW if stopped
+    2. Fetch license (to get Logging Service license from CDL)
+    3. Wait for CSP certificate sync
+    4. Poll for valid device certificate
+    5. Mark NGFW as ready and auto-stop
+
+    Args:
+        request_id: UUID of the request containing the NGFW.
+
+    Returns:
+        True if complete-setup initiated, False if request/instance not found.
+
+    Raises:
+        EngineError: If NGFW is not in a valid status for setup completion.
+    """
+    from engine.ecs import start_ngfw_operation
+    from engine.models import Instance, Request
+
+    logger.debug("complete_ngfw_setup: request_id=%s", request_id)
+
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("complete_ngfw_setup: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("complete_ngfw_setup: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    # Allow completion from awaiting_association or stopped (after auto-stop)
+    valid_statuses = [
+        ResourceStatus.AWAITING_ASSOCIATION.value,
+        ResourceStatus.PAUSED.value,  # PAUSED = "paused" which maps to "stopped" in UI
+        "stopped",  # Direct status value used in some places
+    ]
+    if ngfw_instance.status not in valid_statuses:
+        raise EngineError(
+            f"Cannot complete setup: NGFW is in '{ngfw_instance.status}' status. "
+            f"Expected one of: awaiting_association, stopped"
+        )
+
+    task_arn = start_ngfw_operation(request_id, "complete-setup")
+
+    if task_arn:
+        logger.info(
+            "complete_ngfw_setup: started ECS task=%s for request=%s",
+            task_arn,
+            request_id,
+        )
+
+    return task_arn is not None

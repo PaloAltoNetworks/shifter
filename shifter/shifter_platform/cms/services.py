@@ -3018,3 +3018,90 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
         instance_id=instance.id,
         is_deleted=True,
     )
+
+
+def complete_ngfw_setup(user: User, app_id: UUID | str) -> NGFWAppRef:
+    """Complete NGFW setup after user associates device in SCM/XDR.
+
+    After provisioning completes with awaiting_association status, the user must:
+    1. Associate the device in Strata Cloud Manager (Device Associations)
+    2. Connect the firewall to XDR/XSIAM
+
+    Once those steps are done, this function triggers the final setup which:
+    - Fetches the license (retrieves Logging Service license from CDL)
+    - Waits for CSP certificate sync
+    - Polls for valid device certificate
+    - Marks NGFW as ready
+
+    Args:
+        user: User requesting setup completion
+        app_id: UUID of the NGFW App
+
+    Returns:
+        NGFWAppRef with configuring status
+
+    Raises:
+        TypeError: If user is None or parameter types are invalid
+        ValueError: If parameters invalid
+        CMSError: If NGFW not found, not owned by user, or invalid state
+    """
+    from cms.models import App
+    from engine import services as engine_services
+    from shared.schemas.app import NGFWAppRef
+
+    _validate_ngfw_user(user)
+    validated_app_id = _validate_app_id(app_id)
+    logger.debug("complete_ngfw_setup called for user_id=%s, app_id=%s", user.id, validated_app_id)
+
+    try:
+        app = App.objects.select_related("instance", "instance__request").get(
+            id=validated_app_id,
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
+        )
+    except App.DoesNotExist:
+        logger.error("complete_ngfw_setup: App id=%s not found for user_id=%s", app_id, user.id)
+        raise CMSError("NGFW not found") from None
+
+    instance = app.instance
+    assert instance is not None, "App must have an instance"
+
+    # Validate status allows setup completion
+    valid_statuses = [
+        ResourceStatus.AWAITING_ASSOCIATION.value,
+        "stopped",  # After auto-stop following provisioning
+    ]
+    if instance.status not in valid_statuses:
+        logger.warning(
+            "complete_ngfw_setup: invalid status=%s for App id=%s",
+            instance.status,
+            app_id,
+        )
+        raise CMSError(
+            f"Cannot complete setup: NGFW is in '{instance.status}' status. "
+            "Please wait for provisioning to complete first."
+        )
+
+    request_id = instance.request.request_id
+
+    # Call engine to trigger complete-setup ECS task
+    try:
+        success = engine_services.complete_ngfw_setup(request_id)
+    except engine_services.EngineError as e:
+        raise CMSError(str(e)) from e
+
+    if not success:
+        raise CMSError("Failed to trigger setup completion")
+
+    logger.info(
+        "complete_ngfw_setup: triggered for App id=%s, request_id=%s",
+        app_id,
+        request_id,
+    )
+
+    return NGFWAppRef(
+        app_id=app.id,
+        instance_id=instance.id,
+        is_deleted=False,
+    )

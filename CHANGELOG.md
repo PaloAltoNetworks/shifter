@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Dashboard renamed to Ranges
 - Ranges view uses multiple tiles for launch and active ranges
+- NGFW flow handles prompting user to associate NGFW to SCM and XDR
 
 ### Fixed
 - Django build does not include cyberscript shared library

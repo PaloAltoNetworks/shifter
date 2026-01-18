@@ -90,10 +90,10 @@ class TestGetRangeFromDb:
         """Range with ngfw: true in range_config should have ngfw_enabled=True."""
         with patch("psycopg.connect") as mock_connect:
             mock_cursor = MagicMock()
-            # First call returns range row, second call returns NGFW service name
+            # First call returns range row, second call returns NGFW data ENI ID
             mock_cursor.fetchone.side_effect = [
                 sample_db_range_row_with_ngfw,
-                ("com.amazonaws.vpce.us-east-2.vpce-svc-test123", 123),  # NGFW lookup: (service_name, instance_id)
+                ("eni-test123", 123),  # NGFW lookup: (data_eni_id, instance_id)
             ]
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -105,7 +105,7 @@ class TestGetRangeFromDb:
             result = get_range_from_db(42)
 
             assert result["ngfw_enabled"] is True
-            assert result["gwlb_service_name"] == "com.amazonaws.vpce.us-east-2.vpce-svc-test123"
+            assert result["ngfw_data_eni_id"] == "eni-test123"
 
 
 class TestDataclassDefaults:
@@ -173,7 +173,7 @@ class TestDataclassDefaults:
             availability_zone="us-east-2a",
             portal_vpc_cidr="10.0.0.0/16",
         )
-        assert config.gwlb_service_name == ""
+        assert config.ngfw_data_eni_id == ""
         assert config.ngfw_enabled is False
         assert config.dc_ami_id == ""
         assert config.portal_vpc_cidr == "10.0.0.0/16"
@@ -328,14 +328,14 @@ class TestLoadConfigIntegration:
     def mock_db_range_data(self, mocker):
         """Mock get_range_from_db to return test data."""
 
-        def _mock_db(range_id, range_config=None, ngfw_enabled=False, gwlb_service_name=""):
+        def _mock_db(range_id, range_config=None, ngfw_enabled=False, ngfw_data_eni_id=""):
             mock_data = {
                 "id": range_id,
                 "user_id": 1,
                 "request_uuid": "request-uuid-test",
                 "range_config": range_config or {"subnets": []},
                 "ngfw_enabled": ngfw_enabled,
-                "gwlb_service_name": gwlb_service_name,
+                "ngfw_data_eni_id": ngfw_data_eni_id,
             }
             mocker.patch("config.get_range_from_db", return_value=mock_data)
             return mock_data
@@ -409,20 +409,20 @@ class TestLoadConfigIntegration:
         assert result.subnets[0].instances[0].agent_presigned_url == "https://s3.example.com/presigned-url"
 
     def test_includes_ngfw_config(self, mock_pulumi_config, mock_db_range_data, mock_boto3_clients):
-        """load_config should include gwlb_service_name when NGFW enabled."""
+        """load_config should include ngfw_data_eni_id when NGFW enabled."""
         from config import load_config
 
         mock_db_range_data(
             42,
             range_config={"subnets": []},
             ngfw_enabled=True,
-            gwlb_service_name="com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123",
+            ngfw_data_eni_id="eni-ngfw123456789",
         )
 
         result = load_config()
 
         assert result.ngfw_enabled is True
-        assert result.gwlb_service_name == "com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123"
+        assert result.ngfw_data_eni_id == "eni-ngfw123456789"
 
     def test_parses_dc_config_and_join_domain(self, mock_pulumi_config, mocker, mock_boto3_clients):
         """load_config should parse dc_config and join_domain from subnets."""
@@ -458,7 +458,7 @@ class TestLoadConfigIntegration:
                     ]
                 },
                 "ngfw_enabled": False,
-                "gwlb_service_name": "",
+                "ngfw_data_eni_id": "",
             },
         )
 
@@ -500,7 +500,7 @@ class TestLoadConfigIntegration:
                     ]
                 },
                 "ngfw_enabled": False,
-                "gwlb_service_name": "",
+                "ngfw_data_eni_id": "",
             },
         )
 

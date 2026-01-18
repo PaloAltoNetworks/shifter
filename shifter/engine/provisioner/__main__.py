@@ -3,7 +3,7 @@
 This is the main Pulumi program that gets executed when running `pulumi up`.
 It detects the stack type from config and creates the appropriate resources:
 - Range stack: Creates cyber range with attacker/victim instances
-- NGFW stack: Creates VM-Series NGFW with GWLB for traffic inspection
+- NGFW stack: Creates VM-Series NGFW with direct ENI routing for traffic inspection
 """
 
 from __future__ import annotations
@@ -84,10 +84,8 @@ def _provision_ngfw() -> None:
     pulumi.export("ec2_instance_id", ngfw_stack.ec2_instance_id)
     pulumi.export("management_ip", ngfw_stack.management_ip)
     pulumi.export("dataplane_ip", ngfw_stack.dataplane_ip)
+    pulumi.export("data_eni_id", ngfw_stack.data_eni_id)
     pulumi.export("ssh_key_secret_arn", ngfw_stack.ssh_key_secret_arn)
-    pulumi.export("gwlb_arn", ngfw_stack.gwlb_arn)
-    pulumi.export("target_group_arn", ngfw_stack.target_group_arn)
-    pulumi.export("service_name", ngfw_stack.service_name)
 
     logger.debug("_provision_ngfw: exports registered")
 
@@ -131,7 +129,6 @@ def _provision_range() -> None:
             "subnet_cidr": network.subnet_cidr,
             "security_group_id": network.security_group_id,
             "route_table_id": network.route_table_id,
-            "gwlb_endpoint_id": network.gwlb_endpoint_id,
         }
     pulumi.export("subnets", subnets_output)
 

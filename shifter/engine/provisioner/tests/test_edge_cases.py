@@ -60,7 +60,7 @@ class TestLoadConfigEdgeCases:
                     "subnets": [{"name": "main", "uuid": "subnet-1", "instances": instances, "connected_to": []}],
                 },
                 "ngfw_enabled": False,
-                "gwlb_service_name": "",
+                "ngfw_data_eni_id": "",
             },
         )
 
@@ -91,7 +91,7 @@ class TestLoadConfigEdgeCases:
                     "subnets": [{"name": "mixed", "uuid": "subnet-1", "instances": instances, "connected_to": []}],
                 },
                 "ngfw_enabled": False,
-                "gwlb_service_name": "",
+                "ngfw_data_eni_id": "",
             },
         )
 

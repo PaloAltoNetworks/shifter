@@ -2,16 +2,15 @@
 
 This component creates the network infrastructure for a logical subnet:
 - AWS Subnet (/28 for logical subnets, /24 for legacy single-subnet)
-- Security Group (intra-subnet unrestricted, GWLB return traffic)
+- Security Group (intra-subnet unrestricted, VPC CIDR for return traffic)
 - Route Table (portal peering route, S3 endpoint association)
-- GWLB Endpoint (when NGFW is enabled)
 
 Inter-subnet routing:
 After NetworkComponents are created, RangeStack adds explicit routes from
-each subnet to connected subnet CIDRs via the GWLB. This overrides AWS's
-implicit local VPC route for those specific CIDRs, forcing inter-subnet
-traffic through the NGFW. Internet traffic (0.0.0.0/0) is NOT routed through
-GWLB - it uses the existing NAT gateway / AWS Network Firewall path.
+each subnet to connected subnet CIDRs via the NGFW data ENI. This overrides
+AWS's implicit local VPC route for those specific CIDRs, forcing inter-subnet
+traffic through the NGFW. Internet traffic (0.0.0.0/0) uses the NAT gateway
+via AWS Network Firewall, not the NGFW.
 """
 
 import hashlib
@@ -441,11 +440,10 @@ class NetworkComponent(pulumi.ComponentResource):
 
     Creates per-subnet resources:
     - AWS Subnet (/28 for logical subnets, /24 for legacy)
-    - Security Group (intra-subnet unrestricted, VPC CIDR for GWLB return)
+    - Security Group (intra-subnet unrestricted, VPC CIDR for return traffic)
     - Route Table (portal route, S3 endpoint association)
-    - GWLB Endpoint (when gwlb_service_name provided)
 
-    Note: Inter-subnet routes via GWLB are added by RangeStack, not here.
+    Note: Inter-subnet routes via NGFW ENI are added by RangeStack, not here.
 
     Attributes:
         subnet: The created subnet resource.
@@ -455,8 +453,6 @@ class NetworkComponent(pulumi.ComponentResource):
         security_group_id: The security group ID.
         route_table: The created route table.
         route_table_id: The route table ID.
-        gwlb_endpoint: The GWLB endpoint (None if no NGFW).
-        gwlb_endpoint_id: The GWLB endpoint ID (empty string if no NGFW).
     """
 
     subnet: aws.ec2.Subnet
@@ -466,8 +462,6 @@ class NetworkComponent(pulumi.ComponentResource):
     security_group_id: pulumi.Output[str]
     route_table: aws.ec2.RouteTable
     route_table_id: pulumi.Output[str]
-    gwlb_endpoint: aws.ec2.VpcEndpoint | None
-    gwlb_endpoint_id: pulumi.Output[str]
 
     def __init__(
         self,
@@ -483,7 +477,6 @@ class NetworkComponent(pulumi.ComponentResource):
         subnet_uuid: str = "",
         request_uuid: str = "",
         subnet_size: int = 24,
-        gwlb_service_name: str = "",
         s3_endpoint_id: str = "",
         firewall_endpoint_id: str = "",
         portal_vpc_cidr: str = "",
@@ -506,7 +499,6 @@ class NetworkComponent(pulumi.ComponentResource):
             subnet_uuid: Logical subnet UUID for tagging.
             request_uuid: Request UUID for correlation.
             subnet_size: Subnet prefix length (24 or 28). Default 24.
-            gwlb_service_name: GWLB VPC Endpoint Service name. Empty = no NGFW.
             s3_endpoint_id: S3 Gateway VPC Endpoint ID for agent downloads.
             firewall_endpoint_id: AWS Network Firewall endpoint ID for internet egress.
             portal_vpc_cidr: Portal VPC CIDR block for SSH access. Empty = no portal access.
@@ -522,11 +514,10 @@ class NetworkComponent(pulumi.ComponentResource):
         self._portal_vpc_peering_id = portal_vpc_peering_id
 
         logger.info(
-            "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, gwlb=%s, cidr=%s",
+            "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, cidr=%s",
             name,
             subnet_name,
             subnet_size,
-            "enabled" if gwlb_service_name else "disabled",
             allocated_cidr or "auto",
         )
 
@@ -557,9 +548,6 @@ class NetworkComponent(pulumi.ComponentResource):
 
         # Associate route table with S3 VPC endpoint for agent downloads
         self._associate_s3_endpoint(name)
-
-        # Create GWLB endpoint if service name provided
-        self._create_gwlb_endpoint(name, vpc_id, gwlb_service_name, common_tags)
 
         # Associate route table with subnet
         aws.ec2.RouteTableAssociation(
@@ -662,7 +650,7 @@ class NetworkComponent(pulumi.ComponentResource):
 
         Rules:
         - Inbound: Allow ALL from same subnet CIDR (intra-subnet unrestricted)
-        - Inbound: Allow ALL from VPC CIDR (for GWLB return traffic)
+        - Inbound: Allow ALL from VPC CIDR (for NGFW return traffic)
         - Inbound: Allow SSH (port 22) from portal VPC CIDR (for terminal access)
         - Outbound: Allow ALL
 
@@ -686,13 +674,13 @@ class NetworkComponent(pulumi.ComponentResource):
                 cidr_blocks=[subnet_cidr],
                 description="Allow all intra-subnet traffic",
             ),
-            # Allow all from VPC (GWLB return traffic)
+            # Allow all from VPC (NGFW return traffic for inter-subnet inspection)
             aws.ec2.SecurityGroupIngressArgs(
                 protocol="-1",
                 from_port=0,
                 to_port=0,
                 cidr_blocks=[vpc_cidr],
-                description="Allow GWLB return traffic from VPC",
+                description="Allow NGFW return traffic from VPC",
             ),
         ]
 
@@ -764,7 +752,7 @@ class NetworkComponent(pulumi.ComponentResource):
         """Create route table for this subnet.
 
         The route table starts with just the local VPC route (implicit).
-        GWLB route is added separately if NGFW is enabled.
+        Inter-subnet routes through NGFW ENI are added separately if NGFW is enabled.
         Portal VPC route is added if portal_vpc_cidr and portal_vpc_peering_id are set.
 
         Args:
@@ -859,98 +847,37 @@ class NetworkComponent(pulumi.ComponentResource):
 
         logger.debug("Associated route table with S3 endpoint for subnet %s", name)
 
-    def _create_gwlb_endpoint(
-        self,
-        name: str,
-        vpc_id: str,
-        gwlb_service_name: str,
-        common_tags: dict[str, str],
-    ) -> None:
-        """Create GWLB endpoint if service name provided.
-
-        When NGFW is enabled, creates a VPC endpoint for the GWLB. Inter-subnet
-        routes via this endpoint are added separately by RangeStack using
-        add_route_to_subnet(). Internet traffic is NOT routed through GWLB.
-
-        Args:
-            name: Resource name prefix.
-            vpc_id: VPC ID.
-            gwlb_service_name: GWLB VPC Endpoint Service name. Empty = no NGFW.
-            common_tags: Common tags dict.
-        """
-        if not gwlb_service_name:
-            self.gwlb_endpoint = None
-            self.gwlb_endpoint_id = pulumi.Output.from_input("")
-            logger.debug("No GWLB service name provided, skipping endpoint creation")
-            return
-
-        subnet_name_tag = common_tags.get("shifter:subnet_name", "default")
-
-        logger.info(
-            "Creating GWLB endpoint for subnet %s with service %s",
-            name,
-            gwlb_service_name,
-        )
-
-        # Create VPC endpoint for GWLB
-        self.gwlb_endpoint = aws.ec2.VpcEndpoint(
-            f"{name}-gwlbe",
-            vpc_id=vpc_id,
-            service_name=gwlb_service_name,
-            vpc_endpoint_type="GatewayLoadBalancer",
-            subnet_ids=[self.subnet.id],
-            tags={
-                **common_tags,
-                "Name": f"shifter-{subnet_name_tag}-gwlbe",
-            },
-            opts=pulumi.ResourceOptions(parent=self, depends_on=[self.subnet]),
-        )
-
-        self.gwlb_endpoint_id = self.gwlb_endpoint.id
-
-        # Note: We don't add a default route (0.0.0.0/0) to GWLB here.
-        # Inter-subnet routes are added explicitly via add_route_to_subnet()
-        # for connected subnet pairs. Internet traffic should use the existing
-        # NAT gateway / AWS Network Firewall path, not go through GWLB.
-
-        logger.info("Created GWLB endpoint for subnet %s", name)
-
-    def add_route_to_subnet(
+    def add_route_to_ngfw(
         self,
         name: str,
         destination_cidr: pulumi.Output[str],
+        ngfw_eni_id: str,
         opts: pulumi.ResourceOptions | None = None,
-    ) -> aws.ec2.Route | None:
-        """Add a route to another subnet's CIDR through GWLB.
+    ) -> aws.ec2.Route:
+        """Add a route to another subnet's CIDR through NGFW data ENI.
 
         This overrides AWS's implicit local VPC route for that specific CIDR,
-        forcing traffic through the GWLB/NGFW instead of direct local routing.
+        forcing traffic through the NGFW for inspection instead of direct routing.
 
         Use this after all NetworkComponents are created to add inter-subnet
-        routes that force all inter-subnet traffic through the NGFW.
+        routes that force traffic between connected subnets through the NGFW.
 
         Args:
             name: Unique resource name for this route.
             destination_cidr: The destination subnet's CIDR block (Pulumi Output).
+            ngfw_eni_id: The NGFW data ENI ID to route traffic through.
             opts: Optional Pulumi resource options.
 
         Returns:
-            The created Route resource, or None if no GWLB endpoint.
+            The created Route resource.
         """
-        if not self.gwlb_endpoint:
-            logger.debug(
-                "No GWLB endpoint, skipping inter-subnet route %s",
-                name,
-            )
-            return None
-
-        logger.debug("Adding inter-subnet route %s", name)
+        logger.debug("Adding inter-subnet route %s via NGFW ENI %s", name, ngfw_eni_id)
 
         return aws.ec2.Route(
             name,
             route_table_id=self.route_table.id,
             destination_cidr_block=destination_cidr,
-            vpc_endpoint_id=self.gwlb_endpoint.id,
+            network_interface_id=ngfw_eni_id,
             opts=opts or pulumi.ResourceOptions(parent=self),
         )
 
@@ -991,6 +918,5 @@ class NetworkComponent(pulumi.ComponentResource):
                 "subnetCidr": self.subnet_cidr,
                 "securityGroupId": self.security_group_id,
                 "routeTableId": self.route_table_id,
-                "gwlbEndpointId": self.gwlb_endpoint_id,
             }
         )

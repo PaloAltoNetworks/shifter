@@ -372,7 +372,7 @@ def sample_range_config(sample_subnet_config_attack, sample_subnet_config_target
         dc_ami_id="ami-dc-test",
         agent_s3_bucket="shifter-agents",
         availability_zone="us-east-2a",
-        gwlb_service_name="",
+        ngfw_data_eni_id="",
     )
 
 
@@ -454,7 +454,7 @@ def sample_range_config_multi_subnet():
         dc_ami_id="ami-dc-prod",
         agent_s3_bucket="shifter-agents-prod",
         availability_zone="us-east-2b",
-        gwlb_service_name="com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123",
+        ngfw_data_eni_id="eni-ngfw123456789",
     )
 
 

@@ -7,7 +7,7 @@ the plan step by step, handling reboots and verification.
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from executors.base import CommandResult
 from executors.ssm_executor import (
@@ -187,56 +187,122 @@ class SetupOrchestrator:
             verification_result=verify_result,
         )
 
+    # PAN-OS management plane error patterns that indicate the device isn't ready
+    PANOS_MGMT_ERRORS: ClassVar[list[str]] = [
+        "Cannot connect to management server",
+        "Server timeout",
+        "Management server is not ready",
+    ]
+
     def _execute_step(
         self,
         instance_id: str,
         step: SetupStep,
         context: dict[str, Any],
         document_name: str,
+        max_retries: int = 1,
     ) -> StepResult:
-        """Execute a single step.
+        """Execute a single step with retry support.
 
         Args:
             instance_id: Target instance
             step: Step to execute
             context: Template variables
             document_name: SSM document to use
+            max_retries: Number of retry attempts on failure (default 1)
 
         Returns:
             StepResult with step output
 
         Raises:
-            CommandError, TimeoutError, SetupError: On failure
+            CommandError, TimeoutError, SetupError: On failure after retries
         """
-        logger.debug("_execute_step: step=%s instance_id=%s", step.name, instance_id)
+        import time
+
+        logger.info("_execute_step: starting step=%s", step.name)
         # Render the script and stdin_input with context variables
         rendered_script = self._render_script(step.script, context, step.name)
         rendered_stdin = self._render_script(getattr(step, "stdin_input", "") or "", context, step.name)
 
-        # Execute via executor (SSM or SSH)
-        result = self.executor.run_command(
-            instance_id=instance_id,
-            script=rendered_script,
-            timeout_seconds=step.timeout_seconds,
-            document_name=document_name,
-            stdin_input=rendered_stdin if rendered_stdin else None,
-        )
+        last_result = None
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                logger.info("_execute_step: retry %d/%d for step=%s", attempt, max_retries, step.name)
+                time.sleep(10)  # Brief pause before retry
 
-        if result.success:
-            logger.debug("_execute_step: completed step=%s", step.name)
-        else:
-            logger.warning(
-                "_execute_step: failed step=%s stderr=%s",
-                step.name,
-                result.stderr[:200] if result.stderr else "",
+            # Execute via executor (SSM or SSH)
+            result = self.executor.run_command(
+                instance_id=instance_id,
+                script=rendered_script,
+                timeout_seconds=step.timeout_seconds,
+                document_name=document_name,
+                stdin_input=rendered_stdin if rendered_stdin else None,
             )
+            last_result = result
 
+            # Check for PAN-OS management plane errors in output
+            panos_error = self._check_panos_errors(result.stdout)
+            if panos_error:
+                logger.warning(
+                    "_execute_step: PAN-OS error in step=%s: %s",
+                    step.name,
+                    panos_error,
+                )
+                if attempt < max_retries:
+                    continue  # Retry
+                else:
+                    raise SetupError(
+                        f"Step '{step.name}' failed with PAN-OS error: {panos_error}",
+                        step_name=step.name,
+                    )
+
+            if result.success:
+                # Log success with output summary
+                stdout_preview = result.stdout[:500] if result.stdout else "(no output)"
+                logger.info(
+                    "_execute_step: completed step=%s output=%s",
+                    step.name,
+                    stdout_preview,
+                )
+                return StepResult(
+                    step_name=step.name,
+                    success=True,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                )
+            else:
+                logger.warning(
+                    "_execute_step: failed step=%s attempt=%d stderr=%s",
+                    step.name,
+                    attempt + 1,
+                    result.stderr[:200] if result.stderr else "",
+                )
+                if attempt < max_retries:
+                    continue  # Retry
+
+        # All retries exhausted
         return StepResult(
             step_name=step.name,
-            success=result.success,
-            stdout=result.stdout,
-            stderr=result.stderr,
+            success=False,
+            stdout=last_result.stdout if last_result else "",
+            stderr=last_result.stderr if last_result else "",
         )
+
+    def _check_panos_errors(self, output: str) -> str | None:
+        """Check output for PAN-OS management plane errors.
+
+        Args:
+            output: Command output to check
+
+        Returns:
+            Error message if found, None otherwise
+        """
+        if not output:
+            return None
+        for error_pattern in self.PANOS_MGMT_ERRORS:
+            if error_pattern in output:
+                return error_pattern
+        return None
 
     def _render_script(
         self,

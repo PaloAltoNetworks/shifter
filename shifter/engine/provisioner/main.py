@@ -537,6 +537,15 @@ def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> 
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
 
+    # Wait for management plane to be ready (especially important after NGFW start)
+    logger.info("Verifying NGFW management plane is ready...")
+    poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=300,  # 5 min - should be quick if NGFW was already running
+        poll_interval=15,
+    )
+
     # Build and execute the configure plan
     plan = NGFWConfigureSubnetsPlan()
     steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
@@ -607,6 +616,15 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     ssh_executor = SSHExecutor(private_key=private_key)
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
+
+    # Wait for management plane to be ready
+    logger.info("Verifying NGFW management plane is ready...")
+    poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=300,  # 5 min - should be quick since NGFW is running
+        poll_interval=15,
+    )
 
     # Build and execute the remove plan
     plan = NGFWRemoveSubnetsPlan()
@@ -1965,6 +1983,18 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     logger.info(f"Waiting for SSH on NGFW at {management_ip}...")
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
 
+    # Poll for serial number BEFORE running provision plan - this ensures management
+    # plane is ready to accept configuration commands. Serial number appearing
+    # indicates the PAN-OS management server is operational.
+    logger.info("Polling for NGFW serial number (management plane readiness check)...")
+    serial_number = poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=600,  # 10 min - serial should appear after mgmt plane is up
+        poll_interval=30,
+    )
+    logger.info("NGFW management plane ready, serial=%s", serial_number)
+
     # Create orchestrator with SSH executor
     orchestrator = SetupOrchestrator(ssh_executor)
 
@@ -1983,6 +2013,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     provision_plan = NGFWProvisionPlan()
     # NOTE: SetupOrchestrator.orchestrate() uses "instance_id" as the SSH target.
     # For SSH-based plans, this is the management IP address, not a UUID or EC2 ID.
+    logger.info("Running NGFW provision plan...")
     provision_result = orchestrator.orchestrate(
         instance_id=management_ip,
         plan=provision_plan,
@@ -1991,16 +2022,6 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
 
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
-
-    # Poll for serial number only - user must associate in SCM before cert is available
-    # Serial becomes available quickly after SSH is ready (embedded in VM)
-    logger.info("Polling for NGFW serial number...")
-    serial_number = poll_for_serial_number(
-        ssh_executor=ssh_executor,
-        host=management_ip,
-        timeout_seconds=600,  # 10 min - serial should appear quickly
-        poll_interval=30,
-    )
 
     # Build state dict with all outputs including data_eni_id for range routing
     state = {

@@ -208,6 +208,50 @@ resource "aws_networkfirewall_rule_group" "block_ip_sni" {
 }
 
 # ------------------------------------------------------------------------------
+# IP-based Allowlist (GCP ranges for PANW services)
+# ------------------------------------------------------------------------------
+
+resource "aws_networkfirewall_rule_group" "victim_ips" {
+  count = var.enable_network_firewall && length(var.victim_allowed_cidrs) > 0 ? 1 : 0
+
+  capacity = 1000 # Each CIDR uses ~1 capacity unit
+  name     = "${var.name_prefix}-victim-ips"
+  type     = "STATEFUL"
+
+  rule_group {
+    rule_variables {
+      ip_sets {
+        key = "HOME_NET"
+        ip_set {
+          definition = [var.vpc_cidr]
+        }
+      }
+      ip_sets {
+        key = "ALLOWED_IPS"
+        ip_set {
+          definition = var.victim_allowed_cidrs
+        }
+      }
+    }
+
+    rules_source {
+      # Allow TCP 443 to all GCP/PANW IPs
+      rules_string = <<-EOT
+        pass tcp $HOME_NET any -> $ALLOWED_IPS 443 (msg:"Allow HTTPS to PANW/GCP IPs"; sid:2000001; rev:1;)
+      EOT
+    }
+
+    stateful_rule_options {
+      rule_order = "DEFAULT_ACTION_ORDER"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-victim-ips"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Drop All Unmatched Traffic (default deny)
 # ------------------------------------------------------------------------------
 
@@ -236,9 +280,10 @@ resource "aws_networkfirewall_rule_group" "drop_all" {
 
     rules_source {
       # Drop all outbound traffic that wasn't explicitly allowed by previous rules
-      # This enforces the allowlist - only traffic to allowed domains passes
+      # This enforces the allowlist - only traffic to allowed domains/IPs passes
       rules_string = <<-EOT
-        drop ip $HOME_NET any -> $EXTERNAL_NET any (msg:"Drop all unmatched egress"; sid:9999999; rev:1;)
+        drop tcp $HOME_NET any -> $EXTERNAL_NET 443 (msg:"Drop unmatched HTTPS egress"; sid:9999998; rev:1;)
+        drop tcp $HOME_NET any -> $EXTERNAL_NET 80 (msg:"Drop unmatched HTTP egress"; sid:9999997; rev:1;)
       EOT
     }
 
@@ -273,10 +318,10 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 
     # Rule evaluation order (DEFAULT_ACTION_ORDER evaluates all rules):
     # 1. NGFW bypass - pass all from NGFW subnet
-    # 2. Block IP SNI - reject TLS with IP as SNI
-    # 3. Victim domains - allow listed domains
+    # 2. Victim IPs - allow HTTPS to GCP/PANW IP ranges
+    # 3. Victim domains - allow listed domains (SNI-based)
     # 4. Kali domains - allow listed domains (if configured)
-    # 5. Drop all - drop everything else (default deny)
+    # 5. Drop all - drop unmatched HTTP/HTTPS (default deny)
 
     # NGFW bypass - allow all egress for SCM/licensing (must be first)
     dynamic "stateful_rule_group_reference" {
@@ -286,12 +331,15 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       }
     }
 
-    # Block direct IP connections
-    stateful_rule_group_reference {
-      resource_arn = aws_networkfirewall_rule_group.block_ip_sni[0].arn
+    # Victim IPs - allow HTTPS to GCP/PANW IP ranges
+    dynamic "stateful_rule_group_reference" {
+      for_each = length(var.victim_allowed_cidrs) > 0 ? [1] : []
+      content {
+        resource_arn = aws_networkfirewall_rule_group.victim_ips[0].arn
+      }
     }
 
-    # Victim domains (always included)
+    # Victim domains - SNI-based allowlist (backup for any IPs we missed)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.victim_domains[0].arn
     }
@@ -304,7 +352,7 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       }
     }
 
-    # Drop all unmatched traffic (default deny - must be last)
+    # Drop all unmatched HTTP/HTTPS traffic (default deny - must be last)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.drop_all[0].arn
     }

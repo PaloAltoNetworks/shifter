@@ -163,8 +163,6 @@ class TestDataclassDefaults:
             vpc_id="vpc-123",
             vpc_cidr="10.1.0.0/16",
             route_table_id="rtb-123",
-            kali_security_group_id="sg-kali",
-            victim_security_group_id="sg-victim",
             instance_profile_name="profile",
             kali_ami_id="ami-kali",
             victim_ami_id="ami-victim",

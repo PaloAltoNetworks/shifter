@@ -1,10 +1,14 @@
 """Tests for NGFWProvisionPlan.
 
 NGFWProvisionPlan handles post-Pulumi NGFW configuration via SSH:
-- Configure data interface (ethernet1/1 as L3 DHCP for ENI routing)
+- Configure data interface (ethernet1/1 as L3 DHCP + virtual router)
+- Create shared 'ranges' zone for all range traffic
+- Delete default allow-all rule (bypasses per-range logging)
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
-- Create security policy (allow-all rule with logging)
+
+Note: No default security policy is created. Per-range rules are
+created by NGFWConfigureSubnetsPlan during range provisioning.
 
 Note: SSH wait is handled by main.py before this plan runs.
 Serial number polling is also in main.py (after plan completes).
@@ -28,13 +32,13 @@ class TestNGFWProvisionPlanStructure:
     """Test NGFWProvisionPlan step definitions and verification."""
 
     def test_plan_structure(self):
-        """Plan should have 4 steps with proper attributes."""
+        """Plan should have 5 steps with proper attributes."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
 
-        # Should have 4 steps (interface config + logging + profile + policy)
-        assert len(plan.steps) == 4
+        # Should have 5 steps (interface + zone + delete allow-all + logging + profile)
+        assert len(plan.steps) == 5
 
         # All steps must have required attributes
         for step in plan.steps:
@@ -47,7 +51,7 @@ class TestNGFWProvisionPlanStructure:
         assert plan.verify_step is None
 
     def test_steps_in_correct_order(self):
-        """Steps must be in correct order: interface config first, then logging before profile."""
+        """Steps must be in correct order: interface, zone, delete allow-all, logging, profile."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
@@ -57,10 +61,21 @@ class TestNGFWProvisionPlanStructure:
         interface_idx = next(i for i, n in enumerate(step_names) if "data_interface" in n)
         assert interface_idx == 0
 
-        # Cloud logging must come before log forwarding profile
+        # Zone creation must come after interface config
+        zone_idx = next(i for i, n in enumerate(step_names) if "zone" in n)
+        assert zone_idx > interface_idx
+
+        # Delete allow-all must come after zone creation
+        delete_allow_all_idx = next(i for i, n in enumerate(step_names) if "allow_all" in n)
+        assert delete_allow_all_idx > zone_idx
+
+        # Cloud logging must come after delete allow-all
         cloud_logging_idx = next(i for i, n in enumerate(step_names) if "cloud_logging" in n)
+        assert cloud_logging_idx > delete_allow_all_idx
+
+        # Log forwarding profile must come last
         profile_idx = next(i for i, n in enumerate(step_names) if "log_forwarding" in n)
-        assert cloud_logging_idx < profile_idx
+        assert profile_idx > cloud_logging_idx
 
 
 class TestNGFWProvisionPlanContext:
@@ -112,17 +127,34 @@ class TestNGFWProvisionPlanScripts:
         assert "XDR-Forward" in profile_step.stdin_input
         assert "log-settings" in profile_step.stdin_input
 
-    def test_security_policy_creates_allow_all_rule(self):
-        """Security policy step should create allow-all rule with logging."""
+    def test_shared_zone_creates_ranges_zone(self):
+        """Shared zone step should create 'ranges' zone with ethernet1/1."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
-        policy_step = next(s for s in plan.steps if "security_policy" in s.name)
+        zone_step = next(s for s in plan.steps if "zone" in s.name)
 
-        content = policy_step.stdin_input
-        assert "rulebase security" in content or "security rules" in content
-        assert "allow" in content.lower()
-        assert "log" in content.lower()
+        assert "zone ranges" in zone_step.stdin_input
+        assert "ethernet1/1" in zone_step.stdin_input
+
+    def test_data_interface_includes_virtual_router(self):
+        """Data interface step should assign ethernet1/1 to virtual router."""
+        from plans.ngfw_provision import NGFWProvisionPlan
+
+        plan = NGFWProvisionPlan()
+        interface_step = next(s for s in plan.steps if "data_interface" in s.name)
+
+        assert "virtual-router default" in interface_step.stdin_input
+        assert "ethernet1/1" in interface_step.stdin_input
+
+    def test_delete_allow_all_rule_removes_default_rule(self):
+        """Delete allow-all step should remove the default allow-all rule."""
+        from plans.ngfw_provision import NGFWProvisionPlan
+
+        plan = NGFWProvisionPlan()
+        delete_step = next(s for s in plan.steps if "allow_all" in s.name)
+
+        assert "delete rulebase security rules allow-all" in delete_step.stdin_input
 
     def test_configure_steps_include_commit(self):
         """Configuration steps using stdin_input must include commit command."""

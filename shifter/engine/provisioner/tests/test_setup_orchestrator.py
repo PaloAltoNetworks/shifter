@@ -9,9 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from executors.base import CommandResult
 from executors.ssm_executor import (
     CommandError,
-    CommandResult,
     SSMExecutor,
     TimeoutError,
 )

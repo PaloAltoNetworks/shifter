@@ -1,6 +1,7 @@
 """NGFW Configure Subnets Plan for adding subnet address objects and rules.
 
 This plan configures the NGFW with:
+- Static routes for each subnet (via VPC gateway)
 - Address objects for all subnets in a range
 - Security rules based on connected_to relationships (bidirectional)
 
@@ -46,17 +47,28 @@ def build_connected_pairs(subnets: list[dict]) -> list[tuple[str, str]]:
     return pairs
 
 
-def build_configure_input(subnets: list[dict], range_id: int) -> str:
-    """Build PAN-OS configure commands for addresses and security rules.
+def build_configure_input(subnets: list[dict], range_id: int, vpc_gateway_ip: str) -> str:
+    """Build PAN-OS configure commands for routes, addresses and security rules.
 
     Args:
         subnets: List of dicts with 'name', 'cidr', and 'connected_to' keys.
         range_id: Range ID for unique naming.
+        vpc_gateway_ip: VPC gateway IP address for static route next-hop.
 
     Returns:
         Multi-line string with configure commands and single commit.
     """
     lines = ["configure"]
+
+    # Add static routes for each subnet (routes must exist for traffic to flow)
+    for subnet in subnets:
+        route_name = f"range-{range_id}-{subnet['name']}"
+        cidr = subnet["cidr"]
+        lines.append(
+            f"set network virtual-router default routing-table ip static-route "
+            f"{route_name} destination {cidr} interface ethernet1/1 "
+            f"nexthop ip-address {vpc_gateway_ip}"
+        )
 
     # Add address objects for each subnet
     for subnet in subnets:
@@ -65,6 +77,7 @@ def build_configure_input(subnets: list[dict], range_id: int) -> str:
         lines.append(f"set address {addr_name} ip-netmask {cidr}")
 
     # Add bidirectional security rules for each connected pair
+    # Rules use 'ranges' zone (created during NGFW provisioning)
     for subnet_a, subnet_b in build_connected_pairs(subnets):
         addr_a = f"range-{range_id}-{subnet_a}"
         addr_b = f"range-{range_id}-{subnet_b}"
@@ -73,7 +86,7 @@ def build_configure_input(subnets: list[dict], range_id: int) -> str:
         rule_ab = f"range-{range_id}-{subnet_a}-to-{subnet_b}"
         lines.append(
             f"set rulebase security rules {rule_ab} "
-            f"from any to any source {addr_a} destination {addr_b} "
+            f"from ranges to ranges source {addr_a} destination {addr_b} "
             "application any service any action allow "
             "log-end yes log-setting XDR-Forward"
         )
@@ -82,7 +95,7 @@ def build_configure_input(subnets: list[dict], range_id: int) -> str:
         rule_ba = f"range-{range_id}-{subnet_b}-to-{subnet_a}"
         lines.append(
             f"set rulebase security rules {rule_ba} "
-            f"from any to any source {addr_b} destination {addr_a} "
+            f"from ranges to ranges source {addr_b} destination {addr_a} "
             "application any service any action allow "
             "log-end yes log-setting XDR-Forward"
         )
@@ -93,9 +106,9 @@ def build_configure_input(subnets: list[dict], range_id: int) -> str:
 
 
 def build_remove_input(subnets: list[dict], range_id: int) -> str:
-    """Build PAN-OS configure commands to remove addresses and rules.
+    """Build PAN-OS configure commands to remove routes, addresses and rules.
 
-    Rules deleted first since they reference addresses.
+    Deletion order: rules first (reference addresses), then addresses, then routes.
 
     Args:
         subnets: List of subnet dicts with 'name' and 'connected_to'.
@@ -116,6 +129,11 @@ def build_remove_input(subnets: list[dict], range_id: int) -> str:
     # Delete address objects
     for subnet in subnets:
         lines.append(f"delete address range-{range_id}-{subnet['name']}")
+
+    # Delete static routes
+    for subnet in subnets:
+        route_name = f"range-{range_id}-{subnet['name']}"
+        lines.append(f"delete network virtual-router default routing-table ip static-route {route_name}")
 
     lines.append("commit")
     lines.append("exit")
@@ -143,17 +161,18 @@ class NGFWConfigureSubnetsPlan:
         is_verification=True,
     )
 
-    def get_steps(self, subnets: list[dict], range_id: int) -> list[SetupStep]:
+    def get_steps(self, subnets: list[dict], range_id: int, vpc_gateway_ip: str) -> list[SetupStep]:
         """Build steps with dynamic stdin_input for the given subnets.
 
         Args:
             subnets: List of subnet dicts with 'name', 'cidr', 'connected_to'.
             range_id: Range ID for unique naming.
+            vpc_gateway_ip: VPC gateway IP address for static route next-hop.
 
         Returns:
             List with single SetupStep containing all configure commands.
         """
-        stdin_input = build_configure_input(subnets, range_id)
+        stdin_input = build_configure_input(subnets, range_id, vpc_gateway_ip)
         return [
             SetupStep(
                 name="configure_subnets",

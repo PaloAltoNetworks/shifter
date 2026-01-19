@@ -41,6 +41,26 @@ logger = logging.getLogger(__name__)
 NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 3600  # 60 minutes
 
 
+def get_vpc_gateway_ip(cidr: str) -> str:
+    """Compute VPC gateway IP from CIDR (first IP + 1).
+
+    AWS reserves the first IP (.0) for the network address and uses
+    the second IP (.1) as the VPC gateway/router.
+
+    Example: 10.1.4.0/22 -> 10.1.4.1
+
+    Args:
+        cidr: CIDR block string (e.g., "10.1.4.0/22")
+
+    Returns:
+        Gateway IP address string (e.g., "10.1.4.1")
+    """
+    import ipaddress
+
+    network = ipaddress.ip_network(cidr, strict=False)
+    return str(network.network_address + 1)
+
+
 def _get_pulumi_path() -> str:
     """Get the full path to the pulumi executable."""
     path = shutil.which("pulumi")
@@ -465,20 +485,27 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
 
 
 def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
-    """Configure user's NGFW with subnet addresses and security rules.
+    """Configure user's NGFW with subnet routes, addresses and security rules.
 
     Starts the NGFW if stopped, waits for SSH, then runs the configure plan.
 
     Args:
         user_id: Django User ID who owns the NGFW.
         subnets: List of subnet dicts with 'name', 'cidr', 'connected_to'.
-        range_id: Range ID for unique naming of addresses/rules.
+        range_id: Range ID for unique naming of routes/addresses/rules.
 
     Raises:
-        ValueError: If user has no NGFW provisioned.
+        ValueError: If user has no NGFW provisioned or NGFW_SUBNET_CIDR not set.
         RuntimeError: If NGFW configuration fails.
     """
     from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
+
+    # Get VPC gateway IP from NGFW subnet CIDR
+    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
+    if not ngfw_subnet_cidr:
+        raise ValueError("NGFW_SUBNET_CIDR environment variable is required for subnet configuration")
+    vpc_gateway_ip = get_vpc_gateway_ip(ngfw_subnet_cidr)
+    logger.debug("configure_ngfw_subnets: vpc_gateway_ip=%s (from %s)", vpc_gateway_ip, ngfw_subnet_cidr)
 
     # Get user's NGFW
     ngfw_data = get_user_ngfw_data(user_id)
@@ -512,7 +539,7 @@ def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> 
 
     # Build and execute the configure plan
     plan = NGFWConfigureSubnetsPlan()
-    steps = plan.get_steps(subnets, range_id)
+    steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
 
     # Execute steps manually since they're dynamically generated
     for step in steps:
@@ -949,6 +976,7 @@ def poll_for_serial_and_cert(
                     serial_value,
                     cert_status,
                 )
+                assert serial_value is not None  # Guaranteed by serial_ok check
                 return serial_value
 
             # Log what's still missing
@@ -1188,9 +1216,6 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "rangeVpcCidr": os.environ.get("RANGE_VPC_CIDR", ""),
         "rangeRouteTableId": os.environ.get("RANGE_ROUTE_TABLE_ID", ""),
         "availabilityZone": os.environ.get("RANGE_AVAILABILITY_ZONE", ""),
-        "kaliSecurityGroupId": os.environ.get("KALI_SECURITY_GROUP_ID", ""),
-        "victimSecurityGroupId": os.environ.get("VICTIM_SECURITY_GROUP_ID", ""),
-        "dcSecurityGroupId": os.environ.get("DC_SECURITY_GROUP_ID", ""),
         "rangeInstanceProfileName": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
         "kaliAmiId": os.environ.get("KALI_AMI_ID", ""),
         "victimAmiId": os.environ.get("VICTIM_AMI_ID", ""),

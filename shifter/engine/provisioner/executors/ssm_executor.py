@@ -12,11 +12,12 @@ The setup logic is handled by SetupPlan implementations.
 
 import logging
 import time
-from dataclasses import dataclass
 from typing import ClassVar
 
 import boto3
 from botocore.exceptions import ClientError
+
+from executors.base import CommandResult
 
 # Logger for timing info - useful for tuning timeouts
 logger = logging.getLogger(__name__)
@@ -54,16 +55,6 @@ class InstanceTerminatedError(SSMExecutorError):
     """Raised when the instance is terminated."""
 
     pass
-
-
-@dataclass
-class CommandResult:
-    """Result of a command execution."""
-
-    success: bool
-    exit_code: int
-    stdout: str
-    stderr: str
 
 
 class SSMExecutor:

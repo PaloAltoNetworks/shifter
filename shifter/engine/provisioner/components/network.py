@@ -262,7 +262,7 @@ def _allocate_subnets_internal(vpc_id: str, cidr_prefix: str, count: int, subnet
         if len(allocated) >= count:
             break
 
-        candidate_network = ipaddress.ip_network(candidate_cidr)
+        candidate_network = ipaddress.IPv4Network(candidate_cidr)
 
         # Check against existing AWS subnets
         has_aws_conflict = any(candidate_network.overlaps(existing) for existing in existing_networks)
@@ -380,7 +380,7 @@ def _find_free_subnet_internal(vpc_id: str, cidr_prefix: str, subnet_size: int) 
 
     # Find first non-overlapping candidate
     for candidate_cidr in candidates:
-        candidate_network = ipaddress.ip_network(candidate_cidr)
+        candidate_network = ipaddress.IPv4Network(candidate_cidr)
 
         has_conflict = any(candidate_network.overlaps(existing) for existing in existing_networks)
 
@@ -482,7 +482,7 @@ class NetworkComponent(pulumi.ComponentResource):
         portal_vpc_cidr: str = "",
         portal_vpc_peering_id: str = "",
         allocated_cidr: str = "",
-        ngfw_security_group_id: str = "",
+        connected_subnet_cidrs: list[str] | None = None,
         opts: pulumi.ResourceOptions | None = None,
     ):
         """Create network infrastructure for a logical subnet.
@@ -506,8 +506,8 @@ class NetworkComponent(pulumi.ComponentResource):
             portal_vpc_peering_id: VPC peering connection ID for portal route. Empty = no route.
             allocated_cidr: Pre-allocated CIDR block. If provided, skips allocation.
                 Use allocate_subnets() to get CIDRs for multi-subnet ranges.
-            ngfw_security_group_id: NGFW data ENI security group ID for allowing return traffic.
-                If provided, adds ingress rule from NGFW SG.
+            connected_subnet_cidrs: CIDRs of connected subnets for SG ingress rules.
+                Traffic filtering is done by NGFW; these rules allow it through AWS SGs.
             opts: Pulumi resource options.
         """
         super().__init__("shifter:range:NetworkComponent", name, None, opts)
@@ -515,7 +515,7 @@ class NetworkComponent(pulumi.ComponentResource):
         self._firewall_endpoint_id = firewall_endpoint_id
         self._portal_vpc_cidr = portal_vpc_cidr
         self._portal_vpc_peering_id = portal_vpc_peering_id
-        self._ngfw_security_group_id = ngfw_security_group_id
+        self._connected_subnet_cidrs = connected_subnet_cidrs or []
 
         logger.info(
             "Creating NetworkComponent: name=%s, subnet_name=%s, size=/%d, cidr=%s",
@@ -546,7 +546,7 @@ class NetworkComponent(pulumi.ComponentResource):
 
         # Create security group for this subnet
         self._create_security_group(
-            name, vpc_id, allocated_cidr, common_tags, self._portal_vpc_cidr, self._ngfw_security_group_id
+            name, vpc_id, allocated_cidr, common_tags, self._portal_vpc_cidr, self._connected_subnet_cidrs
         )
 
         # Create route table for this subnet
@@ -650,17 +650,15 @@ class NetworkComponent(pulumi.ComponentResource):
         subnet_cidr: str,
         common_tags: dict[str, str],
         portal_vpc_cidr: str = "",
-        ngfw_security_group_id: str = "",
+        connected_subnet_cidrs: list[str] | None = None,
     ) -> None:
         """Create security group for this subnet.
 
         Rules:
         - Inbound: Allow ALL from same subnet CIDR (intra-subnet unrestricted)
+        - Inbound: Allow ALL from each connected subnet CIDR (NGFW does filtering)
         - Inbound: Allow SSH/RDP from portal VPC CIDR (for terminal access)
         - Outbound: Allow ALL
-
-        After SG creation, adds self-referencing rule for intra-range traffic
-        and NGFW SG rule for return traffic from NGFW inspection.
 
         Args:
             name: Resource name prefix.
@@ -668,12 +666,12 @@ class NetworkComponent(pulumi.ComponentResource):
             subnet_cidr: This subnet's CIDR block.
             common_tags: Common tags dict.
             portal_vpc_cidr: Portal VPC CIDR for SSH access. Empty = no access.
-            ngfw_security_group_id: NGFW data SG ID for return traffic rule.
+            connected_subnet_cidrs: CIDRs of connected subnets. NGFW does actual filtering.
         """
         subnet_name_tag = common_tags.get("shifter:subnet_name", "default")
+        connected_cidrs = connected_subnet_cidrs or []
 
-        # Build initial ingress rules (CIDR-based only)
-        # Self-referencing SG rule added after creation
+        # Build ingress rules
         ingress_rules: list[aws.ec2.SecurityGroupIngressArgs] = [
             # Allow all intra-subnet traffic
             aws.ec2.SecurityGroupIngressArgs(
@@ -684,6 +682,10 @@ class NetworkComponent(pulumi.ComponentResource):
                 description="Allow all intra-subnet traffic",
             ),
         ]
+
+        # Add ingress rules for connected subnets
+        # Traffic filtering is done by NGFW; these rules just allow it through AWS SGs
+        self._add_connected_subnet_ingress_rules(name, ingress_rules, connected_cidrs)
 
         # Add SSH and RDP access from portal VPC if configured
         if portal_vpc_cidr:
@@ -739,28 +741,53 @@ class NetworkComponent(pulumi.ComponentResource):
 
         self.security_group_id = self.security_group.id
 
-        # Add rule for NGFW return traffic if NGFW is enabled
-        # Traffic flow: Subnet A -> NGFW -> Subnet B
-        # NGFW forwards packets using its SG, so B must allow from NGFW SG
-        if ngfw_security_group_id:
-            logger.debug(
-                "Adding NGFW SG rule for %s from %s",
-                name,
-                ngfw_security_group_id,
-            )
-            aws.ec2.SecurityGroupRule(
-                f"{name}-sg-ngfw",
-                type="ingress",
-                security_group_id=self.security_group.id,
-                source_security_group_id=ngfw_security_group_id,
-                protocol="-1",
-                from_port=0,
-                to_port=0,
-                description="Allow return traffic from NGFW",
-                opts=pulumi.ResourceOptions(parent=self),
-            )
+        logger.debug(
+            "Created security group for subnet %s with %d connected subnet rules",
+            name,
+            len(connected_cidrs),
+        )
 
-        logger.debug("Created security group for subnet %s", name)
+    def _add_connected_subnet_ingress_rules(
+        self,
+        name: str,
+        ingress_rules: list[aws.ec2.SecurityGroupIngressArgs],
+        connected_cidrs: list[str],
+    ) -> None:
+        """Add ingress rules for connected subnets.
+
+        Traffic between connected subnets is routed through the NGFW for inspection.
+        The NGFW performs the actual filtering based on PAN-OS security rules.
+        These AWS SG rules just ensure the traffic can reach the destination.
+
+        Args:
+            name: Resource name prefix for logging.
+            ingress_rules: List to append rules to.
+            connected_cidrs: CIDRs of connected subnets.
+
+        Raises:
+            ValueError: If a CIDR is invalid or empty.
+        """
+        for cidr in connected_cidrs:
+            if not cidr:
+                raise ValueError(f"Empty CIDR in connected_subnet_cidrs for {name}")
+            # Basic CIDR format validation
+            if "/" not in cidr:
+                raise ValueError(f"Invalid CIDR format '{cidr}' for {name}: missing prefix length")
+
+            logger.debug(
+                "Adding connected subnet ingress rule for %s from %s",
+                name,
+                cidr,
+            )
+            ingress_rules.append(
+                aws.ec2.SecurityGroupIngressArgs(
+                    protocol="-1",
+                    from_port=0,
+                    to_port=0,
+                    cidr_blocks=[cidr],
+                    description=f"Allow traffic from connected subnet {cidr} (filtered by NGFW)",
+                ),
+            )
 
     def _create_route_table(
         self,

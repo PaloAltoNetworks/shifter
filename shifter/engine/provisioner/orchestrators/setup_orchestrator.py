@@ -1,21 +1,46 @@
 """Setup orchestrator for running setup plans.
 
-SetupOrchestrator takes a SetupPlan and an SSMExecutor, and runs the plan
-step by step, handling reboots and verification.
+SetupOrchestrator takes a SetupPlan and an executor (SSM or SSH), and runs
+the plan step by step, handling reboots and verification.
 """
 
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
+from executors.base import CommandResult
 from executors.ssm_executor import (
     CommandError,
-    SSMExecutor,
     SSMExecutorError,
     TimeoutError,
 )
 from plans.base import SetupPlan, SetupStep
+
+
+class Executor(Protocol):
+    """Protocol for command executors (SSM or SSH).
+
+    Both SSMExecutor and SSHExecutor implement this protocol with slightly
+    different parameter names (host vs instance_id) but compatible call signatures.
+    """
+
+    def run_command(
+        self,
+        instance_id: str,
+        script: str,
+        timeout_seconds: int = ...,
+        document_name: str = ...,
+        stdin_input: str | None = ...,
+    ) -> CommandResult: ...
+
+    def reboot_and_wait(
+        self,
+        instance_id: str,
+        timeout_seconds: int = ...,
+        document_name: str = ...,
+    ) -> bool: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +71,7 @@ class SetupResult:
     success: bool
     step_results: list[StepResult] = field(default_factory=list)
     verification_result: StepResult | None = None
+    error: str | None = None
 
 
 class SetupOrchestrator:
@@ -62,11 +88,11 @@ class SetupOrchestrator:
     # Default reboot timeout (5 minutes)
     DEFAULT_REBOOT_TIMEOUT = 300
 
-    def __init__(self, executor: SSMExecutor):
+    def __init__(self, executor: Executor):
         """Initialize orchestrator with an executor.
 
         Args:
-            executor: SSMExecutor to use for running commands
+            executor: Executor (SSMExecutor or SSHExecutor) to use for running commands
         """
         logger.debug("__init__: executor=%s", type(executor).__name__)
         self.executor = executor

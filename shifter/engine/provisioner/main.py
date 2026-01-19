@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess  # nosec B404 - subprocess used for Pulumi CLI calls with hardcoded commands
+import time
 
 import boto3
 import psycopg
@@ -551,16 +552,25 @@ def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> 
     steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
 
     # Execute steps manually since they're dynamically generated
+    # Retry logic for transient SSH failures (5 attempts, 15s between retries)
     for step in steps:
         logger.info("Executing NGFW config step: %s", step.name)
-        result = ssh_executor.run_command(
-            instance_id=management_ip,
-            script=step.script,
-            stdin_input=step.stdin_input,
-            timeout_seconds=step.timeout_seconds,
-        )
-        if not result.success:
-            raise RuntimeError(f"NGFW config step '{step.name}' failed: {result.stderr}")
+        result = None
+        for attempt in range(5):
+            if attempt > 0:
+                logger.info("Retry %d/4 for step %s", attempt, step.name)
+                time.sleep(15)
+            result = ssh_executor.run_command(
+                instance_id=management_ip,
+                script=step.script,
+                stdin_input=step.stdin_input,
+                timeout_seconds=step.timeout_seconds,
+            )
+            if result.success:
+                break
+        if not result or not result.success:
+            stderr = result.stderr if result else "no result"
+            raise RuntimeError(f"NGFW config step '{step.name}' failed: {stderr}")
         logger.info("NGFW config step '%s' completed", step.name)
 
     logger.info("NGFW subnet configuration complete for range %s", range_id)
@@ -631,16 +641,25 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     steps = plan.get_steps(subnets, range_id)
 
     # Execute steps manually since they're dynamically generated
+    # Retry logic for transient SSH failures (5 attempts, 15s between retries)
     for step in steps:
         logger.info("Executing NGFW remove step: %s", step.name)
-        result = ssh_executor.run_command(
-            instance_id=management_ip,
-            script=step.script,
-            stdin_input=step.stdin_input,
-            timeout_seconds=step.timeout_seconds,
-        )
-        if not result.success:
-            raise RuntimeError(f"NGFW remove step '{step.name}' failed: {result.stderr}")
+        result = None
+        for attempt in range(5):
+            if attempt > 0:
+                logger.info("Retry %d/4 for step %s", attempt, step.name)
+                time.sleep(15)
+            result = ssh_executor.run_command(
+                instance_id=management_ip,
+                script=step.script,
+                stdin_input=step.stdin_input,
+                timeout_seconds=step.timeout_seconds,
+            )
+            if result.success:
+                break
+        if not result or not result.success:
+            stderr = result.stderr if result else "no result"
+            raise RuntimeError(f"NGFW remove step '{step.name}' failed: {stderr}")
         logger.info("NGFW remove step '%s' completed", step.name)
 
     logger.info("NGFW subnet removal complete for range %s", range_id)
@@ -1994,6 +2013,10 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         poll_interval=30,
     )
     logger.info("NGFW management plane ready, serial=%s", serial_number)
+
+    # Brief pause after serial poll to let management plane stabilize
+    logger.info("Waiting 30s for management plane to stabilize before configuration...")
+    time.sleep(30)
 
     # Create orchestrator with SSH executor
     orchestrator = SetupOrchestrator(ssh_executor)

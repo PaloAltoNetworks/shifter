@@ -200,7 +200,7 @@ class SetupOrchestrator:
         step: SetupStep,
         context: dict[str, Any],
         document_name: str,
-        max_retries: int = 1,
+        max_retries: int = 4,
     ) -> StepResult:
         """Execute a single step with retry support.
 
@@ -228,7 +228,7 @@ class SetupOrchestrator:
         for attempt in range(max_retries + 1):
             if attempt > 0:
                 logger.info("_execute_step: retry %d/%d for step=%s", attempt, max_retries, step.name)
-                time.sleep(10)  # Brief pause before retry
+                time.sleep(15)  # Pause before retry
 
             # Execute via executor (SSM or SSH)
             result = self.executor.run_command(

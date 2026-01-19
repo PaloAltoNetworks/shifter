@@ -280,31 +280,21 @@ class InstanceComponent(pulumi.ComponentResource):
         if index > 0:
             instance_name = f"{instance_name}-{index}"
 
-        # Build instance arguments
-        instance_args = {
-            "ami": ami_id,
-            "instance_type": instance_type,
-            "subnet_id": subnet_id,
-            "vpc_security_group_ids": [security_group_id],
-            "user_data_base64": user_data,
-            "metadata_options": aws.ec2.InstanceMetadataOptionsArgs(
+        # Create instance (depends on secret being created first for proper ordering)
+        instance_tags = {**common_tags, "Name": instance_name}
+        self.instance = aws.ec2.Instance(
+            f"{name}-instance",
+            ami=ami_id,
+            instance_type=instance_type,
+            subnet_id=subnet_id,
+            vpc_security_group_ids=[security_group_id],
+            user_data_base64=user_data,
+            metadata_options=aws.ec2.InstanceMetadataOptionsArgs(
                 http_tokens="required",  # IMDSv2 only
                 http_put_response_hop_limit=1,
             ),
-            "tags": {
-                **common_tags,
-                "Name": instance_name,
-            },
-        }
-
-        # Add instance profile if specified
-        if instance_profile_name:
-            instance_args["iam_instance_profile"] = instance_profile_name
-
-        # Create instance (depends on secret being created first for proper ordering)
-        self.instance = aws.ec2.Instance(
-            f"{name}-instance",
-            **instance_args,
+            tags=instance_tags,
+            iam_instance_profile=instance_profile_name if instance_profile_name else None,
             opts=pulumi.ResourceOptions(parent=self, depends_on=[ssh_key_version]),
         )
 
@@ -363,9 +353,9 @@ class InstanceComponent(pulumi.ComponentResource):
         dc_public_key = self.public_key
         dc_agent_presigned_url = self.agent_presigned_url
 
-        def do_setup(args: tuple) -> bool:
+        def do_setup(args: list) -> bool:
             """Run the DC promotion synchronously (called within apply)."""
-            instance_id, _ = args
+            instance_id, _ = args[0], args[1]
             pulumi.log.info(f"DC instance {instance_id} starting setup...")
             pulumi.log.info(f"Domain: {dc_domain_name}, NetBIOS: {dc_netbios_name}")
 
@@ -382,6 +372,10 @@ class InstanceComponent(pulumi.ComponentResource):
                 # Set hostname via BootstrapPlan (includes reboot)
                 pulumi.log.info(f"Setting hostname to {dc_hostname}...")
                 bootstrap_plan = BootstrapPlan()
+
+                # Validate required config before proceeding
+                if not dc_hostname or not dc_public_key:
+                    raise SetupError("DC hostname and public_key are required for bootstrap")
 
                 # Create a simple object with required attributes for get_context
                 class DCBootstrapConfig:
@@ -400,6 +394,16 @@ class InstanceComponent(pulumi.ComponentResource):
                 # This takes ~10-15 minutes and includes a reboot
                 pulumi.log.info(f"Promoting to Domain Controller ({dc_domain_name})...")
                 dc_plan = DCSetupPlan()
+
+                # Validate DC config before proceeding
+                if not all([dc_domain_name, dc_netbios_name, dc_dsrm_password, dc_domain_admin_password]):
+                    raise SetupError("DC domain config is incomplete - missing required fields")
+
+                # Assert types after validation (mypy narrowing)
+                assert dc_domain_name is not None
+                assert dc_netbios_name is not None
+                assert dc_dsrm_password is not None
+                assert dc_domain_admin_password is not None
 
                 # Create config object for DCSetupPlan context
                 class DCPromoteConfig:
@@ -488,9 +492,9 @@ class InstanceComponent(pulumi.ComponentResource):
         instance_join_domain = self.join_domain
         instance_dc_ip = dc_ip
 
-        def do_setup(args: tuple) -> bool:
+        def do_setup(args: list) -> bool:
             """Run the setup synchronously (called within apply)."""
-            instance_id, _ = args
+            instance_id, _ = args[0], args[1]
             pulumi.log.info(f"Starting setup for {instance_role} instance {instance_id}...")
 
             # Create executor and orchestrator
@@ -562,12 +566,12 @@ class InstanceComponent(pulumi.ComponentResource):
 
                     else:
                         # Windows victim: Bootstrap + XDR
-                        bootstrap_plan = BootstrapPlan()
-                        bootstrap_ctx = bootstrap_plan.get_context(ctx)
+                        win_bootstrap_plan = BootstrapPlan()
+                        win_bootstrap_ctx = win_bootstrap_plan.get_context(ctx)
                         result = orchestrator.orchestrate(
                             instance_id,
-                            bootstrap_plan,
-                            bootstrap_ctx,
+                            win_bootstrap_plan,
+                            win_bootstrap_ctx,
                             document_name=document_name,
                         )
                         if not result.success:
@@ -576,12 +580,12 @@ class InstanceComponent(pulumi.ComponentResource):
 
                         # Install XDR agent
                         if instance_agent_url:
-                            xdr_plan = XDRAgentInstallPlan()
-                            xdr_ctx = xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
+                            win_xdr_plan = XDRAgentInstallPlan()
+                            win_xdr_ctx = win_xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
                             result = orchestrator.orchestrate(
                                 instance_id,
-                                xdr_plan,
-                                xdr_ctx,
+                                win_xdr_plan,
+                                win_xdr_ctx,
                                 document_name=document_name,
                             )
                             if not result.success:

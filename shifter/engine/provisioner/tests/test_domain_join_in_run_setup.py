@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from executors.ssm_executor import CommandError, CommandResult, SSMExecutor
+from executors.base import CommandResult
+from executors.ssm_executor import CommandError, SSMExecutor
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.domain_join import JOIN_DOMAIN_SCRIPT, DomainJoinPlan
 

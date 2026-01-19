@@ -8,9 +8,10 @@ import builtins
 import io
 import logging
 import time
-from dataclasses import dataclass
 
 import paramiko
+
+from executors.base import CommandResult
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +41,6 @@ class ConnectionError(SSHExecutorError):
     """Raised when SSH connection fails."""
 
     pass
-
-
-@dataclass
-class CommandResult:
-    """Result of a command execution."""
-
-    success: bool
-    exit_code: int
-    stdout: str
-    stderr: str
 
 
 class SSHExecutor:
@@ -119,7 +110,7 @@ class SSHExecutor:
         instance_id: str,
         script: str,
         timeout_seconds: int = 300,
-        document_name: str | None = None,
+        document_name: str = "",  # Unused, for Protocol compatibility with SSMExecutor
         stdin_input: str | None = None,
     ) -> CommandResult:
         """Run a CLI command on a PAN-OS device via SSH.
@@ -334,14 +325,16 @@ class SSHExecutor:
 
     def reboot_and_wait(
         self,
-        host: str,
+        instance_id: str,
         timeout_seconds: int = 1800,
+        document_name: str = "",  # Unused, for Protocol compatibility with SSMExecutor
     ) -> bool:
         """Reboot PAN-OS device and wait for it to come back.
 
         Args:
-            host: Target IP address
+            instance_id: Target IP address (named for Protocol compatibility)
             timeout_seconds: Maximum time to wait for device to return
+            document_name: Unused, for Protocol compatibility with SSMExecutor
 
         Returns:
             True if device is back online
@@ -349,6 +342,7 @@ class SSHExecutor:
         Raises:
             TimeoutError: If device doesn't come back in time
         """
+        host = instance_id
         logger.info(f"Rebooting {host}...")
 
         # Issue reboot command
@@ -369,4 +363,3 @@ class SSHExecutor:
         # Wait for SSH to come back up
         logger.info("Waiting for device to come back online...")
         return self.wait_for_agent(host, timeout_seconds=timeout_seconds - 60)
-        logger.info("Waiting for device to go offline...")

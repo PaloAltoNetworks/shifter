@@ -269,11 +269,12 @@ class NGFWComponent(pulumi.ComponentResource):
         user_data = f"vmseries-bootstrap-aws-s3bucket={bootstrap_path}"
 
         # Create EC2 instance
-        instance_args = {
-            "ami": ami_id,
-            "instance_type": instance_type,
-            "key_name": self.key_pair.key_name,
-            "network_interfaces": [
+        self.instance = aws.ec2.Instance(
+            f"{name}-instance",
+            ami=ami_id,
+            instance_type=instance_type,
+            key_name=self.key_pair.key_name,
+            network_interfaces=[
                 aws.ec2.InstanceNetworkInterfaceArgs(
                     device_index=0,
                     network_interface_id=self.mgmt_eni.id,
@@ -283,16 +284,9 @@ class NGFWComponent(pulumi.ComponentResource):
                     network_interface_id=self.data_eni.id,
                 ),
             ],
-            "user_data": user_data,
-            "tags": tags,
-        }
-
-        if instance_profile_name:
-            instance_args["iam_instance_profile"] = instance_profile_name
-
-        self.instance = aws.ec2.Instance(
-            f"{name}-instance",
-            **instance_args,
+            user_data=user_data,
+            tags=tags,
+            iam_instance_profile=instance_profile_name,
             opts=pulumi.ResourceOptions(
                 parent=self,
                 depends_on=[

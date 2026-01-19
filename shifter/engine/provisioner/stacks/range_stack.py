@@ -352,16 +352,40 @@ class RangeStack(pulumi.ComponentResource):
             allocated_cidrs,
         )
 
+        # Build name→CIDR map for connected subnet lookups
+        if len(config.subnets) != len(allocated_cidrs):
+            raise ValueError(
+                f"Subnet count mismatch: {len(config.subnets)} subnets but {len(allocated_cidrs)} CIDRs allocated"
+            )
+        name_to_cidr: dict[str, str] = {subnet.name: allocated_cidrs[idx] for idx, subnet in enumerate(config.subnets)}
+        logger.debug("Built name→CIDR map: %s", name_to_cidr)
+
+        # Compute connected pairs once, reuse for SG rules and routes
+        connected_pairs = self._get_connected_pairs(config)
+        logger.debug(
+            "Computed %d connected pairs: %s",
+            len(connected_pairs),
+            connected_pairs,
+        )
+
         for idx, subnet_config in enumerate(config.subnets):
             network_name = f"{name}-net-{subnet_config.name}"
             subnet_cidr = allocated_cidrs[idx]
 
+            # Get CIDRs of connected subnets for SG ingress rules
+            connected_cidrs = self._get_connected_cidrs(
+                subnet_config.name,
+                connected_pairs,
+                name_to_cidr,
+            )
+
             logger.debug(
-                "Creating network %s (uuid=%s, cidr=%s, ngfw=%s)",
+                "Creating network %s (uuid=%s, cidr=%s, ngfw=%s, connected_cidrs=%s)",
                 network_name,
                 subnet_config.uuid,
                 subnet_cidr,
                 "enabled" if config.ngfw_data_eni_id else "disabled",
+                connected_cidrs,
             )
 
             network = NetworkComponent(
@@ -382,13 +406,13 @@ class RangeStack(pulumi.ComponentResource):
                 portal_vpc_cidr=config.portal_vpc_cidr,
                 portal_vpc_peering_id=config.portal_vpc_peering_id,
                 allocated_cidr=subnet_cidr,
-                ngfw_security_group_id=config.ngfw_security_group_id,
+                connected_subnet_cidrs=connected_cidrs,
                 opts=pulumi.ResourceOptions(parent=self),
             )
             self.networks[subnet_config.name] = network
 
         # Add inter-subnet routes to force connected traffic through NGFW
-        self._add_inter_subnet_routes(name, config)
+        self._add_inter_subnet_routes(name, config, connected_pairs)
 
     def _get_connected_pairs(self, config: RangeConfig) -> list[tuple[str, str]]:
         """Build deduplicated list of connected subnet pairs from config.
@@ -426,7 +450,58 @@ class RangeStack(pulumi.ComponentResource):
 
         return pairs
 
-    def _add_inter_subnet_routes(self, name: str, config: RangeConfig) -> None:
+    def _get_connected_cidrs(
+        self,
+        subnet_name: str,
+        connected_pairs: list[tuple[str, str]],
+        name_to_cidr: dict[str, str],
+    ) -> list[str]:
+        """Get CIDRs of subnets connected to a given subnet.
+
+        Looks up which subnets are connected to the given subnet from the
+        pre-computed pairs, then resolves their names to CIDRs.
+
+        Args:
+            subnet_name: The subnet to find connections for.
+            connected_pairs: List of (subnet_a, subnet_b) connected pairs.
+            name_to_cidr: Mapping of subnet name to allocated CIDR.
+
+        Returns:
+            List of CIDRs for connected subnets. Empty if no connections.
+
+        Raises:
+            KeyError: If a connected subnet name is not in name_to_cidr map.
+        """
+        connected_cidrs: list[str] = []
+
+        for subnet_a, subnet_b in connected_pairs:
+            if subnet_a == subnet_name:
+                peer_name = subnet_b
+            elif subnet_b == subnet_name:
+                peer_name = subnet_a
+            else:
+                continue
+
+            if peer_name not in name_to_cidr:
+                raise KeyError(
+                    f"Connected subnet '{peer_name}' not found in CIDR map. "
+                    f"Available subnets: {list(name_to_cidr.keys())}"
+                )
+            connected_cidrs.append(name_to_cidr[peer_name])
+
+        logger.debug(
+            "Subnet '%s' connected to CIDRs: %s",
+            subnet_name,
+            connected_cidrs,
+        )
+        return connected_cidrs
+
+    def _add_inter_subnet_routes(
+        self,
+        name: str,
+        config: RangeConfig,
+        connected_pairs: list[tuple[str, str]],
+    ) -> None:
         """Add bidirectional routes between connected subnets through NGFW.
 
         Only creates routes between subnets that are connected via the
@@ -439,6 +514,7 @@ class RangeStack(pulumi.ComponentResource):
         Args:
             name: Pulumi resource name prefix.
             config: Range configuration with subnets and connected_to.
+            connected_pairs: Pre-computed list of connected subnet pairs.
         """
         if not config.ngfw_data_eni_id:
             logger.debug("No NGFW configured, skipping inter-subnet routes")
@@ -448,7 +524,6 @@ class RangeStack(pulumi.ComponentResource):
             logger.debug("Only one subnet, no inter-subnet routes needed")
             return
 
-        connected_pairs = self._get_connected_pairs(config)
         if not connected_pairs:
             logger.debug("No connected subnet pairs, skipping inter-subnet routes")
             return

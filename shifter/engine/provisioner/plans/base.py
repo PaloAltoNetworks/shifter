@@ -37,13 +37,21 @@ class SetupPlan(Protocol):
 
     Each instance type (DC, domain member, etc.) implements this protocol
     to define how it should be configured.
+
+    Note: steps and verify_step may be ClassVar in implementations, which
+    is compatible with this protocol (class variables are accessible as
+    instance attributes).
     """
 
-    steps: list[SetupStep]
-    """List of steps to execute in order."""
+    @property
+    def steps(self) -> list[SetupStep]:
+        """List of steps to execute in order."""
+        ...
 
-    verify_step: SetupStep
-    """Final verification step to confirm setup succeeded."""
+    @property
+    def verify_step(self) -> SetupStep | None:
+        """Final verification step to confirm setup succeeded (optional)."""
+        ...
 
     def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for rendering scripts.

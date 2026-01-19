@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build stage - use uv's official image for faster builds
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ RUN uv export --no-hashes --no-emit-project --frozen > requirements.txt && \
     uv pip install --system --no-cache /cyberscript
 
 # Production stage
-FROM python:3.12-slim-bookworm AS production
+FROM python:3.12-slim-trixie AS production
 
 WORKDIR /app
 

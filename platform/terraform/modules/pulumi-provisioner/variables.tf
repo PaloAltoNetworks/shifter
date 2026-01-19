@@ -153,22 +153,6 @@ variable "range_availability_zone" {
   type        = string
 }
 
-variable "victim_security_group_id" {
-  description = "Security group ID for victim instances"
-  type        = string
-}
-
-variable "kali_security_group_id" {
-  description = "Security group ID for Kali instances"
-  type        = string
-}
-
-variable "dc_security_group_id" {
-  description = "Security group ID for Domain Controller instances"
-  type        = string
-  default     = ""
-}
-
 variable "range_instance_profile_arn" {
   description = "IAM instance profile ARN for range instances"
   type        = string
@@ -309,6 +293,12 @@ variable "ngfw_instance_type" {
 
 variable "ngfw_subnet_id" {
   description = "Subnet ID for VM-Series NGFW instances"
+  type        = string
+  default     = ""
+}
+
+variable "ngfw_subnet_cidr" {
+  description = "CIDR block for NGFW subnet (for VPC gateway IP calculation)"
   type        = string
   default     = ""
 }

@@ -158,8 +158,6 @@ class RangeConfig:
     vpc_id: str
     vpc_cidr: str
     route_table_id: str
-    kali_security_group_id: str
-    victim_security_group_id: str
     instance_profile_name: str
     kali_ami_id: str
     victim_ami_id: str
@@ -168,14 +166,12 @@ class RangeConfig:
     availability_zone: str
     ngfw_data_eni_id: str = ""  # NGFW data ENI ID for inter-subnet routing
     dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
-    dc_security_group_id: str = ""  # Security group for Domain Controller instances
     portal_vpc_cidr: str = ""
     portal_vpc_peering_id: str = ""  # VPC peering connection ID for portal route
     # NGFW (VM-Series) configuration
     ngfw_enabled: bool = False
     ngfw_ami_id: str = ""
     ngfw_instance_type: str = "m5.xlarge"
-    ngfw_security_group_id: str = ""
     # S3 VPC endpoint for agent downloads (Gateway endpoint ID)
     s3_endpoint_id: str = ""
     # AWS Network Firewall endpoint ID for internet egress from range subnets
@@ -594,8 +590,6 @@ def load_config() -> RangeConfig:
         vpc_id=config.require("rangeVpcId"),
         vpc_cidr=config.require("rangeVpcCidr"),
         route_table_id=config.require("rangeRouteTableId"),
-        kali_security_group_id=config.require("kaliSecurityGroupId"),
-        victim_security_group_id=config.require("victimSecurityGroupId"),
         instance_profile_name=config.get("rangeInstanceProfileName") or "",
         kali_ami_id=config.require("kaliAmiId"),
         victim_ami_id=config.require("victimAmiId"),
@@ -606,12 +600,10 @@ def load_config() -> RangeConfig:
         dc_ami_id=config.get("dcAmiId") or "",
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
         portal_vpc_peering_id=config.get("portalVpcPeeringId") or "",
-        dc_security_group_id=config.get("dcSecurityGroupId") or "",
         # NGFW (VM-Series) configuration - enabled from DB, config from env vars
         ngfw_enabled=ngfw_enabled,
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
-        ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
         # S3 VPC endpoint for agent downloads
         s3_endpoint_id=config.get("s3EndpointId") or "",
         # AWS Network Firewall endpoint for internet egress

@@ -7,7 +7,7 @@ the plan step by step, handling reboots and verification.
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Protocol
+from typing import Any, Protocol
 
 from executors.base import CommandResult
 from executors.ssm_executor import (
@@ -187,13 +187,6 @@ class SetupOrchestrator:
             verification_result=verify_result,
         )
 
-    # PAN-OS management plane error patterns that indicate the device isn't ready
-    PANOS_MGMT_ERRORS: ClassVar[list[str]] = [
-        "Cannot connect to management server",
-        "Server timeout",
-        "Management server is not ready",
-    ]
-
     def _execute_step(
         self,
         instance_id: str,
@@ -240,19 +233,18 @@ class SetupOrchestrator:
             )
             last_result = result
 
-            # Check for PAN-OS management plane errors in output
-            panos_error = self._check_panos_errors(result.stdout)
-            if panos_error:
+            # Check for PAN-OS commit success if commit was attempted
+            if not self._check_commit_success(result.stdout):
                 logger.warning(
-                    "_execute_step: PAN-OS error in step=%s: %s",
+                    "_execute_step: PAN-OS commit failed in step=%s, output=%s",
                     step.name,
-                    panos_error,
+                    result.stdout[:500] if result.stdout else "(no output)",
                 )
                 if attempt < max_retries:
                     continue  # Retry
                 else:
                     raise SetupError(
-                        f"Step '{step.name}' failed with PAN-OS error: {panos_error}",
+                        f"Step '{step.name}' failed: PAN-OS commit did not succeed",
                         step_name=step.name,
                     )
 
@@ -288,21 +280,26 @@ class SetupOrchestrator:
             stderr=last_result.stderr if last_result else "",
         )
 
-    def _check_panos_errors(self, output: str) -> str | None:
-        """Check output for PAN-OS management plane errors.
+    def _check_commit_success(self, output: str) -> bool:
+        """Check if PAN-OS commit succeeded.
+
+        PAN-OS outputs "Configuration committed successfully" on successful commits.
+        If the output contains a commit command but not this success message,
+        the commit failed.
 
         Args:
             output: Command output to check
 
         Returns:
-            Error message if found, None otherwise
+            True if no commit was attempted or commit succeeded, False if commit failed
         """
         if not output:
-            return None
-        for error_pattern in self.PANOS_MGMT_ERRORS:
-            if error_pattern in output:
-                return error_pattern
-        return None
+            return True
+        # Check if this was a commit operation
+        if "commit" not in output.lower():
+            return True
+        # If commit was attempted, check for success message
+        return "Configuration committed successfully" in output
 
     def _render_script(
         self,

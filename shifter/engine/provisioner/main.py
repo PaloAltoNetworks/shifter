@@ -42,6 +42,28 @@ logger = logging.getLogger(__name__)
 NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 3600  # 60 minutes
 
 
+def _check_commit_success(output: str) -> bool:
+    """Check if PAN-OS commit succeeded.
+
+    PAN-OS outputs "Configuration committed successfully" on successful commits.
+    If the output contains a commit command but not this success message,
+    the commit failed.
+
+    Args:
+        output: Command output to check
+
+    Returns:
+        True if no commit was attempted or commit succeeded, False if commit failed
+    """
+    if not output:
+        return True
+    # Check if this was a commit operation
+    if "commit" not in output.lower():
+        return True
+    # If commit was attempted, check for success message
+    return "Configuration committed successfully" in output
+
+
 def get_vpc_gateway_ip(cidr: str) -> str:
     """Compute VPC gateway IP from CIDR (first IP + 1).
 
@@ -552,7 +574,7 @@ def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> 
     steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
 
     # Execute steps manually since they're dynamically generated
-    # Retry logic for transient SSH failures (5 attempts, 15s between retries)
+    # Retry logic for transient SSH failures or commit failures (5 attempts, 15s between retries)
     for step in steps:
         logger.info("Executing NGFW config step: %s", step.name)
         result = None
@@ -566,12 +588,24 @@ def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> 
                 stdin_input=step.stdin_input,
                 timeout_seconds=step.timeout_seconds,
             )
-            if result.success:
+            # Check both SSH success AND PAN-OS commit success
+            if result.success and _check_commit_success(result.stdout):
                 break
+            if result.success and not _check_commit_success(result.stdout):
+                logger.warning(
+                    "NGFW config step '%s' SSH succeeded but commit failed, output: %s",
+                    step.name,
+                    result.stdout[:500] if result.stdout else "(no output)",
+                )
         if not result or not result.success:
             stderr = result.stderr if result else "no result"
             raise RuntimeError(f"NGFW config step '{step.name}' failed: {stderr}")
-        logger.info("NGFW config step '%s' completed", step.name)
+        if not _check_commit_success(result.stdout):
+            raise RuntimeError(
+                f"NGFW config step '{step.name}' commit failed after retries: "
+                f"{result.stdout[:500] if result.stdout else '(no output)'}"
+            )
+        logger.info("NGFW config step '%s' completed successfully", step.name)
 
     logger.info("NGFW subnet configuration complete for range %s", range_id)
 
@@ -641,7 +675,7 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     steps = plan.get_steps(subnets, range_id)
 
     # Execute steps manually since they're dynamically generated
-    # Retry logic for transient SSH failures (5 attempts, 15s between retries)
+    # Retry logic for transient SSH failures or commit failures (5 attempts, 15s between retries)
     for step in steps:
         logger.info("Executing NGFW remove step: %s", step.name)
         result = None
@@ -655,12 +689,24 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
                 stdin_input=step.stdin_input,
                 timeout_seconds=step.timeout_seconds,
             )
-            if result.success:
+            # Check both SSH success AND PAN-OS commit success
+            if result.success and _check_commit_success(result.stdout):
                 break
+            if result.success and not _check_commit_success(result.stdout):
+                logger.warning(
+                    "NGFW remove step '%s' SSH succeeded but commit failed, output: %s",
+                    step.name,
+                    result.stdout[:500] if result.stdout else "(no output)",
+                )
         if not result or not result.success:
             stderr = result.stderr if result else "no result"
             raise RuntimeError(f"NGFW remove step '{step.name}' failed: {stderr}")
-        logger.info("NGFW remove step '%s' completed", step.name)
+        if not _check_commit_success(result.stdout):
+            raise RuntimeError(
+                f"NGFW remove step '{step.name}' commit failed after retries: "
+                f"{result.stdout[:500] if result.stdout else '(no output)'}"
+            )
+        logger.info("NGFW remove step '%s' completed successfully", step.name)
 
     logger.info("NGFW subnet removal complete for range %s", range_id)
 
@@ -2057,6 +2103,16 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         "serial_number": serial_number,
     }
 
+    # Auto-stop NGFW to save costs while user completes association
+    # Stop BEFORE emitting awaiting_association status so NGFW is fully stopped
+    # when user sees the Complete Setup button (prevents race condition)
+    logger.info("Auto-stopping NGFW after provisioning (awaiting association): request_id=%s", request_id)
+    try:
+        run_ngfw_operation("stop", request_id)
+        logger.info("Auto-stop completed successfully: request_id=%s", request_id)
+    except Exception:
+        logger.exception("Auto-stop FAILED: request_id=%s - NGFW remains running (cost impact)", request_id)
+
     # Update local DB with provisioned resources - awaiting user association
     # User must: 1) Associate device in SCM, 2) Connect to XDR/XSIAM
     update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION, **state)
@@ -2070,15 +2126,6 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         status=STATUS_AWAITING_ASSOCIATION,
         serial_number=serial_number,
     )
-
-    # Auto-stop NGFW to save costs while user completes association
-    # NGFW will be started when user triggers "complete-setup" operation
-    logger.info("Auto-stopping NGFW after provisioning (awaiting association): request_id=%s", request_id)
-    try:
-        run_ngfw_operation("stop", request_id)
-        logger.info("Auto-stop completed successfully: request_id=%s", request_id)
-    except Exception:
-        logger.exception("Auto-stop FAILED: request_id=%s - NGFW remains running (cost impact)", request_id)
 
 
 def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:

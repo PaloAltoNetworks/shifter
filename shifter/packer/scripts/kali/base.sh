@@ -71,6 +71,7 @@ if ! grep -q '^PasswordAuthentication' /etc/ssh/sshd_config; then
 fi
 
 # Fix polkit for xrdp sessions (allows shutdown/restart from desktop)
+mkdir -p /etc/polkit-1/localauthority/50-local.d
 cat > /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla << 'EOF'
 [Allow Colord all Users]
 Identity=unix-user:*

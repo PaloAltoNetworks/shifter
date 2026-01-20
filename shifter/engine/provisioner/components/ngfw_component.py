@@ -216,7 +216,9 @@ class NGFWComponent(pulumi.ComponentResource):
         self.ssh_key_secret_arn = self.ssh_key_secret.arn
 
         # Generate bootstrap init-cfg.txt from template
-        bootstrap_prefix = f"bootstrap/ngfw/{user_id}"
+        # Use instance_uuid for unique bootstrap prefix to avoid race conditions
+        # when multiple NGFWs are provisioned/deleted concurrently
+        bootstrap_prefix = f"bootstrap/ngfw/{instance_uuid}"
         hostname = f"ngfw-user-{user_id}"
 
         templates_dir = _get_templates_dir()

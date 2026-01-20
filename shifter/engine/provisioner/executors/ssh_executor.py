@@ -170,13 +170,15 @@ class SSHExecutor:
             channel.send("exit\n")
             channel.shutdown_write()
 
-            # Read output using prompt detection strategy
-            # PAN-OS CLI shows a prompt like "admin@ngfw-user-1>" when ready
+            # Read output until channel closes naturally
+            # We send 'exit' and shutdown_write(), so PAN-OS will close the channel
+            # when all commands complete. This is more reliable than prompt detection
+            # since commits can take 30+ seconds.
             output = ""
             start_time = time.time()
             chunk_count = 0
 
-            logger.info("Reading output with prompt detection (looking for admin@ prompt)")
+            logger.info("Reading output until channel closes")
 
             while True:
                 if channel.recv_ready():
@@ -186,21 +188,18 @@ class SSHExecutor:
                     logger.debug(f"Chunk {chunk_count} content: {chunk!r}")
                     output += chunk
 
-                    # Check for PAN-OS prompt pattern in recent output
-                    if "admin@" in output[-200:] and ">" in output[-50:]:
-                        logger.info("Detected PAN-OS prompt - command complete")
-                        # Wait briefly for any trailing data
-                        time.sleep(0.5)
-                        while channel.recv_ready():
-                            chunk = channel.recv(4096).decode("utf-8", errors="replace")
-                            chunk_count += 1
-                            logger.debug(f"Final chunk {chunk_count}: {len(chunk)} bytes")
-                            output += chunk
-                        break
-
-                # Also check if channel naturally closed
+                # Check if channel closed (exit command processed)
                 if channel.exit_status_ready():
                     logger.info("Channel exit status ready")
+                    while channel.recv_ready():
+                        chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                        chunk_count += 1
+                        output += chunk
+                    break
+
+                # Check if channel EOF (remote closed)
+                if channel.eof_received:
+                    logger.info("Channel EOF received")
                     while channel.recv_ready():
                         chunk = channel.recv(4096).decode("utf-8", errors="replace")
                         chunk_count += 1

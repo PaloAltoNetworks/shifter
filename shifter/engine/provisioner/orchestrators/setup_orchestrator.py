@@ -10,7 +10,12 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from executors.base import CommandResult
-from executors.ssh_executor import ConnectionError as SSHConnectionError
+from executors.ssh_executor import (
+    ConnectionError as SSHConnectionError,
+)
+from executors.ssh_executor import (
+    TimeoutError as SSHTimeoutError,
+)
 from executors.ssm_executor import (
     CommandError,
     SSMExecutorError,
@@ -233,16 +238,17 @@ class SetupOrchestrator:
                     document_name=document_name,
                     stdin_input=rendered_stdin if rendered_stdin else None,
                 )
-            except SSHConnectionError as e:
+            except (SSHConnectionError, SSHTimeoutError) as e:
                 logger.warning(
-                    "_execute_step: SSH connection failed step=%s attempt=%d",
+                    "_execute_step: SSH error step=%s attempt=%d: %s",
                     step.name,
                     attempt + 1,
+                    e,
                 )
                 if attempt < max_retries:
                     continue  # Retry
                 raise SetupError(
-                    f"Step '{step.name}' failed: SSH connection error after {max_retries + 1} attempts: {e}",
+                    f"Step '{step.name}' failed: SSH error after {max_retries + 1} attempts: {e}",
                     step_name=step.name,
                     cause=e,
                 ) from e
@@ -449,8 +455,8 @@ class SetupOrchestrator:
                     document_name=document_name,
                     stdin_input=f"show jobs id {job_id}\n",
                 )
-            except SSHConnectionError:
-                logger.warning("_poll_panos_job: SSH connection failed, retrying")
+            except (SSHConnectionError, SSHTimeoutError) as e:
+                logger.warning("_poll_panos_job: SSH error, retrying: %s", e)
                 time.sleep(poll_interval)
                 continue
             last_output = result.stdout

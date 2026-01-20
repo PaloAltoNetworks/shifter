@@ -4,6 +4,9 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Refresh package lists after base.sh upgrade
+apt-get update
+
 echo "=== Installing Apache with PHP ==="
 apt-get install -y apache2 libapache2-mod-php php php-mysqli
 

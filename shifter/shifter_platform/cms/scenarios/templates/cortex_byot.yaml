@@ -1,7 +1,7 @@
 id: cortex_byot
 name: Cortex BYOT
 description: The classic Cortex XDR BYOT range with a ngfw, domain controller, two workstations, a server, and an attacker.
-enabled: false
+enabled: true
 ngfw: true
 
 instances:

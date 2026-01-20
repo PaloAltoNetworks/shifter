@@ -61,9 +61,7 @@ Write-Host "Administrator password set"
 # ------------------------------------------------------------------------------
 Write-Host "=== Configuring Windows Firewall ==="
 
-# Enable firewall on all profiles
-Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
-
+# Add firewall rules BEFORE enabling firewall to avoid killing WinRM connection
 # Common rules for both victim and DC
 New-NetFirewallRule -DisplayName "RDP Inbound" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "SSH Inbound" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue
@@ -92,6 +90,9 @@ if ($Role -eq "victim") {
     New-NetFirewallRule -DisplayName "RPC Endpoint Mapper Inbound" -Direction Inbound -Protocol TCP -LocalPort 135 -Action Allow -ErrorAction SilentlyContinue
     New-NetFirewallRule -DisplayName "RPC Dynamic Inbound" -Direction Inbound -Protocol TCP -LocalPort 49152-65535 -Action Allow -ErrorAction SilentlyContinue
 }
+
+# Enable firewall on all profiles AFTER rules are in place
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
 
 Write-Host "Firewall rules configured"
 

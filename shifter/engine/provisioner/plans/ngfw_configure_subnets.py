@@ -4,6 +4,8 @@ This plan configures the NGFW with:
 - Static routes for each subnet (via VPC gateway)
 - Address objects for all subnets in a range
 - Security rules based on connected_to relationships (bidirectional)
+  - Rules attach ALERT_PROFILE_GROUP for threat detection without blocking
+  - Rules use XDR-Forward log-setting for cloud logging
 
 All configuration is done in a single commit for efficiency.
 
@@ -13,6 +15,7 @@ Commands are executed via SSHExecutor to the NGFW management interface.
 from typing import ClassVar
 
 from plans.base import SetupStep
+from plans.ngfw_provision import ALERT_PROFILE_GROUP
 
 
 def build_connected_pairs(subnets: list[dict]) -> list[tuple[str, str]]:
@@ -78,6 +81,7 @@ def build_configure_input(subnets: list[dict], range_id: int, vpc_gateway_ip: st
 
     # Add bidirectional security rules for each connected pair
     # Rules use 'ranges' zone (created during NGFW provisioning)
+    # Profile-group attaches alert-only threat detection (created during NGFW provisioning)
     for subnet_a, subnet_b in build_connected_pairs(subnets):
         addr_a = f"range-{range_id}-{subnet_a}"
         addr_b = f"range-{range_id}-{subnet_b}"
@@ -88,7 +92,7 @@ def build_configure_input(subnets: list[dict], range_id: int, vpc_gateway_ip: st
             f"set rulebase security rules {rule_ab} "
             f"from ranges to ranges source {addr_a} destination {addr_b} "
             "application any service any action allow "
-            "log-end yes log-setting XDR-Forward"
+            f"log-end yes log-setting XDR-Forward profile-setting group {ALERT_PROFILE_GROUP}"
         )
 
         # Rule B → A
@@ -97,7 +101,7 @@ def build_configure_input(subnets: list[dict], range_id: int, vpc_gateway_ip: st
             f"set rulebase security rules {rule_ba} "
             f"from ranges to ranges source {addr_b} destination {addr_a} "
             "application any service any action allow "
-            "log-end yes log-setting XDR-Forward"
+            f"log-end yes log-setting XDR-Forward profile-setting group {ALERT_PROFILE_GROUP}"
         )
 
     lines.append("commit")

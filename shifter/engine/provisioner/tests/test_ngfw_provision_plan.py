@@ -6,9 +6,11 @@ NGFWProvisionPlan handles post-Pulumi NGFW configuration via SSH:
 - Delete default allow-all rule (bypasses per-range logging)
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
+- Create alert-only security profiles and profile-group (Alert-Group)
 
 Note: No default security policy is created. Per-range rules are
 created by NGFWConfigureSubnetsPlan during range provisioning.
+Those rules attach Alert-Group for threat detection without blocking.
 
 Note: SSH wait is handled by main.py before this plan runs.
 Serial number polling is also in main.py (after plan completes).
@@ -32,13 +34,13 @@ class TestNGFWProvisionPlanStructure:
     """Test NGFWProvisionPlan step definitions and verification."""
 
     def test_plan_structure(self):
-        """Plan should have 5 steps with proper attributes."""
+        """Plan should have 6 steps with proper attributes."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
 
-        # Should have 5 steps (interface + zone + delete allow-all + logging + profile)
-        assert len(plan.steps) == 5
+        # Should have 6 steps (interface + zone + delete allow-all + logging + log-profile + security-profiles)
+        assert len(plan.steps) == 6
 
         # All steps must have required attributes
         for step in plan.steps:
@@ -51,7 +53,7 @@ class TestNGFWProvisionPlanStructure:
         assert plan.verify_step is None
 
     def test_steps_in_correct_order(self):
-        """Steps must be in correct order: interface, zone, delete allow-all, logging, profile."""
+        """Steps must be in correct dependency order."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
@@ -73,9 +75,13 @@ class TestNGFWProvisionPlanStructure:
         cloud_logging_idx = next(i for i, n in enumerate(step_names) if "cloud_logging" in n)
         assert cloud_logging_idx > delete_allow_all_idx
 
-        # Log forwarding profile must come last
-        profile_idx = next(i for i, n in enumerate(step_names) if "log_forwarding" in n)
-        assert profile_idx > cloud_logging_idx
+        # Log forwarding profile must come after cloud logging
+        log_profile_idx = next(i for i, n in enumerate(step_names) if "log_forwarding" in n)
+        assert log_profile_idx > cloud_logging_idx
+
+        # Security profiles must come last
+        security_profiles_idx = next(i for i, n in enumerate(step_names) if "security_profiles" in n)
+        assert security_profiles_idx > log_profile_idx
 
 
 class TestNGFWProvisionPlanContext:

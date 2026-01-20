@@ -394,9 +394,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
 
-                // Show success and reload to show updated status
-                alert('Setup triggered successfully! The NGFW is now configuring. This page will refresh to show the updated status.');
-                window.location.reload();
+                // Update the UI immediately to show configuring state
+                // Update status badge in header
+                const statusContainer = document.querySelector('.page-subtitle .status');
+                if (statusContainer) {
+                    statusContainer.className = 'status status-configuring';
+                    statusContainer.querySelector('span:last-child').textContent = 'Configuring';
+                }
+
+                // Update status in overview card
+                const overviewStatus = document.querySelector('.details-grid .detail-item:nth-child(2) .detail-value');
+                if (overviewStatus) {
+                    overviewStatus.textContent = 'Configuring';
+                }
+
+                // Hide the action required card
+                const actionCard = this.closest('.card');
+                if (actionCard) {
+                    actionCard.style.display = 'none';
+                }
 
             } catch (err) {
                 console.error('Complete setup error:', err);

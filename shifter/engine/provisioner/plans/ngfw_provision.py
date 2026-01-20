@@ -6,9 +6,13 @@ This plan runs after the NGFW EC2 instance is created to configure:
 - Delete default allow-all rule (bypasses per-range logging if left in place)
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
+- Create alert-only security profiles (virus, spyware, vulnerability, etc.)
+- Create profile-group bundling all security profiles
+- Apply zone-protection-profile to ranges zone
 
 Note: No default security policy is created. Per-range security rules
 are created by NGFWConfigureSubnetsPlan during range provisioning.
+The ALERT_PROFILE_GROUP is attached to those rules for threat detection.
 
 Commands are executed via SSHExecutor to the NGFW management interface.
 All PAN-OS CLI commands have been validated against PAN-OS 11.x.
@@ -21,6 +25,13 @@ time to complete license registration with the Palo Alto CSP.
 from typing import Any
 
 from plans.base import SetupStep
+
+# Profile group name used for security rules - must match what's created below
+# and referenced in ngfw_configure_subnets.py when attaching to rules
+ALERT_PROFILE_GROUP = "Alert-Group"
+
+# Zone protection profile name applied to the ranges zone
+ZONE_PROTECTION_PROFILE = "Alert-Only-ZP"
 
 # PAN-OS configure mode commands for data interface setup
 # Configures ethernet1/1 as Layer 3 DHCP with virtual router for ENI routing
@@ -67,9 +78,71 @@ CREATE_LOG_FORWARDING_PROFILE_INPUT = (
     "exit\n"
 )
 
+# PAN-OS configure mode commands for alert-only security profiles
+# These profiles detect threats without blocking traffic (action=alert)
+# All profiles are bundled into ALERT_PROFILE_GROUP for easy attachment to rules
+#
+# Profile types created:
+#   - virus (Alert-Only-AV): Antivirus scanning for all protocols
+#   - spyware (Alert-Only-AS): Anti-spyware/botnet detection
+#   - vulnerability (Alert-Only-VP): Vulnerability/exploit detection
+#   - url-filtering (Alert-Only-URL): URL category alerting
+#   - file-blocking (Alert-Only-FB): File type alerting
+#   - wildfire-analysis (Alert-Only-WF): Cloud sandbox analysis
+#   - profile-group (Alert-Group): Bundle of all above profiles
+#   - zone-protection-profile (Alert-Only-ZP): Flood/DoS protection
+CREATE_SECURITY_PROFILES_INPUT = f"""configure
+set profiles virus Alert-Only-AV decoder http action alert
+set profiles virus Alert-Only-AV decoder ftp action alert
+set profiles virus Alert-Only-AV decoder smb action alert
+set profiles virus Alert-Only-AV decoder smtp action alert
+set profiles virus Alert-Only-AV decoder imap action alert
+set profiles virus Alert-Only-AV decoder pop3 action alert
+set profiles spyware Alert-Only-AS rules Alert-All action alert
+set profiles spyware Alert-Only-AS rules Alert-All severity any
+set profiles spyware Alert-Only-AS rules Alert-All threat-name any
+set profiles spyware Alert-Only-AS rules Alert-All category any
+set profiles vulnerability Alert-Only-VP rules Alert-All action alert
+set profiles vulnerability Alert-Only-VP rules Alert-All severity any
+set profiles vulnerability Alert-Only-VP rules Alert-All threat-name any
+set profiles vulnerability Alert-Only-VP rules Alert-All category any
+set profiles vulnerability Alert-Only-VP rules Alert-All cve any
+set profiles vulnerability Alert-Only-VP rules Alert-All host any
+set profiles vulnerability Alert-Only-VP rules Alert-All vendor-id any
+set profiles url-filtering Alert-Only-URL category command-and-control action alert
+set profiles url-filtering Alert-Only-URL category malware action alert
+set profiles url-filtering Alert-Only-URL category phishing action alert
+set profiles url-filtering Alert-Only-URL category grayware action alert
+set profiles url-filtering Alert-Only-URL category ransomware action alert
+set profiles file-blocking Alert-Only-FB rules Alert-All action alert
+set profiles file-blocking Alert-Only-FB rules Alert-All application any
+set profiles file-blocking Alert-Only-FB rules Alert-All file-type any
+set profiles file-blocking Alert-Only-FB rules Alert-All direction both
+set profiles wildfire-analysis Alert-Only-WF rules Forward-All application any
+set profiles wildfire-analysis Alert-Only-WF rules Forward-All file-type any
+set profiles wildfire-analysis Alert-Only-WF rules Forward-All direction both
+set profiles wildfire-analysis Alert-Only-WF rules Forward-All analysis public-cloud
+set profile-group {ALERT_PROFILE_GROUP} virus Alert-Only-AV
+set profile-group {ALERT_PROFILE_GROUP} spyware Alert-Only-AS
+set profile-group {ALERT_PROFILE_GROUP} vulnerability Alert-Only-VP
+set profile-group {ALERT_PROFILE_GROUP} url-filtering Alert-Only-URL
+set profile-group {ALERT_PROFILE_GROUP} file-blocking Alert-Only-FB
+set profile-group {ALERT_PROFILE_GROUP} wildfire-analysis Alert-Only-WF
+set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood tcp-syn enable yes
+set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood tcp-syn action alert
+set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood udp enable yes
+set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood udp action alert
+set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood icmp enable yes
+set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood icmp action alert
+set zone ranges network zone-protection-profile {ZONE_PROTECTION_PROFILE}
+commit
+exit
+"""
+
 # Note: No default security policy is created here.
 # Per-range security rules are created by NGFWConfigureSubnetsPlan
 # during range provisioning, using the 'ranges' zone.
+# Those rules attach ALERT_PROFILE_GROUP for threat detection.
 
 
 class NGFWProvisionPlan:
@@ -81,9 +154,16 @@ class NGFWProvisionPlan:
     3. Delete default allow-all rule (bypasses per-range logging)
     4. Enable cloud logging (Strata Logging Service)
     5. Create log forwarding profile (XDR-Forward)
+    6. Create alert-only security profiles, profile-group, and zone-protection:
+       - virus (Alert-Only-AV), spyware (Alert-Only-AS), vulnerability (Alert-Only-VP)
+       - url-filtering (Alert-Only-URL), file-blocking (Alert-Only-FB)
+       - wildfire-analysis (Alert-Only-WF)
+       - profile-group (ALERT_PROFILE_GROUP) bundling all above
+       - zone-protection-profile (ZONE_PROTECTION_PROFILE) applied to 'ranges' zone
 
     Note: No default security policy is created. Per-range rules are created
-    by NGFWConfigureSubnetsPlan during range provisioning.
+    by NGFWConfigureSubnetsPlan during range provisioning. Those rules
+    attach ALERT_PROFILE_GROUP for threat detection without blocking.
 
     All commands are executed via SSHExecutor to the NGFW management interface.
     SSH wait is handled by main.py before this plan runs.
@@ -128,6 +208,15 @@ class NGFWProvisionPlan:
                 name="create_log_forwarding_profile",
                 script="",
                 stdin_input=CREATE_LOG_FORWARDING_PROFILE_INPUT,
+                timeout_seconds=300,  # 5 min - config + commit
+            ),
+            # Create alert-only security profiles and profile-group
+            # These profiles detect threats without blocking (action=alert)
+            # Also creates zone-protection-profile and applies to 'ranges' zone
+            SetupStep(
+                name="create_security_profiles",
+                script="",
+                stdin_input=CREATE_SECURITY_PROFILES_INPUT,
                 timeout_seconds=300,  # 5 min - config + commit
             ),
         ]

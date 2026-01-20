@@ -17,6 +17,7 @@ instances:
     os_type: windows
     domain_controller: true
     xdr_agent: false
+    ai_agent: true
     dc_config:
       domain_name: cortexbyot.lab
       netbios_name: CORTEXBYOT
@@ -26,18 +27,21 @@ instances:
     os_type: windows
     xdr_agent: true
     join_domain: true
+    ai_agent: true
 
   - name: Workstation 2
     role: victim
     os_type: windows
     xdr_agent: true
     join_domain: true
+    ai_agent: true
 
   - name: Server
     role: victim
     os_type: ubuntu
     xdr_agent: true
     join_domain: true
+    ai_agent: true
 
 subnets:
   - name: dc_network

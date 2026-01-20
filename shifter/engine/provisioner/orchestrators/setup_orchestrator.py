@@ -284,7 +284,9 @@ class SetupOrchestrator:
         """Check if PAN-OS commit succeeded.
 
         PAN-OS outputs "Configuration committed successfully" on successful commits.
-        If the output contains a commit command but not this success message,
+        If there are no changes to commit, PAN-OS outputs "There are no changes to commit"
+        which is also considered success (idempotent behavior).
+        If the output contains a commit command but neither success message,
         the commit failed.
 
         Args:
@@ -298,8 +300,10 @@ class SetupOrchestrator:
         # Check if this was a commit operation
         if "commit" not in output.lower():
             return True
-        # If commit was attempted, check for success message
-        return "Configuration committed successfully" in output
+        # If commit was attempted, check for success messages
+        if "Configuration committed successfully" in output:
+            return True
+        return "There are no changes to commit" in output
 
     def _render_script(
         self,

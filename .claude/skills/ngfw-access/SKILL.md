@@ -136,3 +136,27 @@ Management plane is starting up. The `poll_for_serial_number()` function in prov
 
 ### SSH Connection Refused
 NGFW may still be booting. Check instance state and wait for SSH to be available.
+
+## Bootstrap Debugging
+
+### Check Bootstrap Status
+```
+show system bootstrap status
+```
+
+### Bootstrap Logs
+The bootstrap configuration log is in configd.log. To see bootstrap-related errors:
+```
+less mp-log configd.log
+```
+Then search for "bootstrap" - errors will show which XML nodes are missing or malformed.
+
+Example error indicating missing `<deviceconfig><system>` section:
+```
+initcfg: devices/entry/deviceconfig/system node does not exist... ignoring bootstrap config
+```
+
+### Required bootstrap.xml Structure
+The bootstrap.xml must include at minimum:
+- `devices/entry[@name='localhost.localdomain']/deviceconfig/system` with hostname
+- Any network/interface/zone config goes under `devices/entry[@name='localhost.localdomain']`

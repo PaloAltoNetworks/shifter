@@ -84,10 +84,8 @@ resource "aws_networkfirewall_rule_group" "victim_domains" {
       }
     }
 
-    # Use DEFAULT_ACTION_ORDER so domain allowlist works correctly
-    # STRICT_ORDER with drop_strict drops TCP SYN before TLS SNI can be inspected
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -122,9 +120,8 @@ resource "aws_networkfirewall_rule_group" "kali_domains" {
       }
     }
 
-    # Use DEFAULT_ACTION_ORDER so domain allowlist works correctly
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -153,7 +150,7 @@ resource "aws_networkfirewall_rule_group" "ngfw_bypass" {
     }
 
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -198,7 +195,7 @@ resource "aws_networkfirewall_rule_group" "block_ip_sni" {
     }
 
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -242,7 +239,7 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
     }
 
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -288,7 +285,7 @@ resource "aws_networkfirewall_rule_group" "drop_all" {
     }
 
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -310,51 +307,57 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     stateless_default_actions          = ["aws:forward_to_sfe"]
     stateless_fragment_default_actions = ["aws:forward_to_sfe"]
 
-    # Use DEFAULT_ACTION_ORDER for domain-based filtering
-    # This allows TCP handshake to complete so TLS SNI can be inspected
+    # Use STRICT_ORDER for predictable rule evaluation with priorities
+    # Lower priority number = evaluated first
     stateful_engine_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order              = "STRICT_ORDER"
+      stream_exception_policy = "CONTINUE"
     }
 
-    # Rule evaluation order (DEFAULT_ACTION_ORDER evaluates all rules):
-    # 1. NGFW bypass - pass all from NGFW subnet
-    # 2. Victim IPs - allow HTTPS to GCP/PANW IP ranges
-    # 3. Victim domains - allow listed domains (SNI-based)
-    # 4. Kali domains - allow listed domains (if configured)
-    # 5. Drop all - drop unmatched HTTP/HTTPS (default deny)
+    # Rule evaluation order (STRICT_ORDER - lower priority evaluated first):
+    # Priority 1: NGFW bypass - pass all from NGFW subnet
+    # Priority 2: Victim IPs - allow HTTPS to GCP/PANW IP ranges
+    # Priority 3: Victim domains - allow listed domains (SNI-based)
+    # Priority 4: Kali domains - allow listed domains (if configured)
+    # Priority 100: Drop all - drop unmatched HTTP/HTTPS (default deny)
 
-    # NGFW bypass - allow all egress for SCM/licensing (must be first)
+    # NGFW bypass - allow all egress for SCM/licensing (priority 1)
     dynamic "stateful_rule_group_reference" {
       for_each = var.enable_ngfw_infrastructure ? [1] : []
       content {
         resource_arn = aws_networkfirewall_rule_group.ngfw_bypass[0].arn
+        priority     = 1
       }
     }
 
-    # Victim IPs - allow HTTPS to GCP/PANW IP ranges
+    # Victim IPs - allow HTTPS to GCP/PANW IP ranges (priority 2)
     dynamic "stateful_rule_group_reference" {
       for_each = length(var.victim_allowed_cidrs) > 0 ? [1] : []
       content {
         resource_arn = aws_networkfirewall_rule_group.victim_ips[0].arn
+        priority     = 2
       }
     }
 
-    # Victim domains - SNI-based allowlist (backup for any IPs we missed)
+    # Victim domains - SNI-based allowlist (priority 3)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.victim_domains[0].arn
+      priority     = 3
     }
 
-    # Kali domains (only if configured)
+    # Kali domains (priority 4, only if configured)
     dynamic "stateful_rule_group_reference" {
       for_each = length(var.kali_allowed_domains) > 0 ? [1] : []
       content {
         resource_arn = aws_networkfirewall_rule_group.kali_domains[0].arn
+        priority     = 4
       }
     }
 
-    # Drop all unmatched HTTP/HTTPS traffic (default deny - must be last)
+    # Drop all unmatched HTTP/HTTPS traffic (priority 100 - last)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.drop_all[0].arn
+      priority     = 100
     }
   }
 

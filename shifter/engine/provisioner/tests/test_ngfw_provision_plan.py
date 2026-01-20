@@ -7,6 +7,8 @@ NGFWProvisionPlan handles post-Pulumi NGFW configuration via SSH:
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
 - Create alert-only security profiles and profile-group (Alert-Group)
+- Download threat content (Apps + Threats package)
+- Install threat content
 
 Note: No default security policy is created. Per-range rules are
 created by NGFWConfigureSubnetsPlan during range provisioning.
@@ -34,13 +36,14 @@ class TestNGFWProvisionPlanStructure:
     """Test NGFWProvisionPlan step definitions and verification."""
 
     def test_plan_structure(self):
-        """Plan should have 6 steps with proper attributes."""
+        """Plan should have 8 steps with proper attributes."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
 
-        # Should have 6 steps (interface + zone + delete allow-all + logging + log-profile + security-profiles)
-        assert len(plan.steps) == 6
+        # Should have 8 steps (interface + zone + delete allow-all + logging +
+        # log-profile + security-profiles + download content + install content)
+        assert len(plan.steps) == 8
 
         # All steps must have required attributes
         for step in plan.steps:
@@ -132,6 +135,14 @@ class TestNGFWProvisionPlanScripts:
 
         assert "XDR-Forward" in profile_step.stdin_input
         assert "log-settings" in profile_step.stdin_input
+        # Must include all log types for comprehensive cyber range visibility
+        assert "log-type traffic" in profile_step.stdin_input
+        assert "log-type threat" in profile_step.stdin_input
+        assert "log-type url" in profile_step.stdin_input
+        assert "log-type wildfire" in profile_step.stdin_input
+        assert "log-type data" in profile_step.stdin_input
+        assert "log-type tunnel" in profile_step.stdin_input
+        assert "log-type auth" in profile_step.stdin_input
 
     def test_shared_zone_creates_ranges_zone(self):
         """Shared zone step should create 'ranges' zone with ethernet1/1."""
@@ -168,6 +179,27 @@ class TestNGFWProvisionPlanScripts:
 
         plan = NGFWProvisionPlan()
 
-        config_steps = [s for s in plan.steps if s.stdin_input]
+        # Exclude content download/install steps - they're operational, not config
+        config_steps = [s for s in plan.steps if s.stdin_input and "content" not in s.name]
         for step in config_steps:
             assert "commit" in step.stdin_input.lower(), f"Step {step.name} missing commit"
+
+    def test_content_download_step_has_poll_for_job(self):
+        """Content download step should have poll_for_job enabled."""
+        from plans.ngfw_provision import NGFWProvisionPlan
+
+        plan = NGFWProvisionPlan()
+        download_step = next(s for s in plan.steps if "download" in s.name)
+
+        assert download_step.poll_for_job is True
+        assert "request content upgrade download" in download_step.stdin_input
+
+    def test_content_install_step_has_poll_for_job(self):
+        """Content install step should have poll_for_job enabled."""
+        from plans.ngfw_provision import NGFWProvisionPlan
+
+        plan = NGFWProvisionPlan()
+        install_step = next(s for s in plan.steps if "install" in s.name)
+
+        assert install_step.poll_for_job is True
+        assert "request content upgrade install" in install_step.stdin_input

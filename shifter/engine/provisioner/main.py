@@ -1872,7 +1872,8 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
         _set_ngfw_stack_config(env, request_id, instance_id, app_spec)
 
         if operation == "up":
-            _run_ngfw_provision(request_id, instance_id, app_id, stack_name, env)
+            sls_region = app_spec.get("sls_region", "americas")
+            _run_ngfw_provision(request_id, instance_id, app_id, stack_name, env, sls_region)
         elif operation == "destroy":
             _run_ngfw_deprovision(request_id, instance_id, app_id, stack_name, env)
         else:
@@ -1953,7 +1954,9 @@ def _set_ngfw_stack_config(env: dict, request_id: str, instance_uuid: str, app_s
             )
 
 
-def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
+def _run_ngfw_provision(
+    request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict, sls_region: str
+) -> None:
     """Run Pulumi up to provision the NGFW, then run post-Pulumi configuration.
 
     Args:
@@ -1962,6 +1965,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         app_id: UUID string of the App (NGFW).
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
+        sls_region: Strata Logging Service region (e.g., "americas", "europe").
     """
     # Update local DB and emit provisioning status event
     update_instance_state(request_id, STATUS_PROVISIONING)
@@ -2073,7 +2077,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
         "management_ip": management_ip,
         "dataplane_ip": output_data.get("dataplane_ip"),
         "data_eni_id": output_data.get("data_eni_id"),
-        "sls_region": os.environ.get("AWS_REGION", "us-east-2"),
+        "sls_region": sls_region,
     }
 
     # Import and run the NGFW provision plan

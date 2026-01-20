@@ -61,7 +61,9 @@ chmod +x /etc/xrdp/startwm.sh
 usermod -aG ssl-cert kali
 
 # Set kali user password for RDP login and SSH
+# Base Kali AMI ships with account locked; chpasswd sets password but doesn't unlock
 echo "kali:kali" | chpasswd
+passwd -u kali
 
 # Enable SSH password authentication for SFTP file transfers via Guacamole
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config

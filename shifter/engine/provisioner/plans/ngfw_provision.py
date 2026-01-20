@@ -8,7 +8,7 @@ This plan runs after the NGFW EC2 instance is created to configure:
 - Create log forwarding profile (XDR-Forward)
 - Create alert-only security profiles (virus, spyware, vulnerability, etc.)
 - Create profile-group bundling all security profiles
-- Apply zone-protection-profile to ranges zone
+- Download and install threat content (Apps + Threats package)
 
 Note: No default security policy is created. Per-range security rules
 are created by NGFWConfigureSubnetsPlan during range provisioning.
@@ -30,8 +30,10 @@ from plans.base import SetupStep
 # and referenced in ngfw_configure_subnets.py when attaching to rules
 ALERT_PROFILE_GROUP = "Alert-Group"
 
-# Zone protection profile name applied to the ranges zone
-ZONE_PROTECTION_PROFILE = "Alert-Only-ZP"
+# Zone protection profile - DISABLED
+# Zone protection profiles drop traffic when flood thresholds are exceeded,
+# there's no "allow" action. Since this is a controlled cyber range, we don't
+# need DoS protection and it interferes with attack traffic flow.
 
 # PAN-OS configure mode commands for data interface setup
 # Configures ethernet1/1 as Layer 3 DHCP with virtual router for ENI routing
@@ -69,9 +71,29 @@ exit
 """
 
 # PAN-OS configure mode commands for log forwarding profile (Step 13 from steps.md)
+# Includes all log types for comprehensive XDR visibility in the cyber range:
+# - traffic: Network traffic logs
+# - threat: Security profile alerts (AV, spyware, vulnerability, etc.)
+# - url: URL filtering logs
+# - wildfire: WildFire cloud analysis logs
+# - data: Data filtering/DLP logs
+# - tunnel: Tunnel inspection logs
+# - auth: Authentication logs
 CREATE_LOG_FORWARDING_PROFILE_INPUT = (
     "configure\n"
     "set shared log-settings profiles XDR-Forward match-list all-traffic log-type traffic "
+    'filter "All Logs" send-to-panorama yes\n'
+    "set shared log-settings profiles XDR-Forward match-list all-threats log-type threat "
+    'filter "All Logs" send-to-panorama yes\n'
+    "set shared log-settings profiles XDR-Forward match-list all-url log-type url "
+    'filter "All Logs" send-to-panorama yes\n'
+    "set shared log-settings profiles XDR-Forward match-list all-wildfire log-type wildfire "
+    'filter "All Logs" send-to-panorama yes\n'
+    "set shared log-settings profiles XDR-Forward match-list all-data log-type data "
+    'filter "All Logs" send-to-panorama yes\n'
+    "set shared log-settings profiles XDR-Forward match-list all-tunnel log-type tunnel "
+    'filter "All Logs" send-to-panorama yes\n'
+    "set shared log-settings profiles XDR-Forward match-list all-auth log-type auth "
     'filter "All Logs" send-to-panorama yes\n'
     "set shared log-settings profiles XDR-Forward enhanced-application-logging yes\n"
     "commit\n"
@@ -90,7 +112,9 @@ CREATE_LOG_FORWARDING_PROFILE_INPUT = (
 #   - file-blocking (Alert-Only-FB): File type alerting
 #   - wildfire-analysis (Alert-Only-WF): Cloud sandbox analysis
 #   - profile-group (Alert-Group): Bundle of all above profiles
-#   - zone-protection-profile (Alert-Only-ZP): Flood/DoS protection
+#
+# Note: Zone protection profiles are NOT created - they drop traffic when
+# flood thresholds are exceeded with no "allow" action available.
 CREATE_SECURITY_PROFILES_INPUT = f"""configure
 set profiles virus Alert-Only-AV decoder http action alert
 set profiles virus Alert-Only-AV decoder ftp action alert
@@ -128,13 +152,6 @@ set profile-group {ALERT_PROFILE_GROUP} vulnerability Alert-Only-VP
 set profile-group {ALERT_PROFILE_GROUP} url-filtering Alert-Only-URL
 set profile-group {ALERT_PROFILE_GROUP} file-blocking Alert-Only-FB
 set profile-group {ALERT_PROFILE_GROUP} wildfire-analysis Alert-Only-WF
-set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood tcp-syn enable yes
-set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood tcp-syn action alert
-set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood udp enable yes
-set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood udp action alert
-set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood icmp enable yes
-set network profiles zone-protection-profile {ZONE_PROTECTION_PROFILE} flood icmp action alert
-set zone ranges network zone-protection-profile {ZONE_PROTECTION_PROFILE}
 commit
 exit
 """
@@ -143,6 +160,16 @@ exit
 # Per-range security rules are created by NGFWConfigureSubnetsPlan
 # during range provisioning, using the 'ranges' zone.
 # Those rules attach ALERT_PROFILE_GROUP for threat detection.
+
+# PAN-OS operational commands for content download
+# Downloads latest threat content (Apps + Threats package)
+# Command is async - returns job ID, requires polling for completion
+DOWNLOAD_CONTENT_INPUT = "request content upgrade download latest\n"
+
+# PAN-OS operational commands for content install
+# Installs the downloaded threat content
+# Command is async - returns job ID, requires polling for completion
+INSTALL_CONTENT_INPUT = "request content upgrade install version latest\n"
 
 
 class NGFWProvisionPlan:
@@ -154,12 +181,13 @@ class NGFWProvisionPlan:
     3. Delete default allow-all rule (bypasses per-range logging)
     4. Enable cloud logging (Strata Logging Service)
     5. Create log forwarding profile (XDR-Forward)
-    6. Create alert-only security profiles, profile-group, and zone-protection:
+    6. Create alert-only security profiles and profile-group:
        - virus (Alert-Only-AV), spyware (Alert-Only-AS), vulnerability (Alert-Only-VP)
        - url-filtering (Alert-Only-URL), file-blocking (Alert-Only-FB)
        - wildfire-analysis (Alert-Only-WF)
        - profile-group (ALERT_PROFILE_GROUP) bundling all above
-       - zone-protection-profile (ZONE_PROTECTION_PROFILE) applied to 'ranges' zone
+    7. Download threat content (Apps + Threats package)
+    8. Install threat content
 
     Note: No default security policy is created. Per-range rules are created
     by NGFWConfigureSubnetsPlan during range provisioning. Those rules
@@ -212,12 +240,27 @@ class NGFWProvisionPlan:
             ),
             # Create alert-only security profiles and profile-group
             # These profiles detect threats without blocking (action=alert)
-            # Also creates zone-protection-profile and applies to 'ranges' zone
             SetupStep(
                 name="create_security_profiles",
                 script="",
                 stdin_input=CREATE_SECURITY_PROFILES_INPUT,
                 timeout_seconds=300,  # 5 min - config + commit
+            ),
+            # Download threat content (async - polls for job completion)
+            SetupStep(
+                name="download_threat_content",
+                script="",
+                stdin_input=DOWNLOAD_CONTENT_INPUT,
+                timeout_seconds=600,  # 10 min - download can take a while
+                poll_for_job=True,
+            ),
+            # Install threat content (async - polls for job completion)
+            SetupStep(
+                name="install_threat_content",
+                script="",
+                stdin_input=INSTALL_CONTENT_INPUT,
+                timeout_seconds=600,  # 10 min - install can take a while
+                poll_for_job=True,
             ),
         ]
         # No verify_step - verification is handled by poll_for_serial_and_cert()

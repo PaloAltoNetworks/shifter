@@ -22,6 +22,8 @@ class SetupStep:
         is_verification: If True, this is a check not an action
         stdin_input: Multi-line input to pipe via stdin (for interactive modes
             like PAN-OS configure). If set, script may be empty.
+        poll_for_job: If True, parse PAN-OS job ID from output and poll until
+            complete. Used for async operations like content download/install.
     """
 
     name: str
@@ -30,6 +32,7 @@ class SetupStep:
     requires_reboot: bool = False
     is_verification: bool = False
     stdin_input: str = ""
+    poll_for_job: bool = False
 
 
 class SetupPlan(Protocol):

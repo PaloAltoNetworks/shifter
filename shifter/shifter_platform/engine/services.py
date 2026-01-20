@@ -512,16 +512,19 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         rdp_username = "kali"
         rdp_password = "kali"  # nosec B105 - Kali OS default
 
-    # Get SSH key for SFTP file transfers (Windows requires key-based auth)
+    # Get SSH key for SFTP file transfers
+    # Windows requires key-based auth; Kali uses password auth (Guacamole's
+    # libssh2 has issues with Ed25519 OpenSSH key format)
     from engine.secrets import get_ssh_key
 
     ssh_key = None
-    ssh_key_arn = instance.get("ssh_key_secret_arn")
-    if ssh_key_arn:
-        try:
-            ssh_key = get_ssh_key(ssh_key_arn)
-        except Exception as e:
-            logger.warning("Failed to get SSH key for SFTP: %s", e)
+    if os_type == "windows":
+        ssh_key_arn = instance.get("ssh_key_secret_arn")
+        if ssh_key_arn:
+            try:
+                ssh_key = get_ssh_key(ssh_key_arn)
+            except Exception as e:
+                logger.warning("Failed to get SSH key for SFTP: %s", e)
 
     return {
         "private_ip": private_ip,

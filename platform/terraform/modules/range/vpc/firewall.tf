@@ -206,13 +206,20 @@ resource "aws_networkfirewall_rule_group" "block_ip_sni" {
 
 # ------------------------------------------------------------------------------
 # IP-based Allowlist (GCP ranges for PANW services)
+# Split into multiple rule groups due to AWS 8192 char rule limit
 # ------------------------------------------------------------------------------
 
+locals {
+  # Split CIDRs into chunks of 300 to stay under AWS rule length limit
+  cidr_chunk_size = 300
+  cidr_chunks     = var.enable_network_firewall && length(var.victim_allowed_cidrs) > 0 ? chunklist(var.victim_allowed_cidrs, local.cidr_chunk_size) : []
+}
+
 resource "aws_networkfirewall_rule_group" "victim_ips" {
-  count = var.enable_network_firewall && length(var.victim_allowed_cidrs) > 0 ? 1 : 0
+  count = var.enable_network_firewall ? length(local.cidr_chunks) : 0
 
   capacity = 1000 # Each CIDR uses ~1 capacity unit
-  name     = "${var.name_prefix}-victim-ips"
+  name     = "${var.name_prefix}-victim-ips-${count.index + 1}"
   type     = "STATEFUL"
 
   rule_group {
@@ -226,15 +233,15 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
       ip_sets {
         key = "ALLOWED_IPS"
         ip_set {
-          definition = var.victim_allowed_cidrs
+          definition = local.cidr_chunks[count.index]
         }
       }
     }
 
     rules_source {
-      # Allow TCP 443 to all GCP/PANW IPs
+      # Allow TCP 443 to GCP/PANW IPs (chunk ${count.index + 1})
       rules_string = <<-EOT
-        pass tcp $HOME_NET any -> $ALLOWED_IPS 443 (msg:"Allow HTTPS to PANW/GCP IPs"; sid:2000001; rev:1;)
+        pass tcp $HOME_NET any -> $ALLOWED_IPS 443 (msg:"Allow HTTPS to PANW/GCP IPs chunk ${count.index + 1}"; sid:${2000001 + count.index}; rev:1;)
       EOT
     }
 
@@ -244,7 +251,7 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-victim-ips"
+    Name = "${var.name_prefix}-victim-ips-${count.index + 1}"
   })
 }
 
@@ -316,9 +323,9 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 
     # Rule evaluation order (STRICT_ORDER - lower priority evaluated first):
     # Priority 1: NGFW bypass - pass all from NGFW subnet
-    # Priority 2: Victim IPs - allow HTTPS to GCP/PANW IP ranges
-    # Priority 3: Victim domains - allow listed domains (SNI-based)
-    # Priority 4: Kali domains - allow listed domains (if configured)
+    # Priority 2-N: Victim IPs - allow HTTPS to GCP/PANW IP ranges (chunked)
+    # Priority N+1: Victim domains - allow listed domains (SNI-based)
+    # Priority N+2: Kali domains - allow listed domains (if configured)
     # Priority 100: Drop all - drop unmatched HTTP/HTTPS (default deny)
 
     # NGFW bypass - allow all egress for SCM/licensing (priority 1)
@@ -330,27 +337,27 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       }
     }
 
-    # Victim IPs - allow HTTPS to GCP/PANW IP ranges (priority 2)
+    # Victim IPs - allow HTTPS to GCP/PANW IP ranges (priorities 2, 3, 4, ...)
     dynamic "stateful_rule_group_reference" {
-      for_each = length(var.victim_allowed_cidrs) > 0 ? [1] : []
+      for_each = aws_networkfirewall_rule_group.victim_ips
       content {
-        resource_arn = aws_networkfirewall_rule_group.victim_ips[0].arn
-        priority     = 2
+        resource_arn = stateful_rule_group_reference.value.arn
+        priority     = 2 + stateful_rule_group_reference.key
       }
     }
 
-    # Victim domains - SNI-based allowlist (priority 3)
+    # Victim domains - SNI-based allowlist (priority after victim IPs)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.victim_domains[0].arn
-      priority     = 3
+      priority     = 2 + length(local.cidr_chunks) + 1
     }
 
-    # Kali domains (priority 4, only if configured)
+    # Kali domains (priority after victim domains, only if configured)
     dynamic "stateful_rule_group_reference" {
       for_each = length(var.kali_allowed_domains) > 0 ? [1] : []
       content {
         resource_arn = aws_networkfirewall_rule_group.kali_domains[0].arn
-        priority     = 4
+        priority     = 2 + length(local.cidr_chunks) + 2
       }
     }
 

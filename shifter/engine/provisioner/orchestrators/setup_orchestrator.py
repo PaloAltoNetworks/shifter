@@ -249,6 +249,31 @@ class SetupOrchestrator:
                     )
 
             if result.success:
+                # If poll_for_job is enabled, parse job ID and poll until complete
+                if getattr(step, "poll_for_job", False):
+                    job_id = self._parse_panos_job_id(result.stdout)
+                    if job_id:
+                        logger.info("_execute_step: polling for job %s completion", job_id)
+                        poll_success, poll_output = self._poll_panos_job(
+                            instance_id, job_id, step.timeout_seconds, document_name
+                        )
+                        if not poll_success:
+                            if attempt < max_retries:
+                                continue  # Retry
+                            raise SetupError(
+                                f"Step '{step.name}' failed: PAN-OS job {job_id} did not complete successfully",
+                                step_name=step.name,
+                            )
+                        # Append poll output to result
+                        result = CommandResult(
+                            success=True,
+                            exit_code=0,
+                            stdout=result.stdout + "\n" + poll_output,
+                            stderr=result.stderr,
+                        )
+                    else:
+                        logger.warning("_execute_step: poll_for_job enabled but no job ID found in output")
+
                 # Log success with output summary
                 stdout_preview = result.stdout[:500] if result.stdout else "(no output)"
                 logger.info(
@@ -354,3 +379,80 @@ class SetupOrchestrator:
             )
 
         return result
+
+    def _parse_panos_job_id(self, output: str) -> str | None:
+        """Parse PAN-OS job ID from command output.
+
+        Looks for patterns like "job enqueued with jobid 19" in the output.
+
+        Args:
+            output: Command output to parse
+
+        Returns:
+            Job ID string if found, None otherwise
+        """
+        if not output:
+            return None
+        # Match patterns like "job enqueued with jobid 19" or "jobid 19"
+        match = re.search(r"jobid\s+(\d+)", output, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
+
+    def _poll_panos_job(
+        self,
+        instance_id: str,
+        job_id: str,
+        timeout_seconds: int,
+        document_name: str,
+        poll_interval: int = 10,
+    ) -> tuple[bool, str]:
+        """Poll PAN-OS job until completion.
+
+        Args:
+            instance_id: Target instance (IP for SSH)
+            job_id: PAN-OS job ID to poll
+            timeout_seconds: Maximum time to wait for job completion
+            document_name: SSM document name
+            poll_interval: Seconds between poll attempts
+
+        Returns:
+            Tuple of (success, final_output)
+        """
+        import time
+
+        start_time = time.time()
+        last_output = ""
+
+        while time.time() - start_time < timeout_seconds:
+            # Run show jobs id <job_id>
+            result = self.executor.run_command(
+                instance_id=instance_id,
+                script="",
+                timeout_seconds=60,
+                document_name=document_name,
+                stdin_input=f"show jobs id {job_id}\n",
+            )
+            last_output = result.stdout
+
+            if not result.success:
+                logger.warning("_poll_panos_job: poll command failed, retrying")
+                time.sleep(poll_interval)
+                continue
+
+            # Check for job completion - look for "FIN" in Status column
+            # Output format: "... Status Result ..." with "FIN" and "OK" when done
+            if "FIN" in result.stdout:
+                # Check if result is OK
+                if "OK" in result.stdout:
+                    logger.info("_poll_panos_job: job %s completed successfully", job_id)
+                    return True, result.stdout
+                else:
+                    logger.error("_poll_panos_job: job %s finished with error", job_id)
+                    return False, result.stdout
+
+            logger.debug("_poll_panos_job: job %s still running", job_id)
+            time.sleep(poll_interval)
+
+        logger.error("_poll_panos_job: timeout waiting for job %s", job_id)
+        return False, last_output

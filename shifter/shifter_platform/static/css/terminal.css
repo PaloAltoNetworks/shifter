@@ -264,8 +264,9 @@
     to { transform: rotate(360deg); }
 }
 
-/* Adjust pane-status when RDP button present */
-.pane-header .pane-action-btn + .pane-status {
+/* Adjust pane-status when RDP button present - remove auto margin, use fixed gap */
+.pane-header .pane-action-btn + .pane-status,
+.split-pane-header .pane-action-btn + .pane-status {
     margin-left: 0.5rem;
 }
 

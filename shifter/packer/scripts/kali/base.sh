@@ -61,9 +61,16 @@ chmod +x /etc/xrdp/startwm.sh
 usermod -aG ssl-cert kali
 
 # Set kali user password for RDP login and SSH
-# Base Kali AMI ships with account locked; chpasswd sets password but doesn't unlock
 echo "kali:kali" | chpasswd
-passwd -u kali
+
+# Override cloud-init's lock_passwd setting (20_kali.cfg sets lock_passwd: True)
+# This prevents cloud-init from re-locking the account on boot
+cat > /etc/cloud/cloud.cfg.d/90_shifter.cfg << 'EOF'
+system_info:
+  default_user:
+    name: kali
+    lock_passwd: false
+EOF
 
 # Enable SSH password authentication for SFTP file transfers via Guacamole
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config

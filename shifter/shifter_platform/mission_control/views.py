@@ -613,7 +613,10 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
     try:
         ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
+        # NGFW not found (may have failed and been cleaned up)
+        # Redirect to list page instead of showing 404
+        messages.warning(request, "NGFW not found. It may have failed during provisioning.")
+        return redirect("mission_control:ngfw_list")
 
     context = {
         "page_title": ngfw.name,
@@ -650,7 +653,9 @@ def ngfw_deprovision(request: HttpRequest, app_id: str) -> HttpResponse:
     try:
         ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
+        # NGFW not found - redirect to list page
+        messages.warning(request, "NGFW not found.")
+        return redirect("mission_control:ngfw_list")
 
     context = {
         "page_title": f"Deprovision {ngfw.name}",

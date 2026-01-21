@@ -9,4 +9,10 @@
 $LogFile = "C:\Windows\Temp\dc-userdata.log"
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 "$timestamp - DC instance started. Setup will be orchestrated via SSM." | Out-File -FilePath $LogFile
+
+# Set Administrator password for RDP/SSH access
+# TODO: Move to CMS-managed instance credentials (#542)
+$AdminPassword = "CortexSavesTheDay!"
+net user Administrator $AdminPassword
+"$timestamp - Administrator password configured" | Out-File -FilePath $LogFile -Append
 </powershell>

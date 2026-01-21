@@ -5,10 +5,16 @@
 # Usage:
 #   .\services.ps1           - Victim configuration (default)
 #   .\services.ps1 -Role dc  - Domain Controller configuration
+#   PACKER_ROLE=dc           - Environment variable (used by Packer)
 param(
     [ValidateSet("victim", "dc")]
-    [string]$Role = "victim"
+    [string]$Role = ""
 )
+
+# If no parameter provided, check environment variable (set by Packer)
+if (-not $Role) {
+    $Role = if ($env:PACKER_ROLE) { $env:PACKER_ROLE } else { "victim" }
+}
 
 $ErrorActionPreference = "Stop"
 

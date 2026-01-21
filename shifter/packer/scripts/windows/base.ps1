@@ -73,25 +73,10 @@ Write-Host "Skipping firewall configuration (AWS Security Groups handle network 
 # ------------------------------------------------------------------------------
 # WinRM (Windows Remote Management)
 # ------------------------------------------------------------------------------
-Write-Host "=== Configuring WinRM ==="
-
-# Enable WinRM service
-Set-Service -Name "WinRM" -StartupType Automatic
-Start-Service -Name "WinRM"
-
-# Configure WinRM
-winrm quickconfig -quiet
-winrm set winrm/config/service '@{AllowUnencrypted="true"}'
-winrm set winrm/config/service/auth '@{Basic="true"}'
-winrm set winrm/config/winrs '@{MaxMemoryPerShellMB="1024"}'
-
-# Set trusted hosts to allow connections from any host
-Set-Item WSMan:\localhost\Client\TrustedHosts -Value "*" -Force
-
-# Restart WinRM to apply changes
-Restart-Service WinRM
-
-Write-Host "WinRM configured and enabled"
+# NOTE: WinRM is already configured by user_data in the Packer template.
+# Don't reconfigure or restart it here - that kills the active Packer connection.
+Write-Host "=== WinRM ==="
+Write-Host "Skipping WinRM configuration (already configured by user_data)"
 
 # ------------------------------------------------------------------------------
 # Enable required Windows features

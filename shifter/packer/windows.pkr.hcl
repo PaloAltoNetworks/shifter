@@ -7,6 +7,9 @@ source "amazon-ebs" "windows" {
   // Ensure instance is terminated (not just stopped) if Packer exits ungracefully
   shutdown_behavior = "terminate"
 
+  // Don't stop instance - sysprep will shut it down, Packer waits for stopped state
+  disable_stop_instance = true
+
   // Windows Server 2022 Datacenter from Amazon
   source_ami_filter {
     filters = {

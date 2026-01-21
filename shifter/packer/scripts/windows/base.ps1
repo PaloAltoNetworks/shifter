@@ -63,44 +63,13 @@ $admin.SetInfo()
 Write-Host "Administrator password set"
 
 # ------------------------------------------------------------------------------
-# Windows Firewall
+# Windows Firewall - Disabled (AWS Security Groups handle network access)
 # ------------------------------------------------------------------------------
-Write-Host "=== Configuring Windows Firewall ==="
+Write-Host "=== Disabling Windows Firewall ==="
 
-# Add firewall rules BEFORE enabling firewall to avoid killing WinRM connection
-# Common rules for both victim and DC
-New-NetFirewallRule -DisplayName "RDP Inbound" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "SSH Inbound" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "WinRM HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "WinRM HTTPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 5986 -Action Allow -ErrorAction SilentlyContinue
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
 
-if ($Role -eq "victim") {
-    # Victim-specific rules
-    New-NetFirewallRule -DisplayName "HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "HTTPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "MySQL Inbound" -Direction Inbound -Protocol TCP -LocalPort 3306 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "FTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 21 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "FTP Passive Inbound" -Direction Inbound -Protocol TCP -LocalPort 49152-49200 -Action Allow -ErrorAction SilentlyContinue
-} else {
-    # DC-specific rules
-    New-NetFirewallRule -DisplayName "DNS TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 53 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "DNS UDP Inbound" -Direction Inbound -Protocol UDP -LocalPort 53 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "Kerberos TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 88 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "Kerberos UDP Inbound" -Direction Inbound -Protocol UDP -LocalPort 88 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "LDAP TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 389 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "LDAP UDP Inbound" -Direction Inbound -Protocol UDP -LocalPort 389 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "LDAPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 636 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "GC Inbound" -Direction Inbound -Protocol TCP -LocalPort 3268 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "GC SSL Inbound" -Direction Inbound -Protocol TCP -LocalPort 3269 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "SMB Inbound" -Direction Inbound -Protocol TCP -LocalPort 445 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "RPC Endpoint Mapper Inbound" -Direction Inbound -Protocol TCP -LocalPort 135 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "RPC Dynamic Inbound" -Direction Inbound -Protocol TCP -LocalPort 49152-65535 -Action Allow -ErrorAction SilentlyContinue
-}
-
-# Enable firewall on all profiles AFTER rules are in place
-Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
-
-Write-Host "Firewall rules configured"
+Write-Host "Windows Firewall disabled on all profiles"
 
 # ------------------------------------------------------------------------------
 # WinRM (Windows Remote Management)

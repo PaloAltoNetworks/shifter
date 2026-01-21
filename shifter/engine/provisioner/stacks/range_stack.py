@@ -502,19 +502,19 @@ class RangeStack(pulumi.ComponentResource):
         config: RangeConfig,
         connected_pairs: list[tuple[str, str]],
     ) -> None:
-        """Add bidirectional routes between connected subnets through NGFW.
+        """Add bidirectional routes between ALL subnets through NGFW.
 
-        Only creates routes between subnets that are connected via the
-        connected_to relationship. This forces inter-subnet traffic through
-        the NGFW data ENI for inspection, overriding AWS's implicit local VPC route.
+        Routes ALL inter-subnet traffic through the NGFW data ENI for inspection,
+        overriding AWS's implicit local VPC routing. The NGFW security policy
+        controls which traffic is allowed vs denied.
 
-        Connection is symmetric: if A lists B in connected_to OR B lists A,
-        routes are created in both directions (A→B and B→A).
+        The connected_pairs parameter is kept for API compatibility but is no
+        longer used - all subnet pairs get routes through NGFW.
 
         Args:
             name: Pulumi resource name prefix.
-            config: Range configuration with subnets and connected_to.
-            connected_pairs: Pre-computed list of connected subnet pairs.
+            config: Range configuration with subnets.
+            connected_pairs: Unused, kept for API compatibility.
         """
         if not config.ngfw_data_eni_id:
             logger.debug("No NGFW configured, skipping inter-subnet routes")
@@ -524,129 +524,52 @@ class RangeStack(pulumi.ComponentResource):
             logger.debug("Only one subnet, no inter-subnet routes needed")
             return
 
-        if not connected_pairs:
-            logger.debug("No connected subnet pairs, skipping inter-subnet routes")
-            return
-
-        route_count = 0
-
-        for subnet_a, subnet_b in connected_pairs:
-            network_a = self.networks.get(subnet_a)
-            network_b = self.networks.get(subnet_b)
-
-            if not network_a or not network_b:
-                logger.warning(
-                    "Skipping route pair %s<->%s: network not found",
-                    subnet_a,
-                    subnet_b,
-                )
-                continue
-
-            # Route A → B (in A's route table, destination is B's CIDR, via NGFW)
-            route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-ngfw"
-            network_a.add_route_to_ngfw(
-                route_ab_name,
-                network_b.subnet_cidr,
-                config.ngfw_data_eni_id,
-                opts=pulumi.ResourceOptions(
-                    parent=self,
-                    depends_on=[
-                        network_a.route_table,
-                        network_b.subnet,
-                    ],
-                ),
-            )
-            route_count += 1
-
-            # Route B → A (in B's route table, destination is A's CIDR, via NGFW)
-            route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-ngfw"
-            network_b.add_route_to_ngfw(
-                route_ba_name,
-                network_a.subnet_cidr,
-                config.ngfw_data_eni_id,
-                opts=pulumi.ResourceOptions(
-                    parent=self,
-                    depends_on=[
-                        network_b.route_table,
-                        network_a.subnet,
-                    ],
-                ),
-            )
-            route_count += 1
-
-        logger.info(
-            "Added %d inter-subnet routes for %d connected pairs",
-            route_count,
-            len(connected_pairs),
-        )
-
-        # Add blackhole routes for non-connected pairs
-        self._add_blackhole_routes(name, config, connected_pairs)
-
-    def _add_blackhole_routes(
-        self,
-        name: str,
-        config: RangeConfig,
-        connected_pairs: list[tuple[str, str]],
-    ) -> None:
-        """Add blackhole routes for non-connected subnet pairs.
-
-        For subnets that are NOT in connected_to, adds routes that drop
-        traffic, preventing direct communication via VPC local routing.
-
-        Args:
-            name: Pulumi resource name prefix.
-            config: Range configuration with subnets.
-            connected_pairs: List of connected (subnet_a, subnet_b) tuples.
-        """
-        if len(self.networks) < 2:
-            return
-
-        # Build set of connected pairs for O(1) lookup
-        connected_set = {frozenset(pair) for pair in connected_pairs}
-
-        # Get all possible pairs
+        # Build all subnet pairs
         subnet_names = list(self.networks.keys())
-        blackhole_count = 0
+        route_count = 0
 
         for i, subnet_a in enumerate(subnet_names):
             for subnet_b in subnet_names[i + 1 :]:
-                pair_key = frozenset([subnet_a, subnet_b])
-                if pair_key in connected_set:
-                    continue  # Connected pair, skip
-
                 network_a = self.networks[subnet_a]
                 network_b = self.networks[subnet_b]
 
-                # Blackhole A → B (drop traffic from A to B)
-                route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-drop"
-                network_a.add_blackhole_route(
+                # Route A → B (in A's route table, destination is B's CIDR, via NGFW)
+                route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-ngfw"
+                network_a.add_route_to_ngfw(
                     route_ab_name,
                     network_b.subnet_cidr,
+                    config.ngfw_data_eni_id,
                     opts=pulumi.ResourceOptions(
                         parent=self,
-                        depends_on=[network_a.route_table, network_b.subnet],
+                        depends_on=[
+                            network_a.route_table,
+                            network_b.subnet,
+                        ],
                     ),
                 )
-                blackhole_count += 1
+                route_count += 1
 
-                # Blackhole B → A (drop traffic from B to A)
-                route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-drop"
-                network_b.add_blackhole_route(
+                # Route B → A (in B's route table, destination is A's CIDR, via NGFW)
+                route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-ngfw"
+                network_b.add_route_to_ngfw(
                     route_ba_name,
                     network_a.subnet_cidr,
+                    config.ngfw_data_eni_id,
                     opts=pulumi.ResourceOptions(
                         parent=self,
-                        depends_on=[network_b.route_table, network_a.subnet],
+                        depends_on=[
+                            network_b.route_table,
+                            network_a.subnet,
+                        ],
                     ),
                 )
-                blackhole_count += 1
+                route_count += 1
 
-        if blackhole_count > 0:
-            logger.info(
-                "Added %d blackhole routes for non-connected subnet pairs",
-                blackhole_count,
-            )
+        logger.info(
+            "Added %d inter-subnet routes through NGFW for %d subnets",
+            route_count,
+            len(subnet_names),
+        )
 
     def _validate_config(self, config: RangeConfig) -> None:
         """Validate config has required fields for instance types present.

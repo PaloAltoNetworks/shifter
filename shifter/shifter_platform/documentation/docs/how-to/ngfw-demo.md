@@ -5,6 +5,7 @@ Complete walkthrough: add credentials, provision NGFW, associate in SCM, launch 
 ## Before You Start
 
 You need:
+
 - Access to Strata Cloud Manager (SCM)
 - Access to your XDR or XSIAM console
 - Software NGFW Credits deployment profile with authcode
@@ -20,6 +21,7 @@ The deployment profile contains the authcode that licenses your NGFW.
 2. Click **Add Credential**
 3. Select **Deployment Profile**
 4. Enter:
+
    - **Name**: Something descriptive (e.g., "Lab NGFW License")
    - **Authcode**: Your Software NGFW Credits authcode
 5. Save
@@ -32,6 +34,7 @@ The SCM credential enables automatic device registration.
 2. Click **Add Credential**
 3. Select **SCM Credential**
 4. Enter:
+
    - **Name**: Descriptive name
    - **SCM Folder**: The folder in SCM where the device will register
    - **PIN ID**: Auto-registration PIN from SCM
@@ -49,16 +52,20 @@ The SCM credential enables automatic device registration.
 1. Go to **Assets > NGFWs**
 2. Click **Setup NGFW**
 3. **Step 1 - Name & Profile**:
+
    - Enter a name for the NGFW
    - Select your deployment profile
    - Click Next
 4. **Step 2 - Registration**:
+
    - Select your SCM credential
    - Click Next
 5. **Step 3 - Confirm**:
+
    - Review settings
    - Click **Provision NGFW**
 6. **Step 4 - Provisioning**:
+
    - Wait 15-30 minutes
    - Watch the progress steps
 
@@ -97,10 +104,12 @@ When provisioning reaches "Action Required":
 ## Verifying the Setup
 
 **In your range:**
+
 - Traffic between attacker and victim routes through NGFW
 - Run attacks from Kali terminal
 
 **In XDR/XSIAM:**
+
 - You should see both:
   - Endpoint alerts from your agent
   - Network alerts from NGFW logs

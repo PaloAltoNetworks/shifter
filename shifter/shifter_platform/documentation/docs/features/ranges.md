@@ -42,21 +42,24 @@ The Ranges page shows real-time status updates during provisioning. You'll see p
 ## Access a Range
 
 Once Ready:
+
 1. Go to **Terminal**
 2. Select an instance
 3. Use SSH or RDP to connect
 
-See [Terminal](terminal.md) for details.
+See [Terminal](terminal) for details.
 
 ## Cancel a Range
 
 While in Pending or Provisioning status:
+
 1. Go to **Ranges page**
 2. Click **Cancel** on the range
 
 ## Destroy a Range
 
 When finished:
+
 1. Go to **Ranges page**
 2. Click **Destroy** on the range
 

@@ -59,25 +59,17 @@ def get_ami_id(ami_type: str) -> str:
         ami_type: One of 'kali', 'victim', 'windows', 'dc'
 
     Returns:
-        AMI ID string, or empty string if not found
+        AMI ID string
 
-    Falls back to environment variable if SSM lookup fails (for local dev).
+    Raises:
+        ValueError: If ami_type is unknown or SSM parameter not found
     """
     if ami_type in _ami_cache:
         return _ami_cache[ami_type]
 
     param_path = _AMI_SSM_PARAMS.get(ami_type)
     if not param_path:
-        logger.warning("Unknown AMI type: %s", ami_type)
-        return ""
-
-    # Map ami_type to env var name for fallback
-    env_var_map = {
-        "kali": "KALI_AMI_ID",
-        "victim": "VICTIM_AMI_ID",
-        "windows": "WINDOWS_AMI_ID",
-        "dc": "DC_AMI_ID",
-    }
+        raise ValueError(f"Unknown AMI type: {ami_type}")
 
     try:
         ssm = boto3.client("ssm")
@@ -87,21 +79,8 @@ def get_ami_id(ami_type: str) -> str:
         _ami_cache[ami_type] = ami_id
         return ami_id
     except Exception as e:
-        # Fall back to environment variable (for local dev or if SSM fails)
-        env_var = env_var_map.get(ami_type, "")
-        fallback = os.environ.get(env_var, "")
-        if fallback:
-            logger.warning(
-                "SSM lookup failed for %s (%s), using env var %s: %s",
-                ami_type,
-                e,
-                env_var,
-                fallback,
-            )
-            _ami_cache[ami_type] = fallback
-            return fallback
-        logger.error("Failed to get %s AMI ID from SSM or env: %s", ami_type, e)
-        return ""
+        # No fallback - fail fast to surface IAM/config issues immediately
+        raise ValueError(f"Failed to get {ami_type} AMI ID from SSM parameter {param_path}: {e}") from e
 
 
 # Default timeout for waiting for NGFW SSH to become available (seconds)

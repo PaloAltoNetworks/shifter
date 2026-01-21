@@ -4,10 +4,11 @@ source "amazon-ebs" "windows" {
   instance_type   = var.instance_type
   region          = var.aws_region
 
-  // Ensure instance is terminated (not just stopped) if Packer exits ungracefully
-  shutdown_behavior = "terminate"
+  // Instance must STOP (not terminate) when sysprep shuts it down
+  // so Packer can create the AMI from the stopped instance
+  shutdown_behavior = "stop"
 
-  // Don't stop instance - sysprep will shut it down, Packer waits for stopped state
+  // Don't send stop command - sysprep handles shutdown, Packer waits for stopped state
   disable_stop_instance = true
 
   // Windows Server 2022 Datacenter from Amazon

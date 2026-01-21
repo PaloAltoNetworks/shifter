@@ -34,6 +34,7 @@ Upload the installer as downloaded from your XDR/XSIAM console:
 ## Manage Agents
 
 From the Agents page you can:
+
 - View all uploaded agents
 - See file size and upload date
 - Delete agents you no longer need

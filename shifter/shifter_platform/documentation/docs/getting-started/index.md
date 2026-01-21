@@ -4,13 +4,13 @@ Shifter provides isolated cyber range environments for XDR/XSIAM demos. You brin
 
 ## First Time?
 
-Start with the [Quickstart](quickstart.md) to launch your first range.
+Start with the [Quickstart](quickstart) to launch your first range.
 
 ## Need Context?
 
-See [Key Concepts](concepts.md) for terminology and how things connect.
+See [Key Concepts](concepts) for terminology and how things connect.
 
 ## Ready to Go Deeper?
 
-- [Scenarios](../scenarios/index.md) - Different range configurations
-- [Features](../features/index.md) - Detailed feature guides
+- [Scenarios](../scenarios/) - Different range configurations
+- [Features](../features/) - Detailed feature guides

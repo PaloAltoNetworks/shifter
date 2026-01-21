@@ -41,7 +41,7 @@ CI/CD via GitHub Actions with self-hosted runners. DNS hosted on Cloudflare (`de
 
 ## Shifter (Django)
 
-Django monorepo. Users interact via Mission Control; backend apps expose REST APIs.
+Django monorepo. Users interact via Mission Control; backend apps expose service interfaces.
 
 ```mermaid
 graph TB
@@ -54,17 +54,48 @@ graph TB
 
     Users((Users)) --> MC
 
-    MC --> SE
-    MC --> CMS
-    MC --> SA
+    MC -->|service calls| SE
+    MC -->|service calls| CMS
+    MC -->|service calls| SA
+    SE -.->|references models| CMS
 ```
 
 | Element | App | Purpose |
 |---------|-----|---------|
 | **Mission Control** | `mission_control` | Presentation layer. Single UI for all users. |
-| **Shifter Engine** | `engine` | Range management. |
-| **Shifter CMS** | `cms` | Content management. |
-| **Shifter Admin** | `management` | Platform management. |
+| **Shifter Engine** | `engine` | Range management. Owns Range lifecycle, references CMS assets. |
+| **Shifter CMS** | `cms` | Content management. Assets, credentials, scenario catalog. |
+| **Shifter Admin** | `management` | Platform management. Audit logging, user profiles. |
+
+### Event-Driven Communication
+
+Provisioner publishes status events to SNS. All domains subscribe via SQS and process events through domain-specific handlers.
+
+```mermaid
+sequenceDiagram
+    participant P as Provisioner
+    participant SNS as SNS
+    participant SQS as SQS
+    participant ENG as Engine Handlers
+    participant CMS as CMS Handlers
+    participant MC as MC Handlers
+    participant R as Redis Channels
+    participant B as Browser
+
+    P->>SNS: publish event
+    SNS->>SQS: fanout
+    SQS->>ENG: process
+    SQS->>CMS: process
+    SQS->>MC: process
+    ENG->>ENG: update Engine models
+    CMS->>CMS: update CMS models
+    MC->>R: broadcast
+    R->>B: WebSocket push
+```
+
+- **Engine handlers**: Update `Range` status, timestamps
+- **CMS handlers**: Update `RangeInstance`, `Instance`, `App` status
+- **MC handlers**: Broadcast to WebSocket for real-time UI updates
 
 ## Design Decisions
 

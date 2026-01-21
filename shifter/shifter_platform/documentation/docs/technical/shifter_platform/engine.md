@@ -15,20 +15,41 @@ Infrastructure lifecycle. Range provisioning, NGFW operations, terminal connecti
 
 | Model | Purpose |
 |-------|---------|
-| `Range` | User's cyber range instance with provisioned infrastructure |
-| `UserNGFW` | User's VM-Series NGFW instance |
+| `Request` | Provisioning request container (correlation via UUID) |
+| `Range` | User's cyber range with lifecycle status and timestamps |
+| `Instance` | Materialized VM instance with Pulumi/Terraform state |
+| `App` | Materialized app (NGFW, etc.) with infrastructure state |
+| `Subnet` | Allocated subnet with CIDR and routing configuration |
 
 ## Service Interface
 
+### Range Operations
+
 | Function | Purpose |
 |----------|---------|
-| `create_range(range_config)` | Provision infrastructure for range |
-| `destroy_range(range_id)` | Tear down range infrastructure |
-| `cancel_range(range_id)` | Cancel in-progress provisioning |
-| `get_range_status(range_id)` | Get current state, progress, instances |
+| `create_range(request_spec)` | Start provisioning from RequestSpec |
+| `destroy_range_by_request(request_id)` | Destroy range by request UUID |
+| `cancel_range_by_request(request_id)` | Cancel in-progress provisioning |
+| `get_range_status(range_id)` | Get status, instances, progress |
 | `pause_range(range_id)` | Pause range instances |
 | `resume_range(range_id)` | Resume range instances |
-| `connect_terminal(user, range_id, instance_type)` | Get SSH connection to instance |
+
+### Terminal Operations
+
+| Function | Purpose |
+|----------|---------|
+| `connect_terminal(user, instance_uuid)` | Get SSH connection to instance |
+| `get_rdp_connection_info(user, instance_uuid)` | Get Guacamole RDP connection |
+
+### NGFW Operations
+
+| Function | Purpose |
+|----------|---------|
+| `create_ngfw(request_spec)` | Start NGFW provisioning |
+| `destroy_ngfw(request_id)` | Destroy NGFW |
+| `start_ngfw(request_id)` | Start stopped NGFW |
+| `stop_ngfw(request_id)` | Stop running NGFW |
+| `complete_ngfw_setup(request_id)` | Mark NGFW setup as complete |
 
 ### Internal Services
 
@@ -45,22 +66,17 @@ Not exposed to MC. Used within Engine.
 
 *Currently in `mission_control/services/`, to be moved.
 
-## Status Publishing
+## Event Handling
 
-Engine publishes status updates via Redis Channels.
+Engine receives events from the Provisioner via SNS/SQS. The `engine/handlers.py` module processes these events:
 
 ```python
-channel_layer.group_send(
-    f"ngfw_{ngfw_id}",
-    {
-        "type": "ngfw.status.update",
-        "status": "active",
-        "progress": 100,
-        "message": "Provisioning complete",
-    }
-)
+def process_range_event(message):
+    """Update Range model from provisioner events."""
+    # range.status.updated -> update Range.status, timestamps
+    # range.provisioned -> audit log (state written directly by provisioner)
 ```
 
-Channel groups:
-- `range_{range_id}` - range lifecycle updates
-- `ngfw_{ngfw_id}` - NGFW lifecycle updates
+Engine handlers update Engine models only. Mission Control handlers (not Engine) broadcast to WebSocket clients.
+
+See [Shifter Platform](.) for the full event flow diagram.

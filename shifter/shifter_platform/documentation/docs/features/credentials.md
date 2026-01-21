@@ -38,6 +38,7 @@ For software NGFW deployment.
 ## Expiration
 
 Credentials track expiration dates:
+
 - **Valid**: Credential is current
 - **Expires Soon**: Within 30 days of expiration
 - **Expired**: No longer valid, needs renewal
@@ -45,6 +46,7 @@ Credentials track expiration dates:
 ## Manage Credentials
 
 From the Credentials page:
+
 - View all credentials with type badges
 - Filter by type (All, SCM, Deployment Profiles)
 - See expiration status

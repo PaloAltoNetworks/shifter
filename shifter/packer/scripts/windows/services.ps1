@@ -102,8 +102,23 @@ if ($sshCapability.State -eq "Installed") {
     Write-Host "OpenSSH Server already installed"
 } else {
     Write-Host "Installing OpenSSH Server capability..."
-    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction SilentlyContinue
-    Write-Host "OpenSSH Server capability installed"
+    try {
+        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction Stop
+        Write-Host "OpenSSH Server capability installed via PowerShell"
+    } catch {
+        Write-Host "WARNING: Add-WindowsCapability failed: $($_.Exception.Message)"
+        Write-Host "Attempting DISM fallback..."
+        $dismResult = dism /Online /Add-Capability /CapabilityName:OpenSSH.Server~~~~0.0.1.0 /NoRestart 2>&1
+        Write-Host $dismResult
+    }
+
+    # Verify installation succeeded
+    $sshCapability = Get-WindowsCapability -Online | Where-Object { $_.Name -like "OpenSSH.Server*" }
+    if ($sshCapability.State -ne "Installed") {
+        Write-Error "FATAL: OpenSSH Server installation failed - SSH is required"
+        exit 1
+    }
+    Write-Host "OpenSSH Server installation verified"
 }
 
 # Configure sshd service (only if it exists)

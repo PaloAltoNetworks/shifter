@@ -74,8 +74,11 @@ build {
   }
 
   // Install services (XAMPP, IIS, FTP, OpenSSH)
+  // Note: elevated_user required for Add-WindowsCapability to work via WinRM
   provisioner "powershell" {
-    script = "scripts/windows/services.ps1"
+    elevated_user     = "Administrator"
+    elevated_password = build.Password
+    script            = "scripts/windows/services.ps1"
   }
 
   // Install development tools (Python, Node.js, Git)

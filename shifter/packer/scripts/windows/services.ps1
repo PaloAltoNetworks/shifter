@@ -96,14 +96,32 @@ if ($Role -eq "victim") {
 # ------------------------------------------------------------------------------
 Write-Host "=== Installing OpenSSH Server ==="
 
-# Install OpenSSH Server capability
-Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+# Check if OpenSSH Server is already installed
+$sshCapability = Get-WindowsCapability -Online | Where-Object { $_.Name -like "OpenSSH.Server*" }
+if ($sshCapability.State -eq "Installed") {
+    Write-Host "OpenSSH Server already installed"
+} else {
+    Write-Host "Installing OpenSSH Server capability..."
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction Stop
+    Write-Host "OpenSSH Server capability installed"
+}
 
-# Configure sshd service
-Set-Service -Name sshd -StartupType Automatic
+# Configure sshd service (only if it exists)
+$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+if ($sshdService) {
+    Set-Service -Name sshd -StartupType Automatic
+    Write-Host "sshd service configured"
+} else {
+    Write-Host "WARNING: sshd service not found"
+}
 
-# Set default shell to PowerShell
-New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force
+# Set default shell to PowerShell (create key if needed)
+$openSSHKeyPath = "HKLM:\SOFTWARE\OpenSSH"
+if (-not (Test-Path $openSSHKeyPath)) {
+    New-Item -Path $openSSHKeyPath -Force | Out-Null
+}
+New-ItemProperty -Path $openSSHKeyPath -Name DefaultShell -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force | Out-Null
+Write-Host "Default shell set to PowerShell"
 
 # Enable password authentication for SSH/SFTP
 $sshdConfigPath = "C:\ProgramData\ssh\sshd_config"
@@ -117,6 +135,8 @@ if (Test-Path $sshdConfigPath) {
     }
     Set-Content -Path $sshdConfigPath -Value $sshdConfig
     Write-Host "Enabled password authentication in sshd_config"
+} else {
+    Write-Host "sshd_config not found (SSH may not be fully installed)"
 }
 
 # Ensure ssh-agent is available

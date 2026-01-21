@@ -244,7 +244,7 @@ class InstanceComponent(pulumi.ComponentResource):
             # This ensures XDR/XSIAM creates separate cases per range
             self.domain_name = f"range{range_id}.lab"
             self.netbios_name = f"RANGE{range_id}"[:15]  # NetBIOS max 15 chars
-            self.hostname = f"DC-{range_id}"
+            self.hostname = f"shifter-dc-{range_id}"
             self.dsrm_password = self.domain_admin_password  # Reuse for DSRM
             self.public_key = public_key
             # Store agent URL for XDR installation (if provided)

@@ -60,12 +60,38 @@ Write-Host "=== Administrator Password ==="
 Write-Host "Skipping password change (will be set in sysprep.ps1)"
 
 # ------------------------------------------------------------------------------
-# Windows Firewall - Left at default (AWS Security Groups handle network access)
+# Windows Firewall
 # ------------------------------------------------------------------------------
-# NOTE: Don't modify firewall during Packer build - it can disrupt WinRM connection.
-# AWS Security Groups provide network-level access control.
-Write-Host "=== Windows Firewall ==="
-Write-Host "Skipping firewall configuration (AWS Security Groups handle network access)"
+Write-Host "=== Configuring Windows Firewall ==="
+
+# Enable firewall on all profiles
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
+
+# Common rules for both victim and DC
+New-NetFirewallRule -DisplayName "SSH Inbound" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "WinRM HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "WinRM HTTPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 5986 -Action Allow -ErrorAction SilentlyContinue
+
+if ($Role -eq "victim") {
+    # Victim-specific rules for web services
+    New-NetFirewallRule -DisplayName "HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "HTTPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "MySQL Inbound" -Direction Inbound -Protocol TCP -LocalPort 3306 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "FTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 21 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "FTP Passive Inbound" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Action Allow -ErrorAction SilentlyContinue
+    Write-Host "Victim firewall rules configured"
+} else {
+    # DC-specific rules for AD services
+    New-NetFirewallRule -DisplayName "DNS TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 53 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "DNS UDP Inbound" -Direction Inbound -Protocol UDP -LocalPort 53 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "Kerberos TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 88 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "Kerberos UDP Inbound" -Direction Inbound -Protocol UDP -LocalPort 88 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "LDAP Inbound" -Direction Inbound -Protocol TCP -LocalPort 389 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "LDAPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 636 -Action Allow -ErrorAction SilentlyContinue
+    Write-Host "DC firewall rules configured"
+}
+
+Write-Host "Firewall rules configured"
 
 # ------------------------------------------------------------------------------
 # WinRM (Windows Remote Management)

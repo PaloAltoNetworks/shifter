@@ -4,12 +4,12 @@ Getting started as a Shifter developer.
 
 ## Quick Start
 
-1. [Local Setup](local-setup.md) - Clone, dependencies, run locally
-2. [Setup](setup.md) - Deploy to AWS from scratch
-3. [CI/CD](ci-cd.md) - How deployments work
-4. [Secrets](secrets.md) - What secrets exist, where they live
-5. [Terraform](terraform.md) - Infrastructure patterns
-6. [Principles](principles.md) - Engineering philosophy
+1. [Local Setup](local-setup) - Clone, dependencies, run locally
+2. [Setup](setup) - Deploy to AWS from scratch
+3. [CI/CD](ci-cd) - How deployments work
+4. [Secrets](secrets) - What secrets exist, where they live
+5. [Terraform](terraform) - Infrastructure patterns
+6. [Principles](principles) - Engineering philosophy
 
 ## Prerequisites
 
@@ -75,4 +75,4 @@ All changes go through pull requests. Never commit directly to dev or main.
 
 ## Next Steps
 
-Start with [Local Setup](local-setup.md) to get the portal running on your machine.
+Start with [Local Setup](local-setup) to get the portal running on your machine.

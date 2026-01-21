@@ -60,7 +60,7 @@ ElastiCache Redis:
 
 ## Related Docs
 
-- [Manual Deployment](manual-deployment.md) - Infrastructure elements deployed without CI/CD
-- [CI/CD](cicd.md) - Deployment pipelines
-- [Networking](networking.md) - VPC architecture and peering
-- [Guacamole](guacamole.md) - Browser-based RDP integration
+- [Manual Deployment](manual-deployment) - Infrastructure elements deployed without CI/CD
+- [CI/CD](cicd) - Deployment pipelines
+- [Networking](networking) - VPC architecture and peering
+- [Guacamole](guacamole) - Browser-based RDP integration

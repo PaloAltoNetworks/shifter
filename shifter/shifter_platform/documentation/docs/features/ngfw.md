@@ -9,7 +9,8 @@ A software firewall that routes range traffic and logs it to your XDR/XSIAM. Use
 ## Prerequisites
 
 Before setting up NGFW:
-1. Add SCM credentials (see [Credentials](credentials.md))
+
+1. Add SCM credentials (see [Credentials](credentials))
 2. Add a deployment profile credential
 3. Have access to Strata Cloud Manager
 
@@ -45,6 +46,7 @@ Once the NGFW is ready:
 ## Managing NGFWs
 
 From the NGFW page:
+
 - View provisioned NGFWs with status
 - See serial numbers and creation dates
 - Refresh status

@@ -27,6 +27,7 @@ Launch your first range in 5 minutes.
 ### 3. Wait for Provisioning
 
 Takes 2-5 minutes. You'll see status updates:
+
 - **Pending** - Queued for provisioning
 - **Provisioning** - Infrastructure spinning up
 - **Ready** - Range is live
@@ -34,6 +35,7 @@ Takes 2-5 minutes. You'll see status updates:
 ### 4. Access Your Range
 
 Once ready:
+
 1. Go to **Terminal** in the sidebar
 2. Click on an instance tab to open SSH
 3. For Windows/Kali GUI: click the **RDP** button
@@ -41,6 +43,7 @@ Once ready:
 ## What You Get
 
 Basic Range includes:
+
 - **Attacker** - Kali Linux with standard attack tools
 - **Workstation** - Your selected OS with your agent installed
 
@@ -48,6 +51,6 @@ Your agent reports to your XDR/XSIAM console. Run attacks from Kali, see alerts 
 
 ## Next Steps
 
-- [Basic Range Details](../scenarios/basic-range.md) - Full scenario documentation
-- [Terminal Guide](../features/terminal.md) - SSH and RDP access
-- [Other Scenarios](../scenarios/index.md) - AD labs, NGFW integration
+- [Basic Range Details](../scenarios/basic-range) - Full scenario documentation
+- [Terminal Guide](../features/terminal) - SSH and RDP access
+- [Other Scenarios](../scenarios/) - AD labs, NGFW integration

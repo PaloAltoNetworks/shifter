@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Draft Cortex BYOT scenario template
 - venv enforcer hook for Claude Code
 - Guacamole RDP for Range instances
+- User (not just technical) docs in Shifter
 
 ### Changed
 - NGFW models and services refactored to use schemas
@@ -78,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AaC gate (service layer boundary violations at code or model level) fails will now block PRs
 - AWS assets tagged to requests for cost tracking and cleanup
 - Patched vulnerable urllib3, now on 2.6.3
+- Update technical docs
 
 ### Fixed
 - Dashboard range status updates and styling
@@ -86,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tmux now used for Terminal UI sessions
 - RDP copy/paste not working
 - Packer does not clean up EC2 instance after build
+- tmux Terminal UI sessions not allowing mouse scrolling
 
 ## [0.10.6] - 2025-01-09
 

@@ -25,8 +25,10 @@ source .venv/bin/activate
 ### 2. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
+
+Dependencies defined in `pyproject.toml`. The `-e` flag installs in editable mode.
 
 ### 3. Run Development Server
 
@@ -69,7 +71,7 @@ ruff format .
 
 ### Missing Dependencies
 - Ensure virtual environment is activated: `which python` should show `.venv/bin/python`
-- Reinstall: `pip install -r requirements.txt`
+- Reinstall: `pip install -e ".[dev]"`
 
 ### Port Already in Use
 - Check what's using port 8000: `lsof -i :8000`

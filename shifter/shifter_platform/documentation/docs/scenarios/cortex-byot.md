@@ -45,6 +45,7 @@ graph TB
 ## Network
 
 Four segmented subnets with NGFW routing:
+
 - **Attacker network**: Kali (isolated, routes through NGFW)
 - **Workstation network**: Windows workstations
 - **Server network**: Ubuntu server
@@ -59,7 +60,8 @@ Four segmented subnets with NGFW routing:
 ## Prerequisites
 
 Before launching this scenario:
-1. Set up an NGFW (see [NGFW Guide](../features/ngfw.md))
+
+1. Set up an NGFW (see [NGFW Guide](../features/ngfw))
 2. Complete SCM device association
 3. Configure log forwarding to XDR/XSIAM
 4. Have a Windows agent uploaded

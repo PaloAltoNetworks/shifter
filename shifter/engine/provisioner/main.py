@@ -37,6 +37,73 @@ from orchestrators.setup_orchestrator import SetupOrchestrator
 
 logger = logging.getLogger(__name__)
 
+# SSM parameter paths for AMI IDs (fetched at runtime for latest values)
+_AMI_SSM_PARAMS = {
+    "kali": "/shifter/ami/kali",
+    "victim": "/shifter/ami/ubuntu",
+    "windows": "/shifter/ami/windows",
+    "dc": "/shifter/ami/dc",
+}
+
+# Cache for SSM AMI lookups (cleared per invocation, avoids repeated API calls)
+_ami_cache: dict[str, str] = {}
+
+
+def get_ami_id(ami_type: str) -> str:
+    """Get AMI ID from SSM Parameter Store at runtime.
+
+    This ensures the provisioner always uses the latest AMI IDs without
+    requiring a Terraform apply or ECS task definition update.
+
+    Args:
+        ami_type: One of 'kali', 'victim', 'windows', 'dc'
+
+    Returns:
+        AMI ID string, or empty string if not found
+
+    Falls back to environment variable if SSM lookup fails (for local dev).
+    """
+    if ami_type in _ami_cache:
+        return _ami_cache[ami_type]
+
+    param_path = _AMI_SSM_PARAMS.get(ami_type)
+    if not param_path:
+        logger.warning("Unknown AMI type: %s", ami_type)
+        return ""
+
+    # Map ami_type to env var name for fallback
+    env_var_map = {
+        "kali": "KALI_AMI_ID",
+        "victim": "VICTIM_AMI_ID",
+        "windows": "WINDOWS_AMI_ID",
+        "dc": "DC_AMI_ID",
+    }
+
+    try:
+        ssm = boto3.client("ssm")
+        response = ssm.get_parameter(Name=param_path)
+        ami_id = response["Parameter"]["Value"]
+        logger.info("Fetched %s AMI from SSM %s: %s", ami_type, param_path, ami_id)
+        _ami_cache[ami_type] = ami_id
+        return ami_id
+    except Exception as e:
+        # Fall back to environment variable (for local dev or if SSM fails)
+        env_var = env_var_map.get(ami_type, "")
+        fallback = os.environ.get(env_var, "")
+        if fallback:
+            logger.warning(
+                "SSM lookup failed for %s (%s), using env var %s: %s",
+                ami_type,
+                e,
+                env_var,
+                fallback,
+            )
+            _ami_cache[ami_type] = fallback
+            return fallback
+        logger.error("Failed to get %s AMI ID from SSM or env: %s", ami_type, e)
+        return ""
+
+
 # Default timeout for waiting for NGFW SSH to become available (seconds)
 # PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
 NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 3600  # 60 minutes
@@ -1300,10 +1367,11 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "rangeRouteTableId": os.environ.get("RANGE_ROUTE_TABLE_ID", ""),
         "availabilityZone": os.environ.get("RANGE_AVAILABILITY_ZONE", ""),
         "rangeInstanceProfileName": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
-        "kaliAmiId": os.environ.get("KALI_AMI_ID", ""),
-        "victimAmiId": os.environ.get("VICTIM_AMI_ID", ""),
-        "windowsAmiId": os.environ.get("WINDOWS_AMI_ID", ""),
-        "dcAmiId": os.environ.get("DC_AMI_ID", ""),
+        # AMI IDs fetched from SSM at runtime for latest values
+        "kaliAmiId": get_ami_id("kali"),
+        "victimAmiId": get_ami_id("victim"),
+        "windowsAmiId": get_ami_id("windows"),
+        "dcAmiId": get_ami_id("dc"),
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
         "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
         "firewallEndpointId": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
@@ -2107,6 +2175,10 @@ def _run_ngfw_provision(
         "serial_number": serial_number,
     }
 
+    # Save state to DB FIRST so run_ngfw_operation can find ec2_instance_id
+    # Keep status as provisioning for now - will update to awaiting_association after stop
+    update_instance_state(request_id, STATUS_PROVISIONING, **state)
+
     # Auto-stop NGFW to save costs while user completes association
     # Stop BEFORE emitting awaiting_association status so NGFW is fully stopped
     # when user sees the Complete Setup button (prevents race condition)
@@ -2117,9 +2189,9 @@ def _run_ngfw_provision(
     except Exception:
         logger.exception("Auto-stop FAILED: request_id=%s - NGFW remains running (cost impact)", request_id)
 
-    # Update local DB with provisioned resources - awaiting user association
+    # Update status to awaiting_association - user must complete setup
     # User must: 1) Associate device in SCM, 2) Connect to XDR/XSIAM
-    update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION, **state)
+    update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION)
 
     # Emit awaiting_association event for UI to show user action prompt
     # Serial number included so users can copy it for SCM device association

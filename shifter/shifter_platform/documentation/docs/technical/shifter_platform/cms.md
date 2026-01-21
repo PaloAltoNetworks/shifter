@@ -39,29 +39,35 @@ Declarative YAML definitions in `cms/scenarios/templates/`.
 id: string                    # Unique identifier
 name: string                  # Display name
 description: string           # User-facing description
-
-requirements:
-  agent:
-    required: boolean         # Must provide agent
-    os: string | null         # OS constraint (null = any)
+enabled: boolean              # Available to users
+ngfw: boolean                 # Requires NGFW
 
 instances:
-  - role: string              # attacker, victim, dc
+  - name: string              # Instance display name
+    role: string              # attacker, victim, dc
     os_type: string           # kali, windows, ubuntu, from_agent
-    agent_slot: string | null # primary, secondary, null
-    domain_controller: bool   # DC-specific
-    join_domain: bool         # Domain-join victim
-    dc_config:                # DC configuration
+    xdr_agent: boolean        # Deploy XDR agent
+    join_domain: boolean      # Join AD domain (optional)
+    domain_controller: boolean # Is DC (optional)
+    ai_agent: boolean         # AI-assisted (optional)
+    dc_config:                # DC configuration (optional)
       domain_name: string
       netbios_name: string
+
+subnets:
+  - name: string              # Subnet name
+    instances: [string]       # Instance names in subnet
+    connected_to: [string]    # Connected subnets (for NGFW routing)
 ```
 
 ### Available Scenarios
 
-| ID | Name | Instances | Agent Requirement |
-|----|------|-----------|-------------------|
-| `basic` | Basic Range | attacker, victim | Any OS |
-| `ad_attack_lab` | AD Attack Lab | attacker, dc, victim | Windows |
+| ID | Name | Instances | NGFW |
+|----|------|-----------|------|
+| `basic` | Basic Range | attacker, victim | No |
+| `basic_ngfw` | Basic Range with NGFW | attacker, victim | Yes |
+| `ad_attack_lab` | AD Attack Lab | attacker, dc, victim | No |
+| `cortex_byot` | Cortex BYOT | attacker, dc, 2x victim, server | Yes |
 
 ## Hydrated Range Config
 
@@ -87,10 +93,36 @@ range_config = {
 
 ## Models
 
+### Catalog Models (System-Defined Types)
+
 | Model | Purpose |
 |-------|---------|
-| `Credential` | Unified credential (SCM, deployment profile) |
-| `RangeScenario` | Tracks range_id to scenario_id associations |
+| `OperatingSystem` | Available OS types (Windows, Ubuntu, Kali) |
+| `CredentialType` | Types of credentials (SCM, Deployment Profile) |
+| `InstanceType` | VM instance type definitions |
+| `AppType` | Application type definitions (NGFW) |
+
+### Asset Models (User-Owned)
+
+| Model | Purpose |
+|-------|---------|
+| `AgentConfig` | XDR/XSIAM agent installer uploaded by user |
+| `Credential` | User credentials with type-specific data |
+
+### Entity Models (Materialized in Ranges)
+
+| Model | Purpose |
+|-------|---------|
+| `Instance` | VM instance definition in a range |
+| `App` | Application (NGFW) definition in a range |
+| `Subnet` | Network subnet definition in a range |
+
+### Request Tracking
+
+| Model | Purpose |
+|-------|---------|
+| `Request` | Provisioning request container (correlation UUID) |
+| `RangeInstance` | Tracks hydrated scenario config sent to Engine |
 
 ## Internal Modules
 

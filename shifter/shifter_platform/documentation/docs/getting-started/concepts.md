@@ -26,6 +26,7 @@ Browser-based access to your range instances. SSH for command line, RDP for grap
 ## Credentials
 
 Authentication info for integrations:
+
 - **SCM Credentials** - For Strata Cloud Manager device association
 - **Deployment Profiles** - For software NGFW deployment
 

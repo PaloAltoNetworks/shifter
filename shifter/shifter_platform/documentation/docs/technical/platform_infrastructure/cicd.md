@@ -6,14 +6,14 @@ GitHub Actions with self-hosted runners.
 
 ```
 .github/workflows/
-├── deploy.yml           # Orchestrator (change detection, dependency chain)
-├── _quality.yml         # Linting, security scanning
-├── _core.yml            # Core infrastructure (ECR, budgets)
-├── _range.yml           # Range VPC infrastructure
-├── _shifter-engine.yml  # Engine container build and push
-├── _portal.yml          # Portal infrastructure and app deployment
-├── packer.yml           # AMI builds
-└── packer-promote.yml   # AMI promotion to prod
+├── deploy.yml              # Orchestrator (change detection, dependency chain)
+├── _quality.yml            # Linting, security scanning
+├── _core.yml               # Core infrastructure (ECR, budgets)
+├── _range.yml              # Range VPC infrastructure
+├── _shifter-engine.yml     # Engine container build and push
+├── _shifter-platform.yml   # Portal infrastructure and app deployment
+├── packer.yml              # AMI builds
+└── packer-promote.yml      # AMI promotion to prod
 ```
 
 ## Deployment Chain
@@ -23,8 +23,8 @@ graph LR
     Quality --> Core
     Core --> Range
     Core --> ShifterEngine["Shifter Engine"]
-    Range --> Portal
-    ShifterEngine --> Portal
+    Range --> ShifterPlatform["Shifter Platform"]
+    ShifterEngine --> ShifterPlatform
 ```
 
 Jobs run only when relevant files change. `deploy.yml` detects changes and triggers appropriate workflows.
@@ -36,7 +36,7 @@ Jobs run only when relevant files change. `deploy.yml` detects changes and trigg
 | **core** | `platform/terraform/modules/ecr/**`, `platform/terraform/environments/*/*.tf` |
 | **range** | `platform/terraform/modules/range/**`, `platform/terraform/environments/*/range/**` |
 | **shifter_engine** | `shifter/engine/provisioner/**`, `platform/terraform/modules/pulumi-provisioner/**` |
-| **portal** | `platform/terraform/modules/portal/**`, `shifter/**` |
+| **shifter_platform** | `platform/terraform/modules/portal/**`, `shifter/**` |
 
 ## Environment Targeting
 

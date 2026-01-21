@@ -37,9 +37,13 @@ graph TB
 
 | Domain | Models |
 |--------|--------|
-| **CMS** | `Asset`, `FileAsset`, `Credential`, `AgentConfig`, `SCMCredential`, `NGFWDeploymentProfile`, `OperatingSystem` |
-| **Engine** | `Range`, `UserNGFW` |
+| **CMS** | `Credential`, `CredentialType`, `AgentConfig`, `OperatingSystem`, `Instance`, `App`, `Subnet`, `InstanceType`, `AppType`, `Request`, `RangeInstance` |
+| **Engine** | `Request`, `Range`, `Instance`, `App`, `Subnet` |
 | **Management** | `UserProfile`, `ActivityLog` |
+
+Both CMS and Engine have Instance/App/Subnet models serving different purposes:
+- **CMS**: Asset definitions (types, catalog entries) and user content tracking
+- **Engine**: Infrastructure instantiations with Pulumi/Terraform state
 
 ## Service Layer
 
@@ -64,23 +68,38 @@ Services own business logic. Views handle HTTP concerns only.
 
 ## Status Updates
 
-Engine publishes status changes to Redis Channels. Mission Control subscribes via WebSocket consumers and pushes to browser.
+Provisioner publishes status events to SNS. Events fan out to SQS where domain handlers process them:
 
 ```mermaid
 sequenceDiagram
     participant P as Provisioner
-    participant R as Redis
-    participant MC as MC Consumer
+    participant SNS as SNS
+    participant SQS as SQS
+    participant ENG as engine.handlers
+    participant CMS as cms.handlers
+    participant MC as mc.handlers
+    participant R as Redis Channels
     participant B as Browser
 
-    P->>R: publish range.{id}.status
-    R->>MC: range_status_update
-    MC->>B: WebSocket message
+    P->>SNS: publish event
+    SNS->>SQS: fanout
+    SQS->>ENG: process_event()
+    SQS->>CMS: process_event()
+    SQS->>MC: process_event()
+    ENG->>ENG: update Range model
+    CMS->>CMS: update RangeInstance/App/Instance
+    MC->>R: group_send()
+    R->>B: WebSocket message
 ```
 
-Channel naming:
-- `range.{range_id}.status` - range lifecycle updates
-- `ngfw.{ngfw_id}.status` - NGFW lifecycle updates
+Each domain's handler (in `{app}/handlers.py`) processes the same event differently:
+- **Engine**: Updates `Range` status, timestamps (`ready_at`, `destroyed_at`)
+- **CMS**: Updates `RangeInstance`, `Instance`, `App` status
+- **Mission Control**: Broadcasts to WebSocket groups for real-time UI
+
+Channel groups:
+- `range_events_{request_id}` - range lifecycle updates
+- `ngfw_events_{app_id}` - NGFW lifecycle updates
 
 ## Domain Relationships
 

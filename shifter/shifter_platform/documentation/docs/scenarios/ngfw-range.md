@@ -29,6 +29,7 @@ graph LR
 ## Network
 
 Two subnets with NGFW routing between them:
+
 - **Attack subnet**: Kali attacker
 - **Target subnet**: Victim workstation
 
@@ -37,7 +38,8 @@ All traffic between subnets passes through your NGFW.
 ## Prerequisites
 
 Before launching this scenario:
-1. Set up an NGFW (see [NGFW Guide](../features/ngfw.md))
+
+1. Set up an NGFW (see [NGFW Guide](../features/ngfw))
 2. Complete SCM device association
 3. Configure log forwarding to XDR/XSIAM
 
@@ -66,6 +68,7 @@ Before launching this scenario:
 ## What You See in XDR/XSIAM
 
 With NGFW integration, you get:
+
 - Endpoint alerts from your agent
 - Network alerts from firewall logs
 - Correlated view of attack activity

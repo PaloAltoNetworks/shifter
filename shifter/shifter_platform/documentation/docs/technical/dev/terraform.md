@@ -23,16 +23,22 @@ platform/terraform/
 │   └── prod/                 # Same structure as dev
 ├── modules/                  # Reusable modules
 │   ├── portal/
-│   │   ├── vpc/
-│   │   ├── rds/
-│   │   ├── ec2/
-│   │   ├── alb/
-│   │   └── cognito/
+│   │   ├── alb/              # Application Load Balancer, WAF
+│   │   ├── cognito/          # User pool, OIDC
+│   │   ├── ec2/              # Portal instances
+│   │   ├── messaging/        # SNS/SQS for events
+│   │   ├── rds/              # PostgreSQL database
+│   │   ├── redis/            # ElastiCache Redis
+│   │   ├── s3/               # User storage bucket
+│   │   ├── ssm/              # SSM parameters
+│   │   └── vpc/              # Portal VPC, subnets
 │   ├── range/
-│   │   └── vpc/
+│   │   └── vpc/              # Range VPC, Network Firewall
 │   ├── pulumi-provisioner/   # ECS task for Shifter Engine
 │   ├── pulumi-state/         # S3 + DynamoDB for Pulumi
-│   └── ecr/
+│   ├── guacamole/            # Browser-based RDP
+│   ├── log-aggregation/      # Centralized logging
+│   └── ecr/                  # Container registries
 └── global/                   # Cross-environment resources
     ├── iam/                  # GitHub OIDC, roles
     ├── github-runner/        # Self-hosted runner

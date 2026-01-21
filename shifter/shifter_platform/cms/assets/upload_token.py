@@ -23,6 +23,7 @@ def generate_upload_token(
     filename: str,
     os_slug: str,
     file_size: int,
+    agent_type: str = "xdr",
 ) -> str:
     """
     Generate a signed token for upload completion verification.
@@ -36,6 +37,7 @@ def generate_upload_token(
         filename: Original filename
         os_slug: Operating system slug (windows/linux/macos)
         file_size: Expected file size in bytes
+        agent_type: Type of agent (xdr, xdr_collector, cloud_identity_engine)
 
     Returns:
         Base64-encoded signed token string
@@ -47,6 +49,7 @@ def generate_upload_token(
         "filename": filename,
         "os_slug": os_slug,
         "file_size": file_size,
+        "agent_type": agent_type,
         "expires_at": int(time.time()) + settings.AGENT_UPLOAD_URL_EXPIRES,
     }
 

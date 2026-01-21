@@ -75,7 +75,7 @@ user_storage_bucket = "shifter-dev-user-storage-e3462f0c"
 # See shifter/packer/ for AMI build configuration
 
 victim_instance_type = "t3.large"
-kali_instance_type   = "t3.medium"
+kali_instance_type   = "t3.large"
 
 # ------------------------------------------------------------------------------
 # Autoscaling

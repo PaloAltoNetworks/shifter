@@ -79,6 +79,10 @@ if ! grep -q '^PasswordAuthentication' /etc/ssh/sshd_config; then
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
 fi
 
+# Set home directory permissions for SFTP access
+# Guacamole's SFTP (libssh2) needs read+execute on the directory
+chmod 755 /home/kali
+
 # Fix polkit for xrdp sessions (allows shutdown/restart from desktop)
 mkdir -p /etc/polkit-1/localauthority/50-local.d
 cat > /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla << 'EOF'

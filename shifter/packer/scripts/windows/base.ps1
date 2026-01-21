@@ -63,13 +63,12 @@ $admin.SetInfo()
 Write-Host "Administrator password set"
 
 # ------------------------------------------------------------------------------
-# Windows Firewall - Disabled (AWS Security Groups handle network access)
+# Windows Firewall - Left at default (AWS Security Groups handle network access)
 # ------------------------------------------------------------------------------
-Write-Host "=== Disabling Windows Firewall ==="
-
-Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
-
-Write-Host "Windows Firewall disabled on all profiles"
+# NOTE: Don't modify firewall during Packer build - it can disrupt WinRM connection.
+# AWS Security Groups provide network-level access control.
+Write-Host "=== Windows Firewall ==="
+Write-Host "Skipping firewall configuration (AWS Security Groups handle network access)"
 
 # ------------------------------------------------------------------------------
 # WinRM (Windows Remote Management)

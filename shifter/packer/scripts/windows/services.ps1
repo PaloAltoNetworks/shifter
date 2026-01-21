@@ -102,7 +102,7 @@ if ($sshCapability.State -eq "Installed") {
     Write-Host "OpenSSH Server already installed"
 } else {
     Write-Host "Installing OpenSSH Server capability..."
-    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction Stop
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
     Write-Host "OpenSSH Server capability installed"
 }
 

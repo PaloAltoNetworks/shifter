@@ -84,6 +84,18 @@ wevtutil cl System 2>$null
 Write-Host "Temp files cleaned"
 
 # ------------------------------------------------------------------------------
+# Set Administrator Password
+# Done here at the end to avoid breaking WinRM session during earlier scripts
+# ------------------------------------------------------------------------------
+Write-Host "=== Setting Administrator password ==="
+
+$admin = [ADSI]"WinNT://./Administrator,user"
+$admin.SetPassword("CortexSavesTheDay!")
+$admin.SetInfo()
+
+Write-Host "Administrator password set"
+
+# ------------------------------------------------------------------------------
 # Run EC2Launch sysprep
 # This MUST be the last step - it shuts down the instance
 # ------------------------------------------------------------------------------

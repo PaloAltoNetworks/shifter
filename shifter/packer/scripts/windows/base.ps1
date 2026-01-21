@@ -80,8 +80,7 @@ Write-Host "Skipping WinRM configuration (already configured by user_data)"
 # ------------------------------------------------------------------------------
 Write-Host "=== Enabling Windows features ==="
 
-# .NET Framework (required by many applications)
-Enable-WindowsOptionalFeature -Online -FeatureName NetFx4-AdvSrvs -All -NoRestart -ErrorAction SilentlyContinue
+# Note: .NET Framework 4.8 is pre-installed on Windows Server 2022
 
 if ($Role -eq "dc") {
     # Install AD DS feature (but do NOT promote - that happens at runtime)

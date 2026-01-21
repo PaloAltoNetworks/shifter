@@ -70,12 +70,14 @@ build {
 
   // Base system configuration (RDP, firewall, SSM, AD DS feature)
   provisioner "powershell" {
-    inline = ["scripts/windows/base.ps1 -Role dc"]
+    environment_vars = ["PACKER_ROLE=dc"]
+    script           = "scripts/windows/base.ps1"
   }
 
   // Install services (OpenSSH only for DC)
   provisioner "powershell" {
-    inline = ["scripts/windows/services.ps1 -Role dc"]
+    environment_vars = ["PACKER_ROLE=dc"]
+    script           = "scripts/windows/services.ps1"
   }
 
   // Install development tools (Python, Node.js, Git - needed for Claude Code)

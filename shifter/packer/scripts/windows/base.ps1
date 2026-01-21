@@ -4,10 +4,16 @@
 # Usage:
 #   .\base.ps1           - Victim configuration (default)
 #   .\base.ps1 -Role dc  - Domain Controller configuration
+#   PACKER_ROLE=dc       - Environment variable (used by Packer)
 param(
     [ValidateSet("victim", "dc")]
-    [string]$Role = "victim"
+    [string]$Role = ""
 )
+
+# If no parameter provided, check environment variable (set by Packer)
+if (-not $Role) {
+    $Role = if ($env:PACKER_ROLE) { $env:PACKER_ROLE } else { "victim" }
+}
 
 $ErrorActionPreference = "Stop"
 
@@ -74,7 +80,7 @@ if ($Role -eq "victim") {
     New-NetFirewallRule -DisplayName "HTTPS Inbound" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -ErrorAction SilentlyContinue
     New-NetFirewallRule -DisplayName "MySQL Inbound" -Direction Inbound -Protocol TCP -LocalPort 3306 -Action Allow -ErrorAction SilentlyContinue
     New-NetFirewallRule -DisplayName "FTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 21 -Action Allow -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "FTP Passive Inbound" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "FTP Passive Inbound" -Direction Inbound -Protocol TCP -LocalPort 49152-49200 -Action Allow -ErrorAction SilentlyContinue
 } else {
     # DC-specific rules
     New-NetFirewallRule -DisplayName "DNS TCP Inbound" -Direction Inbound -Protocol TCP -LocalPort 53 -Action Allow -ErrorAction SilentlyContinue

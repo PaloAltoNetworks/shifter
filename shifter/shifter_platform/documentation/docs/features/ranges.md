@@ -33,7 +33,7 @@ stateDiagram-v2
 3. Select an agent
 4. Click **Launch Range**
 
-Provisioning takes 2-5 minutes.
+Provisioning takes about 10 minutes.
 
 ## Monitor Provisioning
 

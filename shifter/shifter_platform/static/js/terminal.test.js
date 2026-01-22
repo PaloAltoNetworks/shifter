@@ -135,18 +135,13 @@ describe('TerminalManager', () => {
     });
 
     describe('isRdpOnly', () => {
-        test('returns true for Windows DC instances', () => {
+        test('returns false for all instances (SSH supported everywhere)', () => {
             const dcInstance = { osType: 'windows', role: 'dc' };
-            expect(manager.isRdpOnly(dcInstance)).toBe(true);
-        });
-
-        test('returns false for Windows non-DC instances', () => {
             const winInstance = { osType: 'windows', role: 'victim' };
-            expect(manager.isRdpOnly(winInstance)).toBe(false);
-        });
-
-        test('returns false for non-Windows instances', () => {
             const kaliInstance = { osType: 'kali', role: 'attacker' };
+
+            expect(manager.isRdpOnly(dcInstance)).toBe(false);
+            expect(manager.isRdpOnly(winInstance)).toBe(false);
             expect(manager.isRdpOnly(kaliInstance)).toBe(false);
         });
     });
@@ -178,13 +173,13 @@ describe('TerminalManager', () => {
         test('creates terminal instances for SSH-capable instances', () => {
             manager.init();
 
-            // Kali and Ubuntu should have terminals, DC should not (RDP-only)
+            // All instances should have terminals (SSH supported everywhere)
             expect(manager.terminals.has('kali-uuid')).toBe(true);
             expect(manager.terminals.has('victim-uuid')).toBe(true);
             expect(manager.terminals.has('dc-uuid')).toBe(true);
 
-            // DC should be marked as RDP-only
-            expect(manager.terminals.get('dc-uuid').isRdpOnly).toBe(true);
+            // No instances are RDP-only
+            expect(manager.terminals.get('dc-uuid').isRdpOnly).toBe(false);
             expect(manager.terminals.get('kali-uuid').isRdpOnly).toBe(false);
         });
 
@@ -253,13 +248,13 @@ describe('TerminalManager', () => {
             expect(global.WebSocket).toHaveBeenCalled();
         });
 
-        test('does not connect WebSocket for RDP-only instances', () => {
+        test('connects WebSocket for DC instances (SSH supported)', () => {
             const callCountBefore = global.WebSocket.mock.calls.length;
             manager.activateTerminal('dc-uuid');
 
-            // Should not have made additional WebSocket call
-            expect(global.WebSocket.mock.calls.length).toBe(callCountBefore);
-            expect(manager.connectedUuids.has('dc-uuid')).toBe(false);
+            // Should have made WebSocket call for DC
+            expect(global.WebSocket.mock.calls.length).toBe(callCountBefore + 1);
+            expect(manager.connectedUuids.has('dc-uuid')).toBe(true);
         });
     });
 
@@ -506,13 +501,13 @@ describe('TerminalManager', () => {
             expect(global.WebSocket.mock.calls.length).toBe(callCount);
         });
 
-        test('does not connect RDP-only instances', () => {
+        test('connects DC instances (SSH supported)', () => {
             const callCount = global.WebSocket.mock.calls.length;
 
             manager.connectIfNeeded('dc-uuid');
 
-            expect(global.WebSocket.mock.calls.length).toBe(callCount);
-            expect(manager.connectedUuids.has('dc-uuid')).toBe(false);
+            expect(global.WebSocket.mock.calls.length).toBe(callCount + 1);
+            expect(manager.connectedUuids.has('dc-uuid')).toBe(true);
         });
 
         test('handles null uuid gracefully', () => {

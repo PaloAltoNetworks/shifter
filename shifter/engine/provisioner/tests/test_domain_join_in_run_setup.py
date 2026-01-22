@@ -43,9 +43,10 @@ class TestDomainJoinPlan:
         assert context["domain_admin_password"] == "TestPassword123!"
         assert context["domain_admin_user"] == "Administrator"
 
-    def test_dns_polling_has_7_max_attempts(self):
-        """DNS polling should have 7 max attempts (~70s total)."""
-        assert "$maxAttempts = 7" in JOIN_DOMAIN_SCRIPT
+    def test_dns_polling_has_generous_retry_config(self):
+        """DNS polling should have generous retries (~10 mins total)."""
+        assert "$maxAttempts = 30" in JOIN_DOMAIN_SCRIPT
+        assert "$retryDelaySeconds = 20" in JOIN_DOMAIN_SCRIPT
 
 
 class TestDomainJoinErrorHandling:

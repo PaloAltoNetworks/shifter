@@ -115,17 +115,26 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
     Version = "2012-10-17"
     Statement = [
       {
-        # Permissions based on Terraform AWS provider ec2_instance.go:
-        # - RunInstances, DescribeInstances, TerminateInstances for lifecycle
-        # - CreateTags for tagging (tags are applied during RunInstances)
-        # - DescribeImages for AMI validation
+        # Full EC2 instance lifecycle management
+        # - RunInstances, TerminateInstances for create/destroy
+        # - StopInstances, StartInstances for power management
+        # - ModifyInstanceAttribute for runtime changes
+        # - CreateTags, DeleteTags for tagging
+        # - Describe* for state queries
+        # - ImportKeyPair/DeleteKeyPair for SSH key management
         Sid    = "EC2InstanceOperations"
         Effect = "Allow"
         Action = [
           "ec2:RunInstances",
           "ec2:TerminateInstances",
+          "ec2:StopInstances",
+          "ec2:StartInstances",
+          "ec2:ModifyInstanceAttribute",
           "ec2:CreateTags",
-          "ec2:Describe*"
+          "ec2:DeleteTags",
+          "ec2:Describe*",
+          "ec2:ImportKeyPair",
+          "ec2:DeleteKeyPair"
         ]
         Resource = "*"
       },
@@ -144,25 +153,35 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Resource = "*"
       },
       {
-        # Permissions based on Terraform AWS provider vpc_subnet.go:
-        # - CreateSubnet, DescribeSubnets, DeleteSubnet for lifecycle
+        # Full subnet lifecycle management
+        # - CreateSubnet, DeleteSubnet for create/destroy
+        # - ModifySubnetAttribute for map_public_ip_on_launch, etc.
+        # - DescribeSubnets for state queries
         # Note: CreateTags is in EC2InstanceOperations and applies to all EC2 resources
         Sid    = "EC2SubnetOperations"
         Effect = "Allow"
         Action = [
           "ec2:CreateSubnet",
-          "ec2:DescribeSubnets",
-          "ec2:DeleteSubnet"
+          "ec2:DeleteSubnet",
+          "ec2:ModifySubnetAttribute",
+          "ec2:DescribeSubnets"
         ]
         Resource = "*"
       },
       {
-        # Permissions based on Terraform AWS provider vpc_route_table_association.go:
-        # - AssociateRouteTable, DisassociateRouteTable for lifecycle
-        # - DescribeRouteTables for reading association state
+        # Route Table lifecycle management
+        # - CreateRouteTable, DeleteRouteTable for create/destroy
+        # - CreateRoute, DeleteRoute, ReplaceRoute for route entries
+        # - AssociateRouteTable, DisassociateRouteTable for subnet associations
+        # - DescribeRouteTables for state queries
         Sid    = "EC2RouteTableOperations"
         Effect = "Allow"
         Action = [
+          "ec2:CreateRouteTable",
+          "ec2:DeleteRouteTable",
+          "ec2:CreateRoute",
+          "ec2:DeleteRoute",
+          "ec2:ReplaceRoute",
           "ec2:AssociateRouteTable",
           "ec2:DisassociateRouteTable",
           "ec2:DescribeRouteTables"
@@ -170,21 +189,73 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Resource = "*"
       },
       {
-        # Read-only permissions for validating references (VPC, AZ, SG)
-        Sid    = "EC2ReadOnlyValidation"
+        # Security Group lifecycle management
+        # - CreateSecurityGroup, DeleteSecurityGroup for create/destroy
+        # - AuthorizeSecurityGroupIngress/Egress for inbound/outbound rules
+        # - RevokeSecurityGroupIngress/Egress for rule removal
+        # Note: DescribeSecurityGroups covered by Describe* in EC2InstanceOperations
+        Sid    = "EC2SecurityGroupOperations"
         Effect = "Allow"
         Action = [
-          "ec2:DescribeVpcs",
-          "ec2:DescribeAvailabilityZones",
-          "ec2:DescribeSecurityGroups"
+          "ec2:CreateSecurityGroup",
+          "ec2:DeleteSecurityGroup",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:AuthorizeSecurityGroupEgress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupEgress"
         ]
         Resource = "*"
       },
       {
-        Sid      = "PassRoleToInstances"
-        Effect   = "Allow"
-        Action   = "iam:PassRole"
-        Resource = var.range_instance_role_arn
+        # Internet Gateway lifecycle management
+        # Required for routing traffic to/from the internet
+        Sid    = "EC2InternetGatewayOperations"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateInternetGateway",
+          "ec2:DeleteInternetGateway",
+          "ec2:AttachInternetGateway",
+          "ec2:DetachInternetGateway",
+          "ec2:DescribeInternetGateways"
+        ]
+        Resource = "*"
+      },
+      {
+        # Elastic IP lifecycle management
+        # Required for static public IPs on instances/NAT gateways
+        Sid    = "EC2ElasticIPOperations"
+        Effect = "Allow"
+        Action = [
+          "ec2:AllocateAddress",
+          "ec2:ReleaseAddress",
+          "ec2:AssociateAddress",
+          "ec2:DisassociateAddress",
+          "ec2:DescribeAddresses"
+        ]
+        Resource = "*"
+      },
+      {
+        # NAT Gateway lifecycle management
+        # Required for private subnet outbound internet access
+        Sid    = "EC2NATGatewayOperations"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateNatGateway",
+          "ec2:DeleteNatGateway",
+          "ec2:DescribeNatGateways"
+        ]
+        Resource = "*"
+      },
+      {
+        # PassRole for range instances and NGFW instances
+        # compact() filters out empty strings when NGFW is not enabled
+        Sid    = "PassRoleToInstances"
+        Effect = "Allow"
+        Action = "iam:PassRole"
+        Resource = compact([
+          var.range_instance_role_arn,
+          var.ngfw_instance_role_arn
+        ])
       }
     ]
   })
@@ -219,7 +290,10 @@ resource "aws_iam_role_policy" "secrets_manager" {
         "secretsmanager:ListSecretVersionIds",
         "secretsmanager:UpdateSecretVersionStage"
       ]
-      Resource = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:shifter/${var.environment}/range/*"
+      Resource = [
+        "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:shifter/${var.environment}/range/*",
+        "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:shifter/${var.environment}/ngfw/*"
+      ]
     }]
   })
 }
@@ -314,30 +388,48 @@ resource "aws_iam_role_policy" "gwlb" {
 }
 
 # ------------------------------------------------------------------------------
-# Task Role Policy - VPC Endpoint Service
+# Task Role Policy - VPC Endpoints
 # ------------------------------------------------------------------------------
-# Provisioner creates VPC Endpoint Services for GWLB connectivity from ranges.
+# Provisioner creates:
+# - VPC Endpoint Services for GWLB connectivity from ranges (gwlb_component.py)
+# - VPC Endpoints (GatewayLoadBalancer type) in range subnets (network.py)
 
-resource "aws_iam_role_policy" "vpc_endpoint_service" {
-  name = "vpc-endpoint-service"
+resource "aws_iam_role_policy" "vpc_endpoints" {
+  name = "vpc-endpoints"
   role = aws_iam_role.ecs_task.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "ec2:CreateVpcEndpointServiceConfiguration",
-        "ec2:DeleteVpcEndpointServiceConfigurations",
-        "ec2:ModifyVpcEndpointServiceConfiguration",
-        "ec2:ModifyVpcEndpointServicePermissions",
-        "ec2:DescribeVpcEndpointServiceConfigurations",
-        "ec2:DescribeVpcEndpointServicePermissions",
-        "ec2:AcceptVpcEndpointConnections",
-        "ec2:RejectVpcEndpointConnections"
-      ]
-      Resource = "*"
-    }]
+    Statement = [
+      {
+        # VPC Endpoint Service operations (for GWLB service exposure)
+        Sid    = "VPCEndpointServiceOperations"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateVpcEndpointServiceConfiguration",
+          "ec2:DeleteVpcEndpointServiceConfigurations",
+          "ec2:ModifyVpcEndpointServiceConfiguration",
+          "ec2:ModifyVpcEndpointServicePermissions",
+          "ec2:DescribeVpcEndpointServiceConfigurations",
+          "ec2:DescribeVpcEndpointServicePermissions",
+          "ec2:AcceptVpcEndpointConnections",
+          "ec2:RejectVpcEndpointConnections"
+        ]
+        Resource = "*"
+      },
+      {
+        # VPC Endpoint operations (for GWLB endpoints in range subnets)
+        Sid    = "VPCEndpointOperations"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateVpcEndpoint",
+          "ec2:DeleteVpcEndpoints",
+          "ec2:ModifyVpcEndpoint",
+          "ec2:DescribeVpcEndpoints"
+        ]
+        Resource = "*"
+      }
+    ]
   })
 }
 
@@ -357,7 +449,8 @@ resource "aws_iam_role_policy" "s3_bootstrap" {
       Effect = "Allow"
       Action = [
         "s3:PutObject",
-        "s3:DeleteObject"
+        "s3:DeleteObject",
+        "s3:GetObjectTagging"
       ]
       Resource = "${var.agent_s3_bucket_arn}/bootstrap/*"
     }]
@@ -397,6 +490,16 @@ resource "aws_iam_role_policy" "ssm_parameters" {
           "ssm:RemoveTagsFromResource"
         ]
         Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/${var.environment}/range/*"
+      },
+      {
+        # Read-only access to AMI parameters (set by Packer builds)
+        Sid    = "SSMReadAMIParameters"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/ami/*"
       },
       {
         # DescribeParameters required by Pulumi/Terraform for metadata lookup

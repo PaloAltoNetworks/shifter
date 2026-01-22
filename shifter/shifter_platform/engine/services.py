@@ -581,7 +581,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     # Check if instance has GUI
     os_type = instance.get("os_type", "")
-    if os_type not in ("kali", "windows"):
+    if os_type not in ("kali", "ubuntu", "windows"):
         raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
 
     # Get IP
@@ -603,6 +603,23 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     elif os_type == "kali":
         rdp_username = "kali"
         rdp_password = "kali"  # nosec B105 - Kali OS default
+    elif os_type == "ubuntu":
+        rdp_username = "ubuntu"
+        rdp_password = "ubuntu"  # nosec B105 - demo environment
+
+    # Get SSH key for SFTP file transfers
+    # Windows requires key-based auth; Kali uses password auth (Guacamole's
+    # libssh2 has issues with Ed25519 OpenSSH key format)
+    from engine.secrets import get_ssh_key
+
+    ssh_key = None
+    if os_type == "windows":
+        ssh_key_arn = instance.get("ssh_key_secret_arn")
+        if ssh_key_arn:
+            try:
+                ssh_key = get_ssh_key(ssh_key_arn)
+            except Exception as e:
+                logger.warning("Failed to get SSH key for SFTP: %s", e)
 
     return {
         "private_ip": private_ip,
@@ -610,25 +627,28 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         "connection_name": connection_name,
         "rdp_username": rdp_username,
         "rdp_password": rdp_password,
+        "ssh_key": ssh_key,
     }
 
 
-def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnection:
+def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
     """Get SSH connection to instance.
+
+    Looks up the Range containing the instance by searching provisioned_instances
+    JSONB for matching UUID. This supports the new request_id-based provisioning
+    pattern where range_id may not be populated in CMS.
 
     Args:
         user: Authenticated user requesting connection
-        range_id: ID of the range containing the instance
         instance_uuid: UUID of the instance to connect to
 
     Returns:
         SSHConnection configured for the instance
 
     Raises:
-        ValueError: If user is None, range_id invalid, instance_uuid invalid,
+        ValueError: If user is None, instance_uuid invalid,
             range not READY, or instance not found
         PermissionError: If user doesn't own the range
-        Range.DoesNotExist: If range not found
     """
     # Lazy imports to avoid circular dependencies
     from engine.models import Range
@@ -638,34 +658,43 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     # Input validation
     if user is None:
         raise ValueError("user is required")
-    if range_id is None or not isinstance(range_id, int) or range_id < 0:
-        raise ValueError("range_id must be a positive integer")
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
-    logger.debug("connect_terminal: range_id=%s instance_uuid=%s", range_id, instance_uuid)
+    logger.debug("connect_terminal: user_id=%s instance_uuid=%s", user.id, instance_uuid)
 
-    # Fetch range
-    try:
-        range_obj = Range.objects.get(id=range_id)
-    except Range.DoesNotExist:
-        logger.error("Range not found: range_id=%s", range_id)
-        raise
+    # Find Range containing this instance by searching provisioned_instances JSONB
+    # PostgreSQL JSONB containment query: find where array contains object with uuid
+    range_obj = Range.objects.filter(
+        provisioned_instances__contains=[{"uuid": instance_uuid}],
+        user=user,
+    ).first()
 
-    # Verify ownership
-    if range_obj.user.id != user.id:
-        logger.error("Permission denied: user=%s does not own range=%s", user.id, range_id)
-        raise PermissionError("User does not own this range")
+    if not range_obj:
+        logger.error(
+            "Range not found for instance: user_id=%s instance_uuid=%s",
+            user.id,
+            instance_uuid,
+        )
+        raise ValueError(f"No range found containing instance {instance_uuid}")
 
     # Verify range is ready
     if range_obj.status != Range.Status.READY:
-        logger.error("Range not ready: range_id=%s status=%s", range_id, range_obj.status)
+        logger.error(
+            "Range not ready: range_id=%s status=%s",
+            range_obj.id,
+            range_obj.status,
+        )
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
     # Find instance by UUID
     instance = range_obj.get_instance_by_uuid(instance_uuid)
     if instance is None:
-        logger.error("Instance not found: range_id=%s instance_uuid=%s", range_id, instance_uuid)
+        logger.error(
+            "Instance not found: range_id=%s instance_uuid=%s",
+            range_obj.id,
+            instance_uuid,
+        )
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     # Get SSH key from secrets
@@ -778,9 +807,12 @@ def destroy_ngfw(request_id: UUID) -> bool:
 
     Returns:
         True if teardown initiated, False if request/instance not found.
+
+    Raises:
+        EngineError: If ranges are still attached to this NGFW.
     """
     from engine.ecs import start_ngfw_teardown
-    from engine.models import Instance, Request
+    from engine.models import Instance, Range, Request
 
     logger.debug("destroy_ngfw: request_id=%s", request_id)
 
@@ -795,6 +827,24 @@ def destroy_ngfw(request_id: UUID) -> bool:
     if not ngfw_instance:
         logger.warning("destroy_ngfw: no NGFW instance found for request_id=%s", request_id)
         return False
+
+    # Check for attached ranges - must be deleted before NGFW can be destroyed
+    attached_ranges = Range.objects.filter(
+        ngfw_instance=ngfw_instance,
+        status__in=[
+            Range.Status.READY,
+            Range.Status.PENDING,
+            Range.Status.PROVISIONING,
+            Range.Status.PAUSED,
+            Range.Status.RESUMING,
+        ],
+    )
+    if attached_ranges.exists():
+        count = attached_ranges.count()
+        range_ids = list(attached_ranges.values_list("id", flat=True)[:5])
+        raise EngineError(
+            f"Cannot delete NGFW: {count} range(s) are still attached. Delete these ranges first: {range_ids}"
+        )
 
     task_arn = start_ngfw_teardown(request_id)
 
@@ -901,6 +951,68 @@ def stop_ngfw(request_id: UUID) -> bool:
     if task_arn:
         logger.info(
             "stop_ngfw: started ECS task=%s for request=%s",
+            task_arn,
+            request_id,
+        )
+
+    return task_arn is not None
+
+
+def complete_ngfw_setup(request_id: UUID) -> bool:
+    """Complete NGFW setup after user associates device in SCM/XDR.
+
+    Validates the Instance is in awaiting_association or stopped status,
+    then triggers ECS to run the complete-setup operation.
+
+    The complete-setup operation will:
+    1. Start the NGFW if stopped
+    2. Fetch license (to get Logging Service license from CDL)
+    3. Wait for CSP certificate sync
+    4. Poll for valid device certificate
+    5. Mark NGFW as ready and auto-stop
+
+    Args:
+        request_id: UUID of the request containing the NGFW.
+
+    Returns:
+        True if complete-setup initiated, False if request/instance not found.
+
+    Raises:
+        EngineError: If NGFW is not in a valid status for setup completion.
+    """
+    from engine.ecs import start_ngfw_operation
+    from engine.models import Instance, Request
+
+    logger.debug("complete_ngfw_setup: request_id=%s", request_id)
+
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("complete_ngfw_setup: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("complete_ngfw_setup: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    # Allow completion from awaiting_association or stopped (after auto-stop)
+    valid_statuses = [
+        ResourceStatus.AWAITING_ASSOCIATION.value,
+        ResourceStatus.PAUSED.value,  # PAUSED = "paused" which maps to "stopped" in UI
+        "stopped",  # Direct status value used in some places
+    ]
+    if ngfw_instance.status not in valid_statuses:
+        raise EngineError(
+            f"Cannot complete setup: NGFW is in '{ngfw_instance.status}' status. "
+            f"Expected one of: awaiting_association, stopped"
+        )
+
+    task_arn = start_ngfw_operation(request_id, "complete-setup")
+
+    if task_arn:
+        logger.info(
+            "complete_ngfw_setup: started ECS task=%s for request=%s",
             task_arn,
             request_id,
         )

@@ -4,8 +4,12 @@ source "amazon-ebs" "windows" {
   instance_type   = var.instance_type
   region          = var.aws_region
 
-  // Ensure instance is terminated (not just stopped) if Packer exits ungracefully
-  shutdown_behavior = "terminate"
+  // Instance must STOP (not terminate) when sysprep shuts it down
+  // so Packer can create the AMI from the stopped instance
+  shutdown_behavior = "stop"
+
+  // Don't send stop command - sysprep handles shutdown, Packer waits for stopped state
+  disable_stop_instance = true
 
   // Windows Server 2022 Datacenter from Amazon
   source_ami_filter {
@@ -74,8 +78,11 @@ build {
   }
 
   // Install services (XAMPP, IIS, FTP, OpenSSH)
+  // Note: elevated_user required for Add-WindowsCapability to work via WinRM
   provisioner "powershell" {
-    script = "scripts/windows/services.ps1"
+    elevated_user     = "Administrator"
+    elevated_password = build.Password
+    script            = "scripts/windows/services.ps1"
   }
 
   // Install development tools (Python, Node.js, Git)

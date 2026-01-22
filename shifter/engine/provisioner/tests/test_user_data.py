@@ -3,11 +3,8 @@
 Tests template rendering for EC2 instance user data scripts.
 """
 
-import base64
-import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
@@ -152,102 +149,6 @@ class TestVictimWindowsTemplate:
         """Template should explain that SSM handles setup."""
         result = windows_template.render()
         assert "SSM" in result
-
-
-class TestUserDataGeneration:
-    """Tests for user data generation logic."""
-
-    def test_attacker_uses_kali_template(self, temp_templates_dir):
-        """role='attacker' should use kali.sh.j2 template."""
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
-
-        # For attackers, use kali template
-        role = "attacker"
-        template_name = "kali.sh.j2" if role == "attacker" else "victim_linux.sh.j2"
-        template = env.get_template(template_name)
-
-        result = template.render(
-            hostname="shifter-kali-42",
-            public_key="ssh-ed25519 AAAA...",
-        )
-        assert "shifter-kali-42" in result
-
-    def test_linux_victim_uses_linux_template(self, temp_templates_dir):
-        """role='victim', os!='windows' should use victim_linux.sh.j2."""
-        # NOSONAR: autoescape=False - shell/PowerShell templates, not HTML
-        env = Environment(
-            loader=FileSystemLoader(str(temp_templates_dir)),
-            autoescape=False,
-        )
-
-        role = "victim"
-        template_name = "kali.sh.j2" if role == "attacker" else "victim_linux.sh.j2"
-        template = env.get_template(template_name)
-
-        # Victim templates are minimal - no variables needed
-        result = template.render()
-        # Minimal template just logs that SSM handles setup
-        assert "SSM" in result
-
-    def test_windows_victim_uses_windows_template(self, temp_templates_dir):
-        """os='windows' should use victim_windows.ps1.j2."""
-        # NOSONAR: autoescape=False - shell/PowerShell templates, not HTML
-        env = Environment(
-            loader=FileSystemLoader(str(temp_templates_dir)),
-            autoescape=False,
-        )
-
-        template_name = "victim_windows.ps1.j2"
-        template = env.get_template(template_name)
-
-        # Victim templates are minimal - no variables needed
-        result = template.render()
-        # Minimal template just logs that SSM handles setup
-        assert "SSM" in result
-
-    def test_user_data_base64_encoded(self, temp_templates_dir):
-        """User data output should be base64 encodable."""
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
-        template = env.get_template("kali.sh.j2")
-
-        script = template.render(
-            hostname="shifter-kali-42",
-            public_key="ssh-ed25519 AAAA...",
-        )
-
-        # Should be encodable as base64
-        encoded = base64.b64encode(script.encode()).decode()
-        assert len(encoded) > 0
-
-    def test_user_data_decodes_correctly(self, temp_templates_dir):
-        """Base64 encoded user data should decode back to original."""
-        # NOSONAR: autoescape=False - these are shell/PowerShell templates, not HTML
-        env = Environment(loader=FileSystemLoader(str(temp_templates_dir)), autoescape=False)
-        template = env.get_template("kali.sh.j2")
-
-        script = template.render(
-            hostname="shifter-kali-42",
-            public_key="ssh-ed25519 AAAA...",
-        )
-
-        encoded = base64.b64encode(script.encode()).decode()
-        decoded = base64.b64decode(encoded).decode()
-
-        assert decoded == script
-
-    def test_templates_dir_env_var(self, temp_templates_dir):
-        """TEMPLATES_DIR env var should be respected."""
-        # This tests the pattern used in instance.py
-        custom_templates_dir = str(temp_templates_dir)
-
-        with patch.dict(os.environ, {"TEMPLATES_DIR": custom_templates_dir}):
-            templates_dir = os.environ.get(
-                "TEMPLATES_DIR",
-                str(Path(__file__).parent.parent / "templates"),
-            )
-            assert templates_dir == custom_templates_dir
 
 
 class TestTemplateContentSafety:

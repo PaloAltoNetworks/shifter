@@ -12,34 +12,17 @@ import pytest
 class TestTitleFromFilename:
     """Tests for _title_from_filename helper."""
 
-    def test_converts_dashes_to_spaces(self):
-        """design-system becomes Design System."""
+    def test_converts_filenames_to_titles(self):
+        """Converts various filename formats to display titles."""
         from documentation.views import _title_from_filename
 
+        # Dashes to spaces with title case
         assert _title_from_filename("design-system") == "Design System"
-
-    def test_converts_underscores_to_spaces(self):
-        """kali_ami becomes Kali Ami."""
-        from documentation.views import _title_from_filename
-
+        # Underscores to spaces with title case
         assert _title_from_filename("kali_ami") == "Kali Ami"
-
-    def test_index_becomes_overview(self):
-        """index becomes Overview."""
-        from documentation.views import _title_from_filename
-
+        # Special case: index becomes Overview
         assert _title_from_filename("index") == "Overview"
-
-    def test_title_case_applied(self):
-        """Words are title-cased."""
-        from documentation.views import _title_from_filename
-
-        assert _title_from_filename("hello-world") == "Hello World"
-
-    def test_single_word(self):
-        """Single words are title-cased."""
-        from documentation.views import _title_from_filename
-
+        # Single word title case
         assert _title_from_filename("architecture") == "Architecture"
 
 
@@ -149,42 +132,29 @@ class TestBuildNavTree:
 class TestRenderMarkdown:
     """Tests for _render_markdown helper."""
 
-    def test_renders_basic_markdown(self):
-        """Renders basic markdown to HTML."""
+    def test_renders_markdown_elements(self):
+        """Renders various markdown elements to HTML."""
         from documentation.views import _render_markdown
 
+        # Basic markdown
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
             f.write("# Hello\n\nWorld")
             f.flush()
-
             result = _render_markdown(Path(f.name))
+            assert "<h1" in result and "Hello" in result
 
-            assert "<h1>" in result or "<h1" in result
-            assert "Hello" in result
-            assert "World" in result
-
-    def test_renders_tables(self):
-        """Renders markdown tables."""
-        from documentation.views import _render_markdown
-
+        # Tables
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
             f.write("| A | B |\n|---|---|\n| 1 | 2 |")
             f.flush()
-
             result = _render_markdown(Path(f.name))
-
             assert "<table" in result
 
-    def test_renders_fenced_code(self):
-        """Renders fenced code blocks."""
-        from documentation.views import _render_markdown
-
+        # Fenced code blocks
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
             f.write("```python\nprint('hello')\n```")
             f.flush()
-
             result = _render_markdown(Path(f.name))
-
             assert "<code" in result or "<pre" in result
 
     def test_preserves_mermaid_blocks(self):
@@ -221,24 +191,6 @@ class TestRenderMarkdown:
 
             assert "Hello" in result
             assert "Unicode" in result
-
-
-class TestPathSanitization:
-    """Tests for path sanitization in doc_page view."""
-
-    def test_normalize_removes_double_dots(self):
-        """os.path.normpath handles .."""
-        import os
-
-        # This is what we use in the view
-        result = os.path.normpath("section/../index")
-        assert ".." not in result
-
-    def test_lstrip_removes_leading_slash(self):
-        """lstrip removes leading /."""
-        path = "/some/path"
-        result = path.lstrip("/")
-        assert result == "some/path"
 
 
 class TestBleachSanitization:

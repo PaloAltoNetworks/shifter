@@ -17,17 +17,17 @@ from pathlib import Path
 
 import pulumi
 import pulumi_aws as aws
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from jinja2 import Environment, FileSystemLoader
 
 from executors.ssm_executor import SSMExecutor
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.bootstrap import BootstrapPlan
+from plans.dc_setup import DCSetupPlan
 from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
+from utils.crypto import generate_ssh_keypair
 
 logger = logging.getLogger(__name__)
 
@@ -45,35 +45,6 @@ def validate_s3_path(value: str) -> bool:
     # This covers valid S3 bucket names and common key patterns
     safe_pattern = re.compile(r"^[a-zA-Z0-9._/=-]+$")
     return bool(safe_pattern.match(value))
-
-
-def generate_ssh_keypair() -> tuple[str, str]:
-    """Generate an Ed25519 SSH key pair.
-
-    This is a pure Python operation with no AWS calls, safe to run at any time.
-
-    Returns:
-        tuple: (private_key_pem, public_key_openssh)
-    """
-    logger.debug("generate_ssh_keypair: generating Ed25519 key pair")
-    private_key = ed25519.Ed25519PrivateKey.generate()
-
-    private_key_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode("utf-8")
-
-    public_key_openssh = (
-        private_key.public_key()
-        .public_bytes(
-            encoding=serialization.Encoding.OpenSSH,
-            format=serialization.PublicFormat.OpenSSH,
-        )
-        .decode("utf-8")
-    )
-
-    return private_key_pem, public_key_openssh
 
 
 class InstanceComponent(pulumi.ComponentResource):
@@ -261,19 +232,20 @@ class InstanceComponent(pulumi.ComponentResource):
                 self.ssh_user = "ubuntu" if os_type == "ubuntu" else "ec2-user"
             # Windows doesn't use SSH user (uses WinRM/RDP)
 
-        # For DC role, read config from environment variables (prebaked AMI)
+        # For DC role, generate dynamic domain name per range
         if role == "dc":
-            # Read from environment variables (set by Terraform via ECS task definition)
-            self.domain_name = os.environ.get("DC_DOMAIN_NAME", "internal.shifter")
+            # Read domain admin password from environment (set by Terraform via ECS task definition)
             self.domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
 
             if not self.domain_admin_password:
                 raise ValueError("DC_DOMAIN_PASSWORD environment variable is required for DC instances")
 
-            # Prebaked AMI has fixed hostname DC01 and no DSRM password needed
-            self.dsrm_password = None  # Not used with prebaked AMI
-            self.netbios_name = dc_config.get("netbios_name", "INTSHIFTER") if dc_config else "INTSHIFTER"
-            self.hostname = "DC01"  # Fixed in prebaked AMI
+            # Fixed domain name from prebaked DC AMI
+            # Tradeoff: All ranges share same domain name, but provisioning is fast
+            self.domain_name = "internal.shifter"
+            self.netbios_name = "INTSHIFTER"
+            self.hostname = f"shifter-dc-{range_id}"
+            self.dsrm_password = self.domain_admin_password  # Reuse for DSRM
             self.public_key = public_key
             # Store agent URL for XDR installation (if provided)
             self.agent_presigned_url = agent_presigned_url if agent_presigned_url else None
@@ -308,31 +280,21 @@ class InstanceComponent(pulumi.ComponentResource):
         if index > 0:
             instance_name = f"{instance_name}-{index}"
 
-        # Build instance arguments
-        instance_args = {
-            "ami": ami_id,
-            "instance_type": instance_type,
-            "subnet_id": subnet_id,
-            "vpc_security_group_ids": [security_group_id],
-            "user_data_base64": user_data,
-            "metadata_options": aws.ec2.InstanceMetadataOptionsArgs(
+        # Create instance (depends on secret being created first for proper ordering)
+        instance_tags = {**common_tags, "Name": instance_name}
+        self.instance = aws.ec2.Instance(
+            f"{name}-instance",
+            ami=ami_id,
+            instance_type=instance_type,
+            subnet_id=subnet_id,
+            vpc_security_group_ids=[security_group_id],
+            user_data_base64=user_data,
+            metadata_options=aws.ec2.InstanceMetadataOptionsArgs(
                 http_tokens="required",  # IMDSv2 only
                 http_put_response_hop_limit=1,
             ),
-            "tags": {
-                **common_tags,
-                "Name": instance_name,
-            },
-        }
-
-        # Add instance profile if specified
-        if instance_profile_name:
-            instance_args["iam_instance_profile"] = instance_profile_name
-
-        # Create instance (depends on secret being created first for proper ordering)
-        self.instance = aws.ec2.Instance(
-            f"{name}-instance",
-            **instance_args,
+            tags=instance_tags,
+            iam_instance_profile=instance_profile_name if instance_profile_name else None,
             opts=pulumi.ResourceOptions(parent=self, depends_on=[ssh_key_version]),
         )
 
@@ -361,10 +323,11 @@ class InstanceComponent(pulumi.ComponentResource):
     ) -> pulumi.Output[bool]:
         """Run DC setup via SSM Run Command.
 
-        With prebaked DC AMI, this method only needs to:
-        1. Wait for DC's SSM agent to come online (proves DC booted with AD DS ready)
-        2. Clean stale DNS records from prebaked AMI
-        3. Install XDR agent on DC
+        With AD DS feature AMI (not promoted), this method:
+        1. Wait for SSM agent to come online
+        2. Set hostname via BootstrapPlan
+        3. Promote to Domain Controller via DCSetupPlan (creates unique domain per range)
+        4. Install XDR agent on DC
 
         Domain members handle their own domain join in run_setup().
 
@@ -381,99 +344,91 @@ class InstanceComponent(pulumi.ComponentResource):
             # Not a DC instance, return immediately
             return pulumi.Output.from_input(True)
 
-        # Store domain config for domain join (captured in closure)
+        # Store config for closure
         dc_domain_name = self.domain_name
+        dc_netbios_name = self.netbios_name
+        dc_dsrm_password = self.dsrm_password
+        dc_domain_admin_password = self.domain_admin_password
         dc_agent_presigned_url = self.agent_presigned_url
 
-        def do_setup(args: tuple) -> bool:
-            """Run the domain join synchronously (called within apply)."""
-            instance_id, private_ip = args
-            pulumi.log.info(f"Prebaked DC instance {instance_id} starting up...")
+        def do_setup(args: list) -> bool:
+            """Run the DC promotion synchronously (called within apply)."""
+            instance_id, _ = args[0], args[1]
+            pulumi.log.info(f"DC instance {instance_id} starting setup...")
+            pulumi.log.info(f"Domain: {dc_domain_name}, NetBIOS: {dc_netbios_name}")
 
             # Create executor and orchestrator
             executor = SSMExecutor(region=region)
             orchestrator = SetupOrchestrator(executor=executor)
 
             try:
-                # Wait for SSM agent to come online (proves DC booted with AD DS ready)
-                # Windows DC with AD DS can take longer to fully boot - use generous timeout
+                # Wait for SSM agent to come online
                 pulumi.log.info(f"Waiting for SSM agent on DC {instance_id}...")
                 executor.wait_for_agent(instance_id, timeout_seconds=600)
-                pulumi.log.info(f"DC {instance_id} is ready (SSM agent online)")
+                pulumi.log.info(f"DC {instance_id} SSM agent online")
 
-                # Clean stale DNS records from prebaked AMI
-                # The AMI contains A records from the build environment that must be removed
-                pulumi.log.info(f"Cleaning stale DNS records on DC {instance_id}...")
-                dns_cleanup_script = f'''
-$ErrorActionPreference = "Stop"
-$currentIP = "{private_ip}"
-$zone = "{dc_domain_name}"
+                # Prebaked DC: Skip hostname change - DC already has correct hostname from AMI
+                # The prebaked DC AMI has AD DS promoted with a fixed hostname.
+                # Changing the hostname would break AD replication and cause verification to fail.
+                pulumi.log.info("Using prebaked DC AMI - skipping hostname change")
 
-# Remove stale A records (any IP that isn't the current DC IP)
-$staleRecords = Get-DnsServerResourceRecord -ZoneName $zone -RRType A -ErrorAction SilentlyContinue |
-    Where-Object {{ $_.HostName -eq "@" -and $_.RecordData.IPv4Address.IPAddressToString -ne $currentIP }}
+                # Verify Domain Controller via DCSetupPlan
+                # Prebaked DC has no setup steps, only verification
+                pulumi.log.info(f"Verifying Domain Controller ({dc_domain_name})...")
+                dc_plan = DCSetupPlan()
 
-foreach ($record in $staleRecords) {{
-    $oldIP = $record.RecordData.IPv4Address.IPAddressToString
-    Write-Host "Removing stale A record: $oldIP"
-    Remove-DnsServerResourceRecord -ZoneName $zone -InputObject $record -Force
-}}
+                # Validate DC config before proceeding
+                if not all([dc_domain_name, dc_netbios_name, dc_dsrm_password, dc_domain_admin_password]):
+                    raise SetupError("DC domain config is incomplete - missing required fields")
 
-# Also clean DomainDnsZones and ForestDnsZones
-foreach ($subzone in @("DomainDnsZones", "ForestDnsZones")) {{
-    $stale = Get-DnsServerResourceRecord -ZoneName $zone -Name $subzone -RRType A -ErrorAction SilentlyContinue |
-        Where-Object {{ $_.RecordData.IPv4Address.IPAddressToString -ne $currentIP }}
-    foreach ($r in $stale) {{
-        Write-Host "Removing stale $subzone A record"
-        Remove-DnsServerResourceRecord -ZoneName $zone -InputObject $r -Force -ErrorAction SilentlyContinue
-    }}
-}}
+                # Assert types after validation (mypy narrowing)
+                assert dc_domain_name is not None
+                assert dc_netbios_name is not None
+                assert dc_dsrm_password is not None
+                assert dc_domain_admin_password is not None
 
-# Ensure current IP is registered as zone root A record
-$existingRecord = Get-DnsServerResourceRecord -ZoneName $zone -RRType A -ErrorAction SilentlyContinue |
-    Where-Object {{ $_.HostName -eq "@" -and $_.RecordData.IPv4Address.IPAddressToString -eq $currentIP }}
+                # Create config object for DCSetupPlan context
+                class DCPromoteConfig:
+                    def __init__(
+                        self,
+                        domain_name: str,
+                        netbios_name: str,
+                        dsrm_password: str,
+                        domain_admin_password: str,
+                    ):
+                        self.domain_name = domain_name
+                        self.netbios_name = netbios_name
+                        self.dsrm_password = dsrm_password
+                        self.domain_admin_password = domain_admin_password
 
-if (-not $existingRecord) {{
-    Write-Host "Adding A record for current IP: $currentIP"
-    Add-DnsServerResourceRecordA -ZoneName $zone -Name "@" -IPv4Address $currentIP -TimeToLive 00:10:00
-}}
-
-# Force re-registration
-Register-DnsClient
-ipconfig /registerdns | Out-Null
-
-Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
-'''
-                result = executor.run_command(
-                    instance_id=instance_id,
-                    script=dns_cleanup_script,
-                    timeout_seconds=60,
-                    document_name="AWS-RunPowerShellScript",
+                dc_config = DCPromoteConfig(
+                    dc_domain_name,
+                    dc_netbios_name,
+                    dc_dsrm_password,
+                    dc_domain_admin_password,
                 )
-                if not result.success:
-                    pulumi.log.warn(f"DNS cleanup returned non-zero: {result.stderr}")
-                else:
-                    pulumi.log.info("DNS cleanup complete")
+                dc_context = dc_plan.get_context(dc_config)
+                dc_result = orchestrator.orchestrate(instance_id, dc_plan, dc_context)
+                if not dc_result.success:
+                    raise SetupError(f"DC verification failed: {dc_result.error}")
+                pulumi.log.info("DC verification complete")
 
                 # Install XDR agent on DC
-                if not dc_agent_presigned_url:
-                    raise SetupError("XDR agent URL is required for DC instances but was not provided")
-
-                pulumi.log.info(f"Installing XDR agent on DC {instance_id}...")
-
-                xdr_plan = XDRAgentInstallPlan()
-                context = xdr_plan.get_context({"agent_presigned_url": dc_agent_presigned_url})
-
-                xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, context)
-                if not xdr_result.success:
-                    raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
-
-                pulumi.log.info(f"XDR agent installed successfully on DC {instance_id}")
+                if dc_agent_presigned_url:
+                    pulumi.log.info(f"Installing XDR agent on DC {instance_id}...")
+                    xdr_plan = XDRAgentInstallPlan()
+                    xdr_context = xdr_plan.get_context({"agent_presigned_url": dc_agent_presigned_url})
+                    xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, xdr_context)
+                    if not xdr_result.success:
+                        raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
+                    pulumi.log.info("XDR agent installed successfully on DC")
+                else:
+                    pulumi.log.info("No XDR agent URL provided, skipping XDR install on DC")
 
                 return True
 
             except Exception as e:
-                pulumi.log.error(f"Domain setup failed: {e}")
+                pulumi.log.error(f"DC setup failed: {e}")
                 raise
 
         # Use apply to run the setup when instance_id and private_ip are resolved
@@ -484,6 +439,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         self,
         region: str | None = None,
         dc_ip: str | None = None,
+        domain_name: str | None = None,
     ) -> pulumi.Output[bool]:
         """Run setup plan for non-DC instances via SSM Run Command.
 
@@ -498,6 +454,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         Args:
             region: AWS region (uses default if not provided)
             dc_ip: DC private IP for domain join (only used if join_domain=True)
+            domain_name: Domain FQDN for domain join (e.g., "range42.lab")
 
         Returns:
             pulumi.Output[bool] that resolves to True on success
@@ -518,10 +475,11 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
         instance_ssh_user = self.ssh_user
         instance_join_domain = self.join_domain
         instance_dc_ip = dc_ip
+        instance_domain_name = domain_name
 
-        def do_setup(args: tuple) -> bool:
+        def do_setup(args: list) -> bool:
             """Run the setup synchronously (called within apply)."""
-            instance_id, _ = args
+            instance_id, _ = args[0], args[1]
             pulumi.log.info(f"Starting setup for {instance_role} instance {instance_id}...")
 
             # Create executor and orchestrator
@@ -566,7 +524,10 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                         bootstrap_plan = LinuxBootstrapPlan()
                         bootstrap_ctx = bootstrap_plan.get_context(ctx)
                         result = orchestrator.orchestrate(
-                            instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name
+                            instance_id,
+                            bootstrap_plan,
+                            bootstrap_ctx,
+                            document_name=document_name,
                         )
                         if not result.success:
                             raise SetupError(f"Linux bootstrap failed: {result.error}")
@@ -577,7 +538,10 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                             xdr_plan = LinuxXDRAgentInstallPlan()
                             xdr_ctx = xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
                             result = orchestrator.orchestrate(
-                                instance_id, xdr_plan, xdr_ctx, document_name=document_name
+                                instance_id,
+                                xdr_plan,
+                                xdr_ctx,
+                                document_name=document_name,
                             )
                             if not result.success:
                                 raise SetupError(f"Linux XDR install failed: {result.error}")
@@ -587,10 +551,13 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
 
                     else:
                         # Windows victim: Bootstrap + XDR
-                        bootstrap_plan = BootstrapPlan()
-                        bootstrap_ctx = bootstrap_plan.get_context(ctx)
+                        win_bootstrap_plan = BootstrapPlan()
+                        win_bootstrap_ctx = win_bootstrap_plan.get_context(ctx)
                         result = orchestrator.orchestrate(
-                            instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name
+                            instance_id,
+                            win_bootstrap_plan,
+                            win_bootstrap_ctx,
+                            document_name=document_name,
                         )
                         if not result.success:
                             raise SetupError(f"Windows bootstrap failed: {result.error}")
@@ -598,10 +565,13 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
 
                         # Install XDR agent
                         if instance_agent_url:
-                            xdr_plan = XDRAgentInstallPlan()
-                            xdr_ctx = xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
+                            win_xdr_plan = XDRAgentInstallPlan()
+                            win_xdr_ctx = win_xdr_plan.get_context({"agent_presigned_url": instance_agent_url})
                             result = orchestrator.orchestrate(
-                                instance_id, xdr_plan, xdr_ctx, document_name=document_name
+                                instance_id,
+                                win_xdr_plan,
+                                win_xdr_ctx,
+                                document_name=document_name,
                             )
                             if not result.success:
                                 raise SetupError(f"Windows XDR install failed: {result.error}")
@@ -610,17 +580,16 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                             pulumi.log.info(f"No XDR agent URL provided for {instance_id}")
 
                         # Domain join (only for Windows victims with join_domain=True)
-                        if instance_join_domain and instance_dc_ip:
-                            domain_name = os.environ.get("DC_DOMAIN_NAME", "internal.shifter")
+                        if instance_join_domain and instance_dc_ip and instance_domain_name:
                             domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
 
                             if domain_password:
-                                pulumi.log.info(f"Joining domain {domain_name} for {instance_id}...")
+                                pulumi.log.info(f"Joining domain {instance_domain_name} for {instance_id}...")
                                 domain_join_plan = DomainJoinPlan()
                                 dj_context = domain_join_plan.get_context(
                                     {
                                         "dc_ip": instance_dc_ip,
-                                        "domain_name": domain_name,
+                                        "domain_name": instance_domain_name,
                                         "domain_admin_password": domain_password,
                                     }
                                 )
@@ -637,7 +606,7 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
                                 pulumi.log.warn(f"DC_DOMAIN_PASSWORD not set, skipping domain join for {instance_id}")
                         elif instance_join_domain:
                             pulumi.log.info(
-                                f"join_domain=True but no dc_ip provided, skipping domain join for {instance_id}"
+                                f"join_domain=True but no dc_ip/domain_name, skipping domain join for {instance_id}"
                             )
 
                 return True
@@ -727,7 +696,6 @@ Write-Host "DNS cleanup complete. Current DC IP: $currentIP"
             context = {}  # No variables needed - template just logs SSM will handle setup
 
         script = template.render(**context)
-        logger.debug("_generate_user_data: rendered template for role=%s os_type=%s", role, os_type)
         return base64.b64encode(script.encode()).decode()
 
     @property

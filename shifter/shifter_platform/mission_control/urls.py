@@ -37,6 +37,7 @@ urlpatterns = [
     path("api/ngfw/", views.api_ngfw_create, name="api_ngfw_create"),
     path("api/ngfw/list/", views.api_ngfw_list, name="api_ngfw_list"),
     path("api/ngfw/<uuid:app_id>/destroy/", views.api_ngfw_destroy, name="api_ngfw_destroy"),
+    path("api/ngfw/<uuid:app_id>/complete-setup/", views.api_ngfw_complete_setup, name="api_ngfw_complete_setup"),
     # Credential views
     path("credentials/", views.credentials_list, name="credentials_list"),
     path("credentials/add/", views.credential_add, name="credential_add"),

@@ -9,3 +9,6 @@ __pycache__/
 *.pyo
 .env
 .env.*
+
+# Mock pulumi CLI (local dev only - real pulumi is installed in container)
+pulumi

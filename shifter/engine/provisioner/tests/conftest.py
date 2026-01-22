@@ -363,8 +363,6 @@ def sample_range_config(sample_subnet_config_attack, sample_subnet_config_target
         vpc_id="vpc-12345",
         vpc_cidr="10.1.0.0/16",
         route_table_id="rtb-12345",
-        kali_security_group_id="sg-kali",
-        victim_security_group_id="sg-victim",
         instance_profile_name="range-instance-profile",
         kali_ami_id="ami-kali123",
         victim_ami_id="ami-ubuntu123",
@@ -372,7 +370,7 @@ def sample_range_config(sample_subnet_config_attack, sample_subnet_config_target
         dc_ami_id="ami-dc-test",
         agent_s3_bucket="shifter-agents",
         availability_zone="us-east-2a",
-        gwlb_service_name="",
+        ngfw_data_eni_id="",
     )
 
 
@@ -445,8 +443,6 @@ def sample_range_config_multi_subnet():
         vpc_id="vpc-prod",
         vpc_cidr="10.2.0.0/16",
         route_table_id="rtb-prod",
-        kali_security_group_id="sg-kali-prod",
-        victim_security_group_id="sg-victim-prod",
         instance_profile_name="prod-instance-profile",
         kali_ami_id="ami-kali-prod",
         victim_ami_id="ami-ubuntu-prod",
@@ -454,7 +450,7 @@ def sample_range_config_multi_subnet():
         dc_ami_id="ami-dc-prod",
         agent_s3_bucket="shifter-agents-prod",
         availability_zone="us-east-2b",
-        gwlb_service_name="com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123",
+        ngfw_data_eni_id="eni-ngfw123456789",
     )
 
 
@@ -647,12 +643,12 @@ def sample_db_range_row():
     """Sample database row for a range with subnets (new format).
 
     Returns tuple matching get_range_from_db query:
-    (id, user_id, request_uuid, range_config, ngfw_enabled, gwlb_service_name)
+    (id, user_id, uuid, range_config)
     """
     return (
         42,  # id
         1,  # user_id
-        "request-uuid-12345",  # request_uuid
+        "request-uuid-12345",  # uuid
         {  # range_config
             "subnets": [
                 {
@@ -676,19 +672,18 @@ def sample_db_range_row():
                 },
             ]
         },
-        False,  # ngfw_enabled
-        "",  # gwlb_service_name (no NGFW)
     )
 
 
 @pytest.fixture
 def sample_db_range_row_with_ngfw():
-    """Sample database row for a range with NGFW enabled."""
+    """Sample database row for a range with NGFW enabled (ngfw: true in range_config)."""
     return (
         42,  # id
         1,  # user_id
-        "request-uuid-ngfw-12345",  # request_uuid
+        "request-uuid-ngfw-12345",  # uuid
         {  # range_config
+            "ngfw": True,  # Indicates NGFW scenario
             "subnets": [
                 {
                     "name": "attack",
@@ -702,10 +697,8 @@ def sample_db_range_row_with_ngfw():
                     "instances": [{"uuid": "inst-uuid-002", "role": "victim", "os_type": "ubuntu"}],
                     "connected_to": [],
                 },
-            ]
+            ],
         },
-        True,  # ngfw_enabled
-        "com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123",  # gwlb_service_name
     )
 
 
@@ -715,7 +708,7 @@ def sample_db_range_row_no_agent():
     return (
         43,  # id
         2,  # user_id
-        "request-uuid-no-agent",  # request_uuid
+        "request-uuid-no-agent",  # uuid
         {  # range_config
             "subnets": [
                 {
@@ -732,8 +725,6 @@ def sample_db_range_row_no_agent():
                 },
             ]
         },
-        False,  # ngfw_enabled
-        "",  # gwlb_service_name
     )
 
 
@@ -743,8 +734,9 @@ def sample_db_range_row_multi_subnet():
     return (
         44,  # id
         3,  # user_id
-        "request-uuid-multi-subnet",  # request_uuid
+        "request-uuid-multi-subnet",  # uuid
         {  # range_config
+            "ngfw": True,  # Indicates NGFW scenario
             "subnets": [
                 {
                     "name": "attack",
@@ -794,10 +786,8 @@ def sample_db_range_row_multi_subnet():
                     ],
                     "connected_to": [],
                 },
-            ]
+            ],
         },
-        True,  # ngfw_enabled
-        "com.amazonaws.vpce.us-east-2.vpce-svc-multi",  # gwlb_service_name
     )
 
 
@@ -829,6 +819,7 @@ def mock_pulumi_config(mocker):
         "dcSecurityGroupId": "sg-dc-test",
         "rangeInstanceProfileName": "test-profile",
         "portalVpcCidr": "10.0.0.0/16",
+        "portalVpcPeeringId": "pcx-test123",
     }.get(key)
 
     mocker.patch("pulumi.Config", return_value=mock_config)

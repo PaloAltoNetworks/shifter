@@ -408,16 +408,19 @@ def launch_range(request: HttpRequest) -> JsonResponse:
     Request body (JSON):
         New format:
         - agents: Dict mapping OS type to agent ID, e.g. {"windows": 123}
-        - scenario: Scenario type (basic, ad_attack_lab). Defaults to basic.
+                  Can be empty {} for scenarios that don't require agents.
+        - scenario: Scenario type (basic, cortex_byot_no_xdr). Defaults to basic.
 
         Legacy format (backward compatible):
         - agent_id: ID of agent to use for victim instances
-        - scenario: Scenario type (basic, ad_attack_lab). Defaults to basic.
+        - scenario: Scenario type. Defaults to basic.
 
     Response (JSON):
         - success: true
         - range: Range object
     """
+    from cms import get_scenario as cms_get_scenario
+
     user = _get_user(request)
     try:
         data = json.loads(request.body)
@@ -425,14 +428,24 @@ def launch_range(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
     scenario = data.get("scenario", "basic")
-    valid_scenarios = {s["id"] for s in cms_list_scenarios(user)}
+    scenarios_list = cms_list_scenarios(user)
+    valid_scenarios = {s["id"] for s in scenarios_list}
     if scenario not in valid_scenarios:
         return JsonResponse({"error": "Invalid scenario"}, status=400)
+
+    # Get scenario requirements to determine if agents are needed
+    scenario_data = next((s for s in scenarios_list if s["id"] == scenario), None)
+    agent_requirements = scenario_data.get("agent_requirements", {}) if scenario_data else {}
+    scenario_requires_agents = (
+        agent_requirements.get("requires_windows", False)
+        or agent_requirements.get("requires_linux", False)
+        or agent_requirements.get("has_from_agent", False)
+    )
 
     # Support both new (agents) and legacy (agent_id) formats
     agents_by_os: dict[str, int] = {}
     if "agents" in data:
-        # New format: {"windows": 123, "linux": 456}
+        # New format: {"windows": 123, "linux": 456} or {} for no-agent scenarios
         agents_by_os = data["agents"]
     elif "agent_id" in data:
         # Legacy format: single agent - determine OS from agent
@@ -445,11 +458,13 @@ def launch_range(request: HttpRequest) -> JsonResponse:
             agents_by_os[os_type] = agent_id
         except CMSError as e:
             return JsonResponse({"error": str(e)}, status=400)
-    else:
+    elif scenario_requires_agents:
+        # Only require agents if scenario needs them
         return JsonResponse(
-            {"error": "Either 'agents' or 'agent_id' is required"},
+            {"error": "Either 'agents' or 'agent_id' is required for this scenario"},
             status=400,
         )
+    # If scenario doesn't require agents and none provided, agents_by_os stays {}
 
     try:
         range_ctx = cms_create_range(

@@ -649,6 +649,9 @@ class DashboardManager {
         const scenario = this.scenarioSelect?.value || 'basic';
         const req = this.scenarioRequirements[scenario] || {};
 
+        // Check if scenario requires any agents
+        const scenarioRequiresAgents = req.requires_windows || req.requires_linux || req.has_from_agent;
+
         // Build agents dict based on scenario requirements
         const agents = {};
 
@@ -668,8 +671,8 @@ class DashboardManager {
             agents.linux = Number.parseInt(this.linuxAgentSelect.value, 10);
         }
 
-        // Validate we have at least one agent
-        if (Object.keys(agents).length === 0) {
+        // Only require agents if scenario needs them
+        if (scenarioRequiresAgents && Object.keys(agents).length === 0) {
             return;
         }
 

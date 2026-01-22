@@ -1,0 +1,66 @@
+id: cortex_byot_no_xdr
+name: Cortex BYOT (No XDR)
+description: Cortex BYOT range without XDR agents. Includes NGFW, domain controller, Ubuntu server in DC subnet, two workstations, a server, and an attacker. No agent installation required.
+enabled: true
+ngfw: true
+
+instances:
+  - name: Attacker
+    role: attacker
+    os_type: kali
+    xdr_agent: false
+    join_domain: false
+    ai_agent: true
+
+  - name: Domain Controller
+    role: dc
+    os_type: windows
+    domain_controller: true
+    xdr_agent: false
+    ai_agent: true
+    dc_config:
+      domain_name: cortexbyot.lab
+      netbios_name: CORTEXBYOT
+
+  - name: DC Ubuntu Server
+    role: victim
+    os_type: ubuntu
+    xdr_agent: false
+    join_domain: true
+    ai_agent: true
+
+  - name: Workstation 1
+    role: victim
+    os_type: windows
+    xdr_agent: false
+    join_domain: true
+    ai_agent: true
+
+  - name: Workstation 2
+    role: victim
+    os_type: windows
+    xdr_agent: false
+    join_domain: true
+    ai_agent: true
+
+  - name: Server
+    role: victim
+    os_type: ubuntu
+    xdr_agent: false
+    join_domain: true
+    ai_agent: true
+
+subnets:
+  - name: dc_network
+    instances: [Domain Controller, DC Ubuntu Server]
+    connected_to: [workstation_network, server_network]
+
+  - name: workstation_network
+    instances: [Workstation 1, Workstation 2]
+    connected_to: [attacker_network]
+
+  - name: server_network
+    instances: [Server]
+
+  - name: attacker_network
+    instances: [Attacker]

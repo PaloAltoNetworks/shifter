@@ -194,10 +194,12 @@ class SSMExecutor:
                     # Check if it's an instance termination
                     if "not in a valid state" in stderr.lower():
                         raise InstanceTerminatedError(f"Instance {instance_id} is not in a valid state")
+                    # Include stdout in error - PowerShell Write-Host goes to stdout
+                    error_details = stderr if stderr else stdout
                     raise CommandError(
                         f"Command failed on {instance_id}",
                         exit_code=exit_code,
-                        stderr=stderr,
+                        stderr=error_details,
                     )
 
             time.sleep(self._poll_interval)

@@ -489,7 +489,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     # Check if instance has GUI
     os_type = instance.get("os_type", "")
-    if os_type not in ("kali", "windows"):
+    if os_type not in ("kali", "ubuntu", "windows"):
         raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
 
     # Get IP
@@ -511,6 +511,9 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     elif os_type == "kali":
         rdp_username = "kali"
         rdp_password = "kali"  # nosec B105 - Kali OS default
+    elif os_type == "ubuntu":
+        rdp_username = "ubuntu"
+        rdp_password = "ubuntu"  # nosec B105 - demo environment
 
     # Get SSH key for SFTP file transfers
     # Windows requires key-based auth; Kali uses password auth (Guacamole's

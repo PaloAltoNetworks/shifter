@@ -128,12 +128,18 @@ class RangeStack(pulumi.ComponentResource):
         self.register_outputs(outputs)
 
     def _run_all_setup(self, dc_components: list[InstanceComponent], config: RangeConfig) -> None:
-        """Run setup for all instances (non-DC first, then DCs).
+        """Run setup for all instances (DCs first, then others).
+
+        DC setup must complete before domain-joining victims attempt to join.
 
         Args:
             dc_components: List of DC instance components.
             config: Range configuration.
         """
+        # Run DC setup FIRST - must complete before victims can domain join
+        for dc_instance in dc_components:
+            dc_instance.run_dc_setup()
+
         # Build a flat list of (instance_config, instance_component) pairs for non-DCs
         # by iterating through subnets
         non_dc_pairs: list[tuple[InstanceConfig, InstanceComponent]] = []
@@ -149,22 +155,37 @@ class RangeStack(pulumi.ComponentResource):
 
         # Run setup for non-DC instances
         for inst_config, instance in non_dc_pairs:
-            # Domain-joining instances get DC's private_ip and domain_name for domain join
+            # Domain-joining instances must wait for DC setup to complete
             if inst_config.join_domain and dc_components:
                 # DC's domain_name is a plain string, not a Pulumi Output
                 # DC instances always have domain_name set; cast for mypy
                 dc_domain = cast(str, dc_components[0].domain_name)
+                dc_setup_result = dc_components[0].setup_result
 
-                def setup_with_dc_info(ip: str, inst: InstanceComponent = instance, domain: str = dc_domain) -> None:
-                    inst.run_setup(dc_ip=ip, domain_name=domain)
+                if dc_setup_result is not None:
 
-                dc_components[0].private_ip.apply(setup_with_dc_info)
+                    def setup_with_dc_ready(
+                        dc_ready: bool,
+                        inst: InstanceComponent = instance,
+                        domain: str = dc_domain,
+                        dc: InstanceComponent = dc_components[0],
+                    ) -> None:
+                        # DC setup complete, now get IP and run victim setup
+                        def run_victim_setup(ip: str, i: InstanceComponent = inst, d: str = domain) -> None:
+                            i.run_setup(dc_ip=ip, domain_name=d)
+
+                        dc.private_ip.apply(run_victim_setup)
+
+                    # Wait for DC setup_result (not just private_ip)
+                    dc_setup_result.apply(setup_with_dc_ready)
+                else:
+                    # DC setup not triggered yet - fall back to IP-only dependency
+                    def setup_with_dc_ip(ip: str, inst: InstanceComponent = instance, domain: str = dc_domain) -> None:
+                        inst.run_setup(dc_ip=ip, domain_name=domain)
+
+                    dc_components[0].private_ip.apply(setup_with_dc_ip)
             else:
                 instance.run_setup()
-
-        # Run DC setup
-        for dc_instance in dc_components:
-            dc_instance.run_dc_setup()
 
     def _create_all_instances(self, name: str, config: RangeConfig) -> list[InstanceComponent]:
         """Create all instances (DCs first, then others).

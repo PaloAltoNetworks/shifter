@@ -40,6 +40,9 @@ module "vpc" {
 
   # Persistent NGFW Infrastructure
   enable_ngfw_infrastructure = var.enable_ngfw_infrastructure
+
+  # Network Firewall IP Allowlist
+  victim_allowed_cidrs = var.victim_allowed_cidrs
 }
 
 # ------------------------------------------------------------------------------

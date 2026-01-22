@@ -14,7 +14,7 @@ rm -rf /tmp/*
 rm -rf /var/tmp/*
 
 # Clear logs
-find /var/log -type f -name "*.log" -delete
+find /var/log -type f -name "*.log" ! -name "xrdp*.log" -delete
 find /var/log -type f -name "*.gz" -delete
 journalctl --vacuum-time=1d 2>/dev/null || true
 

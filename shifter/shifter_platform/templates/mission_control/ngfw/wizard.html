@@ -100,8 +100,8 @@
             </p>
 
             <div class="radio-group">
-                <label class="radio-option" data-method="pin">
-                    <input type="radio" name="registration_method" value="pin">
+                <label class="radio-option selected" data-method="pin">
+                    <input type="radio" name="registration_method" value="pin" checked>
                     <div class="radio-option-content">
                         <h4 class="radio-option-title">Use Stored PIN</h4>
                         <p class="radio-option-desc">
@@ -110,19 +110,11 @@
                     </div>
                 </label>
 
-                <label class="radio-option" data-method="otp">
-                    <input type="radio" name="registration_method" value="otp" checked>
-                    <div class="radio-option-content">
-                        <h4 class="radio-option-title">Enter One-Time Password (OTP)</h4>
-                        <p class="radio-option-desc">
-                            Enter a single-use OTP from SCM. Valid for 60 minutes. Good for one-off setups.
-                        </p>
-                    </div>
-                </label>
+                {% comment %}OTP method temporarily hidden - no backend flow implemented yet{% endcomment %}
             </div>
 
             <!-- PIN method fields -->
-            <div class="conditional-fields" id="pin-fields">
+            <div class="conditional-fields visible" id="pin-fields">
                 <div class="form-group">
                     <label class="form-label">
                         SCM Credential <span class="required">*</span>
@@ -154,52 +146,7 @@
                 </div>
             </div>
 
-            <!-- OTP method fields -->
-            <div class="conditional-fields visible" id="otp-fields">
-                <div class="form-group">
-                    <label class="form-label" for="otp-value">
-                        One-Time Password <span class="required">*</span>
-                    </label>
-                    <input type="text" class="form-input" id="otp-value" placeholder="e.g., ABC123XYZ" maxlength="50">
-                    <p class="form-hint">
-                        Get this from SCM: Workflows &rarr; NGFWs &rarr; Onboarding &rarr; Create OTP
-                    </p>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label" for="otp-folder">
-                        SCM Folder Name <span class="required">*</span>
-                    </label>
-                    <input type="text" class="form-input" id="otp-folder" placeholder="e.g., My Firewalls" maxlength="255">
-                    <p class="form-hint">
-                        The folder in SCM where this NGFW will be registered
-                    </p>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">
-                        Strata Logging Service Region <span class="required">*</span>
-                    </label>
-                    <div class="xdr-dropdown full-width" id="region-dropdown">
-                        <input type="hidden" name="sls_region" id="region-select-value" value="americas">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value">Americas</span>
-                            <span class="xdr-dropdown-chevron"></span>
-                        </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="region-items">
-                                <li class="xdr-dropdown-item selected" data-value="americas">Americas</li>
-                                <li class="xdr-dropdown-item" data-value="europe">Europe</li>
-                                <li class="xdr-dropdown-item" data-value="japan">Japan</li>
-                                <li class="xdr-dropdown-item" data-value="asiapacific">Asia Pacific</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <p class="form-hint">
-                        Must match your Strata Logging Service tenant region
-                    </p>
-                </div>
-            </div>
+            {% comment %}OTP method fields hidden - no backend flow yet{% endcomment %}
 
             <div class="wizard-nav">
                 <div class="wizard-nav-left">
@@ -299,6 +246,61 @@
                         <span>Creating Gateway Load Balancer...</span>
                     </div>
                 </div>
+            </div>
+
+            <!-- Awaiting Association State - shown when infrastructure is ready but user needs to associate in SCM -->
+            <div class="awaiting-association-state" id="awaiting-association-state" style="display: none;">
+                <div class="warning-icon">!</div>
+                <h2 class="warning-title">Action Required</h2>
+                <p class="warning-subtitle">
+                    Your NGFW infrastructure is ready. Complete these steps to finish setup:
+                </p>
+
+                <div class="setup-instructions">
+                    <div class="setup-step">
+                        <span class="setup-step-number">1</span>
+                        <div class="setup-step-content">
+                            <h4>Associate Device in Strata Cloud Manager</h4>
+                            <p>Go to <strong>Strata Cloud Manager &rarr; Configuration &rarr; Device Associations</strong> and click <strong>Add Device</strong>.</p>
+                            <p class="serial-number-row">
+                                Serial Number: <code id="ngfw-serial">Loading...</code>
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="setup-step">
+                        <span class="setup-step-number">2</span>
+                        <div class="setup-step-content">
+                            <h4>Connect to XDR/XSIAM</h4>
+                            <p>Go to <strong>XDR/XSIAM &rarr; Settings &rarr; NGFW &rarr; Add New Instance</strong> and connect the firewall.
+                               If the firewall is not in the dropdown, use the sync button to refresh.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="setup-note">
+                    Once you've completed both steps above, click the button below to finish configuration:
+                </p>
+
+                <button type="button" class="btn btn-primary" id="complete-setup-btn">
+                    Complete Setup
+                </button>
+
+                <p class="setup-timing-note">
+                    This will configure logging service and may take up to 15 minutes.
+                </p>
+            </div>
+
+            <!-- Configuring State - shown while complete-setup is running -->
+            <div class="configuring-state" id="configuring-state" style="display: none;">
+                <div class="progress-spinner"></div>
+                <h2 class="progress-title">Completing Setup</h2>
+                <p class="progress-subtitle">
+                    Configuring logging service and verifying connection...
+                </p>
+                <p class="progress-subtitle" style="color: var(--xdr-text-tertiary);">
+                    This may take up to 15 minutes. Please don't close this page.
+                </p>
             </div>
 
             <div class="success-state" id="success-state" style="display: none;">

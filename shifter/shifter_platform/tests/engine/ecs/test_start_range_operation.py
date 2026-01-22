@@ -30,6 +30,7 @@ class TestStartRangeOperation:
         """Function returns ECS task ARN when pause operation starts successfully."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -52,6 +53,7 @@ class TestStartRangeOperation:
         """Function returns ECS task ARN when resume operation starts successfully."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -74,6 +76,7 @@ class TestStartRangeOperation:
         """Function passes 'pause' command to _start_range_ecs_task."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -100,6 +103,7 @@ class TestStartRangeOperation:
         """Function passes 'resume' command to _start_range_ecs_task."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -180,6 +184,7 @@ class TestStartRangeOperation:
         """Function returns None when PULUMI_ECS_CLUSTER_ARN is not set."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
@@ -195,6 +200,7 @@ class TestStartRangeOperation:
         """Function returns None when PULUMI_TASK_DEFINITION_ARN is not set."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         if hasattr(settings, "PULUMI_TASK_DEFINITION_ARN"):
@@ -214,6 +220,7 @@ class TestStartRangeOperation:
         """Function raises ClientError when ECS run_task fails."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -239,6 +246,7 @@ class TestStartRangeOperation:
         """Function logs WARNING when ECS configuration is incomplete."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
@@ -253,6 +261,7 @@ class TestStartRangeOperation:
         """Function logs INFO when task starts successfully."""
         from engine.ecs import start_range_operation
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"

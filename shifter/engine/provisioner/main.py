@@ -12,11 +12,13 @@ import logging
 import os
 import shutil
 import subprocess  # nosec B404 - subprocess used for Pulumi CLI calls with hardcoded commands
+import time
 
 import boto3
 import psycopg
 
 from events import (
+    STATUS_AWAITING_ASSOCIATION,
     STATUS_DESTROYED,
     STATUS_DESTROYING,
     STATUS_FAILED,
@@ -35,6 +37,98 @@ from orchestrators.setup_orchestrator import SetupOrchestrator
 
 logger = logging.getLogger(__name__)
 
+# SSM parameter paths for AMI IDs (fetched at runtime for latest values)
+_AMI_SSM_PARAMS = {
+    "kali": "/shifter/ami/kali",
+    "victim": "/shifter/ami/ubuntu",
+    "windows": "/shifter/ami/windows",
+    "dc": "/shifter/ami/dc",
+}
+
+# Cache for SSM AMI lookups (cleared per invocation, avoids repeated API calls)
+_ami_cache: dict[str, str] = {}
+
+
+def get_ami_id(ami_type: str) -> str:
+    """Get AMI ID from SSM Parameter Store at runtime.
+
+    This ensures the provisioner always uses the latest AMI IDs without
+    requiring a Terraform apply or ECS task definition update.
+
+    Args:
+        ami_type: One of 'kali', 'victim', 'windows', 'dc'
+
+    Returns:
+        AMI ID string
+
+    Raises:
+        ValueError: If ami_type is unknown or SSM parameter not found
+    """
+    if ami_type in _ami_cache:
+        return _ami_cache[ami_type]
+
+    param_path = _AMI_SSM_PARAMS.get(ami_type)
+    if not param_path:
+        raise ValueError(f"Unknown AMI type: {ami_type}")
+
+    try:
+        ssm = boto3.client("ssm")
+        response = ssm.get_parameter(Name=param_path)
+        ami_id = response["Parameter"]["Value"]
+        logger.info("Fetched %s AMI from SSM %s: %s", ami_type, param_path, ami_id)
+        _ami_cache[ami_type] = ami_id
+        return ami_id
+    except Exception as e:
+        # No fallback - fail fast to surface IAM/config issues immediately
+        raise ValueError(f"Failed to get {ami_type} AMI ID from SSM parameter {param_path}: {e}") from e
+
+
+# Default timeout for waiting for NGFW SSH to become available (seconds)
+# PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
+NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 3600  # 60 minutes
+
+
+def _check_commit_success(output: str) -> bool:
+    """Check if PAN-OS commit succeeded.
+
+    PAN-OS outputs "Configuration committed successfully" on successful commits.
+    If the output contains a commit command but not this success message,
+    the commit failed.
+
+    Args:
+        output: Command output to check
+
+    Returns:
+        True if no commit was attempted or commit succeeded, False if commit failed
+    """
+    if not output:
+        return True
+    # Check if this was a commit operation
+    if "commit" not in output.lower():
+        return True
+    # If commit was attempted, check for success message
+    return "Configuration committed successfully" in output
+
+
+def get_vpc_gateway_ip(cidr: str) -> str:
+    """Compute VPC gateway IP from CIDR (first IP + 1).
+
+    AWS reserves the first IP (.0) for the network address and uses
+    the second IP (.1) as the VPC gateway/router.
+
+    Example: 10.1.4.0/22 -> 10.1.4.1
+
+    Args:
+        cidr: CIDR block string (e.g., "10.1.4.0/22")
+
+    Returns:
+        Gateway IP address string (e.g., "10.1.4.1")
+    """
+    import ipaddress
+
+    network = ipaddress.ip_network(cidr, strict=False)
+    return str(network.network_address + 1)
+
 
 def _get_pulumi_path() -> str:
     """Get the full path to the pulumi executable."""
@@ -45,11 +139,27 @@ def _get_pulumi_path() -> str:
     return path
 
 
+def _get_working_dir() -> str:
+    """Get the working directory for Pulumi commands.
+
+    In ECS container: /app
+    In local dev: the provisioner directory (where this script lives)
+    """
+    # If DB_PASSWORD is set, we're running locally
+    if os.environ.get("DB_PASSWORD"):
+        return os.path.dirname(os.path.abspath(__file__))
+    return "/app"
+
+
 def get_db_connection() -> psycopg.Connection:
-    """Get database connection using RDS IAM auth.
+    """Get database connection.
+
+    Supports two authentication modes:
+    - If DB_PASSWORD is set: Uses standard password authentication (local dev)
+    - Otherwise: Uses RDS IAM authentication (ECS/production)
 
     Returns:
-        psycopg.Connection: Active database connection with SSL.
+        psycopg.Connection: Active database connection.
 
     Raises:
         Exception: If connection fails.
@@ -58,20 +168,47 @@ def get_db_connection() -> psycopg.Connection:
     db_port = int(os.environ.get("DB_PORT", 5432))
     db_user = os.environ.get("DB_USER")
     db_name = os.environ.get("DB_NAME")
+    db_password = os.environ.get("DB_PASSWORD")
+
+    # Local dev mode: use password auth
+    if db_password:
+        if not all([db_host, db_user, db_name]):
+            missing = [
+                k
+                for k, v in [
+                    ("DB_HOST", db_host),
+                    ("DB_USER", db_user),
+                    ("DB_NAME", db_name),
+                ]
+                if not v
+            ]
+            raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
+
+        logger.debug("get_db_connection: password auth to %s:%s/%s", db_host, db_port, db_name)
+        return psycopg.connect(
+            host=db_host,
+            port=db_port,
+            dbname=db_name,
+            user=db_user,
+            password=db_password,
+        )
+
+    # Production mode: use RDS IAM auth
     aws_region = os.environ.get("AWS_REGION")
-
     if not all([db_host, db_user, db_name, aws_region]):
-        env_pairs = [
-            ("DB_HOST", db_host),
-            ("DB_USER", db_user),
-            ("DB_NAME", db_name),
-            ("AWS_REGION", aws_region),
+        missing = [
+            k
+            for k, v in [
+                ("DB_HOST", db_host),
+                ("DB_USER", db_user),
+                ("DB_NAME", db_name),
+                ("AWS_REGION", aws_region),
+            ]
+            if not v
         ]
-        missing = [k for k, v in env_pairs if not v]
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+        raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
-    logger.debug("get_db_connection: connecting to %s:%s/%s", db_host, db_port, db_name)
-
+    logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
     client = boto3.client("rds")
     token = client.generate_db_auth_token(
         DBHostname=db_host,
@@ -120,10 +257,82 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
         conn.commit()
 
 
+def _validate_pulumi_output_schema(output_data: dict) -> None:
+    """Validate Pulumi stack outputs have expected structure.
+
+    Args:
+        output_data: Parsed JSON from `pulumi stack output --json`.
+
+    Raises:
+        ValueError: If required keys are missing or have wrong types.
+    """
+    if "subnets" not in output_data:
+        raise ValueError("Pulumi outputs missing 'subnets' key")
+    if not isinstance(output_data["subnets"], dict):
+        raise ValueError("Pulumi 'subnets' must be a dict")
+
+    if "instances" not in output_data:
+        raise ValueError("Pulumi outputs missing 'instances' key")
+    if not isinstance(output_data["instances"], list):
+        raise ValueError("Pulumi 'instances' must be a list")
+
+
+def _validate_provisioned_outputs(
+    subnets: dict[str, dict],
+    instances: list[dict],
+    expected_subnet_names: set[str] | None = None,
+) -> None:
+    """Validate Pulumi outputs have required fields before DB write.
+
+    Args:
+        subnets: Dict of subnet_name -> subnet details.
+        instances: List of instance dicts.
+        expected_subnet_names: Optional set of expected subnet names from spec.
+
+    Raises:
+        ValueError: If required fields are missing or empty.
+    """
+    # Validate subnet data
+    for subnet_name, subnet_data in subnets.items():
+        subnet_uuid = subnet_data.get("uuid")
+        if not subnet_uuid:
+            raise ValueError(f"Subnet '{subnet_name}' missing required 'uuid'")
+
+        subnet_id = subnet_data.get("subnet_id")
+        if not subnet_id:
+            raise ValueError(f"Subnet '{subnet_name}' missing 'subnet_id'")
+
+        subnet_cidr = subnet_data.get("subnet_cidr")
+        if not subnet_cidr:
+            raise ValueError(f"Subnet '{subnet_name}' missing 'subnet_cidr'")
+
+    # Validate instance data
+    for i, inst in enumerate(instances):
+        instance_uuid = inst.get("uuid")
+        if not instance_uuid:
+            raise ValueError(f"Instance[{i}] (role={inst.get('role')}) missing 'uuid'")
+
+        instance_id = inst.get("instance_id")
+        if not instance_id:
+            raise ValueError(f"Instance[{i}] missing 'instance_id'")
+
+    # Validate expected subnets were created
+    if expected_subnet_names:
+        actual_subnets = set(subnets.keys())
+        missing = expected_subnet_names - actual_subnets
+        if missing:
+            raise ValueError(f"Expected subnets not created: {missing}")
+
+        extra = actual_subnets - expected_subnet_names
+        if extra:
+            logger.warning("Unexpected subnets in output: %s", extra)
+
+
 def write_provisioned_state(
     range_id: int,
     subnets: dict[str, dict],
     instances: list[dict],
+    ngfw_instance_id: int | None = None,
 ) -> None:
     """Write provisioned infrastructure state directly to database.
 
@@ -134,6 +343,7 @@ def write_provisioned_state(
         range_id: The range ID being provisioned.
         subnets: Dict of subnet_name -> subnet details with uuid and AWS resource IDs.
         instances: List of instance dicts with uuid, instance_id, private_ip, etc.
+        ngfw_instance_id: ID of the NGFW Instance this range is attached to (if any).
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -149,7 +359,6 @@ def write_provisioned_state(
                     "aws_cidr": subnet_data.get("subnet_cidr"),
                     "aws_security_group_id": subnet_data.get("security_group_id"),
                     "aws_route_table_id": subnet_data.get("route_table_id"),
-                    "aws_gwlb_endpoint_id": subnet_data.get("gwlb_endpoint_id"),
                 }
 
                 cur.execute(
@@ -160,6 +369,8 @@ def write_provisioned_state(
                     """,
                     (json.dumps(state), subnet_uuid, range_id),
                 )
+                if cur.rowcount == 0:
+                    raise ValueError(f"No engine_subnet record found for uuid={subnet_uuid}, range_id={range_id}")
                 logger.debug("Updated engine_subnet state: uuid=%s", subnet_uuid)
 
             # Update engine_instance records with provisioned state
@@ -189,6 +400,8 @@ def write_provisioned_state(
                     """,
                     (json.dumps(instance_state), instance_uuid),
                 )
+                if cur.rowcount == 0:
+                    raise ValueError(f"No engine_instance record found for uuid={instance_uuid}")
                 logger.debug("Updated engine_instance state: uuid=%s", instance_uuid)
 
                 # Also build legacy provisioned_instances for Range.provisioned_instances
@@ -204,15 +417,17 @@ def write_provisioned_state(
                     }
                 )
 
-            # Update Range.provisioned_instances for backwards compatibility
+            # Update Range.provisioned_instances and ngfw_instance_id
             cur.execute(
                 """
                 UPDATE mission_control_range
-                SET provisioned_instances = %s, updated_at = NOW()
+                SET provisioned_instances = %s, ngfw_instance_id = %s, updated_at = NOW()
                 WHERE id = %s
                 """,
-                (json.dumps(provisioned_instances), range_id),
+                (json.dumps(provisioned_instances), ngfw_instance_id, range_id),
             )
+            if cur.rowcount == 0:
+                raise ValueError(f"No mission_control_range record found for id={range_id}")
             logger.debug(
                 "Updated Range.provisioned_instances: range_id=%s count=%d",
                 range_id,
@@ -228,44 +443,43 @@ def write_provisioned_state(
     )
 
 
-def mark_range_instances_destroyed(range_id: int) -> None:
+def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
     """Mark all engine_instance and engine_subnet records for a range as destroyed.
+
+    Uses single UPDATE statements with subqueries to avoid race conditions between
+    SELECT and UPDATE operations.
 
     Called after Pulumi destroy succeeds to update Instance and Subnet status.
 
     Args:
         range_id: The range ID that was destroyed.
+
+    Returns:
+        Tuple of (instance_count, subnet_count) marked as destroyed.
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # Get all instance UUIDs for this range via engine_subnet
+            # Single UPDATE with subquery - no race window between SELECT and UPDATE
             cur.execute(
                 """
-                SELECT DISTINCT i.uuid
-                FROM engine_instance i
-                JOIN engine_request r ON i.request_id = r.id
-                JOIN mission_control_range rng ON rng.request_id = r.id
-                WHERE rng.id = %s
+                UPDATE engine_instance
+                SET status = 'destroyed', destroyed_at = NOW()
+                WHERE uuid IN (
+                    SELECT DISTINCT i.uuid
+                    FROM engine_instance i
+                    JOIN engine_request r ON i.request_id = r.id
+                    JOIN mission_control_range rng ON rng.request_id = r.id
+                    WHERE rng.id = %s
+                )
                 """,
                 (range_id,),
             )
-            instance_uuids = [row[0] for row in cur.fetchall()]
-
-            # Update engine_instance records
-            if instance_uuids:
-                cur.execute(
-                    """
-                    UPDATE engine_instance
-                    SET status = 'destroyed', destroyed_at = NOW()
-                    WHERE uuid = ANY(%s)
-                    """,
-                    (instance_uuids,),
-                )
-                logger.debug(
-                    "Marked %d engine_instance records as destroyed for range_id=%s",
-                    len(instance_uuids),
-                    range_id,
-                )
+            instance_count = cur.rowcount
+            logger.debug(
+                "Marked %d engine_instance records as destroyed for range_id=%s",
+                instance_count,
+                range_id,
+            )
 
             # Update engine_subnet records
             cur.execute(
@@ -276,9 +490,21 @@ def mark_range_instances_destroyed(range_id: int) -> None:
                 """,
                 (range_id,),
             )
+            subnet_count = cur.rowcount
+            logger.debug(
+                "Marked %d engine_subnet records as destroyed for range_id=%s",
+                subnet_count,
+                range_id,
+            )
 
         conn.commit()
-    logger.info("Marked engine records as destroyed: range_id=%s", range_id)
+    logger.info(
+        "Marked engine records as destroyed: range_id=%s instances=%d subnets=%d",
+        range_id,
+        instance_count,
+        subnet_count,
+    )
+    return instance_count, subnet_count
 
 
 def get_user_ngfw_data(user_id: int) -> dict | None:
@@ -328,20 +554,27 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
 
 
 def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
-    """Configure user's NGFW with subnet addresses and security rules.
+    """Configure user's NGFW with subnet routes, addresses and security rules.
 
     Starts the NGFW if stopped, waits for SSH, then runs the configure plan.
 
     Args:
         user_id: Django User ID who owns the NGFW.
         subnets: List of subnet dicts with 'name', 'cidr', 'connected_to'.
-        range_id: Range ID for unique naming of addresses/rules.
+        range_id: Range ID for unique naming of routes/addresses/rules.
 
     Raises:
-        ValueError: If user has no NGFW provisioned.
+        ValueError: If user has no NGFW provisioned or NGFW_SUBNET_CIDR not set.
         RuntimeError: If NGFW configuration fails.
     """
     from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
+
+    # Get VPC gateway IP from NGFW subnet CIDR
+    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
+    if not ngfw_subnet_cidr:
+        raise ValueError("NGFW_SUBNET_CIDR environment variable is required for subnet configuration")
+    vpc_gateway_ip = get_vpc_gateway_ip(ngfw_subnet_cidr)
+    logger.debug("configure_ngfw_subnets: vpc_gateway_ip=%s (from %s)", vpc_gateway_ip, ngfw_subnet_cidr)
 
     # Get user's NGFW
     ngfw_data = get_user_ngfw_data(user_id)
@@ -373,22 +606,52 @@ def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> 
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
 
+    # Wait for management plane to be ready (especially important after NGFW start)
+    logger.info("Verifying NGFW management plane is ready...")
+    poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=300,  # 5 min - should be quick if NGFW was already running
+        poll_interval=15,
+    )
+
     # Build and execute the configure plan
     plan = NGFWConfigureSubnetsPlan()
-    steps = plan.get_steps(subnets, range_id)
+    steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
 
     # Execute steps manually since they're dynamically generated
+    # Retry logic for transient SSH failures or commit failures (5 attempts, 15s between retries)
     for step in steps:
         logger.info("Executing NGFW config step: %s", step.name)
-        result = ssh_executor.execute(
-            host=management_ip,
-            script=step.script,
-            stdin_input=step.stdin_input,
-            timeout_seconds=step.timeout_seconds,
-        )
-        if not result.success:
-            raise RuntimeError(f"NGFW config step '{step.name}' failed: {result.stderr}")
-        logger.info("NGFW config step '%s' completed", step.name)
+        result = None
+        for attempt in range(5):
+            if attempt > 0:
+                logger.info("Retry %d/4 for step %s", attempt, step.name)
+                time.sleep(15)
+            result = ssh_executor.run_command(
+                instance_id=management_ip,
+                script=step.script,
+                stdin_input=step.stdin_input,
+                timeout_seconds=step.timeout_seconds,
+            )
+            # Check both SSH success AND PAN-OS commit success
+            if result.success and _check_commit_success(result.stdout):
+                break
+            if result.success and not _check_commit_success(result.stdout):
+                logger.warning(
+                    "NGFW config step '%s' SSH succeeded but commit failed, output: %s",
+                    step.name,
+                    result.stdout[:500] if result.stdout else "(no output)",
+                )
+        if not result or not result.success:
+            stderr = result.stderr if result else "no result"
+            raise RuntimeError(f"NGFW config step '{step.name}' failed: {stderr}")
+        if not _check_commit_success(result.stdout):
+            raise RuntimeError(
+                f"NGFW config step '{step.name}' commit failed after retries: "
+                f"{result.stdout[:500] if result.stdout else '(no output)'}"
+            )
+        logger.info("NGFW config step '%s' completed successfully", step.name)
 
     logger.info("NGFW subnet configuration complete for range %s", range_id)
 
@@ -444,22 +707,52 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
 
+    # Wait for management plane to be ready
+    logger.info("Verifying NGFW management plane is ready...")
+    poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=300,  # 5 min - should be quick since NGFW is running
+        poll_interval=15,
+    )
+
     # Build and execute the remove plan
     plan = NGFWRemoveSubnetsPlan()
     steps = plan.get_steps(subnets, range_id)
 
     # Execute steps manually since they're dynamically generated
+    # Retry logic for transient SSH failures or commit failures (5 attempts, 15s between retries)
     for step in steps:
         logger.info("Executing NGFW remove step: %s", step.name)
-        result = ssh_executor.execute(
-            host=management_ip,
-            script=step.script,
-            stdin_input=step.stdin_input,
-            timeout_seconds=step.timeout_seconds,
-        )
-        if not result.success:
-            raise RuntimeError(f"NGFW remove step '{step.name}' failed: {result.stderr}")
-        logger.info("NGFW remove step '%s' completed", step.name)
+        result = None
+        for attempt in range(5):
+            if attempt > 0:
+                logger.info("Retry %d/4 for step %s", attempt, step.name)
+                time.sleep(15)
+            result = ssh_executor.run_command(
+                instance_id=management_ip,
+                script=step.script,
+                stdin_input=step.stdin_input,
+                timeout_seconds=step.timeout_seconds,
+            )
+            # Check both SSH success AND PAN-OS commit success
+            if result.success and _check_commit_success(result.stdout):
+                break
+            if result.success and not _check_commit_success(result.stdout):
+                logger.warning(
+                    "NGFW remove step '%s' SSH succeeded but commit failed, output: %s",
+                    step.name,
+                    result.stdout[:500] if result.stdout else "(no output)",
+                )
+        if not result or not result.success:
+            stderr = result.stderr if result else "no result"
+            raise RuntimeError(f"NGFW remove step '{step.name}' failed: {stderr}")
+        if not _check_commit_success(result.stdout):
+            raise RuntimeError(
+                f"NGFW remove step '{step.name}' commit failed after retries: "
+                f"{result.stdout[:500] if result.stdout else '(no output)'}"
+            )
+        logger.info("NGFW remove step '%s' completed successfully", step.name)
 
     logger.info("NGFW subnet removal complete for range %s", range_id)
 
@@ -564,6 +857,7 @@ def get_range_data_by_request_id(request_id: str) -> dict:
             - spec: JSON dict (range_config)
             - subnet_index: Allocated subnet index
             - status: Current Range status
+            - ngfw_instance_id: ID of the NGFW Instance if ngfw is enabled and available
 
     Raises:
         ValueError: If Request or Range not found.
@@ -587,13 +881,39 @@ def get_range_data_by_request_id(request_id: str) -> dict:
         row = cur.fetchone()
         if not row:
             raise ValueError(f"Range request not found: {request_id}")
+
+        range_config = row[3] if row[3] else {}
+        user_id = row[2]
+        ngfw_instance_id = None
+
+        # Look up NGFW instance ID if ngfw is enabled
+        if range_config.get("ngfw", False):
+            cur.execute(
+                """
+                SELECT ei.id
+                FROM engine_instance ei
+                JOIN engine_request er ON ei.request_id = er.id
+                WHERE er.user_id = %s
+                  AND ei.role = 'ngfw'
+                  AND ei.status = 'active'
+                  AND ei.state->>'service_name' IS NOT NULL
+                ORDER BY ei.created_at DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            ngfw_row = cur.fetchone()
+            if ngfw_row:
+                ngfw_instance_id = ngfw_row[0]
+
         return {
             "request_id": str(row[0]),
             "range_id": row[1],
-            "user_id": row[2],
-            "spec": row[3] if row[3] else {},
+            "user_id": user_id,
+            "spec": range_config,
             "subnet_index": row[4],
             "status": row[5],
+            "ngfw_instance_id": ngfw_instance_id,
         }
 
 
@@ -629,6 +949,188 @@ def parse_serial_number(system_info_output: str) -> str | None:
     return serial
 
 
+def poll_for_serial_number(
+    ssh_executor: "SSHExecutor",
+    host: str,
+    timeout_seconds: int = 600,
+    poll_interval: int = 30,
+) -> str:
+    """Poll NGFW for serial number until it appears or timeout.
+
+    License registration with Palo Alto CSP can take 10-20 minutes after boot.
+    This function polls 'show system info' until a valid serial number appears.
+
+    Args:
+        ssh_executor: SSHExecutor instance for running commands.
+        host: NGFW management IP address.
+        timeout_seconds: Maximum time to wait for serial (default 10 min).
+        poll_interval: Seconds between poll attempts (default 30s).
+
+    Returns:
+        Serial number string.
+
+    Raises:
+        RuntimeError: If serial not found within timeout.
+    """
+    import time
+
+    start_time = time.time()
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed > timeout_seconds:
+            raise RuntimeError(
+                f"NGFW serial number not found after {timeout_seconds}s - license registration may have failed"
+            )
+
+        logger.info(
+            "Polling for NGFW serial number... (%.0fs / %ds)",
+            elapsed,
+            timeout_seconds,
+        )
+
+        try:
+            result = ssh_executor.run_command(
+                instance_id=host,
+                script="show system info",
+                timeout_seconds=60,
+            )
+            serial = parse_serial_number(result.stdout)
+            if serial:
+                logger.info(
+                    "NGFW serial number found after %.0fs: %s",
+                    elapsed,
+                    serial,
+                )
+                return serial
+
+            logger.info("Serial not yet available, retrying in %ds...", poll_interval)
+
+        except Exception as e:
+            logger.warning("Error polling for serial (will retry): %s", e)
+
+        time.sleep(poll_interval)
+
+
+def parse_device_certificate_status(system_info_output: str) -> str | None:
+    """Extract device certificate status from PAN-OS 'show system info' output.
+
+    PAN-OS format includes a line like:
+        device-certificate-status: Valid
+
+    Args:
+        system_info_output: stdout from 'show system info' command.
+
+    Returns:
+        Certificate status string if found (e.g., "Valid"), None otherwise.
+    """
+    import re
+
+    match = re.search(r"device-certificate-status:\s*(\S+)", system_info_output, re.IGNORECASE)
+    if not match:
+        return None
+
+    return match.group(1).strip()
+
+
+def poll_for_serial_and_cert(
+    ssh_executor: "SSHExecutor",
+    host: str,
+    timeout_seconds: int = 1800,
+    poll_interval: int = 30,
+) -> str:
+    """Poll NGFW until both serial number AND device certificate are present.
+
+    License registration and certificate provisioning can take 10-30 minutes
+    after boot. This function polls until both are valid, tracking each
+    independently since they may appear at different times.
+
+    Args:
+        ssh_executor: SSHExecutor instance for running commands.
+        host: NGFW management IP address.
+        timeout_seconds: Maximum time to wait (default 30 min).
+        poll_interval: Seconds between poll attempts (default 30s).
+
+    Returns:
+        Serial number string when both serial and cert are valid.
+
+    Raises:
+        RuntimeError: If either check fails within timeout, with details
+            on which check(s) failed.
+    """
+    import time
+
+    start_time = time.time()
+    serial_value = None
+    cert_status = None
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed > timeout_seconds:
+            missing = []
+            if not serial_value:
+                missing.append("serial number")
+            if cert_status != "Valid":
+                missing.append(f"device certificate (status: {cert_status or 'not found'})")
+            raise RuntimeError(f"NGFW verification failed after {timeout_seconds}s - missing: {', '.join(missing)}")
+
+        logger.info(
+            "Polling for NGFW serial and certificate... (%.0fs / %ds)",
+            elapsed,
+            timeout_seconds,
+        )
+
+        try:
+            result = ssh_executor.run_command(
+                instance_id=host,
+                script="show system info",
+                timeout_seconds=60,
+            )
+
+            # Debug: log raw output to diagnose parsing issues
+            logger.debug("Raw SSH output (first 500 chars): %r", result.stdout[:500])
+
+            # Parse both values from output
+            serial_value = parse_serial_number(result.stdout)
+            cert_status = parse_device_certificate_status(result.stdout)
+
+            # Log current state
+            serial_ok = bool(serial_value)
+            cert_ok = cert_status == "Valid"
+
+            if serial_ok and cert_ok:
+                logger.info(
+                    "NGFW verification complete after %.0fs: serial=%s, cert=%s",
+                    elapsed,
+                    serial_value,
+                    cert_status,
+                )
+                assert serial_value is not None  # Guaranteed by serial_ok check
+                return serial_value
+
+            # Log what's still missing
+            status_parts = []
+            if serial_ok:
+                status_parts.append(f"serial={serial_value}")
+            else:
+                status_parts.append("serial=waiting")
+            if cert_ok:
+                status_parts.append(f"cert={cert_status}")
+            else:
+                status_parts.append(f"cert={cert_status or 'waiting'}")
+
+            logger.info(
+                "NGFW not ready (%s), retrying in %ds...",
+                ", ".join(status_parts),
+                poll_interval,
+            )
+
+        except Exception as e:
+            logger.warning("Error polling NGFW (will retry): %s", e)
+
+        time.sleep(poll_interval)
+
+
 def update_instance_state(request_id: str, status: str, **state_updates) -> None:
     """Update NGFW Instance and App status/state in Engine database.
 
@@ -641,7 +1143,7 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
         status: New status value (e.g., 'provisioning', 'ready', 'failed', 'destroyed').
         **state_updates: Key-value pairs to merge into Instance.state JSON.
             Common keys: ec2_instance_id, management_ip, dataplane_ip,
-            service_name, gwlb_arn, target_group_arn, pulumi_stack, error_message.
+            service_name, data_eni_id, pulumi_stack, error_message.
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -758,7 +1260,7 @@ def run_pulumi(operation: str, request_id: str) -> None:
             logger.info("Provision failed - attempting auto-cleanup...")
             subprocess.run(
                 ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
@@ -787,7 +1289,7 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
     # Try to select existing stack
     result = subprocess.run(  # noqa: S603
         ["pulumi", "stack", "select", stack_name],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -814,7 +1316,7 @@ def _select_or_create_stack(stack_name: str, env: dict) -> None:
             "--secrets-provider",
             secrets_provider,
         ],
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -843,22 +1345,24 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "rangeVpcCidr": os.environ.get("RANGE_VPC_CIDR", ""),
         "rangeRouteTableId": os.environ.get("RANGE_ROUTE_TABLE_ID", ""),
         "availabilityZone": os.environ.get("RANGE_AVAILABILITY_ZONE", ""),
-        "kaliSecurityGroupId": os.environ.get("KALI_SECURITY_GROUP_ID", ""),
-        "victimSecurityGroupId": os.environ.get("VICTIM_SECURITY_GROUP_ID", ""),
-        "dcSecurityGroupId": os.environ.get("DC_SECURITY_GROUP_ID", ""),
         "rangeInstanceProfileName": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
-        "kaliAmiId": os.environ.get("KALI_AMI_ID", ""),
-        "victimAmiId": os.environ.get("VICTIM_AMI_ID", ""),
-        "windowsAmiId": os.environ.get("WINDOWS_AMI_ID", ""),
-        "dcAmiId": os.environ.get("DC_AMI_ID", ""),
+        # AMI IDs fetched from SSM at runtime for latest values
+        "kaliAmiId": get_ami_id("kali"),
+        "victimAmiId": get_ami_id("victim"),
+        "windowsAmiId": get_ami_id("windows"),
+        "dcAmiId": get_ami_id("dc"),
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
+        "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
+        "firewallEndpointId": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
+        "portalVpcCidr": os.environ.get("PORTAL_VPC_CIDR", ""),
+        "portalVpcPeeringId": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
     }
 
     for key, value in config_values.items():
         if value:
             subprocess.run(  # noqa: S603
                 ["pulumi", "config", "set", key, value],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
@@ -866,7 +1370,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
             # Remove empty config values to prevent stale values from persisting
             subprocess.run(  # noqa: S603
                 ["pulumi", "config", "rm", key],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
                 # Ignore errors - key may not exist
@@ -875,6 +1379,15 @@ def _set_stack_config(env: dict, range_id: int) -> None:
 
 def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str, env: dict) -> None:
     """Run Pulumi up to provision the range.
+
+    The sequence is:
+    1. Run Pulumi up
+    2. Validate outputs (fail early if incomplete)
+    3. Configure NGFW (fail before marking ready)
+    4. Write to DB (mark as ready)
+    5. Publish ready event
+
+    This ensures the range is NOT marked ready if NGFW configuration fails.
 
     Args:
         request_id: UUID string of the Request.
@@ -889,7 +1402,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
 
     result = subprocess.run(
         ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -906,7 +1419,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     logger.info("Retrieving stack outputs...")
     outputs = subprocess.run(
         ["pulumi", "stack", "output", "--json"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -915,35 +1428,52 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     output_data = json.loads(outputs.stdout)
     logger.info(f"Stack outputs: {json.dumps(output_data, indent=2)}")
 
-    # Write provisioned state directly to DB (follows NGFW pattern)
-    subnets_output = output_data.get("subnets", {})
-    write_provisioned_state(
-        range_id=range_id,
-        subnets=subnets_output,
-        instances=output_data.get("instances", []),
-    )
+    # Validate output schema
+    _validate_pulumi_output_schema(output_data)
 
-    # Configure user's NGFW with subnet addresses and security rules
-    # Build subnet list with CIDRs for NGFW configuration
+    subnets_output = output_data.get("subnets", {})
+    instances_output = output_data.get("instances", [])
+
+    # Get range spec for validation and NGFW config
     range_data = get_range_data_by_request_id(request_id)
     range_spec = range_data.get("spec", {})
     spec_subnets = range_spec.get("subnets", [])
+    expected_subnet_names = {s.get("name") for s in spec_subnets}
 
-    # Merge CIDRs from Pulumi output into subnet specs
+    # Validate outputs have all required fields
+    _validate_provisioned_outputs(
+        subnets=subnets_output,
+        instances=instances_output,
+        expected_subnet_names=expected_subnet_names,
+    )
+
+    # Configure NGFW BEFORE marking range as ready
+    # If NGFW config fails, the range should NOT be marked ready
     subnets_for_ngfw = []
     for subnet_spec in spec_subnets:
         subnet_name = subnet_spec.get("name")
         subnet_output = subnets_output.get(subnet_name, {})
+        cidr = subnet_output.get("subnet_cidr", "")
+        if not cidr:
+            raise ValueError(f"Subnet '{subnet_name}' has no CIDR - cannot configure NGFW")
         subnets_for_ngfw.append(
             {
                 "name": subnet_name,
-                "cidr": subnet_output.get("subnet_cidr", ""),
+                "cidr": cidr,
                 "connected_to": subnet_spec.get("connected_to", []),
             }
         )
 
     if subnets_for_ngfw:
         configure_ngfw_subnets(user_id, subnets_for_ngfw, range_id)
+
+    # Write provisioned state to DB - only after NGFW is configured
+    write_provisioned_state(
+        range_id=range_id,
+        subnets=subnets_output,
+        instances=instances_output,
+        ngfw_instance_id=range_data.get("ngfw_instance_id"),
+    )
 
     # Publish notification-only ready event
     publish_ready(
@@ -956,6 +1486,12 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
 def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, env: dict) -> None:
     """Run Pulumi destroy to tear down the range.
 
+    This function is designed to be idempotent: if Pulumi destroy succeeds,
+    the database records are marked as destroyed even if subsequent steps fail.
+
+    Pre-destroy validation ensures we don't attempt to destroy ranges that are
+    already in a terminal state or don't exist.
+
     Args:
         request_id: UUID string of the Request.
         range_id: The range ID being destroyed.
@@ -963,11 +1499,23 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
     """
-    # Engine already set status to DESTROYING before launching ECS task
+    # Pre-destroy validation: verify range exists and is in a destroyable state
+    try:
+        range_data = get_range_data_by_request_id(request_id)
+    except ValueError as e:
+        logger.warning("Range not found for request %s, skipping destroy: %s", request_id, e)
+        return
 
-    # Remove NGFW subnet config BEFORE destroying AWS resources
-    # Get subnet specs from range_config for removal
-    range_data = get_range_data_by_request_id(request_id)
+    current_status = range_data.get("status")
+    if current_status in ("destroyed", "failed"):
+        logger.info(
+            "Range %d already in terminal state '%s', skipping destroy",
+            range_id,
+            current_status,
+        )
+        return
+
+    # Get subnet specs from range_config for NGFW removal
     range_spec = range_data.get("spec", {})
     spec_subnets = range_spec.get("subnets", [])
 
@@ -980,63 +1528,74 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
 
     logger.info("Running pulumi destroy...")
 
-    result = subprocess.run(  # noqa: S603
-        [
-            _get_pulumi_path(),
-            "destroy",
-            "--yes",
-            "--non-interactive",
-            "--skip-preview",
-        ],
-        cwd="/app",
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    pulumi_succeeded = False
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                _get_pulumi_path(),
+                "destroy",
+                "--yes",
+                "--non-interactive",
+                "--skip-preview",
+            ],
+            cwd=_get_working_dir(),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
 
-    logger.info(f"Pulumi stdout:\n{result.stdout}")
-    if result.stderr:
-        logger.warning(f"Pulumi stderr:\n{result.stderr}")
+        logger.info(f"Pulumi stdout:\n{result.stdout}")
+        if result.stderr:
+            logger.warning(f"Pulumi stderr:\n{result.stderr}")
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Pulumi destroy failed: {result.stderr}")
+        if result.returncode != 0:
+            raise RuntimeError(f"Pulumi destroy failed: {result.stderr}")
 
-    # Remove stack
-    logger.info(f"Removing stack: {stack_name}")
-    subprocess.run(  # noqa: S603
-        ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
-        cwd="/app",
-        env=env,
-        check=True,
-        capture_output=True,
-    )
+        pulumi_succeeded = True
 
-    # Mark engine_instance and engine_subnet records as destroyed
-    mark_range_instances_destroyed(range_id)
+        # Remove stack
+        logger.info(f"Removing stack: {stack_name}")
+        subprocess.run(  # noqa: S603
+            ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
+            cwd=_get_working_dir(),
+            env=env,
+            check=True,
+            capture_output=True,
+        )
 
-    # If this was the user's last active range, stop their NGFW to save costs
-    if not user_has_active_ranges(user_id, range_id):
-        ngfw_data = get_user_ngfw_data(user_id)
-        if ngfw_data and ngfw_data["status"] == "active":
-            logger.info("No other active ranges for user %s, stopping NGFW", user_id)
+    finally:
+        # Always mark DB records as destroyed if Pulumi succeeded
+        # This ensures DB state is updated even if stack removal fails
+        if pulumi_succeeded:
             try:
-                run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
+                mark_range_instances_destroyed(range_id)
             except Exception as e:
-                logger.warning("Failed to stop NGFW (non-fatal): %s", e)
+                logger.error("Failed to mark range %d as destroyed in DB: %s", range_id, e)
+                # Don't raise - AWS resources are gone, DB inconsistency is better than stuck
 
-    # Publish destroyed event
+        # Always attempt NGFW auto-stop (soft fail)
+        try:
+            if not user_has_active_ranges(user_id, range_id):
+                ngfw_data = get_user_ngfw_data(user_id)
+                if ngfw_data and ngfw_data["status"] == "active":
+                    logger.info("No other active ranges for user %s, stopping NGFW", user_id)
+                    run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
+        except Exception as e:
+            logger.warning("Failed to stop NGFW (non-fatal): %s", e)
+
+    # Publish destroyed event only on full success
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 
 
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
-    """Run NGFW runtime operation (start/stop/route management).
+    """Run NGFW runtime operation (start/stop/complete-setup).
 
     Retrieves EC2 instance ID from the Instance.state (populated during Pulumi
     provisioning), executes the operation plan, and publishes events for status
     updates.
 
     Args:
-        operation: Operation name (start, stop, add-route, remove-route).
+        operation: Operation name (start, stop, complete-setup).
         request_id: UUID string of the Request.
         **kwargs: Operation-specific parameters (overrides for context).
 
@@ -1048,14 +1607,17 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     if kwargs:
         logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
 
+    # Handle complete-setup as special case (requires AWS + SSH hybrid execution)
+    if operation == "complete-setup":
+        _run_complete_setup(request_id)
+        return
+
     from events import publish_ngfw_event
 
     # Status transitions for each operation
     status_map = {
         "start": ("starting", "active"),
         "stop": ("stopping", "stopped"),
-        "add-route": ("configuring", "active"),
-        "remove-route": ("configuring", "active"),
     }
 
     if operation not in status_map:
@@ -1092,8 +1654,6 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
         plan_map = {
             "start": "plans.ngfw_start.NGFWStartPlan",
             "stop": "plans.ngfw_stop.NGFWStopPlan",
-            "add-route": "plans.gwlb_add_route.GWLBAddRoutePlan",
-            "remove-route": "plans.gwlb_remove_route.GWLBRemoveRoutePlan",
         }
 
         plan_path = plan_map[operation]
@@ -1106,9 +1666,11 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
         plan = plan_class()
 
         # Build context dict with EC2 instance ID and any additional kwargs
-        # Note: Plans use "instance_id" for the EC2 instance ID parameter
+        # NOTE ON NAMING: Plans use "instance_id" key for the AWS EC2 Instance ID
+        # (e.g., "i-099ee928142d5f092"), NOT the Django Instance UUID.
+        # This is a legacy naming convention that should eventually be renamed.
         context = {
-            "instance_id": ec2_instance_id,
+            "instance_id": ec2_instance_id,  # AWS EC2 Instance ID (e.g., "i-...")
             **kwargs,
         }
 
@@ -1148,6 +1710,180 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
         raise
 
 
+def _run_complete_setup(request_id: str) -> None:
+    """Complete NGFW setup after user associates device in SCM/XDR.
+
+    This hybrid operation combines AWS (start instance) and SSH (license fetch,
+    certificate verification) to finalize NGFW configuration after the user
+    has manually associated the device in Strata Cloud Manager and XDR.
+
+    Flow:
+    1. Start NGFW if stopped, wait if in transitional state (AWS)
+    2. Wait for SSH connectivity
+    3. Fetch license (SSH) - retrieves Logging Service license from CDL
+    4. Poll for valid device certificate (SSH)
+    5. Mark NGFW as ready and auto-stop
+
+    Args:
+        request_id: UUID string of the Request.
+
+    Raises:
+        RuntimeError: If any step fails.
+    """
+
+    logger.info("_run_complete_setup: starting request_id=%s", request_id)
+
+    # Get NGFW data from database
+    ngfw_data = get_ngfw_data_by_request_id(request_id)
+    instance_uuid: str = ngfw_data["instance_id"]
+    app_id: str | None = ngfw_data["app_id"]
+    state: dict = ngfw_data.get("state", {})
+    current_status: str = ngfw_data.get("status", "")
+
+    ec2_instance_id: str | None = state.get("ec2_instance_id")
+    management_ip: str | None = state.get("management_ip")
+    ssh_key_secret_arn: str | None = state.get("ssh_key_secret_arn")
+
+    if not ec2_instance_id:
+        raise RuntimeError(f"EC2 instance ID not found in state for request: {request_id}")
+    if not management_ip:
+        raise RuntimeError(f"Management IP not found in state for request: {request_id}")
+    if not ssh_key_secret_arn:
+        raise RuntimeError(f"SSH key secret ARN not found in state for request: {request_id}")
+
+    # Warn if already in configuring state (possible retry of failed attempt)
+    if current_status == "configuring":
+        logger.warning(
+            "_run_complete_setup: NGFW already in 'configuring' status, "
+            "possibly retrying after previous failure: request_id=%s",
+            request_id,
+        )
+
+    # Update status to configuring
+    update_instance_state(request_id, "configuring")
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_uuid,
+        app_id=app_id,
+        status="configuring",
+    )
+
+    try:
+        # 1. Start NGFW if stopped, wait if in transitional state
+        aws_executor = AWSExecutor()
+        result = aws_executor.describe_instance(ec2_instance_id)
+        if not result.success:
+            raise RuntimeError(f"Failed to describe instance: {result.stderr}")
+        instance_data = json.loads(result.stdout)
+        ec2_state: str = (
+            instance_data.get("Reservations", [{}])[0].get("Instances", [{}])[0].get("State", {}).get("Name", "unknown")
+        )
+        logger.info("_run_complete_setup: EC2 instance state=%s", ec2_state)
+
+        if ec2_state == "stopped":
+            logger.info("_run_complete_setup: Starting stopped NGFW instance")
+            aws_executor.start_instance(ec2_instance_id)
+            aws_executor.wait_for_running(ec2_instance_id)
+        elif ec2_state in ("pending", "stopping", "shutting-down"):
+            # Instance is in a transitional state - wait for it to stabilize
+            logger.info(
+                "_run_complete_setup: Instance in transitional state '%s', waiting for stable state",
+                ec2_state,
+            )
+            if ec2_state == "pending":
+                aws_executor.wait_for_running(ec2_instance_id)
+            elif ec2_state == "stopping":
+                aws_executor.wait_for_stopped(ec2_instance_id)
+                # Now start it
+                logger.info("_run_complete_setup: Starting NGFW after it finished stopping")
+                aws_executor.start_instance(ec2_instance_id)
+                aws_executor.wait_for_running(ec2_instance_id)
+            else:  # shutting-down
+                raise RuntimeError(f"NGFW instance is shutting down (terminating): {ec2_instance_id}")
+        elif ec2_state == "running":
+            logger.info("_run_complete_setup: NGFW instance already running")
+        elif ec2_state == "terminated":
+            raise RuntimeError(f"NGFW instance has been terminated: {ec2_instance_id}")
+        else:
+            raise RuntimeError(f"NGFW instance in unexpected state: {ec2_state}")
+
+        # 2. Wait for SSH connectivity
+        logger.info("_run_complete_setup: Waiting for SSH on %s", management_ip)
+        secrets_client = boto3.client("secretsmanager")
+        secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+        private_key: str = secret_response["SecretString"]
+
+        ssh_executor = SSHExecutor(private_key=private_key)
+        ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
+        ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
+
+        # 3. Fetch license (retrieves Logging Service license after SCM association)
+        logger.info("_run_complete_setup: Fetching license")
+        license_result = ssh_executor.run_command(
+            instance_id=management_ip,
+            script="request license fetch",
+            timeout_seconds=120,
+        )
+        if not license_result.success:
+            logger.warning("License fetch returned non-success: %s", license_result.stderr)
+            # Don't fail - license fetch may report errors even when successful
+
+        logger.info(
+            "License fetch output: %s",
+            license_result.stdout[:500] if license_result.stdout else "(empty)",
+        )
+
+        # 4. Poll for valid device certificate
+        # CSP certificate sync typically takes 10-30 minutes after license fetch.
+        # Rather than sleeping a fixed time, poll with appropriate timeout.
+        logger.info("_run_complete_setup: Polling for valid device certificate")
+        poll_timeout = int(os.environ.get("NGFW_CERT_POLL_TIMEOUT", 2400))  # 40 min default
+        serial_number = poll_for_serial_and_cert(
+            ssh_executor=ssh_executor,
+            host=management_ip,
+            timeout_seconds=poll_timeout,
+            poll_interval=30,
+        )
+
+        # 5. Update state and mark ready (only pass serial_number, not entire state)
+        update_instance_state(request_id, STATUS_READY, serial_number=serial_number)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_READY,
+            serial_number=serial_number,
+        )
+
+        logger.info("_run_complete_setup: NGFW marked as ready, serial=%s", serial_number)
+
+        # 6. Auto-stop NGFW to save costs (soft failure - setup already succeeded)
+        logger.info("_run_complete_setup: Auto-stopping NGFW")
+        try:
+            run_ngfw_operation("stop", request_id)
+            logger.info("_run_complete_setup: Auto-stop completed successfully")
+        except Exception:
+            logger.exception(
+                "_run_complete_setup: Auto-stop failed (non-fatal) - NGFW remains running: request_id=%s",
+                request_id,
+            )
+            # Don't re-raise - setup succeeded, stop failure is non-fatal
+
+        logger.info("_run_complete_setup: Complete setup finished successfully")
+
+    except Exception:
+        logger.exception("_run_complete_setup failed: request_id=%s", request_id)
+        error_msg = "Complete setup failed - check logs for details"
+        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_FAILED,
+        )
+        raise
+
+
 def run_ngfw_pulumi(operation: str, request_id: str) -> None:
     """Run NGFW Pulumi operation (provision or deprovision).
 
@@ -1163,6 +1899,8 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
 
     # Get NGFW data from database (needed for correlation IDs and credentials)
     ngfw_data = get_ngfw_data_by_request_id(request_id)
+    # NOTE: "instance_id" here is the Django Instance UUID (e.g., "5eb96281-a4a8-...")
+    # NOT the AWS EC2 Instance ID. Variable named for event publishing compatibility.
     instance_id = ngfw_data["instance_id"]
     app_id = ngfw_data["app_id"]
     app_spec = ngfw_data.get("app_spec", {})
@@ -1181,7 +1919,8 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
         _set_ngfw_stack_config(env, request_id, instance_id, app_spec)
 
         if operation == "up":
-            _run_ngfw_provision(request_id, instance_id, app_id, stack_name, env)
+            sls_region = app_spec.get("sls_region", "americas")
+            _run_ngfw_provision(request_id, instance_id, app_id, stack_name, env, sls_region)
         elif operation == "destroy":
             _run_ngfw_deprovision(request_id, instance_id, app_id, stack_name, env)
         else:
@@ -1196,7 +1935,7 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
             logger.info("NGFW provision failed - attempting auto-cleanup...")
             subprocess.run(
                 ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
@@ -1231,7 +1970,8 @@ def _set_ngfw_stack_config(env: dict, request_id: str, instance_uuid: str, app_s
         "environment": os.environ.get("ENVIRONMENT", "dev"),
         "ngfwVpcId": os.environ.get("NGFW_VPC_ID", ""),
         "ngfwSubnetId": os.environ.get("NGFW_SUBNET_ID", ""),
-        "ngfwSecurityGroupId": os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+        "ngfwMgmtSecurityGroupId": os.environ.get("NGFW_MGMT_SECURITY_GROUP_ID", ""),
+        "ngfwDataSecurityGroupId": os.environ.get("NGFW_DATA_SECURITY_GROUP_ID", ""),
         "ngfwAmiId": os.environ.get("NGFW_AMI_ID", ""),
         "bootstrapBucket": os.environ.get("NGFW_BOOTSTRAP_BUCKET", ""),
         "ngfwInstanceType": os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
@@ -1248,28 +1988,31 @@ def _set_ngfw_stack_config(env: dict, request_id: str, instance_uuid: str, app_s
         if value:
             subprocess.run(  # noqa: S603
                 ["pulumi", "config", "set", key, value],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
         else:
             subprocess.run(  # noqa: S603
                 ["pulumi", "config", "rm", key],  # noqa: S607
-                cwd="/app",
+                cwd=_get_working_dir(),
                 env=env,
                 capture_output=True,
             )
 
 
-def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
+def _run_ngfw_provision(
+    request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict, sls_region: str
+) -> None:
     """Run Pulumi up to provision the NGFW, then run post-Pulumi configuration.
 
     Args:
         request_id: UUID string of the Request.
-        instance_id: UUID string of the Instance.
+        instance_id: Django Instance UUID (e.g., "5eb96281-a4a8-..."), NOT AWS EC2 ID.
         app_id: UUID string of the App (NGFW).
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
+        sls_region: Strata Logging Service region (e.g., "americas", "europe").
     """
     # Update local DB and emit provisioning status event
     update_instance_state(request_id, STATUS_PROVISIONING)
@@ -1283,7 +2026,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
 
     result = subprocess.run(
         ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -1300,7 +2043,7 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     logger.info("Retrieving NGFW stack outputs...")
     outputs = subprocess.run(
         ["pulumi", "stack", "output", "--json"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -1310,6 +2053,32 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     logger.info(f"NGFW Stack outputs: {json.dumps(output_data, indent=2)}")
 
     # Run post-Pulumi configuration (wait for SSH, configure cloud logging, etc.)
+    # Skip in local dev mode (DB_PASSWORD set) - post-Pulumi config requires real AWS resources
+    if os.environ.get("DB_PASSWORD"):
+        logger.info("LOCAL DEV MODE: Skipping post-Pulumi NGFW configuration")
+        # Update state with mock outputs and mark as ready
+        update_instance_state(
+            request_id,
+            STATUS_READY,
+            **output_data,
+        )
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_id,
+            app_id=app_id,
+            status=STATUS_READY,
+        )
+        # Auto-stop: In local dev, just update status (no real EC2 to stop)
+        logger.info("LOCAL DEV MODE: Setting NGFW status to stopped: request_id=%s", request_id)
+        update_instance_state(request_id, "stopped")
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_id,
+            app_id=app_id,
+            status="stopped",
+        )
+        return
+
     logger.info("Running post-Pulumi NGFW configuration...")
 
     # Get SSH private key from Secrets Manager
@@ -1326,29 +2095,45 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
 
     # Create SSH executor and wait for NGFW to be ready (15-25 min boot time)
     ssh_executor = SSHExecutor(private_key=private_key)
+    ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
     logger.info(f"Waiting for SSH on NGFW at {management_ip}...")
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=1800)
+    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
+
+    # Poll for serial number BEFORE running provision plan - this ensures management
+    # plane is ready to accept configuration commands. Serial number appearing
+    # indicates the PAN-OS management server is operational.
+    logger.info("Polling for NGFW serial number (management plane readiness check)...")
+    serial_number = poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=600,  # 10 min - serial should appear after mgmt plane is up
+        poll_interval=30,
+    )
+    logger.info("NGFW management plane ready, serial=%s", serial_number)
+
+    # Brief pause after serial poll to let management plane stabilize
+    logger.info("Waiting 30s for management plane to stabilize before configuration...")
+    time.sleep(30)
 
     # Create orchestrator with SSH executor
     orchestrator = SetupOrchestrator(ssh_executor)
 
-    # Create context object with the stack outputs
-    class NGFWContext:
-        pass
-
-    context = NGFWContext()
-    context.ec2_instance_id = output_data.get("instance_id")
-    context.management_ip = management_ip
-    context.dataplane_ip = output_data.get("dataplane_ip")
-    context.service_name = output_data.get("service_name")
-    context.gwlb_arn = output_data.get("gwlb_arn")
-    context.target_group_arn = output_data.get("target_group_arn")
-    context.sls_region = os.environ.get("AWS_REGION", "us-east-2")
+    # Create context dict with the stack outputs for template rendering
+    context = {
+        "ec2_instance_id": output_data.get("ec2_instance_id"),
+        "management_ip": management_ip,
+        "dataplane_ip": output_data.get("dataplane_ip"),
+        "data_eni_id": output_data.get("data_eni_id"),
+        "sls_region": sls_region,
+    }
 
     # Import and run the NGFW provision plan
     from plans.ngfw_provision import NGFWProvisionPlan
 
     provision_plan = NGFWProvisionPlan()
+    # NOTE: SetupOrchestrator.orchestrate() uses "instance_id" as the SSH target.
+    # For SSH-based plans, this is the management IP address, not a UUID or EC2 ID.
+    logger.info("Running NGFW provision plan...")
     provision_result = orchestrator.orchestrate(
         instance_id=management_ip,
         plan=provision_plan,
@@ -1358,79 +2143,44 @@ def _run_ngfw_provision(request_id: str, instance_id: str, app_id: str, stack_na
     if not provision_result.success:
         raise RuntimeError("NGFW post-Pulumi configuration failed")
 
-    # Extract serial number from verify_device_cert step output
-    serial_number = None
-    for step_result in provision_result.step_results:
-        if step_result.step_name == "verify_device_cert":
-            serial_number = parse_serial_number(step_result.stdout)
-            break
-
-    if not serial_number:
-        raise RuntimeError("NGFW serial number not found - CSP registration may have failed")
-
-    # Run GWLB setup (register target, wait for healthy)
-    # This uses AWSExecutor directly since GWLBSetupPlan expects AWS API calls
-    logger.info("Running GWLB target registration...")
-    from plans.gwlb_setup import GWLBSetupPlan
-
-    aws_executor = AWSExecutor()
-    gwlb_plan = GWLBSetupPlan()
-
-    # Build context for GWLB setup - needs target_group_arn and instance_id (EC2)
-    ec2_instance_id = output_data.get("instance_id")
-    target_group_arn = output_data.get("target_group_arn")
-
-    if not target_group_arn:
-        raise RuntimeError("NGFW stack missing target_group_arn output")
-    if not ec2_instance_id:
-        raise RuntimeError("NGFW stack missing instance_id output")
-
-    # Execute GWLB setup steps directly via AWSExecutor
-    gwlb_context = {
-        "target_group_arn": target_group_arn,
-        "target_id": ec2_instance_id,
-    }
-
-    for step in gwlb_plan.steps:
-        step_params = {k: gwlb_context[k] for k in step.params}
-        logger.info(f"Executing GWLB step: {step.name}")
-        method = getattr(aws_executor, step.action)
-        step_result = method(**step_params)
-        if not step_result.success:
-            raise RuntimeError(f"GWLB setup step '{step.name}' failed: {step_result.stderr}")
-        logger.info(f"GWLB step '{step.name}' completed successfully")
-
-    # Build state dict with all outputs
+    # Build state dict with all outputs including data_eni_id for range routing
     state = {
-        "ec2_instance_id": output_data.get("instance_id"),
+        "ec2_instance_id": output_data.get("ec2_instance_id"),
         "management_ip": output_data.get("management_ip"),
         "dataplane_ip": output_data.get("dataplane_ip"),
-        "service_name": output_data.get("service_name"),
-        "gwlb_arn": output_data.get("gwlb_arn"),
-        "target_group_arn": output_data.get("target_group_arn"),
+        "data_eni_id": output_data.get("data_eni_id"),
         "ssh_key_secret_arn": ssh_key_secret_arn,
         "pulumi_stack": stack_name,
         "serial_number": serial_number,
     }
 
-    # Update local DB with provisioned resources
-    update_instance_state(request_id, STATUS_READY, **state)
+    # Save state to DB FIRST so run_ngfw_operation can find ec2_instance_id
+    # Keep status as provisioning for now - will update to awaiting_association after stop
+    update_instance_state(request_id, STATUS_PROVISIONING, **state)
 
-    # Emit ready event notification for CMS/Engine handlers
-    # Note: Full state is already in DB - this is just a notification
-    # Serial number included so consumers can verify CSP registration
+    # Auto-stop NGFW to save costs while user completes association
+    # Stop BEFORE emitting awaiting_association status so NGFW is fully stopped
+    # when user sees the Complete Setup button (prevents race condition)
+    logger.info("Auto-stopping NGFW after provisioning (awaiting association): request_id=%s", request_id)
+    try:
+        run_ngfw_operation("stop", request_id)
+        logger.info("Auto-stop completed successfully: request_id=%s", request_id)
+    except Exception:
+        logger.exception("Auto-stop FAILED: request_id=%s - NGFW remains running (cost impact)", request_id)
+
+    # Update status to awaiting_association - user must complete setup
+    # User must: 1) Associate device in SCM, 2) Connect to XDR/XSIAM
+    update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION)
+
+    # Emit awaiting_association event for UI to show user action prompt
+    # Serial number included so users can copy it for SCM device association
     publish_ngfw_event(
         request_id=request_id,
         instance_id=instance_id,
         app_id=app_id,
-        status=STATUS_READY,
+        status=STATUS_AWAITING_ASSOCIATION,
         serial_number=serial_number,
     )
-
-    # Auto-stop NGFW after provisioning to save costs
-    # NGFW will be started on-demand when ranges link to it
-    logger.info("Auto-stopping NGFW after provisioning: request_id=%s", request_id)
-    run_ngfw_operation("stop", request_id)
 
 
 def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
@@ -1438,7 +2188,7 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
 
     Args:
         request_id: UUID string of the Request.
-        instance_id: UUID string of the Instance.
+        instance_id: Django Instance UUID (e.g., "5eb96281-a4a8-..."), NOT AWS EC2 ID.
         app_id: UUID string of the App (NGFW).
         stack_name: The Pulumi stack name.
         env: Environment dictionary for subprocess.
@@ -1476,13 +2226,10 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
 
             deprovision_plan = NGFWDeprovisionPlan()
 
-            # Create context with management_ip from stored state
-            class NGFWContext:
-                pass
+            # Create context dict with management_ip from stored state
+            context = {"management_ip": management_ip}
 
-            context = NGFWContext()
-            context.management_ip = management_ip
-
+            # NOTE: SetupOrchestrator uses "instance_id" as the SSH target (IP address here).
             deprovision_result = orchestrator.orchestrate(
                 instance_id=management_ip,
                 plan=deprovision_plan,
@@ -1506,7 +2253,7 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
             "--non-interactive",
             "--skip-preview",
         ],
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         capture_output=True,
         text=True,
@@ -1523,7 +2270,7 @@ def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_
     logger.info(f"Removing NGFW stack: {stack_name}")
     subprocess.run(  # noqa: S603
         ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
-        cwd="/app",
+        cwd=_get_working_dir(),
         env=env,
         check=True,
         capture_output=True,
@@ -1573,8 +2320,7 @@ if __name__ == "__main__":
             "deprovision",
             "start",
             "stop",
-            "add-route",
-            "remove-route",
+            "complete-setup",
         ],
         help="NGFW operation to perform",
     )
@@ -1590,31 +2336,6 @@ if __name__ == "__main__":
         type=str,
         help="EC2 instance ID (for start/stop)",
     )
-    ngfw_parser.add_argument(
-        "--subnet-id",
-        type=str,
-        help="Subnet ID (for add-route)",
-    )
-    ngfw_parser.add_argument(
-        "--service-name",
-        type=str,
-        help="VPC Endpoint Service name (for add-route)",
-    )
-    ngfw_parser.add_argument(
-        "--vpc-id",
-        type=str,
-        help="VPC ID (for add-route)",
-    )
-    ngfw_parser.add_argument(
-        "--route-table-id",
-        type=str,
-        help="Route table ID (for add-route)",
-    )
-    ngfw_parser.add_argument(
-        "--endpoint-id",
-        type=str,
-        help="VPC Endpoint ID (for remove-route)",
-    )
 
     args = parser.parse_args()
 
@@ -1629,20 +2350,10 @@ if __name__ == "__main__":
             pulumi_op = "up" if args.operation == "provision" else "destroy"
             run_ngfw_pulumi(pulumi_op, args.request_id)
         else:
-            # Runtime operations (start, stop, add-route, remove-route)
+            # Runtime operations (start, stop, complete-setup)
             kwargs = {}
             if args.ec2_instance_id:
                 kwargs["ec2_instance_id"] = args.ec2_instance_id
-            if args.subnet_id:
-                kwargs["subnet_id"] = args.subnet_id
-            if args.service_name:
-                kwargs["service_name"] = args.service_name
-            if args.vpc_id:
-                kwargs["vpc_id"] = args.vpc_id
-            if args.route_table_id:
-                kwargs["route_table_id"] = args.route_table_id
-            if args.endpoint_id:
-                kwargs["endpoint_id"] = args.endpoint_id
 
             run_ngfw_operation(args.operation, args.request_id, **kwargs)
 

@@ -266,6 +266,9 @@ module "ssm" {
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
   redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
 
+  # Database endpoint (direct RDS connection - hostname only, not endpoint with port)
+  db_host_override = module.rds.db_instance_address
+
   # Logging level (DEBUG for dev, INFO for prod)
   log_level = var.log_level
 }
@@ -435,7 +438,7 @@ module "pulumi_provisioner" {
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
 
-  # Database
+  # Database (direct RDS connection - hostname only, port passed separately)
   db_host        = module.rds.db_instance_address
   db_port        = 5432
   db_name        = var.db_name
@@ -457,9 +460,6 @@ module "pulumi_provisioner" {
   range_vpc_cidr              = data.terraform_remote_state.range.outputs.vpc_cidr
   range_route_table_id        = data.terraform_remote_state.range.outputs.private_route_table_id
   range_availability_zone     = data.terraform_remote_state.range.outputs.availability_zone
-  victim_security_group_id    = data.terraform_remote_state.range.outputs.victim_security_group_id
-  kali_security_group_id      = data.terraform_remote_state.range.outputs.kali_security_group_id
-  dc_security_group_id        = data.terraform_remote_state.range.outputs.dc_security_group_id
   range_instance_profile_arn  = data.terraform_remote_state.range.outputs.range_instance_profile_arn
   range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
   range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
@@ -479,8 +479,14 @@ module "pulumi_provisioner" {
   victim_instance_type = var.victim_instance_type
 
   # S3
-  agent_s3_bucket     = module.s3.bucket_name
-  agent_s3_bucket_arn = module.s3.bucket_arn
+  agent_s3_bucket      = module.s3.bucket_name
+  agent_s3_bucket_arn  = module.s3.bucket_arn
+  s3_endpoint_id       = data.terraform_remote_state.range.outputs.s3_endpoint_id
+  firewall_endpoint_id = data.terraform_remote_state.range.outputs.firewall_endpoint_id != null ? data.terraform_remote_state.range.outputs.firewall_endpoint_id : ""
+
+  # Portal VPC configuration (for terminal SSH routing)
+  portal_vpc_cidr       = module.vpc.vpc_cidr
+  portal_vpc_peering_id = aws_vpc_peering_connection.portal_to_range.id
 
   # NGFW (VM-Series) - from Range VPC outputs
   ngfw_mgmt_security_group_id = data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id : ""
@@ -488,7 +494,9 @@ module "pulumi_provisioner" {
   ngfw_ami_id                 = data.terraform_remote_state.range.outputs.vm_series_ami_id
   ngfw_instance_type          = data.terraform_remote_state.range.outputs.vm_series_instance_type
   ngfw_subnet_id              = data.terraform_remote_state.range.outputs.ngfw_subnet_id != null ? data.terraform_remote_state.range.outputs.ngfw_subnet_id : ""
+  ngfw_subnet_cidr            = data.terraform_remote_state.range.outputs.ngfw_subnet_cidr != null ? data.terraform_remote_state.range.outputs.ngfw_subnet_cidr : ""
   ngfw_instance_profile_name  = data.terraform_remote_state.range.outputs.ngfw_instance_profile_name != null ? data.terraform_remote_state.range.outputs.ngfw_instance_profile_name : ""
+  ngfw_instance_role_arn      = data.terraform_remote_state.range.outputs.ngfw_instance_role_arn != null ? data.terraform_remote_state.range.outputs.ngfw_instance_role_arn : ""
 
   # Messaging (SNS topic for range event publishing)
   sns_topic_arn = module.messaging.sns_topic_arn

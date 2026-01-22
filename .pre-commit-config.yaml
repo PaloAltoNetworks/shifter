@@ -19,7 +19,8 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/) # Tests check key format strings
+        # Exclude: tests (check key format strings) + crypto.py (key generation module, not leaked secrets)
+        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/|shifter/engine/provisioner/utils/crypto\.py)
 
   # Python - Ruff (linting + formatting)
   # Note: Ruff handles import sorting via "I" rules - no separate isort needed
@@ -153,6 +154,14 @@ repos:
         entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && mypy .'
         language: system
         files: ^shifter/shifter_platform/
+        pass_filenames: false
+        types: [python]
+
+      - id: mypy-provisioner
+        name: mypy (provisioner)
+        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && mypy .'
+        language: system
+        files: ^shifter/engine/provisioner/
         pass_filenames: false
         types: [python]
 

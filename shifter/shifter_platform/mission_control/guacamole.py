@@ -164,6 +164,8 @@ def create_rdp_connection_params(
             params["sftp-password"] = password
         if sftp_root_directory:
             params["sftp-root-directory"] = sftp_root_directory
+            # sftp-directory is the upload destination for drag-and-drop transfers
+            params["sftp-directory"] = sftp_root_directory
 
     if username:
         params["username"] = username

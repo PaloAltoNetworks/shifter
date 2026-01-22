@@ -12,7 +12,6 @@ data ENI for inspection. Non-connected subnets have blackhole routes.
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, cast
 
 import pulumi
@@ -170,33 +169,27 @@ class RangeStack(pulumi.ComponentResource):
             instance.run_setup()
 
         # Run domain-joining instances in parallel after DC is ready
+        # All run_setup() calls are kicked off in the same apply callback.
+        # Since run_setup() returns a Pulumi Output (non-blocking), Pulumi
+        # executes the underlying Commands in parallel.
         if domain_join_instances and dc_components:
             dc_domain = cast(str, dc_components[0].domain_name)
             dc_setup_result = dc_components[0].setup_result
 
             if dc_setup_result is not None:
 
-                def run_all_domain_joins_parallel(
+                def run_all_domain_joins(
                     args: list[Any],
                     instances: list[InstanceComponent] = domain_join_instances,
                     domain: str = dc_domain,
                 ) -> None:
-                    """Run all domain join setups in parallel using threads."""
+                    """Kick off all domain join setups (Pulumi runs them in parallel)."""
                     _dc_ready, dc_ip = args[0], args[1]
-
-                    def run_single_setup(inst: InstanceComponent) -> None:
-                        """Run setup for a single instance."""
+                    for inst in instances:
                         inst.run_setup(dc_ip=dc_ip, domain_name=domain)
 
-                    # Use ThreadPoolExecutor to run setups in parallel
-                    with ThreadPoolExecutor(max_workers=len(instances)) as executor:
-                        futures = [executor.submit(run_single_setup, inst) for inst in instances]
-                        for future in as_completed(futures):
-                            # Propagate any exceptions
-                            future.result()
-
-                # Wait for both DC setup and DC IP, then run all domain joins in parallel
-                pulumi.Output.all(dc_setup_result, dc_components[0].private_ip).apply(run_all_domain_joins_parallel)
+                # Wait for both DC setup and DC IP, then run all domain joins
+                pulumi.Output.all(dc_setup_result, dc_components[0].private_ip).apply(run_all_domain_joins)
             else:
                 # DC setup not triggered yet - fall back to IP-only dependency
                 def run_all_domain_joins_with_ip(
@@ -204,15 +197,9 @@ class RangeStack(pulumi.ComponentResource):
                     instances: list[InstanceComponent] = domain_join_instances,
                     domain: str = dc_domain,
                 ) -> None:
-                    """Run all domain join setups in parallel using threads."""
-
-                    def run_single_setup(inst: InstanceComponent) -> None:
+                    """Kick off all domain join setups (Pulumi runs them in parallel)."""
+                    for inst in instances:
                         inst.run_setup(dc_ip=dc_ip, domain_name=domain)
-
-                    with ThreadPoolExecutor(max_workers=len(instances)) as executor:
-                        futures = [executor.submit(run_single_setup, inst) for inst in instances]
-                        for future in as_completed(futures):
-                            future.result()
 
                 dc_components[0].private_ip.apply(run_all_domain_joins_with_ip)
 

@@ -11,27 +11,51 @@
         <div class="terminal-header-left">
             <h1 class="terminal-title">Terminal</h1>
             {% if has_active_range %}
-            <span class="terminal-range-info">Range #{{ active_range.range_id }}</span>
+            <span class="terminal-range-info">{{ scenario_name|default:active_range.scenario_id }}</span>
             {% else %}
             <span class="terminal-range-info text-muted">No active range</span>
             {% endif %}
         </div>
+        {% if has_active_range %}
+        <div class="terminal-layout-toggle" id="layout-toggle">
+            <button class="toggle-btn active" data-mode="tabs" title="Tabbed View">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+                    <path d="M3 9H21" stroke="currentColor" stroke-width="2"/>
+                    <path d="M9 3V9" stroke="currentColor" stroke-width="2"/>
+                </svg>
+            </button>
+            <button class="toggle-btn" data-mode="split" title="Split View">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+                    <path d="M12 3V21" stroke="currentColor" stroke-width="2"/>
+                </svg>
+            </button>
+        </div>
+        {% endif %}
     </div>
 
     {% if has_active_range %}
-    <div class="terminal-container" id="terminal-container">
-        <!-- Kali Terminal Pane -->
-        <div class="terminal-pane" id="kali-pane">
+    <!-- Tab bar for tab mode -->
+    <div class="terminal-tabs" id="terminal-tabs">
+        <!-- Tabs generated dynamically by JavaScript -->
+    </div>
+
+    <!-- Terminal container with dynamic panes -->
+    <div class="terminal-container mode-tabs" id="terminal-container">
+        <!-- Dynamic terminal panes for each instance (tab mode) -->
+        {% for instance in active_range.instances %}
+        <div class="terminal-pane{% if forloop.first %} active{% endif %}" id="pane-{{ instance.uuid }}" data-uuid="{{ instance.uuid }}">
             <div class="pane-header">
                 <span class="pane-icon">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path fill="currentColor" d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path fill="currentColor" d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                 </span>
-                <span class="pane-title">Kali Linux</span>
-                <span class="pane-subtitle">Attacker</span>
-                <button class="pane-action-btn rdp-btn" title="Open RDP Session">
+                <span class="pane-title">{{ instance.name|default:instance.role }}</span>
+                <span class="pane-subtitle">{{ instance.os_type }}</span>
+                <button class="pane-action-btn rdp-btn" title="Open RDP Session" data-uuid="{{ instance.uuid }}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
                         <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -39,33 +63,24 @@
                     </svg>
                     <span>RDP</span>
                 </button>
-                <div class="pane-status" id="kali-status">
-                    <span class="status-indicator connecting"></span>
-                    <span>Connecting...</span>
+                <div class="pane-status" id="status-{{ instance.uuid }}">
+                    <span class="status-indicator"></span>
+                    <span class="status-text">Not connected</span>
                 </div>
             </div>
             <div class="terminal-wrapper">
-                <div class="terminal-inner" id="kali-terminal"></div>
+                <div class="terminal-inner" id="terminal-{{ instance.uuid }}"></div>
             </div>
         </div>
+        {% endfor %}
 
-        <!-- Resizable Divider -->
-        <div class="terminal-divider" id="terminal-divider">
-            <div class="divider-handle"></div>
-        </div>
-
-        <!-- Victim Terminal Pane -->
-        <div class="terminal-pane" id="victim-pane">
-            <div class="pane-header">
-                <span class="pane-icon">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path fill="currentColor" d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path fill="currentColor" d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                </span>
-                <span class="pane-title">Victim</span>
-                <span class="pane-subtitle">Target</span>
-                <button class="pane-action-btn rdp-btn" title="Open RDP Session">
+        <!-- Split mode panes (hidden by default, shown in split mode) -->
+        <div class="split-pane" id="left-pane">
+            <div class="split-pane-header">
+                <select class="pane-select" id="left-pane-select">
+                    <!-- Options populated by JavaScript -->
+                </select>
+                <button class="pane-action-btn rdp-btn split-rdp-btn" title="Open RDP Session" id="left-pane-rdp-btn">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
                         <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -73,13 +88,35 @@
                     </svg>
                     <span>RDP</span>
                 </button>
-                <div class="pane-status" id="victim-status">
-                    <span class="status-indicator connecting"></span>
-                    <span>Connecting...</span>
+                <div class="pane-status" id="left-pane-status">
+                    <span class="status-indicator"></span>
+                    <span class="status-text">Not connected</span>
                 </div>
             </div>
-            <div class="terminal-wrapper">
-                <div class="terminal-inner" id="victim-terminal"></div>
+            <div class="split-terminal-wrapper" id="left-terminal-wrapper">
+                <!-- Terminal moved here dynamically -->
+            </div>
+        </div>
+        <div class="split-pane" id="right-pane">
+            <div class="split-pane-header">
+                <select class="pane-select" id="right-pane-select">
+                    <!-- Options populated by JavaScript -->
+                </select>
+                <button class="pane-action-btn rdp-btn split-rdp-btn" title="Open RDP Session" id="right-pane-rdp-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>RDP</span>
+                </button>
+                <div class="pane-status" id="right-pane-status">
+                    <span class="status-indicator"></span>
+                    <span class="status-text">Not connected</span>
+                </div>
+            </div>
+            <div class="split-terminal-wrapper" id="right-terminal-wrapper">
+                <!-- Terminal moved here dynamically -->
             </div>
         </div>
     </div>
@@ -114,16 +151,20 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js" integrity="sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js" integrity="sha384-iAAiqSZrWZz/YKZSTKOPNaRhVOg9JY14avg2EWEpYNnUsrnATA+Sg8pV7mak84/G" crossorigin="anonymous"></script>
 
+<!-- Split.js for resizable split panes -->
+<script src="https://unpkg.com/split.js@1.6.5/dist/split.min.js"></script>
+
 <script src="{% static 'js/terminal.js' %}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Instances from RangeContext (uuid, role, os_type, etc.)
+    // Instances from RangeContext (uuid, role, os_type, name)
     const instances = [
         {% for instance in active_range.instances %}
         {
             uuid: "{{ instance.uuid }}",
             role: "{{ instance.role }}",
-            osType: "{{ instance.os_type }}"
+            osType: "{{ instance.os_type }}",
+            name: "{{ instance.name|default:instance.role }}"
         }{% if not forloop.last %},{% endif %}
         {% endfor %}
     ];
@@ -141,55 +182,66 @@ document.addEventListener('DOMContentLoaded', function() {
     const terminalManager = new TerminalManager({
         instances: instances,
         connectionUrls: connectionUrls,
-        kaliContainerId: 'kali-terminal',
-        victimContainerId: 'victim-terminal',
         wsProtocol: window.location.protocol === 'https:' ? 'wss:' : 'ws:',
         wsHost: window.location.host,
     });
     terminalManager.init();
 
-    // Setup RDP button click handlers
-    document.querySelectorAll('.rdp-btn').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
+    // Helper function to open RDP session
+    async function openRdpSession(button, instanceUuid) {
+        if (!instanceUuid) {
+            alert('Instance not available');
+            return;
+        }
+
+        // Disable button while loading
+        button.disabled = true;
+        button.classList.add('loading');
+
+        try {
+            const response = await fetch('{% url "mission_control:guacamole_rdp_url" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}',
+                },
+                body: JSON.stringify({ instance_uuid: instanceUuid }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to generate RDP URL');
+            }
+
+            // Open RDP session in new tab
+            window.open(data.url, '_blank');
+        } catch (error) {
+            console.error('RDP button error:', error);
+            alert('Failed to open RDP session: ' + error.message);
+        } finally {
+            button.disabled = false;
+            button.classList.remove('loading');
+        }
+    }
+
+    // Setup RDP button click handlers for tabbed view (has data-uuid)
+    document.querySelectorAll('.rdp-btn[data-uuid]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
             const button = e.currentTarget;
-            const pane = button.closest('.terminal-pane');
-            const instanceUuid = pane?.dataset.uuid;
-
-            if (!instanceUuid) {
-                alert('Instance not available');
-                return;
-            }
-
-            // Disable button while loading
-            button.disabled = true;
-            button.classList.add('loading');
-
-            try {
-                const response = await fetch('{% url "mission_control:guacamole_rdp_url" %}', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}',
-                    },
-                    body: JSON.stringify({ instance_uuid: instanceUuid }),
-                });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to generate RDP URL');
-                }
-
-                // Open RDP session in new tab
-                window.open(data.url, '_blank');
-            } catch (error) {
-                console.error('RDP button error:', error);
-                alert('Failed to open RDP session: ' + error.message);
-            } finally {
-                button.disabled = false;
-                button.classList.remove('loading');
-            }
+            openRdpSession(button, button.dataset.uuid);
         });
+    });
+
+    // Setup RDP button click handlers for split view (gets uuid from select)
+    document.getElementById('left-pane-rdp-btn')?.addEventListener('click', (e) => {
+        const select = document.getElementById('left-pane-select');
+        openRdpSession(e.currentTarget, select?.value);
+    });
+
+    document.getElementById('right-pane-rdp-btn')?.addEventListener('click', (e) => {
+        const select = document.getElementById('right-pane-select');
+        openRdpSession(e.currentTarget, select?.value);
     });
 });
 </script>

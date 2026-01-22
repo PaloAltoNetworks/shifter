@@ -1,20 +1,23 @@
 """Range stack component for Shifter range provisioning.
 
 This is the main composition component that brings together:
-- Networks (multiple subnets with SG, RT, GWLB per subnet)
+- Networks (multiple subnets with SG, RT per subnet)
 - Instances (Kali, victims, DC) placed in their designated subnets
 
 DC instances are created first to ensure domain controllers are available
 before domain member instances that depend on them.
+
+Inter-subnet traffic (for connected subnets) is routed through the NGFW
+data ENI for inspection. Non-connected subnets have blackhole routes.
 """
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pulumi
 
 from components.instance import InstanceComponent
-from components.network import NetworkComponent
+from components.network import NetworkComponent, allocate_subnets
 from config import InstanceConfig, RangeConfig
 
 logger = logging.getLogger(__name__)
@@ -24,11 +27,14 @@ class RangeStack(pulumi.ComponentResource):
     """Creates a complete range with all infrastructure.
 
     This is the main entry point for provisioning a range. It composes:
-    - NetworkComponent(s) for each logical subnet (with SG, RT, GWLB per subnet)
+    - NetworkComponent(s) for each logical subnet (with SG, RT per subnet)
     - InstanceComponent(s) for each configured instance, placed in designated subnets
 
     DC instances are created first (dependency ordering) to ensure the domain
     controller is available before domain members attempt to join.
+
+    Inter-subnet traffic between connected subnets is routed through the NGFW
+    data ENI for inspection. Non-connected subnets have blackhole routes.
 
     Attributes:
         networks: Dict mapping subnet name to NetworkComponent.
@@ -108,7 +114,6 @@ class RangeStack(pulumi.ComponentResource):
                 "subnet_cidr": net.subnet_cidr,
                 "security_group_id": net.security_group_id,
                 "route_table_id": net.route_table_id,
-                "gwlb_endpoint_id": net.gwlb_endpoint_id,
             }
             for name, net in self.networks.items()
         }
@@ -123,12 +128,18 @@ class RangeStack(pulumi.ComponentResource):
         self.register_outputs(outputs)
 
     def _run_all_setup(self, dc_components: list[InstanceComponent], config: RangeConfig) -> None:
-        """Run setup for all instances (non-DC first, then DCs).
+        """Run setup for all instances (DCs first, then others).
+
+        DC setup must complete before domain-joining victims attempt to join.
 
         Args:
             dc_components: List of DC instance components.
             config: Range configuration.
         """
+        # Run DC setup FIRST - must complete before victims can domain join
+        for dc_instance in dc_components:
+            dc_instance.run_dc_setup()
+
         # Build a flat list of (instance_config, instance_component) pairs for non-DCs
         # by iterating through subnets
         non_dc_pairs: list[tuple[InstanceConfig, InstanceComponent]] = []
@@ -144,19 +155,37 @@ class RangeStack(pulumi.ComponentResource):
 
         # Run setup for non-DC instances
         for inst_config, instance in non_dc_pairs:
-            # Domain-joining instances get DC's private_ip for domain join
+            # Domain-joining instances must wait for DC setup to complete
             if inst_config.join_domain and dc_components:
+                # DC's domain_name is a plain string, not a Pulumi Output
+                # DC instances always have domain_name set; cast for mypy
+                dc_domain = cast(str, dc_components[0].domain_name)
+                dc_setup_result = dc_components[0].setup_result
 
-                def setup_with_dc_ip(ip: str, inst: InstanceComponent = instance) -> None:
-                    inst.run_setup(dc_ip=ip)
+                if dc_setup_result is not None:
 
-                dc_components[0].private_ip.apply(setup_with_dc_ip)
+                    def setup_with_dc_ready(
+                        dc_ready: bool,
+                        inst: InstanceComponent = instance,
+                        domain: str = dc_domain,
+                        dc: InstanceComponent = dc_components[0],
+                    ) -> None:
+                        # DC setup complete, now get IP and run victim setup
+                        def run_victim_setup(ip: str, i: InstanceComponent = inst, d: str = domain) -> None:
+                            i.run_setup(dc_ip=ip, domain_name=d)
+
+                        dc.private_ip.apply(run_victim_setup)
+
+                    # Wait for DC setup_result (not just private_ip)
+                    dc_setup_result.apply(setup_with_dc_ready)
+                else:
+                    # DC setup not triggered yet - fall back to IP-only dependency
+                    def setup_with_dc_ip(ip: str, inst: InstanceComponent = instance, domain: str = dc_domain) -> None:
+                        inst.run_setup(dc_ip=ip, domain_name=domain)
+
+                    dc_components[0].private_ip.apply(setup_with_dc_ip)
             else:
                 instance.run_setup()
-
-        # Run DC setup
-        for dc_instance in dc_components:
-            dc_instance.run_dc_setup()
 
     def _create_all_instances(self, name: str, config: RangeConfig) -> list[InstanceComponent]:
         """Create all instances (DCs first, then others).
@@ -309,10 +338,14 @@ class RangeStack(pulumi.ComponentResource):
         """Create network infrastructure for all subnets.
 
         Creates one NetworkComponent per logical subnet, each with its own
-        security group, route table, and optional GWLB endpoint.
+        security group and route table.
+
+        Pre-allocates all subnet CIDRs atomically before creating any
+        NetworkComponent to prevent race conditions where multiple subnets
+        get the same CIDR.
 
         After all networks are created, adds inter-subnet routes to force
-        all inter-subnet traffic through the GWLB/NGFW.
+        connected subnet traffic through the NGFW data ENI.
 
         Args:
             name: Pulumi resource name prefix.
@@ -320,21 +353,63 @@ class RangeStack(pulumi.ComponentResource):
         """
         self.networks = {}
         cidr_prefix = self._extract_cidr_prefix(config.vpc_cidr)
+        subnet_count = len(config.subnets)
 
         logger.info(
             "Creating %d networks for range %d",
-            len(config.subnets),
+            subnet_count,
             config.range_id,
         )
 
-        for subnet_config in config.subnets:
-            network_name = f"{name}-{subnet_config.name}"
+        # Pre-allocate all subnet CIDRs atomically to prevent race conditions
+        # This holds the advisory lock for the entire allocation
+        allocated_cidrs = allocate_subnets(
+            vpc_id=config.vpc_id,
+            cidr_prefix=cidr_prefix,
+            count=subnet_count,
+            subnet_size=28,  # All range subnets use /28
+        )
+
+        logger.info(
+            "Pre-allocated %d CIDRs: %s",
+            len(allocated_cidrs),
+            allocated_cidrs,
+        )
+
+        # Build name→CIDR map for connected subnet lookups
+        if len(config.subnets) != len(allocated_cidrs):
+            raise ValueError(
+                f"Subnet count mismatch: {len(config.subnets)} subnets but {len(allocated_cidrs)} CIDRs allocated"
+            )
+        name_to_cidr: dict[str, str] = {subnet.name: allocated_cidrs[idx] for idx, subnet in enumerate(config.subnets)}
+        logger.debug("Built name→CIDR map: %s", name_to_cidr)
+
+        # Compute connected pairs once, reuse for SG rules and routes
+        connected_pairs = self._get_connected_pairs(config)
+        logger.debug(
+            "Computed %d connected pairs: %s",
+            len(connected_pairs),
+            connected_pairs,
+        )
+
+        for idx, subnet_config in enumerate(config.subnets):
+            network_name = f"{name}-net-{subnet_config.name}"
+            subnet_cidr = allocated_cidrs[idx]
+
+            # Get CIDRs of connected subnets for SG ingress rules
+            connected_cidrs = self._get_connected_cidrs(
+                subnet_config.name,
+                connected_pairs,
+                name_to_cidr,
+            )
 
             logger.debug(
-                "Creating network %s (uuid=%s, gwlb=%s)",
+                "Creating network %s (uuid=%s, cidr=%s, ngfw=%s, connected_cidrs=%s)",
                 network_name,
                 subnet_config.uuid,
-                "enabled" if config.gwlb_service_name else "disabled",
+                subnet_cidr,
+                "enabled" if config.ngfw_data_eni_id else "disabled",
+                connected_cidrs,
             )
 
             network = NetworkComponent(
@@ -350,68 +425,172 @@ class RangeStack(pulumi.ComponentResource):
                 subnet_uuid=subnet_config.uuid,
                 request_uuid=config.request_uuid,
                 subnet_size=28,  # All range subnets use /28
-                gwlb_service_name=config.gwlb_service_name,
+                s3_endpoint_id=config.s3_endpoint_id,
+                firewall_endpoint_id=config.firewall_endpoint_id,
+                portal_vpc_cidr=config.portal_vpc_cidr,
+                portal_vpc_peering_id=config.portal_vpc_peering_id,
+                allocated_cidr=subnet_cidr,
+                connected_subnet_cidrs=connected_cidrs,
                 opts=pulumi.ResourceOptions(parent=self),
             )
             self.networks[subnet_config.name] = network
 
-        # Add inter-subnet routes to force all inter-subnet traffic through GWLB
-        self._add_inter_subnet_routes(name, config)
+        # Add inter-subnet routes to force connected traffic through NGFW
+        self._add_inter_subnet_routes(name, config, connected_pairs)
 
-    def _add_inter_subnet_routes(self, name: str, config: RangeConfig) -> None:
-        """Add routes from each subnet to all other subnets through GWLB.
+    def _get_connected_pairs(self, config: RangeConfig) -> list[tuple[str, str]]:
+        """Build deduplicated list of connected subnet pairs from config.
 
-        This forces ALL inter-subnet traffic through the NGFW, overriding
-        AWS's implicit local VPC route. Without these explicit routes,
-        traffic between subnets (e.g., 10.1.2.0/28 → 10.1.3.0/28) would
-        use the local route and bypass the NGFW entirely.
+        Connection is symmetric: if A lists B in connected_to OR B lists A,
+        they're connected bidirectionally. Uses frozenset for O(1) deduplication.
 
-        The NGFW policies (based on connected_to) determine what traffic
-        is allowed; this routing ensures ALL inter-subnet traffic is
-        inspected by the NGFW first.
+        Args:
+            config: Range configuration with subnets.
+
+        Returns:
+            List of (subnet_a, subnet_b) tuples, sorted alphabetically,
+            with no duplicates.
+        """
+        subnet_names = {s.name for s in config.subnets}
+        seen: set[frozenset[str]] = set()
+        pairs: list[tuple[str, str]] = []
+
+        for subnet in config.subnets:
+            src = subnet.name
+            for dst in subnet.connected_to:
+                if dst not in subnet_names:
+                    logger.warning(
+                        "Subnet '%s' references unknown subnet '%s' in connected_to",
+                        src,
+                        dst,
+                    )
+                    continue  # Skip invalid references
+                pair_key = frozenset([src, dst])
+                if pair_key not in seen:
+                    seen.add(pair_key)
+                    # Sort for consistent naming
+                    a, b = sorted([src, dst])
+                    pairs.append((a, b))
+
+        return pairs
+
+    def _get_connected_cidrs(
+        self,
+        subnet_name: str,
+        connected_pairs: list[tuple[str, str]],
+        name_to_cidr: dict[str, str],
+    ) -> list[str]:
+        """Get CIDRs of subnets connected to a given subnet.
+
+        Looks up which subnets are connected to the given subnet from the
+        pre-computed pairs, then resolves their names to CIDRs.
+
+        Args:
+            subnet_name: The subnet to find connections for.
+            connected_pairs: List of (subnet_a, subnet_b) connected pairs.
+            name_to_cidr: Mapping of subnet name to allocated CIDR.
+
+        Returns:
+            List of CIDRs for connected subnets. Empty if no connections.
+
+        Raises:
+            KeyError: If a connected subnet name is not in name_to_cidr map.
+        """
+        connected_cidrs: list[str] = []
+
+        for subnet_a, subnet_b in connected_pairs:
+            if subnet_a == subnet_name:
+                peer_name = subnet_b
+            elif subnet_b == subnet_name:
+                peer_name = subnet_a
+            else:
+                continue
+
+            if peer_name not in name_to_cidr:
+                raise KeyError(
+                    f"Connected subnet '{peer_name}' not found in CIDR map. "
+                    f"Available subnets: {list(name_to_cidr.keys())}"
+                )
+            connected_cidrs.append(name_to_cidr[peer_name])
+
+        logger.debug(
+            "Subnet '%s' connected to CIDRs: %s",
+            subnet_name,
+            connected_cidrs,
+        )
+        return connected_cidrs
+
+    def _add_inter_subnet_routes(
+        self,
+        name: str,
+        config: RangeConfig,
+        connected_pairs: list[tuple[str, str]],
+    ) -> None:
+        """Add bidirectional routes between ALL subnets through NGFW.
+
+        Routes ALL inter-subnet traffic through the NGFW data ENI for inspection,
+        overriding AWS's implicit local VPC routing. The NGFW security policy
+        controls which traffic is allowed vs denied.
+
+        The connected_pairs parameter is kept for API compatibility but is no
+        longer used - all subnet pairs get routes through NGFW.
 
         Args:
             name: Pulumi resource name prefix.
-            config: Range configuration.
+            config: Range configuration with subnets.
+            connected_pairs: Unused, kept for API compatibility.
         """
-        if not config.gwlb_service_name:
-            logger.debug("No GWLB configured, skipping inter-subnet routes")
+        if not config.ngfw_data_eni_id:
+            logger.debug("No NGFW configured, skipping inter-subnet routes")
             return
 
         if len(self.networks) < 2:
             logger.debug("Only one subnet, no inter-subnet routes needed")
             return
 
+        # Build all subnet pairs
         subnet_names = list(self.networks.keys())
         route_count = 0
 
-        for src_name in subnet_names:
-            src_network = self.networks[src_name]
+        for i, subnet_a in enumerate(subnet_names):
+            for subnet_b in subnet_names[i + 1 :]:
+                network_a = self.networks[subnet_a]
+                network_b = self.networks[subnet_b]
 
-            for dst_name in subnet_names:
-                if src_name == dst_name:
-                    continue  # Skip routes to self
-
-                dst_network = self.networks[dst_name]
-
-                # Add route from src subnet to dst subnet's CIDR via GWLB
-                route_name = f"{name}-{src_name}-to-{dst_name}-route"
-                src_network.add_route_to_subnet(
-                    route_name,
-                    dst_network.subnet_cidr,
+                # Route A → B (in A's route table, destination is B's CIDR, via NGFW)
+                route_ab_name = f"{name}-{subnet_a}-to-{subnet_b}-ngfw"
+                network_a.add_route_to_ngfw(
+                    route_ab_name,
+                    network_b.subnet_cidr,
+                    config.ngfw_data_eni_id,
                     opts=pulumi.ResourceOptions(
                         parent=self,
                         depends_on=[
-                            src_network.route_table,
-                            src_network.gwlb_endpoint,
-                            dst_network.subnet,
+                            network_a.route_table,
+                            network_b.subnet,
+                        ],
+                    ),
+                )
+                route_count += 1
+
+                # Route B → A (in B's route table, destination is A's CIDR, via NGFW)
+                route_ba_name = f"{name}-{subnet_b}-to-{subnet_a}-ngfw"
+                network_b.add_route_to_ngfw(
+                    route_ba_name,
+                    network_a.subnet_cidr,
+                    config.ngfw_data_eni_id,
+                    opts=pulumi.ResourceOptions(
+                        parent=self,
+                        depends_on=[
+                            network_b.route_table,
+                            network_a.subnet,
                         ],
                     ),
                 )
                 route_count += 1
 
         logger.info(
-            "Added %d inter-subnet routes for %d subnets",
+            "Added %d inter-subnet routes through NGFW for %d subnets",
             route_count,
             len(subnet_names),
         )
@@ -464,7 +643,6 @@ class RangeStack(pulumi.ComponentResource):
                 "subnet_cidr": net.subnet_cidr,
                 "security_group_id": net.security_group_id,
                 "route_table_id": net.route_table_id,
-                "gwlb_endpoint_id": net.gwlb_endpoint_id,
             }
             for name, net in self.networks.items()
         }

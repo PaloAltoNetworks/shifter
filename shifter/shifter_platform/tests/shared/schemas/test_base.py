@@ -10,12 +10,6 @@ from pydantic import ValidationError
 class TestSpecBase:
     """Tests for SpecBase Pydantic model."""
 
-    def test_import_spec_base(self):
-        """SpecBase can be imported from shared.schemas.base."""
-        from shared.schemas.base import SpecBase
-
-        assert SpecBase is not None
-
     def test_create_with_name(self):
         """SpecBase can be created with a name."""
         from shared.schemas.base import SpecBase

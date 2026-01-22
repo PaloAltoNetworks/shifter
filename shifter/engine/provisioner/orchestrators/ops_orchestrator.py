@@ -30,6 +30,14 @@ class OpsResult:
     success: bool
     step_results: list[StepResult] = field(default_factory=list)
 
+    @property
+    def error(self) -> str | None:
+        """Get error message from failed step, if any."""
+        for step_result in self.step_results:
+            if not step_result.success:
+                return step_result.stderr or f"Step '{step_result.step_name}' failed"
+        return None
+
 
 @runtime_checkable
 class OpsStep(Protocol):
@@ -85,7 +93,11 @@ class OpsOrchestrator:
         """Execute an operations plan.
 
         Args:
-            instance_id: Target instance or resource ID.
+            instance_id: Target for the operation. The semantic meaning varies
+                by operation type:
+                - Start/Stop: AWS EC2 Instance ID (e.g., "i-099ee928142d5f092")
+                - Route operations: May be different resource IDs
+                Used primarily for logging; actual parameters come from context.
             plan: OpsPlan defining steps to execute.
             context: Template variables for the plan.
             **kwargs: Additional arguments for specific executors.

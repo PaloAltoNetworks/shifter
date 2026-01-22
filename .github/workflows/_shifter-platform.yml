@@ -240,7 +240,8 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./shifter/shifter_platform
+          context: ./shifter
+          file: ./shifter/shifter_platform/Dockerfile
           push: true
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
@@ -394,13 +395,22 @@ jobs:
           # Substitute PS_PREFIX
           DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__PS_PREFIX__/${PS_PREFIX}}"
 
-          # Run deploy via SSM
+          # Run deploy via SSM using temp file to avoid quoting issues
+          PARAMS_FILE=$(mktemp)
+          cat > "$PARAMS_FILE" << EOF
+          {
+            "commands": [$(echo "$DEPLOY_SCRIPT" | jq -Rs .)]
+          }
+          EOF
+
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --instance-ids "$INSTANCE_ID" \
-            --parameters "commands=[\"$DEPLOY_SCRIPT\"]" \
+            --parameters "file://$PARAMS_FILE" \
             --timeout-seconds 600 \
             --query "Command.CommandId" --output text)
+
+          rm -f "$PARAMS_FILE"
 
           echo "SSM Command ID: $COMMAND_ID"
           aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true

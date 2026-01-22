@@ -12,7 +12,7 @@ data ENI for inspection. Non-connected subnets have blackhole routes.
 """
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pulumi
 
@@ -149,13 +149,16 @@ class RangeStack(pulumi.ComponentResource):
 
         # Run setup for non-DC instances
         for inst_config, instance in non_dc_pairs:
-            # Domain-joining instances get DC's private_ip for domain join
+            # Domain-joining instances get DC's private_ip and domain_name for domain join
             if inst_config.join_domain and dc_components:
+                # DC's domain_name is a plain string, not a Pulumi Output
+                # DC instances always have domain_name set; cast for mypy
+                dc_domain = cast(str, dc_components[0].domain_name)
 
-                def setup_with_dc_ip(ip: str, inst: InstanceComponent = instance) -> None:
-                    inst.run_setup(dc_ip=ip)
+                def setup_with_dc_info(ip: str, inst: InstanceComponent = instance, domain: str = dc_domain) -> None:
+                    inst.run_setup(dc_ip=ip, domain_name=domain)
 
-                dc_components[0].private_ip.apply(setup_with_dc_ip)
+                dc_components[0].private_ip.apply(setup_with_dc_info)
             else:
                 instance.run_setup()
 

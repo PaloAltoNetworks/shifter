@@ -295,13 +295,25 @@ class SetupOrchestrator:
                     else:
                         logger.warning("_execute_step: poll_for_job enabled but no job ID found in output")
 
-                # Log success with output summary
-                stdout_preview = result.stdout[:500] if result.stdout else "(no output)"
+                # Log success with full output for visibility
                 logger.info(
-                    "_execute_step: completed step=%s output=%s",
+                    "_execute_step: completed step=%s exit_code=%d",
                     step.name,
-                    stdout_preview,
+                    result.exit_code,
                 )
+                if result.stdout:
+                    # Log full output - critical for debugging setup issues
+                    logger.info(
+                        "_execute_step: step=%s STDOUT:\n%s",
+                        step.name,
+                        result.stdout,
+                    )
+                if result.stderr:
+                    logger.info(
+                        "_execute_step: step=%s STDERR:\n%s",
+                        step.name,
+                        result.stderr,
+                    )
                 return StepResult(
                     step_name=step.name,
                     success=True,
@@ -310,11 +322,24 @@ class SetupOrchestrator:
                 )
             else:
                 logger.warning(
-                    "_execute_step: failed step=%s attempt=%d stderr=%s",
+                    "_execute_step: FAILED step=%s attempt=%d/%d exit_code=%d",
                     step.name,
                     attempt + 1,
-                    result.stderr[:200] if result.stderr else "",
+                    max_retries + 1,
+                    result.exit_code,
                 )
+                if result.stdout:
+                    logger.warning(
+                        "_execute_step: step=%s FAILED STDOUT:\n%s",
+                        step.name,
+                        result.stdout,
+                    )
+                if result.stderr:
+                    logger.warning(
+                        "_execute_step: step=%s FAILED STDERR:\n%s",
+                        step.name,
+                        result.stderr,
+                    )
                 if attempt < max_retries:
                     continue  # Retry
 

@@ -12,14 +12,43 @@ from .base import SetupStep
 PROMOTE_DC_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
-Write-Host "Promoting server to Domain Controller..."
+Write-Host "=========================================="
+Write-Host "DC PROMOTION STARTING"
+Write-Host "=========================================="
+Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Host "Hostname: $env:COMPUTERNAME"
+Write-Host "Domain to create: {{ domain_name }}"
+Write-Host "NetBIOS name: {{ netbios_name }}"
+Write-Host ""
 
 try {
-    # Convert passwords to SecureString
+    Write-Host "[Step 1] Converting passwords to SecureString..."
     $DsrmPassword = ConvertTo-SecureString "{{ dsrm_password }}" -AsPlainText -Force
     $DomainAdminPassword = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
+    Write-Host "  Passwords converted successfully"
 
-    # Install AD DS Forest
+    Write-Host ""
+    Write-Host "[Step 2] Checking AD DS feature is installed..."
+    $addsFeature = Get-WindowsFeature -Name AD-Domain-Services
+    Write-Host "  AD-Domain-Services installed: $($addsFeature.Installed)"
+    Write-Host "  Install state: $($addsFeature.InstallState)"
+
+    if (-not $addsFeature.Installed) {
+        Write-Host "  ERROR: AD-Domain-Services feature not installed!"
+        Write-Host "  This AMI should have AD DS prebaked - check AMI configuration"
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Host "[Step 3] Installing AD DS Forest..."
+    Write-Host "  DomainName: {{ domain_name }}"
+    Write-Host "  DomainNetbiosName: {{ netbios_name }}"
+    Write-Host "  InstallDns: Yes"
+    Write-Host "  NoRebootOnCompletion: Yes"
+    Write-Host ""
+    Write-Host "  Starting Install-ADDSForest (this may take several minutes)..."
+
+    $startTime = Get-Date
     Install-ADDSForest `
         -DomainName "{{ domain_name }}" `
         -DomainNetbiosName "{{ netbios_name }}" `
@@ -28,47 +57,216 @@ try {
         -NoRebootOnCompletion `
         -Force `
         -ErrorAction Stop
+    $endTime = Get-Date
+    $duration = $endTime - $startTime
 
-    Write-Host "AD DS Forest installed successfully"
-    Write-Host "Server will restart automatically to complete promotion"
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "DC PROMOTION COMPLETED SUCCESSFULLY"
+    Write-Host "=========================================="
+    Write-Host "Duration: $($duration.TotalSeconds) seconds"
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "Server will restart to complete domain controller configuration"
+    Write-Host "=========================================="
 
     exit 0
 } catch {
-    Write-Host "Error promoting to Domain Controller: $_"
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "DC PROMOTION FAILED"
+    Write-Host "=========================================="
+    Write-Host "Exception Type: $($_.Exception.GetType().FullName)"
+    Write-Host "Exception Message: $($_.Exception.Message)"
+    if ($_.Exception.InnerException) {
+        Write-Host "Inner Exception: $($_.Exception.InnerException.Message)"
+    }
+    Write-Host "Stack Trace:"
+    Write-Host $_.ScriptStackTrace
+    Write-Host ""
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "=========================================="
     exit 1
 }
 """
 
 # PowerShell script to verify AD DS is running
+# Includes retry logic - AD services may take time to fully start after reboot
 VERIFY_AD_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
-Write-Host "Verifying AD Domain Services..."
+Write-Host "=========================================="
+Write-Host "DC VERIFICATION STARTING"
+Write-Host "=========================================="
+Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Host "Hostname: $env:COMPUTERNAME"
 
-try {
-    # Check if AD DS service is running
-    $addsService = Get-Service -Name "NTDS" -ErrorAction Stop
-    if ($addsService.Status -ne "Running") {
-        Write-Host "NTDS service is not running"
-        exit 1
+$maxAttempts = 15
+$retryDelaySeconds = 20
+$attempt = 0
+$verified = $false
+
+Write-Host "Will attempt verification up to $maxAttempts times with ${retryDelaySeconds}s delay between attempts"
+Write-Host ""
+
+while ($attempt -lt $maxAttempts -and -not $verified) {
+    $attempt++
+    Write-Host "=========================================="
+    Write-Host "VERIFICATION ATTEMPT $attempt of $maxAttempts"
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "=========================================="
+
+    $stepsPassed = 0
+    $totalSteps = 4
+
+    # Step 1: Check NTDS service
+    Write-Host ""
+    Write-Host "[Step 1/$totalSteps] Checking NTDS service..."
+    try {
+        $addsService = Get-Service -Name "NTDS" -ErrorAction Stop
+        Write-Host "  NTDS service found"
+        Write-Host "  Status: $($addsService.Status)"
+        Write-Host "  StartType: $($addsService.StartType)"
+
+        if ($addsService.Status -ne "Running") {
+            Write-Host "  ERROR: NTDS service is not running (Status=$($addsService.Status))"
+            Write-Host "  Waiting for service to start..."
+        } else {
+            Write-Host "  SUCCESS: NTDS service is running"
+            $stepsPassed++
+        }
+    } catch {
+        Write-Host "  ERROR: Failed to query NTDS service"
+        Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+        Write-Host "  Exception Message: $($_.Exception.Message)"
     }
-    Write-Host "NTDS service is running"
 
-    # Check if we can query the domain controller
-    $dc = Get-ADDomainController -ErrorAction Stop
-    Write-Host "Domain Controller: $($dc.HostName)"
-    Write-Host "Domain: $($dc.Domain)"
-    Write-Host "Forest: $($dc.Forest)"
-    Write-Host "Site: $($dc.Site)"
+    # Step 2: Check AD DS module and domain controller
+    Write-Host ""
+    Write-Host "[Step 2/$totalSteps] Querying AD Domain Controller..."
+    try {
+        # First check if AD module is available
+        $adModule = Get-Module -ListAvailable -Name ActiveDirectory
+        if ($adModule) {
+            Write-Host "  ActiveDirectory module version: $($adModule.Version)"
+        } else {
+            Write-Host "  WARNING: ActiveDirectory module not found in available modules"
+        }
 
-    # Check DNS is working
-    $domain = Get-ADDomain -ErrorAction Stop
-    Write-Host "Domain DN: $($domain.DistinguishedName)"
+        Import-Module ActiveDirectory -ErrorAction Stop
+        Write-Host "  ActiveDirectory module imported"
 
-    Write-Host "AD DS verification completed successfully"
+        $dc = Get-ADDomainController -ErrorAction Stop
+        Write-Host "  SUCCESS: Domain Controller query succeeded"
+        Write-Host "  HostName: $($dc.HostName)"
+        Write-Host "  Domain: $($dc.Domain)"
+        Write-Host "  Forest: $($dc.Forest)"
+        Write-Host "  Site: $($dc.Site)"
+        Write-Host "  IPv4Address: $($dc.IPv4Address)"
+        Write-Host "  OperatingSystem: $($dc.OperatingSystem)"
+        Write-Host "  IsGlobalCatalog: $($dc.IsGlobalCatalog)"
+        Write-Host "  IsReadOnly: $($dc.IsReadOnly)"
+        $stepsPassed++
+    } catch {
+        Write-Host "  ERROR: Failed to query AD Domain Controller"
+        Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+        Write-Host "  Exception Message: $($_.Exception.Message)"
+        if ($_.Exception.InnerException) {
+            Write-Host "  Inner Exception: $($_.Exception.InnerException.Message)"
+        }
+    }
+
+    # Step 3: Check AD Domain
+    Write-Host ""
+    Write-Host "[Step 3/$totalSteps] Querying AD Domain..."
+    try {
+        $domain = Get-ADDomain -ErrorAction Stop
+        Write-Host "  SUCCESS: AD Domain query succeeded"
+        Write-Host "  Name: $($domain.Name)"
+        Write-Host "  DNSRoot: $($domain.DNSRoot)"
+        Write-Host "  NetBIOSName: $($domain.NetBIOSName)"
+        Write-Host "  DomainMode: $($domain.DomainMode)"
+        Write-Host "  DistinguishedName: $($domain.DistinguishedName)"
+        Write-Host "  PDCEmulator: $($domain.PDCEmulator)"
+        Write-Host "  InfrastructureMaster: $($domain.InfrastructureMaster)"
+        $stepsPassed++
+    } catch {
+        Write-Host "  ERROR: Failed to query AD Domain"
+        Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+        Write-Host "  Exception Message: $($_.Exception.Message)"
+        if ($_.Exception.InnerException) {
+            Write-Host "  Inner Exception: $($_.Exception.InnerException.Message)"
+        }
+    }
+
+    # Step 4: Check DNS service
+    Write-Host ""
+    Write-Host "[Step 4/$totalSteps] Checking DNS service..."
+    try {
+        $dnsService = Get-Service -Name "DNS" -ErrorAction Stop
+        Write-Host "  DNS service found"
+        Write-Host "  Status: $($dnsService.Status)"
+
+        if ($dnsService.Status -eq "Running") {
+            Write-Host "  SUCCESS: DNS service is running"
+            $stepsPassed++
+        } else {
+            Write-Host "  WARNING: DNS service status is $($dnsService.Status)"
+        }
+    } catch {
+        Write-Host "  ERROR: Failed to query DNS service"
+        Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+        Write-Host "  Exception Message: $($_.Exception.Message)"
+    }
+
+    # Evaluate overall status
+    Write-Host ""
+    Write-Host "----------------------------------------"
+    Write-Host "Attempt $attempt summary: $stepsPassed/$totalSteps steps passed"
+
+    if ($stepsPassed -eq $totalSteps) {
+        Write-Host "ALL STEPS PASSED - DC verification successful!"
+        $verified = $true
+    } else {
+        Write-Host "INCOMPLETE: $($totalSteps - $stepsPassed) steps failed"
+        if ($attempt -lt $maxAttempts) {
+            Write-Host "Waiting $retryDelaySeconds seconds before retry..."
+            Write-Host "----------------------------------------"
+            Start-Sleep -Seconds $retryDelaySeconds
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "=========================================="
+if ($verified) {
+    Write-Host "DC VERIFICATION COMPLETED SUCCESSFULLY"
+    Write-Host "Total attempts: $attempt"
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "=========================================="
     exit 0
-} catch {
-    Write-Host "AD DS verification failed: $_"
+} else {
+    Write-Host "DC VERIFICATION FAILED"
+    Write-Host "Exhausted all $maxAttempts attempts"
+    Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Host "=========================================="
+
+    # Final diagnostic dump
+    Write-Host ""
+    Write-Host "FINAL DIAGNOSTICS:"
+    Write-Host "----------------------------------------"
+
+    Write-Host "Services status:"
+    Get-Service -Name NTDS,DNS,Netlogon,ADWS -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "  $($_.Name): $($_.Status)"
+    }
+
+    Write-Host ""
+    Write-Host "Event log errors (last 10 from System):"
+    Get-EventLog -LogName System -EntryType Error -Newest 10 -ErrorAction SilentlyContinue | ForEach-Object {
+        $msg = $_.Message.Substring(0, [Math]::Min(200, $_.Message.Length))
+        Write-Host "  [$($_.TimeGenerated)] $($_.Source): $msg..."
+    }
+
     exit 1
 }
 """
@@ -101,7 +299,7 @@ class DCSetupPlan:
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ad_running",
         script=VERIFY_AD_SCRIPT,
-        timeout_seconds=600,  # 10 min - generous for post-reboot SSM latency
+        timeout_seconds=900,  # 15 min - allows 15 retries x 20s delays + verification time
         is_verification=True,
     )
 

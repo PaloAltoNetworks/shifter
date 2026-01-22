@@ -46,14 +46,16 @@ instances:
 subnets:
   - name: dc_network
     instances: [Domain Controller]
-    connected_to: [workstation_network, server_network]
+    connected_to: [workstation_network, server_network, attacker_network]
 
   - name: workstation_network
     instances: [Workstation 1, Workstation 2]
-    connected_to: [attacker_network]
+    connected_to: [dc_network, server_network, attacker_network]
 
   - name: server_network
     instances: [Server]
+    connected_to: [dc_network, workstation_network, attacker_network]
 
   - name: attacker_network
     instances: [Attacker]
+    connected_to: [dc_network, workstation_network, server_network]

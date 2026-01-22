@@ -12,6 +12,7 @@ data ENI for inspection. Non-connected subnets have blackhole routes.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, cast
 
 import pulumi
@@ -128,9 +129,10 @@ class RangeStack(pulumi.ComponentResource):
         self.register_outputs(outputs)
 
     def _run_all_setup(self, dc_components: list[InstanceComponent], config: RangeConfig) -> None:
-        """Run setup for all instances (DCs first, then others).
+        """Run setup for all instances (DCs first, then others in parallel).
 
         DC setup must complete before domain-joining victims attempt to join.
+        Domain-joining instances run their setups in parallel using threading.
 
         Args:
             dc_components: List of DC instance components.
@@ -153,39 +155,66 @@ class RangeStack(pulumi.ComponentResource):
                     non_dc_pairs.append((inst_config, instance))
                     instance_idx += 1
 
-        # Run setup for non-DC instances
+        # Separate domain-joining and non-domain-joining instances
+        domain_join_instances: list[InstanceComponent] = []
+        non_domain_join_instances: list[InstanceComponent] = []
+
         for inst_config, instance in non_dc_pairs:
-            # Domain-joining instances must wait for DC setup to complete
             if inst_config.join_domain and dc_components:
-                # DC's domain_name is a plain string, not a Pulumi Output
-                # DC instances always have domain_name set; cast for mypy
-                dc_domain = cast(str, dc_components[0].domain_name)
-                dc_setup_result = dc_components[0].setup_result
-
-                if dc_setup_result is not None:
-
-                    def setup_with_dc_ready(
-                        dc_ready: bool,
-                        inst: InstanceComponent = instance,
-                        domain: str = dc_domain,
-                        dc: InstanceComponent = dc_components[0],
-                    ) -> None:
-                        # DC setup complete, now get IP and run victim setup
-                        def run_victim_setup(ip: str, i: InstanceComponent = inst, d: str = domain) -> None:
-                            i.run_setup(dc_ip=ip, domain_name=d)
-
-                        dc.private_ip.apply(run_victim_setup)
-
-                    # Wait for DC setup_result (not just private_ip)
-                    dc_setup_result.apply(setup_with_dc_ready)
-                else:
-                    # DC setup not triggered yet - fall back to IP-only dependency
-                    def setup_with_dc_ip(ip: str, inst: InstanceComponent = instance, domain: str = dc_domain) -> None:
-                        inst.run_setup(dc_ip=ip, domain_name=domain)
-
-                    dc_components[0].private_ip.apply(setup_with_dc_ip)
+                domain_join_instances.append(instance)
             else:
-                instance.run_setup()
+                non_domain_join_instances.append(instance)
+
+        # Run non-domain-joining instances immediately (they don't need DC)
+        for instance in non_domain_join_instances:
+            instance.run_setup()
+
+        # Run domain-joining instances in parallel after DC is ready
+        if domain_join_instances and dc_components:
+            dc_domain = cast(str, dc_components[0].domain_name)
+            dc_setup_result = dc_components[0].setup_result
+
+            if dc_setup_result is not None:
+
+                def run_all_domain_joins_parallel(
+                    args: list[Any],
+                    instances: list[InstanceComponent] = domain_join_instances,
+                    domain: str = dc_domain,
+                ) -> None:
+                    """Run all domain join setups in parallel using threads."""
+                    _dc_ready, dc_ip = args[0], args[1]
+
+                    def run_single_setup(inst: InstanceComponent) -> None:
+                        """Run setup for a single instance."""
+                        inst.run_setup(dc_ip=dc_ip, domain_name=domain)
+
+                    # Use ThreadPoolExecutor to run setups in parallel
+                    with ThreadPoolExecutor(max_workers=len(instances)) as executor:
+                        futures = [executor.submit(run_single_setup, inst) for inst in instances]
+                        for future in as_completed(futures):
+                            # Propagate any exceptions
+                            future.result()
+
+                # Wait for both DC setup and DC IP, then run all domain joins in parallel
+                pulumi.Output.all(dc_setup_result, dc_components[0].private_ip).apply(run_all_domain_joins_parallel)
+            else:
+                # DC setup not triggered yet - fall back to IP-only dependency
+                def run_all_domain_joins_with_ip(
+                    dc_ip: str,
+                    instances: list[InstanceComponent] = domain_join_instances,
+                    domain: str = dc_domain,
+                ) -> None:
+                    """Run all domain join setups in parallel using threads."""
+
+                    def run_single_setup(inst: InstanceComponent) -> None:
+                        inst.run_setup(dc_ip=dc_ip, domain_name=domain)
+
+                    with ThreadPoolExecutor(max_workers=len(instances)) as executor:
+                        futures = [executor.submit(run_single_setup, inst) for inst in instances]
+                        for future in as_completed(futures):
+                            future.result()
+
+                dc_components[0].private_ip.apply(run_all_domain_joins_with_ip)
 
     def _create_all_instances(self, name: str, config: RangeConfig) -> list[InstanceComponent]:
         """Create all instances (DCs first, then others).

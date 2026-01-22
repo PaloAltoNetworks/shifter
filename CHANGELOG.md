@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [10.0.8] - 2026-01-13
+## [1.0.0] - 2026-01-21
+
+### Added
+- Cortex BYOT scenario (automation except for CIE and XDR collector)
 
 ### Changed
 - Dashboard renamed to Ranges
 - Ranges view uses multiple tiles for launch and active ranges
 - NGFW flow handles prompting user to associate NGFW to SCM and XDR
 - Removed legacy Terraform-based range provisioning
+- Ubuntu box supports RDP/desktop access
 
 ### Fixed
 - Django build does not include cyberscript shared library
@@ -22,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Missing VPC route for kali
 - VPC Internet egress not enforcing drop rule
 - Kali RDP not working due to permissions on logs
+- XDR not deployed on BYOT scenario DC
+- Race condition in DC readiness and target attempt to join domain
 
 ## [0.10.7] - 2026-01-12
 

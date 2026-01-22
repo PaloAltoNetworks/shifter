@@ -16,7 +16,7 @@ instances:
     role: dc
     os_type: windows
     domain_controller: true
-    xdr_agent: false
+    xdr_agent: true
     ai_agent: true
     dc_config:
       domain_name: cortexbyot.lab

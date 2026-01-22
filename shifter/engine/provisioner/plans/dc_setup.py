@@ -275,26 +275,18 @@ if ($verified) {
 class DCSetupPlan:
     """Setup plan for Windows Domain Controller.
 
-    DC instances use a prebaked AMI with AD DS feature installed. Hostname
-    and SSH are configured via user_data at boot (not BootstrapPlan).
-    This plan only promotes to DC.
+    DC instances use a prebaked AMI with domain already promoted.
+    This plan only verifies the DC is running - no promotion needed.
 
-    Steps:
-    1. Promote to Domain Controller (requires reboot)
+    Steps: None (DC already promoted in AMI)
 
     Verification:
     - Check NTDS service is running
     - Query AD Domain Controller
     """
 
-    steps: ClassVar[list[SetupStep]] = [
-        SetupStep(
-            name="promote_to_dc",
-            script=PROMOTE_DC_SCRIPT,
-            timeout_seconds=900,  # 15 min - generous, will tune after data
-            requires_reboot=True,
-        ),
-    ]
+    # No setup steps - DC is already promoted in prebaked AMI
+    steps: ClassVar[list[SetupStep]] = []
 
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ad_running",

@@ -1,7 +1,7 @@
 """Tests for DCSetupPlan.
 
-DCSetupPlan defines the specific steps to promote a Windows Server
-(with AD DS feature prebaked in AMI) to a Domain Controller.
+DCSetupPlan is used with a prebaked DC AMI where the domain is already
+promoted. The plan only verifies the DC is running - no promotion needed.
 """
 
 from dataclasses import dataclass
@@ -25,44 +25,23 @@ class MockDCInstance:
 class TestDCSetupPlan:
     """Tests for DCSetupPlan behavior."""
 
-    def test_has_promote_step(self):
-        """Plan has promote_to_dc step."""
+    def test_no_setup_steps_with_prebaked_ami(self):
+        """Prebaked DC has no setup steps - domain already promoted."""
         plan = DCSetupPlan()
-        step_names = [step.name for step in plan.steps]
-        assert "promote_to_dc" in step_names
+        assert len(plan.steps) == 0
 
-    def test_promote_step_requires_reboot(self):
-        """Promote step requires reboot (DC restarts after promotion)."""
-        plan = DCSetupPlan()
-        promote_step = next(s for s in plan.steps if s.name == "promote_to_dc")
-        assert promote_step.requires_reboot is True
-
-    def test_single_reboot_with_prebaked_ami(self):
-        """With prebaked AMI, DC setup only needs 1 reboot (promote only)."""
+    def test_no_reboots_with_prebaked_ami(self):
+        """Prebaked DC has no reboots - domain already promoted."""
         plan = DCSetupPlan()
         reboot_steps = [s for s in plan.steps if s.requires_reboot]
-        assert len(reboot_steps) == 1
-        assert reboot_steps[0].name == "promote_to_dc"
+        assert len(reboot_steps) == 0
 
-    def test_promote_script_uses_install_addsforest(self):
-        """Promote script uses Install-ADDSForest cmdlet."""
+    def test_has_verify_step(self):
+        """Plan has verify_ad_running verification step."""
         plan = DCSetupPlan()
-        promote_step = next(s for s in plan.steps if s.name == "promote_to_dc")
-        assert "Install-ADDSForest" in promote_step.script
-
-    def test_promote_script_uses_template_variables(self):
-        """Promote script uses template variables for config."""
-        plan = DCSetupPlan()
-        promote_step = next(s for s in plan.steps if s.name == "promote_to_dc")
-        script = promote_step.script
-        assert "{{ domain_name }}" in script or "{{domain_name}}" in script
-        assert "{{ netbios_name }}" in script or "{{netbios_name}}" in script
-
-    def test_passwords_use_securestring(self):
-        """Passwords are converted to SecureString in PowerShell."""
-        plan = DCSetupPlan()
-        promote_step = next(s for s in plan.steps if s.name == "promote_to_dc")
-        assert "ConvertTo-SecureString" in promote_step.script
+        assert plan.verify_step is not None
+        assert plan.verify_step.name == "verify_ad_running"
+        assert plan.verify_step.is_verification is True
 
 
 class TestDCSetupPlanContext:

@@ -240,10 +240,10 @@ class InstanceComponent(pulumi.ComponentResource):
             if not self.domain_admin_password:
                 raise ValueError("DC_DOMAIN_PASSWORD environment variable is required for DC instances")
 
-            # Generate unique domain name per range (e.g., range42.lab)
-            # This ensures XDR/XSIAM creates separate cases per range
-            self.domain_name = f"range{range_id}.lab"
-            self.netbios_name = f"RANGE{range_id}"[:15]  # NetBIOS max 15 chars
+            # Fixed domain name from prebaked DC AMI
+            # Tradeoff: All ranges share same domain name, but provisioning is fast
+            self.domain_name = "internal.shifter"
+            self.netbios_name = "INTSHIFTER"
             self.hostname = f"shifter-dc-{range_id}"
             self.dsrm_password = self.domain_admin_password  # Reuse for DSRM
             self.public_key = public_key

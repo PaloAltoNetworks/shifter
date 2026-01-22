@@ -457,6 +457,7 @@ class InstanceComponent(pulumi.ComponentResource):
         self,
         region: str | None = None,
         dc_ip: str | None = None,
+        domain_name: str | None = None,
     ) -> pulumi.Output[bool]:
         """Run setup plan for non-DC instances via SSM Run Command.
 
@@ -471,6 +472,7 @@ class InstanceComponent(pulumi.ComponentResource):
         Args:
             region: AWS region (uses default if not provided)
             dc_ip: DC private IP for domain join (only used if join_domain=True)
+            domain_name: Domain FQDN for domain join (e.g., "range42.lab")
 
         Returns:
             pulumi.Output[bool] that resolves to True on success
@@ -491,6 +493,7 @@ class InstanceComponent(pulumi.ComponentResource):
         instance_ssh_user = self.ssh_user
         instance_join_domain = self.join_domain
         instance_dc_ip = dc_ip
+        instance_domain_name = domain_name
 
         def do_setup(args: list) -> bool:
             """Run the setup synchronously (called within apply)."""
@@ -595,17 +598,16 @@ class InstanceComponent(pulumi.ComponentResource):
                             pulumi.log.info(f"No XDR agent URL provided for {instance_id}")
 
                         # Domain join (only for Windows victims with join_domain=True)
-                        if instance_join_domain and instance_dc_ip:
-                            domain_name = os.environ.get("DC_DOMAIN_NAME", "internal.shifter")
+                        if instance_join_domain and instance_dc_ip and instance_domain_name:
                             domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
 
                             if domain_password:
-                                pulumi.log.info(f"Joining domain {domain_name} for {instance_id}...")
+                                pulumi.log.info(f"Joining domain {instance_domain_name} for {instance_id}...")
                                 domain_join_plan = DomainJoinPlan()
                                 dj_context = domain_join_plan.get_context(
                                     {
                                         "dc_ip": instance_dc_ip,
-                                        "domain_name": domain_name,
+                                        "domain_name": instance_domain_name,
                                         "domain_admin_password": domain_password,
                                     }
                                 )
@@ -622,7 +624,7 @@ class InstanceComponent(pulumi.ComponentResource):
                                 pulumi.log.warn(f"DC_DOMAIN_PASSWORD not set, skipping domain join for {instance_id}")
                         elif instance_join_domain:
                             pulumi.log.info(
-                                f"join_domain=True but no dc_ip provided, skipping domain join for {instance_id}"
+                                f"join_domain=True but no dc_ip/domain_name, skipping domain join for {instance_id}"
                             )
 
                 return True

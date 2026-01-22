@@ -349,8 +349,6 @@ class InstanceComponent(pulumi.ComponentResource):
         dc_netbios_name = self.netbios_name
         dc_dsrm_password = self.dsrm_password
         dc_domain_admin_password = self.domain_admin_password
-        dc_hostname = self.hostname
-        dc_public_key = self.public_key
         dc_agent_presigned_url = self.agent_presigned_url
 
         def do_setup(args: list) -> bool:
@@ -369,30 +367,14 @@ class InstanceComponent(pulumi.ComponentResource):
                 executor.wait_for_agent(instance_id, timeout_seconds=600)
                 pulumi.log.info(f"DC {instance_id} SSM agent online")
 
-                # Set hostname via BootstrapPlan (includes reboot)
-                pulumi.log.info(f"Setting hostname to {dc_hostname}...")
-                bootstrap_plan = BootstrapPlan()
+                # Prebaked DC: Skip hostname change - DC already has correct hostname from AMI
+                # The prebaked DC AMI has AD DS promoted with a fixed hostname.
+                # Changing the hostname would break AD replication and cause verification to fail.
+                pulumi.log.info("Using prebaked DC AMI - skipping hostname change")
 
-                # Validate required config before proceeding
-                if not dc_hostname or not dc_public_key:
-                    raise SetupError("DC hostname and public_key are required for bootstrap")
-
-                # Create a simple object with required attributes for get_context
-                class DCBootstrapConfig:
-                    def __init__(self, hostname: str, public_key: str):
-                        self.hostname = hostname
-                        self.public_key = public_key
-
-                bootstrap_config = DCBootstrapConfig(dc_hostname, dc_public_key)
-                bootstrap_context = bootstrap_plan.get_context(bootstrap_config)
-                bootstrap_result = orchestrator.orchestrate(instance_id, bootstrap_plan, bootstrap_context)
-                if not bootstrap_result.success:
-                    raise SetupError(f"Bootstrap failed on DC: {bootstrap_result.error}")
-                pulumi.log.info("Hostname set successfully")
-
-                # Promote to Domain Controller via DCSetupPlan
-                # This takes ~10-15 minutes and includes a reboot
-                pulumi.log.info(f"Promoting to Domain Controller ({dc_domain_name})...")
+                # Verify Domain Controller via DCSetupPlan
+                # Prebaked DC has no setup steps, only verification
+                pulumi.log.info(f"Verifying Domain Controller ({dc_domain_name})...")
                 dc_plan = DCSetupPlan()
 
                 # Validate DC config before proceeding
@@ -428,8 +410,8 @@ class InstanceComponent(pulumi.ComponentResource):
                 dc_context = dc_plan.get_context(dc_config)
                 dc_result = orchestrator.orchestrate(instance_id, dc_plan, dc_context)
                 if not dc_result.success:
-                    raise SetupError(f"DC promotion failed: {dc_result.error}")
-                pulumi.log.info("DC promotion complete")
+                    raise SetupError(f"DC verification failed: {dc_result.error}")
+                pulumi.log.info("DC verification complete")
 
                 # Install XDR agent on DC
                 if dc_agent_presigned_url:

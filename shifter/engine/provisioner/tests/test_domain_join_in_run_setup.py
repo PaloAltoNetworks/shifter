@@ -33,13 +33,13 @@ class TestDomainJoinPlan:
         plan = DomainJoinPlan()
         dc_config = {
             "dc_ip": "10.1.100.10",
-            "domain_name": "internal.shifter",
+            "domain_name": "range42.lab",
             "domain_admin_password": "TestPassword123!",
         }
         context = plan.get_context(dc_config)
 
         assert context["dc_ip"] == "10.1.100.10"
-        assert context["domain_name"] == "internal.shifter"
+        assert context["domain_name"] == "range42.lab"
         assert context["domain_admin_password"] == "TestPassword123!"
         assert context["domain_admin_user"] == "Administrator"
 
@@ -64,7 +64,7 @@ class TestDomainJoinErrorHandling:
         context = plan.get_context(
             {
                 "dc_ip": "10.1.100.10",
-                "domain_name": "internal.shifter",
+                "domain_name": "range42.lab",
                 "domain_admin_password": "TestPassword123!",
             }
         )

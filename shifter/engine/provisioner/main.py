@@ -757,6 +757,139 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     logger.info("NGFW subnet removal complete for range %s", range_id)
 
 
+def add_temp_ngfw_allow_rule(user_id: int, range_id: int) -> None:
+    """Add temporary allow-all rule to NGFW for range provisioning.
+
+    This rule allows all traffic in the 'ranges' zone during provisioning,
+    enabling domain join and other inter-subnet traffic before specific
+    rules are configured. Should be removed after configure_ngfw_subnets.
+
+    Args:
+        user_id: Django User ID who owns the NGFW.
+        range_id: Range ID for unique rule naming.
+
+    Raises:
+        RuntimeError: If NGFW configuration fails.
+    """
+    ngfw_data = get_user_ngfw_data(user_id)
+    if not ngfw_data:
+        logger.info("User %s has no NGFW, skipping temp allow rule", user_id)
+        return
+
+    ngfw_request_id = ngfw_data["ngfw_request_id"]
+    management_ip = ngfw_data["management_ip"]
+    ssh_key_secret_arn = ngfw_data["ssh_key_secret_arn"]
+    status = ngfw_data["status"]
+
+    if not management_ip or not ssh_key_secret_arn:
+        logger.warning("NGFW missing management_ip or ssh_key, skipping temp rule")
+        return
+
+    # Start NGFW if stopped
+    if status == "stopped":
+        logger.info("Starting stopped NGFW for temp allow rule...")
+        run_ngfw_operation("start", ngfw_request_id)
+
+    # Get SSH private key from Secrets Manager
+    secrets_client = boto3.client("secretsmanager")
+    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+    private_key = secret_response["SecretString"]
+
+    # Create SSH executor and wait for NGFW to be ready
+    ssh_executor = SSHExecutor(private_key=private_key)
+    logger.info("Waiting for SSH on NGFW at %s for temp rule...", management_ip)
+    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
+
+    # Wait for management plane
+    logger.info("Verifying NGFW management plane is ready...")
+    poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=300,
+        poll_interval=15,
+    )
+
+    # Add temporary allow-all rule
+    rule_name = f"temp-range-{range_id}-allow-all"
+    add_rule_input = (
+        "configure\n"
+        f"set rulebase security rules {rule_name} from ranges to ranges "
+        "source any destination any application any service any action allow "
+        "log-end yes log-setting XDR-Forward\n"
+        "commit\n"
+        "exit\n"
+    )
+
+    logger.info("Adding temp allow-all rule: %s", rule_name)
+    for attempt in range(5):
+        if attempt > 0:
+            logger.info("Retry %d/4 for temp allow rule", attempt)
+            time.sleep(15)
+        result = ssh_executor.run_command(
+            instance_id=management_ip,
+            script="",
+            stdin_input=add_rule_input,
+            timeout_seconds=120,
+        )
+        if result.success and _check_commit_success(result.stdout):
+            logger.info("Temp allow rule added successfully: %s", rule_name)
+            return
+        logger.warning("Temp allow rule attempt failed: %s", result.stdout[:300] if result.stdout else "(no output)")
+
+    raise RuntimeError(f"Failed to add temp allow rule {rule_name} after 5 attempts")
+
+
+def remove_temp_ngfw_allow_rule(user_id: int, range_id: int) -> None:
+    """Remove temporary allow-all rule from NGFW after provisioning.
+
+    Called after configure_ngfw_subnets to clean up the temp rule.
+
+    Args:
+        user_id: Django User ID who owns the NGFW.
+        range_id: Range ID for rule naming.
+    """
+    ngfw_data = get_user_ngfw_data(user_id)
+    if not ngfw_data:
+        return
+
+    management_ip = ngfw_data["management_ip"]
+    ssh_key_secret_arn = ngfw_data["ssh_key_secret_arn"]
+
+    if not management_ip or not ssh_key_secret_arn:
+        return
+
+    # Get SSH private key
+    secrets_client = boto3.client("secretsmanager")
+    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+    private_key = secret_response["SecretString"]
+
+    ssh_executor = SSHExecutor(private_key=private_key)
+
+    # Remove temp rule
+    rule_name = f"temp-range-{range_id}-allow-all"
+    remove_rule_input = f"configure\ndelete rulebase security rules {rule_name}\ncommit\nexit\n"
+
+    logger.info("Removing temp allow-all rule: %s", rule_name)
+    for attempt in range(3):
+        if attempt > 0:
+            time.sleep(10)
+        result = ssh_executor.run_command(
+            instance_id=management_ip,
+            script="",
+            stdin_input=remove_rule_input,
+            timeout_seconds=120,
+        )
+        if result.success and _check_commit_success(result.stdout):
+            logger.info("Temp allow rule removed: %s", rule_name)
+            return
+        # Rule might not exist (already removed or never created) - that's OK
+        if result.stdout and "does not exist" in result.stdout.lower():
+            logger.info("Temp rule already removed or never existed: %s", rule_name)
+            return
+
+    logger.warning("Could not remove temp rule %s - may need manual cleanup", rule_name)
+
+
 def user_has_active_ranges(user_id: int, exclude_range_id: int) -> bool:
     """Check if user has any active ranges besides the one being destroyed.
 
@@ -1381,11 +1514,13 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     """Run Pulumi up to provision the range.
 
     The sequence is:
-    1. Run Pulumi up
-    2. Validate outputs (fail early if incomplete)
-    3. Configure NGFW (fail before marking ready)
-    4. Write to DB (mark as ready)
-    5. Publish ready event
+    1. Add temp NGFW allow-all rule (enables domain join during provisioning)
+    2. Run Pulumi up
+    3. Validate outputs (fail early if incomplete)
+    4. Configure NGFW with specific rules
+    5. Remove temp allow-all rule
+    6. Write to DB (mark as ready)
+    7. Publish ready event
 
     This ensures the range is NOT marked ready if NGFW configuration fails.
 
@@ -1398,6 +1533,16 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     """
     # Publish status change event
     publish_status_update(request_id=request_id, range_id=range_id, user_id=user_id, new_status="provisioning")
+
+    # Add temporary allow-all rule BEFORE Pulumi up
+    # This enables domain join traffic between subnets during provisioning
+    logger.info("Adding temp NGFW allow rule for range %s...", range_id)
+    try:
+        add_temp_ngfw_allow_rule(user_id, range_id)
+    except Exception as e:
+        logger.warning("Failed to add temp NGFW rule (continuing anyway): %s", e)
+        # Don't fail - user might not have NGFW, or it's a non-NGFW scenario
+
     logger.info("Running pulumi up...")
 
     result = subprocess.run(
@@ -1466,6 +1611,12 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
 
     if subnets_for_ngfw:
         configure_ngfw_subnets(user_id, subnets_for_ngfw, range_id)
+
+    # Remove temp allow-all rule now that specific rules are configured
+    try:
+        remove_temp_ngfw_allow_rule(user_id, range_id)
+    except Exception as e:
+        logger.warning("Failed to remove temp NGFW rule: %s", e)
 
     # Write provisioned state to DB - only after NGFW is configured
     write_provisioned_state(

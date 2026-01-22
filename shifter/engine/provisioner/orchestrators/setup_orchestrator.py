@@ -252,6 +252,21 @@ class SetupOrchestrator:
                     step_name=step.name,
                     cause=e,
                 ) from e
+            except TimeoutError as e:
+                logger.warning(
+                    "_execute_step: timeout step=%s attempt=%d/%d: %s",
+                    step.name,
+                    attempt + 1,
+                    max_retries + 1,
+                    e,
+                )
+                if attempt < max_retries:
+                    continue  # Retry
+                raise SetupError(
+                    f"Step '{step.name}' failed: timeout after {max_retries + 1} attempts: {e}",
+                    step_name=step.name,
+                    cause=e,
+                ) from e
             last_result = result
 
             # Check for PAN-OS commit success if commit was attempted

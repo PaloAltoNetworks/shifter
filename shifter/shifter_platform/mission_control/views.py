@@ -183,7 +183,7 @@ def guacamole_rdp_url(request):
     elif os_type == "ubuntu":
         sftp_root_directory = "/home/ubuntu"
     elif os_type == "windows":
-        sftp_root_directory = "/C:/Users/Administrator"
+        sftp_root_directory = "/C:/Users/Administrator/Downloads"
     else:
         sftp_root_directory = None
 

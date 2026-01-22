@@ -144,7 +144,7 @@ def guacamole_rdp_url(request):
     Security:
         - User must have an active range in READY status
         - URL is signed with HMAC-SHA256 and expires in 5 minutes
-        - Only works for instances with GUI (kali, windows)
+        - Only works for instances with GUI (kali, ubuntu, windows)
     """
     from engine.services import get_rdp_connection_info
     from mission_control.guacamole import create_guacamole_rdp_url
@@ -180,6 +180,8 @@ def guacamole_rdp_url(request):
     os_type = conn_info.get("os_type")
     if os_type == "kali":
         sftp_root_directory = "/home/kali"
+    elif os_type == "ubuntu":
+        sftp_root_directory = "/home/ubuntu"
     elif os_type == "windows":
         sftp_root_directory = "/C:/Users/Administrator"
     else:

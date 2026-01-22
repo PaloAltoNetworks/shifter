@@ -1,7 +1,7 @@
 id: test_ngfw_basic
 name: Basic Range Test
 description: basic range test with ngfw
-enabled: true
+enabled: false
 ngfw: true
 
 instances:

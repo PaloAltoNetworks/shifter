@@ -1225,17 +1225,34 @@ def get_active_range(user: User) -> RangeContext | None:
         from shared.schemas import InstanceContext
 
         # Get instance data from stored range_spec
+        # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
+        # Legacy format: instances directly at range_spec["instances"]
         instance_contexts = []
-        if instance.range_spec and "instances" in instance.range_spec:
-            instance_contexts = [
-                InstanceContext(
-                    uuid=spec.get("uuid"),
-                    role=spec["role"],
-                    os_type=spec["os_type"],
-                    join_domain=spec.get("join_domain", False),
-                )
-                for spec in instance.range_spec["instances"]
-            ]
+        if instance.range_spec:
+            if "subnets" in instance.range_spec:
+                for subnet in instance.range_spec["subnets"]:
+                    for spec in subnet.get("instances", []):
+                        instance_contexts.append(
+                            InstanceContext(
+                                uuid=spec.get("uuid"),
+                                name=spec.get("name", ""),
+                                role=spec["role"],
+                                os_type=spec["os_type"],
+                                join_domain=spec.get("join_domain", False),
+                            )
+                        )
+            elif "instances" in instance.range_spec:
+                # Legacy flat format for backward compatibility with existing prod data
+                for spec in instance.range_spec["instances"]:
+                    instance_contexts.append(
+                        InstanceContext(
+                            uuid=spec.get("uuid"),
+                            name=spec.get("name", ""),
+                            role=spec["role"],
+                            os_type=spec["os_type"],
+                            join_domain=spec.get("join_domain", False),
+                        )
+                    )
 
         # Get agent_name from FK if exists
         agent_name = instance.agent.name if instance.agent else None
@@ -1328,17 +1345,34 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
         raise CMSError("Range has no associated request")
 
     # Build instance contexts from range_spec
+    # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
+    # Legacy format: instances directly at range_spec["instances"]
     instance_contexts = []
-    if instance.range_spec and "instances" in instance.range_spec:
-        instance_contexts = [
-            InstanceContext(
-                uuid=spec.get("uuid"),
-                role=spec["role"],
-                os_type=spec["os_type"],
-                join_domain=spec.get("join_domain", False),
-            )
-            for spec in instance.range_spec["instances"]
-        ]
+    if instance.range_spec:
+        if "subnets" in instance.range_spec:
+            for subnet in instance.range_spec["subnets"]:
+                for spec in subnet.get("instances", []):
+                    instance_contexts.append(
+                        InstanceContext(
+                            uuid=spec.get("uuid"),
+                            name=spec.get("name", ""),
+                            role=spec["role"],
+                            os_type=spec["os_type"],
+                            join_domain=spec.get("join_domain", False),
+                        )
+                    )
+        elif "instances" in instance.range_spec:
+            # Legacy flat format for backward compatibility with existing prod data
+            for spec in instance.range_spec["instances"]:
+                instance_contexts.append(
+                    InstanceContext(
+                        uuid=spec.get("uuid"),
+                        name=spec.get("name", ""),
+                        role=spec["role"],
+                        os_type=spec["os_type"],
+                        join_domain=spec.get("join_domain", False),
+                    )
+                )
 
     # Get agent_name from FK if exists
     agent_name = instance.agent.name if instance.agent else None
@@ -1536,6 +1570,7 @@ def create_range(
         instance_contexts = [
             InstanceContext(
                 uuid=spec.uuid,
+                name=spec.name or "",
                 role=spec.role,
                 os_type=spec.os_type,
                 join_domain=spec.join_domain,
@@ -3343,21 +3378,26 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
         )
         raise ValueError("Name confirmation does not match")
 
+    instance = app.instance
+    assert instance is not None, "App must have an instance"
+    request_id = instance.request.request_id
+
+    # Call engine to tear down infrastructure BEFORE status changes
+    # Engine validates no attached ranges exist
+    try:
+        engine_services.destroy_ngfw(request_id)
+    except engine_services.EngineError as e:
+        raise CMSError(str(e)) from e
+
     # Update status to deprovisioning for both App and Instance
     now = timezone.now()
     app.status = ResourceStatus.DESTROYING.value
     app.deleted_at = now
     app.save(update_fields=["status", "deleted_at"])
 
-    instance = app.instance
-    assert instance is not None, "App must have an instance"
     instance.status = ResourceStatus.DESTROYING.value
     instance.deleted_at = now
     instance.save(update_fields=["status", "deleted_at"])
-
-    # Call engine to tear down infrastructure using request_id
-    request_id = instance.request.request_id
-    engine_services.destroy_ngfw(request_id)
 
     logger.info(
         "destroy_ngfw: started deprovisioning App id=%s, request_id=%s",
@@ -3369,4 +3409,91 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
         app_id=app.id,
         instance_id=instance.id,
         is_deleted=True,
+    )
+
+
+def complete_ngfw_setup(user: User, app_id: UUID | str) -> NGFWAppRef:
+    """Complete NGFW setup after user associates device in SCM/XDR.
+
+    After provisioning completes with awaiting_association status, the user must:
+    1. Associate the device in Strata Cloud Manager (Device Associations)
+    2. Connect the firewall to XDR/XSIAM
+
+    Once those steps are done, this function triggers the final setup which:
+    - Fetches the license (retrieves Logging Service license from CDL)
+    - Waits for CSP certificate sync
+    - Polls for valid device certificate
+    - Marks NGFW as ready
+
+    Args:
+        user: User requesting setup completion
+        app_id: UUID of the NGFW App
+
+    Returns:
+        NGFWAppRef with configuring status
+
+    Raises:
+        TypeError: If user is None or parameter types are invalid
+        ValueError: If parameters invalid
+        CMSError: If NGFW not found, not owned by user, or invalid state
+    """
+    from cms.models import App
+    from engine import services as engine_services
+    from shared.schemas.app import NGFWAppRef
+
+    _validate_ngfw_user(user)
+    validated_app_id = _validate_app_id(app_id)
+    logger.debug("complete_ngfw_setup called for user_id=%s, app_id=%s", user.id, validated_app_id)
+
+    try:
+        app = App.objects.select_related("instance", "instance__request").get(
+            id=validated_app_id,
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
+        )
+    except App.DoesNotExist:
+        logger.error("complete_ngfw_setup: App id=%s not found for user_id=%s", app_id, user.id)
+        raise CMSError("NGFW not found") from None
+
+    instance = app.instance
+    assert instance is not None, "App must have an instance"
+
+    # Validate status allows setup completion
+    valid_statuses = [
+        ResourceStatus.AWAITING_ASSOCIATION.value,
+        "stopped",  # After auto-stop following provisioning
+    ]
+    if instance.status not in valid_statuses:
+        logger.warning(
+            "complete_ngfw_setup: invalid status=%s for App id=%s",
+            instance.status,
+            app_id,
+        )
+        raise CMSError(
+            f"Cannot complete setup: NGFW is in '{instance.status}' status. "
+            "Please wait for provisioning to complete first."
+        )
+
+    request_id = instance.request.request_id
+
+    # Call engine to trigger complete-setup ECS task
+    try:
+        success = engine_services.complete_ngfw_setup(request_id)
+    except engine_services.EngineError as e:
+        raise CMSError(str(e)) from e
+
+    if not success:
+        raise CMSError("Failed to trigger setup completion")
+
+    logger.info(
+        "complete_ngfw_setup: triggered for App id=%s, request_id=%s",
+        app_id,
+        request_id,
+    )
+
+    return NGFWAppRef(
+        app_id=app.id,
+        instance_id=instance.id,
+        is_deleted=False,
     )

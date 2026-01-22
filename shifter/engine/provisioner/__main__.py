@@ -3,7 +3,7 @@
 This is the main Pulumi program that gets executed when running `pulumi up`.
 It detects the stack type from config and creates the appropriate resources:
 - Range stack: Creates cyber range with attacker/victim instances
-- NGFW stack: Creates VM-Series NGFW with GWLB for traffic inspection
+- NGFW stack: Creates VM-Series NGFW with direct ENI routing for traffic inspection
 """
 
 from __future__ import annotations
@@ -80,12 +80,12 @@ def _provision_ngfw() -> None:
     logger.info("_provision_ngfw: UserNGFWStack created for request_id=%s", config.request_id)
 
     # Export outputs for main.py to read after pulumi up
-    pulumi.export("instance_id", ngfw_stack.instance_id)
+    # Keys must match what main.py reads via output_data.get()
+    pulumi.export("ec2_instance_id", ngfw_stack.ec2_instance_id)
     pulumi.export("management_ip", ngfw_stack.management_ip)
     pulumi.export("dataplane_ip", ngfw_stack.dataplane_ip)
-    pulumi.export("gwlb_arn", ngfw_stack.gwlb_arn)
-    pulumi.export("target_group_arn", ngfw_stack.target_group_arn)
-    pulumi.export("service_name", ngfw_stack.service_name)
+    pulumi.export("data_eni_id", ngfw_stack.data_eni_id)
+    pulumi.export("ssh_key_secret_arn", ngfw_stack.ssh_key_secret_arn)
 
     logger.debug("_provision_ngfw: exports registered")
 
@@ -101,9 +101,9 @@ def _provision_range() -> None:
         len(config.subnets),
     )
 
-    # Create the range stack
+    # Create the range stack (rng{id} prefix for shorter, clearer resource names)
     range_stack = RangeStack(
-        f"range-{config.range_id}",
+        f"rng{config.range_id}",
         config=config,
     )
 
@@ -129,7 +129,6 @@ def _provision_range() -> None:
             "subnet_cidr": network.subnet_cidr,
             "security_group_id": network.security_group_id,
             "route_table_id": network.route_table_id,
-            "gwlb_endpoint_id": network.gwlb_endpoint_id,
         }
     pulumi.export("subnets", subnets_output)
 
@@ -140,10 +139,12 @@ def _provision_range() -> None:
     for inst, subnet_name in range_stack.instances:
         instances_output.append(
             {
-                "uuid": inst.uuid,
+                "uuid": inst.uuid,  # Django Instance UUID
                 "role": inst.role,
                 "os": inst.os_type,
                 "subnet_name": subnet_name,
+                # NOTE: "instance_id" key here is the AWS EC2 Instance ID (e.g., "i-...")
+                # This is read by main.py write_provisioned_state() and stored in DB state.
                 "instance_id": inst.instance_id,
                 "private_ip": inst.private_ip,
                 "ssh_key_secret_arn": inst.ssh_key_secret_arn,

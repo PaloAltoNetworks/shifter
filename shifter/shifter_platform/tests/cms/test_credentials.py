@@ -136,29 +136,11 @@ class TestCredential:
 
         assert cred.name == "My Credential"
         assert cred.credential_type == scm_credential_type
+        assert cred.credential_type.slug == "scm"
         assert cred.data["scm_folder_name"] == "folder"
 
-    def test_credential_type_slug_accessible(self, django_user_model, scm_credential_type):
-        """Credential type slug should be accessible via FK."""
-        from cms.models import Credential
-
-        user = django_user_model.objects.create_user(
-            username="slugtest",
-            email="slug@test.com",
-            password="test",
-        )
-
-        cred = Credential.objects.create(
-            user=user,
-            name="Slug Test",
-            credential_type=scm_credential_type,
-            data={},
-        )
-
-        assert cred.credential_type.slug == "scm"
-
-    def test_is_deleted_false_by_default(self, django_user_model, deployment_profile_type):
-        """is_deleted should be False when deleted_at is None."""
+    def test_is_deleted_property(self, django_user_model, deployment_profile_type):
+        """is_deleted reflects deleted_at state."""
         from cms.models import Credential
 
         user = django_user_model.objects.create_user(
@@ -167,37 +149,21 @@ class TestCredential:
             password="test",
         )
 
+        # Not deleted
         cred = Credential.objects.create(
             user=user,
             name="Not Deleted",
             credential_type=deployment_profile_type,
             data={"authcode": "D1234567"},
         )
-
         assert cred.is_deleted is False
 
-    def test_is_deleted_true_when_deleted_at_set(self, django_user_model, deployment_profile_type):
-        """is_deleted should be True when deleted_at is set."""
-        from cms.models import Credential
-
-        user = django_user_model.objects.create_user(
-            username="deletedtest2",
-            email="deleted2@test.com",
-            password="test",
-        )
-
-        cred = Credential.objects.create(
-            user=user,
-            name="Deleted",
-            credential_type=deployment_profile_type,
-            data={"authcode": "D1234567"},
-            deleted_at=timezone.now(),
-        )
-
+        # Deleted
+        cred.deleted_at = timezone.now()
         assert cred.is_deleted is True
 
-    def test_is_expired_false_when_no_expiration(self, django_user_model, deployment_profile_type):
-        """is_expired should be False when expires_at is None."""
+    def test_is_expired_property(self, django_user_model, deployment_profile_type):
+        """is_expired reflects expires_at state."""
         from cms.models import Credential
 
         user = django_user_model.objects.create_user(
@@ -208,35 +174,20 @@ class TestCredential:
 
         cred = Credential(
             user=user,
-            name="No Expiration",
+            name="Test Expiration",
             credential_type=deployment_profile_type,
             data={},
         )
 
+        # No expiration
         assert cred.is_expired is False
 
-    def test_is_expired_true_when_past(self, django_user_model, deployment_profile_type):
-        """is_expired should be True when expires_at is in the past."""
-        from cms.models import Credential
-
-        user = django_user_model.objects.create_user(
-            username="expiredtest2",
-            email="expired2@test.com",
-            password="test",
-        )
-
-        cred = Credential(
-            user=user,
-            name="Expired",
-            credential_type=deployment_profile_type,
-            data={},
-            expires_at=timezone.now() - timedelta(days=1),
-        )
-
+        # Expired
+        cred.expires_at = timezone.now() - timedelta(days=1)
         assert cred.is_expired is True
 
-    def test_expires_soon_false_when_no_expiration(self, django_user_model, deployment_profile_type):
-        """expires_soon should be False when expires_at is None."""
+    def test_expires_soon_property(self, django_user_model, deployment_profile_type):
+        """expires_soon is True only within 30 days of non-expired credential."""
         from cms.models import Credential
 
         user = django_user_model.objects.create_user(
@@ -247,74 +198,24 @@ class TestCredential:
 
         cred = Credential(
             user=user,
-            name="No Expiration",
+            name="Test Expires Soon",
             credential_type=deployment_profile_type,
             data={},
         )
 
+        # No expiration - not expiring soon
         assert cred.expires_soon is False
 
-    def test_expires_soon_false_when_already_expired(self, django_user_model, deployment_profile_type):
-        """expires_soon should be False when already expired."""
-        from cms.models import Credential
-
-        user = django_user_model.objects.create_user(
-            username="soontest2",
-            email="soon2@test.com",
-            password="test",
-        )
-
-        cred = Credential(
-            user=user,
-            name="Already Expired",
-            credential_type=deployment_profile_type,
-            data={},
-            expires_at=timezone.now() - timedelta(days=1),
-        )
-
-        assert cred.is_expired is True
+        # Already expired - not "expiring soon"
+        cred.expires_at = timezone.now() - timedelta(days=1)
         assert cred.expires_soon is False
 
-    def test_expires_soon_true_within_30_days(self, django_user_model, deployment_profile_type):
-        """expires_soon should be True when expiring within 30 days."""
-        from cms.models import Credential
-
-        user = django_user_model.objects.create_user(
-            username="soontest3",
-            email="soon3@test.com",
-            password="test",
-        )
-
-        cred = Credential(
-            user=user,
-            name="Expiring Soon",
-            credential_type=deployment_profile_type,
-            data={},
-            expires_at=timezone.now() + timedelta(days=15),
-        )
-
-        assert cred.is_expired is False
+        # Expiring within 30 days - expires soon
+        cred.expires_at = timezone.now() + timedelta(days=15)
         assert cred.expires_soon is True
 
-    def test_expires_soon_false_beyond_30_days(self, django_user_model, deployment_profile_type):
-        """expires_soon should be False when expiring beyond 30 days."""
-        from cms.models import Credential
-
-        user = django_user_model.objects.create_user(
-            username="soontest4",
-            email="soon4@test.com",
-            password="test",
-        )
-
-        cred = Credential(
-            user=user,
-            name="Expiring Far",
-            credential_type=deployment_profile_type,
-            data={},
-            expires_at=timezone.now() + timedelta(days=60),
-        )
-
-        assert cred.is_expired is False
+        # Expiring beyond 30 days - not expiring soon
+        cred.expires_at = timezone.now() + timedelta(days=60)
         assert cred.expires_soon is False
 
     def test_unique_name_per_user_constraint(self, django_user_model, deployment_profile_type):

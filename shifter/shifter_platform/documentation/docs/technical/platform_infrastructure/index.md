@@ -1,0 +1,67 @@
+# Platform Infrastructure
+
+AWS infrastructure and CI/CD for Shifter.
+
+## Directory Structure
+
+```
+platform/
+├── terraform/
+│   ├── global/
+│   │   ├── iam/              # GitHub OIDC, CI/CD IAM roles
+│   │   ├── github-runner/    # Self-hosted runner infrastructure
+│   │   └── dev-box/          # Developer workstation
+│   ├── modules/
+│   │   ├── ecr/              # Container registries
+│   │   ├── portal/           # Shifter app infrastructure
+│   │   ├── range/            # Range VPC and networking
+│   │   ├── pulumi-provisioner/   # ECS Fargate for Engine
+│   │   ├── pulumi-state/         # Pulumi backend (S3 + DynamoDB)
+│   │   ├── guacamole/            # Browser-based RDP (Guacamole)
+│   │   └── log-aggregation/      # Centralized logging
+│   └── environments/
+│       ├── dev/              # Dev environment configs
+│       └── prod/             # Prod environment configs
+└── cloudformation/
+    ├── dev/                  # Cortex XDR connector templates (dev)
+    └── prod/                 # Cortex XDR connector templates (prod)
+```
+
+## Components
+
+| Component | Module | Purpose |
+|-----------|--------|---------|
+| **Global** | `platform/terraform/global/iam/` | GitHub OIDC provider, CI/CD IAM roles, github-runner, dev-box |
+| **Core** | `platform/terraform/environments/{env}/` | ECR repositories, budget alerts |
+| **Range** | `platform/terraform/modules/range/` | Range VPC, security groups, Network Firewall |
+| **Portal*** | `platform/terraform/modules/portal/` | ALB, EC2/ASG, RDS, Redis, Cognito, S3 |
+| **Pulumi Provisioner** | `platform/terraform/modules/pulumi-provisioner/` | ECS Fargate task for range provisioning |
+| **Guacamole** | `platform/terraform/modules/guacamole/` | Browser-based RDP access to range instances |
+| **CloudFormation** | `platform/cloudformation/{env}/` | Cortex XDR connector IAM roles (manually deployed) |
+
+*Portal is a legacy name. Deploys Shifter Django infrastructure. Redis uses single-node in dev, HA replication group in prod.
+
+## State Management
+
+Terraform state stored in S3 with DynamoDB locking:
+
+| Environment | Bucket | Lock Table |
+|-------------|--------|------------|
+| dev | `shifter-dev-infra-*` | `shifter-dev-terraform-*` |
+| prod | `shifter-prod-infra-*` | `shifter-prod-terraform-*` |
+
+## Redis
+
+ElastiCache Redis:
+- **Dev:** Single-node `cache.t3.micro`
+- **Prod:** Replication group (primary + 1 replica, Multi-AZ, automatic failover)
+- Used for Django Channels
+- Prod snapshots: 1-day retention
+
+## Related Docs
+
+- [AMI Management](ami-management) - Packer builds and SSM parameter management
+- [Manual Deployment](manual-deployment) - Infrastructure elements deployed without CI/CD
+- [CI/CD](cicd) - Deployment pipelines
+- [Networking](networking) - VPC architecture and peering
+- [Guacamole](guacamole) - Browser-based RDP integration

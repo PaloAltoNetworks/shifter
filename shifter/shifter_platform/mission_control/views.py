@@ -54,10 +54,10 @@ def _get_user(request: HttpRequest) -> User:
 @login_required
 @require_GET
 def dashboard(request: HttpRequest) -> HttpResponse:
-    """Main dashboard - launch and manage ranges."""
+    """Ranges page - launch and manage cyber ranges."""
     context = {
-        "page_title": "Dashboard",
-        "active_nav": "dashboard",
+        "page_title": "Ranges",
+        "active_nav": "ranges",
         "provisioning_timeout_ms": django_settings.PROVISIONING_TIMEOUT_MS,
     }
     return render(request, "mission_control/dashboard.html", context)
@@ -144,7 +144,7 @@ def guacamole_rdp_url(request):
     Security:
         - User must have an active range in READY status
         - URL is signed with HMAC-SHA256 and expires in 5 minutes
-        - Only works for instances with GUI (kali, windows)
+        - Only works for instances with GUI (kali, ubuntu, windows)
     """
     from engine.services import get_rdp_connection_info
     from mission_control.guacamole import create_guacamole_rdp_url
@@ -175,6 +175,18 @@ def guacamole_rdp_url(request):
     guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
     # Generate signed URL
+    # Set SFTP root directory based on OS type for file transfers
+    # Note: SFTP paths use forward slashes even on Windows
+    os_type = conn_info.get("os_type")
+    if os_type == "kali":
+        sftp_root_directory = "/home/kali"
+    elif os_type == "ubuntu":
+        sftp_root_directory = "/home/ubuntu"
+    elif os_type == "windows":
+        sftp_root_directory = "/C:/Users/Administrator/Downloads"
+    else:
+        sftp_root_directory = None
+
     try:
         url = create_guacamole_rdp_url(
             base_url=guacamole_base_url,
@@ -186,6 +198,8 @@ def guacamole_rdp_url(request):
             rdp_username=conn_info.get("rdp_username"),
             rdp_password=conn_info.get("rdp_password"),
             api_base_url=guacamole_api_url,
+            sftp_root_directory=sftp_root_directory,
+            sftp_private_key=conn_info.get("ssh_key"),
         )
     except ValueError as e:
         logger.error(f"Failed to generate Guacamole URL: {e}")
@@ -683,7 +697,10 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
     try:
         ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
+        # NGFW not found (may have failed and been cleaned up)
+        # Redirect to list page instead of showing 404
+        messages.warning(request, "NGFW not found. It may have failed during provisioning.")
+        return redirect("mission_control:ngfw_list")
 
     context = {
         "page_title": ngfw.name,
@@ -720,7 +737,9 @@ def ngfw_deprovision(request: HttpRequest, app_id: str) -> HttpResponse:
     try:
         ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
+        # NGFW not found - redirect to list page
+        messages.warning(request, "NGFW not found.")
+        return redirect("mission_control:ngfw_list")
 
     context = {
         "page_title": f"Deprovision {ngfw.name}",
@@ -829,6 +848,39 @@ def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
 
     logger.info("NGFW deprovisioning started: user=%s app_id=%s", user.email, app_id)
     return JsonResponse({"status": "deprovisioning"})
+
+
+@login_required
+@require_POST
+def api_ngfw_complete_setup(request: HttpRequest, app_id: str) -> JsonResponse:
+    """Complete NGFW setup after user associates device in SCM/XDR.
+
+    After provisioning ends with awaiting_association status, the user must:
+    1. Associate the device in Strata Cloud Manager (Device Associations)
+    2. Connect the firewall to XDR/XSIAM
+
+    This endpoint triggers the final setup which fetches the license,
+    waits for CSP certificate sync, and marks the NGFW as ready.
+    """
+    from cms.services import complete_ngfw_setup as cms_complete_ngfw_setup
+
+    user = _get_user(request)
+
+    try:
+        result = cms_complete_ngfw_setup(user, app_id)
+    except CMSError as e:
+        if "not found" in str(e).lower():
+            raise Http404(_NGFW_NOT_FOUND) from None
+        return JsonResponse({"error": str(e)}, status=400)
+
+    logger.info("NGFW complete-setup triggered: user=%s app_id=%s", user.email, app_id)
+    return JsonResponse(
+        {
+            "status": "configuring",
+            "app_id": str(result.app_id),
+            "instance_id": str(result.instance_id),
+        }
+    )
 
 
 # -----------------------------------------------------------------------------

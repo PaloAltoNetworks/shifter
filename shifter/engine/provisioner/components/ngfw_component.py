@@ -66,7 +66,7 @@ class NGFWComponent(pulumi.ComponentResource):
         authcodes: S3 object for bootstrap license/authcodes.
         key_pair: EC2 key pair for SSH access.
         ssh_key_secret: Secrets Manager secret for SSH private key.
-        instance_id: EC2 instance ID.
+        ec2_instance_id: EC2 instance ID.
         management_ip: Management ENI private IP.
         dataplane_ip: Data plane ENI private IP.
         ssh_key_secret_arn: ARN of the SSH key in Secrets Manager.
@@ -79,7 +79,7 @@ class NGFWComponent(pulumi.ComponentResource):
     authcodes: aws.s3.BucketObject
     key_pair: aws.ec2.KeyPair
     ssh_key_secret: aws.secretsmanager.Secret
-    instance_id: pulumi.Output[str]
+    ec2_instance_id: pulumi.Output[str]
     management_ip: pulumi.Output[str]
     dataplane_ip: pulumi.Output[str]
     ssh_key_secret_arn: pulumi.Output[str]
@@ -185,19 +185,22 @@ class NGFWComponent(pulumi.ComponentResource):
         private_key, public_key = _generate_ssh_keypair()
 
         # Create EC2 KeyPair with the public key
+        # Use instance_uuid to ensure uniqueness across multiple provisioning attempts
+        instance_uuid_short = instance_uuid[:8]
         self.key_pair = aws.ec2.KeyPair(
             f"{name}-keypair",
-            key_name=f"ngfw-user-{user_id}",
+            key_name=f"ngfw-{instance_uuid_short}",
             public_key=public_key,
             tags=tags,
             opts=pulumi.ResourceOptions(parent=self),
         )
 
         # Store private key in Secrets Manager
+        # Use instance_uuid to ensure uniqueness across multiple provisioning attempts
         self.ssh_key_secret = aws.secretsmanager.Secret(
             f"{name}-ssh-secret",
-            name=f"shifter/{environment}/ngfw/{user_id}/ssh-key",
-            description=f"SSH private key for NGFW user {user_id}",
+            name=f"shifter/{environment}/ngfw/{instance_uuid}/ssh-key",
+            description=f"SSH private key for NGFW instance {instance_uuid}",
             recovery_window_in_days=0,  # Immediate delete for cleanup
             tags=tags,
             opts=pulumi.ResourceOptions(parent=self),
@@ -213,7 +216,9 @@ class NGFWComponent(pulumi.ComponentResource):
         self.ssh_key_secret_arn = self.ssh_key_secret.arn
 
         # Generate bootstrap init-cfg.txt from template
-        bootstrap_prefix = f"bootstrap/ngfw/{user_id}"
+        # Use instance_uuid for unique bootstrap prefix to avoid race conditions
+        # when multiple NGFWs are provisioned/deleted concurrently
+        bootstrap_prefix = f"bootstrap/ngfw/{instance_uuid}"
         hostname = f"ngfw-user-{user_id}"
 
         templates_dir = _get_templates_dir()
@@ -266,11 +271,12 @@ class NGFWComponent(pulumi.ComponentResource):
         user_data = f"vmseries-bootstrap-aws-s3bucket={bootstrap_path}"
 
         # Create EC2 instance
-        instance_args = {
-            "ami": ami_id,
-            "instance_type": instance_type,
-            "key_name": self.key_pair.key_name,
-            "network_interfaces": [
+        self.instance = aws.ec2.Instance(
+            f"{name}-instance",
+            ami=ami_id,
+            instance_type=instance_type,
+            key_name=self.key_pair.key_name,
+            network_interfaces=[
                 aws.ec2.InstanceNetworkInterfaceArgs(
                     device_index=0,
                     network_interface_id=self.mgmt_eni.id,
@@ -280,16 +286,9 @@ class NGFWComponent(pulumi.ComponentResource):
                     network_interface_id=self.data_eni.id,
                 ),
             ],
-            "user_data": user_data,
-            "tags": tags,
-        }
-
-        if instance_profile_name:
-            instance_args["iam_instance_profile"] = instance_profile_name
-
-        self.instance = aws.ec2.Instance(
-            f"{name}-instance",
-            **instance_args,
+            user_data=user_data,
+            tags=tags,
+            iam_instance_profile=instance_profile_name,
             opts=pulumi.ResourceOptions(
                 parent=self,
                 depends_on=[
@@ -303,7 +302,7 @@ class NGFWComponent(pulumi.ComponentResource):
         )
 
         # Export outputs
-        self.instance_id = self.instance.id
+        self.ec2_instance_id = self.instance.id
         self.management_ip = self.mgmt_eni.private_ip
         self.dataplane_ip = self.data_eni.private_ip
 
@@ -317,9 +316,10 @@ class NGFWComponent(pulumi.ComponentResource):
         # Register outputs
         self.register_outputs(
             {
-                "instanceId": self.instance_id,
+                "ec2InstanceId": self.ec2_instance_id,
                 "managementIp": self.management_ip,
                 "dataplaneIp": self.dataplane_ip,
+                "dataEniId": self.data_eni.id,
                 "sshKeySecretArn": self.ssh_key_secret_arn,
             }
         )

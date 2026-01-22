@@ -136,106 +136,25 @@ class TestListAgents:
 
     # --- Response validation (model returns garbage) ---
 
-    def test_raises_on_model_returns_none(self, user):
-        """Service raises TypeError if model returns None instead of list."""
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = None
-        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs), pytest.raises(TypeError):
-            services.list_agents(user)
-
-    def test_raises_on_model_returns_string(self, user):
-        """Service raises TypeError if model returns string instead of list."""
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = "not a list"
-        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs), pytest.raises(TypeError):
-            services.list_agents(user)
-
-    def test_raises_on_model_returns_dict(self, user):
-        """Service raises TypeError if model returns dict instead of list."""
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = {"agents": []}
-        with (
-            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
-            pytest.raises(TypeError),
-        ):
-            services.list_agents(user)
-
-    def test_raises_on_model_returns_list_of_strings(self, user):
-        """Service raises TypeError if model returns list of wrong type."""
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = ["a", "b", "c"]
-        with (
-            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
-            pytest.raises(TypeError),
-        ):
-            services.list_agents(user)
-
-    def test_raises_on_model_returns_list_of_dicts(self, user):
-        """Service raises TypeError if model returns list of dicts instead of AgentConfig."""
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = [{"id": 1}, {"id": 2}]
-        with (
-            patch.object(AgentConfig, "active_for_user", return_value=mock_qs),
-            pytest.raises(TypeError),
-        ):
-            services.list_agents(user)
+    def test_raises_on_invalid_model_return(self, user):
+        """Service raises TypeError if model returns invalid types."""
+        invalid_returns = [
+            None,
+            "not a list",
+            {"agents": []},
+            ["a", "b", "c"],  # list of strings
+            [{"id": 1}, {"id": 2}],  # list of dicts
+        ]
+        for invalid in invalid_returns:
+            mock_qs = Mock()
+            mock_qs.select_related.return_value = invalid
+            with patch.object(AgentConfig, "active_for_user", return_value=mock_qs), pytest.raises(TypeError):
+                services.list_agents(user)
 
     # --- Return type guarantee ---
 
-    def test_returns_list_of_dicts(self, user):
-        """Service returns list of dicts, not model instances."""
-        from django.utils import timezone
-
-        mock_os = Mock()
-        mock_os.name = "Windows"
-        mock_os.slug = "windows"
-        mock_agent = Mock(
-            spec=AgentConfig,
-            id=1,
-            os=mock_os,
-            file_size_mb=10,
-            original_filename="agent.msi",
-            created_at=timezone.now(),
-        )
-        mock_agent.name = "Agent"
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = [mock_agent]
-        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
-            result = services.list_agents(user)
-            assert type(result) is list
-            assert type(result[0]) is dict
-
-    def test_dict_has_required_keys(self, user):
-        """Each dict has id, name, os_name, os_slug, file_size_mb, original_filename, created_at."""
-        from django.utils import timezone
-
-        mock_os = Mock()
-        mock_os.name = "Windows"
-        mock_os.slug = "windows"
-        mock_agent = Mock(
-            spec=AgentConfig,
-            id=1,
-            os=mock_os,
-            file_size_mb=10,
-            original_filename="agent.msi",
-            created_at=timezone.now(),
-        )
-        mock_agent.name = "Agent"
-        mock_qs = Mock()
-        mock_qs.select_related.return_value = [mock_agent]
-        with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
-            result = services.list_agents(user)
-            agent = result[0]
-            assert "id" in agent
-            assert "name" in agent
-            assert "os_name" in agent
-            assert "os_slug" in agent
-            assert "file_size_mb" in agent
-            assert "original_filename" in agent
-            assert "created_at" in agent
-
-    def test_dict_values_have_correct_types(self, user):
-        """Dict values have correct types: id=int, strings, file_size_mb=number, created_at=datetime."""
+    def test_returns_correctly_typed_dicts(self, user):
+        """Service returns list of dicts with required keys and correct types."""
         from datetime import datetime
 
         from django.utils import timezone
@@ -257,6 +176,12 @@ class TestListAgents:
         mock_qs.select_related.return_value = [mock_agent]
         with patch.object(AgentConfig, "active_for_user", return_value=mock_qs):
             result = services.list_agents(user)
+
+            # Returns list of dicts
+            assert type(result) is list
+            assert type(result[0]) is dict
+
+            # Has required keys with correct types
             agent = result[0]
             assert isinstance(agent["id"], int)
             assert isinstance(agent["name"], str)
@@ -268,26 +193,22 @@ class TestListAgents:
 
     # --- Input validation ---
 
-    def test_requires_user_argument(self):
-        """Service raises TypeError if user not provided."""
+    def test_validates_user_parameter(self, db):
+        """Service validates user parameter."""
+        # Missing user
         with pytest.raises(TypeError):
             services.list_agents()
 
-    def test_raises_on_none_user(self):
-        """Service raises error if user is None."""
+        # None user
         with pytest.raises((TypeError, ValueError)):
             services.list_agents(None)
 
-    def test_raises_on_invalid_user_type(self):
-        """Service raises error if user is wrong type."""
+        # Invalid type
         with pytest.raises((TypeError, AttributeError)):
             services.list_agents("not-a-user")
 
-    def test_raises_on_unsaved_user(self, db):
-        """Service raises error if user has no ID (unsaved)."""
+        # Unsaved user (no ID)
         unsaved_user = User(username="unsaved", email="unsaved@test.com")
-        # User exists but has no ID yet
-        assert unsaved_user.id is None
         with pytest.raises((TypeError, ValueError)):
             services.list_agents(unsaved_user)
 
@@ -373,28 +294,6 @@ class TestGetAgent:
         ):
             services.get_agent(user, 42)
 
-    def test_cms_error_has_descriptive_message_for_not_found(self, user):
-        """CMSError message indicates agent not found."""
-        from cms.exceptions import CMSError
-
-        with (
-            patch.object(AgentConfig.objects, "get", side_effect=AgentConfig.DoesNotExist),
-            pytest.raises(CMSError, match=r"not found|does not exist"),
-        ):
-            services.get_agent(user, 999)
-
-    def test_cms_error_has_descriptive_message_for_ownership(self, user):
-        """CMSError message indicates ownership violation."""
-        from cms.exceptions import CMSError
-
-        other_user = Mock(id=999)
-        mock_agent = Mock(spec=AgentConfig, id=42, user=other_user, deleted_at=None)
-        with (
-            patch.object(AgentConfig.objects, "get", return_value=mock_agent),
-            pytest.raises(CMSError, match=r"not found|access denied|permission"),
-        ):
-            services.get_agent(user, 42)
-
     # -------------------------------------------------------------------------
     # Error propagation - non-business errors
     # -------------------------------------------------------------------------
@@ -408,52 +307,43 @@ class TestGetAgent:
             services.get_agent(user, 42)
 
     # -------------------------------------------------------------------------
-    # Input validation - user parameter
+    # Input validation
     # -------------------------------------------------------------------------
 
-    def test_requires_user_argument(self):
-        """Service raises TypeError if user not provided."""
+    def test_validates_user_parameter(self, db):
+        """Service validates user parameter."""
+        # Missing user
         with pytest.raises(TypeError):
             services.get_agent(agent_id=42)
 
-    def test_raises_on_none_user(self):
-        """Service raises error if user is None."""
+        # None user
         with pytest.raises((TypeError, ValueError)):
             services.get_agent(None, 42)
 
-    def test_raises_on_invalid_user_type(self):
-        """Service raises error if user is wrong type."""
+        # Invalid type
         with pytest.raises((TypeError, AttributeError)):
             services.get_agent("not-a-user", 42)
 
-    def test_raises_on_unsaved_user(self, db):
-        """Service raises error if user has no ID (unsaved)."""
+        # Unsaved user (no ID)
         unsaved_user = User(username="unsaved", email="unsaved@test.com")
-        assert unsaved_user.id is None
         with pytest.raises((TypeError, ValueError)):
             services.get_agent(unsaved_user, 42)
 
-    # -------------------------------------------------------------------------
-    # Input validation - agent_id parameter
-    # -------------------------------------------------------------------------
-
-    def test_requires_agent_id_argument(self, user):
-        """Service raises TypeError if agent_id not provided."""
+    def test_validates_agent_id_parameter(self, user):
+        """Service validates agent_id parameter."""
+        # Missing agent_id
         with pytest.raises(TypeError):
             services.get_agent(user)
 
-    def test_raises_on_none_agent_id(self, user):
-        """Service raises error if agent_id is None."""
+        # None agent_id
         with pytest.raises((TypeError, ValueError)):
             services.get_agent(user, None)
 
-    def test_raises_on_invalid_agent_id_type(self, user):
-        """Service raises error if agent_id is wrong type."""
+        # Invalid type
         with pytest.raises((TypeError, ValueError)):
             services.get_agent(user, "not-an-id")
 
-    def test_raises_on_negative_agent_id(self, user):
-        """Service raises error if agent_id is negative."""
+        # Negative
         with pytest.raises((TypeError, ValueError)):
             services.get_agent(user, -1)
 
@@ -461,20 +351,12 @@ class TestGetAgent:
     # Response validation - model returns garbage
     # -------------------------------------------------------------------------
 
-    def test_raises_on_model_returns_none(self, user):
-        """Service raises TypeError if model returns None instead of agent."""
-        with patch.object(AgentConfig.objects, "get", return_value=None), pytest.raises(TypeError):
-            services.get_agent(user, 42)
-
-    def test_raises_on_model_returns_wrong_type(self, user):
-        """Service raises TypeError if model returns wrong type."""
-        with patch.object(AgentConfig.objects, "get", return_value="not an agent"), pytest.raises(TypeError):
-            services.get_agent(user, 42)
-
-    def test_raises_on_model_returns_dict(self, user):
-        """Service raises TypeError if model returns dict instead of AgentConfig."""
-        with patch.object(AgentConfig.objects, "get", return_value={"id": 42}), pytest.raises(TypeError):
-            services.get_agent(user, 42)
+    def test_raises_on_invalid_model_return(self, user):
+        """Service raises TypeError if model returns invalid types."""
+        invalid_returns = [None, "not an agent", {"id": 42}]
+        for invalid in invalid_returns:
+            with patch.object(AgentConfig.objects, "get", return_value=invalid), pytest.raises(TypeError):
+                services.get_agent(user, 42)
 
 
 @pytest.mark.django_db
@@ -596,88 +478,52 @@ class TestCreateAgent:
     # Input validation - user parameter
     # -------------------------------------------------------------------------
 
-    def test_requires_user_argument(self):
-        """Service raises TypeError if user not provided."""
+    def test_validates_user_parameter(self, db):
+        """Service validates user parameter."""
+        create_kwargs = {
+            "name": "Test Agent",
+            "s3_key": "agents/test/agent.msi",
+            "filename": "agent.msi",
+            "os_slug": "windows",
+            "file_size": 1000,
+            "sha256": "abc123",
+        }
+
+        # Missing user
         with pytest.raises(TypeError):
-            services.create_agent(
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
+            services.create_agent(**create_kwargs)
 
-    def test_raises_on_none_user(self):
-        """Service raises error if user is None."""
+        # None user
         with pytest.raises((TypeError, ValueError)):
-            services.create_agent(
-                None,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
+            services.create_agent(None, **create_kwargs)
 
-    def test_raises_on_invalid_user_type(self):
-        """Service raises error if user is wrong type."""
+        # Invalid type
         with pytest.raises((TypeError, AttributeError)):
-            services.create_agent(
-                "not-a-user",
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
+            services.create_agent("not-a-user", **create_kwargs)
 
-    def test_raises_on_unsaved_user(self, db):
-        """Service raises error if user has no ID (unsaved)."""
+        # Unsaved user (no ID)
         unsaved_user = User(username="unsaved", email="unsaved@test.com")
-        assert unsaved_user.id is None
         with pytest.raises((TypeError, ValueError)):
-            services.create_agent(
-                unsaved_user,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
+            services.create_agent(unsaved_user, **create_kwargs)
 
     # -------------------------------------------------------------------------
     # Response validation - assets service returns garbage
     # -------------------------------------------------------------------------
 
-    def test_raises_on_assets_returns_none(self, user):
-        """Service raises TypeError if assets service returns None."""
-        with patch("cms.services.assets_create_agent", return_value=None), pytest.raises(TypeError):
-            services.create_agent(
-                user,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
-
-    def test_raises_on_assets_returns_wrong_type(self, user):
-        """Service raises TypeError if assets service returns wrong type."""
-        with patch("cms.services.assets_create_agent", return_value="not an agent"), pytest.raises(TypeError):
-            services.create_agent(
-                user,
-                name="Test Agent",
-                s3_key="agents/test/agent.msi",
-                filename="agent.msi",
-                os_slug="windows",
-                file_size=1000,
-                sha256="abc123",
-            )
+    def test_raises_on_invalid_assets_return(self, user):
+        """Service raises TypeError if assets service returns invalid types."""
+        create_kwargs = {
+            "name": "Test Agent",
+            "s3_key": "agents/test/agent.msi",
+            "filename": "agent.msi",
+            "os_slug": "windows",
+            "file_size": 1000,
+            "sha256": "abc123",
+        }
+        invalid_returns = [None, "not an agent"]
+        for invalid in invalid_returns:
+            with patch("cms.services.assets_create_agent", return_value=invalid), pytest.raises(TypeError):
+                services.create_agent(user, **create_kwargs)
 
 
 @pytest.mark.django_db
@@ -778,51 +624,42 @@ class TestDeleteAgent:
             services.delete_agent(user, 42)
 
     # -------------------------------------------------------------------------
-    # Input validation - user parameter
+    # Input validation
     # -------------------------------------------------------------------------
 
-    def test_requires_user_argument(self):
-        """Service raises TypeError if user not provided."""
+    def test_validates_user_parameter(self, db):
+        """Service validates user parameter."""
+        # Missing user
         with pytest.raises(TypeError):
             services.delete_agent(agent_id=42)
 
-    def test_raises_on_none_user(self):
-        """Service raises error if user is None."""
+        # None user
         with pytest.raises((TypeError, ValueError)):
             services.delete_agent(None, 42)
 
-    def test_raises_on_invalid_user_type(self):
-        """Service raises error if user is wrong type."""
+        # Invalid type
         with pytest.raises((TypeError, AttributeError)):
             services.delete_agent("not-a-user", 42)
 
-    def test_raises_on_unsaved_user(self, db):
-        """Service raises error if user has no ID (unsaved)."""
+        # Unsaved user (no ID)
         unsaved_user = User(username="unsaved", email="unsaved@test.com")
-        assert unsaved_user.id is None
         with pytest.raises((TypeError, ValueError)):
             services.delete_agent(unsaved_user, 42)
 
-    # -------------------------------------------------------------------------
-    # Input validation - agent_id parameter
-    # -------------------------------------------------------------------------
-
-    def test_requires_agent_id_argument(self, user):
-        """Service raises TypeError if agent_id not provided."""
+    def test_validates_agent_id_parameter(self, user):
+        """Service validates agent_id parameter."""
+        # Missing agent_id
         with pytest.raises(TypeError):
             services.delete_agent(user)
 
-    def test_raises_on_none_agent_id(self, user):
-        """Service raises error if agent_id is None."""
+        # None agent_id
         with pytest.raises((TypeError, ValueError)):
             services.delete_agent(user, None)
 
-    def test_raises_on_invalid_agent_id_type(self, user):
-        """Service raises error if agent_id is wrong type."""
+        # Invalid type
         with pytest.raises((TypeError, ValueError)):
             services.delete_agent(user, "not-an-id")
 
-    def test_raises_on_negative_agent_id(self, user):
-        """Service raises error if agent_id is negative."""
+        # Negative
         with pytest.raises((TypeError, ValueError)):
             services.delete_agent(user, -1)

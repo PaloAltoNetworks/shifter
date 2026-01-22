@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim-trixie
 
 # Install Pulumi CLI (pinned version)
 ARG PULUMI_VERSION=3.142.0

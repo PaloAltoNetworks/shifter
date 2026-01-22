@@ -20,7 +20,6 @@ Tagging Standard:
     - NetworkComponent: shifter:subnet_uuid, shifter:subnet_name
     - InstanceComponent: shifter:instance_uuid
     - NGFWComponent: shifter:instance_uuid
-    - GWLBComponent: shifter:instance_uuid (same as parent NGFW)
 """
 
 from __future__ import annotations
@@ -58,7 +57,7 @@ def build_common_tags(
         unit_type: Type of unit this resource belongs to ("subnet" or "instance").
         unit_uuid: UUID of the unit (subnet or instance). Required if unit_type is set.
         unit_name: Optional human-readable name for the unit (e.g., subnet name).
-        component: Optional component identifier (e.g., "ngfw", "gwlb", "range").
+        component: Optional component identifier (e.g., "ngfw", "range").
 
     Returns:
         Dictionary of tag key-value pairs ready for AWS resource creation.

@@ -118,7 +118,10 @@ class TestErrorPropagation:
 
 
 class TestDCSetupPlanIntegration:
-    """Integration tests for DC setup plan."""
+    """Integration tests for DC setup plan.
+
+    With prebaked DC AMI, the plan has no setup steps - only verification.
+    """
 
     @dataclass
     class MockDCInstance:
@@ -128,10 +131,9 @@ class TestDCSetupPlanIntegration:
         domain_admin_password: str = "Admin456!"
 
     def test_dc_plan_with_real_orchestrator(self):
-        """DCSetupPlan works correctly with real orchestrator."""
+        """DCSetupPlan with prebaked AMI only runs verification."""
         mock_executor = MagicMock(spec=SSMExecutor)
         mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
-        mock_executor.reboot_and_wait.return_value = True
 
         plan = DCSetupPlan()
         orchestrator = SetupOrchestrator(executor=mock_executor)
@@ -139,15 +141,15 @@ class TestDCSetupPlanIntegration:
         result = orchestrator.orchestrate("i-12345", plan, context)
 
         assert result.success is True
-        assert mock_executor.run_command.call_count >= 2
-        assert mock_executor.reboot_and_wait.call_count >= 1
+        # With prebaked DC: 0 setup steps, just 1 verify step
+        assert mock_executor.run_command.call_count == 1
+        # No reboots with prebaked DC
+        assert mock_executor.reboot_and_wait.call_count == 0
 
-    def test_dc_plan_promote_failure_stops_everything(self):
-        """If AD promotion fails, verification never runs."""
+    def test_dc_plan_verify_failure_reports_error(self):
+        """If DC verification fails, error is reported."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.side_effect = CommandError(
-            "Promote failed", exit_code=1, stderr="AD DS promotion error"
-        )
+        mock_executor.run_command.side_effect = CommandError("Verify failed", exit_code=1, stderr="NTDS not running")
 
         plan = DCSetupPlan()
         orchestrator = SetupOrchestrator(executor=mock_executor)
@@ -156,21 +158,5 @@ class TestDCSetupPlanIntegration:
         with pytest.raises((SetupError, CommandError)):
             orchestrator.orchestrate("i-12345", plan, context)
 
+        # Only verify step attempted
         assert mock_executor.run_command.call_count == 1
-        assert mock_executor.reboot_and_wait.call_count == 0
-
-    def test_dc_plan_reboot_failure_stops_everything(self):
-        """If reboot fails, subsequent steps never run."""
-        mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
-        mock_executor.reboot_and_wait.side_effect = TimeoutError("Instance never came back")
-
-        plan = DCSetupPlan()
-        orchestrator = SetupOrchestrator(executor=mock_executor)
-        context = plan.get_context(self.MockDCInstance())
-
-        with pytest.raises((SetupError, TimeoutError)):
-            orchestrator.orchestrate("i-12345", plan, context)
-
-        assert mock_executor.run_command.call_count == 1
-        assert mock_executor.reboot_and_wait.call_count == 1

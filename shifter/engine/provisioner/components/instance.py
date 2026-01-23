@@ -9,6 +9,7 @@ This component creates EC2 instances for a range with:
 All AWS resources are created via Pulumi to ensure proper lifecycle management.
 """
 
+import asyncio
 import base64
 import logging
 import os
@@ -431,8 +432,13 @@ class InstanceComponent(pulumi.ComponentResource):
                 pulumi.log.error(f"DC setup failed: {e}")
                 raise
 
-        # Use apply to run the setup when instance_id and private_ip are resolved
-        self.setup_result = pulumi.Output.all(self.instance_id, self.private_ip).apply(do_setup)
+        # Schedule blocking setup on a separate thread to avoid blocking Pulumi's event loop
+        # This enables parallel execution of multiple instance setups
+        def schedule_setup(args: list) -> pulumi.Output[bool]:
+            coro = asyncio.to_thread(do_setup, args)
+            return pulumi.Output.from_input(coro)
+
+        self.setup_result = pulumi.Output.all(self.instance_id, self.private_ip).apply(schedule_setup)
         return self.setup_result
 
     def run_setup(
@@ -615,8 +621,13 @@ class InstanceComponent(pulumi.ComponentResource):
                 pulumi.log.error(f"Setup failed for {instance_id}: {e}")
                 raise
 
-        # Use apply to run the setup when instance_id and private_ip are resolved
-        self.setup_result = pulumi.Output.all(self.instance_id, self.private_ip).apply(do_setup)
+        # Schedule blocking setup on a separate thread to avoid blocking Pulumi's event loop
+        # This enables parallel execution of multiple instance setups
+        def schedule_setup(args: list) -> pulumi.Output[bool]:
+            coro = asyncio.to_thread(do_setup, args)
+            return pulumi.Output.from_input(coro)
+
+        self.setup_result = pulumi.Output.all(self.instance_id, self.private_ip).apply(schedule_setup)
         return self.setup_result
 
     def _generate_user_data(

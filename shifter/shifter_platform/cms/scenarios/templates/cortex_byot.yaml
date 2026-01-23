@@ -22,6 +22,13 @@ instances:
       domain_name: cortexbyot.lab
       netbios_name: CORTEXBYOT
 
+  - name: Cortex Host
+    role: victim
+    os_type: ubuntu
+    xdr_agent: true
+    join_domain: true
+    ai_agent: true
+
   - name: Workstation 1
     role: victim
     os_type: windows
@@ -45,7 +52,7 @@ instances:
 
 subnets:
   - name: dc_network
-    instances: [Domain Controller]
+    instances: [Domain Controller, Cortex Host]
     connected_to: [workstation_network, server_network, attacker_network]
 
   - name: workstation_network

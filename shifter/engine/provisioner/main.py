@@ -37,15 +37,34 @@ from executors.ssh_executor import SSHExecutor
 from executors.ssm_executor import SSMExecutor
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
+from plans.base import SetupStep
 from plans.bootstrap import BootstrapPlan
 from plans.dc_setup import DCSetupPlan
 from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
-from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
+from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan, NGFWRemoveSubnetsPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
 
 logger = logging.getLogger(__name__)
+
+
+class DynamicPlan:
+    """Simple wrapper for dynamically-built setup plans.
+
+    Wraps a list of steps to satisfy the SetupPlan protocol
+    when steps are built at runtime (e.g., from subnet lists).
+    """
+
+    def __init__(self, name: str, steps: list[SetupStep]) -> None:
+        self.name = name
+        self.steps = steps
+        self.verify_step: SetupStep | None = None
+
+    def get_context(self, instance: object) -> dict:
+        """No template variables needed - steps are pre-built."""
+        return {}
+
 
 # SSM parameter paths for AMI IDs (fetched at runtime for latest values)
 _AMI_SSM_PARAMS = {
@@ -556,8 +575,6 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     Raises:
         RuntimeError: If NGFW configuration removal fails.
     """
-    from plans.ngfw_configure_subnets import NGFWRemoveSubnetsPlan
-
     # Get user's NGFW
     ngfw_data = get_user_ngfw_data(user_id)
     if not ngfw_data:
@@ -603,43 +620,21 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
         poll_interval=15,
     )
 
-    # Build and execute the remove plan
-    plan = NGFWRemoveSubnetsPlan()
-    steps = plan.get_steps(subnets, range_id)
+    # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
+    # This ensures consistent execution flow with proven retry/commit handling
+    steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id)
+    plan = DynamicPlan(name="ngfw_remove_subnets", steps=steps)
 
-    # Execute steps manually since they're dynamically generated
-    # Retry logic for transient SSH failures or commit failures (5 attempts, 15s between retries)
-    for step in steps:
-        logger.info("Executing NGFW remove step: %s", step.name)
-        result = None
-        for attempt in range(5):
-            if attempt > 0:
-                logger.info("Retry %d/4 for step %s", attempt, step.name)
-                time.sleep(15)
-            result = ssh_executor.run_command(
-                instance_id=management_ip,
-                script=step.script,
-                stdin_input=step.stdin_input,
-                timeout_seconds=step.timeout_seconds,
-            )
-            # Check both SSH success AND PAN-OS commit success
-            if result.success and _check_commit_success(result.stdout):
-                break
-            if result.success and not _check_commit_success(result.stdout):
-                logger.warning(
-                    "NGFW remove step '%s' SSH succeeded but commit failed, output: %s",
-                    step.name,
-                    result.stdout[:500] if result.stdout else "(no output)",
-                )
-        if not result or not result.success:
-            stderr = result.stderr if result else "no result"
-            raise RuntimeError(f"NGFW remove step '{step.name}' failed: {stderr}")
-        if not _check_commit_success(result.stdout):
-            raise RuntimeError(
-                f"NGFW remove step '{step.name}' commit failed after retries: "
-                f"{result.stdout[:500] if result.stdout else '(no output)'}"
-            )
-        logger.info("NGFW remove step '%s' completed successfully", step.name)
+    orchestrator = SetupOrchestrator(ssh_executor)
+    logger.info("Running NGFW subnet removal via SetupOrchestrator...")
+    result = orchestrator.orchestrate(
+        instance_id=management_ip,
+        plan=plan,
+        context={},
+    )
+
+    if not result.success:
+        raise RuntimeError(f"NGFW subnet removal failed: {result.error or 'unknown error'}")
 
     logger.info("NGFW subnet removal complete for range %s", range_id)
 
@@ -1108,22 +1103,6 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
 # =============================================================================
 
 
-def _check_commit_success(output: str) -> bool:
-    """Check if PAN-OS commit succeeded.
-
-    Args:
-        output: Command output to check.
-
-    Returns:
-        True if no commit was attempted or commit succeeded.
-    """
-    if not output:
-        return True
-    if "commit" not in output.lower():
-        return True
-    return "Configuration committed successfully" in output
-
-
 def configure_ngfw_subnets(
     subnets: list[dict],
     range_id: int,
@@ -1173,41 +1152,21 @@ def configure_ngfw_subnets(
         poll_interval=15,
     )
 
-    # Build and execute the configure plan
-    plan = NGFWConfigureSubnetsPlan()
-    steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
+    # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
+    # This ensures consistent execution flow with proven retry/commit handling
+    steps = NGFWConfigureSubnetsPlan().get_steps(subnets, range_id, vpc_gateway_ip)
+    plan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
-    # Execute steps with retry logic
-    for step in steps:
-        logger.info("Executing NGFW config step: %s", step.name)
-        result = None
-        for attempt in range(5):
-            if attempt > 0:
-                logger.info("Retry %d/4 for step %s", attempt, step.name)
-                time.sleep(15)
-            result = ssh_executor.run_command(
-                instance_id=management_ip,
-                script=step.script,
-                stdin_input=step.stdin_input,
-                timeout_seconds=step.timeout_seconds,
-            )
-            if result.success and _check_commit_success(result.stdout):
-                break
-            if result.success and not _check_commit_success(result.stdout):
-                logger.warning(
-                    "NGFW step '%s' SSH OK but commit failed: %s",
-                    step.name,
-                    result.stdout[:500] if result.stdout else "(empty)",
-                )
-        if not result or not result.success:
-            stderr = result.stderr if result else "no result"
-            raise RuntimeError(f"NGFW config step '{step.name}' failed: {stderr}")
-        if not _check_commit_success(result.stdout):
-            raise RuntimeError(
-                f"NGFW step '{step.name}' commit failed after retries: "
-                f"{result.stdout[:500] if result.stdout else '(empty)'}"
-            )
-        logger.info("NGFW config step '%s' completed", step.name)
+    orchestrator = SetupOrchestrator(ssh_executor)
+    logger.info("Running NGFW subnet configuration via SetupOrchestrator...")
+    result = orchestrator.orchestrate(
+        instance_id=management_ip,
+        plan=plan,
+        context={},  # No template variables - steps are pre-built
+    )
+
+    if not result.success:
+        raise RuntimeError(f"NGFW subnet configuration failed: {result.error or 'unknown error'}")
 
     logger.info(
         "NGFW configuration complete for range %s (%d subnets)",

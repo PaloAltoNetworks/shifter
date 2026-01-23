@@ -11,6 +11,7 @@ from typing import Any
 
 import boto3
 
+import ansible_runner
 import terraform_runner
 from events import (
     STATUS_AWAITING_ASSOCIATION,
@@ -22,7 +23,6 @@ from events import (
     publish_ngfw_event,
 )
 from executors.ssh_executor import SSHExecutor
-from orchestrators.setup_orchestrator import SetupOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -189,25 +189,22 @@ def _run_provision(
         raise RuntimeError(f"Failed to retrieve SSH key from Secrets Manager: {e}") from e
 
     # Wait for SSH availability (NGFW can take 15-25 min to boot)
-    ssh_executor = SSHExecutor(private_key=private_key)
     ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
-    logger.info("Waiting for SSH on NGFW at %s (timeout=%ds)...", management_ip, ssh_timeout)
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
-
-    # Run NGFW provision plan via SSH
-    from plans.ngfw_provision import NGFWProvisionPlan
-
-    provision_plan = NGFWProvisionPlan()
-    orchestrator = SetupOrchestrator(ssh_executor)
-    context = {"management_ip": management_ip, "sls_region": sls_region}
-    provision_result = orchestrator.orchestrate(
-        instance_id=management_ip,
-        plan=provision_plan,
-        context=context,
+    ansible_runner.wait_for_ssh(
+        management_ip=management_ip,
+        private_key=private_key,
+        timeout_seconds=ssh_timeout,
     )
 
-    if not provision_result.success:
-        raise RuntimeError(f"NGFW provision plan failed: {provision_result.error}")
+    # Run NGFW provision playbook via Ansible
+    ansible_runner.run_ngfw_provision(
+        management_ip=management_ip,
+        private_key=private_key,
+        sls_region=sls_region,
+    )
+
+    # Create SSHExecutor for serial polling (still uses SSH directly)
+    ssh_executor = SSHExecutor(private_key=private_key)
 
     # Poll for serial number and certificate
     serial_number = poll_for_serial_and_cert(ssh_executor, management_ip)
@@ -259,29 +256,18 @@ def _run_deprovision(
     management_ip = current_state.get("management_ip")
     ssh_key_secret_arn = current_state.get("ssh_key_secret_arn")
 
-    # Run pre-destroy license deactivation
+    # Run pre-destroy license deactivation via Ansible
     if management_ip and ssh_key_secret_arn:
-        logger.info("Running NGFW license deactivation...")
+        logger.info("Running NGFW license deactivation via Ansible...")
         try:
             secrets_client = boto3.client("secretsmanager")
             secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
             private_key = secret_response["SecretString"]
 
-            ssh_executor = SSHExecutor(private_key=private_key)
-            orchestrator = SetupOrchestrator(ssh_executor)
-
-            from plans.ngfw_deprovision import NGFWDeprovisionPlan
-
-            deprovision_plan = NGFWDeprovisionPlan()
-            context = {"management_ip": management_ip}
-
-            deprovision_result = orchestrator.orchestrate(
-                instance_id=management_ip,
-                plan=deprovision_plan,
-                context=context,
+            ansible_runner.run_ngfw_deprovision(
+                management_ip=management_ip,
+                private_key=private_key,
             )
-            if not deprovision_result.success:
-                logger.warning("License deactivation failed, proceeding with destroy")
         except Exception as e:
             logger.warning("License deactivation error: %s, proceeding", e)
     else:

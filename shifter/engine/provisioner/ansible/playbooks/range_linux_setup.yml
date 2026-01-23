@@ -1,0 +1,261 @@
+---
+# Linux Instance Setup Playbook
+#
+# Configures Linux victim instance with:
+# - Hostname for XDR console visibility
+# - SSH access for browser-based terminal from Shifter
+# - XDR agent installation (if xdr_agent_url provided)
+#
+# Variables:
+#   hostname: Instance hostname (required)
+#   ssh_public_key: SSH public key for authentication (optional)
+#   ssh_user: SSH username (default: ubuntu)
+#   xdr_agent_url: Presigned S3 URL for XDR agent (optional)
+
+- name: Configure Linux Instance
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    hostname: ""
+    ssh_public_key: ""
+    ssh_user: "ubuntu"
+    xdr_agent_url: ""
+
+  tasks:
+    # Set hostname
+    - name: Set hostname
+      ansible.builtin.hostname:
+        name: "{{ hostname }}"
+
+    - name: Add hostname to /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "127.0.0.1 {{ hostname }}"
+        state: present
+
+    # Configure SSH
+    - name: Get user home directory
+      ansible.builtin.shell: "eval echo ~{{ ssh_user }}"
+      register: user_home_result
+      changed_when: false
+
+    - name: Set user_home fact
+      ansible.builtin.set_fact:
+        user_home: "{{ user_home_result.stdout }}"
+
+    - name: Create .ssh directory
+      ansible.builtin.file:
+        path: "{{ user_home }}/.ssh"
+        state: directory
+        mode: "0700"
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
+
+    - name: Add SSH public key to authorized_keys
+      ansible.builtin.lineinfile:
+        path: "{{ user_home }}/.ssh/authorized_keys"
+        line: "{{ ssh_public_key }}"
+        create: true
+        mode: "0600"
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
+      when: ssh_public_key | length > 0
+
+    # Verify hostname
+    - name: Verify hostname is set correctly
+      ansible.builtin.command: hostname
+      register: hostname_check
+      changed_when: false
+
+    - name: Fail if hostname mismatch
+      ansible.builtin.fail:
+        msg: "Hostname mismatch! Expected: {{ hostname }}, Got: {{ hostname_check.stdout }}"
+      when: hostname_check.stdout != hostname
+
+    # XDR Agent Installation (if URL provided)
+    - name: Download XDR agent
+      ansible.builtin.get_url:
+        url: "{{ xdr_agent_url }}"
+        dest: /tmp/agent-installer
+        mode: "0755"
+        timeout: 120
+      register: download_result
+      retries: 5
+      delay: 10
+      until: download_result is succeeded
+      when: xdr_agent_url | length > 0
+
+    - name: Fail if XDR agent download failed
+      ansible.builtin.fail:
+        msg: "Failed to download XDR agent after 5 attempts"
+      when: xdr_agent_url | length > 0 and download_result is failed
+
+    - name: Install XDR agent
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        installer_path="/tmp/agent-installer"
+        extract_dir="/tmp/agent-extract"
+
+        # Helper to deploy cortex.conf before running installer
+        deploy_cortex_conf() {
+            local search_dir="$1"
+            local conf_file=""
+            conf_file=$(find "$search_dir" -name "cortex.conf" -type f 2>/dev/null | head -1)
+            if [ -n "$conf_file" ]; then
+                mkdir -p /etc/panw
+                cp "$conf_file" /etc/panw/cortex.conf
+                chmod 644 /etc/panw/cortex.conf
+                return 0
+            fi
+            return 1
+        }
+
+        # Helper to find and run installer in extracted directory
+        run_extracted_installer() {
+            local search_dir="$1"
+            local installer=""
+
+            deploy_cortex_conf "$search_dir" || true
+
+            # Try .sh first
+            installer=$(find "$search_dir" -maxdepth 2 -name "*.sh" -type f 2>/dev/null | head -1)
+            if [ -n "$installer" ]; then
+                chmod +x "$installer"
+                "$installer"
+                return 0
+            fi
+
+            # Try .deb
+            installer=$(find "$search_dir" -maxdepth 2 -name "*.deb" -type f 2>/dev/null | head -1)
+            if [ -n "$installer" ]; then
+                dpkg -i "$installer" || apt-get install -f -y
+                return 0
+            fi
+
+            # Try .rpm
+            installer=$(find "$search_dir" -maxdepth 2 -name "*.rpm" -type f 2>/dev/null | head -1)
+            if [ -n "$installer" ]; then
+                rpm -i "$installer" || yum install -y "$installer" || dnf install -y "$installer"
+                return 0
+            fi
+
+            echo "ERROR: No installer found in archive"
+            return 1
+        }
+
+        # Detect file type and install
+        mime_type=$(file -b --mime-type "$installer_path")
+
+        case "$mime_type" in
+            application/x-debian-package|application/vnd.debian.binary-package)
+                dpkg -i "$installer_path" || apt-get install -f -y
+                ;;
+            application/x-rpm)
+                rpm -i "$installer_path" || yum install -y "$installer_path" || dnf install -y "$installer_path"
+                ;;
+            text/x-shellscript|application/x-shellscript|application/x-sh)
+                chmod +x "$installer_path"
+                cd /tmp
+                if ! bash "$installer_path" 2>&1; then
+                    sleep 5
+                    if pgrep -f "cortex|traps" > /dev/null 2>&1; then
+                        exit 0
+                    fi
+                    if [ -d "/opt/traps" ] || [ -d "/opt/cortex" ]; then
+                        exit 0
+                    fi
+                    exit 1
+                fi
+                ;;
+            application/gzip|application/x-gzip)
+                mkdir -p "$extract_dir"
+                tar xzf "$installer_path" -C "$extract_dir"
+                run_extracted_installer "$extract_dir"
+                ;;
+            application/zip)
+                mkdir -p "$extract_dir"
+                unzip -o "$installer_path" -d "$extract_dir"
+                run_extracted_installer "$extract_dir"
+                ;;
+            application/x-executable|application/octet-stream)
+                if file "$installer_path" | grep -q "gzip"; then
+                    mkdir -p "$extract_dir"
+                    tar xzf "$installer_path" -C "$extract_dir"
+                    run_extracted_installer "$extract_dir"
+                elif file "$installer_path" | grep -q "Zip"; then
+                    mkdir -p "$extract_dir"
+                    unzip -o "$installer_path" -d "$extract_dir"
+                    run_extracted_installer "$extract_dir"
+                else
+                    chmod +x "$installer_path"
+                    "$installer_path" --install || "$installer_path"
+                fi
+                ;;
+            *)
+                chmod +x "$installer_path"
+                "$installer_path" --install || "$installer_path"
+                ;;
+        esac
+      args:
+        executable: /bin/bash
+      register: install_result
+      when: xdr_agent_url | length > 0
+
+    - name: Fail if XDR agent install failed
+      ansible.builtin.fail:
+        msg: "XDR agent installation failed"
+      when: xdr_agent_url | length > 0 and install_result is failed
+
+    - name: Verify XDR agent is running
+      ansible.builtin.shell: |
+        # Check for Cortex XDR processes
+        if pgrep -f "cortex" > /dev/null 2>&1; then
+            echo "Cortex process found"
+            exit 0
+        fi
+
+        # Check for Traps processes
+        if pgrep -f "traps" > /dev/null 2>&1; then
+            echo "Traps process found"
+            exit 0
+        fi
+
+        # Check systemd services
+        if systemctl is-active --quiet cortexagent 2>/dev/null; then
+            echo "cortexagent service is running"
+            exit 0
+        fi
+
+        if systemctl is-active --quiet traps 2>/dev/null; then
+            echo "traps service is running"
+            exit 0
+        fi
+
+        echo "XDR agent not running"
+        exit 1
+      args:
+        executable: /bin/bash
+      register: xdr_verify_result
+      retries: 6
+      delay: 10
+      until: xdr_verify_result.rc == 0
+      when: xdr_agent_url | length > 0
+
+    - name: Fail if XDR agent not running
+      ansible.builtin.fail:
+        msg: "XDR agent service/process not found after installation"
+      when: xdr_agent_url | length > 0 and xdr_verify_result.rc != 0
+
+    - name: Cleanup installer
+      ansible.builtin.file:
+        path: /tmp/agent-installer
+        state: absent
+      when: xdr_agent_url | length > 0
+
+    - name: Cleanup extract directory
+      ansible.builtin.file:
+        path: /tmp/agent-extract
+        state: absent
+      when: xdr_agent_url | length > 0

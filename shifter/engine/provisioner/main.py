@@ -17,6 +17,7 @@ import time
 import boto3
 import psycopg
 
+import range_ansible_runner
 from events import (
     STATUS_AWAITING_ASSOCIATION,
     STATUS_DESTROYED,
@@ -1467,8 +1468,28 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
         expected_subnet_names=expected_subnet_names,
     )
 
-    # NGFW configuration (routes, addresses, rules) happens inside Pulumi,
-    # after subnets are created but before instances. See range_stack.py.
+    # NGFW configuration (routes, addresses, rules) happens inside Pulumi
+    # via range_ansible_runner (SSH to NGFW). See range_stack.py _configure_ngfw().
+
+    # Instance setup (hostname, SSH, XDR, domain join) happens post-Pulumi
+    # via Ansible playbooks. This separates infrastructure (Pulumi) from
+    # configuration management (Ansible).
+    logger.info("Running post-Pulumi instance setup via Ansible...")
+    dc_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+    # Get DC domain name from range spec if available
+    dc_domain = None
+    for subnet_spec in spec_subnets:
+        if subnet_spec.get("dc_config"):
+            dc_domain = subnet_spec["dc_config"].get("domain_name")
+            break
+
+    range_ansible_runner.run_post_pulumi_range_setup(
+        instances=instances_output,
+        dc_domain_name=dc_domain,
+        dc_domain_password=dc_password,
+        region=os.environ.get("AWS_REGION", "us-east-2"),
+    )
+    logger.info("Post-Pulumi instance setup complete")
 
     # Write provisioned state to DB
     write_provisioned_state(

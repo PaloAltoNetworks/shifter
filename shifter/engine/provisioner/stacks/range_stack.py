@@ -18,18 +18,16 @@ try to communicate (e.g., domain join).
 import asyncio
 import ipaddress
 import logging
-import time
 from collections.abc import Awaitable
 from typing import Any, cast
 
 import boto3
 import pulumi
 
+import range_ansible_runner
 from components.instance import InstanceComponent
 from components.network import NetworkComponent, allocate_subnets
 from config import InstanceConfig, RangeConfig
-from executors.ssh_executor import SSHExecutor
-from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +94,7 @@ class RangeStack(pulumi.ComponentResource):
 
     def _build_instance_output(
         self, instance: InstanceComponent, subnet_name: str
-    ) -> dict[str, str | pulumi.Output[str]]:
+    ) -> dict[str, str | bool | pulumi.Output[str] | None]:
         """Build output dict for a single instance.
 
         Args:
@@ -104,7 +102,8 @@ class RangeStack(pulumi.ComponentResource):
             subnet_name: Name of the subnet this instance is in.
 
         Returns:
-            Dictionary with instance output fields including uuid for DB correlation.
+            Dictionary with instance output fields including uuid for DB correlation
+            and configuration fields needed by Ansible for post-Pulumi setup.
         """
         return {
             "uuid": instance.uuid,
@@ -114,6 +113,11 @@ class RangeStack(pulumi.ComponentResource):
             "instance_id": instance.instance_id,
             "private_ip": instance.private_ip,
             "ssh_key_secret_arn": instance.ssh_key_secret_arn,
+            # Fields needed by Ansible for post-Pulumi setup
+            "hostname": instance.hostname,
+            "ssh_public_key": instance.public_key,
+            "xdr_agent_url": instance.agent_presigned_url,
+            "join_domain": instance.join_domain,
         }
 
     def _register_outputs(self) -> None:
@@ -222,9 +226,10 @@ class RangeStack(pulumi.ComponentResource):
         ssh_key_secret_arn: str,
         ngfw_subnet_cidr: str,
     ) -> None:
-        """Execute NGFW configuration via SSH (blocking).
+        """Execute NGFW configuration via Ansible (blocking).
 
         This is the actual SSH work - runs on a separate thread.
+        Uses range_ansible_runner for SSH execution.
 
         Args:
             subnets: List of dicts with 'name', 'cidr', 'connected_to'.
@@ -247,48 +252,23 @@ class RangeStack(pulumi.ComponentResource):
         secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
         private_key = secret_response["SecretString"]
 
-        # Create SSH executor
-        ssh_executor = SSHExecutor(private_key=private_key)
-
         # Wait for SSH to be available
         logger.info("Waiting for SSH on NGFW at %s...", management_ip)
-        ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
+        range_ansible_runner.wait_for_ssh(
+            host=management_ip,
+            user="admin",
+            private_key=private_key,
+            timeout_seconds=300,
+        )
 
-        # Build and execute the configure plan
-        plan = NGFWConfigureSubnetsPlan()
-        steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
-
-        # Execute steps with retry logic
-        for step in steps:
-            logger.info("Executing NGFW config step: %s", step.name)
-            result = None
-            for attempt in range(5):
-                if attempt > 0:
-                    logger.info("Retry %d/4 for step %s", attempt, step.name)
-                    time.sleep(15)
-                result = ssh_executor.run_command(
-                    instance_id=management_ip,
-                    script=step.script,
-                    stdin_input=step.stdin_input,
-                    timeout_seconds=step.timeout_seconds,
-                )
-                if result.success and self._check_commit_success(result.stdout):
-                    break
-                if result.success and not self._check_commit_success(result.stdout):
-                    logger.warning(
-                        "NGFW step '%s' SSH OK but commit failed: %s",
-                        step.name,
-                        result.stdout[:500] if result.stdout else "(empty)",
-                    )
-            if not result or not result.success:
-                stderr = result.stderr if result else "no result"
-                raise RuntimeError(f"NGFW config step '{step.name}' failed: {stderr}")
-            if not self._check_commit_success(result.stdout):
-                raise RuntimeError(
-                    f"NGFW step '{step.name}' commit failed after retries: "
-                    f"{result.stdout[:500] if result.stdout else '(empty)'}"
-                )
-            logger.info("NGFW config step '%s' completed", step.name)
+        # Run NGFW configuration via Ansible
+        range_ansible_runner.run_ngfw_configure_subnets(
+            host=management_ip,
+            private_key=private_key,
+            subnets=subnets,
+            range_id=range_id,
+            vpc_gateway_ip=vpc_gateway_ip,
+        )
 
         logger.info(
             "NGFW configuration complete for range %s (%d subnets)",
@@ -296,23 +276,14 @@ class RangeStack(pulumi.ComponentResource):
             len(subnets),
         )
 
-    def _check_commit_success(self, output: str) -> bool:
-        """Check if PAN-OS commit succeeded.
-
-        Args:
-            output: Command output to check.
-
-        Returns:
-            True if no commit was attempted or commit succeeded.
-        """
-        if not output:
-            return True
-        if "commit" not in output.lower():
-            return True
-        return "Configuration committed successfully" in output
-
     def _run_all_setup(self, dc_components: list[InstanceComponent], config: RangeConfig) -> None:
         """Run setup for all instances (DCs first, then others in parallel).
+
+        TODO: Delete after Ansible debugging - Instance setup now happens
+        post-Pulumi via range_ansible_runner.run_post_pulumi_range_setup()
+        called from main.py. This ensures clean separation between:
+        - Pulumi: Infrastructure creation (EC2, SGs, subnets, NGFW config)
+        - Ansible: Instance configuration (hostname, SSH, XDR, domain join)
 
         DC setup must complete before domain-joining victims attempt to join.
         Domain-joining instances run their setups in parallel using threading.
@@ -321,6 +292,11 @@ class RangeStack(pulumi.ComponentResource):
             dc_components: List of DC instance components.
             config: Range configuration.
         """
+        # Skip SSM-based setup - now handled post-Pulumi via Ansible
+        logger.info("Skipping SSM-based instance setup (handled post-Pulumi via Ansible)")
+        return
+
+        # OLD SSM-BASED CODE BELOW - kept for reference during migration
         # Run DC setup FIRST - must complete before victims can domain join
         for dc_instance in dc_components:
             dc_instance.run_dc_setup()

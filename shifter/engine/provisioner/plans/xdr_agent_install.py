@@ -1,5 +1,7 @@
 """XDR Agent installation plan for Windows instances.
 
+TODO: Delete after Ansible debugging - merged into ansible/playbooks/range_windows_setup.yml and range_dc_setup.yml
+
 Defines the steps to download and install Cortex XDR agent on Windows
 instances via SSM Run Command.
 """

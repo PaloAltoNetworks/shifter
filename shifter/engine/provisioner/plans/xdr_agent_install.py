@@ -18,11 +18,38 @@ $installerPath = "C:\\Windows\\Temp\\cortex_xdr_installer.msi"
 Write-Host "Downloading XDR agent installer..."
 
 try {
-    # Ensure TLS 1.2 for S3 presigned URLs
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # Cleanup any existing file from previous attempts (prevents file lock issues)
+    if (Test-Path $installerPath) {
+        Write-Host "Removing existing installer file..."
+        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
 
-    # Download installer
-    Invoke-WebRequest -Uri $presignedUrl -OutFile $installerPath -UseBasicParsing
+    # Extract hostname from presigned URL for diagnostics
+    $uri = [System.Uri]$presignedUrl
+    $s3Host = $uri.Host
+    Write-Host "S3 endpoint: $s3Host"
+
+    # Test DNS resolution
+    Write-Host "Testing DNS resolution..."
+    try {
+        $dns = [System.Net.Dns]::GetHostAddresses($s3Host)
+        Write-Host "DNS resolved to: $($dns -join ', ')"
+    } catch {
+        Write-Host "WARNING: DNS resolution failed: $_"
+    }
+
+    # Ensure TLS 1.2+ for S3 presigned URLs
+    $tls = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+    [Net.ServicePointManager]::SecurityProtocol = $tls
+    Write-Host "TLS protocols enabled: $([Net.ServicePointManager]::SecurityProtocol)"
+
+    # Download installer with timeout (120 seconds)
+    Write-Host "Starting download at $(Get-Date -Format 'HH:mm:ss')..."
+    $startTime = Get-Date
+    Invoke-WebRequest -Uri $presignedUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
+    $duration = (Get-Date) - $startTime
+    Write-Host "Download completed in $($duration.TotalSeconds) seconds"
 
     if (Test-Path $installerPath) {
         $fileSize = (Get-Item $installerPath).Length
@@ -34,6 +61,10 @@ try {
     exit 0
 } catch {
     Write-Host "Error downloading XDR agent: $_"
+    Write-Host "Exception type: $($_.Exception.GetType().FullName)"
+    if ($_.Exception.InnerException) {
+        Write-Host "Inner exception: $($_.Exception.InnerException.Message)"
+    }
     exit 1
 }
 """

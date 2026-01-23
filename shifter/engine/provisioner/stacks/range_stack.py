@@ -82,11 +82,7 @@ class RangeStack(pulumi.ComponentResource):
 
         self._validate_config(config)
         self._create_networks(name, config)
-        # Configure NGFW with routes/rules BEFORE creating instances
-        # This ensures traffic can flow when instances try to communicate
-        self._configure_ngfw(config)
-        dc_components = self._create_all_instances(name, config)
-        self._run_all_setup(dc_components, config)
+        self._create_all_instances(name, config)
         self._register_outputs()
 
         logger.info(

@@ -829,7 +829,7 @@ def add_temp_ngfw_allow_rule(user_id: int, range_id: int) -> None:
             instance_id=management_ip,
             script="",
             stdin_input=add_rule_input,
-            timeout_seconds=120,
+            timeout_seconds=500,  # ~8 min - PAN-OS commits can be slow
         )
         if result.success and _check_commit_success(result.stdout):
             logger.info("Temp allow rule added successfully: %s", rule_name)

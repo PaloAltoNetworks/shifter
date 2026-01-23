@@ -7,12 +7,14 @@ It handles:
 - Pulumi stack creation, provisioning, and destruction
 """
 
+import ipaddress
 import json
 import logging
 import os
 import shutil
 import subprocess  # nosec B404 - subprocess used for Pulumi CLI calls with hardcoded commands
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 import psycopg
@@ -32,8 +34,16 @@ from events import (
 )
 from executors.aws_executor import AWSExecutor
 from executors.ssh_executor import SSHExecutor
+from executors.ssm_executor import SSMExecutor
 from orchestrators.ops_orchestrator import OpsOrchestrator
-from orchestrators.setup_orchestrator import SetupOrchestrator
+from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
+from plans.bootstrap import BootstrapPlan
+from plans.dc_setup import DCSetupPlan
+from plans.domain_join import DomainJoinPlan
+from plans.linux_bootstrap import LinuxBootstrapPlan
+from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
+from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
+from plans.xdr_agent_install import XDRAgentInstallPlan
 
 logger = logging.getLogger(__name__)
 
@@ -86,28 +96,6 @@ def get_ami_id(ami_type: str) -> str:
 # Default timeout for waiting for NGFW SSH to become available (seconds)
 # PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
 NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 3600  # 60 minutes
-
-
-def _check_commit_success(output: str) -> bool:
-    """Check if PAN-OS commit succeeded.
-
-    PAN-OS outputs "Configuration committed successfully" on successful commits.
-    If the output contains a commit command but not this success message,
-    the commit failed.
-
-    Args:
-        output: Command output to check
-
-    Returns:
-        True if no commit was attempted or commit succeeded, False if commit failed
-    """
-    if not output:
-        return True
-    # Check if this was a commit operation
-    if "commit" not in output.lower():
-        return True
-    # If commit was attempted, check for success message
-    return "Configuration committed successfully" in output
 
 
 def get_vpc_gateway_ip(cidr: str) -> str:
@@ -553,109 +541,6 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
             "ssh_key_secret_arn": state.get("ssh_key_secret_arn"),
             "status": status,
         }
-
-
-def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
-    """Configure user's NGFW with subnet routes, addresses and security rules.
-
-    Starts the NGFW if stopped, waits for SSH, then runs the configure plan.
-
-    Args:
-        user_id: Django User ID who owns the NGFW.
-        subnets: List of subnet dicts with 'name', 'cidr', 'connected_to'.
-        range_id: Range ID for unique naming of routes/addresses/rules.
-
-    Raises:
-        ValueError: If user has no NGFW provisioned or NGFW_SUBNET_CIDR not set.
-        RuntimeError: If NGFW configuration fails.
-    """
-    from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
-
-    # Get VPC gateway IP from NGFW subnet CIDR
-    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
-    if not ngfw_subnet_cidr:
-        raise ValueError("NGFW_SUBNET_CIDR environment variable is required for subnet configuration")
-    vpc_gateway_ip = get_vpc_gateway_ip(ngfw_subnet_cidr)
-    logger.debug("configure_ngfw_subnets: vpc_gateway_ip=%s (from %s)", vpc_gateway_ip, ngfw_subnet_cidr)
-
-    # Get user's NGFW
-    ngfw_data = get_user_ngfw_data(user_id)
-    if not ngfw_data:
-        logger.warning("User %s has no NGFW, skipping subnet configuration", user_id)
-        return
-
-    ngfw_request_id = ngfw_data["ngfw_request_id"]
-    management_ip = ngfw_data["management_ip"]
-    ssh_key_secret_arn = ngfw_data["ssh_key_secret_arn"]
-    status = ngfw_data["status"]
-
-    if not management_ip or not ssh_key_secret_arn:
-        logger.warning("NGFW missing management_ip or ssh_key, skipping config")
-        return
-
-    # Start NGFW if stopped
-    if status == "stopped":
-        logger.info("Starting stopped NGFW for subnet configuration...")
-        run_ngfw_operation("start", ngfw_request_id)
-
-    # Get SSH private key from Secrets Manager
-    secrets_client = boto3.client("secretsmanager")
-    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-    private_key = secret_response["SecretString"]
-
-    # Create SSH executor and wait for NGFW to be ready
-    ssh_executor = SSHExecutor(private_key=private_key)
-    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
-
-    # Wait for management plane to be ready (especially important after NGFW start)
-    logger.info("Verifying NGFW management plane is ready...")
-    poll_for_serial_number(
-        ssh_executor=ssh_executor,
-        host=management_ip,
-        timeout_seconds=300,  # 5 min - should be quick if NGFW was already running
-        poll_interval=15,
-    )
-
-    # Build and execute the configure plan
-    plan = NGFWConfigureSubnetsPlan()
-    steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
-
-    # Execute steps manually since they're dynamically generated
-    # Retry logic for transient SSH failures or commit failures (5 attempts, 15s between retries)
-    for step in steps:
-        logger.info("Executing NGFW config step: %s", step.name)
-        result = None
-        for attempt in range(5):
-            if attempt > 0:
-                logger.info("Retry %d/4 for step %s", attempt, step.name)
-                time.sleep(15)
-            result = ssh_executor.run_command(
-                instance_id=management_ip,
-                script=step.script,
-                stdin_input=step.stdin_input,
-                timeout_seconds=step.timeout_seconds,
-            )
-            # Check both SSH success AND PAN-OS commit success
-            if result.success and _check_commit_success(result.stdout):
-                break
-            if result.success and not _check_commit_success(result.stdout):
-                logger.warning(
-                    "NGFW config step '%s' SSH succeeded but commit failed, output: %s",
-                    step.name,
-                    result.stdout[:500] if result.stdout else "(no output)",
-                )
-        if not result or not result.success:
-            stderr = result.stderr if result else "no result"
-            raise RuntimeError(f"NGFW config step '{step.name}' failed: {stderr}")
-        if not _check_commit_success(result.stdout):
-            raise RuntimeError(
-                f"NGFW config step '{step.name}' commit failed after retries: "
-                f"{result.stdout[:500] if result.stdout else '(no output)'}"
-            )
-        logger.info("NGFW config step '%s' completed successfully", step.name)
-
-    logger.info("NGFW subnet configuration complete for range %s", range_id)
 
 
 def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
@@ -1217,6 +1102,400 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
         conn.commit()
 
 
+# =============================================================================
+# Post-Pulumi Setup Functions
+# These run AFTER pulumi up creates infrastructure, BEFORE marking range ready
+# =============================================================================
+
+
+def _check_commit_success(output: str) -> bool:
+    """Check if PAN-OS commit succeeded.
+
+    Args:
+        output: Command output to check.
+
+    Returns:
+        True if no commit was attempted or commit succeeded.
+    """
+    if not output:
+        return True
+    if "commit" not in output.lower():
+        return True
+    return "Configuration committed successfully" in output
+
+
+def configure_ngfw_subnets(
+    subnets: list[dict],
+    range_id: int,
+    management_ip: str,
+    ssh_key_secret_arn: str,
+    ngfw_subnet_cidr: str,
+) -> None:
+    """Configure NGFW with routes for range subnets.
+
+    This runs AFTER pulumi up (subnets exist) and BEFORE instance setup.
+    Configures static routes on the NGFW so traffic can flow between subnets.
+
+    Args:
+        subnets: List of dicts with 'name', 'cidr', 'connected_to'.
+        range_id: Range ID for unique naming.
+        management_ip: NGFW management IP for SSH.
+        ssh_key_secret_arn: Secrets Manager ARN for SSH private key.
+        ngfw_subnet_cidr: NGFW subnet CIDR for computing gateway IP.
+    """
+    # Compute VPC gateway IP (first IP + 1 in the subnet)
+    network = ipaddress.ip_network(ngfw_subnet_cidr, strict=False)
+    vpc_gateway_ip = str(network.network_address + 1)
+    logger.info(
+        "Configuring NGFW: %d subnets, gateway=%s",
+        len(subnets),
+        vpc_gateway_ip,
+    )
+
+    # Get SSH private key from Secrets Manager
+    secrets_client = boto3.client("secretsmanager")
+    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+    private_key = secret_response["SecretString"]
+
+    # Create SSH executor
+    ssh_executor = SSHExecutor(private_key=private_key)
+
+    # Wait for SSH to be available
+    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
+
+    # Wait for management plane to be ready (especially important after NGFW start)
+    logger.info("Verifying NGFW management plane is ready...")
+    poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=300,
+        poll_interval=15,
+    )
+
+    # Build and execute the configure plan
+    plan = NGFWConfigureSubnetsPlan()
+    steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
+
+    # Execute steps with retry logic
+    for step in steps:
+        logger.info("Executing NGFW config step: %s", step.name)
+        result = None
+        for attempt in range(5):
+            if attempt > 0:
+                logger.info("Retry %d/4 for step %s", attempt, step.name)
+                time.sleep(15)
+            result = ssh_executor.run_command(
+                instance_id=management_ip,
+                script=step.script,
+                stdin_input=step.stdin_input,
+                timeout_seconds=step.timeout_seconds,
+            )
+            if result.success and _check_commit_success(result.stdout):
+                break
+            if result.success and not _check_commit_success(result.stdout):
+                logger.warning(
+                    "NGFW step '%s' SSH OK but commit failed: %s",
+                    step.name,
+                    result.stdout[:500] if result.stdout else "(empty)",
+                )
+        if not result or not result.success:
+            stderr = result.stderr if result else "no result"
+            raise RuntimeError(f"NGFW config step '{step.name}' failed: {stderr}")
+        if not _check_commit_success(result.stdout):
+            raise RuntimeError(
+                f"NGFW step '{step.name}' commit failed after retries: "
+                f"{result.stdout[:500] if result.stdout else '(empty)'}"
+            )
+        logger.info("NGFW config step '%s' completed", step.name)
+
+    logger.info(
+        "NGFW configuration complete for range %s (%d subnets)",
+        range_id,
+        len(subnets),
+    )
+
+
+def _run_single_instance_setup(
+    instance_id: str,
+    role: str,
+    os_type: str,
+    agent_presigned_url: str,
+    join_domain: bool,
+    dc_ip: str | None,
+    domain_name: str | None,
+) -> bool:
+    """Run setup for a single non-DC instance.
+
+    Args:
+        instance_id: EC2 instance ID.
+        role: Instance role ('attacker' or 'victim').
+        os_type: OS type ('kali', 'ubuntu', 'windows').
+        agent_presigned_url: Pre-signed URL for XDR agent download.
+        join_domain: Whether to join the domain.
+        dc_ip: DC private IP (for domain join).
+        domain_name: Domain FQDN (for domain join).
+
+    Returns:
+        True on success.
+
+    Raises:
+        SetupError: If setup fails.
+    """
+    logger.info("Starting setup for %s instance %s...", role, instance_id)
+
+    # Create executor and orchestrator
+    executor = SSMExecutor()
+    orchestrator = SetupOrchestrator(executor=executor)
+
+    # Select SSM document based on OS type
+    document_name = "AWS-RunShellScript" if os_type in ("kali", "ubuntu", "amazon-linux") else "AWS-RunPowerShellScript"
+
+    # Wait for SSM agent to come online
+    logger.info("Waiting for SSM agent on %s...", instance_id)
+    executor.wait_for_agent(instance_id, timeout_seconds=300)
+    logger.info("Instance %s is ready (SSM agent online)", instance_id)
+
+    # Create context object for plan get_context()
+    class InstanceContext:
+        def __init__(self):
+            self.hostname = f"inst-{instance_id[-8:]}"  # Use last 8 chars of instance ID
+            self.public_key = ""  # Not needed for SSM-based setup
+            self.agent_presigned_url = agent_presigned_url
+            self.ssh_user = "kali" if os_type == "kali" else "ubuntu"
+
+    ctx = InstanceContext()
+
+    # Select and run plans based on role and OS type
+    if role == "attacker":
+        # Kali: hostname + SSH setup
+        plan = LinuxBootstrapPlan()
+        context = plan.get_context(ctx)
+        result = orchestrator.orchestrate(instance_id, plan, context, document_name=document_name)
+        if not result.success:
+            raise SetupError(f"Kali setup failed: {result.error}")
+        logger.info("Kali setup complete for %s", instance_id)
+
+    elif role == "victim":
+        if os_type in ("kali", "ubuntu", "amazon-linux"):
+            # Linux victim: Bootstrap + XDR
+            bootstrap_plan = LinuxBootstrapPlan()
+            bootstrap_ctx = bootstrap_plan.get_context(ctx)
+            result = orchestrator.orchestrate(instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name)
+            if not result.success:
+                raise SetupError(f"Linux bootstrap failed: {result.error}")
+            logger.info("Linux bootstrap complete for %s", instance_id)
+
+            # Install XDR agent
+            if agent_presigned_url:
+                xdr_plan = LinuxXDRAgentInstallPlan()
+                xdr_ctx = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
+                result = orchestrator.orchestrate(instance_id, xdr_plan, xdr_ctx, document_name=document_name)
+                if not result.success:
+                    raise SetupError(f"Linux XDR install failed: {result.error}")
+                logger.info("Linux XDR agent installed on %s", instance_id)
+            else:
+                logger.info("No XDR agent URL provided for %s", instance_id)
+
+        else:
+            # Windows victim: Bootstrap + XDR + Domain join
+            win_bootstrap_plan = BootstrapPlan()
+            win_bootstrap_ctx = win_bootstrap_plan.get_context(ctx)
+            result = orchestrator.orchestrate(
+                instance_id, win_bootstrap_plan, win_bootstrap_ctx, document_name=document_name
+            )
+            if not result.success:
+                raise SetupError(f"Windows bootstrap failed: {result.error}")
+            logger.info("Windows bootstrap complete for %s", instance_id)
+
+            # Install XDR agent
+            if agent_presigned_url:
+                win_xdr_plan = XDRAgentInstallPlan()
+                win_xdr_ctx = win_xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
+                result = orchestrator.orchestrate(instance_id, win_xdr_plan, win_xdr_ctx, document_name=document_name)
+                if not result.success:
+                    raise SetupError(f"Windows XDR install failed: {result.error}")
+                logger.info("Windows XDR agent installed on %s", instance_id)
+            else:
+                logger.info("No XDR agent URL provided for %s", instance_id)
+
+            # Domain join (only for Windows victims with join_domain=True)
+            if join_domain and dc_ip and domain_name:
+                domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+                if domain_password:
+                    logger.info("Joining domain %s for %s...", domain_name, instance_id)
+                    domain_join_plan = DomainJoinPlan()
+                    dj_context = domain_join_plan.get_context(
+                        {
+                            "dc_ip": dc_ip,
+                            "domain_name": domain_name,
+                            "domain_admin_password": domain_password,
+                        }
+                    )
+                    result = orchestrator.orchestrate(
+                        instance_id, domain_join_plan, dj_context, document_name=document_name
+                    )
+                    if not result.success:
+                        raise SetupError(f"Domain join failed for {instance_id}")
+                    logger.info("Domain join complete for %s", instance_id)
+                else:
+                    logger.warning("DC_DOMAIN_PASSWORD not set, skipping domain join for %s", instance_id)
+            elif join_domain:
+                logger.info("join_domain=True but no dc_ip/domain_name, skipping domain join for %s", instance_id)
+
+    return True
+
+
+def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str) -> bool:
+    """Run setup for a DC instance.
+
+    Args:
+        instance_id: EC2 instance ID.
+        dc_config: DC configuration dict with domain_name, netbios_name, etc.
+        agent_presigned_url: Pre-signed URL for XDR agent download.
+
+    Returns:
+        True on success.
+
+    Raises:
+        SetupError: If setup fails.
+    """
+    logger.info("DC instance %s starting setup...", instance_id)
+    domain_name = dc_config.get("domain_name", "")
+    netbios_name = dc_config.get("netbios_name", "")
+    logger.info("Domain: %s, NetBIOS: %s", domain_name, netbios_name)
+
+    # Create executor and orchestrator
+    executor = SSMExecutor()
+    orchestrator = SetupOrchestrator(executor=executor)
+
+    # Wait for SSM agent to come online
+    logger.info("Waiting for SSM agent on DC %s...", instance_id)
+    executor.wait_for_agent(instance_id, timeout_seconds=600)
+    logger.info("DC %s SSM agent online", instance_id)
+
+    # Prebaked DC: Skip hostname change - DC already has correct hostname from AMI
+    logger.info("Using prebaked DC AMI - skipping hostname change")
+
+    # Verify Domain Controller via DCSetupPlan
+    logger.info("Verifying Domain Controller (%s)...", domain_name)
+    dc_plan = DCSetupPlan()
+
+    # Create config object for DCSetupPlan context
+    class DCPromoteConfig:
+        def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str):
+            self.domain_name = domain_name
+            self.netbios_name = netbios_name
+            self.dsrm_password = dsrm_password
+            self.domain_admin_password = domain_admin_password
+
+    dsrm_password = dc_config.get("dsrm_password", "")
+    domain_admin_password = dc_config.get("domain_admin_password", "")
+
+    config_obj = DCPromoteConfig(domain_name, netbios_name, dsrm_password, domain_admin_password)
+    dc_context = dc_plan.get_context(config_obj)
+    dc_result = orchestrator.orchestrate(instance_id, dc_plan, dc_context)
+    if not dc_result.success:
+        raise SetupError(f"DC verification failed: {dc_result.error}")
+    logger.info("DC verification complete")
+
+    # Install XDR agent on DC
+    if agent_presigned_url:
+        logger.info("Installing XDR agent on DC %s...", instance_id)
+        xdr_plan = XDRAgentInstallPlan()
+        xdr_context = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
+        xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, xdr_context)
+        if not xdr_result.success:
+            raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
+        logger.info("XDR agent installed successfully on DC")
+    else:
+        logger.info("No XDR agent URL provided, skipping XDR install on DC")
+
+    return True
+
+
+def run_instance_setup(
+    instances_output: list[dict],
+    range_spec: dict,
+    dc_ip: str | None = None,
+    domain_name: str | None = None,
+) -> None:
+    """Run setup for all instances after infrastructure is ready.
+
+    Runs DC setup first (blocking), then all other instances in parallel.
+
+    Args:
+        instances_output: List of instance dicts from Pulumi outputs.
+        range_spec: Range specification with subnet/instance configs.
+        dc_ip: DC private IP for domain join (from DC instance output).
+        domain_name: Domain FQDN for domain join.
+    """
+    # Build lookup from instance UUID to config
+    uuid_to_config: dict[str, dict] = {}
+    for subnet in range_spec.get("subnets", []):
+        for inst in subnet.get("instances", []):
+            uuid_to_config[inst.get("uuid", "")] = inst
+
+    # Separate DCs from other instances
+    dc_instances = []
+    other_instances = []
+    for inst in instances_output:
+        if inst.get("role") == "dc":
+            dc_instances.append(inst)
+        else:
+            other_instances.append(inst)
+
+    # Run DC setup FIRST (blocking) - must complete before domain joins
+    for dc_inst in dc_instances:
+        inst_uuid = dc_inst.get("uuid", "")
+        inst_config = uuid_to_config.get(inst_uuid, {})
+        dc_config = inst_config.get("dc_config", {})
+        agent_url = inst_config.get("agent_presigned_url", "")
+        _run_dc_setup(dc_inst["instance_id"], dc_config, agent_url)
+
+    # Get DC IP and domain for domain joins (from first DC)
+    actual_dc_ip = dc_ip
+    actual_domain = domain_name
+    if dc_instances and not actual_dc_ip:
+        actual_dc_ip = dc_instances[0].get("private_ip")
+        # Get domain from DC config
+        dc_uuid = dc_instances[0].get("uuid", "")
+        dc_config = uuid_to_config.get(dc_uuid, {}).get("dc_config", {})
+        actual_domain = dc_config.get("domain_name")
+
+    # Run other instances in parallel
+    if other_instances:
+        logger.info("Running setup for %d non-DC instances in parallel...", len(other_instances))
+
+        def setup_instance(inst: dict) -> tuple[str, bool, str | None]:
+            """Setup a single instance, return (instance_id, success, error)."""
+            inst_id = inst["instance_id"]
+            inst_uuid = inst.get("uuid", "")
+            inst_config = uuid_to_config.get(inst_uuid, {})
+            try:
+                _run_single_instance_setup(
+                    instance_id=inst_id,
+                    role=inst.get("role", "victim"),
+                    os_type=inst.get("os", "ubuntu"),
+                    agent_presigned_url=inst_config.get("agent_presigned_url", ""),
+                    join_domain=inst_config.get("join_domain", False),
+                    dc_ip=actual_dc_ip,
+                    domain_name=actual_domain,
+                )
+                return (inst_id, True, None)
+            except Exception as e:
+                return (inst_id, False, str(e))
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(setup_instance, inst): inst for inst in other_instances}
+            for future in as_completed(futures):
+                inst_id, success, error = future.result()
+                if not success:
+                    raise SetupError(f"Instance {inst_id} setup failed: {error}")
+
+    logger.info("All instance setup complete")
+
+
 def run_pulumi(operation: str, request_id: str) -> None:
     """Run Pulumi operation.
 
@@ -1410,14 +1689,15 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     """Run Pulumi up to provision the range.
 
     The sequence is:
-    1. Run Pulumi up (creates subnets, configures NGFW, creates instances)
+    1. Run Pulumi up (creates subnets and instances - infrastructure only)
     2. Validate outputs (fail early if incomplete)
-    3. Write to DB (mark as ready)
-    4. Publish ready event
+    3. Configure NGFW subnets (routes for traffic flow)
+    4. Run instance setup (DC first, then others in parallel)
+    5. Write to DB (mark as ready)
+    6. Publish ready event
 
-    NGFW configuration (routes, addresses, rules) happens INSIDE Pulumi,
-    after subnets are created but before instances are created. This ensures
-    traffic can flow when instances try to communicate (e.g., domain join).
+    NGFW configuration and instance setup happen AFTER pulumi up returns,
+    ensuring a clear sequential flow: infrastructure -> NGFW routes -> instance setup.
 
     Args:
         request_id: UUID string of the Request.
@@ -1478,8 +1758,31 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
         expected_subnet_names=expected_subnet_names,
     )
 
-    # NGFW configuration (routes, addresses, rules) happens inside Pulumi,
-    # after subnets are created but before instances. See range_stack.py.
+    # Configure NGFW with routes for range subnets (before instance setup)
+    ngfw_data = get_user_ngfw_data(user_id)
+    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
+    if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
+        logger.info("Configuring NGFW with subnet routes...")
+        configure_ngfw_subnets(
+            subnets=spec_subnets,
+            range_id=range_id,
+            management_ip=ngfw_data["management_ip"],
+            ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
+            ngfw_subnet_cidr=ngfw_subnet_cidr,
+        )
+    else:
+        logger.warning(
+            "Skipping NGFW config: ngfw_data=%s, ngfw_subnet_cidr=%s",
+            bool(ngfw_data),
+            bool(ngfw_subnet_cidr),
+        )
+
+    # Run instance setup (DC first, then others in parallel)
+    logger.info("Running instance setup...")
+    run_instance_setup(
+        instances_output=instances_output,
+        range_spec=range_spec,
+    )
 
     # Write provisioned state to DB
     write_provisioned_state(

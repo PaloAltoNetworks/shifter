@@ -29,6 +29,7 @@ from components.instance import InstanceComponent
 from components.network import NetworkComponent, allocate_subnets
 from config import InstanceConfig, RangeConfig
 from executors.ssh_executor import SSHExecutor
+from main import poll_for_serial_number
 from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
 
 logger = logging.getLogger(__name__)
@@ -253,6 +254,15 @@ class RangeStack(pulumi.ComponentResource):
         # Wait for SSH to be available
         logger.info("Waiting for SSH on NGFW at %s...", management_ip)
         ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
+
+        # Wait for management plane to be ready (especially important after NGFW start)
+        logger.info("Verifying NGFW management plane is ready...")
+        poll_for_serial_number(
+            ssh_executor=ssh_executor,
+            host=management_ip,
+            timeout_seconds=300,
+            poll_interval=15,
+        )
 
         # Build and execute the configure plan
         plan = NGFWConfigureSubnetsPlan()

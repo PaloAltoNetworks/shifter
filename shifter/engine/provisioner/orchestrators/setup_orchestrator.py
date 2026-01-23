@@ -269,21 +269,6 @@ class SetupOrchestrator:
                 ) from e
             last_result = result
 
-            # Check for PAN-OS commit success if commit was attempted
-            if not self._check_commit_success(result.stdout):
-                logger.warning(
-                    "_execute_step: PAN-OS commit failed in step=%s, output=%s",
-                    step.name,
-                    result.stdout[:500] if result.stdout else "(no output)",
-                )
-                if attempt < max_retries:
-                    continue  # Retry
-                else:
-                    raise SetupError(
-                        f"Step '{step.name}' failed: PAN-OS commit did not succeed",
-                        step_name=step.name,
-                    )
-
             if result.success:
                 # If poll_for_job is enabled, parse job ID and poll until complete
                 if getattr(step, "poll_for_job", False):

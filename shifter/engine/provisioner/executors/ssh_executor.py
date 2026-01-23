@@ -198,12 +198,21 @@ class SSHExecutor:
                 # This is the ONLY reliable way to know all output has been received
                 if channel.eof_received:
                     logger.info("Channel EOF received - draining remaining data")
-                    # Final drain of any buffered data
-                    while channel.recv_ready():
-                        chunk = channel.recv(4096).decode("utf-8", errors="replace")
-                        chunk_count += 1
-                        logger.info(f"Drain chunk {chunk_count}: {len(chunk)} bytes")
-                        output += chunk
+                    # Use blocking recv() to drain ALL remaining data
+                    # recv_ready() only checks Paramiko's buffer, not kernel TCP buffer
+                    # Set short timeout for drain phase
+                    channel.settimeout(2)
+                    while True:
+                        try:
+                            chunk = channel.recv(4096)
+                            if not chunk:  # Empty bytes = channel closed, no more data
+                                break
+                            chunk_count += 1
+                            logger.info(f"Drain chunk {chunk_count}: {len(chunk)} bytes")
+                            output += chunk.decode("utf-8", errors="replace")
+                        except builtins.TimeoutError:
+                            logger.info("Drain timeout - no more data")
+                            break
                     break
 
                 # Overall timeout check

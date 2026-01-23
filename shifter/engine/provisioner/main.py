@@ -1899,6 +1899,13 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
         ValueError: If unknown operation or Request not found.
         Exception: If the Pulumi operation fails.
     """
+    # Use Terraform for NGFW operations
+    from ngfw_terraform import run_ngfw_terraform
+
+    run_ngfw_terraform(operation, request_id)
+    return
+
+    # Legacy Pulumi code below - kept for reference/rollback
     logger.info("run_ngfw_pulumi: starting operation=%s request_id=%s", operation, request_id)
 
     # Get NGFW data from database (needed for correlation IDs and credentials)

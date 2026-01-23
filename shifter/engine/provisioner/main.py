@@ -1389,8 +1389,9 @@ def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str) -
             self.dsrm_password = dsrm_password
             self.domain_admin_password = domain_admin_password
 
-    dsrm_password = dc_config.get("dsrm_password", "")
-    domain_admin_password = dc_config.get("domain_admin_password", "")
+    # Passwords come from env var, not from spec (same as InstanceComponent)
+    domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+    dsrm_password = domain_admin_password  # Reuse for DSRM (same as InstanceComponent)
 
     config_obj = DCPromoteConfig(domain_name, netbios_name, dsrm_password, domain_admin_password)
     dc_context = dc_plan.get_context(config_obj)
@@ -1450,7 +1451,7 @@ def run_instance_setup(
         inst_uuid = dc_inst.get("uuid", "")
         inst_config = uuid_to_config.get(inst_uuid, {})
         dc_config = inst_config.get("dc_config", {})
-        agent_url = inst_config.get("agent_presigned_url", "")
+        agent_url = dc_inst.get("agent_presigned_url", "")  # From Pulumi output
         _run_dc_setup(dc_inst["instance_id"], dc_config, agent_url)
 
     # Get DC IP and domain for domain joins (from first DC)
@@ -1477,7 +1478,7 @@ def run_instance_setup(
                     instance_id=inst_id,
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),
-                    agent_presigned_url=inst_config.get("agent_presigned_url", ""),
+                    agent_presigned_url=inst.get("agent_presigned_url", ""),  # From Pulumi output
                     join_domain=inst_config.get("join_domain", False),
                     dc_ip=actual_dc_ip,
                     domain_name=actual_domain,
@@ -1763,8 +1764,20 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
     if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
         logger.info("Configuring NGFW with subnet routes...")
+        # Build subnets list with CIDRs from Pulumi output + connected_to from spec
+        subnets_for_ngfw = []
+        for spec_subnet in spec_subnets:
+            subnet_name = spec_subnet.get("name", "")
+            subnet_output = subnets_output.get(subnet_name, {})
+            subnets_for_ngfw.append(
+                {
+                    "name": subnet_name,
+                    "cidr": subnet_output.get("subnet_cidr", ""),
+                    "connected_to": spec_subnet.get("connected_to", []),
+                }
+            )
         configure_ngfw_subnets(
-            subnets=spec_subnets,
+            subnets=subnets_for_ngfw,
             range_id=range_id,
             management_ip=ngfw_data["management_ip"],
             ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],

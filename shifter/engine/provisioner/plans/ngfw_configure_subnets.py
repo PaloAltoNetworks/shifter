@@ -1,5 +1,7 @@
 """NGFW Configure Subnets Plan for adding subnet address objects and rules.
 
+TODO: Delete after Ansible debugging - replaced by ansible/playbooks/ngfw_configure_subnets.yml
+
 This plan configures the NGFW with:
 - Static routes for each subnet (via VPC gateway)
 - Address objects for all subnets in a range

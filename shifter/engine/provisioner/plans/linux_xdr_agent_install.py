@@ -1,5 +1,7 @@
 """Linux XDR Agent installation plan.
 
+TODO: Delete after Ansible debugging - merged into ansible/playbooks/range_linux_setup.yml
+
 Defines the steps to download and install Cortex XDR agent on Linux
 victim instances via SSM Run Command.
 

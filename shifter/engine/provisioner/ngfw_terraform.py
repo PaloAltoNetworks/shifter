@@ -218,32 +218,11 @@ def _run_provision(
     # Update DB with full state
     update_instance_state(request_id, STATUS_PROVISIONING, **state)
 
-    # Auto-stop after provisioning to save costs
-    ec2_instance_id = output_data.get("ec2_instance_id")
-    if not ec2_instance_id:
-        raise RuntimeError("NGFW Terraform missing ec2_instance_id output")
+    # Auto-stop after provisioning to save costs (uses unified start/stop path)
+    from main import run_ngfw_operation
 
     logger.info("Auto-stopping NGFW after provisioning...")
-
-    # Emit stopping status (matches run_ngfw_operation behavior)
-    update_instance_state(request_id, "stopping")
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status="stopping",
-    )
-
-    aws_runner.stop_ngfw(ec2_instance_id)
-
-    # Emit stopped status (matches run_ngfw_operation behavior)
-    update_instance_state(request_id, "stopped")
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status="stopped",
-    )
+    run_ngfw_operation("stop", request_id)
 
     # Update to awaiting_association status
     update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION)

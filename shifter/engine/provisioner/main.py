@@ -32,7 +32,6 @@ from events import (
 )
 from executors.aws_executor import AWSExecutor
 from executors.ssh_executor import SSHExecutor
-from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -1594,22 +1593,22 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     """Run NGFW runtime operation (start/stop/complete-setup).
 
-    Retrieves EC2 instance ID from the Instance.state (populated during Pulumi
-    provisioning), executes the operation plan, and publishes events for status
+    Retrieves EC2 instance ID from the Instance.state (populated during
+    provisioning), executes the operation, and publishes events for status
     updates.
 
     Args:
         operation: Operation name (start, stop, complete-setup).
         request_id: UUID string of the Request.
-        **kwargs: Operation-specific parameters (overrides for context).
+        **kwargs: Operation-specific parameters (unused, kept for compatibility).
 
     Raises:
         ValueError: If unknown operation or EC2 instance ID not found.
         Exception: If operation fails.
     """
+    import aws_runner
+
     logger.info("run_ngfw_operation: starting operation=%s request_id=%s", operation, request_id)
-    if kwargs:
-        logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
 
     # Handle complete-setup as special case (requires AWS + SSH hybrid execution)
     if operation == "complete-setup":
@@ -1633,7 +1632,7 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     app_id = ngfw_data["app_id"]
     state = ngfw_data.get("state", {})
 
-    # EC2 instance ID is stored in state after Pulumi provisioning
+    # EC2 instance ID is stored in state after provisioning
     ec2_instance_id = state.get("ec2_instance_id")
     if not ec2_instance_id:
         raise ValueError(f"EC2 instance ID not found in state for request: {request_id}")
@@ -1650,48 +1649,11 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     )
 
     try:
-        # Create executor and orchestrator
-        executor = AWSExecutor()
-        orchestrator = OpsOrchestrator(executor)
-
-        # Load the appropriate plan
-        plan_map = {
-            "start": "plans.ngfw_start.NGFWStartPlan",
-            "stop": "plans.ngfw_stop.NGFWStopPlan",
-        }
-
-        plan_path = plan_map[operation]
-        module_path, class_name = plan_path.rsplit(".", 1)
-
-        import importlib
-
-        module = importlib.import_module(module_path)
-        plan_class = getattr(module, class_name)
-        plan = plan_class()
-
-        # Build context dict with EC2 instance ID and any additional kwargs
-        # NOTE ON NAMING: Plans use "instance_id" key for the AWS EC2 Instance ID
-        # (e.g., "i-099ee928142d5f092"), NOT the Django Instance UUID.
-        # This is a legacy naming convention that should eventually be renamed.
-        context = {
-            "instance_id": ec2_instance_id,  # AWS EC2 Instance ID (e.g., "i-...")
-            **kwargs,
-        }
-
-        # Execute the plan - orchestrate(target_id, plan, context)
-        result = orchestrator.orchestrate(ec2_instance_id, plan, context)
-
-        if not result.success:
-            # Log step errors for debugging
-            for step_result in result.step_results:
-                if not step_result.success:
-                    logger.error(
-                        "NGFW %s step %s failed: %s",
-                        operation,
-                        step_result.step_name,
-                        step_result.stderr,
-                    )
-            raise RuntimeError(f"Operation {operation} failed")
+        # Execute operation using aws_runner
+        if operation == "start":
+            aws_runner.start_ngfw(ec2_instance_id)
+        elif operation == "stop":
+            aws_runner.stop_ngfw(ec2_instance_id)
 
         # Update DB and publish event for success status
         update_instance_state(request_id, success_status)

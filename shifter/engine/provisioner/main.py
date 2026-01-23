@@ -511,6 +511,8 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
     """Get NGFW data for a user (if they have one provisioned).
 
     Queries for a ready/active NGFW Instance belonging to this user.
+    Includes 'stopping' status because range provisioner will wait for
+    stop to complete, then start the NGFW.
 
     Args:
         user_id: Django User ID.
@@ -530,7 +532,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
             JOIN engine_request r ON i.request_id = r.id
             WHERE r.user_id = %s
               AND i.role = 'ngfw'
-              AND i.status IN ('ready', 'active', 'stopped')
+              AND i.status IN ('ready', 'active', 'stopped', 'stopping')
             ORDER BY i.created_at DESC
             LIMIT 1
             """,
@@ -1251,8 +1253,16 @@ def run_pulumi(operation: str, request_id: str) -> None:
                 ngfw_data["management_ip"],
             )
 
-            # Start NGFW if stopped (must be running for subnet config)
-            if ngfw_data.get("status") == "stopped":
+            # Start NGFW if stopped/stopping (must be running for subnet config)
+            ngfw_status = ngfw_data.get("status")
+            if ngfw_status in ("stopped", "stopping"):
+                ec2_instance_id = ngfw_data.get("ec2_instance_id")
+                if ngfw_status == "stopping" and ec2_instance_id:
+                    # Wait for stop to complete before starting
+                    logger.info("NGFW is stopping, waiting for stop to complete...")
+                    aws_executor = AWSExecutor()
+                    aws_executor.wait_for_stopped(ec2_instance_id)
+                    logger.info("NGFW stop complete, now starting...")
                 logger.info("Starting stopped NGFW for range provisioning...")
                 run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
 

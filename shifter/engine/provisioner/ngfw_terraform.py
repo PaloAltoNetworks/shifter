@@ -12,6 +12,7 @@ from typing import Any
 import boto3
 
 import ansible_runner
+import aws_runner
 import terraform_runner
 from events import (
     STATUS_AWAITING_ASSOCIATION,
@@ -111,7 +112,6 @@ def _run_provision(
     from main import (
         NGFW_SSH_WAIT_TIMEOUT_DEFAULT,
         poll_for_serial_and_cert,
-        run_ngfw_operation,
         update_instance_state,
     )
 
@@ -218,9 +218,32 @@ def _run_provision(
     # Update DB with full state
     update_instance_state(request_id, STATUS_PROVISIONING, **state)
 
-    # Auto-stop after provisioning
+    # Auto-stop after provisioning to save costs
+    ec2_instance_id = output_data.get("ec2_instance_id")
+    if not ec2_instance_id:
+        raise RuntimeError("NGFW Terraform missing ec2_instance_id output")
+
     logger.info("Auto-stopping NGFW after provisioning...")
-    run_ngfw_operation("stop", request_id)
+
+    # Emit stopping status (matches run_ngfw_operation behavior)
+    update_instance_state(request_id, "stopping")
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status="stopping",
+    )
+
+    aws_runner.stop_ngfw(ec2_instance_id)
+
+    # Emit stopped status (matches run_ngfw_operation behavior)
+    update_instance_state(request_id, "stopped")
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status="stopped",
+    )
 
     # Update to awaiting_association status
     update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION)
@@ -255,23 +278,46 @@ def _run_deprovision(
     current_state = ngfw_data.get("state", {})
     management_ip = current_state.get("management_ip")
     ssh_key_secret_arn = current_state.get("ssh_key_secret_arn")
+    ec2_instance_id = current_state.get("ec2_instance_id")
 
     # Run pre-destroy license deactivation via Ansible
-    if management_ip and ssh_key_secret_arn:
+    # NGFW must be running to SSH for license deactivation
+    if management_ip and ssh_key_secret_arn and ec2_instance_id:
         logger.info("Running NGFW license deactivation via Ansible...")
         try:
+            # Start NGFW if stopped (need SSH access for license deactivation)
+            instance_state = aws_runner.get_instance_state(ec2_instance_id)
+            if instance_state == "stopped":
+                logger.info("Starting stopped NGFW for license deactivation...")
+                aws_runner.start_ngfw(ec2_instance_id)
+
+            # Get SSH key from Secrets Manager
             secrets_client = boto3.client("secretsmanager")
             secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
             private_key = secret_response["SecretString"]
 
+            # Wait for SSH to be available
+            logger.info("Waiting for SSH availability before license deactivation...")
+            ansible_runner.wait_for_ssh(
+                management_ip=management_ip,
+                private_key=private_key,
+                timeout_seconds=300,  # 5 min should be enough for already-booted NGFW
+            )
+
+            # Deactivate license
             ansible_runner.run_ngfw_deprovision(
                 management_ip=management_ip,
                 private_key=private_key,
             )
         except Exception as e:
-            logger.warning("License deactivation error: %s, proceeding", e)
+            logger.warning("License deactivation error: %s, proceeding with destroy", e)
     else:
-        logger.warning("Missing management_ip or ssh_key_secret_arn, skipping license deactivation")
+        logger.warning(
+            "Missing state fields for license deactivation (management_ip=%s, ssh_key=%s, ec2=%s), skipping",
+            bool(management_ip),
+            bool(ssh_key_secret_arn),
+            bool(ec2_instance_id),
+        )
 
     # Run Terraform destroy
     logger.info("Running terraform destroy for NGFW...")

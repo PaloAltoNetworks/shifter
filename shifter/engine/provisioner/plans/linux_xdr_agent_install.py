@@ -25,6 +25,13 @@ installer_path="/tmp/agent-installer"
 
 echo "Downloading XDR agent installer..."
 
+# Cleanup any existing file from previous attempts (prevents issues on retry)
+if [ -f "$installer_path" ]; then
+    echo "Removing existing installer file..."
+    rm -f "$installer_path" || true
+    sleep 1
+fi
+
 # Download using curl with proper options for S3 presigned URLs
 curl -sSf -o "$installer_path" "$presigned_url"
 

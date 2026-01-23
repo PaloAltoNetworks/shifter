@@ -1899,13 +1899,28 @@ def run_ngfw_pulumi(operation: str, request_id: str) -> None:
         ValueError: If unknown operation or Request not found.
         Exception: If the Pulumi operation fails.
     """
-    # Use Terraform for NGFW operations
-    from ngfw_terraform import run_ngfw_terraform
+    # Dispatch based on operation and backend
+    if operation == "up":
+        # New provisions always use Terraform
+        from ngfw_terraform import run_ngfw_terraform
 
-    run_ngfw_terraform(operation, request_id)
-    return
+        run_ngfw_terraform(operation, request_id)
+        return
 
-    # Legacy Pulumi code below - kept for reference/rollback
+    if operation == "destroy":
+        # Check which backend was used to provision this NGFW
+        import terraform_runner
+
+        if terraform_runner.has_terraform_state(request_id):
+            # Terraform-provisioned NGFW - use Terraform to destroy
+            from ngfw_terraform import run_ngfw_terraform
+
+            logger.info("NGFW has Terraform state - using Terraform destroy")
+            run_ngfw_terraform(operation, request_id)
+            return
+        # else: fall through to Pulumi destroy for backwards compatibility
+
+    # Legacy Pulumi code below - used for destroying Pulumi-provisioned NGFWs
     logger.info("run_ngfw_pulumi: starting operation=%s request_id=%s", operation, request_id)
 
     # Get NGFW data from database (needed for correlation IDs and credentials)

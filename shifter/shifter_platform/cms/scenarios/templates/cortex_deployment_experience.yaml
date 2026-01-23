@@ -1,6 +1,6 @@
-id: cortex_byot
-name: Cortex BYOT
-description: The classic Cortex XDR BYOT range with a ngfw, domain controller, two workstations, a server, and an attacker.
+id: cortex_deployment_experience
+name: Cortex Deployment Experience
+description: A range designed for use in the Cortex Deployment Experience. Includes a domain controller, two workstations, a server, and an attacker.
 enabled: true
 ngfw: true
 
@@ -16,36 +16,43 @@ instances:
     role: dc
     os_type: windows
     domain_controller: true
-    xdr_agent: true
+    xdr_agent: false
     ai_agent: true
     dc_config:
       domain_name: cortexbyot.lab
       netbios_name: CORTEXBYOT
 
+  - name: Cortex Host
+    role: victim
+    os_type: ubuntu
+    xdr_agent: false
+    join_domain: true
+    ai_agent: true
+
   - name: Workstation 1
     role: victim
     os_type: windows
-    xdr_agent: true
+    xdr_agent: false
     join_domain: true
     ai_agent: true
 
   - name: Workstation 2
     role: victim
     os_type: windows
-    xdr_agent: true
+    xdr_agent: false
     join_domain: true
     ai_agent: true
 
   - name: Server
     role: victim
     os_type: ubuntu
-    xdr_agent: true
+    xdr_agent: false
     join_domain: true
     ai_agent: true
 
 subnets:
   - name: dc_network
-    instances: [Domain Controller]
+    instances: [Domain Controller, Cortex Host]
     connected_to: [workstation_network, server_network, attacker_network]
 
   - name: workstation_network

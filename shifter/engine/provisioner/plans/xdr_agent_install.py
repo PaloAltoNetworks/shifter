@@ -14,59 +14,82 @@ $ErrorActionPreference = "Stop"
 
 $presignedUrl = "{{ agent_presigned_url }}"
 $installerPath = "C:\\Windows\\Temp\\cortex_xdr_installer.msi"
+$maxRetries = 5
+$retryDelaySeconds = 10
 
 Write-Host "Downloading XDR agent installer..."
 
-try {
-    # Cleanup any existing file from previous attempts (prevents file lock issues)
-    if (Test-Path $installerPath) {
-        Write-Host "Removing existing installer file..."
-        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
-    }
-
-    # Extract hostname from presigned URL for diagnostics
-    $uri = [System.Uri]$presignedUrl
-    $s3Host = $uri.Host
-    Write-Host "S3 endpoint: $s3Host"
-
-    # Test DNS resolution
-    Write-Host "Testing DNS resolution..."
-    try {
-        $dns = [System.Net.Dns]::GetHostAddresses($s3Host)
-        Write-Host "DNS resolved to: $($dns -join ', ')"
-    } catch {
-        Write-Host "WARNING: DNS resolution failed: $_"
-    }
-
-    # Ensure TLS 1.2+ for S3 presigned URLs
-    $tls = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
-    [Net.ServicePointManager]::SecurityProtocol = $tls
-    Write-Host "TLS protocols enabled: $([Net.ServicePointManager]::SecurityProtocol)"
-
-    # Download installer with timeout (120 seconds)
-    Write-Host "Starting download at $(Get-Date -Format 'HH:mm:ss')..."
-    $startTime = Get-Date
-    Invoke-WebRequest -Uri $presignedUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
-    $duration = (Get-Date) - $startTime
-    Write-Host "Download completed in $($duration.TotalSeconds) seconds"
-
-    if (Test-Path $installerPath) {
-        $fileSize = (Get-Item $installerPath).Length
-        Write-Host "Download complete: $installerPath ($fileSize bytes)"
-    } else {
-        throw "Failed to download installer - file not found"
-    }
-
-    exit 0
-} catch {
-    Write-Host "Error downloading XDR agent: $_"
-    Write-Host "Exception type: $($_.Exception.GetType().FullName)"
-    if ($_.Exception.InnerException) {
-        Write-Host "Inner exception: $($_.Exception.InnerException.Message)"
-    }
-    exit 1
+# Cleanup any existing file from previous attempts (prevents file lock issues)
+if (Test-Path $installerPath) {
+    Write-Host "Removing existing installer file..."
+    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
 }
+
+# Extract hostname from presigned URL for diagnostics
+$uri = [System.Uri]$presignedUrl
+$s3Host = $uri.Host
+Write-Host "S3 endpoint: $s3Host"
+
+# Test DNS resolution
+Write-Host "Testing DNS resolution..."
+try {
+    $dns = [System.Net.Dns]::GetHostAddresses($s3Host)
+    Write-Host "DNS resolved to: $($dns -join ', ')"
+} catch {
+    Write-Host "WARNING: DNS resolution failed: $_"
+}
+
+# Ensure TLS 1.2+ for S3 presigned URLs
+$tls = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+[Net.ServicePointManager]::SecurityProtocol = $tls
+Write-Host "TLS protocols enabled: $([Net.ServicePointManager]::SecurityProtocol)"
+
+# Download with retry logic
+$lastError = $null
+for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+    try {
+        Write-Host "Download attempt $attempt of $maxRetries at $(Get-Date -Format 'HH:mm:ss')..."
+        $startTime = Get-Date
+        Invoke-WebRequest -Uri $presignedUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
+        $duration = (Get-Date) - $startTime
+        Write-Host "Download completed in $($duration.TotalSeconds) seconds"
+
+        if (Test-Path $installerPath) {
+            $fileSize = (Get-Item $installerPath).Length
+            if ($fileSize -gt 0) {
+                Write-Host "Download complete: $installerPath ($fileSize bytes)"
+                exit 0
+            } else {
+                throw "Downloaded file is empty"
+            }
+        } else {
+            throw "Failed to download installer - file not found"
+        }
+    } catch {
+        $lastError = $_
+        Write-Host "Attempt $attempt failed: $_"
+        Write-Host "Exception type: $($_.Exception.GetType().FullName)"
+        if ($_.Exception.InnerException) {
+            Write-Host "Inner exception: $($_.Exception.InnerException.Message)"
+        }
+
+        if ($attempt -lt $maxRetries) {
+            # Exponential backoff: 10s, 20s, 40s, 80s
+            $delay = $retryDelaySeconds * [Math]::Pow(2, $attempt - 1)
+            Write-Host "Retrying in $delay seconds..."
+            Start-Sleep -Seconds $delay
+            # Cleanup partial download
+            if (Test-Path $installerPath) {
+                Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+Write-Host "All $maxRetries download attempts failed"
+Write-Host "Last error: $lastError"
+exit 1
 """
 
 # PowerShell script to install XDR agent silently

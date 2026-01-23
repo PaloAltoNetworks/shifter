@@ -80,6 +80,38 @@ def _get_state_key(request_uuid: str) -> str:
     return f"user_ngfw/{request_uuid}/terraform.tfstate"
 
 
+def has_terraform_state(request_uuid: str) -> bool:
+    """Check if Terraform state exists for the given request.
+
+    Used to determine if an NGFW was provisioned with Terraform (vs Pulumi).
+
+    Args:
+        request_uuid: UUID of the provisioning request
+
+    Returns:
+        True if Terraform state file exists in S3, False otherwise
+    """
+    try:
+        bucket = _get_state_bucket()
+    except ValueError:
+        # No state bucket configured
+        return False
+
+    state_key = _get_state_key(request_uuid)
+    s3_client = boto3.client("s3")
+
+    try:
+        s3_client.head_object(Bucket=bucket, Key=state_key)
+        logger.debug("Terraform state exists for request %s", request_uuid)
+        return True
+    except s3_client.exceptions.ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "404":
+            logger.debug("No Terraform state for request %s", request_uuid)
+            return False
+        # Re-raise other errors (permissions, etc.)
+        raise
+
+
 def _run_terraform(
     args: list[str],
     working_dir: Path,

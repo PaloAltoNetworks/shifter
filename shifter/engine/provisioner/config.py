@@ -172,6 +172,10 @@ class RangeConfig:
     ngfw_enabled: bool = False
     ngfw_ami_id: str = ""
     ngfw_instance_type: str = "m5.xlarge"
+    # NGFW connection info for subnet configuration (set when ngfw_enabled=True)
+    ngfw_management_ip: str = ""  # NGFW management IP for SSH
+    ngfw_ssh_key_secret_arn: str = ""  # Secrets Manager ARN for SSH private key
+    ngfw_subnet_cidr: str = ""  # NGFW subnet CIDR for computing gateway IP
     # S3 VPC endpoint for agent downloads (Gateway endpoint ID)
     s3_endpoint_id: str = ""
     # AWS Network Firewall endpoint ID for internet egress from range subnets
@@ -604,6 +608,10 @@ def load_config() -> RangeConfig:
         ngfw_enabled=ngfw_enabled,
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
+        # NGFW connection info for subnet configuration (set by main.py)
+        ngfw_management_ip=os.environ.get("NGFW_MANAGEMENT_IP", ""),
+        ngfw_ssh_key_secret_arn=os.environ.get("NGFW_SSH_KEY_SECRET_ARN", ""),
+        ngfw_subnet_cidr=os.environ.get("NGFW_SUBNET_CIDR", ""),
         # S3 VPC endpoint for agent downloads
         s3_endpoint_id=config.get("s3EndpointId") or "",
         # AWS Network Firewall endpoint for internet egress

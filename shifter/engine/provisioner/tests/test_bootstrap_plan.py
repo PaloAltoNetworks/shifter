@@ -33,10 +33,10 @@ class TestBootstrapPlan:
     def test_get_context_returns_expected_values(self):
         """get_context returns hostname and public_key."""
         plan = BootstrapPlan()
-        instance = MockInstance(hostname="test-dc-1", public_key="ssh-ed25519 AAAA")
+        instance = MockInstance(hostname="test-dc-1", public_key="ssh-rsa AAAA")
         context = plan.get_context(instance)
         assert context["hostname"] == "test-dc-1"
-        assert context["public_key"] == "ssh-ed25519 AAAA"
+        assert context["public_key"] == "ssh-rsa AAAA"
 
     def test_get_context_missing_hostname_raises(self):
         """get_context raises if hostname is missing."""

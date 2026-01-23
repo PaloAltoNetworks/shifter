@@ -19,8 +19,8 @@ instances:
     xdr_agent: false
     ai_agent: true
     dc_config:
-      domain_name: cortexbyot.lab
-      netbios_name: CORTEXBYOT
+      domain_name: internal.shifter
+      netbios_name: INTSHIFTER
 
   - name: Cortex Host
     role: victim

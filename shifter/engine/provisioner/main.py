@@ -1103,6 +1103,76 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
 # =============================================================================
 
 
+def find_stale_routes_by_cidr(
+    ssh_executor: SSHExecutor,
+    management_ip: str,
+    target_cidrs: set[str],
+) -> list[str]:
+    """Find existing NGFW static routes that match target CIDRs.
+
+    Queries the NGFW running config for static routes and returns names of
+    any routes whose destination matches one of the target CIDRs. Used to
+    clean up stale routes from destroyed ranges when CIDRs are recycled.
+
+    Args:
+        ssh_executor: SSH executor for NGFW connection.
+        management_ip: NGFW management IP address.
+        target_cidrs: Set of CIDRs to match against.
+
+    Returns:
+        List of route names that should be deleted.
+    """
+    import re
+
+    # Query the running static route config
+    query_cmd = "set cli pager off\nshow config running | match static-route"
+    try:
+        result = ssh_executor.run_command(
+            instance_id=management_ip,
+            script="",
+            stdin_input=query_cmd + "\nexit\n",
+            timeout_seconds=30,
+        )
+    except Exception as e:
+        logger.warning("Failed to query NGFW routes for cleanup: %s", e)
+        return []
+
+    if not result.success or not result.stdout:
+        return []
+
+    # Parse output to find route entries with matching destinations
+    # PAN-OS config format example:
+    #   range-146-dc_network {
+    #     destination 10.1.2.32/28;
+    stale_routes = []
+    current_route_name = None
+
+    # Match route name pattern: range-{id}-{name} {
+    route_pattern = re.compile(r"(range-\d+-\w+)\s*\{")
+    # Match destination pattern: destination X.X.X.X/Y;
+    dest_pattern = re.compile(r"destination\s+([\d./]+);")
+
+    for line in result.stdout.split("\n"):
+        route_match = route_pattern.search(line)
+        if route_match:
+            current_route_name = route_match.group(1)
+            continue
+
+        dest_match = dest_pattern.search(line)
+        if dest_match and current_route_name:
+            cidr = dest_match.group(1)
+            if cidr in target_cidrs:
+                logger.info(
+                    "Found stale route %s with CIDR %s - will delete",
+                    current_route_name,
+                    cidr,
+                )
+                stale_routes.append(current_route_name)
+            current_route_name = None
+
+    return stale_routes
+
+
 def configure_ngfw_subnets(
     subnets: list[dict],
     range_id: int,
@@ -1152,9 +1222,16 @@ def configure_ngfw_subnets(
         poll_interval=15,
     )
 
+    # Find any stale routes with matching CIDRs from destroyed ranges
+    # This handles CIDR recycling where old ranges weren't properly cleaned up
+    target_cidrs = {s["cidr"] for s in subnets if s.get("cidr")}
+    stale_routes = find_stale_routes_by_cidr(ssh_executor, management_ip, target_cidrs)
+    if stale_routes:
+        logger.info("Found %d stale routes to clean up: %s", len(stale_routes), stale_routes)
+
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
-    steps = NGFWConfigureSubnetsPlan().get_steps(subnets, range_id, vpc_gateway_ip)
+    steps = NGFWConfigureSubnetsPlan().get_steps(subnets, range_id, vpc_gateway_ip, stale_routes)
     plan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)

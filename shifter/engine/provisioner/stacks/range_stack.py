@@ -111,6 +111,7 @@ class RangeStack(pulumi.ComponentResource):
             "instance_id": instance.instance_id,
             "private_ip": instance.private_ip,
             "ssh_key_secret_arn": instance.ssh_key_secret_arn,
+            "agent_presigned_url": instance.agent_presigned_url or "",
         }
 
     def _register_outputs(self) -> None:

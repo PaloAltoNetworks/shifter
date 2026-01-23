@@ -27,6 +27,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Ansible collections
+COPY ansible/requirements.yml /app/ansible/
+RUN ansible-galaxy collection install -r /app/ansible/requirements.yml
+
 # Copy Pulumi program
 COPY . .
 

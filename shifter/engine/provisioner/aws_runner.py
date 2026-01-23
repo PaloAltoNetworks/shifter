@@ -93,20 +93,23 @@ def get_instance_state(ec2_instance_id: str) -> str:
 def start_ngfw(
     ec2_instance_id: str,
     timeout_seconds: int = START_TIMEOUT_DEFAULT,
+    wait: bool = True,
 ) -> None:
-    """Start an NGFW EC2 instance and wait for it to be running.
+    """Start an NGFW EC2 instance.
 
-    This function is idempotent - if the instance is already running,
-    it returns immediately. If the instance is in a transitional state,
-    it waits for the appropriate stable state first.
+    This function is idempotent - if the instance is already running or
+    starting, it returns immediately without error.
 
     Args:
         ec2_instance_id: AWS EC2 instance ID (e.g., 'i-0123456789abcdef0')
-        timeout_seconds: Maximum time to wait for instance to start
+        timeout_seconds: Maximum time to wait for instance to start (only used if wait=True)
+        wait: If True (default), wait for instance to reach running state.
+              If False, issue start command and return immediately (fire-and-forget).
 
     Raises:
         ValueError: If ec2_instance_id is empty or invalid
-        RuntimeError: If start fails or times out
+        RuntimeError: If start fails, instance is terminated/shutting-down,
+                      or times out (when wait=True)
     """
     _validate_instance_id(ec2_instance_id)
 
@@ -133,9 +136,12 @@ def start_ngfw(
     ec2 = boto3.client("ec2")
 
     if current_state == "pending":
-        # Already starting - just wait for running
-        logger.info("start_ngfw: instance already starting, waiting for running state")
-        _wait_for_running(ec2, ec2_instance_id, timeout_seconds)
+        # Already starting
+        if wait:
+            logger.info("start_ngfw: instance already starting, waiting for running state")
+            _wait_for_running(ec2, ec2_instance_id, timeout_seconds)
+        else:
+            logger.info("start_ngfw: instance already starting (fire-and-forget)")
         return
 
     if current_state == "stopping":
@@ -162,15 +168,20 @@ def start_ngfw(
             )
             raise RuntimeError(f"Failed to start instance {ec2_instance_id}: {error_code}: {error_message}") from e
 
-        # Wait for running state
-        _wait_for_running(ec2, ec2_instance_id, timeout_seconds)
+        # Wait for running state (unless fire-and-forget)
+        if wait:
+            _wait_for_running(ec2, ec2_instance_id, timeout_seconds)
+            logger.info(
+                "start_ngfw: instance started successfully ec2_instance_id=%s",
+                ec2_instance_id,
+            )
+        else:
+            logger.info(
+                "start_ngfw: start command issued (fire-and-forget) ec2_instance_id=%s",
+                ec2_instance_id,
+            )
     else:
         raise RuntimeError(f"Unexpected instance state '{current_state}' for {ec2_instance_id}")
-
-    logger.info(
-        "start_ngfw: instance started successfully ec2_instance_id=%s",
-        ec2_instance_id,
-    )
 
 
 def stop_ngfw(

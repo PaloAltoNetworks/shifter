@@ -44,11 +44,12 @@ locals {
     ]
   ])
 
-  # Deduplicate pairs by sorting names alphabetically (string comparison)
+  # Deduplicate pairs by sorting names alphabetically
+  # sort() works on strings and returns them in lexicographic order
   connected_pairs = distinct([
     for pair in local.raw_pairs : {
-      a = pair.from < pair.to ? pair.from : pair.to
-      b = pair.from < pair.to ? pair.to : pair.from
+      a = sort([pair.from, pair.to])[0]
+      b = sort([pair.from, pair.to])[1]
     }
   ])
 

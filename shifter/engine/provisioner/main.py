@@ -20,6 +20,13 @@ import boto3
 import psycopg
 
 import range_terraform_runner
+from catalog.instances import (
+    _get_dc_instance_type,
+    _get_kali_instance_type,
+    _get_victim_instance_type,
+    _get_windows_instance_type,
+)
+from config import generate_presigned_url
 from events import (
     STATUS_AWAITING_ASSOCIATION,
     STATUS_DESTROYED,
@@ -1491,7 +1498,7 @@ def run_instance_setup(
         inst_uuid = dc_inst.get("uuid", "")
         inst_config = uuid_to_config.get(inst_uuid, {})
         dc_config = inst_config.get("dc_config", {})
-        agent_url = dc_inst.get("agent_presigned_url", "")  # From Pulumi output
+        agent_url = dc_inst.get("xdr_agent_url", "")  # From Terraform output
         _run_dc_setup(dc_inst["instance_id"], dc_config, agent_url)
 
     # Get DC IP and domain for domain joins (from first DC)
@@ -1519,7 +1526,7 @@ def run_instance_setup(
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),
                     public_key=inst.get("public_key", ""),
-                    agent_presigned_url=inst.get("agent_presigned_url", ""),
+                    agent_presigned_url=inst.get("xdr_agent_url", ""),  # From Terraform output
                     join_domain=inst_config.get("join_domain", False),
                     dc_ip=actual_dc_ip,
                     domain_name=actual_domain,
@@ -2213,27 +2220,48 @@ def _build_range_terraform_variables(
     for subnet in spec_subnets:
         subnet_instances = []
         for inst in subnet.get("instances", []):
-            os_type = inst.get("os", "linux")
+            os_type = inst.get("os_type", "ubuntu")
             role = inst.get("role", "victim")
 
             # Map to Terraform os_type values
             # DC role always uses Windows (domain controller)
+            # Attacker role always uses Kali
             if role == "dc":
                 tf_os_type = "windows"
-            elif os_type == "kali":
+            elif role == "attacker" or os_type == "kali":
                 tf_os_type = "kali"
             elif os_type == "windows":
                 tf_os_type = "windows"
             else:
                 tf_os_type = "ubuntu"
 
+            # Get instance_type from role/os-based defaults (not in spec)
+            if role == "attacker":
+                instance_type = _get_kali_instance_type()
+            elif role == "dc":
+                instance_type = _get_dc_instance_type()
+            elif tf_os_type == "windows":
+                instance_type = _get_windows_instance_type()
+            else:
+                instance_type = _get_victim_instance_type()
+
+            # Get agent presigned URL from agent.s3_key (spec has nested structure)
+            agent_data = inst.get("agent") or {}
+            agent_s3_key = agent_data.get("s3_key")
+            agent_presigned_url = ""
+            if agent_s3_key:
+                agent_presigned_url = generate_presigned_url(
+                    bucket=os.environ.get("AGENT_S3_BUCKET", ""),
+                    key=agent_s3_key,
+                )
+
             subnet_instances.append(
                 {
                     "uuid": inst.get("uuid", ""),
                     "role": role,
                     "os_type": tf_os_type,
-                    "instance_type": inst.get("instance_type", "t3.medium"),
-                    "agent_presigned_url": inst.get("xdr_agent_url", ""),
+                    "instance_type": instance_type,
+                    "agent_presigned_url": agent_presigned_url,
                     "join_domain": inst.get("join_domain", False),
                 }
             )

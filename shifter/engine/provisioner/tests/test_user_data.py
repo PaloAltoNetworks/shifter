@@ -76,7 +76,7 @@ class TestVictimLinuxTemplate:
     """Tests for Linux victim user data template.
 
     user_data should be MINIMAL - just enough to log boot.
-    All real setup (hostname, SSH, XDR) is handled by Ansible playbooks.
+    All real setup (hostname, SSH, XDR) is handled by SSM plans.
     """
 
     @pytest.fixture
@@ -93,12 +93,12 @@ class TestVictimLinuxTemplate:
     def test_victim_linux_template_is_minimal(self, linux_template):
         """Template should be minimal - no hostname or SSH setup."""
         result = linux_template.render()
-        # Should NOT set hostname (Ansible does that)
+        # Should NOT set hostname (SSM does that)
         assert "hostnamectl" not in result
-        # Should NOT configure SSH (Ansible does that)
+        # Should NOT configure SSH (SSM does that)
         assert "authorized_keys" not in result
         assert ".ssh" not in result
-        # Should NOT install XDR (Ansible does that)
+        # Should NOT install XDR (SSM does that)
         assert "curl" not in result
 
     def test_victim_linux_template_valid_bash(self, linux_template):
@@ -107,17 +107,17 @@ class TestVictimLinuxTemplate:
         assert result.strip().startswith("#!/bin/bash")
         assert "set -euo pipefail" in result or "set -e" in result
 
-    def test_victim_linux_template_explains_ansible(self, linux_template):
-        """Template should explain that Ansible handles setup."""
+    def test_victim_linux_template_explains_ssm(self, linux_template):
+        """Template should explain that SSM handles setup."""
         result = linux_template.render()
-        assert "Ansible" in result
+        assert "SSM" in result
 
 
 class TestVictimWindowsTemplate:
     """Tests for Windows victim user data template.
 
     user_data should be MINIMAL - just enough to log boot.
-    All real setup (hostname, SSH, XDR) is handled by Ansible playbooks.
+    All real setup (hostname, SSH, XDR) is handled by SSM plans.
     """
 
     @pytest.fixture
@@ -131,12 +131,12 @@ class TestVictimWindowsTemplate:
     def test_victim_windows_template_is_minimal(self, windows_template):
         """Template should be minimal - no hostname or SSH setup."""
         result = windows_template.render()
-        # Should NOT set hostname (Ansible does that)
+        # Should NOT set hostname (SSM does that)
         assert "Rename-Computer" not in result
-        # Should NOT configure SSH (Ansible does that)
+        # Should NOT configure SSH (SSM does that)
         assert "authorized_keys" not in result
         assert "sshd" not in result
-        # Should NOT install XDR (Ansible does that)
+        # Should NOT install XDR (SSM does that)
         assert "Invoke-WebRequest" not in result
 
     def test_victim_windows_template_valid_powershell(self, windows_template):
@@ -145,10 +145,10 @@ class TestVictimWindowsTemplate:
         assert "<powershell>" in result
         assert "</powershell>" in result
 
-    def test_victim_windows_template_explains_ansible(self, windows_template):
-        """Template should explain that Ansible handles setup."""
+    def test_victim_windows_template_explains_ssm(self, windows_template):
+        """Template should explain that SSM handles setup."""
         result = windows_template.render()
-        assert "Ansible" in result
+        assert "SSM" in result
 
 
 class TestTemplateContentSafety:

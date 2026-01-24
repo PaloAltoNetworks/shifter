@@ -1,7 +1,5 @@
 """Setup orchestrator for running setup plans.
 
-TODO: Delete after Ansible debugging - replaced by range_ansible_runner.py
-
 SetupOrchestrator takes a SetupPlan and an executor (SSM or SSH), and runs
 the plan step by step, handling reboots and verification.
 """

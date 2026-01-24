@@ -1,7 +1,5 @@
 """Bootstrap setup plan.
 
-TODO: Delete after Ansible debugging - replaced by ansible/playbooks/range_windows_setup.yml
-
 Handles initial instance configuration that all instances need:
 - Hostname setting
 - SSH key configuration

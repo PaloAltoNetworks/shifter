@@ -517,8 +517,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         rdp_password = "ubuntu"  # nosec B105 - demo environment
 
     # Get SSH key for SFTP file transfers
-    # Windows requires key-based auth; Kali uses password auth (Guacamole's
-    # libssh2 has issues with Ed25519 OpenSSH key format)
+    # Windows uses key-based auth; Linux uses password auth for simplicity
     from engine.secrets import get_ssh_key
 
     ssh_key = None

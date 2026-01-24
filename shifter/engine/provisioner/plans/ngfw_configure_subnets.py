@@ -52,18 +52,30 @@ def build_connected_pairs(subnets: list[dict]) -> list[tuple[str, str]]:
     return pairs
 
 
-def build_configure_input(subnets: list[dict], range_id: int, vpc_gateway_ip: str) -> str:
+def build_configure_input(
+    subnets: list[dict],
+    range_id: int,
+    vpc_gateway_ip: str,
+    stale_routes_to_delete: list[str] | None = None,
+) -> str:
     """Build PAN-OS configure commands for routes, addresses and security rules.
 
     Args:
         subnets: List of dicts with 'name', 'cidr', and 'connected_to' keys.
         range_id: Range ID for unique naming.
         vpc_gateway_ip: VPC gateway IP address for static route next-hop.
+        stale_routes_to_delete: Optional list of existing route names to delete first.
+            Used to clean up stale routes from destroyed ranges that reused CIDRs.
 
     Returns:
         Multi-line string with configure commands and single commit.
     """
     lines = ["configure"]
+
+    # Delete any stale routes that conflict with our CIDRs (from recycled allocations)
+    if stale_routes_to_delete:
+        for route_name in stale_routes_to_delete:
+            lines.append(f"delete network virtual-router default routing-table ip static-route {route_name}")
 
     # Add static routes for each subnet (routes must exist for traffic to flow)
     for subnet in subnets:
@@ -167,18 +179,25 @@ class NGFWConfigureSubnetsPlan:
         is_verification=True,
     )
 
-    def get_steps(self, subnets: list[dict], range_id: int, vpc_gateway_ip: str) -> list[SetupStep]:
+    def get_steps(
+        self,
+        subnets: list[dict],
+        range_id: int,
+        vpc_gateway_ip: str,
+        stale_routes_to_delete: list[str] | None = None,
+    ) -> list[SetupStep]:
         """Build steps with dynamic stdin_input for the given subnets.
 
         Args:
             subnets: List of subnet dicts with 'name', 'cidr', 'connected_to'.
             range_id: Range ID for unique naming.
             vpc_gateway_ip: VPC gateway IP address for static route next-hop.
+            stale_routes_to_delete: Optional list of stale route names to delete first.
 
         Returns:
             List with single SetupStep containing all configure commands.
         """
-        stdin_input = build_configure_input(subnets, range_id, vpc_gateway_ip)
+        stdin_input = build_configure_input(subnets, range_id, vpc_gateway_ip, stale_routes_to_delete)
         return [
             SetupStep(
                 name="configure_subnets",

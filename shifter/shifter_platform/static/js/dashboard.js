@@ -668,8 +668,9 @@ class DashboardManager {
             agents.linux = Number.parseInt(this.linuxAgentSelect.value, 10);
         }
 
-        // Validate we have at least one agent
-        if (Object.keys(agents).length === 0) {
+        // Validate we have required agents (scenarios without agent requirements can proceed)
+        const requiresAgents = req.has_from_agent || req.requires_windows || req.requires_linux;
+        if (requiresAgents && Object.keys(agents).length === 0) {
             return;
         }
 

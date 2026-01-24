@@ -1,20 +1,16 @@
 ---
 # NGFW Provision Playbook
 #
-# Configures a newly provisioned VM-Series NGFW with:
-# - Data interface (ethernet1/1) as Layer 3 DHCP with virtual router
-# - Shared 'ranges' zone for all range traffic
+# Configures VM-Series NGFW post-provision:
+# - Data interface (ethernet1/1) as L3 DHCP with virtual router
+# - Shared 'ranges' zone
 # - Cloud logging (Strata Logging Service)
 # - Log forwarding profile (XDR-Forward)
 # - Alert-only security profiles and profile-group
 # - Threat content download and install
 #
 # Required variables:
-#   - management_ip: NGFW management IP address
-#   - sls_region: Strata Logging Service region (americas, europe, etc.)
-#   - ansible_ssh_private_key_file: Path to SSH private key
-#
-# All commands are PAN-OS CLI commands sent via SSH.
+#   management_ip, sls_region, ansible_ssh_private_key_file
 
 - name: Configure NGFW post-provision
   hosts: ngfw
@@ -23,63 +19,81 @@
     ansible_user: admin
     ansible_connection: ssh
     ansible_shell_type: sh
-    commit_timeout: 300
-    job_poll_interval: 10
     job_timeout: 600
+    job_poll_interval: 10
+    max_retries: 4
 
   tasks:
     # Step 1: Configure data interface
     - name: Configure data interface (ethernet1/1 as L3 DHCP)
       ansible.builtin.raw: |
+        set cli pager off
         configure
         set network virtual-router default interface ethernet1/1
         set network interface ethernet ethernet1/1 layer3 dhcp-client create-default-route no
         commit
         exit
       register: data_interface_result
+      retries: "{{ max_retries }}"
+      delay: 15
+      until: data_interface_result.rc == 0
       changed_when: true
 
-    - name: Log data interface result
-      ansible.builtin.debug:
-        var: data_interface_result.stdout_lines
-        verbosity: 1
+    - name: Verify data interface commit
+      ansible.builtin.assert:
+        that:
+          - "'Configuration committed successfully' in data_interface_result.stdout or 'no changes to commit' in data_interface_result.stdout | lower"
+        fail_msg: "Data interface commit failed"
+      when: data_interface_result.stdout is defined
 
     # Step 2: Create shared zone
     - name: Create shared zone (ranges)
       ansible.builtin.raw: |
+        set cli pager off
         configure
         set zone ranges network layer3 ethernet1/1
         commit
         exit
       register: zone_result
+      retries: "{{ max_retries }}"
+      delay: 15
+      until: zone_result.rc == 0
       changed_when: true
 
     # Step 3: Delete default allow-all rule
     - name: Delete default allow-all rule
       ansible.builtin.raw: |
+        set cli pager off
         configure
         delete rulebase security rules allow-all
         commit
         exit
       register: delete_rule_result
-      # May fail if rule doesn't exist - that's OK
+      retries: "{{ max_retries }}"
+      delay: 15
+      until: delete_rule_result.rc == 0
       failed_when: false
       changed_when: true
 
     # Step 4: Enable cloud logging
-    - name: Enable cloud logging (Strata Logging Service)
+    - name: Enable cloud logging
       ansible.builtin.raw: |
+        set cli pager off
         configure
         set deviceconfig setting logging logging-service-forwarding enable yes
         set deviceconfig setting logging logging-service-forwarding logging-service-regions {{ sls_region }}
         commit
         exit
       register: cloud_logging_result
+      retries: "{{ max_retries }}"
+      delay: 15
+      until: cloud_logging_result.rc == 0
       changed_when: true
 
     # Step 5: Create log forwarding profile
     - name: Create log forwarding profile (XDR-Forward)
       ansible.builtin.raw: |
+        set cli pager off
         configure
         set shared log-settings profiles XDR-Forward match-list all-traffic log-type traffic filter "All Logs" send-to-panorama yes
         set shared log-settings profiles XDR-Forward match-list all-threats log-type threat filter "All Logs" send-to-panorama yes
@@ -92,11 +106,15 @@
         commit
         exit
       register: log_profile_result
+      retries: "{{ max_retries }}"
+      delay: 15
+      until: log_profile_result.rc == 0
       changed_when: true
 
     # Step 6: Create security profiles and profile-group
     - name: Create alert-only security profiles
       ansible.builtin.raw: |
+        set cli pager off
         configure
         set profiles virus Alert-Only-AV decoder http action alert
         set profiles virus Alert-Only-AV decoder ftp action alert
@@ -137,73 +155,78 @@
         commit
         exit
       register: security_profiles_result
+      retries: "{{ max_retries }}"
+      delay: 15
+      until: security_profiles_result.rc == 0
       changed_when: true
 
-    # Step 7: Download threat content
-    - name: Download threat content (Apps + Threats)
-      ansible.builtin.raw: "request content upgrade download latest"
-      register: download_result
+    # Step 7: Download threat content (async job)
+    - name: Start threat content download
+      ansible.builtin.raw: |
+        set cli pager off
+        request content upgrade download latest
+      register: download_start_result
+      retries: "{{ max_retries }}"
+      delay: 15
+      until: download_start_result.rc == 0
 
-    - name: Extract download job ID
+    - name: Parse download job ID
       ansible.builtin.set_fact:
-        download_job_id: "{{ download_result.stdout | regex_search('jobid\\s+(\\d+)', '\\1') | first | default('') }}"
-      when: download_result.stdout is defined
-
-    - name: Log download job ID
-      ansible.builtin.debug:
-        msg: "Download job ID: {{ download_job_id }}"
-      when: download_job_id is defined and download_job_id | length > 0
+        download_job_id: "{{ download_start_result.stdout | regex_search('jobid\\s+(\\d+)', '\\1', ignorecase=True) | default([''], true) | first }}"
 
     - name: Poll for download job completion
-      ansible.builtin.raw: "show jobs id {{ download_job_id }}"
+      ansible.builtin.raw: |
+        set cli pager off
+        show jobs id {{ download_job_id }}
       register: download_job_status
       until: "'FIN' in download_job_status.stdout"
       retries: "{{ (job_timeout / job_poll_interval) | int }}"
       delay: "{{ job_poll_interval }}"
-      when: download_job_id is defined and download_job_id | length > 0
+      when: download_job_id | length > 0
 
     - name: Verify download job succeeded
-      ansible.builtin.fail:
-        msg: "Threat content download failed: {{ download_job_status.stdout }}"
+      ansible.builtin.assert:
+        that:
+          - "'FIN' in download_job_status.stdout"
+          - "'OK' in download_job_status.stdout"
+        fail_msg: "Threat content download failed"
       when:
-        - download_job_id is defined
         - download_job_id | length > 0
         - download_job_status is defined
-        - "'FIN' in download_job_status.stdout"
-        - "'OK' not in download_job_status.stdout"
 
-    # Step 8: Install threat content
-    - name: Install threat content
-      ansible.builtin.raw: "request content upgrade install version latest"
-      register: install_result
+    # Step 8: Install threat content (async job)
+    - name: Start threat content install
+      ansible.builtin.raw: |
+        set cli pager off
+        request content upgrade install version latest
+      register: install_start_result
+      retries: "{{ max_retries }}"
+      delay: 15
+      until: install_start_result.rc == 0
 
-    - name: Extract install job ID
+    - name: Parse install job ID
       ansible.builtin.set_fact:
-        install_job_id: "{{ install_result.stdout | regex_search('jobid\\s+(\\d+)', '\\1') | first | default('') }}"
-      when: install_result.stdout is defined
-
-    - name: Log install job ID
-      ansible.builtin.debug:
-        msg: "Install job ID: {{ install_job_id }}"
-      when: install_job_id is defined and install_job_id | length > 0
+        install_job_id: "{{ install_start_result.stdout | regex_search('jobid\\s+(\\d+)', '\\1', ignorecase=True) | default([''], true) | first }}"
 
     - name: Poll for install job completion
-      ansible.builtin.raw: "show jobs id {{ install_job_id }}"
+      ansible.builtin.raw: |
+        set cli pager off
+        show jobs id {{ install_job_id }}
       register: install_job_status
       until: "'FIN' in install_job_status.stdout"
       retries: "{{ (job_timeout / job_poll_interval) | int }}"
       delay: "{{ job_poll_interval }}"
-      when: install_job_id is defined and install_job_id | length > 0
+      when: install_job_id | length > 0
 
     - name: Verify install job succeeded
-      ansible.builtin.fail:
-        msg: "Threat content install failed: {{ install_job_status.stdout }}"
+      ansible.builtin.assert:
+        that:
+          - "'FIN' in install_job_status.stdout"
+          - "'OK' in install_job_status.stdout"
+        fail_msg: "Threat content install failed"
       when:
-        - install_job_id is defined
         - install_job_id | length > 0
         - install_job_status is defined
-        - "'FIN' in install_job_status.stdout"
-        - "'OK' not in install_job_status.stdout"
 
     - name: Provision complete
       ansible.builtin.debug:

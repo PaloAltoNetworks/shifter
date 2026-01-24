@@ -11,7 +11,6 @@ from typing import Any
 
 import boto3
 
-import ansible_runner
 import aws_runner
 import terraform_runner
 from events import (
@@ -24,6 +23,8 @@ from events import (
     publish_ngfw_event,
 )
 from executors.ssh_executor import SSHExecutor
+from orchestrators.setup_orchestrator import SetupOrchestrator
+from plans.ngfw_provision import NGFWProvisionPlan
 
 logger = logging.getLogger(__name__)
 
@@ -188,23 +189,29 @@ def _run_provision(
     except Exception as e:
         raise RuntimeError(f"Failed to retrieve SSH key from Secrets Manager: {e}") from e
 
+    # Create SSHExecutor for all SSH operations
+    ssh_executor = SSHExecutor(private_key=private_key)
+
     # Wait for SSH availability (NGFW can take 15-25 min to boot)
     ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
-    ansible_runner.wait_for_ssh(
-        management_ip=management_ip,
-        private_key=private_key,
-        timeout_seconds=ssh_timeout,
-    )
+    ssh_executor.wait_for_agent(management_ip, timeout_seconds=ssh_timeout)
 
-    # Run NGFW provision playbook via Ansible
-    ansible_runner.run_ngfw_provision(
-        management_ip=management_ip,
-        private_key=private_key,
-        sls_region=sls_region,
-    )
+    # Run NGFW provision plan via SetupOrchestrator
+    plan = NGFWProvisionPlan()
+    orchestrator = SetupOrchestrator(executor=ssh_executor)
 
-    # Create SSHExecutor for serial polling (still uses SSH directly)
-    ssh_executor = SSHExecutor(private_key=private_key)
+    # Create context object with required attributes for the plan
+    class NgfwContext:
+        def __init__(self, mgmt_ip: str, region: str):
+            self.management_ip = mgmt_ip
+            self.sls_region = region
+
+    context = plan.get_context(NgfwContext(management_ip, sls_region))
+    orchestrator.orchestrate(
+        instance_id=management_ip,
+        plan=plan,
+        context=context,
+    )
 
     # Poll for serial number and certificate
     serial_number = poll_for_serial_and_cert(ssh_executor, management_ip)
@@ -259,10 +266,10 @@ def _run_deprovision(
     ssh_key_secret_arn = current_state.get("ssh_key_secret_arn")
     ec2_instance_id = current_state.get("ec2_instance_id")
 
-    # Run pre-destroy license deactivation via Ansible
+    # Run pre-destroy license deactivation via SSH
     # NGFW must be running to SSH for license deactivation
     if management_ip and ssh_key_secret_arn and ec2_instance_id:
-        logger.info("Running NGFW license deactivation via Ansible...")
+        logger.info("Running NGFW license deactivation...")
         try:
             # Start NGFW if stopped (need SSH access for license deactivation)
             instance_state = aws_runner.get_instance_state(ec2_instance_id)
@@ -275,18 +282,18 @@ def _run_deprovision(
             secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
             private_key = secret_response["SecretString"]
 
-            # Wait for SSH to be available
+            # Create SSHExecutor and wait for SSH
+            ssh_executor = SSHExecutor(private_key=private_key)
             logger.info("Waiting for SSH availability before license deactivation...")
-            ansible_runner.wait_for_ssh(
-                management_ip=management_ip,
-                private_key=private_key,
-                timeout_seconds=300,  # 5 min should be enough for already-booted NGFW
-            )
+            ssh_executor.wait_for_agent(management_ip, timeout_seconds=300)
 
             # Deactivate license
-            ansible_runner.run_ngfw_deprovision(
-                management_ip=management_ip,
-                private_key=private_key,
+            logger.info("Deactivating VM-Series license...")
+            ssh_executor.run_command(
+                instance_id=management_ip,
+                script="",
+                stdin_input="request license deactivate VM-Capacity mode auto\n",
+                timeout_seconds=120,
             )
         except Exception as e:
             logger.warning("License deactivation error: %s, proceeding with destroy", e)

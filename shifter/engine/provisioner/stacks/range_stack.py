@@ -261,6 +261,16 @@ class RangeStack(pulumi.ComponentResource):
             timeout_seconds=300,
         )
 
+        # Pre-create check: clean up any orphaned config from failed previous attempts
+        # This handles cases where a previous create/destroy failed after NGFW was
+        # configured but before cleanup completed
+        range_ansible_runner.check_and_cleanup_orphaned_ngfw_config(
+            host=management_ip,
+            private_key=private_key,
+            range_id=range_id,
+            subnets=subnets,
+        )
+
         # Run NGFW configuration via Ansible
         range_ansible_runner.run_ngfw_configure_subnets(
             host=management_ip,

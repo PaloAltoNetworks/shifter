@@ -129,23 +129,15 @@ def run_ngfw_provision(
     management_ip: str,
     private_key: str,
     sls_region: str = "americas",
-    timeout_seconds: int = 1800,
+    timeout_seconds: int = 3600,
 ) -> None:
     """Run NGFW provision playbook.
-
-    Configures a newly provisioned NGFW with:
-    - Data interface configuration
-    - Shared zone creation
-    - Cloud logging
-    - Log forwarding profile
-    - Security profiles
-    - Threat content download and install
 
     Args:
         management_ip: NGFW management IP address
         private_key: SSH private key for authentication
         sls_region: Strata Logging Service region
-        timeout_seconds: Timeout for playbook execution
+        timeout_seconds: Timeout for playbook execution (default 1 hour)
 
     Raises:
         RuntimeError: If provisioning fails

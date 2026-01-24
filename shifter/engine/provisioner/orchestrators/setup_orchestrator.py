@@ -145,6 +145,17 @@ class SetupOrchestrator:
                 result = self._execute_step(instance_id, step, context, document_name)
                 step_results.append(result)
 
+                # Check if step failed (returned success=False after retries)
+                if not result.success:
+                    logger.error(
+                        "orchestrate: step '%s' failed after retries",
+                        step.name,
+                    )
+                    raise SetupError(
+                        f"Step '{step.name}' failed after all retry attempts",
+                        step_name=step.name,
+                    )
+
                 # Handle reboot if required
                 if step.requires_reboot:
                     reboot_timeout = max(step.timeout_seconds, self.DEFAULT_REBOOT_TIMEOUT)

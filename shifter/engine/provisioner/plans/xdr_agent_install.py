@@ -41,7 +41,10 @@ for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
     # -o: output file
     # --connect-timeout: connection timeout
     # --max-time: total operation timeout
-    $curlResult = & curl.exe -sSfL -o $installerPath --connect-timeout 30 --max-time 120 $presignedUrl 2>&1
+    # --ssl-revoke-best-effort: try CRL check but proceed if servers unreachable
+    #   (required for isolated/semi-isolated networks that can't reach CRL servers)
+    $curlResult = & curl.exe -sSfL -o $installerPath --connect-timeout 30 `
+        --max-time 120 --ssl-revoke-best-effort $presignedUrl 2>&1
     $curlExitCode = $LASTEXITCODE
 
     $duration = (Get-Date) - $startTime

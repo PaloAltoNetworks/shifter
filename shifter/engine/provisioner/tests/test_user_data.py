@@ -27,14 +27,14 @@ class TestKaliTemplate:
         """hostname variable should be replaced."""
         result = kali_template.render(
             hostname="shifter-kali-42",
-            public_key="ssh-ed25519 AAAA... user@host",
+            public_key="ssh-rsa AAAA... user@host",
         )
         assert "shifter-kali-42" in result
         assert "{{ hostname }}" not in result
 
     def test_kali_template_public_key(self, kali_template):
         """public_key variable should be replaced."""
-        test_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost"
+        test_key = "ssh-rsa AAAAC3NzaC1lZDI1NTE5AAAAIExample test@localhost"
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key=test_key,
@@ -46,7 +46,7 @@ class TestKaliTemplate:
         """Output should be a valid bash script with required sections."""
         result = kali_template.render(
             hostname="shifter-kali-42",
-            public_key="ssh-ed25519 AAAA...",
+            public_key="ssh-rsa AAAA...",
         )
         assert result.strip().startswith("#!/bin/bash")
         # Verify essential script components rather than arbitrary length
@@ -58,7 +58,7 @@ class TestKaliTemplate:
         """Template should set hostname."""
         result = kali_template.render(
             hostname="shifter-kali-99",
-            public_key="ssh-ed25519 AAAA...",
+            public_key="ssh-rsa AAAA...",
         )
         assert "hostnamectl set-hostname" in result
 
@@ -66,7 +66,7 @@ class TestKaliTemplate:
         """Template should configure SSH authorized_keys."""
         result = kali_template.render(
             hostname="shifter-kali-42",
-            public_key="ssh-ed25519 AAAA...",
+            public_key="ssh-rsa AAAA...",
         )
         assert "authorized_keys" in result
         assert "/home/kali/.ssh" in result

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NGFW flow handles prompting user to associate NGFW to SCM and XDR
 - Removed legacy Terraform-based range provisioning
 - Ubuntu box supports RDP/desktop access
+- Users can set MFA to remember devices
 
 ### Fixed
 - Django build does not include cyberscript shared library

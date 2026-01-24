@@ -323,6 +323,10 @@ def _validate_provisioned_outputs(
         if not instance_id:
             raise ValueError(f"Instance[{i}] missing 'instance_id'")
 
+        private_ip = inst.get("private_ip")
+        if not private_ip:
+            raise ValueError(f"Instance[{i}] (role={inst.get('role')}, os={inst.get('os')}) missing 'private_ip'")
+
     # Validate expected subnets were created
     if expected_subnet_names:
         actual_subnets = set(subnets.keys())
@@ -1778,6 +1782,48 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     )
     output_data = json.loads(outputs.stdout)
     logger.info(f"Stack outputs: {json.dumps(output_data, indent=2)}")
+
+    # Wait for all instances to have private_ip (retry up to 60s)
+    # AWS assigns private_ip at ENI attachment, but Pulumi may export before it's available
+    MAX_WAIT_SECONDS = 60
+    POLL_INTERVAL = 5
+
+    start_time = time.time()
+    while True:
+        instances = output_data.get("instances", [])
+        missing_ips = [
+            f"{i.get('role', 'unknown')}/{i.get('os', 'unknown')}" for i in instances if not i.get("private_ip")
+        ]
+
+        if not missing_ips:
+            break  # All instances have IPs
+
+        elapsed = time.time() - start_time
+        if elapsed >= MAX_WAIT_SECONDS:
+            raise RuntimeError(
+                f"Timed out after {MAX_WAIT_SECONDS}s waiting for private_ip on instances: {missing_ips}"
+            )
+
+        logger.info(
+            "Waiting for private_ip on %d instances (%s), elapsed %.0fs...",
+            len(missing_ips),
+            missing_ips,
+            elapsed,
+        )
+        time.sleep(POLL_INTERVAL)
+
+        # Re-fetch outputs
+        outputs = subprocess.run(
+            ["pulumi", "stack", "output", "--json"],  # noqa: S607
+            cwd=_get_working_dir(),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        output_data = json.loads(outputs.stdout)
+
+    logger.info("All instances have private_ip, proceeding with validation")
 
     # Validate output schema
     _validate_pulumi_output_schema(output_data)

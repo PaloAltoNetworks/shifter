@@ -9,76 +9,33 @@ from typing import Any, ClassVar
 from .base import SetupStep
 
 # PowerShell script to download XDR agent from S3 presigned URL
-# Uses curl.exe (built into Windows Server 2019+) for fast downloads
 DOWNLOAD_XDR_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
 $presignedUrl = "{{ agent_presigned_url }}"
 $installerPath = "C:\\Windows\\Temp\\cortex_xdr_installer.msi"
-$maxRetries = 5
-$retryDelaySeconds = 10
 
 Write-Host "Downloading XDR agent installer..."
 
-# Cleanup any existing file from previous attempts
-if (Test-Path $installerPath) {
-    Write-Host "Removing existing installer file..."
-    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
-}
+try {
+    # Ensure TLS 1.2 for S3 presigned URLs
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# Download with curl.exe (much faster than Invoke-WebRequest)
-$lastError = $null
-for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-    Write-Host "Download attempt $attempt of $maxRetries at $(Get-Date -Format 'HH:mm:ss')..."
-    $startTime = Get-Date
+    # Download installer
+    Invoke-WebRequest -Uri $presignedUrl -OutFile $installerPath -UseBasicParsing
 
-    # Use curl.exe with:
-    # -s: silent (no progress)
-    # -S: show errors
-    # -f: fail on HTTP errors
-    # -L: follow redirects
-    # -o: output file
-    # --connect-timeout: connection timeout
-    # --max-time: total operation timeout
-    # --ssl-revoke-best-effort: try CRL check but proceed if servers unreachable
-    #   (required for isolated/semi-isolated networks that can't reach CRL servers)
-    $curlResult = & curl.exe -sSfL -o $installerPath --connect-timeout 30 `
-        --max-time 120 --ssl-revoke-best-effort $presignedUrl 2>&1
-    $curlExitCode = $LASTEXITCODE
-
-    $duration = (Get-Date) - $startTime
-    Write-Host "curl completed in $($duration.TotalSeconds) seconds with exit code $curlExitCode"
-
-    if ($curlExitCode -eq 0 -and (Test-Path $installerPath)) {
+    if (Test-Path $installerPath) {
         $fileSize = (Get-Item $installerPath).Length
-        if ($fileSize -gt 0) {
-            Write-Host "Download complete: $installerPath ($fileSize bytes)"
-            exit 0
-        } else {
-            $lastError = "Downloaded file is empty"
-            Write-Host "ERROR: $lastError"
-        }
+        Write-Host "Download complete: $installerPath ($fileSize bytes)"
     } else {
-        $lastError = "curl failed with exit code $curlExitCode`: $curlResult"
-        Write-Host "ERROR: $lastError"
+        throw "Failed to download installer - file not found"
     }
 
-    if ($attempt -lt $maxRetries) {
-        # Exponential backoff: 10s, 20s, 40s, 80s
-        $delay = $retryDelaySeconds * [Math]::Pow(2, $attempt - 1)
-        Write-Host "Retrying in $delay seconds..."
-        Start-Sleep -Seconds $delay
-        # Cleanup partial download
-        if (Test-Path $installerPath) {
-            Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
-        }
-    }
+    exit 0
+} catch {
+    Write-Host "Error downloading XDR agent: $_"
+    exit 1
 }
-
-Write-Host "All $maxRetries download attempts failed"
-Write-Host "Last error: $lastError"
-exit 1
 """
 
 # PowerShell script to install XDR agent silently

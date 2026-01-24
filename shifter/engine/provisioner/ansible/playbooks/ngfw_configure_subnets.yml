@@ -1,0 +1,107 @@
+---
+# NGFW Subnet Configuration Playbook
+#
+# Configures PAN-OS with:
+# - Static routes for each subnet (via VPC gateway)
+# - Address objects for all subnets in a range
+# - Security rules based on connected_to relationships (bidirectional)
+#
+# Variables:
+#   provider: PAN-OS connection details (ip_address, username, password or api_key)
+#   subnets: List of {name, cidr, connected_to} dicts
+#   range_id: Range ID for naming
+#   vpc_gateway_ip: VPC gateway IP for static route nexthop
+#   connected_pairs: List of [subnet_a, subnet_b] pairs for security rules
+#   alert_profile_group: Profile group name (default: Alert-Group)
+
+- name: Configure NGFW Subnets
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    provider: {}
+    subnets: []
+    range_id: 0
+    vpc_gateway_ip: ""
+    connected_pairs: []
+    alert_profile_group: "Alert-Group"
+
+  tasks:
+    # Static routes for each subnet
+    - name: Create static routes
+      paloaltonetworks.panos.panos_static_route:
+        provider: "{{ provider }}"
+        name: "range-{{ range_id }}-{{ item.name }}"
+        destination: "{{ item.cidr }}"
+        nexthop: "{{ vpc_gateway_ip }}"
+        interface: "ethernet1/1"
+        virtual_router: "default"
+      loop: "{{ subnets }}"
+      loop_control:
+        label: "range-{{ range_id }}-{{ item.name }}"
+
+    # Address objects for each subnet
+    - name: Create address objects
+      paloaltonetworks.panos.panos_address_object:
+        provider: "{{ provider }}"
+        name: "range-{{ range_id }}-{{ item.name }}"
+        value: "{{ item.cidr }}"
+        address_type: "ip-netmask"
+      loop: "{{ subnets }}"
+      loop_control:
+        label: "range-{{ range_id }}-{{ item.name }}"
+
+    # Security rules for each connected pair (A → B)
+    - name: Create security rules (A to B)
+      paloaltonetworks.panos.panos_security_rule:
+        provider: "{{ provider }}"
+        rule_name: "range-{{ range_id }}-{{ item.0 }}-to-{{ item.1 }}"
+        source_zone: ["ranges"]
+        destination_zone: ["ranges"]
+        source_ip: ["range-{{ range_id }}-{{ item.0 }}"]
+        destination_ip: ["range-{{ range_id }}-{{ item.1 }}"]
+        application: ["any"]
+        service: ["any"]
+        action: "allow"
+        log_end: true
+        log_setting: "XDR-Forward"
+        group_profile: "{{ alert_profile_group }}"
+      loop: "{{ connected_pairs }}"
+      loop_control:
+        label: "range-{{ range_id }}-{{ item.0 }}-to-{{ item.1 }}"
+
+    # Security rules for each connected pair (B → A)
+    - name: Create security rules (B to A)
+      paloaltonetworks.panos.panos_security_rule:
+        provider: "{{ provider }}"
+        rule_name: "range-{{ range_id }}-{{ item.1 }}-to-{{ item.0 }}"
+        source_zone: ["ranges"]
+        destination_zone: ["ranges"]
+        source_ip: ["range-{{ range_id }}-{{ item.1 }}"]
+        destination_ip: ["range-{{ range_id }}-{{ item.0 }}"]
+        application: ["any"]
+        service: ["any"]
+        action: "allow"
+        log_end: true
+        log_setting: "XDR-Forward"
+        group_profile: "{{ alert_profile_group }}"
+      loop: "{{ connected_pairs }}"
+      loop_control:
+        label: "range-{{ range_id }}-{{ item.1 }}-to-{{ item.0 }}"
+
+    # Commit configuration
+    - name: Commit configuration
+      paloaltonetworks.panos.panos_commit_firewall:
+        provider: "{{ provider }}"
+
+    # Verify configuration was applied
+    - name: Verify configuration
+      paloaltonetworks.panos.panos_op:
+        provider: "{{ provider }}"
+        cmd: "show config running"
+      register: config_result
+
+    - name: Fail if configuration not applied
+      ansible.builtin.fail:
+        msg: "Configuration verification failed - range-{{ range_id }} not found in running config"
+      when: config_result.stdout is not search('range-' ~ (range_id | string))

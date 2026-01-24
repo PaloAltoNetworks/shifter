@@ -1,5 +1,9 @@
 """Instance component for Shifter range provisioning.
 
+TODO: Delete after Ansible debugging - SSM setup logic merged into:
+- stacks/range_stack.py _run_post_pulumi_setup() for instance orchestration
+- range_ansible_runner.py for Ansible playbook execution
+
 This component creates EC2 instances for a range with:
 - SSH key generation and storage in Secrets Manager (Pulumi-managed)
 - User data scripts for setup
@@ -695,13 +699,13 @@ class InstanceComponent(pulumi.ComponentResource):
                 "public_key": public_key,
             }
         elif role == "dc":
-            # DC user_data is minimal - all setup via SSM (BootstrapPlan + DCSetupPlan)
+            # DC user_data is minimal - Ansible verifies AD and installs XDR
             template = env.get_template("dc_windows.ps1.j2")
-            context = {}  # No variables needed - template just logs SSM will handle setup
+            context = {}
         elif os_type == "windows":
-            # Windows victim - all setup via SSM (BootstrapPlan + XDRAgentInstallPlan)
+            # Windows victim - Ansible handles all setup via SSH
             template = env.get_template("victim_windows.ps1.j2")
-            context = {}  # No variables needed - template just logs SSM will handle setup
+            context = {}
         else:
             # Linux victim - all setup via SSM (LinuxBootstrapPlan + LinuxXDRAgentInstallPlan)
             template = env.get_template("victim_linux.sh.j2")

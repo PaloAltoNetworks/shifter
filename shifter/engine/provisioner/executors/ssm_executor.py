@@ -1,5 +1,7 @@
 """Generic SSM command executor for running scripts on EC2 instances.
 
+TODO: Delete after Ansible debugging - replaced by range_ansible_runner.py
+
 SSMExecutor uses AWS Systems Manager Run Command to execute scripts
 on EC2 instances. It provides:
 - Command execution with timeout handling

@@ -23,7 +23,7 @@ output "instances" {
       private_ip         = inst.private_ip
       ssh_key_secret_arn = aws_secretsmanager_secret.ssh_key[key].arn
       hostname           = "shifter-${local.instance_map[key].role}-${var.range_id}"
-      ssh_public_key     = tls_private_key.instance[key].public_key_openssh
+      public_key         = tls_private_key.instance[key].public_key_openssh
       xdr_agent_url      = local.instance_map[key].agent_url
       join_domain        = local.instance_map[key].join_domain
     }

@@ -1,7 +1,5 @@
 """Operations Orchestrator for runtime operations.
 
-TODO: Delete after Ansible debugging - replaced by aws_runner.py and range_ansible_runner.py
-
 OpsOrchestrator handles runtime operations like:
 - Starting/stopping instances
 - Managing routes

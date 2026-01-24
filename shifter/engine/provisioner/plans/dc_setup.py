@@ -1,7 +1,5 @@
 """DC (Domain Controller) setup plan.
 
-TODO: Delete after Ansible debugging - replaced by ansible/playbooks/range_dc_setup.yml
-
 Defines the steps to promote a Windows Server (with AD DS feature prebaked)
 to an Active Directory Domain Controller.
 """

@@ -1,6 +1,6 @@
 <powershell>
 # Windows victim instance setup script
-# Minimal - Ansible handles setup via SSH (pre-baked in AMI)
+# Minimal - all real setup is handled by SSM plans
 
 $ErrorActionPreference = "Stop"
 $LogFile = "C:\Windows\Temp\user-data.log"
@@ -20,8 +20,10 @@ $AdminPassword = "CortexSavesTheDay!"
 net user Administrator $AdminPassword
 Log-Message "Administrator password configured"
 
-# All setup (hostname, SSH keys, XDR) is handled by Ansible via SSH.
-# SSH server is pre-baked in AMI with password auth enabled.
+# All setup (hostname, SSH, XDR) is handled by SSM plans:
+#   - BootstrapPlan: hostname + SSH configuration
+#   - XDRAgentInstallPlan: XDR agent installation
+# This keeps user_data minimal and testable.
 
-Log-Message "user_data complete. Ansible will handle remaining setup."
+Log-Message "user_data complete. SSM will handle remaining setup."
 </powershell>

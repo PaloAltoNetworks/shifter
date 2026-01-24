@@ -1,7 +1,5 @@
 """Domain join setup plan.
 
-TODO: Delete after Ansible debugging - merged into ansible/playbooks/range_windows_setup.yml
-
 Defines the steps to join a Windows machine to an Active Directory domain.
 This plan is executed by the DC after promotion, targeting each victim
 that needs to be domain-joined.

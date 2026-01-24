@@ -11,7 +11,6 @@ from typing import Any
 
 import boto3
 
-import aws_runner
 import terraform_runner
 from events import (
     STATUS_AWAITING_ASSOCIATION,
@@ -272,10 +271,15 @@ def _run_deprovision(
         logger.info("Running NGFW license deactivation...")
         try:
             # Start NGFW if stopped (need SSH access for license deactivation)
-            instance_state = aws_runner.get_instance_state(ec2_instance_id)
+            ec2_client = boto3.client("ec2")
+            response = ec2_client.describe_instances(InstanceIds=[ec2_instance_id])
+            instance_state = response["Reservations"][0]["Instances"][0]["State"]["Name"]
             if instance_state == "stopped":
                 logger.info("Starting stopped NGFW for license deactivation...")
-                aws_runner.start_ngfw(ec2_instance_id)
+                ec2_client.start_instances(InstanceIds=[ec2_instance_id])
+                # Wait for instance to be running
+                waiter = ec2_client.get_waiter("instance_running")
+                waiter.wait(InstanceIds=[ec2_instance_id])
 
             # Get SSH key from Secrets Manager
             secrets_client = boto3.client("secretsmanager")

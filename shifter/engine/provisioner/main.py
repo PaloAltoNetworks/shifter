@@ -2048,9 +2048,28 @@ def _run_terraform_provision(
 
     logger.info("Running terraform apply for range...")
 
-    # Build Terraform variables from range spec
+    # Allocate CIDRs for subnets before Terraform
     spec_subnets = range_spec.get("subnets", [])
-    tf_variables = _build_range_terraform_variables(range_id, user_id, range_spec)
+    if spec_subnets:
+        from components.network import allocate_subnets
+
+        vpc_id = os.environ.get("RANGE_VPC_ID", "")
+        vpc_cidr = os.environ.get("RANGE_VPC_CIDR", "10.1.0.0/16")
+        # Extract CIDR prefix (e.g., "10.1" from "10.1.0.0/16")
+        cidr_prefix = ".".join(vpc_cidr.split("/")[0].split(".")[:2])
+
+        subnet_count = len(spec_subnets)
+        logger.info("Allocating %d subnet CIDRs in VPC %s", subnet_count, vpc_id)
+
+        allocated_cidrs = allocate_subnets(vpc_id, cidr_prefix, subnet_count, subnet_size=28)
+        logger.info("Allocated CIDRs: %s", allocated_cidrs)
+
+        # Add CIDRs to range_spec subnets
+        for i, subnet in enumerate(spec_subnets):
+            subnet["cidr"] = allocated_cidrs[i]
+
+    # Build Terraform variables from range spec (now with CIDRs)
+    tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
 
     # Run Terraform apply
     output_data = range_terraform_runner.apply_range(
@@ -2171,58 +2190,86 @@ def _run_terraform_destroy(
 
 
 def _build_range_terraform_variables(
+    request_id: str,
     range_id: int,
     user_id: int,
     range_spec: dict,
 ) -> dict:
-    """Build Terraform variables dict from range spec and environment."""
+    """Build Terraform variables dict from range spec and environment.
+
+    Args:
+        request_id: Provisioning request UUID for state isolation.
+        range_id: Range database ID.
+        user_id: Owner's Django user ID.
+        range_spec: Range specification from database.
+
+    Returns:
+        Dict of Terraform variables matching modules/range/variables.tf.
+    """
     spec_subnets = range_spec.get("subnets", [])
 
-    # Build instances list with AMI IDs
-    instances = []
+    # Build subnets with nested instances (Terraform expected format)
+    tf_subnets = []
     for subnet in spec_subnets:
+        subnet_instances = []
         for inst in subnet.get("instances", []):
             os_type = inst.get("os", "linux")
             role = inst.get("role", "victim")
 
-            # Map OS type to AMI type
+            # Map to Terraform os_type values
             if os_type == "kali":
-                ami_type = "kali"
+                tf_os_type = "kali"
             elif os_type == "windows":
-                ami_type = "dc" if role == "dc" else "windows"
+                tf_os_type = "windows"
             else:
-                ami_type = "victim"
+                tf_os_type = "ubuntu"
 
-            instances.append(
+            subnet_instances.append(
                 {
                     "uuid": inst.get("uuid", ""),
-                    "subnet_name": subnet.get("name", ""),
                     "role": role,
-                    "os": os_type,
-                    "hostname": inst.get("hostname", ""),
-                    "ami_id": get_ami_id(ami_type),
+                    "os_type": tf_os_type,
+                    "instance_type": inst.get("instance_type", "t3.medium"),
+                    "agent_presigned_url": inst.get("xdr_agent_url", ""),
                     "join_domain": inst.get("join_domain", False),
-                    "xdr_agent_url": inst.get("xdr_agent_url", ""),
                 }
             )
 
+        tf_subnets.append(
+            {
+                "name": subnet.get("name", ""),
+                "uuid": subnet.get("uuid", ""),
+                "cidr": subnet.get("cidr", ""),  # Pre-allocated CIDR
+                "connected_to": subnet.get("connected_to", []),
+                "instances": subnet_instances,
+            }
+        )
+
     return {
+        # Core identifiers
         "range_id": range_id,
         "user_id": user_id,
+        "request_uuid": request_id,
         "environment": os.environ.get("ENVIRONMENT", "dev"),
+        # VPC configuration
         "vpc_id": os.environ.get("RANGE_VPC_ID", ""),
         "vpc_cidr": os.environ.get("RANGE_VPC_CIDR", ""),
-        "subnets": [
-            {
-                "name": s.get("name", ""),
-                "uuid": s.get("uuid", ""),
-                "connected_to": s.get("connected_to", []),
-            }
-            for s in spec_subnets
-        ],
-        "instances": instances,
-        "ngfw_enabled": range_spec.get("ngfw", False),
-        "ngfw_eni_id": os.environ.get("NGFW_ENI_ID", ""),
+        "availability_zone": os.environ.get("AVAILABILITY_ZONE", "us-east-2b"),
+        # Network integration
+        "s3_endpoint_id": os.environ.get("S3_ENDPOINT_ID", ""),
+        "firewall_endpoint_id": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
+        "portal_vpc_cidr": os.environ.get("PORTAL_VPC_CIDR", ""),
+        "portal_vpc_peering_id": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
+        "ngfw_data_eni_id": os.environ.get("NGFW_ENI_ID", ""),
+        # AMI IDs
+        "kali_ami_id": get_ami_id("kali"),
+        "victim_ami_id": get_ami_id("victim"),
+        "windows_ami_id": get_ami_id("windows"),
+        "dc_ami_id": get_ami_id("dc"),
+        # IAM
+        "instance_profile_name": os.environ.get("INSTANCE_PROFILE_NAME", ""),
+        # Subnets specification
+        "subnets": tf_subnets,
     }
 
 

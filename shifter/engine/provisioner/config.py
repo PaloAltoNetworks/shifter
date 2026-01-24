@@ -340,7 +340,8 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
         ngfw_enabled = range_config.get("ngfw", False)
 
         # Look up data_eni_id and ngfw_instance_id from user's NGFW
-        # NGFW can be in any provisioned state - the ENI exists regardless of running state
+        # NGFW can be in any provisioned state - the ENI exists regardless of running state.
+        # Include 'stopping' because range provisioner will wait for stop then start the NGFW.
         ngfw_data_eni_id = ""
         ngfw_instance_id = None
         if ngfw_enabled:
@@ -351,7 +352,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status IN ('active', 'ready', 'stopped', 'awaiting_association')
+                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping', 'awaiting_association')
                   AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1

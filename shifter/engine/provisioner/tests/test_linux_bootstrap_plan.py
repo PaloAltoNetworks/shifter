@@ -61,10 +61,10 @@ class TestLinuxBootstrapPlanContext:
         plan = LinuxBootstrapPlan()
         instance = MockLinuxInstance(
             hostname="shifter-kali-1",
-            public_key="ssh-ed25519 AAAA...",
+            public_key="ssh-rsa AAAA...",
             ssh_user="kali",
         )
         context = plan.get_context(instance)
         assert context["ssh_user"] == "kali"
         assert context["hostname"] == "shifter-kali-1"
-        assert context["public_key"] == "ssh-ed25519 AAAA..."
+        assert context["public_key"] == "ssh-rsa AAAA..."

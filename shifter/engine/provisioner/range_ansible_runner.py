@@ -305,6 +305,150 @@ def run_ngfw_configure_subnets(
     )
 
 
+def _build_ngfw_remove_commands(
+    subnets: list[dict],
+    range_id: int,
+) -> str:
+    """Build PAN-OS commands to remove routes, addresses and security rules.
+
+    Deletion order: rules first (reference addresses), then addresses, then routes.
+
+    Args:
+        subnets: List of dicts with 'name' and 'connected_to' keys.
+        range_id: Range ID for naming.
+
+    Returns:
+        Multi-line string with delete commands and single commit.
+    """
+    lines = ["configure"]
+
+    # Delete rules first (they reference addresses)
+    for subnet_a, subnet_b in _build_connected_pairs(subnets):
+        rule_ab = f"range-{range_id}-{subnet_a}-to-{subnet_b}"
+        rule_ba = f"range-{range_id}-{subnet_b}-to-{subnet_a}"
+        lines.append(f"delete rulebase security rules {rule_ab}")
+        lines.append(f"delete rulebase security rules {rule_ba}")
+
+    # Delete address objects
+    for subnet in subnets:
+        lines.append(f"delete address range-{range_id}-{subnet['name']}")
+
+    # Delete static routes
+    for subnet in subnets:
+        route_name = f"range-{range_id}-{subnet['name']}"
+        lines.append(f"delete network virtual-router default routing-table ip static-route {route_name}")
+
+    lines.append("commit")
+    lines.append("exit")
+    return "\n".join(lines)
+
+
+def run_ngfw_remove_subnets(
+    host: str,
+    private_key: str,
+    subnets: list[dict],
+    range_id: int,
+    timeout_seconds: int = 300,
+) -> None:
+    """Remove NGFW subnet configuration via SSH using PAN-OS CLI.
+
+    Removes:
+    - Security rules for connected subnet pairs
+    - Address objects for subnets
+    - Static routes for subnets
+
+    Args:
+        host: NGFW management IP
+        private_key: SSH private key (PEM format)
+        subnets: List of dicts with {name, connected_to}
+        range_id: Range ID for naming
+        timeout_seconds: Max time for command execution (default 300s)
+    """
+    logger.info(
+        "run_ngfw_remove_subnets: host=%s subnets=%d range_id=%d",
+        host,
+        len(subnets),
+        range_id,
+    )
+
+    # Build the PAN-OS delete commands
+    remove_commands = _build_ngfw_remove_commands(subnets, range_id)
+    logger.debug("NGFW remove commands:\n%s", remove_commands)
+
+    # Execute via SSH using paramiko invoke_shell (required for PAN-OS CLI)
+    _run_panos_cli_commands(
+        host=host,
+        private_key=private_key,
+        commands=remove_commands,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def check_and_cleanup_orphaned_ngfw_config(
+    host: str,
+    private_key: str,
+    range_id: int,
+    subnets: list[dict],
+    timeout_seconds: int = 60,
+) -> bool:
+    """Check for orphaned NGFW config from a previous failed cleanup and remove it.
+
+    This is a pre-create safety check. If a previous range create/destroy failed
+    after NGFW was configured but before cleanup completed, orphaned routes/addresses/rules
+    may exist. This function detects and cleans them up before proceeding.
+
+    Args:
+        host: NGFW management IP
+        private_key: SSH private key (PEM format)
+        range_id: Range ID to check for orphaned config
+        subnets: List of subnet dicts (used for cleanup if orphans found)
+        timeout_seconds: Max time for check command (default 60s)
+
+    Returns:
+        True if orphaned config was found and cleaned up, False if clean
+    """
+    logger.info("Checking for orphaned NGFW config for range %d...", range_id)
+
+    # Query for any range-{id}- prefixed config in running config
+    check_command = f"show config running | match range-{range_id}-"
+
+    try:
+        output = _run_panos_cli_commands(
+            host=host,
+            private_key=private_key,
+            commands=check_command,
+            timeout_seconds=timeout_seconds,
+        )
+
+        # Check if any range-{id}- config exists
+        range_pattern = f"range-{range_id}-"
+        if range_pattern in output:
+            logger.warning(
+                "Found orphaned NGFW config for range %d, cleaning up before create...",
+                range_id,
+            )
+
+            # Clean up the orphaned config
+            run_ngfw_remove_subnets(
+                host=host,
+                private_key=private_key,
+                subnets=subnets,
+                range_id=range_id,
+            )
+
+            logger.info("Orphaned NGFW config cleanup complete for range %d", range_id)
+            return True
+
+        logger.info("No orphaned NGFW config found for range %d", range_id)
+        return False
+
+    except Exception as e:
+        # Log but don't fail - the create may still succeed
+        # If there's a real conflict, create will fail with a clear error
+        logger.warning("Failed to check for orphaned NGFW config (continuing): %s", e)
+        return False
+
+
 def _run_panos_cli_commands(
     host: str,
     private_key: str,

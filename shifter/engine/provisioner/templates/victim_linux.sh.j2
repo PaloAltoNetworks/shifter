@@ -5,8 +5,9 @@ set -euo pipefail
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Victim Linux instance booting..."
 
-# All setup (hostname, SSH, XDR) is handled by Ansible playbooks:
-#   - range_linux_setup.yml: hostname, SSH, XDR agent installation
+# All setup (hostname, SSH, XDR) is handled by SSM plans:
+#   - LinuxBootstrapPlan: hostname + SSH configuration
+#   - LinuxXDRAgentInstallPlan: XDR agent installation
 # This keeps user_data minimal and testable.
 
-echo "user_data complete. Ansible will handle remaining setup."
+echo "user_data complete. SSM will handle remaining setup."

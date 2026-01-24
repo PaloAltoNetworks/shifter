@@ -207,7 +207,7 @@ def apply_range(
         Dict of Terraform outputs (matches structure expected by Ansible runner):
         - subnets: dict of subnet_name -> {uuid, subnet_id, subnet_cidr, security_group_id, route_table_id}
         - instances: list of instance dicts with uuid, role, os, subnet_name, instance_id,
-                     private_ip, ssh_key_secret_arn, hostname, ssh_public_key, xdr_agent_url, join_domain
+                     private_ip, ssh_key_secret_arn, hostname, public_key, xdr_agent_url, join_domain
         - dc_config_param_name: SSM parameter path (or null)
 
     Raises:

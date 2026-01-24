@@ -1,5 +1,0 @@
-collections:
-  - name: ansible.windows
-    version: ">=2.0.0"
-  - name: ansible.posix
-    version: ">=1.5.0"

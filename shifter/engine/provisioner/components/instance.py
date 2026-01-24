@@ -315,6 +315,7 @@ class InstanceComponent(pulumi.ComponentResource):
                 "instanceId": self.instance_id,
                 "privateIp": self.private_ip,
                 "sshKeySecretArn": self.ssh_key_secret_arn,
+                "publicKey": self.public_key,
             }
         )
 

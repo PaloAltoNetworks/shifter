@@ -1256,6 +1256,7 @@ def _run_single_instance_setup(
     instance_id: str,
     role: str,
     os_type: str,
+    public_key: str,
     agent_presigned_url: str,
     join_domain: bool,
     dc_ip: str | None,
@@ -1267,6 +1268,7 @@ def _run_single_instance_setup(
         instance_id: EC2 instance ID.
         role: Instance role ('attacker' or 'victim').
         os_type: OS type ('kali', 'ubuntu', 'windows').
+        public_key: SSH public key for terminal access.
         agent_presigned_url: Pre-signed URL for XDR agent download.
         join_domain: Whether to join the domain.
         dc_ip: DC private IP (for domain join).
@@ -1295,8 +1297,8 @@ def _run_single_instance_setup(
     # Create context object for plan get_context()
     class InstanceContext:
         def __init__(self):
-            self.hostname = f"inst-{instance_id[-8:]}"  # Use last 8 chars of instance ID
-            self.public_key = ""  # Not needed for SSM-based setup
+            self.hostname = f"inst-{instance_id[-8:]}"
+            self.public_key = public_key
             self.agent_presigned_url = agent_presigned_url
             self.ssh_user = "kali" if os_type == "kali" else "ubuntu"
 
@@ -1514,7 +1516,8 @@ def run_instance_setup(
                     instance_id=inst_id,
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),
-                    agent_presigned_url=inst.get("agent_presigned_url", ""),  # From Pulumi output
+                    public_key=inst.get("public_key", ""),
+                    agent_presigned_url=inst.get("agent_presigned_url", ""),
                     join_domain=inst_config.get("join_domain", False),
                     dc_ip=actual_dc_ip,
                     domain_name=actual_domain,

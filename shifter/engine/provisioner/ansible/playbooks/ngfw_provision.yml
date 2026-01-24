@@ -1,0 +1,210 @@
+---
+# NGFW Provision Playbook
+#
+# Configures a newly provisioned VM-Series NGFW with:
+# - Data interface (ethernet1/1) as Layer 3 DHCP with virtual router
+# - Shared 'ranges' zone for all range traffic
+# - Cloud logging (Strata Logging Service)
+# - Log forwarding profile (XDR-Forward)
+# - Alert-only security profiles and profile-group
+# - Threat content download and install
+#
+# Required variables:
+#   - management_ip: NGFW management IP address
+#   - sls_region: Strata Logging Service region (americas, europe, etc.)
+#   - ansible_ssh_private_key_file: Path to SSH private key
+#
+# All commands are PAN-OS CLI commands sent via SSH.
+
+- name: Configure NGFW post-provision
+  hosts: ngfw
+  gather_facts: false
+  vars:
+    ansible_user: admin
+    ansible_connection: ssh
+    ansible_shell_type: sh
+    commit_timeout: 300
+    job_poll_interval: 10
+    job_timeout: 600
+
+  tasks:
+    # Step 1: Configure data interface
+    - name: Configure data interface (ethernet1/1 as L3 DHCP)
+      ansible.builtin.raw: |
+        configure
+        set network virtual-router default interface ethernet1/1
+        set network interface ethernet ethernet1/1 layer3 dhcp-client create-default-route no
+        commit
+        exit
+      register: data_interface_result
+      changed_when: true
+
+    - name: Log data interface result
+      ansible.builtin.debug:
+        var: data_interface_result.stdout_lines
+        verbosity: 1
+
+    # Step 2: Create shared zone
+    - name: Create shared zone (ranges)
+      ansible.builtin.raw: |
+        configure
+        set zone ranges network layer3 ethernet1/1
+        commit
+        exit
+      register: zone_result
+      changed_when: true
+
+    # Step 3: Delete default allow-all rule
+    - name: Delete default allow-all rule
+      ansible.builtin.raw: |
+        configure
+        delete rulebase security rules allow-all
+        commit
+        exit
+      register: delete_rule_result
+      # May fail if rule doesn't exist - that's OK
+      failed_when: false
+      changed_when: true
+
+    # Step 4: Enable cloud logging
+    - name: Enable cloud logging (Strata Logging Service)
+      ansible.builtin.raw: |
+        configure
+        set deviceconfig setting logging logging-service-forwarding enable yes
+        set deviceconfig setting logging logging-service-forwarding logging-service-regions {{ sls_region }}
+        commit
+        exit
+      register: cloud_logging_result
+      changed_when: true
+
+    # Step 5: Create log forwarding profile
+    - name: Create log forwarding profile (XDR-Forward)
+      ansible.builtin.raw: |
+        configure
+        set shared log-settings profiles XDR-Forward match-list all-traffic log-type traffic filter "All Logs" send-to-panorama yes
+        set shared log-settings profiles XDR-Forward match-list all-threats log-type threat filter "All Logs" send-to-panorama yes
+        set shared log-settings profiles XDR-Forward match-list all-url log-type url filter "All Logs" send-to-panorama yes
+        set shared log-settings profiles XDR-Forward match-list all-wildfire log-type wildfire filter "All Logs" send-to-panorama yes
+        set shared log-settings profiles XDR-Forward match-list all-data log-type data filter "All Logs" send-to-panorama yes
+        set shared log-settings profiles XDR-Forward match-list all-tunnel log-type tunnel filter "All Logs" send-to-panorama yes
+        set shared log-settings profiles XDR-Forward match-list all-auth log-type auth filter "All Logs" send-to-panorama yes
+        set shared log-settings profiles XDR-Forward enhanced-application-logging yes
+        commit
+        exit
+      register: log_profile_result
+      changed_when: true
+
+    # Step 6: Create security profiles and profile-group
+    - name: Create alert-only security profiles
+      ansible.builtin.raw: |
+        configure
+        set profiles virus Alert-Only-AV decoder http action alert
+        set profiles virus Alert-Only-AV decoder ftp action alert
+        set profiles virus Alert-Only-AV decoder smb action alert
+        set profiles virus Alert-Only-AV decoder smtp action alert
+        set profiles virus Alert-Only-AV decoder imap action alert
+        set profiles virus Alert-Only-AV decoder pop3 action alert
+        set profiles spyware Alert-Only-AS rules Alert-All action alert
+        set profiles spyware Alert-Only-AS rules Alert-All severity any
+        set profiles spyware Alert-Only-AS rules Alert-All threat-name any
+        set profiles spyware Alert-Only-AS rules Alert-All category any
+        set profiles vulnerability Alert-Only-VP rules Alert-All action alert
+        set profiles vulnerability Alert-Only-VP rules Alert-All severity any
+        set profiles vulnerability Alert-Only-VP rules Alert-All threat-name any
+        set profiles vulnerability Alert-Only-VP rules Alert-All category any
+        set profiles vulnerability Alert-Only-VP rules Alert-All cve any
+        set profiles vulnerability Alert-Only-VP rules Alert-All host any
+        set profiles vulnerability Alert-Only-VP rules Alert-All vendor-id any
+        set profiles url-filtering Alert-Only-URL category command-and-control action alert
+        set profiles url-filtering Alert-Only-URL category malware action alert
+        set profiles url-filtering Alert-Only-URL category phishing action alert
+        set profiles url-filtering Alert-Only-URL category grayware action alert
+        set profiles url-filtering Alert-Only-URL category ransomware action alert
+        set profiles file-blocking Alert-Only-FB rules Alert-All action alert
+        set profiles file-blocking Alert-Only-FB rules Alert-All application any
+        set profiles file-blocking Alert-Only-FB rules Alert-All file-type any
+        set profiles file-blocking Alert-Only-FB rules Alert-All direction both
+        set profiles wildfire-analysis Alert-Only-WF rules Forward-All application any
+        set profiles wildfire-analysis Alert-Only-WF rules Forward-All file-type any
+        set profiles wildfire-analysis Alert-Only-WF rules Forward-All direction both
+        set profiles wildfire-analysis Alert-Only-WF rules Forward-All analysis public-cloud
+        set profile-group Alert-Group virus Alert-Only-AV
+        set profile-group Alert-Group spyware Alert-Only-AS
+        set profile-group Alert-Group vulnerability Alert-Only-VP
+        set profile-group Alert-Group url-filtering Alert-Only-URL
+        set profile-group Alert-Group file-blocking Alert-Only-FB
+        set profile-group Alert-Group wildfire-analysis Alert-Only-WF
+        commit
+        exit
+      register: security_profiles_result
+      changed_when: true
+
+    # Step 7: Download threat content
+    - name: Download threat content (Apps + Threats)
+      ansible.builtin.raw: "request content upgrade download latest"
+      register: download_result
+
+    - name: Extract download job ID
+      ansible.builtin.set_fact:
+        download_job_id: "{{ download_result.stdout | regex_search('jobid\\s+(\\d+)', '\\1') | first | default('') }}"
+      when: download_result.stdout is defined
+
+    - name: Log download job ID
+      ansible.builtin.debug:
+        msg: "Download job ID: {{ download_job_id }}"
+      when: download_job_id is defined and download_job_id | length > 0
+
+    - name: Poll for download job completion
+      ansible.builtin.raw: "show jobs id {{ download_job_id }}"
+      register: download_job_status
+      until: "'FIN' in download_job_status.stdout"
+      retries: "{{ (job_timeout / job_poll_interval) | int }}"
+      delay: "{{ job_poll_interval }}"
+      when: download_job_id is defined and download_job_id | length > 0
+
+    - name: Verify download job succeeded
+      ansible.builtin.fail:
+        msg: "Threat content download failed: {{ download_job_status.stdout }}"
+      when:
+        - download_job_id is defined
+        - download_job_id | length > 0
+        - download_job_status is defined
+        - "'FIN' in download_job_status.stdout"
+        - "'OK' not in download_job_status.stdout"
+
+    # Step 8: Install threat content
+    - name: Install threat content
+      ansible.builtin.raw: "request content upgrade install version latest"
+      register: install_result
+
+    - name: Extract install job ID
+      ansible.builtin.set_fact:
+        install_job_id: "{{ install_result.stdout | regex_search('jobid\\s+(\\d+)', '\\1') | first | default('') }}"
+      when: install_result.stdout is defined
+
+    - name: Log install job ID
+      ansible.builtin.debug:
+        msg: "Install job ID: {{ install_job_id }}"
+      when: install_job_id is defined and install_job_id | length > 0
+
+    - name: Poll for install job completion
+      ansible.builtin.raw: "show jobs id {{ install_job_id }}"
+      register: install_job_status
+      until: "'FIN' in install_job_status.stdout"
+      retries: "{{ (job_timeout / job_poll_interval) | int }}"
+      delay: "{{ job_poll_interval }}"
+      when: install_job_id is defined and install_job_id | length > 0
+
+    - name: Verify install job succeeded
+      ansible.builtin.fail:
+        msg: "Threat content install failed: {{ install_job_status.stdout }}"
+      when:
+        - install_job_id is defined
+        - install_job_id | length > 0
+        - install_job_status is defined
+        - "'FIN' in install_job_status.stdout"
+        - "'OK' not in install_job_status.stdout"
+
+    - name: Provision complete
+      ansible.builtin.debug:
+        msg: "NGFW provision completed successfully"

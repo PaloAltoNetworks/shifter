@@ -659,7 +659,7 @@ def configure_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> 
 def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
     """Remove subnet addresses and security rules from user's NGFW.
 
-    Starts the NGFW if stopped, waits for SSH, then runs the remove plan.
+    Uses range_ansible_runner to execute PAN-OS CLI commands via SSH.
 
     Args:
         user_id: Django User ID who owns the NGFW.
@@ -669,8 +669,6 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     Raises:
         RuntimeError: If NGFW configuration removal fails.
     """
-    from plans.ngfw_configure_subnets import NGFWRemoveSubnetsPlan
-
     # Get user's NGFW
     ngfw_data = get_user_ngfw_data(user_id)
     if not ngfw_data:
@@ -702,57 +700,22 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
     private_key = secret_response["SecretString"]
 
-    # Create SSH executor and wait for NGFW to be ready
-    ssh_executor = SSHExecutor(private_key=private_key)
+    # Wait for SSH and execute removal via range_ansible_runner
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
-
-    # Wait for management plane to be ready
-    logger.info("Verifying NGFW management plane is ready...")
-    poll_for_serial_number(
-        ssh_executor=ssh_executor,
+    range_ansible_runner.wait_for_ssh(
         host=management_ip,
-        timeout_seconds=300,  # 5 min - should be quick since NGFW is running
-        poll_interval=15,
+        user="admin",
+        private_key=private_key,
+        timeout_seconds=300,
     )
 
-    # Build and execute the remove plan
-    plan = NGFWRemoveSubnetsPlan()
-    steps = plan.get_steps(subnets, range_id)
-
-    # Execute steps manually since they're dynamically generated
-    # Retry logic for transient SSH failures or commit failures (5 attempts, 15s between retries)
-    for step in steps:
-        logger.info("Executing NGFW remove step: %s", step.name)
-        result = None
-        for attempt in range(5):
-            if attempt > 0:
-                logger.info("Retry %d/4 for step %s", attempt, step.name)
-                time.sleep(15)
-            result = ssh_executor.run_command(
-                instance_id=management_ip,
-                script=step.script,
-                stdin_input=step.stdin_input,
-                timeout_seconds=step.timeout_seconds,
-            )
-            # Check both SSH success AND PAN-OS commit success
-            if result.success and _check_commit_success(result.stdout):
-                break
-            if result.success and not _check_commit_success(result.stdout):
-                logger.warning(
-                    "NGFW remove step '%s' SSH succeeded but commit failed, output: %s",
-                    step.name,
-                    result.stdout[:500] if result.stdout else "(no output)",
-                )
-        if not result or not result.success:
-            stderr = result.stderr if result else "no result"
-            raise RuntimeError(f"NGFW remove step '{step.name}' failed: {stderr}")
-        if not _check_commit_success(result.stdout):
-            raise RuntimeError(
-                f"NGFW remove step '{step.name}' commit failed after retries: "
-                f"{result.stdout[:500] if result.stdout else '(no output)'}"
-            )
-        logger.info("NGFW remove step '%s' completed successfully", step.name)
+    # Remove NGFW configuration (routes, addresses, rules)
+    range_ansible_runner.run_ngfw_remove_subnets(
+        host=management_ip,
+        private_key=private_key,
+        subnets=subnets,
+        range_id=range_id,
+    )
 
     logger.info("NGFW subnet removal complete for range %s", range_id)
 
@@ -1277,6 +1240,18 @@ def run_pulumi(operation: str, request_id: str) -> None:
         if operation == "up":
             # Auto-cleanup on failure to avoid orphaned resources
             logger.info("Provision failed - attempting auto-cleanup...")
+
+            # Clean up NGFW configuration (routes, addresses, rules) if NGFW was enabled
+            # This must happen BEFORE pulumi destroy, while NGFW is still accessible
+            spec_subnets = range_spec.get("subnets", [])
+            if range_spec.get("ngfw", False) and spec_subnets:
+                try:
+                    logger.info("Cleaning up NGFW configuration for range %s...", range_id)
+                    remove_ngfw_subnets(user_id, spec_subnets, range_id)
+                except Exception as ngfw_err:
+                    # Log but continue with AWS cleanup - don't leave AWS resources orphaned
+                    logger.warning("NGFW cleanup failed (continuing with Pulumi destroy): %s", ngfw_err)
+
             subprocess.run(
                 ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
                 cwd=_get_working_dir(),

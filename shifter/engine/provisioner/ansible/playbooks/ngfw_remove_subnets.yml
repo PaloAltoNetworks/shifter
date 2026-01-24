@@ -1,0 +1,75 @@
+---
+# NGFW Subnet Removal Playbook
+#
+# Removes PAN-OS configuration:
+# - Security rules for connected subnet pairs
+# - Address objects for subnets
+# - Static routes for subnets
+#
+# Deletion order: rules → addresses → routes (reverse dependency order)
+#
+# Variables:
+#   provider: PAN-OS connection details (ip_address, username, password or api_key)
+#   subnets: List of {name, connected_to} dicts
+#   range_id: Range ID for naming
+#   connected_pairs: List of [subnet_a, subnet_b] pairs for security rules
+
+- name: Remove NGFW Subnet Configuration
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    provider: {}
+    subnets: []
+    range_id: 0
+    connected_pairs: []
+
+  tasks:
+    # Delete security rules first (they reference addresses)
+    - name: Delete security rules (A to B)
+      paloaltonetworks.panos.panos_security_rule:
+        provider: "{{ provider }}"
+        rule_name: "range-{{ range_id }}-{{ item.0 }}-to-{{ item.1 }}"
+        state: absent
+      loop: "{{ connected_pairs }}"
+      loop_control:
+        label: "range-{{ range_id }}-{{ item.0 }}-to-{{ item.1 }}"
+      ignore_errors: true  # Rule may not exist if create failed partway
+
+    - name: Delete security rules (B to A)
+      paloaltonetworks.panos.panos_security_rule:
+        provider: "{{ provider }}"
+        rule_name: "range-{{ range_id }}-{{ item.1 }}-to-{{ item.0 }}"
+        state: absent
+      loop: "{{ connected_pairs }}"
+      loop_control:
+        label: "range-{{ range_id }}-{{ item.1 }}-to-{{ item.0 }}"
+      ignore_errors: true
+
+    # Delete address objects (after rules that reference them)
+    - name: Delete address objects
+      paloaltonetworks.panos.panos_address_object:
+        provider: "{{ provider }}"
+        name: "range-{{ range_id }}-{{ item.name }}"
+        state: absent
+      loop: "{{ subnets }}"
+      loop_control:
+        label: "range-{{ range_id }}-{{ item.name }}"
+      ignore_errors: true
+
+    # Delete static routes last
+    - name: Delete static routes
+      paloaltonetworks.panos.panos_static_route:
+        provider: "{{ provider }}"
+        name: "range-{{ range_id }}-{{ item.name }}"
+        virtual_router: "default"
+        state: absent
+      loop: "{{ subnets }}"
+      loop_control:
+        label: "range-{{ range_id }}-{{ item.name }}"
+      ignore_errors: true
+
+    # Commit configuration
+    - name: Commit configuration
+      paloaltonetworks.panos.panos_commit_firewall:
+        provider: "{{ provider }}"

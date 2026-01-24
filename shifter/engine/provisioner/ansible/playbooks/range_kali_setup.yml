@@ -1,0 +1,63 @@
+---
+# Kali Instance Setup Playbook
+#
+# Configures Kali Linux attacker instance with:
+# - Hostname for XDR console visibility
+# - SSH access for browser-based terminal from Shifter
+# - xrdp service for RDP access via Guacamole
+#
+# Note: No XDR agent for Kali - it's the attacker machine.
+#
+# Variables:
+#   hostname: Instance hostname (required)
+#   ssh_public_key: SSH public key for authentication (required)
+
+- name: Configure Kali Instance
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    hostname: ""
+    ssh_public_key: ""
+
+  tasks:
+    # Set hostname
+    - name: Set hostname
+      ansible.builtin.hostname:
+        name: "{{ hostname }}"
+
+    - name: Add hostname to /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "127.0.0.1 {{ hostname }}"
+        state: present
+
+    # Configure SSH for kali user
+    - name: Create .ssh directory for kali user
+      ansible.builtin.file:
+        path: /home/kali/.ssh
+        state: directory
+        mode: "0700"
+        owner: kali
+        group: kali
+
+    - name: Add SSH public key to authorized_keys
+      ansible.builtin.lineinfile:
+        path: /home/kali/.ssh/authorized_keys
+        line: "{{ ssh_public_key }}"
+        create: true
+        mode: "0600"
+        owner: kali
+        group: kali
+
+    # Start xrdp service for RDP access via Guacamole
+    - name: Start xrdp service
+      ansible.builtin.service:
+        name: xrdp
+        state: started
+
+    - name: Check xrdp service status
+      ansible.builtin.command: systemctl status xrdp --no-pager
+      register: xrdp_status
+      changed_when: false
+      failed_when: false  # || true equivalent - don't fail if status check fails

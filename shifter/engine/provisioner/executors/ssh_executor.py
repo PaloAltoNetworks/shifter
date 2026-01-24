@@ -1,5 +1,7 @@
 """SSH command executor for PAN-OS devices.
 
+TODO: Delete after Ansible debugging - replaced by range_ansible_runner.py
+
 SSHExecutor uses SSH to execute CLI commands on PAN-OS devices (VM-Series).
 Provides same interface as SSMExecutor for use with SetupOrchestrator.
 """

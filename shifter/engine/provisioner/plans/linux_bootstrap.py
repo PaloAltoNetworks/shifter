@@ -1,5 +1,7 @@
 """Linux bootstrap setup plan.
 
+TODO: Delete after Ansible debugging - replaced by ansible/playbooks/range_linux_setup.yml
+
 Defines the steps to configure a generic Linux victim instance:
 - Set hostname for XDR console visibility
 - Configure SSH for browser-based terminal access from Shifter

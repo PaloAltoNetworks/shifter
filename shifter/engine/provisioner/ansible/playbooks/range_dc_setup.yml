@@ -1,0 +1,146 @@
+---
+# DC Setup Playbook
+#
+# Verifies Domain Controller is running (prebaked AMI) and optionally installs XDR agent.
+#
+# The DC AMI has AD DS already promoted. This playbook only verifies services are running.
+#
+# Variables:
+#   xdr_agent_url: Presigned S3 URL for XDR agent MSI (optional)
+
+- name: Configure Domain Controller
+  hosts: all
+  gather_facts: false
+  vars:
+    xdr_agent_url: ""
+
+  tasks:
+    # Verify NTDS service is running
+    - name: Check NTDS service status
+      ansible.windows.win_service_info:
+        name: NTDS
+      register: ntds_info
+      retries: 15
+      delay: 20
+      until: ntds_info.services | length > 0 and ntds_info.services[0].state == 'started'
+
+    - name: Fail if NTDS service not running
+      ansible.builtin.fail:
+        msg: "NTDS service is not running"
+      when: ntds_info.services | length == 0 or ntds_info.services[0].state != 'started'
+
+    # Verify AD Domain Controller can be queried
+    - name: Query AD Domain Controller
+      ansible.windows.win_powershell:
+        script: |
+          Import-Module ActiveDirectory -ErrorAction Stop
+          $dc = Get-ADDomainController -ErrorAction Stop
+          Write-Output "HostName: $($dc.HostName)"
+          Write-Output "Domain: $($dc.Domain)"
+          Write-Output "Forest: $($dc.Forest)"
+      register: ad_dc_result
+      retries: 15
+      delay: 20
+      until: ad_dc_result.rc == 0
+
+    - name: Fail if AD Domain Controller query failed
+      ansible.builtin.fail:
+        msg: "Failed to query AD Domain Controller"
+      when: ad_dc_result.rc != 0
+
+    # Verify AD Domain can be queried
+    - name: Query AD Domain
+      ansible.windows.win_powershell:
+        script: |
+          Import-Module ActiveDirectory -ErrorAction Stop
+          $domain = Get-ADDomain -ErrorAction Stop
+          Write-Output "Name: $($domain.Name)"
+          Write-Output "DNSRoot: $($domain.DNSRoot)"
+          Write-Output "NetBIOSName: $($domain.NetBIOSName)"
+      register: ad_domain_result
+      retries: 15
+      delay: 20
+      until: ad_domain_result.rc == 0
+
+    - name: Fail if AD Domain query failed
+      ansible.builtin.fail:
+        msg: "Failed to query AD Domain"
+      when: ad_domain_result.rc != 0
+
+    # Verify DNS service is running
+    - name: Check DNS service status
+      ansible.windows.win_service_info:
+        name: DNS
+      register: dns_info
+      retries: 15
+      delay: 20
+      until: dns_info.services | length > 0 and dns_info.services[0].state == 'started'
+
+    - name: Fail if DNS service not running
+      ansible.builtin.fail:
+        msg: "DNS service is not running"
+      when: dns_info.services | length == 0 or dns_info.services[0].state != 'started'
+
+    # XDR Agent Installation (if URL provided)
+    - name: Download XDR agent
+      ansible.windows.win_get_url:
+        url: "{{ xdr_agent_url }}"
+        dest: C:\Windows\Temp\cortex_xdr_installer.msi
+        timeout: 120
+      register: download_result
+      retries: 5
+      delay: 10
+      until: download_result is succeeded
+      when: xdr_agent_url | length > 0
+
+    - name: Fail if XDR agent download failed
+      ansible.builtin.fail:
+        msg: "Failed to download XDR agent from {{ xdr_agent_url }}"
+      when: xdr_agent_url | length > 0 and download_result is failed
+
+    - name: Install XDR agent
+      ansible.windows.win_package:
+        path: C:\Windows\Temp\cortex_xdr_installer.msi
+        state: present
+        arguments: /qn /norestart
+      register: install_result
+      when: xdr_agent_url | length > 0
+
+    - name: Fail if XDR agent install failed
+      ansible.builtin.fail:
+        msg: "Failed to install XDR agent"
+      when: xdr_agent_url | length > 0 and install_result is failed
+
+    - name: Check XDR service status
+      ansible.windows.win_powershell:
+        script: |
+          $cortex = Get-Service -Name "CortexXDR" -ErrorAction SilentlyContinue
+          $cyserver = Get-Service -Name "cyserver" -ErrorAction SilentlyContinue
+
+          if ($cortex -and $cortex.Status -eq "Running") {
+              Write-Output "CortexXDR service is running"
+              exit 0
+          }
+          if ($cyserver -and $cyserver.Status -eq "Running") {
+              Write-Output "cyserver service is running"
+              exit 0
+          }
+
+          Write-Error "XDR agent service not running"
+          exit 1
+      register: xdr_service_result
+      retries: 6
+      delay: 10
+      until: xdr_service_result.rc == 0
+      when: xdr_agent_url | length > 0
+
+    - name: Fail if XDR service not running
+      ansible.builtin.fail:
+        msg: "XDR agent service not running - neither CortexXDR nor cyserver found running"
+      when: xdr_agent_url | length > 0 and xdr_service_result.rc != 0
+
+    - name: Cleanup XDR installer
+      ansible.windows.win_file:
+        path: C:\Windows\Temp\cortex_xdr_installer.msi
+        state: absent
+      when: xdr_agent_url | length > 0

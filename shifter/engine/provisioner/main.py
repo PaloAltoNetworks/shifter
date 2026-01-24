@@ -2217,7 +2217,10 @@ def _build_range_terraform_variables(
             role = inst.get("role", "victim")
 
             # Map to Terraform os_type values
-            if os_type == "kali":
+            # DC role always uses Windows (domain controller)
+            if role == "dc":
+                tf_os_type = "windows"
+            elif os_type == "kali":
                 tf_os_type = "kali"
             elif os_type == "windows":
                 tf_os_type = "windows"
@@ -2267,7 +2270,7 @@ def _build_range_terraform_variables(
         "windows_ami_id": get_ami_id("windows"),
         "dc_ami_id": get_ami_id("dc"),
         # IAM
-        "instance_profile_name": os.environ.get("INSTANCE_PROFILE_NAME", ""),
+        "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
         # Subnets specification
         "subnets": tf_subnets,
     }

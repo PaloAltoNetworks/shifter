@@ -44,11 +44,11 @@ locals {
     ]
   ])
 
-  # Deduplicate pairs by sorting names alphabetically
+  # Deduplicate pairs by sorting names alphabetically (string comparison)
   connected_pairs = distinct([
     for pair in local.raw_pairs : {
-      a = min(pair.from, pair.to)
-      b = max(pair.from, pair.to)
+      a = pair.from < pair.to ? pair.from : pair.to
+      b = pair.from < pair.to ? pair.to : pair.from
     }
   ])
 

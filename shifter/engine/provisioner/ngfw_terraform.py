@@ -7,6 +7,7 @@ It makes the same DB calls and emits the same SNS events as the Pulumi path.
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import boto3
@@ -111,7 +112,6 @@ def _run_provision(
     """Run Terraform apply for NGFW, then run post-Terraform configuration."""
     from main import (
         NGFW_SSH_WAIT_TIMEOUT_DEFAULT,
-        poll_for_serial_and_cert,
         update_instance_state,
     )
 
@@ -193,44 +193,81 @@ def _run_provision(
 
     # Wait for SSH availability (NGFW can take 15-25 min to boot)
     ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
+    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
     ssh_executor.wait_for_agent(management_ip, timeout_seconds=ssh_timeout)
 
-    # Run NGFW provision plan via SetupOrchestrator
-    plan = NGFWProvisionPlan()
+    # Poll for serial number BEFORE running provision plan - this ensures management
+    # plane is ready to accept configuration commands. Serial number appearing
+    # indicates the PAN-OS management server is operational.
+    from main import poll_for_serial_number
+
+    logger.info("Polling for NGFW serial number (management plane readiness check)...")
+    serial_number = poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=600,  # 10 min - serial should appear after mgmt plane is up
+        poll_interval=30,
+    )
+    logger.info("NGFW management plane ready, serial=%s", serial_number)
+
+    # Brief pause after serial poll to let management plane stabilize
+    logger.info("Waiting 30s for management plane to stabilize before configuration...")
+    time.sleep(30)
+
+    # Create orchestrator with SSH executor
     orchestrator = SetupOrchestrator(executor=ssh_executor)
 
-    # Create context object with required attributes for the plan
-    class NgfwContext:
-        def __init__(self, mgmt_ip: str, region: str):
-            self.management_ip = mgmt_ip
-            self.sls_region = region
+    # Create context dict with the Terraform outputs for template rendering
+    context = {
+        "ec2_instance_id": output_data.get("ec2_instance_id"),
+        "management_ip": management_ip,
+        "dataplane_ip": output_data.get("dataplane_ip"),
+        "data_eni_id": output_data.get("data_eni_id"),
+        "sls_region": sls_region,
+    }
 
-    context = plan.get_context(NgfwContext(management_ip, sls_region))
-    orchestrator.orchestrate(
+    # Run the NGFW provision plan
+    provision_plan = NGFWProvisionPlan()
+    logger.info("Running NGFW provision plan...")
+    provision_result = orchestrator.orchestrate(
         instance_id=management_ip,
-        plan=plan,
+        plan=provision_plan,
         context=context,
     )
 
-    # Poll for serial number and certificate
-    serial_number = poll_for_serial_and_cert(ssh_executor, management_ip)
+    if not provision_result.success:
+        raise RuntimeError("NGFW post-Terraform configuration failed")
 
-    # Build state dict
+    # Build state dict with all outputs including data_eni_id for range routing
     state = {
         **output_data,
         "serial_number": serial_number,
     }
 
-    # Update DB with full state
+    # Save state to DB FIRST so run_ngfw_operation can find ec2_instance_id
+    # Keep status as provisioning for now - will update to awaiting_association after stop
     update_instance_state(request_id, STATUS_PROVISIONING, **state)
 
-    # Auto-stop after provisioning to save costs (uses unified start/stop path)
+    # Auto-stop NGFW to save costs while user completes association
+    # Stop BEFORE emitting awaiting_association status so NGFW is fully stopped
+    # when user sees the Complete Setup button (prevents race condition)
     from main import run_ngfw_operation
 
-    logger.info("Auto-stopping NGFW after provisioning...")
-    run_ngfw_operation("stop", request_id)
+    logger.info(
+        "Auto-stopping NGFW after provisioning (awaiting association): request_id=%s",
+        request_id,
+    )
+    try:
+        run_ngfw_operation("stop", request_id)
+        logger.info("Auto-stop completed successfully: request_id=%s", request_id)
+    except Exception:
+        logger.exception(
+            "Auto-stop FAILED: request_id=%s - NGFW remains running (cost impact)",
+            request_id,
+        )
 
-    # Update to awaiting_association status
+    # Update status to awaiting_association - user must complete setup
+    # User must: 1) Associate device in SCM, 2) Connect to XDR/XSIAM
     update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION)
     publish_ngfw_event(
         request_id=request_id,

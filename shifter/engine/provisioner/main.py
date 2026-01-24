@@ -18,6 +18,7 @@ import boto3
 import psycopg
 
 import range_ansible_runner
+import range_terraform_runner
 from events import (
     STATUS_AWAITING_ASSOCIATION,
     STATUS_DESTROYED,
@@ -1451,11 +1452,14 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     # configuration management (Ansible).
     logger.info("Running post-Pulumi instance setup via Ansible...")
     dc_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
-    # Get DC domain name from range spec if available
+    # Get DC domain name from range spec if available (dc_config is at instance level)
     dc_domain = None
     for subnet_spec in spec_subnets:
-        if subnet_spec.get("dc_config"):
-            dc_domain = subnet_spec["dc_config"].get("domain_name")
+        for inst in subnet_spec.get("instances", []):
+            if inst.get("dc_config"):
+                dc_domain = inst["dc_config"].get("domain_name")
+                break
+        if dc_domain:
             break
 
     range_ansible_runner.run_post_pulumi_range_setup(
@@ -1583,6 +1587,321 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
             logger.warning("Failed to stop NGFW (non-fatal): %s", e)
 
     # Publish destroyed event only on full success
+    publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
+
+
+def run_range(operation: str, request_id: str) -> None:
+    """Run Range operation.
+
+    New ranges are provisioned with Terraform. For destroy operations,
+    checks if the range was provisioned with Terraform (has state) and
+    falls back to Pulumi for backwards compatibility with existing ranges.
+
+    Args:
+        operation: Either 'up' (provision) or 'destroy' (teardown).
+        request_id: UUID string of the Request.
+
+    Raises:
+        Exception: If the operation fails.
+    """
+    if operation == "up":
+        # New ranges always use Terraform
+        _run_range_terraform(operation, request_id)
+    elif operation == "destroy":
+        # Check if this range was provisioned with Terraform
+        if range_terraform_runner.has_terraform_state(request_id):
+            logger.info("Range has Terraform state - using Terraform destroy")
+            _run_range_terraform(operation, request_id)
+        else:
+            # Fall back to Pulumi for backwards compatibility
+            logger.info("Range has no Terraform state - using Pulumi destroy")
+            run_pulumi(operation, request_id)
+    else:
+        raise ValueError(f"Unknown operation: {operation}")
+
+
+def _run_range_terraform(operation: str, request_id: str) -> None:
+    """Run Range operation using Terraform.
+
+    Args:
+        operation: Either 'up' (provision) or 'destroy' (teardown).
+        request_id: UUID string of the Request.
+
+    Raises:
+        Exception: If the operation fails.
+    """
+    logger.info("_run_range_terraform: starting operation=%s request_id=%s", operation, request_id)
+
+    # Fetch data from DB
+    range_data = get_range_data_by_request_id(request_id)
+    range_id = range_data["range_id"]
+    user_id = range_data["user_id"]
+    range_spec = range_data.get("spec", {})
+
+    try:
+        if operation == "up":
+            _run_terraform_provision(request_id, range_id, user_id, range_spec)
+        elif operation == "destroy":
+            _run_terraform_destroy(request_id, range_id, user_id, range_spec)
+        else:
+            raise ValueError(f"Unknown operation: {operation}")
+
+    except Exception as e:
+        error_msg = str(e)[:1000]
+        logger.error("Terraform operation failed: %s", error_msg)
+
+        if operation == "up":
+            # Auto-cleanup on failure
+            logger.info("Terraform provision failed - attempting auto-cleanup...")
+
+            # Clean up NGFW configuration first
+            spec_subnets = range_spec.get("subnets", [])
+            if range_spec.get("ngfw", False) and spec_subnets:
+                try:
+                    logger.info("Cleaning up NGFW configuration for range %s...", range_id)
+                    remove_ngfw_subnets(user_id, spec_subnets, range_id)
+                except Exception as ngfw_err:
+                    logger.warning("NGFW cleanup failed (continuing): %s", ngfw_err)
+
+            # Destroy Terraform resources
+            try:
+                range_terraform_runner.destroy_range(request_id, range_terraform_runner.RANGE_MODULE_PATH)
+            except Exception as tf_err:
+                logger.warning("Terraform destroy failed during cleanup: %s", tf_err)
+
+        # Publish failed event
+        publish_failed(request_id=request_id, range_id=range_id, user_id=user_id, error_message=error_msg)
+        raise
+
+
+def _run_terraform_provision(request_id: str, range_id: int, user_id: int, range_spec: dict) -> None:
+    """Run Terraform apply to provision the range.
+
+    Orchestration order:
+    1. Allocate CIDRs atomically (PostgreSQL advisory lock)
+    2. Build Terraform variables
+    3. Run Terraform apply
+    4. Configure NGFW (if enabled)
+    5. Run Ansible instance setup
+    6. Write to DB and publish ready event
+
+    Args:
+        request_id: UUID string of the Request.
+        range_id: The range ID being provisioned.
+        user_id: The Django user ID who owns this range.
+        range_spec: Range specification from DB.
+    """
+    from components.network import allocate_subnets
+
+    # Publish status change
+    publish_status_update(request_id=request_id, range_id=range_id, user_id=user_id, new_status="provisioning")
+
+    spec_subnets = range_spec.get("subnets", [])
+    subnet_count = len(spec_subnets)
+
+    if subnet_count == 0:
+        raise ValueError("At least one subnet is required")
+
+    # Get VPC config from environment
+    vpc_id = os.environ.get("RANGE_VPC_ID", "")
+    vpc_cidr = os.environ.get("RANGE_VPC_CIDR", "")
+    if not vpc_id or not vpc_cidr:
+        raise ValueError("RANGE_VPC_ID and RANGE_VPC_CIDR are required")
+
+    # Extract CIDR prefix (first two octets)
+    cidr_parts = vpc_cidr.split(".")
+    cidr_prefix = f"{cidr_parts[0]}.{cidr_parts[1]}"
+
+    # 1. Allocate CIDRs atomically
+    logger.info("Allocating %d subnet CIDRs...", subnet_count)
+    allocated_cidrs = allocate_subnets(
+        vpc_id=vpc_id,
+        cidr_prefix=cidr_prefix,
+        count=subnet_count,
+        subnet_size=28,
+    )
+    logger.info("Allocated CIDRs: %s", allocated_cidrs)
+
+    # 2. Build Terraform variables
+    subnets_for_tf = []
+    for i, subnet_spec in enumerate(spec_subnets):
+        subnets_for_tf.append(
+            {
+                "name": subnet_spec.get("name", f"subnet-{i}"),
+                "uuid": subnet_spec.get("uuid", ""),
+                "cidr": allocated_cidrs[i],
+                "connected_to": subnet_spec.get("connected_to", []),
+                "instances": [
+                    {
+                        "uuid": inst.get("uuid", ""),
+                        "role": inst.get("role", "victim"),
+                        "os_type": inst.get("os_type", "ubuntu"),
+                        "instance_type": inst.get("instance_type", "t3.medium"),
+                        "agent_presigned_url": inst.get("agent_presigned_url", ""),
+                        "join_domain": inst.get("join_domain", False),
+                    }
+                    for inst in subnet_spec.get("instances", [])
+                ],
+            }
+        )
+
+    # Get NGFW data ENI ID if enabled
+    ngfw_data_eni_id = ""
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        if ngfw_data:
+            ngfw_data_eni_id = ngfw_data.get("data_eni_id", "")
+            # Start NGFW if stopped
+            if ngfw_data.get("status") == "stopped":
+                logger.info("Starting stopped NGFW for range provisioning...")
+                run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+
+    tf_variables = {
+        "range_id": range_id,
+        "user_id": user_id,
+        "request_uuid": request_id,
+        "environment": os.environ.get("ENVIRONMENT", "dev"),
+        "vpc_id": vpc_id,
+        "vpc_cidr": vpc_cidr,
+        "availability_zone": os.environ.get("RANGE_AVAILABILITY_ZONE", "us-east-2a"),
+        "s3_endpoint_id": os.environ.get("S3_ENDPOINT_ID", ""),
+        "firewall_endpoint_id": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
+        "portal_vpc_cidr": os.environ.get("PORTAL_VPC_CIDR", ""),
+        "portal_vpc_peering_id": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
+        "ngfw_data_eni_id": ngfw_data_eni_id,
+        "kali_ami_id": get_ami_id("kali"),
+        "victim_ami_id": get_ami_id("victim"),
+        "windows_ami_id": get_ami_id("windows"),
+        "dc_ami_id": get_ami_id("dc"),
+        "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
+        "subnets": subnets_for_tf,
+    }
+
+    # 3. Run Terraform apply
+    logger.info("Running Terraform apply...")
+    outputs = range_terraform_runner.apply_range(request_id, tf_variables, range_terraform_runner.RANGE_MODULE_PATH)
+
+    subnets_output = outputs.get("subnets", {})
+    instances_output = outputs.get("instances", [])
+
+    # 4. Configure NGFW (if enabled)
+    if range_spec.get("ngfw", False) and ngfw_data_eni_id:
+        ngfw_data = get_user_ngfw_data(user_id)
+        if ngfw_data and ngfw_data.get("management_ip"):
+            # Build subnets info for NGFW configuration
+            subnets_for_ngfw = [
+                {
+                    "name": s["name"],
+                    "cidr": subnets_output[s["name"]]["subnet_cidr"],
+                    "connected_to": s.get("connected_to", []),
+                }
+                for s in spec_subnets
+            ]
+            configure_ngfw_subnets(user_id, subnets_for_ngfw, range_id)
+
+    # 5. Run Ansible instance setup
+    logger.info("Running post-Terraform instance setup via Ansible...")
+    dc_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+    # Get DC domain name from range spec if available (dc_config is at instance level)
+    dc_domain = None
+    for subnet_spec in spec_subnets:
+        for inst in subnet_spec.get("instances", []):
+            if inst.get("dc_config"):
+                dc_domain = inst["dc_config"].get("domain_name")
+                break
+        if dc_domain:
+            break
+
+    range_ansible_runner.run_post_pulumi_range_setup(
+        instances=instances_output,
+        dc_domain_name=dc_domain,
+        dc_domain_password=dc_password,
+        region=os.environ.get("AWS_REGION", "us-east-2"),
+    )
+    logger.info("Post-Terraform instance setup complete")
+
+    # 6. Write to DB and publish events
+    range_data = get_range_data_by_request_id(request_id)
+    write_provisioned_state(
+        range_id=range_id,
+        subnets=subnets_output,
+        instances=instances_output,
+        ngfw_instance_id=range_data.get("ngfw_instance_id"),
+    )
+
+    publish_ready(request_id=request_id, range_id=range_id, user_id=user_id)
+
+
+def _run_terraform_destroy(request_id: str, range_id: int, user_id: int, range_spec: dict) -> None:
+    """Run Terraform destroy to tear down the range.
+
+    Orchestration order:
+    1. Remove NGFW configuration (if enabled)
+    2. Run Terraform destroy
+    3. Clean up Terraform state
+    4. Update DB and publish events
+    5. Auto-stop NGFW if no other active ranges
+
+    Args:
+        request_id: UUID string of the Request.
+        range_id: The range ID being destroyed.
+        user_id: The Django user ID who owns this range.
+        range_spec: Range specification from DB.
+    """
+    # Pre-destroy validation
+    try:
+        range_data = get_range_data_by_request_id(request_id)
+    except ValueError as e:
+        logger.warning("Range not found for request %s, skipping destroy: %s", request_id, e)
+        return
+
+    current_status = range_data.get("status")
+    if current_status in ("destroyed", "failed"):
+        logger.info(
+            "Range %d already in terminal state '%s', skipping destroy",
+            range_id,
+            current_status,
+        )
+        return
+
+    spec_subnets = range_spec.get("subnets", [])
+
+    # 1. Remove NGFW configuration
+    if spec_subnets and range_spec.get("ngfw", False):
+        try:
+            remove_ngfw_subnets(user_id, spec_subnets, range_id)
+        except Exception as e:
+            logger.warning("NGFW subnet removal failed (continuing): %s", e)
+
+    # 2. Run Terraform destroy
+    logger.info("Running Terraform destroy...")
+    terraform_succeeded = False
+    try:
+        range_terraform_runner.destroy_range(request_id, range_terraform_runner.RANGE_MODULE_PATH)
+        terraform_succeeded = True
+
+        # 3. Clean up Terraform state
+        range_terraform_runner.cleanup_range_state(request_id)
+
+    finally:
+        # Always mark DB records as destroyed if Terraform succeeded
+        if terraform_succeeded:
+            try:
+                mark_range_instances_destroyed(range_id)
+            except Exception as e:
+                logger.error("Failed to mark range %d as destroyed in DB: %s", range_id, e)
+
+        # 5. Auto-stop NGFW if no other active ranges
+        try:
+            if not user_has_active_ranges(user_id, range_id):
+                ngfw_data = get_user_ngfw_data(user_id)
+                if ngfw_data and ngfw_data["status"] == "active":
+                    logger.info("No other active ranges for user %s, stopping NGFW", user_id)
+                    run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
+        except Exception as e:
+            logger.warning("Failed to stop NGFW (non-fatal): %s", e)
+
+    # Publish destroyed event
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 
 
@@ -2354,6 +2673,6 @@ if __name__ == "__main__":
         logger.info(f"Starting {pulumi_op} for request_id={request_id}")
         logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
-        run_pulumi(pulumi_op, request_id)
+        run_range(pulumi_op, request_id)
 
         logger.info(f"Completed {pulumi_op} for request_id={request_id}")

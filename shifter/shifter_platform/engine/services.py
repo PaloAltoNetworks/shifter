@@ -514,7 +514,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     if os_type == "windows":
         rdp_username = "Administrator"
         # DC uses domain admin password (prebaked AMI), others use demo password
-        rdp_password = "Sh1fterDC2024!" if role == "dc" else "CortexSavesTheDay!"  # nosec B105
+        rdp_password = "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!"  # nosec B105
     elif os_type == "kali":
         rdp_username = "kali"
         rdp_password = "kali"  # nosec B105 - Kali OS default
@@ -802,7 +802,10 @@ def start_ngfw(request_id: UUID) -> bool:
         return False
 
     # Only allow starting from paused or failed status
-    if ngfw_instance.status not in (ResourceStatus.PAUSED.value, ResourceStatus.FAILED.value):
+    if ngfw_instance.status not in (
+        ResourceStatus.PAUSED.value,
+        ResourceStatus.FAILED.value,
+    ):
         logger.warning(
             "start_ngfw: invalid status=%s for request_id=%s (must be stopped or failed)",
             ngfw_instance.status,

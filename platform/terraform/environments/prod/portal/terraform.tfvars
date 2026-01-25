@@ -127,7 +127,7 @@ pulumi_container_tag = "latest"
 
 dc_domain_name = "internal.shifter"
 # nosec B105 - Ephemeral isolated range, not a production credential
-dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
+dc_domain_password = "Sh1fterDC2026" # pragma: allowlist secret
 
 # ------------------------------------------------------------------------------
 # Guacamole

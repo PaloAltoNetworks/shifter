@@ -145,6 +145,17 @@ class SetupOrchestrator:
                 result = self._execute_step(instance_id, step, context, document_name)
                 step_results.append(result)
 
+                # Check if step failed (returned success=False after retries)
+                if not result.success:
+                    logger.error(
+                        "orchestrate: step '%s' failed after retries",
+                        step.name,
+                    )
+                    raise SetupError(
+                        f"Step '{step.name}' failed after all retry attempts",
+                        step_name=step.name,
+                    )
+
                 # Handle reboot if required
                 if step.requires_reboot:
                     reboot_timeout = max(step.timeout_seconds, self.DEFAULT_REBOOT_TIMEOUT)
@@ -252,22 +263,22 @@ class SetupOrchestrator:
                     step_name=step.name,
                     cause=e,
                 ) from e
-            last_result = result
-
-            # Check for PAN-OS commit success if commit was attempted
-            if not self._check_commit_success(result.stdout):
+            except TimeoutError as e:
                 logger.warning(
-                    "_execute_step: PAN-OS commit failed in step=%s, output=%s",
+                    "_execute_step: timeout step=%s attempt=%d/%d: %s",
                     step.name,
-                    result.stdout[:500] if result.stdout else "(no output)",
+                    attempt + 1,
+                    max_retries + 1,
+                    e,
                 )
                 if attempt < max_retries:
                     continue  # Retry
-                else:
-                    raise SetupError(
-                        f"Step '{step.name}' failed: PAN-OS commit did not succeed",
-                        step_name=step.name,
-                    )
+                raise SetupError(
+                    f"Step '{step.name}' failed: timeout after {max_retries + 1} attempts: {e}",
+                    step_name=step.name,
+                    cause=e,
+                ) from e
+            last_result = result
 
             if result.success:
                 # If poll_for_job is enabled, parse job ID and poll until complete

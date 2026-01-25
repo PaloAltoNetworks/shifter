@@ -4,8 +4,8 @@ Tests for:
 - Domain Controller PowerShell template (dc_windows.ps1.j2)
 - NGFW init-cfg.txt template (ngfw_init_cfg.txt.j2)
 
-NOTE: The DC template is now a minimal bootstrap script (hostname, SSH).
-AD DS installation is handled via SSM Run Command orchestration.
+NOTE: The DC template is now a minimal bootstrap script.
+AD DS installation is handled via SSM plans.
 See test_dc_setup_plan.py for AD DS setup tests.
 """
 
@@ -31,11 +31,10 @@ class TestDCTemplateRendering:
     """Tests for DC user_data template rendering.
 
     ARCHITECTURE NOTE: DC user_data is intentionally minimal.
-    All setup (hostname, SSH, AD DS) is handled via SSM Run Command orchestration:
-    - BootstrapPlan: hostname + SSH + reboot
-    - DCSetupPlan: AD DS install + promote
+    All setup (hostname, SSH, AD DS) is handled via SSM plans:
+    - DCSetupPlan: hostname, SSH, AD DS install + promote
 
-    See test_bootstrap_plan.py and test_dc_setup_plan.py for setup tests.
+    See test_dc_setup_plan.py for AD DS setup tests.
     """
 
     @pytest.fixture
@@ -78,11 +77,11 @@ class TestDCTemplateRendering:
         """DC template should NOT do any setup (SSM handles everything)."""
         result = dc_template.render(**dc_template_context)
 
-        # Setup is via SSM orchestration, not user data
-        assert "Rename-Computer" not in result, "Hostname set via SSM BootstrapPlan"
-        assert "Start-Service sshd" not in result, "SSH configured via SSM BootstrapPlan"
-        assert "Install-WindowsFeature" not in result, "AD DS installed via SSM DCSetupPlan"
-        assert "Install-ADDSForest" not in result, "DC promotion via SSM DCSetupPlan"
+        # Setup is via SSM plans, not user data
+        assert "Rename-Computer" not in result, "Hostname set via SSM"
+        assert "Start-Service sshd" not in result, "SSH configured via SSM"
+        assert "Install-WindowsFeature" not in result, "AD DS installed via SSM"
+        assert "Install-ADDSForest" not in result, "DC promotion via SSM"
 
     def test_dc_template_no_template_variables(self, dc_template, dc_template_context):
         """DC template should not require any template variables (minimal bootstrap)."""

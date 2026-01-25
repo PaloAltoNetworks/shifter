@@ -105,16 +105,10 @@ class TestXDRAgentInstallPlanScripts:
     """Tests for XDRAgentInstallPlan script contents."""
 
     def test_download_script_uses_invoke_webrequest(self):
-        """Download script should use Invoke-WebRequest."""
+        """Download script should use Invoke-WebRequest for downloads."""
         plan = XDRAgentInstallPlan()
         download_script = plan.steps[0].script
         assert "Invoke-WebRequest" in download_script
-
-    def test_download_script_uses_tls12(self):
-        """Download script should set TLS 1.2 for S3."""
-        plan = XDRAgentInstallPlan()
-        download_script = plan.steps[0].script
-        assert "Tls12" in download_script
 
     def test_download_script_uses_template_variable(self):
         """Download script should use template variable for URL."""

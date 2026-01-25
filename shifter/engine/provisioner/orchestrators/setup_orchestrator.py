@@ -270,6 +270,17 @@ class SetupOrchestrator:
             last_result = result
 
             if result.success:
+                if result.stdout and "commit" in result.stdout.lower():
+                    output_lower = result.stdout.lower()
+                    if "configuration committed successfully" in output_lower:
+                        logger.info("_execute_step: step=%s commit=immediate_success", step.name)
+                    elif "there are no changes to commit" in output_lower:
+                        logger.info("_execute_step: step=%s commit=no_changes", step.name)
+                    elif "jobid" in output_lower:
+                        logger.info("_execute_step: step=%s commit=job_enqueued", step.name)
+                    else:
+                        logger.info("_execute_step: step=%s commit=unknown_output", step.name)
+
                 # If poll_for_job is enabled, parse job ID and poll until complete
                 if getattr(step, "poll_for_job", False):
                     job_id = self._parse_panos_job_id(result.stdout)
@@ -395,7 +406,11 @@ class SetupOrchestrator:
         # If commit was attempted, check for success messages
         if "Configuration committed successfully" in output:
             return True
-        return "There are no changes to commit" in output
+        if "There are no changes to commit" in output:
+            return True
+        # If we polled a commit job, the stdout may include job status output
+        output_lower = output.lower()
+        return ("fin" in output_lower) and ("ok" in output_lower)
 
     def _render_script(
         self,

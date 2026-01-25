@@ -202,6 +202,7 @@ class NGFWConfigureSubnetsPlan:
                 script="",
                 stdin_input=stdin_input,
                 timeout_seconds=300,  # 5 min for config + commit
+                poll_for_job=True,  # Commit may be async for larger configs
             ),
         ]
 

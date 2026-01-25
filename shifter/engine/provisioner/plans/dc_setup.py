@@ -8,6 +8,68 @@ from typing import Any, ClassVar
 
 from .base import SetupStep
 
+# PowerShell script to set Administrator credential
+# Prebaked DC AMI may have unknown credential - reset to configured value
+SET_ADMIN_CREDENTIAL_SCRIPT = """
+$ErrorActionPreference = "Stop"
+
+Write-Host "=== Setting Administrator Password ==="
+
+$newPassword = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
+
+try {
+    Set-ADAccountPassword -Identity Administrator -Reset -NewPassword $newPassword -ErrorAction Stop
+    Write-Host "Administrator password set successfully"
+} catch {
+    Write-Host "ERROR: Failed to set Administrator password"
+    Write-Host "Exception: $($_.Exception.Message)"
+    exit 1
+}
+
+Write-Host "=== Administrator Password Set ==="
+"""
+
+# PowerShell script to enable SSH with password auth
+# Required for Guacamole SSH connections (AMI may have key-only auth)
+ENABLE_SSH_AUTH_SCRIPT = """
+$ErrorActionPreference = "Stop"
+
+Write-Host "=== Enabling SSH Password Authentication ==="
+
+$sshdConfigPath = "C:\\ProgramData\\ssh\\sshd_config"
+
+if (-not (Test-Path $sshdConfigPath)) {
+    Write-Host "ERROR: sshd_config not found at $sshdConfigPath"
+    exit 1
+}
+
+# Read current config
+$config = Get-Content $sshdConfigPath -Raw
+
+# Enable password authentication (uncomment and set to yes)
+$config = $config -replace '(?m)^#?PasswordAuthentication\\s+.*$', 'PasswordAuthentication yes'
+
+# Ensure the setting exists
+if ($config -notmatch 'PasswordAuthentication') {
+    $config += "`nPasswordAuthentication yes"
+}
+
+# Write updated config
+Set-Content -Path $sshdConfigPath -Value $config -NoNewline
+Write-Host "Updated sshd_config with PasswordAuthentication yes"
+
+# Restart sshd to apply changes
+Write-Host "Restarting sshd service..."
+Restart-Service sshd -Force
+Write-Host "sshd service restarted"
+
+# Verify the change
+$verifyConfig = Get-Content $sshdConfigPath | Select-String "PasswordAuthentication"
+Write-Host "Verification: $verifyConfig"
+
+Write-Host "=== SSH Password Authentication Enabled ==="
+"""
+
 # PowerShell script to promote server to Domain Controller
 PROMOTE_DC_SCRIPT = """
 $ErrorActionPreference = "Stop"
@@ -276,17 +338,29 @@ class DCSetupPlan:
     """Setup plan for Windows Domain Controller.
 
     DC instances use a prebaked AMI with domain already promoted.
-    This plan only verifies the DC is running - no promotion needed.
+    This plan configures runtime settings and verifies the DC is running.
 
-    Steps: None (DC already promoted in AMI)
+    Steps:
+    1. Set Administrator password (prebaked AMI may have unknown password)
+    2. Enable SSH password authentication (for Guacamole SSH access)
 
     Verification:
     - Check NTDS service is running
     - Query AD Domain Controller
     """
 
-    # No setup steps - DC is already promoted in prebaked AMI
-    steps: ClassVar[list[SetupStep]] = []
+    steps: ClassVar[list[SetupStep]] = [
+        SetupStep(
+            name="set_admin_password",
+            script=SET_ADMIN_CREDENTIAL_SCRIPT,
+            timeout_seconds=60,
+        ),
+        SetupStep(
+            name="enable_ssh_password_auth",
+            script=ENABLE_SSH_AUTH_SCRIPT,
+            timeout_seconds=60,
+        ),
+    ]
 
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ad_running",

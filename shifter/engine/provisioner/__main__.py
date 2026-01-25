@@ -140,6 +140,7 @@ def _provision_range() -> None:
         instances_output.append(
             {
                 "uuid": inst.uuid,  # Django Instance UUID
+                "name": inst.display_name,  # Friendly name for hostname
                 "role": inst.role,
                 "os": inst.os_type,
                 "subnet_name": subnet_name,
@@ -148,6 +149,8 @@ def _provision_range() -> None:
                 "instance_id": inst.instance_id,
                 "private_ip": inst.private_ip,
                 "ssh_key_secret_arn": inst.ssh_key_secret_arn,
+                "public_key": inst.public_key or "",  # For SSH key configuration
+                "agent_presigned_url": inst.agent_presigned_url or "",  # For XDR agent
             }
         )
 

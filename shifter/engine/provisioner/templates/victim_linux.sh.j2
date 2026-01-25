@@ -30,5 +30,13 @@ elif systemctl list-unit-files | grep -q "^sshd.service"; then
     systemctl enable --now sshd || true
 fi
 
+# Ensure xrdp is running for RDP access via Guacamole (Ubuntu AMI has xrdp installed)
+if systemctl list-unit-files | grep -q "^xrdp.service"; then
+    echo "Starting xrdp service..."
+    systemctl start xrdp
+    systemctl status xrdp --no-pager || true
+    echo "xrdp service started"
+fi
+
 # All other setup (hostname, XDR) stays in SSM plans.
 echo "user_data complete. SSM will handle remaining setup."

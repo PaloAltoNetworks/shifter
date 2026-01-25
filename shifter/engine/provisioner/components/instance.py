@@ -101,6 +101,7 @@ class InstanceComponent(pulumi.ComponentResource):
         request_uuid: str,
         instance_uuid: str,
         instance_profile_name: str = "",
+        display_name: str = "",
         agent_s3_bucket: str = "",
         agent_s3_key: str = "",
         agent_presigned_url: str = "",
@@ -126,6 +127,7 @@ class InstanceComponent(pulumi.ComponentResource):
             request_uuid: UUID of the provisioning request (for tagging/correlation).
             instance_uuid: UUID of this instance (for tagging/correlation).
             instance_profile_name: IAM instance profile name (optional).
+            display_name: User-friendly name for UI (e.g., "target-ubuntu").
             agent_s3_bucket: S3 bucket for agent installer (for victims).
             agent_s3_key: S3 key for agent installer (for victims).
             agent_presigned_url: Pre-generated presigned URL for agent (for victims).
@@ -155,10 +157,11 @@ class InstanceComponent(pulumi.ComponentResource):
         if not instance_uuid:
             raise ValueError("instance_uuid is required for InstanceComponent")
 
-        # Store role, os_type, and uuid for output building (avoids closure issues)
+        # Store role, os_type, uuid, and display_name for output building (avoids closure issues)
         self.role = role
         self.os_type = os_type
         self._instance_uuid = instance_uuid
+        self.display_name = display_name or f"{role}-{os_type}"
 
         # Build common tags using shared helper
         from components.tags import build_common_tags
@@ -224,7 +227,7 @@ class InstanceComponent(pulumi.ComponentResource):
             self.public_key = public_key
             self.ssh_user = "kali"
         elif role == "victim":
-            self.hostname = f"shifter-victim-{range_id}-{index}"
+            self.hostname = f"shifter-target-{range_id}-{index}"
             self.public_key = public_key
             self.agent_presigned_url = agent_presigned_url if agent_presigned_url else None
             # Determine SSH user based on OS type

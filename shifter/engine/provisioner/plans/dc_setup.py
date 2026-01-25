@@ -31,6 +31,7 @@ Write-Host "=== Administrator Password Set ==="
 
 # PowerShell script to enable SSH with password auth
 # Required for Guacamole SSH connections (AMI may have key-only auth)
+# Windows OpenSSH has a Match Group administrators block that overrides global settings
 ENABLE_SSH_AUTH_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
@@ -46,12 +47,20 @@ if (-not (Test-Path $sshdConfigPath)) {
 # Read current config
 $config = Get-Content $sshdConfigPath -Raw
 
-# Enable password authentication (uncomment and set to yes)
+# Enable password authentication at global level
 $config = $config -replace '(?m)^#?PasswordAuthentication\\s+.*$', 'PasswordAuthentication yes'
 
-# Ensure the setting exists
-if ($config -notmatch 'PasswordAuthentication') {
+# Ensure the global setting exists
+if ($config -notmatch 'PasswordAuthentication yes') {
     $config += "`nPasswordAuthentication yes"
+}
+
+# Windows OpenSSH has Match Group administrators block that overrides global settings
+# Add PasswordAuthentication yes inside that block
+if ($config -match 'Match Group administrators') {
+    Write-Host "Found Match Group administrators block, adding PasswordAuthentication yes"
+    # Insert PasswordAuthentication yes after the Match Group administrators line
+    $config = $config -replace '(Match Group administrators[^\\n]*\\n)', "`$1       PasswordAuthentication yes`n"
 }
 
 # Write updated config

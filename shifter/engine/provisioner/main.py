@@ -452,6 +452,7 @@ def write_provisioned_state(
                 provisioned_instances.append(
                     {
                         "uuid": instance_uuid,
+                        "name": inst.get("name"),
                         "role": inst.get("role"),
                         "os_type": inst.get("os"),
                         "subnet_name": inst.get("subnet_name"),
@@ -1485,6 +1486,7 @@ def _run_single_instance_setup(
     dc_ip: str | None,
     domain_name: str | None,
     xdr_required: bool = False,
+    instance_name: str = "",
 ) -> bool:
     """Run setup for a single non-DC instance.
 
@@ -1498,6 +1500,7 @@ def _run_single_instance_setup(
         dc_ip: DC private IP (for domain join).
         domain_name: Domain FQDN (for domain join).
         xdr_required: If True, fail hard when XDR agent URL is missing.
+        instance_name: Friendly display name for hostname (e.g., "target-ubuntu").
 
     Returns:
         True on success.
@@ -1520,9 +1523,12 @@ def _run_single_instance_setup(
     logger.info("Instance %s is ready (SSM agent online)", instance_id)
 
     # Create context object for plan get_context()
+    # Use friendly name for hostname (e.g., "target-ubuntu" becomes "shifter-target-ubuntu")
+    hostname = f"shifter-{instance_name}" if instance_name else f"inst-{instance_id[-8:]}"
+
     class InstanceContext:
         def __init__(self):
-            self.hostname = f"inst-{instance_id[-8:]}"
+            self.hostname = hostname
             self.public_key = public_key
             self.agent_presigned_url = agent_presigned_url
             self.ssh_user = "kali" if os_type == "kali" else "ubuntu"
@@ -1757,6 +1763,7 @@ def run_instance_setup(
                     dc_ip=actual_dc_ip,
                     domain_name=actual_domain,
                     xdr_required=bool(inst_config.get("agent")),  # XDR required if agent data present
+                    instance_name=inst.get("name", ""),
                 )
                 return (inst_id, True, None)
             except Exception as e:

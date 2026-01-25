@@ -3,7 +3,7 @@
 import logging
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 logger = logging.getLogger(__name__)
 
@@ -13,30 +13,36 @@ class KeyGenerationError(Exception):
 
 
 def generate_ssh_keypair() -> tuple[str, str]:
-    """Generate an Ed25519 SSH key pair.
+    """Generate an RSA 4096-bit SSH key pair.
+
+    Uses RSA for broad compatibility with SSH clients including Guacamole's
+    libssh2 which doesn't support Ed25519.
 
     This is a pure Python operation with no AWS calls, safe to run at any time.
 
     Returns:
         tuple[str, str]: (private_key_pem, public_key_openssh) where:
-            - private_key_pem: PEM-encoded OpenSSH private key
-            - public_key_openssh: OpenSSH-format public key (ssh-ed25519 ...)
+            - private_key_pem: PEM-encoded private key
+            - public_key_openssh: OpenSSH-format public key (ssh-rsa ...)
 
     Raises:
         KeyGenerationError: If key generation or serialization fails.
     """
-    logger.debug("Generating Ed25519 SSH key pair")
+    logger.debug("Generating RSA 4096-bit SSH key pair")
 
     try:
-        private_key = ed25519.Ed25519PrivateKey.generate()
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=4096,
+        )
     except Exception as e:
-        logger.error("Failed to generate Ed25519 private key: %s", e)
-        raise KeyGenerationError(f"Failed to generate Ed25519 private key: {e}") from e
+        logger.error("Failed to generate RSA private key: %s", e)
+        raise KeyGenerationError(f"Failed to generate RSA private key: {e}") from e
 
     try:
         private_key_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.OpenSSH,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
             encryption_algorithm=serialization.NoEncryption(),
         ).decode("utf-8")
     except Exception as e:
@@ -57,11 +63,11 @@ def generate_ssh_keypair() -> tuple[str, str]:
         raise KeyGenerationError(f"Failed to serialize public key: {e}") from e
 
     # Validate generated keys have expected format
-    if not private_key_pem.startswith("-----BEGIN OPENSSH PRIVATE KEY-----"):
+    if not private_key_pem.startswith("-----BEGIN RSA PRIVATE KEY-----"):
         logger.error("Generated private key has unexpected format")
         raise KeyGenerationError("Generated private key has unexpected format")
 
-    if not public_key_openssh.startswith("ssh-ed25519 "):
+    if not public_key_openssh.startswith("ssh-rsa "):
         logger.error("Generated public key has unexpected format")
         raise KeyGenerationError("Generated public key has unexpected format")
 

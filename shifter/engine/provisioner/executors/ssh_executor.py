@@ -174,13 +174,19 @@ class SSHExecutor:
             # We send 'exit' and shutdown_write(), so PAN-OS will close the channel
             # when all commands complete. This is more reliable than prompt detection
             # since commits can take 30+ seconds.
+            #
+            # IMPORTANT: We must wait for eof_received, NOT exit_status_ready.
+            # exit_status_ready() can return True before all data arrives, causing
+            # truncated output. eof_received is the authoritative signal that the
+            # server has finished sending all data.
             output = ""
             start_time = time.time()
             chunk_count = 0
 
-            logger.info("Reading output until channel closes")
+            logger.info("Reading output until channel EOF")
 
             while True:
+                # Read any available data
                 if channel.recv_ready():
                     chunk = channel.recv(4096).decode("utf-8", errors="replace")
                     chunk_count += 1
@@ -188,22 +194,25 @@ class SSHExecutor:
                     logger.debug(f"Chunk {chunk_count} content: {chunk!r}")
                     output += chunk
 
-                # Check if channel closed (exit command processed)
-                if channel.exit_status_ready():
-                    logger.info("Channel exit status ready")
-                    while channel.recv_ready():
-                        chunk = channel.recv(4096).decode("utf-8", errors="replace")
-                        chunk_count += 1
-                        output += chunk
-                    break
-
-                # Check if channel EOF (remote closed)
+                # Check if channel EOF (server finished sending all data)
+                # This is the ONLY reliable way to know all output has been received
                 if channel.eof_received:
-                    logger.info("Channel EOF received")
-                    while channel.recv_ready():
-                        chunk = channel.recv(4096).decode("utf-8", errors="replace")
-                        chunk_count += 1
-                        output += chunk
+                    logger.info("Channel EOF received - draining remaining data")
+                    # Use blocking recv() to drain ALL remaining data
+                    # recv_ready() only checks Paramiko's buffer, not kernel TCP buffer
+                    # Set short timeout for drain phase
+                    channel.settimeout(2)
+                    while True:
+                        try:
+                            chunk = channel.recv(4096)
+                            if not chunk:  # Empty bytes = channel closed, no more data
+                                break
+                            chunk_count += 1
+                            logger.info(f"Drain chunk {chunk_count}: {len(chunk)} bytes")
+                            output += chunk.decode("utf-8", errors="replace")
+                        except builtins.TimeoutError:
+                            logger.info("Drain timeout - no more data")
+                            break
                     break
 
                 # Overall timeout check
@@ -216,13 +225,17 @@ class SSHExecutor:
 
                 time.sleep(0.1)
 
-            # Get exit code if available
+            # Get exit code - wait briefly if not ready yet
+            # After EOF, exit status should arrive shortly
             exit_code = -1
-            if channel.exit_status_ready():
-                exit_code = channel.recv_exit_status()
-                logger.info(f"Exit code: {exit_code}")
+            for _ in range(10):  # Wait up to 1 second
+                if channel.exit_status_ready():
+                    exit_code = channel.recv_exit_status()
+                    logger.info(f"Exit code: {exit_code}")
+                    break
+                time.sleep(0.1)
             else:
-                logger.info("Exit status not ready - using -1")
+                logger.info("Exit status not ready after 1s - using -1")
 
             elapsed = time.time() - start_time
             logger.info(f"Command completed in {elapsed:.1f}s, received {len(output)} bytes in {chunk_count} chunks")

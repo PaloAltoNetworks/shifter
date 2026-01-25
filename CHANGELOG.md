@@ -7,16 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.1] - 2026-01-11
+## [1.0.2] - 2026-01-24
 
 ### Added
-- NGFW pause/resume flow and UI
-- NGFW pause/resume flow and UI
+- Range pause/resume flow and UI
+
+## [1.0.1] - 2026-01-22
+
+### Changed
+- Migrated range and NGFW provisioning from Pulumi to Terraform
 
 ## [1.0.0] - 2026-01-21
 
 ### Added
 - Cortex BYOT scenario (automation except for CIE and XDR collector)
+- Cortex Deployment Experience scenario
 
 ### Changed
 - Dashboard renamed to Ranges

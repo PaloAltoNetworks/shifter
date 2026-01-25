@@ -593,13 +593,14 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     role = instance.get("role", "instance")
     connection_name = f"{role}-{range_obj.id}"
 
-    # Get RDP credentials based on OS type
+    # Get RDP credentials based on OS type and role
     # TODO: Move instance default passwords to CMS (#542)
     rdp_username = None
     rdp_password = None
     if os_type == "windows":
         rdp_username = "Administrator"
-        rdp_password = "CortexSavesTheDay!"  # nosec B105 - demo environment
+        # DC uses domain admin password (prebaked AMI), others use demo password
+        rdp_password = "Sh1fterDC2024!" if role == "dc" else "CortexSavesTheDay!"  # nosec B105
     elif os_type == "kali":
         rdp_username = "kali"
         rdp_password = "kali"  # nosec B105 - Kali OS default
@@ -608,8 +609,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         rdp_password = "ubuntu"  # nosec B105 - demo environment
 
     # Get SSH key for SFTP file transfers
-    # Windows requires key-based auth; Kali uses password auth (Guacamole's
-    # libssh2 has issues with Ed25519 OpenSSH key format)
+    # Windows uses key-based auth; Linux uses password auth for simplicity
     from engine.secrets import get_ssh_key
 
     ssh_key = None

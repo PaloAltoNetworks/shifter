@@ -1017,6 +1017,84 @@ def poll_for_serial_and_cert(
         time.sleep(poll_interval)
 
 
+def wait_for_autocommit(
+    ssh_executor: "SSHExecutor",
+    host: str,
+    timeout_seconds: int = 600,
+    poll_interval: int = 15,
+) -> None:
+    """Wait for NGFW boot autocommit to complete before configuring.
+
+    After boot, PAN-OS runs an autocommit that must complete before any
+    configuration changes can be made. This function polls 'show jobs all'
+    until there are no active (ACT) commit jobs.
+
+    Args:
+        ssh_executor: SSHExecutor instance for running commands.
+        host: NGFW management IP address.
+        timeout_seconds: Maximum time to wait (default 10 min).
+        poll_interval: Seconds between poll attempts (default 15s).
+
+    Raises:
+        RuntimeError: If autocommit doesn't complete within timeout.
+    """
+    import re
+    import time
+
+    start_time = time.time()
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed > timeout_seconds:
+            raise RuntimeError(
+                f"NGFW autocommit did not complete after {timeout_seconds}s - management plane may be stuck"
+            )
+
+        logger.info(
+            "Checking for active NGFW jobs... (%.0fs / %ds)",
+            elapsed,
+            timeout_seconds,
+        )
+
+        try:
+            result = ssh_executor.run_command(
+                instance_id=host,
+                script="show jobs all",
+                timeout_seconds=60,
+            )
+
+            # Parse job output for any active (ACT) jobs
+            # Output format has Status column with ACT (active) or FIN (finished)
+            # We look for "ACT" which indicates a job is still running
+            output = result.stdout
+
+            # Check for active jobs - look for ACT in the output
+            # The output format is tabular with columns like:
+            # Enqueued  ID  Type  Status  Result  Completed
+            has_active_jobs = bool(re.search(r"\bACT\b", output))
+
+            if not has_active_jobs:
+                logger.info(
+                    "No active NGFW jobs found after %.0fs - ready for configuration",
+                    elapsed,
+                )
+                return
+
+            # Log which jobs are active
+            active_lines = [line.strip() for line in output.split("\n") if "ACT" in line]
+            logger.info(
+                "Found %d active job(s), waiting %ds: %s",
+                len(active_lines),
+                poll_interval,
+                active_lines[:3],  # Show first 3 for brevity
+            )
+
+        except Exception as e:
+            logger.warning("Error checking NGFW jobs (will retry): %s", e)
+
+        time.sleep(poll_interval)
+
+
 def update_instance_state(request_id: str, status: str, **state_updates) -> None:
     """Update NGFW Instance and App status/state in Engine database.
 
@@ -1223,6 +1301,16 @@ def configure_ngfw_subnets(
         ssh_executor=ssh_executor,
         host=management_ip,
         timeout_seconds=300,
+        poll_interval=15,
+    )
+
+    # Wait for boot autocommit to complete before attempting configuration
+    # The NGFW runs an autocommit at boot that must finish before we can commit changes
+    logger.info("Waiting for NGFW autocommit to complete...")
+    wait_for_autocommit(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=600,  # 10 min max for autocommit
         poll_interval=15,
     )
 

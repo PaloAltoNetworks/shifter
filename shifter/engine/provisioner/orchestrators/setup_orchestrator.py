@@ -295,6 +295,27 @@ class SetupOrchestrator:
                     else:
                         logger.warning("_execute_step: poll_for_job enabled but no job ID found in output")
 
+                # Check for PAN-OS commit failures (SSH sessions return success even when commit fails)
+                if not self._check_commit_success(result.stdout):
+                    logger.warning(
+                        "_execute_step: PAN-OS commit failed step=%s attempt=%d/%d",
+                        step.name,
+                        attempt + 1,
+                        max_retries + 1,
+                    )
+                    if result.stdout:
+                        logger.warning(
+                            "_execute_step: step=%s COMMIT FAILED STDOUT:\n%s",
+                            step.name,
+                            result.stdout,
+                        )
+                    if attempt < max_retries:
+                        continue  # Retry
+                    raise SetupError(
+                        f"Step '{step.name}' failed: PAN-OS commit failed after {max_retries + 1} attempts",
+                        step_name=step.name,
+                    )
+
                 # Log success with full output for visibility
                 logger.info(
                     "_execute_step: completed step=%s exit_code=%d",

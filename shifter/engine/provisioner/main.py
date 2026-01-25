@@ -1224,27 +1224,28 @@ def find_stale_routes_by_cidr(
         return []
 
     # Parse output to find route entries with matching destinations
-    # PAN-OS 'show config running | match static-route' returns flat set commands:
-    #   set network virtual-router default routing-table ip static-route
-    #   range-146-dc_network destination 10.1.2.0/28 ...
+    # PAN-OS 'show config running | match static-route' returns hierarchical format:
+    #   range-146-dc_network {
+    #     destination 10.1.2.0/28;
+    #     ...
+    #   }
     stale_routes = []
 
-    # Match route name and destination in single pattern for flat set command format
-    # Pattern: static-route range-{id}-{name} destination X.X.X.X/Y
-    route_pattern = re.compile(r"static-route\s+(range-\d+-\w+)\s+destination\s+([\d./]+)")
+    # Match route name and destination in hierarchical config format
+    # Pattern matches: range-{id}-{name} { ... destination X.X.X.X/Y; ... }
+    # Uses [^}]* to stay within the route block (stops at closing brace)
+    route_pattern = re.compile(r"(range-\d+-\w+)\s*\{[^}]*destination\s+([\d./]+);", re.DOTALL)
 
-    for line in result.stdout.split("\n"):
-        match = route_pattern.search(line)
-        if match:
-            route_name = match.group(1)
-            cidr = match.group(2)
-            if cidr in target_cidrs:
-                logger.info(
-                    "Found stale route %s with CIDR %s - will delete",
-                    route_name,
-                    cidr,
-                )
-                stale_routes.append(route_name)
+    for match in route_pattern.finditer(result.stdout):
+        route_name = match.group(1)
+        cidr = match.group(2)
+        if cidr in target_cidrs:
+            logger.info(
+                "Found stale route %s with CIDR %s - will delete",
+                route_name,
+                cidr,
+            )
+            stale_routes.append(route_name)
 
     return stale_routes
 
@@ -1289,20 +1290,18 @@ def find_stale_routes_by_db(
     if not result.success or not result.stdout:
         return []
 
-    # Extract all range IDs from route names
-    # Pattern: static-route range-{id}-{name}
-    route_pattern = re.compile(r"static-route\s+(range-(\d+)-\w+)")
+    # Extract all range IDs from route names in hierarchical config format
+    # Pattern matches: range-{id}-{name} { (route block opening)
+    route_pattern = re.compile(r"(range-(\d+)-\w+)\s*\{")
     routes_by_range: dict[int, list[str]] = {}
 
-    for line in result.stdout.split("\n"):
-        match = route_pattern.search(line)
-        if match:
-            route_name = match.group(1)
-            range_id = int(match.group(2))
-            if range_id != current_range_id:
-                if range_id not in routes_by_range:
-                    routes_by_range[range_id] = []
-                routes_by_range[range_id].append(route_name)
+    for match in route_pattern.finditer(result.stdout):
+        route_name = match.group(1)
+        range_id = int(match.group(2))
+        if range_id != current_range_id:
+            if range_id not in routes_by_range:
+                routes_by_range[range_id] = []
+            routes_by_range[range_id].append(route_name)
 
     if not routes_by_range:
         return []

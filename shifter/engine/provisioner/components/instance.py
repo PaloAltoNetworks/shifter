@@ -15,6 +15,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from typing import Any, ClassVar
 
 import pulumi
 import pulumi_aws as aws
@@ -352,6 +353,7 @@ class InstanceComponent(pulumi.ComponentResource):
         dc_dsrm_password = self.dsrm_password
         dc_domain_admin_password = self.domain_admin_password
         dc_agent_presigned_url = self.agent_presigned_url
+        dc_public_key = self.public_key
 
         def do_setup(args: list) -> bool:
             """Run the DC promotion synchronously (called within apply)."""
@@ -373,6 +375,23 @@ class InstanceComponent(pulumi.ComponentResource):
                 # The prebaked DC AMI has AD DS promoted with a fixed hostname.
                 # Changing the hostname would break AD replication and cause verification to fail.
                 pulumi.log.info("Using prebaked DC AMI - skipping hostname change")
+
+                # Configure SSH for terminal access (user_data doesn't run on prebaked DC AMI)
+                pulumi.log.info(f"Configuring SSH on DC {instance_id}...")
+
+                # Create minimal plan with just SSH step (skip hostname)
+                class SSHOnlyPlan:
+                    steps: ClassVar[list] = [BootstrapPlan.steps[1]]
+                    verify_step: ClassVar[None] = None
+
+                    def get_context(self, instance: Any) -> dict[str, Any]:
+                        return {}
+
+                ssh_context = {"hostname": "", "public_key": dc_public_key or ""}
+                ssh_result = orchestrator.orchestrate(instance_id, SSHOnlyPlan(), ssh_context)
+                if not ssh_result.success:
+                    raise SetupError(f"SSH configuration failed on DC: {ssh_result.error}")
+                pulumi.log.info("SSH configured on DC")
 
                 # Verify Domain Controller via DCSetupPlan
                 # Prebaked DC has no setup steps, only verification

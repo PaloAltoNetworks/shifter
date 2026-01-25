@@ -50,6 +50,38 @@ from plans.xdr_agent_install import XDRAgentInstallPlan
 logger = logging.getLogger(__name__)
 
 
+def get_agent_presigned_url(inst_config: dict) -> str | None:
+    """Generate presigned URL for XDR agent from instance config.
+
+    Args:
+        inst_config: Instance config dict from range_spec containing agent data.
+
+    Returns:
+        Presigned URL string, or None if agent data missing.
+    """
+    agent_data = inst_config.get("agent") or {}
+    s3_key = agent_data.get("s3_key")
+    if not s3_key:
+        return None
+
+    bucket = os.environ.get("AGENT_S3_BUCKET", "")
+    if not bucket:
+        logger.warning("AGENT_S3_BUCKET not set, cannot generate presigned URL")
+        return None
+
+    try:
+        s3_client = boto3.client("s3")
+        url: str = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": s3_key},
+            ExpiresIn=3600,
+        )
+        return url
+    except Exception as e:
+        logger.error("Failed to generate presigned URL for %s: %s", s3_key, e)
+        return None
+
+
 class DynamicPlan:
     """Simple wrapper for dynamically-built setup plans.
 
@@ -1210,12 +1242,7 @@ def find_stale_routes_by_cidr(
     # Query the running static route config using configure mode
     # 'show config running | match static-route' only returns lines with "static-route"
     # We need the full hierarchical output to parse route names and destinations
-    query_cmd = (
-        "set cli pager off\n"
-        "configure\n"
-        "show network virtual-router default routing-table ip static-route\n"
-        "exit"
-    )
+    query_cmd = "set cli pager off\nconfigure\nshow network virtual-router default routing-table ip static-route\nexit"
     try:
         result = ssh_executor.run_command(
             instance_id=management_ip,
@@ -1284,12 +1311,7 @@ def find_stale_routes_by_db(
     # Query the running static route config using configure mode
     # 'show config running | match static-route' only returns lines with "static-route"
     # We need the full hierarchical output to parse route names
-    query_cmd = (
-        "set cli pager off\n"
-        "configure\n"
-        "show network virtual-router default routing-table ip static-route\n"
-        "exit"
-    )
+    query_cmd = "set cli pager off\nconfigure\nshow network virtual-router default routing-table ip static-route\nexit"
     try:
         result = ssh_executor.run_command(
             instance_id=management_ip,
@@ -1462,6 +1484,7 @@ def _run_single_instance_setup(
     join_domain: bool,
     dc_ip: str | None,
     domain_name: str | None,
+    xdr_required: bool = False,
 ) -> bool:
     """Run setup for a single non-DC instance.
 
@@ -1474,12 +1497,13 @@ def _run_single_instance_setup(
         join_domain: Whether to join the domain.
         dc_ip: DC private IP (for domain join).
         domain_name: Domain FQDN (for domain join).
+        xdr_required: If True, fail hard when XDR agent URL is missing.
 
     Returns:
         True on success.
 
     Raises:
-        SetupError: If setup fails.
+        SetupError: If setup fails or XDR required but URL missing.
     """
     logger.info("Starting setup for %s instance %s...", role, instance_id)
 
@@ -1533,8 +1557,10 @@ def _run_single_instance_setup(
                 if not result.success:
                     raise SetupError(f"Linux XDR install failed: {result.error}")
                 logger.info("Linux XDR agent installed on %s", instance_id)
+            elif xdr_required:
+                raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
             else:
-                logger.info("No XDR agent URL provided for %s", instance_id)
+                logger.info("No XDR agent URL provided for %s (not required)", instance_id)
 
         else:
             # Windows victim: Bootstrap + XDR + Domain join
@@ -1555,8 +1581,10 @@ def _run_single_instance_setup(
                 if not result.success:
                     raise SetupError(f"Windows XDR install failed: {result.error}")
                 logger.info("Windows XDR agent installed on %s", instance_id)
+            elif xdr_required:
+                raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
             else:
-                logger.info("No XDR agent URL provided for %s", instance_id)
+                logger.info("No XDR agent URL provided for %s (not required)", instance_id)
 
             # Domain join (only for Windows victims with join_domain=True)
             if join_domain and dc_ip and domain_name:
@@ -1585,19 +1613,20 @@ def _run_single_instance_setup(
     return True
 
 
-def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str) -> bool:
+def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str, xdr_required: bool = False) -> bool:
     """Run setup for a DC instance.
 
     Args:
         instance_id: EC2 instance ID.
         dc_config: DC configuration dict with domain_name, netbios_name, etc.
         agent_presigned_url: Pre-signed URL for XDR agent download.
+        xdr_required: If True, fail hard when XDR agent URL is missing.
 
     Returns:
         True on success.
 
     Raises:
-        SetupError: If setup fails.
+        SetupError: If setup fails or XDR required but URL missing.
     """
     logger.info("DC instance %s starting setup...", instance_id)
     domain_name = dc_config.get("domain_name", "")
@@ -1648,8 +1677,10 @@ def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str) -
         if not xdr_result.success:
             raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
         logger.info("XDR agent installed successfully on DC")
+    elif xdr_required:
+        raise SetupError(f"XDR agent required but no URL provided for DC {instance_id}")
     else:
-        logger.info("No XDR agent URL provided, skipping XDR install on DC")
+        logger.info("No XDR agent URL provided for DC (not required)")
 
     return True
 
@@ -1690,8 +1721,9 @@ def run_instance_setup(
         inst_uuid = dc_inst.get("uuid", "")
         inst_config = uuid_to_config.get(inst_uuid, {})
         dc_config = inst_config.get("dc_config", {})
-        agent_url = dc_inst.get("agent_presigned_url", "")  # From Pulumi output
-        _run_dc_setup(dc_inst["instance_id"], dc_config, agent_url)
+        agent_url = get_agent_presigned_url(inst_config)
+        xdr_required = bool(inst_config.get("agent"))  # XDR required if agent data present
+        _run_dc_setup(dc_inst["instance_id"], dc_config, agent_url or "", xdr_required=xdr_required)
 
     # Get DC IP and domain for domain joins (from first DC)
     actual_dc_ip = dc_ip
@@ -1718,10 +1750,11 @@ def run_instance_setup(
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),
                     public_key=inst.get("public_key", ""),
-                    agent_presigned_url=inst.get("agent_presigned_url", ""),
+                    agent_presigned_url=get_agent_presigned_url(inst_config) or "",
                     join_domain=inst_config.get("join_domain", False),
                     dc_ip=actual_dc_ip,
                     domain_name=actual_domain,
+                    xdr_required=bool(inst_config.get("agent")),  # XDR required if agent data present
                 )
                 return (inst_id, True, None)
             except Exception as e:

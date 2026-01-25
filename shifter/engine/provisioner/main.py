@@ -33,6 +33,7 @@ from events import (
     publish_ready,
     publish_status_update,
 )
+from components.instance import sanitize_hostname
 from executors.aws_executor import AWSExecutor
 from executors.ssh_executor import SSHExecutor
 from executors.ssm_executor import SSMExecutor
@@ -1523,8 +1524,9 @@ def _run_single_instance_setup(
     logger.info("Instance %s is ready (SSM agent online)", instance_id)
 
     # Create context object for plan get_context()
-    # Use friendly name for hostname (e.g., "target-ubuntu" becomes "shifter-target-ubuntu")
-    hostname = f"shifter-{instance_name}" if instance_name else f"inst-{instance_id[-8:]}"
+    # Use friendly name for hostname (e.g., "Workstation 1" becomes "shifter-workstation-1")
+    sanitized_name = sanitize_hostname(instance_name) if instance_name else ""
+    hostname = f"shifter-{sanitized_name}" if sanitized_name else f"inst-{instance_id[-8:]}"
 
     class InstanceContext:
         def __init__(self):

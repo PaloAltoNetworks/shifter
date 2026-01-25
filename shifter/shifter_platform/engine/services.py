@@ -497,9 +497,15 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     if not private_ip:
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
-    # Build connection name from role and range ID
+    # Build connection name from instance name (falls back to role-based name)
     role = instance.get("role", "instance")
-    connection_name = f"{role}-{range_obj.id}"
+    instance_name = instance.get("name")
+    if instance_name:
+        connection_name = instance_name
+    else:
+        # Fallback for older ranges without name field
+        display_role = "target" if role == "victim" else role
+        connection_name = f"{display_role}-{os_type}"
 
     # Get RDP credentials based on OS type and role
     # TODO: Move instance default passwords to CMS (#542)

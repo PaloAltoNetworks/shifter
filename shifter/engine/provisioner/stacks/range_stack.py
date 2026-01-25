@@ -105,6 +105,7 @@ class RangeStack(pulumi.ComponentResource):
         """
         return {
             "uuid": instance.uuid,
+            "name": instance.display_name,
             "role": instance.role,
             "os": instance.os_type,
             "subnet_name": subnet_name,
@@ -497,6 +498,7 @@ class RangeStack(pulumi.ComponentResource):
             "request_uuid": config.request_uuid,
             "instance_uuid": inst_config.uuid,
             "instance_profile_name": config.instance_profile_name,
+            "display_name": inst_config.name,
             "agent_s3_bucket": config.agent_s3_bucket,
             "agent_s3_key": inst_config.agent_s3_key or "",
             "agent_presigned_url": inst_config.agent_presigned_url or "",

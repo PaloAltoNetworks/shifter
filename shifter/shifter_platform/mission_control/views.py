@@ -174,6 +174,15 @@ def guacamole_rdp_url(request):
     guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
     guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
+    # Log whether SFTP key is available (do not log key contents)
+    logger.info(
+        "Guac RDP request: user=%s instance_uuid=%s os=%s sftp_key=%s",
+        request.user.email,
+        instance_uuid,
+        conn_info.get("os_type"),
+        "yes" if conn_info.get("ssh_key") else "no",
+    )
+
     # Generate signed URL
     # Set SFTP root directory based on OS type for file transfers
     # Note: SFTP paths use forward slashes even on Windows

@@ -695,17 +695,31 @@ class InstanceComponent(pulumi.ComponentResource):
                 "public_key": public_key,
             }
         elif role == "dc":
-            # DC user_data is minimal - all setup via SSM (BootstrapPlan + DCSetupPlan)
+            # DC user_data ensures SSH/RDP access; SSM handles AD DS + XDR
             template = env.get_template("dc_windows.ps1.j2")
-            context = {}  # No variables needed - template just logs SSM will handle setup
+            context = {
+                "public_key": public_key,
+                "admin_password": os.environ.get("DC_DOMAIN_PASSWORD", ""),
+            }
         elif os_type == "windows":
-            # Windows victim - all setup via SSM (BootstrapPlan + XDRAgentInstallPlan)
+            # Windows victim user_data ensures SSH/RDP access; SSM handles hostname + XDR
             template = env.get_template("victim_windows.ps1.j2")
-            context = {}  # No variables needed - template just logs SSM will handle setup
+            context = {
+                "public_key": public_key,
+            }
         else:
-            # Linux victim - all setup via SSM (LinuxBootstrapPlan + LinuxXDRAgentInstallPlan)
+            # Linux victim user_data ensures SSH access; SSM handles hostname + XDR
             template = env.get_template("victim_linux.sh.j2")
-            context = {}  # No variables needed - template just logs SSM will handle setup
+            if os_type == "kali":
+                ssh_user = "kali"
+            elif os_type == "amazon-linux":
+                ssh_user = "ec2-user"
+            else:
+                ssh_user = "ubuntu"
+            context = {
+                "public_key": public_key,
+                "ssh_user": ssh_user,
+            }
 
         script = template.render(**context)
         return base64.b64encode(script.encode()).decode()

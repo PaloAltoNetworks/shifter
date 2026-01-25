@@ -88,8 +88,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUACAMOLE_VERSION }}
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:latest
-          cache-from: type=local,src=/tmp/.buildx-cache-guacd
-          cache-to: type=local,dest=/tmp/.buildx-cache-guacd-new,mode=max
+          no-cache: true
       - name: Build and push guacamole-client image (with OIDC extension)
         uses: docker/build-push-action@v5
         with:
@@ -100,13 +99,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:latest
-          cache-from: type=local,src=/tmp/.buildx-cache-guacamole
-          cache-to: type=local,dest=/tmp/.buildx-cache-guacamole-new,mode=max
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache-guacd /tmp/.buildx-cache-guacamole
-          mv /tmp/.buildx-cache-guacd-new /tmp/.buildx-cache-guacd || true
-          mv /tmp/.buildx-cache-guacamole-new /tmp/.buildx-cache-guacamole || true
+          no-cache: true
 
   apply:
     name: Apply (${{ inputs.environment }})

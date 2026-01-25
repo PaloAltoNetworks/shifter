@@ -1606,9 +1606,11 @@ def _run_single_instance_setup(
                         raise SetupError(f"Domain join failed for {instance_id}")
                     logger.info("Domain join complete for %s", instance_id)
                 else:
-                    logger.warning("DC_DOMAIN_PASSWORD not set, skipping domain join for %s", instance_id)
+                    # join_domain=True means domain join is required
+                    raise SetupError(f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}")
             elif join_domain:
-                logger.info("join_domain=True but no dc_ip/domain_name, skipping domain join for %s", instance_id)
+                # join_domain=True means domain join is required
+                raise SetupError(f"Domain join required but dc_ip or domain_name not provided for {instance_id}")
 
     return True
 

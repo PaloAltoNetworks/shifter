@@ -1207,8 +1207,15 @@ def find_stale_routes_by_cidr(
     """
     import re
 
-    # Query the running static route config
-    query_cmd = "set cli pager off\nshow config running | match static-route"
+    # Query the running static route config using configure mode
+    # 'show config running | match static-route' only returns lines with "static-route"
+    # We need the full hierarchical output to parse route names and destinations
+    query_cmd = (
+        "set cli pager off\n"
+        "configure\n"
+        "show network virtual-router default routing-table ip static-route\n"
+        "exit"
+    )
     try:
         result = ssh_executor.run_command(
             instance_id=management_ip,
@@ -1224,7 +1231,7 @@ def find_stale_routes_by_cidr(
         return []
 
     # Parse output to find route entries with matching destinations
-    # PAN-OS 'show config running | match static-route' returns hierarchical format:
+    # Configure mode 'show' returns hierarchical format:
     #   range-146-dc_network {
     #     destination 10.1.2.0/28;
     #     ...
@@ -1274,8 +1281,15 @@ def find_stale_routes_by_db(
     """
     import re
 
-    # Query the running static route config
-    query_cmd = "set cli pager off\nshow config running | match static-route"
+    # Query the running static route config using configure mode
+    # 'show config running | match static-route' only returns lines with "static-route"
+    # We need the full hierarchical output to parse route names
+    query_cmd = (
+        "set cli pager off\n"
+        "configure\n"
+        "show network virtual-router default routing-table ip static-route\n"
+        "exit"
+    )
     try:
         result = ssh_executor.run_command(
             instance_id=management_ip,

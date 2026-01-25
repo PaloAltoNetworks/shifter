@@ -7,6 +7,31 @@ description: Query AWS CloudWatch logs for Shifter components. Use when investig
 
 Query CloudWatch logs for Shifter platform components.
 
+## CRITICAL: How to Call AWS CLI
+
+**DO NOT** use `--query` and `--output text` with variable assignment or piping. This pattern consistently fails.
+
+**DO NOT** pipe AWS CLI output to `jq`. This also fails.
+
+**CORRECT approach**: Make plain AWS CLI calls and let them return JSON. Execute commands in separate steps:
+
+```bash
+# Step 1: Get the stream name (returns JSON, read the logStreamName from output)
+aws logs describe-log-streams \
+  --log-group-name /ecs/dev-portal-pulumi-provisioner \
+  --order-by LastEventTime --descending --limit 1 \
+  --region us-east-2 --profile panw-shifter-dev-workstation
+
+# Step 2: Use the stream name from the JSON output in a second call
+aws logs get-log-events \
+  --log-group-name /ecs/dev-portal-pulumi-provisioner \
+  --log-stream-name "pulumi/pulumi-provisioner/<task-id-from-step-1>" \
+  --limit 50 \
+  --region us-east-2 --profile panw-shifter-dev-workstation
+```
+
+Make **two separate Bash tool calls** - one to get the stream name, then read the JSON and make a second call with the stream name.
+
 ## Log Groups by Component
 
 ### Portal/Platform Application
@@ -35,48 +60,48 @@ Query CloudWatch logs for Shifter platform components.
 
 ## Quick Commands
 
+**Remember: Make separate AWS CLI calls. Do NOT use --query/--output text with variable assignment.**
+
 ### Get Latest Provisioner Logs
 
 ```bash
-PROFILE="panw-shifter-dev-workstation"
-REGION="us-east-2"
-
-STREAM=$(aws logs describe-log-streams \
+# Call 1: Get stream name (read logStreamName from JSON output)
+aws logs describe-log-streams \
   --log-group-name /ecs/dev-portal-pulumi-provisioner \
   --order-by LastEventTime --descending --limit 1 \
-  --query 'logStreams[0].logStreamName' --output text \
-  --region "$REGION" --profile "$PROFILE")
+  --region us-east-2 --profile panw-shifter-dev-workstation
 
+# Call 2: Get log events (use stream name from Call 1)
 aws logs get-log-events \
   --log-group-name /ecs/dev-portal-pulumi-provisioner \
-  --log-stream-name "$STREAM" \
-  --query 'events[-20:].message' --output text \
-  --region "$REGION" --profile "$PROFILE"
+  --log-stream-name "pulumi/pulumi-provisioner/<TASK_ID>" \
+  --limit 50 \
+  --region us-east-2 --profile panw-shifter-dev-workstation
 ```
 
 ### Get Latest Portal Logs
 
 ```bash
-STREAM=$(aws logs describe-log-streams \
+# Call 1: Get stream name
+aws logs describe-log-streams \
   --log-group-name /portal/dev-portal \
   --order-by LastEventTime --descending --limit 1 \
-  --query 'logStreams[0].logStreamName' --output text \
-  --region "$REGION" --profile "$PROFILE")
+  --region us-east-2 --profile panw-shifter-dev-workstation
 
+# Call 2: Get log events (use stream name from Call 1)
 aws logs get-log-events \
   --log-group-name /portal/dev-portal \
-  --log-stream-name "$STREAM" \
-  --query 'events[-20:].message' --output text \
-  --region "$REGION" --profile "$PROFILE"
+  --log-stream-name "<STREAM_NAME>" \
+  --limit 50 \
+  --region us-east-2 --profile panw-shifter-dev-workstation
 ```
 
 ### Check ASG Status
 
 ```bash
 aws autoscaling describe-instance-refreshes \
-  --auto-scaling-group-name dev-portal-asg-* \
-  --query 'InstanceRefreshes[0]' \
-  --region "$REGION" --profile "$PROFILE"
+  --auto-scaling-group-name dev-portal-asg \
+  --region us-east-2 --profile panw-shifter-dev-workstation
 ```
 
 ### Check Target Group Health
@@ -84,7 +109,7 @@ aws autoscaling describe-instance-refreshes \
 ```bash
 aws elbv2 describe-target-health \
   --target-group-arn "arn:aws:elasticloadbalancing:us-east-2:878848911818:targetgroup/dev-portal-tg/..." \
-  --region "$REGION" --profile "$PROFILE"
+  --region us-east-2 --profile panw-shifter-dev-workstation
 ```
 
 ## Common Investigation Patterns

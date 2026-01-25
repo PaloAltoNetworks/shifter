@@ -128,9 +128,9 @@ class TerminalManager {
     /**
      * Check if an instance is RDP-only (no SSH access)
      */
-    isRdpOnly(instance) {
-        // Domain Controllers and certain Windows instances are RDP-only
-        return instance.osType === 'windows' && instance.role === 'dc';
+    isRdpOnly(_instance) {
+        // All instances support SSH - no RDP-only instances
+        return false;
     }
 
     /**

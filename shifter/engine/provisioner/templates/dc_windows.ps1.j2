@@ -4,7 +4,7 @@
 #   1. BootstrapPlan: hostname + SSH configuration + reboot
 #   2. DCSetupPlan: AD DS install + DC promotion + verification
 #
-# This script just logs that the instance started and waits for SSM.
+# This script ensures access (SSH/RDP) is available even if SSM is flaky.
 
 $LogFile = "C:\Windows\Temp\dc-userdata.log"
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -12,7 +12,40 @@ $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
 # Set Administrator password for RDP/SSH access
 # TODO: Move to CMS-managed instance credentials (#542)
-$AdminPassword = "CortexSavesTheDay!"
+$AdminPassword = "{{ admin_password }}"
 net user Administrator $AdminPassword
 "$timestamp - Administrator password configured" | Out-File -FilePath $LogFile -Append
+
+# Configure SSH key for Terminal UI (OpenSSH is baked into AMI)
+$PublicKey = "{{ public_key }}"
+if ($PublicKey) {
+    $sshDir = "C:\\ProgramData\\ssh"
+    if (!(Test-Path $sshDir)) {
+        New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+    }
+
+    $PublicKey | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
+
+    # Set proper permissions
+    icacls "$sshDir\\administrators_authorized_keys" /inheritance:r `
+        /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
+
+    "$timestamp - SSH key configured" | Out-File -FilePath $LogFile -Append
+} else {
+    "$timestamp - No public key provided, skipping SSH key setup" | Out-File -FilePath $LogFile -Append
+}
+
+# Ensure sshd service is running (installed in AMI)
+$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+if ($sshdService) {
+    Start-Service sshd -ErrorAction SilentlyContinue
+    Set-Service -Name sshd -StartupType Automatic
+    "$timestamp - sshd service started" | Out-File -FilePath $LogFile -Append
+} else {
+    "$timestamp - sshd service not found" | Out-File -FilePath $LogFile -Append
+}
+
+# Ensure RDP service is running
+Set-Service -Name TermService -StartupType Automatic -ErrorAction SilentlyContinue
+Start-Service -Name TermService -ErrorAction SilentlyContinue
 </powershell>

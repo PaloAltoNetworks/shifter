@@ -629,10 +629,14 @@ class InstanceComponent(pulumi.ComponentResource):
                                     raise SetupError(f"Domain join failed for {instance_id}")
                                 pulumi.log.info(f"Domain join complete for {instance_id}")
                             else:
-                                pulumi.log.warn(f"DC_DOMAIN_PASSWORD not set, skipping domain join for {instance_id}")
+                                # join_domain=True means domain join is required
+                                raise SetupError(
+                                    f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}"
+                                )
                         elif instance_join_domain:
-                            pulumi.log.info(
-                                f"join_domain=True but no dc_ip/domain_name, skipping domain join for {instance_id}"
+                            # join_domain=True means domain join is required
+                            raise SetupError(
+                                f"Domain join required but dc_ip or domain_name not provided for {instance_id}"
                             )
 
                 return True

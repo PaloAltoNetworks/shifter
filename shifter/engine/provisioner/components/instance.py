@@ -49,6 +49,28 @@ def validate_s3_path(value: str) -> bool:
     return bool(safe_pattern.match(value))
 
 
+def sanitize_hostname(name: str, max_length: int = 20) -> str:
+    """Sanitize a display name for use in a hostname.
+
+    Args:
+        name: Display name to sanitize (e.g., "Attacker", "Domain Controller").
+        max_length: Maximum length for the sanitized name portion.
+
+    Returns:
+        Lowercase string with only a-z, 0-9, and hyphens, truncated to max_length.
+    """
+    # Lowercase and replace spaces/underscores with hyphens
+    sanitized = name.lower().replace(" ", "-").replace("_", "-")
+    # Remove any character that's not alphanumeric or hyphen
+    sanitized = re.sub(r"[^a-z0-9-]", "", sanitized)
+    # Collapse multiple consecutive hyphens into one
+    sanitized = re.sub(r"-+", "-", sanitized)
+    # Strip leading/trailing hyphens
+    sanitized = sanitized.strip("-")
+    # Truncate to max length
+    return sanitized[:max_length]
+
+
 class InstanceComponent(pulumi.ComponentResource):
     """Creates an EC2 instance for a range.
 
@@ -221,13 +243,14 @@ class InstanceComponent(pulumi.ComponentResource):
         self.join_domain = join_domain  # Store for run_setup() domain join logic
 
         # Store attributes for all instance types (needed for run_setup)
-        # Generate hostname based on role (same logic as _generate_user_data)
+        # Generate hostname using sanitized display_name from template
+        sanitized_name = sanitize_hostname(self.display_name)
         if role == "attacker":
-            self.hostname = f"shifter-kali-{range_id}"
+            self.hostname = f"shifter-range-{range_id}-{sanitized_name}"
             self.public_key = public_key
             self.ssh_user = "kali"
         elif role == "victim":
-            self.hostname = f"shifter-target-{range_id}-{index}"
+            self.hostname = f"shifter-range-{range_id}-{sanitized_name}"
             self.public_key = public_key
             self.agent_presigned_url = agent_presigned_url if agent_presigned_url else None
             # Determine SSH user based on OS type
@@ -249,7 +272,7 @@ class InstanceComponent(pulumi.ComponentResource):
             # Tradeoff: All ranges share same domain name, but provisioning is fast
             self.domain_name = "internal.shifter"
             self.netbios_name = "INTSHIFTER"
-            self.hostname = f"shifter-dc-{range_id}"
+            self.hostname = f"shifter-range-{range_id}-{sanitized_name}"
             self.dsrm_password = self.domain_admin_password  # Reuse for DSRM
             self.public_key = public_key
             # Store agent URL for XDR installation (if provided)
@@ -717,7 +740,7 @@ class InstanceComponent(pulumi.ComponentResource):
         if role == "attacker":
             template = env.get_template("kali.sh.j2")
             context = {
-                "hostname": f"shifter-kali-{range_id}",
+                "hostname": self.hostname,
                 "public_key": public_key,
             }
         elif role == "dc":

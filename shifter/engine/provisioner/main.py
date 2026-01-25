@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 import psycopg
+from psycopg import sql
 
 from events import (
     STATUS_AWAITING_ASSOCIATION,
@@ -1223,34 +1224,118 @@ def find_stale_routes_by_cidr(
         return []
 
     # Parse output to find route entries with matching destinations
-    # PAN-OS config format example:
-    #   range-146-dc_network {
-    #     destination 10.1.2.32/28;
+    # PAN-OS 'show config running | match static-route' returns flat set commands:
+    #   set network virtual-router default routing-table ip static-route
+    #   range-146-dc_network destination 10.1.2.0/28 ...
     stale_routes = []
-    current_route_name = None
 
-    # Match route name pattern: range-{id}-{name} {
-    route_pattern = re.compile(r"(range-\d+-\w+)\s*\{")
-    # Match destination pattern: destination X.X.X.X/Y;
-    dest_pattern = re.compile(r"destination\s+([\d./]+);")
+    # Match route name and destination in single pattern for flat set command format
+    # Pattern: static-route range-{id}-{name} destination X.X.X.X/Y
+    route_pattern = re.compile(r"static-route\s+(range-\d+-\w+)\s+destination\s+([\d./]+)")
 
     for line in result.stdout.split("\n"):
-        route_match = route_pattern.search(line)
-        if route_match:
-            current_route_name = route_match.group(1)
-            continue
-
-        dest_match = dest_pattern.search(line)
-        if dest_match and current_route_name:
-            cidr = dest_match.group(1)
+        match = route_pattern.search(line)
+        if match:
+            route_name = match.group(1)
+            cidr = match.group(2)
             if cidr in target_cidrs:
                 logger.info(
                     "Found stale route %s with CIDR %s - will delete",
-                    current_route_name,
+                    route_name,
                     cidr,
                 )
-                stale_routes.append(current_route_name)
-            current_route_name = None
+                stale_routes.append(route_name)
+
+    return stale_routes
+
+
+def find_stale_routes_by_db(
+    ssh_executor: SSHExecutor,
+    management_ip: str,
+    current_range_id: int,
+) -> list[str]:
+    """Find NGFW routes belonging to destroyed/failed ranges via DB lookup.
+
+    Queries all NGFW routes matching the range-{id}-{name} pattern, extracts
+    the range IDs, and checks the database to find routes belonging to ranges
+    that are destroyed, failed, or no longer exist.
+
+    This is a secondary check to catch routes that weren't cleaned up during
+    range destruction, complementing find_stale_routes_by_cidr.
+
+    Args:
+        ssh_executor: SSH executor for NGFW connection.
+        management_ip: NGFW management IP address.
+        current_range_id: Current range ID (to exclude from stale detection).
+
+    Returns:
+        List of route names that should be deleted.
+    """
+    import re
+
+    # Query the running static route config
+    query_cmd = "set cli pager off\nshow config running | match static-route"
+    try:
+        result = ssh_executor.run_command(
+            instance_id=management_ip,
+            script="",
+            stdin_input=query_cmd + "\nexit\n",
+            timeout_seconds=30,
+        )
+    except Exception as e:
+        logger.warning("Failed to query NGFW routes for DB cleanup check: %s", e)
+        return []
+
+    if not result.success or not result.stdout:
+        return []
+
+    # Extract all range IDs from route names
+    # Pattern: static-route range-{id}-{name}
+    route_pattern = re.compile(r"static-route\s+(range-(\d+)-\w+)")
+    routes_by_range: dict[int, list[str]] = {}
+
+    for line in result.stdout.split("\n"):
+        match = route_pattern.search(line)
+        if match:
+            route_name = match.group(1)
+            range_id = int(match.group(2))
+            if range_id != current_range_id:
+                if range_id not in routes_by_range:
+                    routes_by_range[range_id] = []
+                routes_by_range[range_id].append(route_name)
+
+    if not routes_by_range:
+        return []
+
+    # Query DB for these range IDs to find which are stale
+    range_ids = list(routes_by_range.keys())
+    stale_routes = []
+
+    try:
+        with get_db_connection() as conn, conn.cursor() as cur:
+            # Find ranges that are active (not stale)
+            # Stale = destroyed, failed, or doesn't exist
+            query = sql.SQL("""
+                SELECT id FROM mission_control_range
+                WHERE id IN ({})
+                AND status NOT IN ('destroyed', 'failed')
+                """).format(sql.SQL(", ").join(sql.Placeholder() * len(range_ids)))
+            cur.execute(query, range_ids)
+            active_range_ids = {row[0] for row in cur.fetchall()}
+
+        # Routes belonging to ranges NOT in active_range_ids are stale
+        for range_id, routes in routes_by_range.items():
+            if range_id not in active_range_ids:
+                logger.info(
+                    "Found %d stale routes for range %d (destroyed/failed/missing)",
+                    len(routes),
+                    range_id,
+                )
+                stale_routes.extend(routes)
+
+    except psycopg.Error as e:
+        logger.warning("Failed to query DB for stale routes: %s", e)
+        return []
 
     return stale_routes
 
@@ -1314,12 +1399,23 @@ def configure_ngfw_subnets(
         poll_interval=15,
     )
 
-    # Find any stale routes with matching CIDRs from destroyed ranges
-    # This handles CIDR recycling where old ranges weren't properly cleaned up
+    # Find stale routes using two methods:
+    # 1. CIDR match - routes with same destination as our target subnets
+    # 2. DB lookup - routes belonging to destroyed/failed/missing ranges
     target_cidrs = {s["cidr"] for s in subnets if s.get("cidr")}
-    stale_routes = find_stale_routes_by_cidr(ssh_executor, management_ip, target_cidrs)
+    stale_by_cidr = find_stale_routes_by_cidr(ssh_executor, management_ip, target_cidrs)
+    stale_by_db = find_stale_routes_by_db(ssh_executor, management_ip, range_id)
+
+    # Combine and deduplicate
+    stale_routes = list(set(stale_by_cidr + stale_by_db))
     if stale_routes:
-        logger.info("Found %d stale routes to clean up: %s", len(stale_routes), stale_routes)
+        logger.info(
+            "Found %d stale routes to clean up: %s (cidr=%d, db=%d)",
+            len(stale_routes),
+            stale_routes,
+            len(stale_by_cidr),
+            len(stale_by_db),
+        )
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling

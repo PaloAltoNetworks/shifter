@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 import psycopg
+from psycopg import sql
 
 import range_terraform_runner
 from catalog.instances import (
@@ -53,6 +54,38 @@ from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan, NGFWRemoveSub
 from plans.xdr_agent_install import XDRAgentInstallPlan
 
 logger = logging.getLogger(__name__)
+
+
+def get_agent_presigned_url(inst_config: dict) -> str | None:
+    """Generate presigned URL for XDR agent from instance config.
+
+    Args:
+        inst_config: Instance config dict from range_spec containing agent data.
+
+    Returns:
+        Presigned URL string, or None if agent data missing.
+    """
+    agent_data = inst_config.get("agent") or {}
+    s3_key = agent_data.get("s3_key")
+    if not s3_key:
+        return None
+
+    bucket = os.environ.get("AGENT_S3_BUCKET", "")
+    if not bucket:
+        logger.warning("AGENT_S3_BUCKET not set, cannot generate presigned URL")
+        return None
+
+    try:
+        s3_client = boto3.client("s3")
+        url: str = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": s3_key},
+            ExpiresIn=3600,
+        )
+        return url
+    except Exception as e:
+        logger.error("Failed to generate presigned URL for %s: %s", s3_key, e)
+        return None
 
 
 class DynamicPlan:
@@ -329,6 +362,10 @@ def _validate_provisioned_outputs(
         if not instance_id:
             raise ValueError(f"Instance[{i}] missing 'instance_id'")
 
+        private_ip = inst.get("private_ip")
+        if not private_ip:
+            raise ValueError(f"Instance[{i}] (role={inst.get('role')}, os={inst.get('os')}) missing 'private_ip'")
+
     # Validate expected subnets were created
     if expected_subnet_names:
         actual_subnets = set(subnets.keys())
@@ -421,6 +458,7 @@ def write_provisioned_state(
                 provisioned_instances.append(
                     {
                         "uuid": instance_uuid,
+                        "name": inst.get("name"),
                         "role": inst.get("role"),
                         "os_type": inst.get("os"),
                         "subnet_name": inst.get("subnet_name"),
@@ -1017,6 +1055,84 @@ def poll_for_serial_and_cert(
         time.sleep(poll_interval)
 
 
+def wait_for_autocommit(
+    ssh_executor: "SSHExecutor",
+    host: str,
+    timeout_seconds: int = 600,
+    poll_interval: int = 15,
+) -> None:
+    """Wait for NGFW boot autocommit to complete before configuring.
+
+    After boot, PAN-OS runs an autocommit that must complete before any
+    configuration changes can be made. This function polls 'show jobs all'
+    until there are no active (ACT) commit jobs.
+
+    Args:
+        ssh_executor: SSHExecutor instance for running commands.
+        host: NGFW management IP address.
+        timeout_seconds: Maximum time to wait (default 10 min).
+        poll_interval: Seconds between poll attempts (default 15s).
+
+    Raises:
+        RuntimeError: If autocommit doesn't complete within timeout.
+    """
+    import re
+    import time
+
+    start_time = time.time()
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed > timeout_seconds:
+            raise RuntimeError(
+                f"NGFW autocommit did not complete after {timeout_seconds}s - management plane may be stuck"
+            )
+
+        logger.info(
+            "Checking for active NGFW jobs... (%.0fs / %ds)",
+            elapsed,
+            timeout_seconds,
+        )
+
+        try:
+            result = ssh_executor.run_command(
+                instance_id=host,
+                script="show jobs all",
+                timeout_seconds=60,
+            )
+
+            # Parse job output for any active (ACT) jobs
+            # Output format has Status column with ACT (active) or FIN (finished)
+            # We look for "ACT" which indicates a job is still running
+            output = result.stdout
+
+            # Check for active jobs - look for ACT in the output
+            # The output format is tabular with columns like:
+            # Enqueued  ID  Type  Status  Result  Completed
+            has_active_jobs = bool(re.search(r"\bACT\b", output))
+
+            if not has_active_jobs:
+                logger.info(
+                    "No active NGFW jobs found after %.0fs - ready for configuration",
+                    elapsed,
+                )
+                return
+
+            # Log which jobs are active
+            active_lines = [line.strip() for line in output.split("\n") if "ACT" in line]
+            logger.info(
+                "Found %d active job(s), waiting %ds: %s",
+                len(active_lines),
+                poll_interval,
+                active_lines[:3],  # Show first 3 for brevity
+            )
+
+        except Exception as e:
+            logger.warning("Error checking NGFW jobs (will retry): %s", e)
+
+        time.sleep(poll_interval)
+
+
 def update_instance_state(request_id: str, status: str, **state_updates) -> None:
     """Update NGFW Instance and App status/state in Engine database.
 
@@ -1128,8 +1244,10 @@ def find_stale_routes_by_cidr(
     """
     import re
 
-    # Query the running static route config
-    query_cmd = "set cli pager off\nshow config running | match static-route"
+    # Query the running static route config using configure mode
+    # 'show config running | match static-route' only returns lines with "static-route"
+    # We need the full hierarchical output to parse route names and destinations
+    query_cmd = "set cli pager off\nconfigure\nshow network virtual-router default routing-table ip static-route\nexit"
     try:
         result = ssh_executor.run_command(
             instance_id=management_ip,
@@ -1145,34 +1263,119 @@ def find_stale_routes_by_cidr(
         return []
 
     # Parse output to find route entries with matching destinations
-    # PAN-OS config format example:
+    # Configure mode 'show' returns hierarchical format:
     #   range-146-dc_network {
-    #     destination 10.1.2.32/28;
+    #     destination 10.1.2.0/28;
+    #     ...
+    #   }
     stale_routes = []
-    current_route_name = None
 
-    # Match route name pattern: range-{id}-{name} {
-    route_pattern = re.compile(r"(range-\d+-\w+)\s*\{")
-    # Match destination pattern: destination X.X.X.X/Y;
-    dest_pattern = re.compile(r"destination\s+([\d./]+);")
+    # Match route name and destination in hierarchical config format
+    # Pattern matches: range-{id}-{name} { ... destination X.X.X.X/Y; ... }
+    # Uses [^}]* to stay within the route block (stops at closing brace)
+    route_pattern = re.compile(r"(range-\d+-\w+)\s*\{[^}]*destination\s+([\d./]+);", re.DOTALL)
 
-    for line in result.stdout.split("\n"):
-        route_match = route_pattern.search(line)
-        if route_match:
-            current_route_name = route_match.group(1)
-            continue
+    for match in route_pattern.finditer(result.stdout):
+        route_name = match.group(1)
+        cidr = match.group(2)
+        if cidr in target_cidrs:
+            logger.info(
+                "Found stale route %s with CIDR %s - will delete",
+                route_name,
+                cidr,
+            )
+            stale_routes.append(route_name)
 
-        dest_match = dest_pattern.search(line)
-        if dest_match and current_route_name:
-            cidr = dest_match.group(1)
-            if cidr in target_cidrs:
+    return stale_routes
+
+
+def find_stale_routes_by_db(
+    ssh_executor: SSHExecutor,
+    management_ip: str,
+    current_range_id: int,
+) -> list[str]:
+    """Find NGFW routes belonging to destroyed/failed ranges via DB lookup.
+
+    Queries all NGFW routes matching the range-{id}-{name} pattern, extracts
+    the range IDs, and checks the database to find routes belonging to ranges
+    that are destroyed, failed, or no longer exist.
+
+    This is a secondary check to catch routes that weren't cleaned up during
+    range destruction, complementing find_stale_routes_by_cidr.
+
+    Args:
+        ssh_executor: SSH executor for NGFW connection.
+        management_ip: NGFW management IP address.
+        current_range_id: Current range ID (to exclude from stale detection).
+
+    Returns:
+        List of route names that should be deleted.
+    """
+    import re
+
+    # Query the running static route config using configure mode
+    # 'show config running | match static-route' only returns lines with "static-route"
+    # We need the full hierarchical output to parse route names
+    query_cmd = "set cli pager off\nconfigure\nshow network virtual-router default routing-table ip static-route\nexit"
+    try:
+        result = ssh_executor.run_command(
+            instance_id=management_ip,
+            script="",
+            stdin_input=query_cmd + "\nexit\n",
+            timeout_seconds=30,
+        )
+    except Exception as e:
+        logger.warning("Failed to query NGFW routes for DB cleanup check: %s", e)
+        return []
+
+    if not result.success or not result.stdout:
+        return []
+
+    # Extract all range IDs from route names in hierarchical config format
+    # Pattern matches: range-{id}-{name} { (route block opening)
+    route_pattern = re.compile(r"(range-(\d+)-\w+)\s*\{")
+    routes_by_range: dict[int, list[str]] = {}
+
+    for match in route_pattern.finditer(result.stdout):
+        route_name = match.group(1)
+        range_id = int(match.group(2))
+        if range_id != current_range_id:
+            if range_id not in routes_by_range:
+                routes_by_range[range_id] = []
+            routes_by_range[range_id].append(route_name)
+
+    if not routes_by_range:
+        return []
+
+    # Query DB for these range IDs to find which are stale
+    range_ids = list(routes_by_range.keys())
+    stale_routes = []
+
+    try:
+        with get_db_connection() as conn, conn.cursor() as cur:
+            # Find ranges that are active (not stale)
+            # Stale = destroyed, failed, or doesn't exist
+            query = sql.SQL("""
+                SELECT id FROM mission_control_range
+                WHERE id IN ({})
+                AND status NOT IN ('destroyed', 'failed')
+                """).format(sql.SQL(", ").join(sql.Placeholder() * len(range_ids)))
+            cur.execute(query, range_ids)
+            active_range_ids = {row[0] for row in cur.fetchall()}
+
+        # Routes belonging to ranges NOT in active_range_ids are stale
+        for range_id, routes in routes_by_range.items():
+            if range_id not in active_range_ids:
                 logger.info(
-                    "Found stale route %s with CIDR %s - will delete",
-                    current_route_name,
-                    cidr,
+                    "Found %d stale routes for range %d (destroyed/failed/missing)",
+                    len(routes),
+                    range_id,
                 )
-                stale_routes.append(current_route_name)
-            current_route_name = None
+                stale_routes.extend(routes)
+
+    except psycopg.Error as e:
+        logger.warning("Failed to query DB for stale routes: %s", e)
+        return []
 
     return stale_routes
 
@@ -1226,12 +1429,33 @@ def configure_ngfw_subnets(
         poll_interval=15,
     )
 
-    # Find any stale routes with matching CIDRs from destroyed ranges
-    # This handles CIDR recycling where old ranges weren't properly cleaned up
+    # Wait for boot autocommit to complete before attempting configuration
+    # The NGFW runs an autocommit at boot that must finish before we can commit changes
+    logger.info("Waiting for NGFW autocommit to complete...")
+    wait_for_autocommit(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=600,  # 10 min max for autocommit
+        poll_interval=15,
+    )
+
+    # Find stale routes using two methods:
+    # 1. CIDR match - routes with same destination as our target subnets
+    # 2. DB lookup - routes belonging to destroyed/failed/missing ranges
     target_cidrs = {s["cidr"] for s in subnets if s.get("cidr")}
-    stale_routes = find_stale_routes_by_cidr(ssh_executor, management_ip, target_cidrs)
+    stale_by_cidr = find_stale_routes_by_cidr(ssh_executor, management_ip, target_cidrs)
+    stale_by_db = find_stale_routes_by_db(ssh_executor, management_ip, range_id)
+
+    # Combine and deduplicate
+    stale_routes = list(set(stale_by_cidr + stale_by_db))
     if stale_routes:
-        logger.info("Found %d stale routes to clean up: %s", len(stale_routes), stale_routes)
+        logger.info(
+            "Found %d stale routes to clean up: %s (cidr=%d, db=%d)",
+            len(stale_routes),
+            stale_routes,
+            len(stale_by_cidr),
+            len(stale_by_db),
+        )
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
@@ -1265,6 +1489,8 @@ def _run_single_instance_setup(
     join_domain: bool,
     dc_ip: str | None,
     domain_name: str | None,
+    xdr_required: bool = False,
+    instance_name: str = "",
 ) -> bool:
     """Run setup for a single non-DC instance.
 
@@ -1277,12 +1503,14 @@ def _run_single_instance_setup(
         join_domain: Whether to join the domain.
         dc_ip: DC private IP (for domain join).
         domain_name: Domain FQDN (for domain join).
+        xdr_required: If True, fail hard when XDR agent URL is missing.
+        instance_name: Friendly display name for hostname (e.g., "target-ubuntu").
 
     Returns:
         True on success.
 
     Raises:
-        SetupError: If setup fails.
+        SetupError: If setup fails or XDR required but URL missing.
     """
     logger.info("Starting setup for %s instance %s...", role, instance_id)
 
@@ -1299,9 +1527,12 @@ def _run_single_instance_setup(
     logger.info("Instance %s is ready (SSM agent online)", instance_id)
 
     # Create context object for plan get_context()
+    # Use friendly name for hostname (e.g., "target-ubuntu" becomes "shifter-target-ubuntu")
+    hostname = f"shifter-{instance_name}" if instance_name else f"inst-{instance_id[-8:]}"
+
     class InstanceContext:
         def __init__(self):
-            self.hostname = f"inst-{instance_id[-8:]}"
+            self.hostname = hostname
             self.public_key = public_key
             self.agent_presigned_url = agent_presigned_url
             self.ssh_user = "kali" if os_type == "kali" else "ubuntu"
@@ -1336,8 +1567,10 @@ def _run_single_instance_setup(
                 if not result.success:
                     raise SetupError(f"Linux XDR install failed: {result.error}")
                 logger.info("Linux XDR agent installed on %s", instance_id)
+            elif xdr_required:
+                raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
             else:
-                logger.info("No XDR agent URL provided for %s", instance_id)
+                logger.info("No XDR agent URL provided for %s (not required)", instance_id)
 
         else:
             # Windows victim: Bootstrap + XDR + Domain join
@@ -1358,8 +1591,10 @@ def _run_single_instance_setup(
                 if not result.success:
                     raise SetupError(f"Windows XDR install failed: {result.error}")
                 logger.info("Windows XDR agent installed on %s", instance_id)
+            elif xdr_required:
+                raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
             else:
-                logger.info("No XDR agent URL provided for %s", instance_id)
+                logger.info("No XDR agent URL provided for %s (not required)", instance_id)
 
             # Domain join (only for Windows victims with join_domain=True)
             if join_domain and dc_ip and domain_name:
@@ -1381,26 +1616,29 @@ def _run_single_instance_setup(
                         raise SetupError(f"Domain join failed for {instance_id}")
                     logger.info("Domain join complete for %s", instance_id)
                 else:
-                    logger.warning("DC_DOMAIN_PASSWORD not set, skipping domain join for %s", instance_id)
+                    # join_domain=True means domain join is required
+                    raise SetupError(f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}")
             elif join_domain:
-                logger.info("join_domain=True but no dc_ip/domain_name, skipping domain join for %s", instance_id)
+                # join_domain=True means domain join is required
+                raise SetupError(f"Domain join required but dc_ip or domain_name not provided for {instance_id}")
 
     return True
 
 
-def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str) -> bool:
+def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str, xdr_required: bool = False) -> bool:
     """Run setup for a DC instance.
 
     Args:
         instance_id: EC2 instance ID.
         dc_config: DC configuration dict with domain_name, netbios_name, etc.
         agent_presigned_url: Pre-signed URL for XDR agent download.
+        xdr_required: If True, fail hard when XDR agent URL is missing.
 
     Returns:
         True on success.
 
     Raises:
-        SetupError: If setup fails.
+        SetupError: If setup fails or XDR required but URL missing.
     """
     logger.info("DC instance %s starting setup...", instance_id)
     domain_name = dc_config.get("domain_name", "")
@@ -1451,8 +1689,10 @@ def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str) -
         if not xdr_result.success:
             raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
         logger.info("XDR agent installed successfully on DC")
+    elif xdr_required:
+        raise SetupError(f"XDR agent required but no URL provided for DC {instance_id}")
     else:
-        logger.info("No XDR agent URL provided, skipping XDR install on DC")
+        logger.info("No XDR agent URL provided for DC (not required)")
 
     return True
 
@@ -1493,8 +1733,9 @@ def run_instance_setup(
         inst_uuid = dc_inst.get("uuid", "")
         inst_config = uuid_to_config.get(inst_uuid, {})
         dc_config = inst_config.get("dc_config", {})
-        agent_url = dc_inst.get("xdr_agent_url", "")  # From Terraform output
-        _run_dc_setup(dc_inst["instance_id"], dc_config, agent_url)
+        agent_url = get_agent_presigned_url(inst_config)
+        xdr_required = bool(inst_config.get("agent"))  # XDR required if agent data present
+        _run_dc_setup(dc_inst["instance_id"], dc_config, agent_url or "", xdr_required=xdr_required)
 
     # Get DC IP and domain for domain joins (from first DC)
     actual_dc_ip = dc_ip
@@ -1521,10 +1762,12 @@ def run_instance_setup(
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),
                     public_key=inst.get("public_key", ""),
-                    agent_presigned_url=inst.get("xdr_agent_url", ""),  # From Terraform output
+                    agent_presigned_url=get_agent_presigned_url(inst_config) or "",
                     join_domain=inst_config.get("join_domain", False),
                     dc_ip=actual_dc_ip,
                     domain_name=actual_domain,
+                    xdr_required=bool(inst_config.get("agent")),  # XDR required if agent data present
+                    instance_name=inst.get("name", ""),
                 )
                 return (inst_id, True, None)
             except Exception as e:
@@ -1782,6 +2025,48 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     )
     output_data = json.loads(outputs.stdout)
     logger.info(f"Stack outputs: {json.dumps(output_data, indent=2)}")
+
+    # Wait for all instances to have private_ip (retry up to 60s)
+    # AWS assigns private_ip at ENI attachment, but Pulumi may export before it's available
+    MAX_WAIT_SECONDS = 60
+    POLL_INTERVAL = 5
+
+    start_time = time.time()
+    while True:
+        instances = output_data.get("instances", [])
+        missing_ips = [
+            f"{i.get('role', 'unknown')}/{i.get('os', 'unknown')}" for i in instances if not i.get("private_ip")
+        ]
+
+        if not missing_ips:
+            break  # All instances have IPs
+
+        elapsed = time.time() - start_time
+        if elapsed >= MAX_WAIT_SECONDS:
+            raise RuntimeError(
+                f"Timed out after {MAX_WAIT_SECONDS}s waiting for private_ip on instances: {missing_ips}"
+            )
+
+        logger.info(
+            "Waiting for private_ip on %d instances (%s), elapsed %.0fs...",
+            len(missing_ips),
+            missing_ips,
+            elapsed,
+        )
+        time.sleep(POLL_INTERVAL)
+
+        # Re-fetch outputs
+        outputs = subprocess.run(
+            ["pulumi", "stack", "output", "--json"],  # noqa: S607
+            cwd=_get_working_dir(),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        output_data = json.loads(outputs.stdout)
+
+    logger.info("All instances have private_ip, proceeding with validation")
 
     # Validate output schema
     _validate_pulumi_output_schema(output_data)

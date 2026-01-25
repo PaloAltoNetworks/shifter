@@ -93,6 +93,7 @@ class InstanceConfig:
 
     Attributes:
         uuid: Unique identifier from the spec (for tagging and DB correlation).
+        name: Display name for UI (e.g., "target-ubuntu", "attacker-kali").
         role: Instance role ("attacker", "victim", or "dc").
         os_type: Operating system type ("kali", "ubuntu", "windows").
         instance_type: AWS instance type (e.g., "t3.medium").
@@ -104,6 +105,7 @@ class InstanceConfig:
     """
 
     uuid: str  # Required: correlation key for tagging and DB updates
+    name: str  # Display name like "target-ubuntu" or "attacker-kali"
     role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
@@ -372,6 +374,12 @@ def _build_instance_config(
     role = inst.get("role", "victim")
     os_type = inst.get("os_type", "ubuntu")
 
+    # Build display name: use "target" instead of "victim" for user-facing labels
+    display_role = "target" if role == "victim" else role
+    instance_name = inst.get("name") or f"{display_role}-{os_type}"
+    # Ensure any existing "victim" in name is replaced with "target"
+    instance_name = instance_name.replace("victim", "target")
+
     # Get instance_type from catalog defaults based on role/os
     if role == "attacker":
         instance_type = _get_kali_instance_type()
@@ -397,6 +405,7 @@ def _build_instance_config(
 
     return InstanceConfig(
         uuid=instance_uuid,
+        name=instance_name,
         role=role,
         os_type=os_type,
         instance_type=instance_type,

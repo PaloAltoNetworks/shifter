@@ -180,6 +180,10 @@ module "cognito" {
   allowed_emails        = var.allowed_emails
   deletion_protection   = false
 
+  # Dev: longer token validity for less frequent MFA prompts
+  access_token_validity_hours = 8
+  id_token_validity_hours     = 8
+
   tags = var.tags
 }
 

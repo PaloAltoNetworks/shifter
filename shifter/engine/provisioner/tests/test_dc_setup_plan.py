@@ -1,7 +1,7 @@
 """Tests for DCSetupPlan.
 
 DCSetupPlan is used with a prebaked DC AMI where the domain is already
-promoted. The plan only verifies the DC is running - no promotion needed.
+promoted. The plan configures runtime settings and verifies the DC is running.
 """
 
 from dataclasses import dataclass
@@ -25,10 +25,12 @@ class MockDCInstance:
 class TestDCSetupPlan:
     """Tests for DCSetupPlan behavior."""
 
-    def test_no_setup_steps_with_prebaked_ami(self):
-        """Prebaked DC has no setup steps - domain already promoted."""
+    def test_has_required_steps(self):
+        """Plan has password and SSH config steps."""
         plan = DCSetupPlan()
-        assert len(plan.steps) == 0
+        assert len(plan.steps) == 2
+        assert plan.steps[0].name == "set_admin_password"
+        assert plan.steps[1].name == "enable_ssh_password_auth"
 
     def test_no_reboots_with_prebaked_ami(self):
         """Prebaked DC has no reboots - domain already promoted."""

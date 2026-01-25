@@ -51,16 +51,22 @@ chmod +x /etc/xrdp/startwm.sh
 # Add ubuntu user to ssl-cert group (required for xrdp)
 usermod -aG ssl-cert ubuntu
 
-# Set ubuntu user password for RDP login
+# Configure cloud-init to set password and enable password auth on every boot
+# This is applied by cloud-init when the instance launches, ensuring it persists
 # nosec B105 - Ephemeral isolated range, not a production credential
-echo "ubuntu:ubuntu" | chpasswd
+cat > /etc/cloud/cloud.cfg.d/99-enable-password.cfg << 'EOF'
+# Enable password authentication for RDP and SSH access in ranges
+chpasswd:
+  expire: false
+  users:
+    - name: ubuntu
+      password: ubuntu
+      type: text
+ssh_pwauth: true
+EOF
 
-# Enable SSH password authentication for SFTP file transfers via Guacamole
-sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-# Ensure it exists in config
-if ! grep -q '^PasswordAuthentication' /etc/ssh/sshd_config; then
-    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
-fi
+# Also set password now for the Packer build validation
+echo "ubuntu:ubuntu" | chpasswd
 
 # Set home directory permissions for SFTP access
 # Guacamole's SFTP (libssh2) needs read+execute on the directory

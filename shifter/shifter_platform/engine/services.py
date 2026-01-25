@@ -589,9 +589,15 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     if not private_ip:
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
-    # Build connection name from role and range ID
+    # Build connection name from instance name (falls back to role-based name)
     role = instance.get("role", "instance")
-    connection_name = f"{role}-{range_obj.id}"
+    instance_name = instance.get("name")
+    if instance_name:
+        connection_name = instance_name
+    else:
+        # Fallback for older ranges without name field
+        display_role = "target" if role == "victim" else role
+        connection_name = f"{display_role}-{os_type}"
 
     # Get RDP credentials based on OS type and role
     # TODO: Move instance default passwords to CMS (#542)
@@ -600,7 +606,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     if os_type == "windows":
         rdp_username = "Administrator"
         # DC uses domain admin password (prebaked AMI), others use demo password
-        rdp_password = "Sh1fterDC2024!" if role == "dc" else "CortexSavesTheDay!"  # nosec B105
+        rdp_password = "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!"  # nosec B105
     elif os_type == "kali":
         rdp_username = "kali"
         rdp_password = "kali"  # nosec B105 - Kali OS default
@@ -888,7 +894,10 @@ def start_ngfw(request_id: UUID) -> bool:
         return False
 
     # Only allow starting from paused or failed status
-    if ngfw_instance.status not in (ResourceStatus.PAUSED.value, ResourceStatus.FAILED.value):
+    if ngfw_instance.status not in (
+        ResourceStatus.PAUSED.value,
+        ResourceStatus.FAILED.value,
+    ):
         logger.warning(
             "start_ngfw: invalid status=%s for request_id=%s (must be stopped or failed)",
             ngfw_instance.status,

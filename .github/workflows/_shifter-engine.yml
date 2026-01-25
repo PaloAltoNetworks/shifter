@@ -81,6 +81,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
+          no-cache: true
 
   deploy:
     name: Deploy (${{ inputs.environment }})

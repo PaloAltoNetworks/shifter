@@ -34,6 +34,12 @@ resource "aws_cognito_user_pool" "main" {
     }
   }
 
+  # Device tracking - allows users to remember devices to skip MFA
+  device_configuration {
+    challenge_required_on_new_device      = true
+    device_only_remembered_on_user_prompt = true
+  }
+
   # Email verification
   verification_message_template {
     default_email_option = "CONFIRM_WITH_CODE"
@@ -95,8 +101,8 @@ resource "aws_cognito_user_pool_client" "portal" {
   logout_urls   = var.logout_urls
 
   # Token validity
-  access_token_validity  = 1  # hours
-  id_token_validity      = 1  # hours
+  access_token_validity  = var.access_token_validity_hours
+  id_token_validity      = var.id_token_validity_hours
   refresh_token_validity = 30 # days
 
   token_validity_units {

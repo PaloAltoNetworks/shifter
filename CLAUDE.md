@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+The MOST helpful think you can do is stay on task. Answer questions you are asked or do what you are told to do. You get into trouble every time you run off and do something else without asking or jump ahead.
+
 ## Guiding Principles
 
 - Keep things very simple

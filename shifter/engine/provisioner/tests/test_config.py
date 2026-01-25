@@ -116,6 +116,7 @@ class TestDataclassDefaults:
         # Test defaults
         config = InstanceConfig(
             uuid="inst-uuid-001",
+            name="target-ubuntu",
             role="victim",
             os_type="ubuntu",
             instance_type="t3.micro",
@@ -128,6 +129,7 @@ class TestDataclassDefaults:
         # Test DC instance with dc_config
         dc_config = InstanceConfig(
             uuid="inst-uuid-002",
+            name="dc-windows",
             role="dc",
             os_type="windows",
             instance_type="t3.large",
@@ -144,6 +146,7 @@ class TestDataclassDefaults:
             instances=[
                 InstanceConfig(
                     uuid="inst-uuid-003",
+                    name="attacker-kali",
                     role="attacker",
                     os_type="kali",
                     instance_type="t3.small",

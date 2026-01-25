@@ -131,7 +131,7 @@ class TestDCSetupPlanIntegration:
         domain_admin_password: str = "Admin456!"
 
     def test_dc_plan_with_real_orchestrator(self):
-        """DCSetupPlan with prebaked AMI only runs verification."""
+        """DCSetupPlan with prebaked AMI runs password, SSH config, and verification."""
         mock_executor = MagicMock(spec=SSMExecutor)
         mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
 
@@ -141,15 +141,20 @@ class TestDCSetupPlanIntegration:
         result = orchestrator.orchestrate("i-12345", plan, context)
 
         assert result.success is True
-        # With prebaked DC: 0 setup steps, just 1 verify step
-        assert mock_executor.run_command.call_count == 1
+        # With prebaked DC: 2 setup steps (password + SSH) + 1 verify step
+        assert mock_executor.run_command.call_count == 3
         # No reboots with prebaked DC
         assert mock_executor.reboot_and_wait.call_count == 0
 
     def test_dc_plan_verify_failure_reports_error(self):
         """If DC verification fails, error is reported."""
         mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.side_effect = CommandError("Verify failed", exit_code=1, stderr="NTDS not running")
+        # First two calls (password + SSH config) succeed, third (verify) fails
+        mock_executor.run_command.side_effect = [
+            CommandResult(success=True, exit_code=0, stdout="ok", stderr=""),
+            CommandResult(success=True, exit_code=0, stdout="ok", stderr=""),
+            CommandError("Verify failed", exit_code=1, stderr="NTDS not running"),
+        ]
 
         plan = DCSetupPlan()
         orchestrator = SetupOrchestrator(executor=mock_executor)
@@ -158,5 +163,5 @@ class TestDCSetupPlanIntegration:
         with pytest.raises((SetupError, CommandError)):
             orchestrator.orchestrate("i-12345", plan, context)
 
-        # Only verify step attempted
-        assert mock_executor.run_command.call_count == 1
+        # password + SSH config steps + verify step attempted
+        assert mock_executor.run_command.call_count == 3

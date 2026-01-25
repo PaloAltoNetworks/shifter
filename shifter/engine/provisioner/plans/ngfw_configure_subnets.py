@@ -70,6 +70,10 @@ def build_configure_input(
     """
     lines = ["configure"]
 
+    # Revert any pending changes from previous failed attempts
+    # This clears the candidate config to avoid accumulating stale routes
+    lines.append("revert config")
+
     # Delete any stale routes that conflict with our CIDRs (from recycled allocations)
     if stale_routes_to_delete:
         for route_name in stale_routes_to_delete:
@@ -202,6 +206,7 @@ class NGFWConfigureSubnetsPlan:
                 script="",
                 stdin_input=stdin_input,
                 timeout_seconds=300,  # 5 min for config + commit
+                poll_for_job=True,  # Commit may be async for larger configs
             ),
         ]
 

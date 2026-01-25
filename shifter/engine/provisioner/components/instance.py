@@ -15,6 +15,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from typing import Any, ClassVar
 
 import pulumi
 import pulumi_aws as aws
@@ -46,6 +47,28 @@ def validate_s3_path(value: str) -> bool:
     # This covers valid S3 bucket names and common key patterns
     safe_pattern = re.compile(r"^[a-zA-Z0-9._/=-]+$")
     return bool(safe_pattern.match(value))
+
+
+def sanitize_hostname(name: str, max_length: int = 20) -> str:
+    """Sanitize a display name for use in a hostname.
+
+    Args:
+        name: Display name to sanitize (e.g., "Attacker", "Domain Controller").
+        max_length: Maximum length for the sanitized name portion.
+
+    Returns:
+        Lowercase string with only a-z, 0-9, and hyphens, truncated to max_length.
+    """
+    # Lowercase and replace spaces/underscores with hyphens
+    sanitized = name.lower().replace(" ", "-").replace("_", "-")
+    # Remove any character that's not alphanumeric or hyphen
+    sanitized = re.sub(r"[^a-z0-9-]", "", sanitized)
+    # Collapse multiple consecutive hyphens into one
+    sanitized = re.sub(r"-+", "-", sanitized)
+    # Strip leading/trailing hyphens
+    sanitized = sanitized.strip("-")
+    # Truncate to max length
+    return sanitized[:max_length]
 
 
 class InstanceComponent(pulumi.ComponentResource):
@@ -100,6 +123,7 @@ class InstanceComponent(pulumi.ComponentResource):
         request_uuid: str,
         instance_uuid: str,
         instance_profile_name: str = "",
+        display_name: str = "",
         agent_s3_bucket: str = "",
         agent_s3_key: str = "",
         agent_presigned_url: str = "",
@@ -125,6 +149,7 @@ class InstanceComponent(pulumi.ComponentResource):
             request_uuid: UUID of the provisioning request (for tagging/correlation).
             instance_uuid: UUID of this instance (for tagging/correlation).
             instance_profile_name: IAM instance profile name (optional).
+            display_name: User-friendly name for UI (e.g., "target-ubuntu").
             agent_s3_bucket: S3 bucket for agent installer (for victims).
             agent_s3_key: S3 key for agent installer (for victims).
             agent_presigned_url: Pre-generated presigned URL for agent (for victims).
@@ -154,10 +179,11 @@ class InstanceComponent(pulumi.ComponentResource):
         if not instance_uuid:
             raise ValueError("instance_uuid is required for InstanceComponent")
 
-        # Store role, os_type, and uuid for output building (avoids closure issues)
+        # Store role, os_type, uuid, and display_name for output building (avoids closure issues)
         self.role = role
         self.os_type = os_type
         self._instance_uuid = instance_uuid
+        self.display_name = display_name or f"{role}-{os_type}"
 
         # Build common tags using shared helper
         from components.tags import build_common_tags
@@ -217,13 +243,14 @@ class InstanceComponent(pulumi.ComponentResource):
         self.join_domain = join_domain  # Store for run_setup() domain join logic
 
         # Store attributes for all instance types (needed for run_setup)
-        # Generate hostname based on role (same logic as _generate_user_data)
+        # Generate hostname using sanitized display_name from template
+        sanitized_name = sanitize_hostname(self.display_name)
         if role == "attacker":
-            self.hostname = f"shifter-kali-{range_id}"
+            self.hostname = f"shifter-range-{range_id}-{sanitized_name}"
             self.public_key = public_key
             self.ssh_user = "kali"
         elif role == "victim":
-            self.hostname = f"shifter-victim-{range_id}-{index}"
+            self.hostname = f"shifter-range-{range_id}-{sanitized_name}"
             self.public_key = public_key
             self.agent_presigned_url = agent_presigned_url if agent_presigned_url else None
             # Determine SSH user based on OS type
@@ -245,7 +272,7 @@ class InstanceComponent(pulumi.ComponentResource):
             # Tradeoff: All ranges share same domain name, but provisioning is fast
             self.domain_name = "internal.shifter"
             self.netbios_name = "INTSHIFTER"
-            self.hostname = f"shifter-dc-{range_id}"
+            self.hostname = f"shifter-range-{range_id}-{sanitized_name}"
             self.dsrm_password = self.domain_admin_password  # Reuse for DSRM
             self.public_key = public_key
             # Store agent URL for XDR installation (if provided)
@@ -352,6 +379,7 @@ class InstanceComponent(pulumi.ComponentResource):
         dc_dsrm_password = self.dsrm_password
         dc_domain_admin_password = self.domain_admin_password
         dc_agent_presigned_url = self.agent_presigned_url
+        dc_public_key = self.public_key
 
         def do_setup(args: list) -> bool:
             """Run the DC promotion synchronously (called within apply)."""
@@ -373,6 +401,23 @@ class InstanceComponent(pulumi.ComponentResource):
                 # The prebaked DC AMI has AD DS promoted with a fixed hostname.
                 # Changing the hostname would break AD replication and cause verification to fail.
                 pulumi.log.info("Using prebaked DC AMI - skipping hostname change")
+
+                # Configure SSH for terminal access (user_data doesn't run on prebaked DC AMI)
+                pulumi.log.info(f"Configuring SSH on DC {instance_id}...")
+
+                # Create minimal plan with just SSH step (skip hostname)
+                class SSHOnlyPlan:
+                    steps: ClassVar[list] = [BootstrapPlan.steps[1]]
+                    verify_step: ClassVar[None] = None
+
+                    def get_context(self, instance: Any) -> dict[str, Any]:
+                        return {}
+
+                ssh_context = {"hostname": "", "public_key": dc_public_key or ""}
+                ssh_result = orchestrator.orchestrate(instance_id, SSHOnlyPlan(), ssh_context)
+                if not ssh_result.success:
+                    raise SetupError(f"SSH configuration failed on DC: {ssh_result.error}")
+                pulumi.log.info("SSH configured on DC")
 
                 # Verify Domain Controller via DCSetupPlan
                 # Prebaked DC has no setup steps, only verification
@@ -610,10 +655,14 @@ class InstanceComponent(pulumi.ComponentResource):
                                     raise SetupError(f"Domain join failed for {instance_id}")
                                 pulumi.log.info(f"Domain join complete for {instance_id}")
                             else:
-                                pulumi.log.warn(f"DC_DOMAIN_PASSWORD not set, skipping domain join for {instance_id}")
+                                # join_domain=True means domain join is required
+                                raise SetupError(
+                                    f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}"
+                                )
                         elif instance_join_domain:
-                            pulumi.log.info(
-                                f"join_domain=True but no dc_ip/domain_name, skipping domain join for {instance_id}"
+                            # join_domain=True means domain join is required
+                            raise SetupError(
+                                f"Domain join required but dc_ip or domain_name not provided for {instance_id}"
                             )
 
                 return True
@@ -691,21 +740,35 @@ class InstanceComponent(pulumi.ComponentResource):
         if role == "attacker":
             template = env.get_template("kali.sh.j2")
             context = {
-                "hostname": f"shifter-kali-{range_id}",
+                "hostname": self.hostname,
                 "public_key": public_key,
             }
         elif role == "dc":
-            # DC user_data is minimal - all setup via SSM (BootstrapPlan + DCSetupPlan)
+            # DC user_data ensures SSH/RDP access; SSM handles AD DS + XDR
             template = env.get_template("dc_windows.ps1.j2")
-            context = {}  # No variables needed - template just logs SSM will handle setup
+            context = {
+                "public_key": public_key,
+                "admin_password": os.environ.get("DC_DOMAIN_PASSWORD", ""),
+            }
         elif os_type == "windows":
-            # Windows victim - all setup via SSM (BootstrapPlan + XDRAgentInstallPlan)
+            # Windows victim user_data ensures SSH/RDP access; SSM handles hostname + XDR
             template = env.get_template("victim_windows.ps1.j2")
-            context = {}  # No variables needed - template just logs SSM will handle setup
+            context = {
+                "public_key": public_key,
+            }
         else:
-            # Linux victim - all setup via SSM (LinuxBootstrapPlan + LinuxXDRAgentInstallPlan)
+            # Linux victim user_data ensures SSH access; SSM handles hostname + XDR
             template = env.get_template("victim_linux.sh.j2")
-            context = {}  # No variables needed - template just logs SSM will handle setup
+            if os_type == "kali":
+                ssh_user = "kali"
+            elif os_type == "amazon-linux":
+                ssh_user = "ec2-user"
+            else:
+                ssh_user = "ubuntu"
+            context = {
+                "public_key": public_key,
+                "ssh_user": ssh_user,
+            }
 
         script = template.render(**context)
         return base64.b64encode(script.encode()).decode()

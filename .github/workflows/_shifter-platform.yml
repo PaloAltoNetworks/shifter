@@ -88,6 +88,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUACAMOLE_VERSION }}
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:latest
+          no-cache: true
       - name: Build and push guacamole-client image (with OIDC extension)
         uses: docker/build-push-action@v5
         with:
@@ -98,6 +99,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:latest
+          no-cache: true
 
   apply:
     name: Apply (${{ inputs.environment }})
@@ -237,6 +239,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
+          no-cache: true
 
   deploy:
     name: Deploy (${{ inputs.environment }})

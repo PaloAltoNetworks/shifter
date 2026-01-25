@@ -3477,6 +3477,30 @@ def complete_ngfw_setup(user: User, app_id: UUID | str) -> NGFWAppRef:
 
     request_id = instance.request.request_id
 
+    # Update status to configuring immediately (before ECS task starts)
+    instance.status = ResourceStatus.CONFIGURING.value
+    instance.save(update_fields=["status"])
+
+    # Broadcast status change to WebSocket clients
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+
+    from shared.channels.groups import ngfw_event_group
+
+    channel_layer = get_channel_layer()
+    group_name = ngfw_event_group(str(app.id))
+    async_to_sync(channel_layer.group_send)(
+        group_name,
+        {
+            "type": "ngfw.status",
+            "app_id": str(app.id),
+            "status": ResourceStatus.CONFIGURING.value,
+            "state": {},
+            "serial_number": app.data.get("serial_number"),
+        },
+    )
+    logger.debug("Broadcast configuring status to group %s", group_name)
+
     # Call engine to trigger complete-setup ECS task
     try:
         success = engine_services.complete_ngfw_setup(request_id)

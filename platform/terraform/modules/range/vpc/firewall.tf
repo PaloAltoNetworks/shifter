@@ -84,10 +84,8 @@ resource "aws_networkfirewall_rule_group" "victim_domains" {
       }
     }
 
-    # Use DEFAULT_ACTION_ORDER so domain allowlist works correctly
-    # STRICT_ORDER with drop_strict drops TCP SYN before TLS SNI can be inspected
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -122,9 +120,8 @@ resource "aws_networkfirewall_rule_group" "kali_domains" {
       }
     }
 
-    # Use DEFAULT_ACTION_ORDER so domain allowlist works correctly
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -153,7 +150,7 @@ resource "aws_networkfirewall_rule_group" "ngfw_bypass" {
     }
 
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
@@ -198,12 +195,109 @@ resource "aws_networkfirewall_rule_group" "block_ip_sni" {
     }
 
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-block-ip-sni"
+  })
+}
+
+# ------------------------------------------------------------------------------
+# IP-based Allowlist (GCP ranges for PANW services)
+# Split into multiple rule groups due to AWS 8192 char rule limit
+# ------------------------------------------------------------------------------
+
+locals {
+  # Split CIDRs into chunks of 300 to stay under AWS rule length limit
+  cidr_chunk_size = 300
+  cidr_chunks     = var.enable_network_firewall && length(var.victim_allowed_cidrs) > 0 ? chunklist(var.victim_allowed_cidrs, local.cidr_chunk_size) : []
+}
+
+resource "aws_networkfirewall_rule_group" "victim_ips" {
+  count = var.enable_network_firewall ? length(local.cidr_chunks) : 0
+
+  capacity = 1000 # Each CIDR uses ~1 capacity unit
+  name     = "${var.name_prefix}-victim-ips-${count.index + 1}"
+  type     = "STATEFUL"
+
+  rule_group {
+    rule_variables {
+      ip_sets {
+        key = "HOME_NET"
+        ip_set {
+          definition = [var.vpc_cidr]
+        }
+      }
+      ip_sets {
+        key = "ALLOWED_IPS"
+        ip_set {
+          definition = local.cidr_chunks[count.index]
+        }
+      }
+    }
+
+    rules_source {
+      # Allow TCP 443 to GCP/PANW IPs (chunk ${count.index + 1})
+      rules_string = <<-EOT
+        pass tcp $HOME_NET any -> $ALLOWED_IPS 443 (msg:"Allow HTTPS to PANW/GCP IPs chunk ${count.index + 1}"; sid:${2000001 + count.index}; rev:1;)
+      EOT
+    }
+
+    stateful_rule_options {
+      rule_order = "STRICT_ORDER"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-victim-ips-${count.index + 1}"
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Drop All Unmatched Traffic (default deny)
+# ------------------------------------------------------------------------------
+
+resource "aws_networkfirewall_rule_group" "drop_all" {
+  count = var.enable_network_firewall ? 1 : 0
+
+  capacity = 10
+  name     = "${var.name_prefix}-drop-all"
+  type     = "STATEFUL"
+
+  rule_group {
+    rule_variables {
+      ip_sets {
+        key = "HOME_NET"
+        ip_set {
+          definition = [var.vpc_cidr]
+        }
+      }
+      ip_sets {
+        key = "EXTERNAL_NET"
+        ip_set {
+          definition = ["0.0.0.0/0"]
+        }
+      }
+    }
+
+    rules_source {
+      # Drop all outbound traffic that wasn't explicitly allowed by previous rules
+      # This enforces the allowlist - only traffic to allowed domains/IPs passes
+      rules_string = <<-EOT
+        drop tcp $HOME_NET any -> $EXTERNAL_NET 443 (msg:"Drop unmatched HTTPS egress"; sid:9999998; rev:1;)
+        drop tcp $HOME_NET any -> $EXTERNAL_NET 80 (msg:"Drop unmatched HTTP egress"; sid:9999997; rev:1;)
+      EOT
+    }
+
+    stateful_rule_options {
+      rule_order = "STRICT_ORDER"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-drop-all"
   })
 }
 
@@ -220,39 +314,57 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     stateless_default_actions          = ["aws:forward_to_sfe"]
     stateless_fragment_default_actions = ["aws:forward_to_sfe"]
 
-    # Use DEFAULT_ACTION_ORDER for domain-based filtering
-    # This allows TCP handshake to complete so TLS SNI can be inspected
+    # Use STRICT_ORDER for predictable rule evaluation with priorities
+    # Lower priority number = evaluated first
     stateful_engine_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order              = "STRICT_ORDER"
+      stream_exception_policy = "CONTINUE"
     }
 
-    # With DEFAULT_ACTION_ORDER, unmatched traffic is dropped after rules are evaluated
-    # This allows the domain allowlist to work properly
+    # Rule evaluation order (STRICT_ORDER - lower priority evaluated first):
+    # Priority 1: NGFW bypass - pass all from NGFW subnet
+    # Priority 2-N: Victim IPs - allow HTTPS to GCP/PANW IP ranges (chunked)
+    # Priority N+1: Victim domains - allow listed domains (SNI-based)
+    # Priority N+2: Kali domains - allow listed domains (if configured)
+    # Priority 100: Drop all - drop unmatched HTTP/HTTPS (default deny)
 
-    # NGFW bypass - allow all egress for SCM/licensing (must be first)
+    # NGFW bypass - allow all egress for SCM/licensing (priority 1)
     dynamic "stateful_rule_group_reference" {
       for_each = var.enable_ngfw_infrastructure ? [1] : []
       content {
         resource_arn = aws_networkfirewall_rule_group.ngfw_bypass[0].arn
+        priority     = 1
       }
     }
 
-    # Block direct IP connections
-    stateful_rule_group_reference {
-      resource_arn = aws_networkfirewall_rule_group.block_ip_sni[0].arn
+    # Victim IPs - allow HTTPS to GCP/PANW IP ranges (priorities 2, 3, 4, ...)
+    dynamic "stateful_rule_group_reference" {
+      for_each = aws_networkfirewall_rule_group.victim_ips
+      content {
+        resource_arn = stateful_rule_group_reference.value.arn
+        priority     = 2 + stateful_rule_group_reference.key
+      }
     }
 
-    # Victim domains (always included)
+    # Victim domains - SNI-based allowlist (priority after victim IPs)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.victim_domains[0].arn
+      priority     = 2 + length(local.cidr_chunks) + 1
     }
 
-    # Kali domains (only if configured)
+    # Kali domains (priority after victim domains, only if configured)
     dynamic "stateful_rule_group_reference" {
       for_each = length(var.kali_allowed_domains) > 0 ? [1] : []
       content {
         resource_arn = aws_networkfirewall_rule_group.kali_domains[0].arn
+        priority     = 2 + length(local.cidr_chunks) + 2
       }
+    }
+
+    # Drop all unmatched HTTP/HTTPS traffic (priority 100 - last)
+    stateful_rule_group_reference {
+      resource_arn = aws_networkfirewall_rule_group.drop_all[0].arn
+      priority     = 100
     }
   }
 

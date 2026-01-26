@@ -1,0 +1,24 @@
+id: basic_ngfw
+name: Basic Range with NGFW
+description: A basic attacker-victim range with Kali Linux attacker and user-provided agent on victim.
+enabled: true
+ngfw: true
+
+instances:
+  - name: Attacker
+    role: attacker
+    os_type: kali
+    xdr_agent: false
+
+  - name: Workstation
+    role: victim
+    os_type: from_agent
+    xdr_agent: true
+
+subnets:
+  - name: attack
+    instances: [Attacker]
+    connected_to: [target]
+
+  - name: target
+    instances: [Workstation]

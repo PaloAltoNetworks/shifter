@@ -29,9 +29,6 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "RANGE_VPC_CIDR", value = var.range_vpc_cidr },
       { name = "RANGE_ROUTE_TABLE_ID", value = var.range_route_table_id },
       { name = "RANGE_AVAILABILITY_ZONE", value = var.range_availability_zone },
-      { name = "KALI_SECURITY_GROUP_ID", value = var.kali_security_group_id },
-      { name = "VICTIM_SECURITY_GROUP_ID", value = var.victim_security_group_id },
-      { name = "DC_SECURITY_GROUP_ID", value = var.dc_security_group_id },
       { name = "RANGE_INSTANCE_PROFILE_NAME", value = var.range_instance_profile_name },
       { name = "KALI_AMI_ID", value = var.kali_ami_id },
       { name = "VICTIM_AMI_ID", value = var.victim_ami_id },
@@ -41,6 +38,9 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "DC_DOMAIN_PASSWORD", value = var.dc_domain_password },
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
       { name = "S3_ENDPOINT_ID", value = var.s3_endpoint_id },
+      { name = "FIREWALL_ENDPOINT_ID", value = var.firewall_endpoint_id },
+      { name = "PORTAL_VPC_CIDR", value = var.portal_vpc_cidr },
+      { name = "PORTAL_VPC_PEERING_ID", value = var.portal_vpc_peering_id },
       { name = "KALI_INSTANCE_TYPE", value = var.kali_instance_type },
       { name = "VICTIM_INSTANCE_TYPE", value = var.victim_instance_type },
       # NGFW (VM-Series) configuration
@@ -50,6 +50,7 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "NGFW_DATA_SECURITY_GROUP_ID", value = var.ngfw_data_security_group_id },
       { name = "NGFW_VPC_ID", value = var.range_vpc_id },
       { name = "NGFW_SUBNET_ID", value = var.ngfw_subnet_id },
+      { name = "NGFW_SUBNET_CIDR", value = var.ngfw_subnet_cidr },
       { name = "NGFW_BOOTSTRAP_BUCKET", value = var.agent_s3_bucket },
       { name = "NGFW_INSTANCE_PROFILE_NAME", value = var.ngfw_instance_profile_name },
       # Messaging (SNS for range events)

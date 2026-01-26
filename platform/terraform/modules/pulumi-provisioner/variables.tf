@@ -153,22 +153,6 @@ variable "range_availability_zone" {
   type        = string
 }
 
-variable "victim_security_group_id" {
-  description = "Security group ID for victim instances"
-  type        = string
-}
-
-variable "kali_security_group_id" {
-  description = "Security group ID for Kali instances"
-  type        = string
-}
-
-variable "dc_security_group_id" {
-  description = "Security group ID for Domain Controller instances"
-  type        = string
-  default     = ""
-}
-
 variable "range_instance_profile_arn" {
   description = "IAM instance profile ARN for range instances"
   type        = string
@@ -257,6 +241,28 @@ variable "s3_endpoint_id" {
   default     = ""
 }
 
+variable "firewall_endpoint_id" {
+  description = "AWS Network Firewall endpoint ID for internet egress from range subnets"
+  type        = string
+  default     = ""
+}
+
+# ------------------------------------------------------------------------------
+# Portal VPC Configuration (for terminal SSH access)
+# ------------------------------------------------------------------------------
+
+variable "portal_vpc_cidr" {
+  description = "CIDR block of the Portal VPC for SSH access routing"
+  type        = string
+  default     = ""
+}
+
+variable "portal_vpc_peering_id" {
+  description = "VPC peering connection ID between Portal and Range VPCs"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # NGFW (VM-Series) Configuration
 # ------------------------------------------------------------------------------
@@ -287,6 +293,12 @@ variable "ngfw_instance_type" {
 
 variable "ngfw_subnet_id" {
   description = "Subnet ID for VM-Series NGFW instances"
+  type        = string
+  default     = ""
+}
+
+variable "ngfw_subnet_cidr" {
+  description = "CIDR block for NGFW subnet (for VPC gateway IP calculation)"
   type        = string
   default     = ""
 }

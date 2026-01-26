@@ -349,6 +349,7 @@ class NGFWStatusConsumer(AsyncWebsocketConsumer):
                     "app_id": event.get("app_id"),
                     "status": event.get("status"),
                     "state": event.get("state"),
+                    "serial_number": event.get("serial_number"),
                 }
             )
         )

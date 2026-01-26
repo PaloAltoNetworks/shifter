@@ -93,6 +93,7 @@ class InstanceConfig:
 
     Attributes:
         uuid: Unique identifier from the spec (for tagging and DB correlation).
+        name: Display name for UI (e.g., "target-ubuntu", "attacker-kali").
         role: Instance role ("attacker", "victim", or "dc").
         os_type: Operating system type ("kali", "ubuntu", "windows").
         instance_type: AWS instance type (e.g., "t3.medium").
@@ -104,6 +105,7 @@ class InstanceConfig:
     """
 
     uuid: str  # Required: correlation key for tagging and DB updates
+    name: str  # Display name like "target-ubuntu" or "attacker-kali"
     role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
@@ -146,7 +148,7 @@ class RangeConfig:
         subnets: List of logical subnets with their instances.
         vpc_id: AWS VPC ID for range deployment.
         vpc_cidr: VPC CIDR block (e.g., '10.1.0.0/16').
-        gwlb_service_name: GWLB VPC Endpoint Service name (from UserNGFW).
+        ngfw_data_eni_id: NGFW data ENI ID for inter-subnet routing.
             Empty string if no NGFW attached to this range.
     """
 
@@ -158,71 +160,28 @@ class RangeConfig:
     vpc_id: str
     vpc_cidr: str
     route_table_id: str
-    kali_security_group_id: str
-    victim_security_group_id: str
     instance_profile_name: str
     kali_ami_id: str
     victim_ami_id: str
     windows_ami_id: str
     agent_s3_bucket: str
     availability_zone: str
-    gwlb_service_name: str = ""  # GWLB endpoint service name from UserNGFW
+    ngfw_data_eni_id: str = ""  # NGFW data ENI ID for inter-subnet routing
     dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
-    dc_security_group_id: str = ""  # Security group for Domain Controller instances
     portal_vpc_cidr: str = ""
+    portal_vpc_peering_id: str = ""  # VPC peering connection ID for portal route
     # NGFW (VM-Series) configuration
     ngfw_enabled: bool = False
     ngfw_ami_id: str = ""
     ngfw_instance_type: str = "m5.xlarge"
-    ngfw_security_group_id: str = ""
+    # NGFW connection info for subnet configuration (set when ngfw_enabled=True)
+    ngfw_management_ip: str = ""  # NGFW management IP for SSH
+    ngfw_ssh_key_secret_arn: str = ""  # Secrets Manager ARN for SSH private key
+    ngfw_subnet_cidr: str = ""  # NGFW subnet CIDR for computing gateway IP
     # S3 VPC endpoint for agent downloads (Gateway endpoint ID)
     s3_endpoint_id: str = ""
-
-
-@dataclass
-class NGFWConfig:
-    """Configuration for NGFW (UserNGFWStack) provisioning.
-
-    Infrastructure config comes from Pulumi config (set from environment).
-    Credential config comes from Pulumi config (set from app_spec in DB).
-
-    Attributes:
-        request_id: UUID of the provisioning request (for tagging/correlation).
-        instance_uuid: UUID of the NGFW instance (for tagging/DB correlation).
-        user_id: Django User ID who owns this NGFW.
-        environment: Deployment environment (dev, staging, prod).
-        vpc_id: AWS VPC ID for NGFW deployment.
-        subnet_id: Subnet ID for NGFW ENIs.
-        mgmt_security_group_id: Security group for management ENI.
-        data_security_group_id: Security group for data ENI.
-        ami_id: VM-Series AMI ID.
-        bootstrap_bucket: S3 bucket for bootstrap configuration.
-        instance_type: EC2 instance type.
-        instance_profile_name: IAM instance profile name.
-        scm_pin_id: SCM auto-registration PIN ID.
-        scm_pin_value: SCM auto-registration PIN value.
-        scm_folder_name: SCM folder name (dgname).
-        authcode: VM-Series authcode for licensing.
-    """
-
-    request_id: str
-    instance_uuid: str  # Required: for tagging and DB correlation
-    user_id: int
-    environment: str
-    # Infrastructure
-    vpc_id: str
-    subnet_id: str
-    mgmt_security_group_id: str
-    data_security_group_id: str
-    ami_id: str
-    bootstrap_bucket: str
-    instance_type: str
-    instance_profile_name: str
-    # Credentials (from app_spec)
-    scm_pin_id: str
-    scm_pin_value: str
-    scm_folder_name: str
-    authcode: str
+    # AWS Network Firewall endpoint ID for internet egress from range subnets
+    firewall_endpoint_id: str = ""
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -297,14 +256,15 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
 
     Returns range data with the new schema where range_config contains
     the full RangeSpec (scenario_id, user_id, subnets with instances).
-    Also looks up gwlb_service_name from the linked UserNGFW if present.
+    Also looks up ngfw_data_eni_id from the user's active NGFW if the
+    scenario has ngfw: true.
 
     Args:
         range_id: Database ID of the range.
 
     Returns:
         Dict with keys: id, user_id, request_uuid, range_config, ngfw_enabled,
-        gwlb_service_name.
+        ngfw_data_eni_id.
 
     Raises:
         ValueError: If range not found.
@@ -318,8 +278,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                     r.id,
                     r.user_id,
                     r.uuid,
-                    r.range_config,
-                    r.gwlb_endpoint_id
+                    r.range_config
                 FROM mission_control_range r
                 WHERE r.id = %s
                 """,
@@ -330,22 +289,58 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
             logger.error("Range %d not found in database", range_id)
             raise ValueError(f"Range {range_id} not found")
 
-        # NGFW is now provisioned separately - gwlb_endpoint_id indicates integration
-        gwlb_endpoint_id = row[4] or ""
+        user_id = row[1]
+        range_config = row[3] or {}
+
+        # Check if scenario requires NGFW (ngfw: true in range_config)
+        ngfw_enabled = range_config.get("ngfw", False)
+
+        # Look up data_eni_id and ngfw_instance_id from user's NGFW
+        # NGFW can be in any provisioned state - the ENI exists regardless of running state.
+        # Include 'stopping' because range provisioner will wait for stop then start the NGFW.
+        ngfw_data_eni_id = ""
+        ngfw_instance_id = None
+        if ngfw_enabled:
+            cur.execute(
+                """
+                SELECT ei.state->>'data_eni_id', ei.id
+                FROM engine_instance ei
+                JOIN engine_request er ON ei.request_id = er.id
+                WHERE er.user_id = %s
+                  AND ei.role = 'ngfw'
+                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping', 'awaiting_association')
+                  AND ei.state->>'data_eni_id' IS NOT NULL
+                ORDER BY ei.created_at DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            ngfw_row = cur.fetchone()
+            if ngfw_row:
+                ngfw_data_eni_id = ngfw_row[0] or ""
+                ngfw_instance_id = ngfw_row[1]
+                logger.debug(
+                    "Found ngfw_data_eni_id=%s, ngfw_instance_id=%s for user %d",
+                    ngfw_data_eni_id,
+                    ngfw_instance_id,
+                    user_id,
+                )
+
         result = {
             "id": row[0],
-            "user_id": row[1],
+            "user_id": user_id,
             "request_uuid": str(row[2]) if row[2] else "",
-            "range_config": row[3],  # Full RangeSpec JSON with subnets
-            "ngfw_enabled": bool(gwlb_endpoint_id),
-            "gwlb_service_name": "",  # No longer stored on range; NGFW owns this
+            "range_config": range_config,
+            "ngfw_enabled": ngfw_enabled,
+            "ngfw_data_eni_id": ngfw_data_eni_id,
+            "ngfw_instance_id": ngfw_instance_id,
         }
 
         logger.debug(
-            "Loaded range %d: ngfw_enabled=%s, gwlb_service_name=%s",
+            "Loaded range %d: ngfw_enabled=%s, ngfw_data_eni_id=%s",
             range_id,
             result["ngfw_enabled"],
-            "present" if result["gwlb_service_name"] else "none",
+            "present" if result["ngfw_data_eni_id"] else "none",
         )
 
         return result
@@ -379,6 +374,12 @@ def _build_instance_config(
     role = inst.get("role", "victim")
     os_type = inst.get("os_type", "ubuntu")
 
+    # Build display name: use "target" instead of "victim" for user-facing labels
+    display_role = "target" if role == "victim" else role
+    instance_name = inst.get("name") or f"{display_role}-{os_type}"
+    # Ensure any existing "victim" in name is replaced with "target"
+    instance_name = instance_name.replace("victim", "target")
+
     # Get instance_type from catalog defaults based on role/os
     if role == "attacker":
         instance_type = _get_kali_instance_type()
@@ -404,6 +405,7 @@ def _build_instance_config(
 
     return InstanceConfig(
         uuid=instance_uuid,
+        name=instance_name,
         role=role,
         os_type=os_type,
         instance_type=instance_type,
@@ -495,7 +497,7 @@ def load_config() -> RangeConfig:
     environment = config.require("environment")
     logger.debug("Loading range_id=%d, environment=%s", range_id, environment)
 
-    # Load range data from database (includes gwlb_service_name lookup)
+    # Load range data from database (includes ngfw_data_eni_id lookup)
     range_data = get_range_from_db(range_id)
 
     # Extract request_uuid with defensive handling
@@ -529,14 +531,14 @@ def load_config() -> RangeConfig:
     # Build subnets with their instances
     subnets = _build_subnet_configs(spec_subnets, get_presigned_url)
 
-    # Extract gwlb_service_name with defensive handling
-    gwlb_service_name = str(range_data.get("gwlb_service_name") or "")
+    # Extract ngfw_data_eni_id with defensive handling
+    ngfw_data_eni_id = str(range_data.get("ngfw_data_eni_id") or "")
     ngfw_enabled = bool(range_data.get("ngfw_enabled", False))
 
-    if ngfw_enabled and not gwlb_service_name:
-        logger.warning(
-            "Range %d has NGFW enabled but no gwlb_service_name found",
-            range_id,
+    if ngfw_enabled and not ngfw_data_eni_id:
+        raise ValueError(
+            f"Range {range_id} requires NGFW but no NGFW with data_eni_id found for user. "
+            "User must have a provisioned NGFW before creating NGFW-enabled ranges."
         )
 
     logger.info(
@@ -556,68 +558,26 @@ def load_config() -> RangeConfig:
         vpc_id=config.require("rangeVpcId"),
         vpc_cidr=config.require("rangeVpcCidr"),
         route_table_id=config.require("rangeRouteTableId"),
-        kali_security_group_id=config.require("kaliSecurityGroupId"),
-        victim_security_group_id=config.require("victimSecurityGroupId"),
         instance_profile_name=config.get("rangeInstanceProfileName") or "",
         kali_ami_id=config.require("kaliAmiId"),
         victim_ami_id=config.require("victimAmiId"),
         windows_ami_id=config.get("windowsAmiId") or "",
         agent_s3_bucket=config.get("agentS3Bucket") or "",
         availability_zone=config.require("availabilityZone"),
-        gwlb_service_name=gwlb_service_name,
+        ngfw_data_eni_id=ngfw_data_eni_id,
         dc_ami_id=config.get("dcAmiId") or "",
         portal_vpc_cidr=config.get("portalVpcCidr") or "",
-        dc_security_group_id=config.get("dcSecurityGroupId") or "",
+        portal_vpc_peering_id=config.get("portalVpcPeeringId") or "",
         # NGFW (VM-Series) configuration - enabled from DB, config from env vars
         ngfw_enabled=ngfw_enabled,
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
-        ngfw_security_group_id=os.environ.get("NGFW_SECURITY_GROUP_ID", ""),
+        # NGFW connection info for subnet configuration (set by main.py)
+        ngfw_management_ip=os.environ.get("NGFW_MANAGEMENT_IP", ""),
+        ngfw_ssh_key_secret_arn=os.environ.get("NGFW_SSH_KEY_SECRET_ARN", ""),
+        ngfw_subnet_cidr=os.environ.get("NGFW_SUBNET_CIDR", ""),
         # S3 VPC endpoint for agent downloads
         s3_endpoint_id=config.get("s3EndpointId") or "",
-    )
-
-
-def load_ngfw_config() -> NGFWConfig:
-    """Load NGFW configuration from Pulumi config.
-
-    All values are set by _set_ngfw_stack_config() in main.py before pulumi up.
-    Infrastructure values come from environment, credentials from app_spec.
-
-    Returns:
-        NGFWConfig: Complete configuration for NGFW provisioning.
-    """
-    logger.info("Loading NGFW configuration")
-    config = pulumi.Config()
-
-    request_id = config.require("requestId")
-    instance_uuid = config.require("instanceUuid")
-    user_id = config.require_int("userId")
-
-    logger.debug(
-        "load_ngfw_config: request_id=%s instance_uuid=%s user_id=%s",
-        request_id,
-        instance_uuid,
-        user_id,
-    )
-
-    return NGFWConfig(
-        request_id=request_id,
-        instance_uuid=instance_uuid,
-        user_id=user_id,
-        environment=config.require("environment"),
-        # Infrastructure
-        vpc_id=config.require("ngfwVpcId"),
-        subnet_id=config.require("ngfwSubnetId"),
-        mgmt_security_group_id=config.require("ngfwMgmtSecurityGroupId"),
-        data_security_group_id=config.require("ngfwDataSecurityGroupId"),
-        ami_id=config.require("ngfwAmiId"),
-        bootstrap_bucket=config.require("bootstrapBucket"),
-        instance_type=config.get("ngfwInstanceType") or "m5.xlarge",
-        instance_profile_name=config.get("ngfwInstanceProfileName") or "",
-        # Credentials (secrets - use require_secret for sensitive values)
-        scm_pin_id=config.require("scmPinId"),
-        scm_pin_value=config.require("scmPinValue"),
-        scm_folder_name=config.require("scmFolderName"),
-        authcode=config.require("authcode"),
+        # AWS Network Firewall endpoint for internet egress
+        firewall_endpoint_id=config.get("firewallEndpointId") or "",
     )

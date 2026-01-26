@@ -614,6 +614,12 @@ class DashboardManager {
         if (destroyBtn) {
             destroyBtn.addEventListener('click', () => this.destroyRange());
         }
+
+        // Bind pause button
+        const pauseBtn = tile.querySelector('#pause-btn');
+        if (pauseBtn) {
+            pauseBtn.addEventListener('click', () => this.pauseRange());
+        }
     }
 
     /**
@@ -641,6 +647,12 @@ class DashboardManager {
         const destroyBtn = tile.querySelector('.destroy-btn');
         if (destroyBtn) {
             destroyBtn.addEventListener('click', () => this.destroyRange());
+        }
+
+        // Bind resume button
+        const resumeBtn = tile.querySelector('#resume-btn');
+        if (resumeBtn) {
+            resumeBtn.addEventListener('click', () => this.resumeRange());
         }
     }
 

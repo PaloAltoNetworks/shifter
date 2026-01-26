@@ -1488,6 +1488,7 @@ def _run_single_instance_setup(
     domain_name: str | None,
     xdr_required: bool = False,
     instance_name: str = "",
+    range_id: int = 0,
 ) -> bool:
     """Run setup for a single non-DC instance.
 
@@ -1502,6 +1503,7 @@ def _run_single_instance_setup(
         domain_name: Domain FQDN (for domain join).
         xdr_required: If True, fail hard when XDR agent URL is missing.
         instance_name: Friendly display name for hostname (e.g., "target-ubuntu").
+        range_id: Range ID for hostname generation.
 
     Returns:
         True on success.
@@ -1524,9 +1526,14 @@ def _run_single_instance_setup(
     logger.info("Instance %s is ready (SSM agent online)", instance_id)
 
     # Create context object for plan get_context()
-    # Use friendly name for hostname (e.g., "Workstation 1" becomes "shifter-workstation-1")
+    # Use friendly name for hostname (e.g., "Workstation" becomes "shifter-range-123-workstation")
     sanitized_name = sanitize_hostname(instance_name) if instance_name else ""
-    hostname = f"shifter-{sanitized_name}" if sanitized_name else f"inst-{instance_id[-8:]}"
+    if sanitized_name and range_id:
+        hostname = f"shifter-range-{range_id}-{sanitized_name}"
+    elif sanitized_name:
+        hostname = f"shifter-{sanitized_name}"
+    else:
+        hostname = f"inst-{instance_id[-8:]}"
 
     class InstanceContext:
         def __init__(self):
@@ -1745,6 +1752,7 @@ def run_instance_setup(
     range_spec: dict,
     dc_ip: str | None = None,
     domain_name: str | None = None,
+    range_id: int = 0,
 ) -> None:
     """Run setup for all instances after infrastructure is ready.
 
@@ -1755,6 +1763,7 @@ def run_instance_setup(
         range_spec: Range specification with subnet/instance configs.
         dc_ip: DC private IP for domain join (from DC instance output).
         domain_name: Domain FQDN for domain join.
+        range_id: Range ID for hostname generation.
     """
     # Build lookup from instance UUID to config
     uuid_to_config: dict[str, dict] = {}
@@ -1818,6 +1827,7 @@ def run_instance_setup(
                     domain_name=actual_domain,
                     xdr_required=bool(inst_config.get("agent")),  # XDR required if agent data present
                     instance_name=inst.get("name", ""),
+                    range_id=range_id,
                 )
                 return (inst_id, True, None)
             except Exception as e:
@@ -2173,6 +2183,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
     run_instance_setup(
         instances_output=instances_output,
         range_spec=range_spec,
+        range_id=range_id,
     )
 
     # Write provisioned state to DB

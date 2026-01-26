@@ -1,5 +1,20 @@
 """Pydantic schemas for data contracts."""
 
+from .action import (
+    ActionContext,
+    ActionContextBase,
+    ActionRef,
+    ActionSpec,
+    ActionSpecBase,
+    CommandActionContext,
+    CommandActionSpec,
+    FileActionContext,
+    FileActionSpec,
+    GenericActionContext,
+    GenericActionSpec,
+    NetworkActionContext,
+    NetworkActionSpec,
+)
 from .app import (
     AgentAppContext,
     AgentAppSpec,
@@ -23,7 +38,15 @@ from .behaviour import (
     BehaviourContext,
     BehaviourContextBase,
     BehaviourRef,
+    BehaviourResult,
+    BehaviourSpec,
     BehaviourSpecBase,
+    BehaviourStatus,
+    CapabilityType,
+    DefenderBehaviourContext,
+    DefenderBehaviourSpec,
+    SimulatedUserBehaviourContext,
+    SimulatedUserBehaviourSpec,
 )
 from .credentials import (
     CredentialContext,
@@ -34,6 +57,15 @@ from .credentials import (
     DeploymentProfileSpec,
     SCMCredentialContext,
     SCMCredentialSpec,
+)
+from .objective import (
+    ObjectiveContext,
+    ObjectivePriority,
+    ObjectiveRef,
+    ObjectiveResult,
+    ObjectiveSpec,
+    ObjectiveStatus,
+    ObjectiveType,
 )
 from .range import (
     AgentDetails,
@@ -49,6 +81,14 @@ from .range import (
     RangeSpecBase,
 )
 from .request import RequestSpec
+from .step import (
+    FailureAction,
+    StepContext,
+    StepRef,
+    StepResult,
+    StepSpec,
+    StepStatus,
+)
 from .subnet import SubnetContext, SubnetRef, SubnetSpec
 
 
@@ -61,6 +101,9 @@ def _rebuild_all_models() -> None:
         "NGFWAppSpec": NGFWAppSpec,
         "InstanceSpec": InstanceSpec,
         "SubnetSpec": SubnetSpec,
+        "ActionSpec": ActionSpec,
+        "StepSpec": StepSpec,
+        "ObjectiveSpec": ObjectiveSpec,
     }
     # InstanceSpec needs NGFWAppSpec resolved
     InstanceSpec.model_rebuild(_types_namespace=_types_namespace)
@@ -69,11 +112,33 @@ def _rebuild_all_models() -> None:
     # RangeSpecBase and RangeSpec need SubnetSpec resolved
     RangeSpecBase.model_rebuild(_types_namespace=_types_namespace)
     RangeSpec.model_rebuild(_types_namespace=_types_namespace)
+    # StepSpec needs ActionSpec resolved
+    StepSpec.model_rebuild(_types_namespace=_types_namespace)
+    # BehaviourSpecBase needs StepSpec and ObjectiveSpec resolved
+    BehaviourSpecBase.model_rebuild(_types_namespace=_types_namespace)
+    AttackBehaviourSpec.model_rebuild(_types_namespace=_types_namespace)
+    DefenderBehaviourSpec.model_rebuild(_types_namespace=_types_namespace)
+    SimulatedUserBehaviourSpec.model_rebuild(_types_namespace=_types_namespace)
 
 
 _rebuild_all_models()
 
 __all__ = [
+    # Action schemas
+    "ActionContext",
+    "ActionContextBase",
+    "ActionRef",
+    "ActionSpec",
+    "ActionSpecBase",
+    "CommandActionContext",
+    "CommandActionSpec",
+    "FileActionContext",
+    "FileActionSpec",
+    "GenericActionContext",
+    "GenericActionSpec",
+    "NetworkActionContext",
+    "NetworkActionSpec",
+    # App schemas
     "AgentAppContext",
     "AgentAppSpec",
     "AgentDetails",
@@ -81,12 +146,22 @@ __all__ = [
     "AppContextBase",
     "AppRef",
     "AppSpecBase",
+    # Behaviour schemas
     "AttackBehaviourContext",
     "AttackBehaviourSpec",
     "BehaviourContext",
     "BehaviourContextBase",
     "BehaviourRef",
+    "BehaviourResult",
+    "BehaviourSpec",
     "BehaviourSpecBase",
+    "BehaviourStatus",
+    "CapabilityType",
+    "DefenderBehaviourContext",
+    "DefenderBehaviourSpec",
+    "SimulatedUserBehaviourContext",
+    "SimulatedUserBehaviourSpec",
+    # Credential schemas
     "CredentialContext",
     "CredentialContextBase",
     "CredentialRef",
@@ -94,6 +169,7 @@ __all__ = [
     "DCConfig",
     "DeploymentProfileContext",
     "DeploymentProfileSpec",
+    # Range schemas
     "InstanceContext",
     "InstanceContextBase",
     "InstanceRef",
@@ -102,6 +178,15 @@ __all__ = [
     "NGFWAppContext",
     "NGFWAppRef",
     "NGFWAppSpec",
+    # Objective schemas
+    "ObjectiveContext",
+    "ObjectivePriority",
+    "ObjectiveRef",
+    "ObjectiveResult",
+    "ObjectiveSpec",
+    "ObjectiveStatus",
+    "ObjectiveType",
+    # App schemas (continued)
     "OSAppContext",
     "OSAppSpec",
     "OtherAppContext",
@@ -115,6 +200,14 @@ __all__ = [
     "SCMCredentialContext",
     "SCMCredentialSpec",
     "SpecBase",
+    # Step schemas
+    "FailureAction",
+    "StepContext",
+    "StepRef",
+    "StepResult",
+    "StepSpec",
+    "StepStatus",
+    # Subnet schemas
     "SubnetContext",
     "SubnetRef",
     "SubnetSpec",

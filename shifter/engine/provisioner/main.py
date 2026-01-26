@@ -27,6 +27,7 @@ from catalog.instances import (
     _get_victim_instance_type,
     _get_windows_instance_type,
 )
+from components.instance import sanitize_hostname
 from config import generate_presigned_url
 from events import (
     STATUS_DESTROYED,
@@ -1527,8 +1528,9 @@ def _run_single_instance_setup(
     logger.info("Instance %s is ready (SSM agent online)", instance_id)
 
     # Create context object for plan get_context()
-    # Use friendly name for hostname (e.g., "target-ubuntu" becomes "shifter-target-ubuntu")
-    hostname = f"shifter-{instance_name}" if instance_name else f"inst-{instance_id[-8:]}"
+    # Use friendly name for hostname (e.g., "Workstation 1" becomes "shifter-workstation-1")
+    sanitized_name = sanitize_hostname(instance_name) if instance_name else ""
+    hostname = f"shifter-{sanitized_name}" if sanitized_name else f"inst-{instance_id[-8:]}"
 
     class InstanceContext:
         def __init__(self):
@@ -1625,13 +1627,20 @@ def _run_single_instance_setup(
     return True
 
 
-def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str, xdr_required: bool = False) -> bool:
+def _run_dc_setup(
+    instance_id: str,
+    dc_config: dict,
+    agent_presigned_url: str,
+    public_key: str = "",
+    xdr_required: bool = False,
+) -> bool:
     """Run setup for a DC instance.
 
     Args:
         instance_id: EC2 instance ID.
         dc_config: DC configuration dict with domain_name, netbios_name, etc.
         agent_presigned_url: Pre-signed URL for XDR agent download.
+        public_key: SSH public key for terminal access.
         xdr_required: If True, fail hard when XDR agent URL is missing.
 
     Returns:
@@ -1656,6 +1665,44 @@ def _run_dc_setup(instance_id: str, dc_config: dict, agent_presigned_url: str, x
 
     # Prebaked DC: Skip hostname change - DC already has correct hostname from AMI
     logger.info("Using prebaked DC AMI - skipping hostname change")
+
+    # Configure SSH key for terminal access (before DC verification)
+    if public_key:
+        logger.info("Configuring SSH key on DC %s...", instance_id)
+        ssh_key_script = f'''
+$ErrorActionPreference = "Stop"
+$publicKey = "{public_key}"
+
+Write-Host "Configuring SSH key for Administrator..."
+
+$sshDir = "C:\\ProgramData\\ssh"
+if (!(Test-Path $sshDir)) {{
+    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+}}
+
+$publicKey | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
+
+# Set proper permissions
+icacls "$sshDir\\administrators_authorized_keys" /inheritance:r `
+    /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
+
+# Restart sshd to pick up new key
+Restart-Service sshd -Force -ErrorAction SilentlyContinue
+
+Write-Host "SSH key configured successfully"
+'''
+        ssh_result = executor.run_command(
+            instance_id=instance_id,
+            script=ssh_key_script,
+            document_name="AWS-RunPowerShellScript",
+            timeout_seconds=60,
+        )
+        if not ssh_result.success:
+            logger.warning("SSH key configuration failed: %s (continuing with setup)", ssh_result.stderr)
+        else:
+            logger.info("SSH key configured on DC %s", instance_id)
+    else:
+        logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
 
     # Verify Domain Controller via DCSetupPlan
     logger.info("Verifying Domain Controller (%s)...", domain_name)
@@ -1735,7 +1782,14 @@ def run_instance_setup(
         dc_config = inst_config.get("dc_config", {})
         agent_url = get_agent_presigned_url(inst_config)
         xdr_required = bool(inst_config.get("agent"))  # XDR required if agent data present
-        _run_dc_setup(dc_inst["instance_id"], dc_config, agent_url or "", xdr_required=xdr_required)
+        public_key = dc_inst.get("public_key", "")
+        _run_dc_setup(
+            dc_inst["instance_id"],
+            dc_config,
+            agent_url or "",
+            public_key=public_key,
+            xdr_required=xdr_required,
+        )
 
     # Get DC IP and domain for domain joins (from first DC)
     actual_dc_ip = dc_ip

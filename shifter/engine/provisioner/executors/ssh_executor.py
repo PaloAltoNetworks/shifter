@@ -8,9 +8,10 @@ import builtins
 import io
 import logging
 import time
-from dataclasses import dataclass
 
 import paramiko
+
+from executors.base import CommandResult
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +43,10 @@ class ConnectionError(SSHExecutorError):
     pass
 
 
-@dataclass
-class CommandResult:
-    """Result of a command execution."""
-
-    success: bool
-    exit_code: int
-    stdout: str
-    stderr: str
-
-
 class SSHExecutor:
     """SSH command executor for PAN-OS devices.
 
-    Executes CLI commands on VM-Series via SSH.
+    Executes CLI commands on VM-Series via SSH using paramiko.
     Same interface as SSMExecutor for orchestrator compatibility.
     """
 
@@ -72,7 +63,7 @@ class SSHExecutor:
         """Initialize SSH executor.
 
         Args:
-            private_key: PEM-encoded private key string
+            private_key: PEM-encoded private key string (RSA or Ed25519)
             username: SSH username (default: admin)
             port: SSH port (default: 22)
             poll_interval_seconds: How often to poll for availability
@@ -82,21 +73,57 @@ class SSHExecutor:
         self._port = port
         self._poll_interval = poll_interval_seconds
 
-        # Parse the private key
-        self._pkey = paramiko.RSAKey.from_private_key(file_obj=io.StringIO(private_key))
+        # Parse the private key (supports RSA and Ed25519)
+        self._pkey = self._load_private_key(private_key)
+
+    def _load_private_key(self, private_key: str) -> paramiko.PKey:
+        """Load a private key, detecting type automatically.
+
+        Args:
+            private_key: PEM-encoded private key string
+
+        Returns:
+            Paramiko key object (RSAKey or Ed25519Key)
+
+        Raises:
+            SSHExecutorError: If key type is unsupported or parsing fails
+        """
+        key_file = io.StringIO(private_key)
+
+        # Try Ed25519 first (our default for NGFW)
+        try:
+            return paramiko.Ed25519Key.from_private_key(file_obj=key_file)
+        except paramiko.SSHException:
+            pass
+
+        # Try RSA
+        key_file.seek(0)
+        try:
+            return paramiko.RSAKey.from_private_key(file_obj=key_file)
+        except paramiko.SSHException:
+            pass
+
+        raise SSHExecutorError("Unsupported key type. Only Ed25519 and RSA keys are supported.")
 
     def run_command(
         self,
-        host: str,
+        instance_id: str,
         script: str,
         timeout_seconds: int = 300,
+        document_name: str = "",  # Unused, for Protocol compatibility with SSMExecutor
+        stdin_input: str | None = None,
     ) -> CommandResult:
         """Run a CLI command on a PAN-OS device via SSH.
 
+        Uses paramiko invoke_shell() to send commands to the PAN-OS CLI.
+
         Args:
-            host: Target IP address or hostname
+            instance_id: Target IP address or hostname. Named for SetupOrchestrator
+                compatibility (SSM uses EC2 instance ID, SSH uses IP address).
             script: PAN-OS CLI command to execute
             timeout_seconds: Maximum time to wait for completion
+            document_name: Ignored. For SetupOrchestrator compatibility.
+            stdin_input: Additional commands to send after script.
 
         Returns:
             CommandResult with success status, exit code, stdout, stderr
@@ -106,10 +133,18 @@ class SSHExecutor:
             TimeoutError: If the command doesn't complete in time
             ConnectionError: If SSH connection fails
         """
+        host = instance_id
         client = paramiko.SSHClient()
         # Security context: AutoAddPolicy is acceptable because we connect to freshly
         # provisioned PAN-OS VMs in isolated VPC subnets. Host keys change on reprovision.
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507  # noqa: S507
+        client.set_missing_host_key_policy(
+            paramiko.AutoAddPolicy()  # noqa: S507
+        )  # nosec B507
+
+        # Build the full command to send via stdin
+        commands = script
+        if stdin_input:
+            commands = f"{commands}\n{stdin_input}"
 
         try:
             logger.info(f"Connecting to {host}:{self._port} as {self._username}")
@@ -123,40 +158,126 @@ class SSHExecutor:
                 look_for_keys=False,
             )
 
-            logger.info(f"Executing command: {script[:100]}...")
-            # Security context: Commands are PAN-OS CLI commands generated internally by
-            # SetupOrchestrator plans, not from user input. No shell injection risk.
-            _stdin, stdout, stderr = client.exec_command(  # nosec B601
-                script,
-                timeout=timeout_seconds,
-            )
+            logger.info(f"Executing command: {commands[:100]}...")
+            logger.info("Opening interactive shell with invoke_shell()")
+            channel = client.invoke_shell()
+            channel.settimeout(timeout_seconds)
 
-            exit_code = stdout.channel.recv_exit_status()
-            stdout_text = stdout.read().decode("utf-8")
-            stderr_text = stderr.read().decode("utf-8")
+            # Send commands
+            logger.info(f"Sending command: {commands[:100]}")
+            channel.send("set cli pager off\n")  # nosec B601 - disable pager for full output
+            channel.send(commands + "\n")  # nosec B601
+            channel.send("exit\n")
+            channel.shutdown_write()
 
-            logger.info(f"Command completed with exit code {exit_code}")
+            # Read output until channel closes naturally
+            # We send 'exit' and shutdown_write(), so PAN-OS will close the channel
+            # when all commands complete. This is more reliable than prompt detection
+            # since commits can take 30+ seconds.
+            #
+            # IMPORTANT: We must wait for eof_received, NOT exit_status_ready.
+            # exit_status_ready() can return True before all data arrives, causing
+            # truncated output. eof_received is the authoritative signal that the
+            # server has finished sending all data.
+            output = ""
+            start_time = time.time()
+            chunk_count = 0
 
-            if exit_code != 0:
-                raise CommandError(
-                    f"Command failed on {host}",
-                    exit_code=exit_code,
-                    stderr=stderr_text,
-                )
+            logger.info("Reading output until channel EOF")
+
+            while True:
+                # Read any available data
+                if channel.recv_ready():
+                    chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                    chunk_count += 1
+                    logger.info(f"Chunk {chunk_count}: {len(chunk)} bytes")
+                    logger.debug(f"Chunk {chunk_count} content: {chunk!r}")
+                    output += chunk
+
+                # Check if channel EOF (server finished sending all data)
+                # This is the ONLY reliable way to know all output has been received
+                if channel.eof_received:
+                    logger.info("Channel EOF received - draining remaining data")
+                    # Use blocking recv() to drain ALL remaining data
+                    # recv_ready() only checks Paramiko's buffer, not kernel TCP buffer
+                    # Set short timeout for drain phase
+                    channel.settimeout(2)
+                    while True:
+                        try:
+                            chunk = channel.recv(4096)
+                            if not chunk:  # Empty bytes = channel closed, no more data
+                                break
+                            chunk_count += 1
+                            logger.info(f"Drain chunk {chunk_count}: {len(chunk)} bytes")
+                            output += chunk.decode("utf-8", errors="replace")
+                        except builtins.TimeoutError:
+                            logger.info("Drain timeout - no more data")
+                            break
+                    break
+
+                # Overall timeout check
+                elapsed = time.time() - start_time
+                if elapsed > timeout_seconds:
+                    logger.error(
+                        f"Command timed out after {elapsed:.1f}s (received {chunk_count} chunks, {len(output)} bytes)"
+                    )
+                    raise TimeoutError(f"Command timed out after {timeout_seconds}s")
+
+                time.sleep(0.1)
+
+            # Get exit code - wait briefly if not ready yet
+            # After EOF, exit status should arrive shortly
+            exit_code = -1
+            for _ in range(10):  # Wait up to 1 second
+                if channel.exit_status_ready():
+                    exit_code = channel.recv_exit_status()
+                    logger.info(f"Exit code: {exit_code}")
+                    break
+                time.sleep(0.1)
+            else:
+                logger.info("Exit status not ready after 1s - using -1")
+
+            elapsed = time.time() - start_time
+            logger.info(f"Command completed in {elapsed:.1f}s, received {len(output)} bytes in {chunk_count} chunks")
+            logger.info(f"Raw output (first 1000 chars): {output[:1000]!r}")
+
+            # Clean output
+            cleaned = self._clean_output(output, commands)
+            logger.info(f"Cleaned output: {len(cleaned)} bytes")
+            logger.info(f"Cleaned output (first 500 chars): {cleaned[:500]}")
 
             return CommandResult(
                 success=True,
                 exit_code=exit_code,
-                stdout=stdout_text,
-                stderr=stderr_text,
+                stdout=cleaned,
+                stderr="",
             )
 
         except paramiko.SSHException as e:
             raise ConnectionError(f"SSH connection failed to {host}: {e}") from e
         except builtins.TimeoutError as e:
             raise TimeoutError(f"SSH command timed out on {host}") from e
+        except OSError as e:
+            raise TimeoutError(f"SSH command timed out on {host}: {e}") from e
         finally:
             client.close()
+
+    def _clean_output(self, output: str, commands: str) -> str:
+        """Clean output by removing prompts and command echo."""
+        lines = output.split("\n")
+        clean_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(self._username + "@"):
+                continue
+            if stripped == commands.strip():
+                continue
+            if stripped == "exit":
+                continue
+            clean_lines.append(line.rstrip())
+        return "\n".join(clean_lines)
 
     def wait_for_agent(
         self,
@@ -197,7 +318,9 @@ class SSHExecutor:
         try:
             client = paramiko.SSHClient()
             # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507  # noqa: S507
+            client.set_missing_host_key_policy(
+                paramiko.AutoAddPolicy()  # noqa: S507
+            )  # nosec B507
             client.connect(
                 hostname=host,
                 port=self._port,
@@ -214,14 +337,16 @@ class SSHExecutor:
 
     def reboot_and_wait(
         self,
-        host: str,
+        instance_id: str,
         timeout_seconds: int = 1800,
+        document_name: str = "",  # Unused, for Protocol compatibility with SSMExecutor
     ) -> bool:
         """Reboot PAN-OS device and wait for it to come back.
 
         Args:
-            host: Target IP address
+            instance_id: Target IP address (named for Protocol compatibility)
             timeout_seconds: Maximum time to wait for device to return
+            document_name: Unused, for Protocol compatibility with SSMExecutor
 
         Returns:
             True if device is back online
@@ -229,11 +354,16 @@ class SSHExecutor:
         Raises:
             TimeoutError: If device doesn't come back in time
         """
+        host = instance_id
         logger.info(f"Rebooting {host}...")
 
         # Issue reboot command
         try:
-            self.run_command(host, "request restart system", timeout_seconds=30)
+            self.run_command(
+                instance_id=host,
+                script="request restart system",
+                timeout_seconds=30,
+            )
         except (ConnectionError, CommandError, TimeoutError):
             # Connection may drop during reboot - that's expected
             logger.info("Connection dropped during reboot (expected)")

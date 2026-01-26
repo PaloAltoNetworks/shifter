@@ -1,15 +1,5 @@
 # SSM Module Outputs
 
-output "document_name" {
-  description = "Name of the SSM document for portal deployment"
-  value       = aws_ssm_document.portal_deploy.name
-}
-
-output "document_arn" {
-  description = "ARN of the SSM document for portal deployment"
-  value       = aws_ssm_document.portal_deploy.arn
-}
-
 output "parameter_store_prefix" {
   description = "Parameter Store path prefix for portal configuration"
   value       = local.ps_prefix

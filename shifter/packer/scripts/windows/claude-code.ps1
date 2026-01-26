@@ -4,10 +4,26 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "=== Installing Claude Code ==="
 
-$nodePath = "C:\Program Files\nodejs"
-
 # Refresh environment to ensure npm is available
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+
+# Find npm - could be in different locations depending on install method
+$npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+if (-not $npmCmd) {
+    # Try common locations
+    $nodePath = "C:\Program Files\nodejs"
+    if (Test-Path "$nodePath\npm.cmd") {
+        $npmCmd = "$nodePath\npm.cmd"
+    } else {
+        Write-Error "npm not found. Node.js installation may have failed."
+        exit 1
+    }
+} else {
+    $npmCmd = $npmCmd.Source
+    $nodePath = Split-Path -Parent $npmCmd
+}
+
+Write-Host "Using npm at: $npmCmd"
 
 # ------------------------------------------------------------------------------
 # Configure npm global prefix
@@ -16,7 +32,7 @@ Write-Host "=== Configuring npm global prefix ==="
 
 # Set npm prefix to nodejs directory so global packages are in system PATH
 # This ensures Claude Code is available to all users
-& "$nodePath\npm.cmd" config set prefix "$nodePath" --global
+& $npmCmd config set prefix "$nodePath" --global
 
 Write-Host "npm global prefix set to $nodePath"
 
@@ -25,7 +41,7 @@ Write-Host "npm global prefix set to $nodePath"
 # ------------------------------------------------------------------------------
 Write-Host "=== Installing Claude Code globally ==="
 
-& "$nodePath\npm.cmd" install -g @anthropic-ai/claude-code
+& $npmCmd install -g @anthropic-ai/claude-code
 
 Write-Host "Claude Code installed"
 

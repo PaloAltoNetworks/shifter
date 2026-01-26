@@ -1,11 +1,22 @@
-"""Tests for NGFWProvisionPlan - TDD: Write tests first, all must fail initially.
+"""Tests for NGFWProvisionPlan.
 
 NGFWProvisionPlan handles post-Pulumi NGFW configuration via SSH:
-- Wait for SSH availability (~13 min after EC2 launch)
-- Verify device certificate
+- Configure data interface (ethernet1/1 as L3 DHCP + virtual router)
+- Create shared 'ranges' zone for all range traffic
+- Delete default allow-all rule (bypasses per-range logging)
 - Enable cloud logging (Strata Logging Service)
 - Create log forwarding profile (XDR-Forward)
-- Create security policy (allow-all rule with logging)
+- Create alert-only security profiles and profile-group (Alert-Group)
+- Download threat content (Apps + Threats package)
+- Install threat content
+
+Note: No default security policy is created. Per-range rules are
+created by NGFWConfigureSubnetsPlan during range provisioning.
+Those rules attach Alert-Group for threat detection without blocking.
+
+Note: SSH wait is handled by main.py before this plan runs.
+Serial number polling is also in main.py (after plan completes).
+Commands use stdin_input for PAN-OS configure mode.
 """
 
 from dataclasses import dataclass
@@ -18,124 +29,76 @@ class MockNGFWInstance:
     """Mock NGFW instance for testing get_context."""
 
     management_ip: str = "10.1.1.50"
-    hostname: str = "ngfw-user-1"
     sls_region: str = "us"
-    auth_key: str | None = None
 
 
-class TestNGFWProvisionPlanSteps:
-    """Test NGFWProvisionPlan step definitions."""
+class TestNGFWProvisionPlanStructure:
+    """Test NGFWProvisionPlan step definitions and verification."""
 
-    def test_has_expected_steps(self):
-        """NGFWProvisionPlan should have 5 steps."""
+    def test_plan_structure(self):
+        """Plan should have 8 steps with proper attributes."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
-        assert len(plan.steps) >= 5
+
+        # Should have 8 steps (interface + zone + delete allow-all + logging +
+        # log-profile + security-profiles + download content + install content)
+        assert len(plan.steps) == 8
+
+        # All steps must have required attributes
+        for step in plan.steps:
+            assert step.name, "Step must have a name"
+            assert step.script or step.stdin_input, f"Step {step.name} must have content"
+            assert step.timeout_seconds > 0, f"Step {step.name} must have positive timeout"
+
+        # NGFW verification is handled by poll_for_serial_and_cert() in main.py,
+        # not via a verify_step (serial + cert polling happens after plan completes)
+        assert plan.verify_step is None
 
     def test_steps_in_correct_order(self):
-        """Steps must be in correct order: SSH wait, cert, logging, profile, policy."""
+        """Steps must be in correct dependency order."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
         step_names = [s.name for s in plan.steps]
 
-        # SSH wait must be first
-        assert step_names[0] == "wait_ssh_ready"
-        # Device cert should be early
-        assert "device_cert" in step_names[1]
-        # Cloud logging before profile
+        # Interface config must come first
+        interface_idx = next(i for i, n in enumerate(step_names) if "data_interface" in n)
+        assert interface_idx == 0
+
+        # Zone creation must come after interface config
+        zone_idx = next(i for i, n in enumerate(step_names) if "zone" in n)
+        assert zone_idx > interface_idx
+
+        # Delete allow-all must come after zone creation
+        delete_allow_all_idx = next(i for i, n in enumerate(step_names) if "allow_all" in n)
+        assert delete_allow_all_idx > zone_idx
+
+        # Cloud logging must come after delete allow-all
         cloud_logging_idx = next(i for i, n in enumerate(step_names) if "cloud_logging" in n)
-        profile_idx = next(i for i, n in enumerate(step_names) if "log_forwarding" in n)
-        assert cloud_logging_idx < profile_idx
+        assert cloud_logging_idx > delete_allow_all_idx
 
-    def test_ssh_wait_step_has_long_timeout(self):
-        """SSH wait step needs ~15 min timeout for VM-Series boot."""
-        from plans.ngfw_provision import NGFWProvisionPlan
+        # Log forwarding profile must come after cloud logging
+        log_profile_idx = next(i for i, n in enumerate(step_names) if "log_forwarding" in n)
+        assert log_profile_idx > cloud_logging_idx
 
-        plan = NGFWProvisionPlan()
-        ssh_step = next(s for s in plan.steps if s.name == "wait_ssh_ready")
-        # At least 10 minutes (600 seconds) for VM-Series boot
-        assert ssh_step.timeout_seconds >= 600
-
-    def test_all_steps_have_names(self):
-        """All steps must have names for logging and debugging."""
-        from plans.ngfw_provision import NGFWProvisionPlan
-
-        plan = NGFWProvisionPlan()
-        for step in plan.steps:
-            assert step.name, "Step must have a name"
-
-    def test_all_steps_have_scripts(self):
-        """All steps must have script content."""
-        from plans.ngfw_provision import NGFWProvisionPlan
-
-        plan = NGFWProvisionPlan()
-        for step in plan.steps:
-            assert step.script, f"Step {step.name} must have a script"
-
-    def test_all_steps_have_timeouts(self):
-        """All steps must have positive timeouts."""
-        from plans.ngfw_provision import NGFWProvisionPlan
-
-        plan = NGFWProvisionPlan()
-        for step in plan.steps:
-            assert step.timeout_seconds is not None, f"Step {step.name} missing timeout"
-            assert step.timeout_seconds > 0, f"Step {step.name} must have positive timeout"
-
-
-class TestNGFWProvisionPlanVerification:
-    """Test NGFWProvisionPlan verification step."""
-
-    def test_has_verification_step(self):
-        """NGFWProvisionPlan should have a verification step."""
-        from plans.ngfw_provision import NGFWProvisionPlan
-
-        plan = NGFWProvisionPlan()
-        assert plan.verify_step is not None
-
-    def test_verification_step_is_marked_as_verification(self):
-        """Verification step should have is_verification=True."""
-        from plans.ngfw_provision import NGFWProvisionPlan
-
-        plan = NGFWProvisionPlan()
-        assert plan.verify_step.is_verification is True
+        # Security profiles must come last
+        security_profiles_idx = next(i for i, n in enumerate(step_names) if "security_profiles" in n)
+        assert security_profiles_idx > log_profile_idx
 
 
 class TestNGFWProvisionPlanContext:
     """Test NGFWProvisionPlan.get_context method."""
 
-    def test_get_context_returns_management_ip(self):
-        """get_context should return management_ip."""
+    def test_get_context_returns_required_fields(self):
+        """get_context should return management_ip and sls_region."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
-        instance = MockNGFWInstance(management_ip="10.1.1.100")
+        instance = MockNGFWInstance(management_ip="10.1.1.100", sls_region="americas")
         context = plan.get_context(instance)
 
-        assert "management_ip" in context
         assert context["management_ip"] == "10.1.1.100"
-
-    def test_get_context_returns_hostname(self):
-        """get_context should return hostname."""
-        from plans.ngfw_provision import NGFWProvisionPlan
-
-        plan = NGFWProvisionPlan()
-        instance = MockNGFWInstance(hostname="ngfw-user-42")
-        context = plan.get_context(instance)
-
-        assert "hostname" in context
-        assert context["hostname"] == "ngfw-user-42"
-
-    def test_get_context_returns_sls_region(self):
-        """get_context should return sls_region for Strata Logging Service."""
-        from plans.ngfw_provision import NGFWProvisionPlan
-
-        plan = NGFWProvisionPlan()
-        instance = MockNGFWInstance(sls_region="americas")
-        context = plan.get_context(instance)
-
-        assert "sls_region" in context
         assert context["sls_region"] == "americas"
 
     def test_get_context_missing_management_ip_raises(self):
@@ -151,18 +114,17 @@ class TestNGFWProvisionPlanContext:
 
 
 class TestNGFWProvisionPlanScripts:
-    """Test NGFWProvisionPlan script content."""
+    """Test NGFWProvisionPlan script/stdin_input content."""
 
-    def test_cloud_logging_script_enables_sls(self):
-        """Cloud logging script should enable Strata Logging Service."""
+    def test_cloud_logging_stdin_enables_sls(self):
+        """Cloud logging stdin_input should enable Strata Logging Service."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
         logging_step = next(s for s in plan.steps if "cloud_logging" in s.name)
 
-        # Script should contain the validated PAN-OS CLI command
-        assert "logging-service-forwarding" in logging_step.script
-        assert "enable yes" in logging_step.script
+        assert "logging-service-forwarding" in logging_step.stdin_input
+        assert "enable yes" in logging_step.stdin_input
 
     def test_log_forwarding_profile_creates_xdr_forward(self):
         """Log forwarding profile step should create XDR-Forward profile."""
@@ -171,56 +133,73 @@ class TestNGFWProvisionPlanScripts:
         plan = NGFWProvisionPlan()
         profile_step = next(s for s in plan.steps if "log_forwarding" in s.name)
 
-        # Script should create the XDR-Forward profile
-        assert "XDR-Forward" in profile_step.script
-        assert "log-settings" in profile_step.script
+        assert "XDR-Forward" in profile_step.stdin_input
+        assert "log-settings" in profile_step.stdin_input
+        # Must include all log types for comprehensive cyber range visibility
+        assert "log-type traffic" in profile_step.stdin_input
+        assert "log-type threat" in profile_step.stdin_input
+        assert "log-type url" in profile_step.stdin_input
+        assert "log-type wildfire" in profile_step.stdin_input
+        assert "log-type data" in profile_step.stdin_input
+        assert "log-type tunnel" in profile_step.stdin_input
+        assert "log-type auth" in profile_step.stdin_input
 
-    def test_security_policy_creates_allow_all_rule(self):
-        """Security policy step should create allow-all rule with logging."""
+    def test_shared_zone_creates_ranges_zone(self):
+        """Shared zone step should create 'ranges' zone with ethernet1/1."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
-        policy_step = next(s for s in plan.steps if "security_policy" in s.name)
+        zone_step = next(s for s in plan.steps if "zone" in s.name)
 
-        # Script should create security rule with logging
-        assert "rulebase security" in policy_step.script or "security rules" in policy_step.script
-        assert "allow" in policy_step.script.lower()
-        assert "log" in policy_step.script.lower()
+        assert "zone ranges" in zone_step.stdin_input
+        assert "ethernet1/1" in zone_step.stdin_input
 
-    def test_scripts_include_commit(self):
-        """Configuration scripts must include commit command."""
+    def test_data_interface_includes_virtual_router(self):
+        """Data interface step should assign ethernet1/1 to virtual router."""
+        from plans.ngfw_provision import NGFWProvisionPlan
+
+        plan = NGFWProvisionPlan()
+        interface_step = next(s for s in plan.steps if "data_interface" in s.name)
+
+        assert "virtual-router default" in interface_step.stdin_input
+        assert "ethernet1/1" in interface_step.stdin_input
+
+    def test_delete_allow_all_rule_removes_default_rule(self):
+        """Delete allow-all step should remove the default allow-all rule."""
+        from plans.ngfw_provision import NGFWProvisionPlan
+
+        plan = NGFWProvisionPlan()
+        delete_step = next(s for s in plan.steps if "allow_all" in s.name)
+
+        assert "delete rulebase security rules allow-all" in delete_step.stdin_input
+
+    def test_configure_steps_include_commit(self):
+        """Configuration steps using stdin_input must include commit command."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
 
-        # All config steps (not SSH wait) should have commit
-        config_steps = [s for s in plan.steps if s.name != "wait_ssh_ready" and "cert" not in s.name]
+        # Exclude content download/install steps - they're operational, not config
+        config_steps = [s for s in plan.steps if s.stdin_input and "content" not in s.name]
         for step in config_steps:
-            assert "commit" in step.script.lower(), f"Step {step.name} missing commit"
+            assert "commit" in step.stdin_input.lower(), f"Step {step.name} missing commit"
 
-
-class TestNGFWProvisionPlanInterface:
-    """Test NGFWProvisionPlan interface compliance."""
-
-    def test_has_steps_attribute(self):
-        """NGFWProvisionPlan should have steps attribute."""
+    def test_content_download_step_has_poll_for_job(self):
+        """Content download step should have poll_for_job enabled."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
-        assert hasattr(plan, "steps")
-        assert isinstance(plan.steps, list)
+        download_step = next(s for s in plan.steps if "download" in s.name)
 
-    def test_has_verify_step_attribute(self):
-        """NGFWProvisionPlan should have verify_step attribute."""
+        assert download_step.poll_for_job is True
+        assert "request content upgrade download" in download_step.stdin_input
+
+    def test_content_install_step_has_poll_for_job(self):
+        """Content install step should have poll_for_job enabled."""
         from plans.ngfw_provision import NGFWProvisionPlan
 
         plan = NGFWProvisionPlan()
-        assert hasattr(plan, "verify_step")
+        install_step = next(s for s in plan.steps if "install" in s.name)
 
-    def test_has_get_context_method(self):
-        """NGFWProvisionPlan should have get_context method."""
-        from plans.ngfw_provision import NGFWProvisionPlan
-
-        plan = NGFWProvisionPlan()
-        assert hasattr(plan, "get_context")
-        assert callable(plan.get_context)
+        assert install_step.poll_for_job is True
+        assert "request content upgrade install" in install_step.stdin_input

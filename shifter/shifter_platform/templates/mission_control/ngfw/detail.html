@@ -1,0 +1,428 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<style>
+    /* Back link */
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+        margin-bottom: 16px;
+    }
+
+    .back-link:hover {
+        color: var(--xdr-text);
+        text-decoration: none;
+    }
+
+    /* Status badges */
+    .status {
+        display: inline-flex;
+        align-items: center;
+        font-size: 13px;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+    }
+
+    .status-ready .status-dot,
+    .status-active .status-dot { background: #00d26a; }
+    .status-provisioning .status-dot,
+    .status-starting .status-dot,
+    .status-stopping .status-dot,
+    .status-configuring .status-dot,
+    .status-deprovisioning .status-dot { background: #faad14; animation: pulse 1.5s infinite; }
+    .status-awaiting_association .status-dot { background: #ff9500; animation: pulse 1.5s infinite; }
+    .status-stopped .status-dot { background: #707070; }
+    .status-failed .status-dot { background: #ff4d4f; }
+    .status-not_provisioned .status-dot { background: #484848; }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    /* Page header with actions */
+    .page-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 24px;
+    }
+
+    .page-header-content {
+        flex: 1;
+    }
+
+    .page-header-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .page-subtitle {
+        font-size: 14px;
+        color: var(--xdr-text-secondary);
+        margin: 8px 0 0;
+    }
+
+    /* Section cards */
+    .section-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+        margin: 0 0 16px;
+    }
+
+    /* Details grid */
+    .details-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+
+    .detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .detail-label {
+        font-size: 11px;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+
+    .detail-value {
+        font-size: 14px;
+        color: var(--xdr-text);
+    }
+
+    .detail-value.mono {
+        font-family: monospace;
+    }
+
+    .detail-value.placeholder {
+        color: var(--xdr-text-secondary);
+        font-style: italic;
+    }
+
+    .detail-value.success {
+        color: #00d26a;
+    }
+
+    .detail-value.warning {
+        color: #faad14;
+    }
+
+    .detail-value.error {
+        color: #ff4d4f;
+    }
+
+    /* Linked ranges table */
+    .ranges-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .ranges-table th,
+    .ranges-table td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--xdr-border);
+    }
+
+    .ranges-table th {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+
+    .ranges-table td {
+        font-size: 13px;
+        color: var(--xdr-text);
+    }
+
+    .ranges-table tbody tr:hover {
+        background: var(--xdr-hover);
+    }
+
+    /* Danger zone */
+    .danger-zone {
+        border-color: rgba(255, 77, 79, 0.3);
+    }
+
+    .danger-zone .card-title {
+        color: #ff4d4f;
+    }
+
+    /* Refresh button styling */
+    .ngfw-refresh-btn {
+        background: transparent !important;
+        border: none !important;
+        cursor: pointer;
+        color: var(--xdr-text-secondary);
+        transition: color 0.2s ease;
+    }
+
+    .ngfw-refresh-btn:hover {
+        color: var(--xdr-text);
+    }
+
+    .ngfw-refresh-btn svg {
+        display: block;
+        fill: currentColor;
+        stroke: currentColor;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{% url 'mission_control:ngfw_list' %}" class="back-link">
+    <span>&larr;</span> Back to NGFWs
+</a>
+
+<div class="page-header-row">
+    <div class="page-header-content">
+        <h1 class="page-title">{{ ngfw.name }}</h1>
+        <div class="page-subtitle">
+            <div class="status status-{{ ngfw.status }}">
+                <span class="status-dot"></span>
+                <span>{{ ngfw.get_status_display }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="page-header-actions">
+        <button class="xdr-button default-hover no-content has-icon tertiary-clear ngfw-refresh-btn"
+                data-ngfw-id="{{ ngfw.app_id }}"
+                aria-label="Refresh NGFW Status"
+                style="padding: 8px;">
+            <svg viewBox="0 0 20 22" xmlns="http://www.w3.org/2000/svg" width="20" height="22" style="display: block;">
+                <g fill="currentColor" fill-rule="evenodd">
+                    <path d="M7.22 18.973a.186.186 0 0 1-.057-.01 8.903 8.903 0 0 1-.54-.194.188.188 0 0 1 .138-.35c.169.068.343.131.518.188a.188.188 0 0 1-.058.366M1.57 13.192a.188.188 0 0 1-.179-.134 8.882 8.882 0 0 1-.207-.837.188.188 0 1 1 .368-.072c.053.269.12.538.198.801a.188.188 0 0 1-.18.242m.64 1.559a.187.187 0 0 1-.167-.1 8.897 8.897 0 0 1-.365-.78.188.188 0 0 1 .347-.143c.104.254.222.505.35.748a.188.188 0 0 1-.166.275m.928 1.407a.187.187 0 0 1-.146-.07 8.943 8.943 0 0 1-.509-.695.188.188 0 0 1 .313-.207c.151.23.315.453.488.667a.188.188 0 0 1-.146.305m1.18 1.203a.187.187 0 0 1-.12-.044 8.985 8.985 0 0 1-.633-.585.188.188 0 0 1 .268-.263c.192.196.396.385.606.56a.188.188 0 0 1-.12.332m1.388.955a.187.187 0 0 1-.09-.024 8.893 8.893 0 0 1-.734-.453.188.188 0 0 1 .213-.31c.226.156.462.302.702.435a.188.188 0 0 1-.09.352M14.704 3.416a.186.186 0 0 1-.104-.031 8.47 8.47 0 0 0-.468-.289.188.188 0 0 1 .186-.326c.165.095.33.196.49.302a.188.188 0 0 1-.104.344M16.146 4.612a.187.187 0 0 1-.134-.057 8.588 8.588 0 0 0-.604-.564.188.188 0 0 1 .243-.286c.218.185.43.383.63.588a.188.188 0 0 1-.135.319M17.2 5.928a.187.187 0 0 1-.157-.085 8.622 8.622 0 0 0-.485-.669.188.188 0 0 1 .293-.235c.178.224.349.458.505.698a.188.188 0 0 1-.156.29m.78 1.495a.188.188 0 0 1-.174-.117 8.541 8.541 0 0 0-.346-.75.188.188 0 0 1 .332-.174c.133.254.254.518.362.783a.188.188 0 0 1-.174.258m.43 1.397a.188.188 0 0 1-.182-.148 8.594 8.594 0 0 0-.15-.587.188.188 0 1 1 .359-.106c.06.201.112.407.157.613a.188.188 0 0 1-.183.228M9.94 6.315a4.217 4.217 0 0 0-4.211 4.215 4.217 4.217 0 0 0 4.21 4.214c2.322 0 4.211-1.89 4.211-4.214a4.217 4.217 0 0 0-4.21-4.215M4.595 10.53A5.352 5.352 0 0 1 9.939 5.18c2.947 0 5.344 2.4 5.344 5.349a5.352 5.352 0 0 1-5.344 5.347 5.352 5.352 0 0 1-5.343-5.347z"></path>
+                    <path stroke="currentColor" stroke-width=".5" d="M9.361 19.646a.281.281 0 0 1-.045-.559l.623-.097c4.644 0 8.422-3.782 8.422-8.43a.281.281 0 1 1 .563 0c0 4.951-4.018 8.98-8.962 8.993l-.556.09a.286.286 0 0 1-.045.003M1.001 9.642A8.97 8.97 0 0 1 3.9 3.905a8.959 8.959 0 0 1 6.04-2.336l1.127.031a.281.281 0 0 1-.005.563l-1.126-.031a8.395 8.395 0 0 0-5.658 2.19A8.409 8.409 0 0 0 1.56 9.699a.281.281 0 0 1-.28.253c-.183-.017-.295-.156-.28-.31z"></path>
+                    <path stroke="currentColor" stroke-width=".5" d="M10.345 20.885L8.81 19.349l1.535-1.535a.171.171 0 1 1 .242.242l-1.292 1.293 1.292 1.294a.172.172 0 0 1-.242.242zM10.093.33l1.535 1.536-1.535 1.536a.171.171 0 1 1-.243-.243l1.293-1.293L9.85.573a.171.171 0 0 1 .243-.243z"></path>
+                </g>
+            </svg>
+        </button>
+    </div>
+</div>
+
+<!-- Overview Section -->
+<div class="card">
+    <h2 class="section-title">Overview</h2>
+    <div class="details-grid">
+        <div class="detail-item">
+            <span class="detail-label">Name</span>
+            <span class="detail-value">{{ ngfw.name }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Status</span>
+            <span class="detail-value">{{ ngfw.get_status_display }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Serial Number</span>
+            {% if ngfw.serial_number %}
+            <span class="detail-value mono">{{ ngfw.serial_number }}</span>
+            {% else %}
+            <span class="detail-value placeholder">Pending provisioning</span>
+            {% endif %}
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Created</span>
+            <span class="detail-value">{{ ngfw.created_at|date:"M d, Y H:i" }}</span>
+        </div>
+    </div>
+</div>
+
+{% if ngfw.status == 'awaiting_association' or ngfw.status == 'stopped' and not ngfw.serial_number %}
+<!-- Complete Setup Section - shown when user needs to finish setup -->
+<div class="card" style="border-color: #ff9500;">
+    <h2 class="section-title" style="color: #ff9500;">Action Required</h2>
+    <p style="color: var(--xdr-text-secondary); margin: 0 0 16px; font-size: 13px;">
+        Your NGFW infrastructure is ready. Complete these steps to finish setup:
+    </p>
+
+    <div style="margin-bottom: 20px;">
+        <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+            <span style="background: #ff9500; color: #000; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;">1</span>
+            <div>
+                <strong>Associate Device in Strata Cloud Manager</strong>
+                <p style="margin: 4px 0 0; color: var(--xdr-text-secondary); font-size: 13px;">
+                    Go to <strong>Strata Cloud Manager &rarr; Configuration &rarr; Device Associations</strong> and click <strong>Add Device</strong>.
+                    {% if ngfw.serial_number %}
+                    <br>Serial Number: <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px;">{{ ngfw.serial_number }}</code>
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+            <span style="background: #ff9500; color: #000; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;">2</span>
+            <div>
+                <strong>Connect to XDR/XSIAM</strong>
+                <p style="margin: 4px 0 0; color: var(--xdr-text-secondary); font-size: 13px;">
+                    Go to <strong>XDR/XSIAM &rarr; Settings &rarr; NGFW &rarr; Add New Instance</strong> and connect the firewall.
+                    If the firewall is not in the dropdown, use the sync button to refresh.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <p style="color: var(--xdr-text-secondary); margin: 0 0 12px; font-size: 13px;">
+        Once you've completed both steps above, click the button below to finish configuration:
+    </p>
+
+    <button type="button" class="btn btn-primary" id="detail-complete-setup-btn" data-app-id="{{ ngfw.app_id }}">
+        Complete Setup
+    </button>
+
+    <p style="color: var(--xdr-text-tertiary); margin: 12px 0 0; font-size: 12px;">
+        This will configure logging service and may take up to 15 minutes.
+    </p>
+</div>
+{% endif %}
+
+<!-- Linked Ranges -->
+<div class="card">
+    <h2 class="section-title">Linked Ranges</h2>
+    {% if linked_ranges %}
+    <table class="ranges-table">
+        <thead>
+            <tr>
+                <th>Range ID</th>
+                <th>Status</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for range in linked_ranges %}
+            <tr>
+                <td>{{ range.id }}</td>
+                <td>
+                    <div class="status status-{{ range.status }}">
+                        <span class="status-dot"></span>
+                        <span>{{ range.get_status_display }}</span>
+                    </div>
+                </td>
+                <td>{{ range.created_at|date:"M d, Y H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--xdr-text-secondary); margin: 0;">
+        No ranges are currently using this NGFW.
+    </p>
+    {% endif %}
+</div>
+
+<!-- Danger Zone -->
+<div class="card danger-zone">
+    <h2 class="card-title">Danger Zone</h2>
+    <p style="color: var(--xdr-text-secondary); margin: 0 0 16px; font-size: 13px;">
+        Deprovisioning will destroy this NGFW and deactivate its license. Credits will be returned to your pool.
+        {% if linked_ranges %}
+        <strong style="color: #ff4d4f;">Warning: {{ linked_ranges|length }} range(s) are currently using this NGFW.</strong>
+        {% endif %}
+    </p>
+    <a href="{% url 'mission_control:ngfw_deprovision' ngfw.app_id %}" class="btn btn-danger btn-small">
+        Deprovision NGFW
+    </a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Refresh button handler
+    const refreshBtn = document.querySelector('.ngfw-refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', async function() {
+            const icon = this.querySelector('svg');
+
+            // Spin animation
+            icon.style.transition = 'transform 0.5s ease';
+            icon.style.transform = 'rotate(360deg)';
+            this.disabled = true;
+
+            try {
+                await fetch('{% url "mission_control:api_ngfw_list" %}');
+                // Reload page to show updated status
+                window.location.reload();
+            } catch (err) {
+                console.error('Refresh failed:', err);
+            } finally {
+                setTimeout(() => {
+                    icon.style.transform = 'rotate(0deg)';
+                    this.disabled = false;
+                }, 500);
+            }
+        });
+    }
+
+    // Complete setup button handler
+    const completeSetupBtn = document.getElementById('detail-complete-setup-btn');
+    if (completeSetupBtn) {
+        completeSetupBtn.addEventListener('click', async function() {
+            const appId = this.dataset.appId;
+            this.disabled = true;
+            this.textContent = 'Completing Setup...';
+
+            try {
+                const response = await fetch(`/mission-control/api/ngfw/${appId}/complete-setup/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    this.disabled = false;
+                    this.textContent = 'Complete Setup';
+                    return;
+                }
+
+                // Update the UI immediately to show configuring state
+                // Update status badge in header
+                const statusContainer = document.querySelector('.page-subtitle .status');
+                if (statusContainer) {
+                    statusContainer.className = 'status status-configuring';
+                    statusContainer.querySelector('span:last-child').textContent = 'Configuring';
+                }
+
+                // Update status in overview card
+                const overviewStatus = document.querySelector('.details-grid .detail-item:nth-child(2) .detail-value');
+                if (overviewStatus) {
+                    overviewStatus.textContent = 'Configuring';
+                }
+
+                // Hide the action required card
+                const actionCard = this.closest('.card');
+                if (actionCard) {
+                    actionCard.style.display = 'none';
+                }
+
+            } catch (err) {
+                console.error('Complete setup error:', err);
+                alert('An error occurred. Please try again.');
+                this.disabled = false;
+                this.textContent = 'Complete Setup';
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

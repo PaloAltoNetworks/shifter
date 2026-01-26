@@ -1,9 +1,9 @@
 """Tests for CMS scenario schema Pydantic models.
 
 Tests the Pydantic models used to validate scenario templates:
-- AgentRequirements: agent OS constraint and required flag
 - DCConfig: domain controller configuration
 - InstanceConfig: individual instance definition
+- SubnetConfig: subnet definition
 - ScenarioTemplate: complete scenario template
 """
 
@@ -11,66 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 
-class TestAgentRequirements:
-    """Tests for AgentRequirements Pydantic model."""
-
-    def test_import_agent_requirements(self):
-        """AgentRequirements can be imported from cms.scenarios.schema."""
-        from cms.scenarios.schema import AgentRequirements
-
-        assert AgentRequirements is not None
-
-    def test_create_with_required_true(self):
-        """AgentRequirements can be created with required=True."""
-        from cms.scenarios.schema import AgentRequirements
-
-        req = AgentRequirements(required=True)
-        assert req.required is True
-
-    def test_create_with_required_false(self):
-        """AgentRequirements can be created with required=False."""
-        from cms.scenarios.schema import AgentRequirements
-
-        req = AgentRequirements(required=False)
-        assert req.required is False
-
-    def test_os_defaults_to_none(self):
-        """AgentRequirements os defaults to None (any OS)."""
-        from cms.scenarios.schema import AgentRequirements
-
-        req = AgentRequirements(required=True)
-        assert req.os is None
-
-    def test_os_can_be_set_to_windows(self):
-        """AgentRequirements os can be set to 'windows'."""
-        from cms.scenarios.schema import AgentRequirements
-
-        req = AgentRequirements(required=True, os="windows")
-        assert req.os == "windows"
-
-    def test_os_can_be_set_to_linux(self):
-        """AgentRequirements os can be set to 'linux'."""
-        from cms.scenarios.schema import AgentRequirements
-
-        req = AgentRequirements(required=True, os="linux")
-        assert req.os == "linux"
-
-    def test_required_is_required_field(self):
-        """AgentRequirements requires 'required' field."""
-        from cms.scenarios.schema import AgentRequirements
-
-        with pytest.raises(ValidationError):
-            AgentRequirements()
-
-
 class TestDCConfig:
     """Tests for DCConfig Pydantic model."""
-
-    def test_import_dc_config(self):
-        """DCConfig can be imported from cms.scenarios.schema."""
-        from cms.scenarios.schema import DCConfig
-
-        assert DCConfig is not None
 
     def test_create_with_domain_name_and_netbios(self):
         """DCConfig can be created with domain_name and netbios_name."""
@@ -98,17 +40,12 @@ class TestDCConfig:
 class TestInstanceConfig:
     """Tests for InstanceConfig Pydantic model."""
 
-    def test_import_instance_config(self):
-        """InstanceConfig can be imported from cms.scenarios.schema."""
-        from cms.scenarios.schema import InstanceConfig
-
-        assert InstanceConfig is not None
-
     def test_create_attacker_instance(self):
         """InstanceConfig can be created for attacker role."""
         from cms.scenarios.schema import InstanceConfig
 
-        instance = InstanceConfig(role="attacker", os_type="kali")
+        instance = InstanceConfig(name="Attacker", role="attacker", os_type="kali")
+        assert instance.name == "Attacker"
         assert instance.role == "attacker"
         assert instance.os_type == "kali"
 
@@ -116,7 +53,7 @@ class TestInstanceConfig:
         """InstanceConfig can be created for victim role."""
         from cms.scenarios.schema import InstanceConfig
 
-        instance = InstanceConfig(role="victim", os_type="windows")
+        instance = InstanceConfig(name="Victim", role="victim", os_type="windows")
         assert instance.role == "victim"
         assert instance.os_type == "windows"
 
@@ -126,6 +63,7 @@ class TestInstanceConfig:
 
         dc_config = DCConfig(domain_name="lab.local", netbios_name="LAB")
         instance = InstanceConfig(
+            name="Domain Controller",
             role="dc",
             os_type="windows",
             domain_controller=True,
@@ -135,180 +73,210 @@ class TestInstanceConfig:
         assert instance.domain_controller is True
         assert instance.dc_config.domain_name == "lab.local"
 
+    def test_name_is_required(self):
+        """InstanceConfig requires name field."""
+        from cms.scenarios.schema import InstanceConfig
+
+        with pytest.raises(ValidationError):
+            InstanceConfig(role="attacker", os_type="kali")
+
     def test_role_is_required(self):
         """InstanceConfig requires role field."""
         from cms.scenarios.schema import InstanceConfig
 
         with pytest.raises(ValidationError):
-            InstanceConfig(os_type="kali")
+            InstanceConfig(name="Test", os_type="kali")
 
     def test_os_type_is_required(self):
         """InstanceConfig requires os_type field."""
         from cms.scenarios.schema import InstanceConfig
 
         with pytest.raises(ValidationError):
-            InstanceConfig(role="attacker")
+            InstanceConfig(name="Test", role="attacker")
 
-    def test_agent_slot_defaults_to_none(self):
-        """InstanceConfig agent_slot defaults to None."""
+    def test_xdr_agent_defaults_to_false(self):
+        """InstanceConfig xdr_agent defaults to False."""
         from cms.scenarios.schema import InstanceConfig
 
-        instance = InstanceConfig(role="attacker", os_type="kali")
-        assert instance.agent_slot is None
+        instance = InstanceConfig(name="Test", role="attacker", os_type="kali")
+        assert instance.xdr_agent is False
 
-    def test_agent_slot_can_be_primary(self):
-        """InstanceConfig agent_slot can be 'primary'."""
+    def test_xdr_agent_can_be_true(self):
+        """InstanceConfig xdr_agent can be set to True."""
         from cms.scenarios.schema import InstanceConfig
 
-        instance = InstanceConfig(role="victim", os_type="from_agent", agent_slot="primary")
-        assert instance.agent_slot == "primary"
-
-    def test_agent_slot_can_be_secondary(self):
-        """InstanceConfig agent_slot can be 'secondary'."""
-        from cms.scenarios.schema import InstanceConfig
-
-        instance = InstanceConfig(role="victim", os_type="from_agent", agent_slot="secondary")
-        assert instance.agent_slot == "secondary"
+        instance = InstanceConfig(name="Victim", role="victim", os_type="windows", xdr_agent=True)
+        assert instance.xdr_agent is True
 
     def test_domain_controller_defaults_to_false(self):
         """InstanceConfig domain_controller defaults to False."""
         from cms.scenarios.schema import InstanceConfig
 
-        instance = InstanceConfig(role="victim", os_type="windows")
+        instance = InstanceConfig(name="Test", role="victim", os_type="windows")
         assert instance.domain_controller is False
 
     def test_join_domain_defaults_to_false(self):
         """InstanceConfig join_domain defaults to False."""
         from cms.scenarios.schema import InstanceConfig
 
-        instance = InstanceConfig(role="victim", os_type="windows")
+        instance = InstanceConfig(name="Test", role="victim", os_type="windows")
         assert instance.join_domain is False
 
     def test_dc_config_defaults_to_none(self):
         """InstanceConfig dc_config defaults to None."""
         from cms.scenarios.schema import InstanceConfig
 
-        instance = InstanceConfig(role="victim", os_type="windows")
+        instance = InstanceConfig(name="Test", role="victim", os_type="windows")
         assert instance.dc_config is None
 
     def test_os_type_from_agent(self):
         """InstanceConfig os_type can be 'from_agent'."""
         from cms.scenarios.schema import InstanceConfig
 
-        instance = InstanceConfig(role="victim", os_type="from_agent", agent_slot="primary")
+        instance = InstanceConfig(name="Victim", role="victim", os_type="from_agent", xdr_agent=True)
         assert instance.os_type == "from_agent"
+
+
+class TestSubnetConfig:
+    """Tests for SubnetConfig Pydantic model."""
+
+    def test_create_basic_subnet(self):
+        """SubnetConfig can be created with name and instances."""
+        from cms.scenarios.schema import SubnetConfig
+
+        subnet = SubnetConfig(name="core", instances=["Attacker", "Victim"])
+        assert subnet.name == "core"
+        assert subnet.instances == ["Attacker", "Victim"]
+        assert subnet.connected_to == []
+
+    def test_create_subnet_with_connections(self):
+        """SubnetConfig can specify connected_to subnets."""
+        from cms.scenarios.schema import SubnetConfig
+
+        subnet = SubnetConfig(
+            name="dc_network",
+            instances=["DC"],
+            connected_to=["workstation_network"],
+        )
+        assert subnet.connected_to == ["workstation_network"]
+
+    def test_instances_cannot_be_empty(self):
+        """SubnetConfig instances must not be empty."""
+        from cms.scenarios.schema import SubnetConfig
+
+        with pytest.raises(ValidationError):
+            SubnetConfig(name="empty", instances=[])
 
 
 class TestScenarioTemplate:
     """Tests for ScenarioTemplate Pydantic model."""
 
-    def test_import_scenario_template(self):
-        """ScenarioTemplate can be imported from cms.scenarios.schema."""
-        from cms.scenarios.schema import ScenarioTemplate
-
-        assert ScenarioTemplate is not None
-
     def test_create_basic_scenario(self):
         """ScenarioTemplate can be created with basic fields."""
-        from cms.scenarios.schema import AgentRequirements, InstanceConfig, ScenarioTemplate
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
 
         template = ScenarioTemplate(
             id="basic",
             name="Basic Range",
             description="A basic attacker-victim range",
-            requirements=AgentRequirements(required=True),
             instances=[
-                InstanceConfig(role="attacker", os_type="kali"),
-                InstanceConfig(role="victim", os_type="from_agent", agent_slot="primary"),
+                InstanceConfig(name="Attacker", role="attacker", os_type="kali"),
+                InstanceConfig(name="Victim", role="victim", os_type="from_agent", xdr_agent=True),
             ],
         )
         assert template.id == "basic"
         assert template.name == "Basic Range"
         assert len(template.instances) == 2
 
+    def test_enabled_defaults_to_true(self):
+        """ScenarioTemplate enabled defaults to True."""
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
+        )
+        assert template.enabled is True
+
+    def test_ngfw_defaults_to_false(self):
+        """ScenarioTemplate ngfw defaults to False."""
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
+        )
+        assert template.ngfw is False
+
     def test_id_is_required(self):
         """ScenarioTemplate requires id field."""
-        from cms.scenarios.schema import AgentRequirements, InstanceConfig, ScenarioTemplate
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
 
         with pytest.raises(ValidationError):
             ScenarioTemplate(
                 name="Test",
                 description="Test",
-                requirements=AgentRequirements(required=True),
-                instances=[InstanceConfig(role="attacker", os_type="kali")],
+                instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
             )
 
     def test_name_is_required(self):
         """ScenarioTemplate requires name field."""
-        from cms.scenarios.schema import AgentRequirements, InstanceConfig, ScenarioTemplate
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
 
         with pytest.raises(ValidationError):
             ScenarioTemplate(
                 id="test",
                 description="Test",
-                requirements=AgentRequirements(required=True),
-                instances=[InstanceConfig(role="attacker", os_type="kali")],
+                instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
             )
 
     def test_description_is_required(self):
         """ScenarioTemplate requires description field."""
-        from cms.scenarios.schema import AgentRequirements, InstanceConfig, ScenarioTemplate
-
-        with pytest.raises(ValidationError):
-            ScenarioTemplate(
-                id="test",
-                name="Test",
-                requirements=AgentRequirements(required=True),
-                instances=[InstanceConfig(role="attacker", os_type="kali")],
-            )
-
-    def test_requirements_is_required(self):
-        """ScenarioTemplate requires requirements field."""
         from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
 
         with pytest.raises(ValidationError):
             ScenarioTemplate(
                 id="test",
                 name="Test",
-                description="Test",
-                instances=[InstanceConfig(role="attacker", os_type="kali")],
+                instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
             )
 
     def test_instances_is_required(self):
         """ScenarioTemplate requires instances field."""
-        from cms.scenarios.schema import AgentRequirements, ScenarioTemplate
+        from cms.scenarios.schema import ScenarioTemplate
 
         with pytest.raises(ValidationError):
             ScenarioTemplate(
                 id="test",
                 name="Test",
                 description="Test",
-                requirements=AgentRequirements(required=True),
             )
 
     def test_instances_must_not_be_empty(self):
         """ScenarioTemplate instances must not be empty."""
-        from cms.scenarios.schema import AgentRequirements, ScenarioTemplate
+        from cms.scenarios.schema import ScenarioTemplate
 
         with pytest.raises(ValidationError):
             ScenarioTemplate(
                 id="test",
                 name="Test",
                 description="Test",
-                requirements=AgentRequirements(required=True),
                 instances=[],
             )
 
     def test_to_dict_returns_dict(self):
         """ScenarioTemplate.model_dump() returns a dictionary."""
-        from cms.scenarios.schema import AgentRequirements, InstanceConfig, ScenarioTemplate
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
 
         template = ScenarioTemplate(
             id="basic",
             name="Basic Range",
             description="A basic range",
-            requirements=AgentRequirements(required=True),
-            instances=[InstanceConfig(role="attacker", os_type="kali")],
+            instances=[InstanceConfig(name="Attacker", role="attacker", os_type="kali")],
         )
         result = template.model_dump()
         assert isinstance(result, dict)
@@ -318,7 +286,6 @@ class TestScenarioTemplate:
     def test_ad_attack_lab_scenario(self):
         """ScenarioTemplate can represent AD attack lab with DC."""
         from cms.scenarios.schema import (
-            AgentRequirements,
             DCConfig,
             InstanceConfig,
             ScenarioTemplate,
@@ -328,25 +295,25 @@ class TestScenarioTemplate:
             id="ad_attack_lab",
             name="AD Attack Lab",
             description="Active Directory attack lab with DC",
-            requirements=AgentRequirements(required=True, os="windows"),
             instances=[
-                InstanceConfig(role="attacker", os_type="kali"),
+                InstanceConfig(name="Attacker", role="attacker", os_type="kali"),
                 InstanceConfig(
+                    name="Domain Controller",
                     role="dc",
                     os_type="windows",
                     domain_controller=True,
                     dc_config=DCConfig(domain_name="lab.local", netbios_name="LAB"),
                 ),
                 InstanceConfig(
+                    name="Workstation",
                     role="victim",
                     os_type="from_agent",
-                    agent_slot="primary",
+                    xdr_agent=True,
                     join_domain=True,
                 ),
             ],
         )
         assert template.id == "ad_attack_lab"
-        assert template.requirements.os == "windows"
         assert len(template.instances) == 3
 
         # Find DC instance
@@ -357,4 +324,103 @@ class TestScenarioTemplate:
         # Find victim instance
         victim = next(i for i in template.instances if i.role == "victim")
         assert victim.join_domain is True
-        assert victim.agent_slot == "primary"
+        assert victim.xdr_agent is True
+
+    def test_requires_agent_returns_true_when_xdr_agent_present(self):
+        """requires_agent() returns True if any instance has xdr_agent=True."""
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[
+                InstanceConfig(name="Attacker", role="attacker", os_type="kali"),
+                InstanceConfig(name="Victim", role="victim", os_type="windows", xdr_agent=True),
+            ],
+        )
+        assert template.requires_agent() is True
+
+    def test_requires_agent_returns_false_when_no_xdr_agent(self):
+        """requires_agent() returns False if no instance has xdr_agent=True."""
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[
+                InstanceConfig(name="Attacker", role="attacker", os_type="kali"),
+            ],
+        )
+        assert template.requires_agent() is False
+
+    def test_get_agent_requirements_from_agent_only(self):
+        """get_agent_requirements() returns has_from_agent=True for from_agent instances."""
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[
+                InstanceConfig(name="Attacker", role="attacker", os_type="kali"),
+                InstanceConfig(name="Victim", role="victim", os_type="from_agent", xdr_agent=True),
+            ],
+        )
+        req = template.get_agent_requirements()
+        assert req["has_from_agent"] is True
+        assert req["requires_windows"] is False
+        assert req["requires_linux"] is False
+
+    def test_get_agent_requirements_windows_required(self):
+        """get_agent_requirements() returns requires_windows=True for Windows instances with xdr_agent."""
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[
+                InstanceConfig(name="Victim", role="victim", os_type="windows", xdr_agent=True),
+            ],
+        )
+        req = template.get_agent_requirements()
+        assert req["requires_windows"] is True
+        assert req["requires_linux"] is False
+        assert req["has_from_agent"] is False
+
+    def test_get_agent_requirements_linux_required(self):
+        """get_agent_requirements() returns requires_linux=True for Linux instances with xdr_agent."""
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[
+                InstanceConfig(name="Victim", role="victim", os_type="ubuntu", xdr_agent=True),
+            ],
+        )
+        req = template.get_agent_requirements()
+        assert req["requires_windows"] is False
+        assert req["requires_linux"] is True
+        assert req["has_from_agent"] is False
+
+    def test_get_agent_requirements_multi_os(self):
+        """get_agent_requirements() returns both requires_windows and requires_linux when both needed."""
+        from cms.scenarios.schema import InstanceConfig, ScenarioTemplate
+
+        template = ScenarioTemplate(
+            id="test",
+            name="Test",
+            description="Test",
+            instances=[
+                InstanceConfig(name="Windows Victim", role="victim", os_type="windows", xdr_agent=True),
+                InstanceConfig(name="Linux Server", role="victim", os_type="ubuntu", xdr_agent=True),
+            ],
+        )
+        req = template.get_agent_requirements()
+        assert req["requires_windows"] is True
+        assert req["requires_linux"] is True
+        assert req["has_from_agent"] is False

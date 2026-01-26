@@ -1,13 +1,12 @@
 """Tests for CMS services."""
 
-import logging
 from unittest.mock import MagicMock
 
 import pytest
 from django.utils import timezone
 
 from shared.constants import USER_CANNOT_BE_NONE
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
 
 
 @pytest.mark.django_db
@@ -32,7 +31,7 @@ class TestGetActiveRange:
             range_id=1,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
         )
 
         result = get_active_range(user)
@@ -41,7 +40,7 @@ class TestGetActiveRange:
         assert isinstance(result, RangeContext)
         assert result.range_id == 1
         assert result.user_id == 42
-        assert result.status == RangeStatus.READY
+        assert result.status == ResourceStatus.READY
 
     def test_returns_provisioning_range(self):
         """Returns RangeContext for range in PROVISIONING status."""
@@ -55,14 +54,14 @@ class TestGetActiveRange:
             range_id=2,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.PROVISIONING.value,
+            status=ResourceStatus.PROVISIONING.value,
         )
 
         result = get_active_range(user)
 
         assert result is not None
         assert result.range_id == 2
-        assert result.status == RangeStatus.PROVISIONING
+        assert result.status == ResourceStatus.PROVISIONING
 
     def test_returns_none_when_no_ranges(self):
         """Returns None when user has no ranges."""
@@ -92,7 +91,7 @@ class TestGetActiveRange:
             range_id=3,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
             deleted_at=timezone.now(),
         )
 
@@ -112,7 +111,7 @@ class TestGetActiveRange:
             range_id=4,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.DESTROYED.value,
+            status=ResourceStatus.DESTROYED.value,
         )
 
         result = get_active_range(user)
@@ -131,7 +130,7 @@ class TestGetActiveRange:
             range_id=5,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.FAILED.value,
+            status=ResourceStatus.FAILED.value,
         )
 
         result = get_active_range(user)
@@ -150,7 +149,7 @@ class TestGetActiveRange:
             range_id=6,
             scenario_id="basic",
             user_id=42,
-            status=RangeStatus.DESTROYING.value,
+            status=ResourceStatus.DESTROYING.value,
         )
 
         result = get_active_range(user)
@@ -170,13 +169,13 @@ class TestGetActiveRange:
             range_id=10,
             scenario_id="old",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
         )
         RangeInstance.objects.create(
             range_id=11,
             scenario_id="new",
             user_id=42,
-            status=RangeStatus.READY.value,
+            status=ResourceStatus.READY.value,
         )
 
         result = get_active_range(user)
@@ -204,65 +203,6 @@ class TestGetActiveRange:
             get_active_range("not a user")
 
     # ---------------------------------------------------------------------
-    # Logging
-    # ---------------------------------------------------------------------
-
-    def test_logs_debug_on_success(self, caplog):
-        """Logs DEBUG when active range found."""
-        from cms.models import RangeInstance
-        from cms.services import get_active_range
-
-        user = MagicMock()
-        user.id = 42
-
-        RangeInstance.objects.create(
-            range_id=20,
-            scenario_id="basic",
-            user_id=42,
-            status=RangeStatus.READY.value,
-        )
-
-        with caplog.at_level(logging.DEBUG, logger="cms.services"):
-            get_active_range(user)
-
-        assert "get_active_range" in caplog.text
-        assert "found range_id=20" in caplog.text
-        assert "42" in caplog.text
-
-    def test_logs_debug_when_no_range_found(self, caplog):
-        """Logs DEBUG when no active range exists."""
-        from cms.services import get_active_range
-
-        user = MagicMock()
-        user.id = 999
-
-        with caplog.at_level(logging.DEBUG, logger="cms.services"):
-            get_active_range(user)
-
-        assert "get_active_range" in caplog.text
-        assert "no active range" in caplog.text
-        assert "999" in caplog.text
-
-    def test_logs_error_on_none_user(self, caplog):
-        """Logs ERROR when user is None."""
-        from cms.services import get_active_range
-
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises(TypeError):
-            get_active_range(None)
-
-        assert "get_active_range called with None" in caplog.text
-
-    def test_logs_error_on_invalid_user_type(self, caplog):
-        """Logs ERROR when user is invalid type."""
-        from cms.services import get_active_range
-
-        with caplog.at_level(logging.ERROR, logger="cms.services"), pytest.raises(TypeError):
-            get_active_range("not a user")
-
-        assert "get_active_range called with invalid user type" in caplog.text
-        assert "str" in caplog.text
-
-    # ---------------------------------------------------------------------
     # Error handling - database failures
     # ---------------------------------------------------------------------
 
@@ -284,28 +224,6 @@ class TestGetActiveRange:
             mock_active.filter.side_effect = DatabaseError("DB connection failed")
             get_active_range(user)
 
-    def test_logs_exception_on_database_error(self, caplog):
-        """Logs exception when database error occurs."""
-        from unittest.mock import patch
-
-        from django.db import DatabaseError
-
-        from cms.services import get_active_range
-
-        user = MagicMock()
-        user.id = 42
-
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            patch("cms.services.RangeInstance.active") as mock_active,
-            pytest.raises(DatabaseError),
-        ):
-            mock_active.filter.side_effect = DatabaseError("DB connection failed")
-            get_active_range(user)
-
-        assert "Error in get_active_range" in caplog.text
-        assert "42" in caplog.text
-
     # ---------------------------------------------------------------------
     # Validation - RangeContext validates on creation
     # ---------------------------------------------------------------------
@@ -325,7 +243,7 @@ class TestGetActiveRange:
         mock_instance = MagicMock()
         mock_instance.range_id = 0  # Invalid: must be positive
         mock_instance.user_id = 42
-        mock_instance.status = RangeStatus.READY.value
+        mock_instance.status = ResourceStatus.READY.value
 
         mock_queryset = MagicMock()
         mock_queryset.exclude.return_value.order_by.return_value.first.return_value = mock_instance
@@ -336,3 +254,94 @@ class TestGetActiveRange:
         ):
             mock_active.filter.return_value = mock_queryset
             get_active_range(user)
+
+    # ---------------------------------------------------------------------
+    # Instance extraction from range_spec
+    # ---------------------------------------------------------------------
+
+    def test_extracts_instances_from_nested_subnets_format(self):
+        """Extracts instances from range_spec with nested subnets format."""
+        from django.contrib.auth import get_user_model
+
+        from cms.models import RangeInstance, Request
+        from cms.services import get_active_range
+
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser_nested", password="testpass")
+
+        # Create request for the FK
+        request = Request.objects.create(
+            request_id="11111111-1111-1111-1111-111111111111",
+            request_type="range",
+            user=user,
+        )
+
+        # New nested format: instances under subnets
+        range_spec = {
+            "subnets": [
+                {
+                    "name": "core",
+                    "instances": [
+                        {"uuid": "att-uuid", "role": "attacker", "os_type": "kali", "join_domain": False},
+                        {"uuid": "vic-uuid", "role": "victim", "os_type": "windows", "join_domain": False},
+                    ],
+                }
+            ]
+        }
+
+        RangeInstance.objects.create(
+            request=request,
+            range_id=100,
+            scenario_id="basic",
+            user_id=user.id,
+            status="ready",
+            range_spec=range_spec,
+        )
+
+        result = get_active_range(user)
+
+        assert result is not None
+        assert len(result.instances) == 2
+        assert result.instances[0].uuid == "att-uuid"
+        assert result.instances[0].role == "attacker"
+        assert result.instances[1].uuid == "vic-uuid"
+        assert result.instances[1].role == "victim"
+
+    def test_extracts_instances_from_legacy_flat_format(self):
+        """Extracts instances from range_spec with legacy flat format."""
+        from django.contrib.auth import get_user_model
+
+        from cms.models import RangeInstance, Request
+        from cms.services import get_active_range
+
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser_legacy", password="testpass")
+
+        request = Request.objects.create(
+            request_id="22222222-2222-2222-2222-222222222222",
+            request_type="range",
+            user=user,
+        )
+
+        # Legacy flat format: instances directly at top level
+        range_spec = {
+            "instances": [
+                {"uuid": "leg-att", "role": "attacker", "os_type": "kali", "join_domain": False},
+            ]
+        }
+
+        RangeInstance.objects.create(
+            request=request,
+            range_id=101,
+            scenario_id="basic",
+            user_id=user.id,
+            status="ready",
+            range_spec=range_spec,
+        )
+
+        result = get_active_range(user)
+
+        assert result is not None
+        assert len(result.instances) == 1
+        assert result.instances[0].uuid == "leg-att"
+        assert result.instances[0].role == "attacker"

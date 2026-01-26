@@ -243,9 +243,12 @@ module "ssm" {
   ecr_repository_name = split("/", data.terraform_remote_state.foundation.outputs.portal_ecr_url)[1]
 
   # Secrets Manager ARNs
-  db_secret_arn      = module.rds.db_credentials_secret_arn
-  app_secret_arn     = aws_secretsmanager_secret.app.arn
-  cognito_secret_arn = module.cognito.cognito_secret_arn
+  db_secret_arn          = module.rds.db_credentials_secret_arn
+  app_secret_arn         = aws_secretsmanager_secret.app.arn
+  cognito_secret_arn     = module.cognito.cognito_secret_arn
+  guacamole_secret_arn   = module.guacamole.json_auth_secret_arn
+  guacamole_base_url     = "https://${var.domain_name}/guacamole"
+  guacamole_api_base_url = module.guacamole.guacamole_client_internal_url
 
   # Application configuration
   domain_name    = var.domain_name
@@ -262,6 +265,12 @@ module "ssm" {
   sqs_engine_url = module.messaging.sqs_queue_urls["engine"]
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
   redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
+
+  # Database endpoint (direct RDS connection - hostname only, not endpoint with port)
+  db_host_override = module.rds.db_instance_address
+
+  # Logging level (DEBUG for dev, INFO for prod)
+  log_level = var.log_level
 }
 
 # ------------------------------------------------------------------------------
@@ -284,6 +293,7 @@ module "ec2" {
     module.rds.db_credentials_secret_arn,
     aws_secretsmanager_secret.app.arn,
     module.cognito.cognito_secret_arn,
+    module.guacamole.json_auth_secret_arn,
   ]
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port
@@ -428,7 +438,7 @@ module "pulumi_provisioner" {
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
 
-  # Database
+  # Database (direct RDS connection - hostname only, port passed separately)
   db_host        = module.rds.db_instance_address
   db_port        = 5432
   db_name        = var.db_name
@@ -450,9 +460,6 @@ module "pulumi_provisioner" {
   range_vpc_cidr              = data.terraform_remote_state.range.outputs.vpc_cidr
   range_route_table_id        = data.terraform_remote_state.range.outputs.private_route_table_id
   range_availability_zone     = data.terraform_remote_state.range.outputs.availability_zone
-  victim_security_group_id    = data.terraform_remote_state.range.outputs.victim_security_group_id
-  kali_security_group_id      = data.terraform_remote_state.range.outputs.kali_security_group_id
-  dc_security_group_id        = data.terraform_remote_state.range.outputs.dc_security_group_id
   range_instance_profile_arn  = data.terraform_remote_state.range.outputs.range_instance_profile_arn
   range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
   range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
@@ -472,13 +479,24 @@ module "pulumi_provisioner" {
   victim_instance_type = var.victim_instance_type
 
   # S3
-  agent_s3_bucket     = module.s3.bucket_name
-  agent_s3_bucket_arn = module.s3.bucket_arn
+  agent_s3_bucket      = module.s3.bucket_name
+  agent_s3_bucket_arn  = module.s3.bucket_arn
+  s3_endpoint_id       = data.terraform_remote_state.range.outputs.s3_endpoint_id
+  firewall_endpoint_id = data.terraform_remote_state.range.outputs.firewall_endpoint_id != null ? data.terraform_remote_state.range.outputs.firewall_endpoint_id : ""
+
+  # Portal VPC configuration (for terminal SSH routing)
+  portal_vpc_cidr       = module.vpc.vpc_cidr
+  portal_vpc_peering_id = aws_vpc_peering_connection.portal_to_range.id
 
   # NGFW (VM-Series) - from Range VPC outputs
-  ngfw_security_group_id = data.terraform_remote_state.range.outputs.ngfw_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_security_group_id : ""
-  ngfw_ami_id            = data.terraform_remote_state.range.outputs.vm_series_ami_id
-  ngfw_instance_type     = data.terraform_remote_state.range.outputs.vm_series_instance_type
+  ngfw_mgmt_security_group_id = data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id : ""
+  ngfw_data_security_group_id = data.terraform_remote_state.range.outputs.ngfw_data_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_data_security_group_id : ""
+  ngfw_ami_id                 = data.terraform_remote_state.range.outputs.vm_series_ami_id
+  ngfw_instance_type          = data.terraform_remote_state.range.outputs.vm_series_instance_type
+  ngfw_subnet_id              = data.terraform_remote_state.range.outputs.ngfw_subnet_id != null ? data.terraform_remote_state.range.outputs.ngfw_subnet_id : ""
+  ngfw_subnet_cidr            = data.terraform_remote_state.range.outputs.ngfw_subnet_cidr != null ? data.terraform_remote_state.range.outputs.ngfw_subnet_cidr : ""
+  ngfw_instance_profile_name  = data.terraform_remote_state.range.outputs.ngfw_instance_profile_name != null ? data.terraform_remote_state.range.outputs.ngfw_instance_profile_name : ""
+  ngfw_instance_role_arn      = data.terraform_remote_state.range.outputs.ngfw_instance_role_arn != null ? data.terraform_remote_state.range.outputs.ngfw_instance_role_arn : ""
 
   # Messaging (SNS topic for range event publishing)
   sns_topic_arn = module.messaging.sns_topic_arn
@@ -486,6 +504,73 @@ module "pulumi_provisioner" {
   # Alarms
   enable_alarms = true
   alarm_email   = var.alarm_email
+}
+
+# ------------------------------------------------------------------------------
+# Guacamole (Remote Desktop Gateway)
+# ------------------------------------------------------------------------------
+
+module "guacamole" {
+  source = "../../../modules/guacamole"
+
+  name_prefix = local.name_prefix
+  environment = var.environment
+  tags        = var.tags
+
+  # Networking (Portal VPC)
+  vpc_id                   = module.vpc.vpc_id
+  private_subnet_ids       = module.vpc.private_subnet_ids
+  range_vpc_cidr           = data.terraform_remote_state.range.outputs.vpc_cidr
+  portal_security_group_id = module.ec2.security_group_id
+
+  # Shared ALB (from Portal ALB module)
+  alb_listener_arn      = module.alb.https_listener_arn
+  alb_security_group_id = module.alb.security_group_id
+
+  # ECR (from foundation remote state)
+  guacd_ecr_repository_url            = data.terraform_remote_state.foundation.outputs.guacd_ecr_url
+  guacd_ecr_repository_arn            = data.terraform_remote_state.foundation.outputs.guacd_ecr_arn
+  guacamole_client_ecr_repository_url = data.terraform_remote_state.foundation.outputs.guacamole_client_ecr_url
+  guacamole_client_ecr_repository_arn = data.terraform_remote_state.foundation.outputs.guacamole_client_ecr_arn
+
+  # Logging (shared with portal)
+  log_retention_days = var.log_retention_days
+
+  # Container configuration
+  guacd_image_tag                = var.guacd_image_tag
+  guacamole_client_image_tag     = var.guacamole_client_image_tag
+  guacd_cpu                      = var.guacd_cpu
+  guacd_memory                   = var.guacd_memory
+  guacamole_client_cpu           = var.guacamole_client_cpu
+  guacamole_client_memory        = var.guacamole_client_memory
+  guacd_desired_count            = var.guacd_desired_count
+  guacamole_client_desired_count = var.guacamole_client_desired_count
+
+  # Database configuration
+  db_instance_class        = var.guacamole_db_instance_class
+  db_allocated_storage     = var.guacamole_db_allocated_storage
+  db_max_allocated_storage = var.guacamole_db_max_allocated_storage
+  db_engine_version        = var.guacamole_db_engine_version
+  db_multi_az              = var.guacamole_db_multi_az
+  db_backup_retention_days = var.guacamole_db_backup_retention_days
+  db_deletion_protection   = var.guacamole_db_deletion_protection
+  db_skip_final_snapshot   = var.guacamole_db_skip_final_snapshot
+
+  # Autoscaling
+  enable_autoscaling       = var.guacamole_enable_autoscaling
+  autoscaling_min_capacity = var.guacamole_autoscaling_min_capacity
+  autoscaling_max_capacity = var.guacamole_autoscaling_max_capacity
+  autoscaling_cpu_target   = var.guacamole_autoscaling_cpu_target
+
+  # Secrets
+  secrets_recovery_window_days = var.guacamole_secrets_recovery_window_days
+
+  # OIDC/Cognito authentication
+  enable_oidc          = var.guacamole_enable_oidc
+  cognito_user_pool_id = module.cognito.user_pool_id
+  cognito_domain       = module.cognito.cognito_domain
+  aws_region           = var.aws_region
+  domain_name          = var.domain_name
 }
 
 # ------------------------------------------------------------------------------
@@ -515,6 +600,8 @@ module "log_aggregation" {
     var.enable_rds_log_exports ? module.rds.log_group_names : [],
     # Pulumi provisioner logs
     module.pulumi_provisioner.log_group_names,
+    # Guacamole logs
+    module.guacamole.log_group_names,
   ) : []
 
   # Monitoring
@@ -522,4 +609,73 @@ module "log_aggregation" {
   alarm_email   = var.alarm_email
 
   tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# Bedrock Model Invocation Logging
+# Captures invocation details including errors for debugging
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "bedrock" {
+  count = var.enable_bedrock_logging ? 1 : 0
+
+  name              = "/aws/bedrock/${local.name_prefix}-invocations"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-bedrock-invocations"
+  })
+}
+
+resource "aws_iam_role" "bedrock_logging" {
+  count = var.enable_bedrock_logging ? 1 : 0
+
+  name = "${local.name_prefix}-bedrock-logging"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "bedrock.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "bedrock_logging" {
+  count = var.enable_bedrock_logging ? 1 : 0
+
+  name = "cloudwatch-logs"
+  role = aws_iam_role.bedrock_logging[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ]
+      Resource = "${aws_cloudwatch_log_group.bedrock[0].arn}:*"
+    }]
+  })
+}
+
+resource "aws_bedrock_model_invocation_logging_configuration" "this" {
+  count = var.enable_bedrock_logging ? 1 : 0
+
+  logging_config {
+    embedding_data_delivery_enabled = false
+    image_data_delivery_enabled     = false
+    text_data_delivery_enabled      = true
+
+    cloudwatch_config {
+      log_group_name = aws_cloudwatch_log_group.bedrock[0].name
+      role_arn       = aws_iam_role.bedrock_logging[0].arn
+    }
+  }
 }

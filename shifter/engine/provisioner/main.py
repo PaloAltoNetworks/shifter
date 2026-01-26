@@ -20,12 +20,18 @@ import boto3
 import psycopg
 from psycopg import sql
 
+import range_terraform_runner
+from catalog.instances import (
+    _get_dc_instance_type,
+    _get_kali_instance_type,
+    _get_victim_instance_type,
+    _get_windows_instance_type,
+)
+from components.instance import sanitize_hostname
+from config import generate_presigned_url
 from events import (
-    STATUS_AWAITING_ASSOCIATION,
     STATUS_DESTROYED,
-    STATUS_DESTROYING,
     STATUS_FAILED,
-    STATUS_PROVISIONING,
     STATUS_READY,
     publish_destroyed,
     publish_failed,
@@ -33,10 +39,10 @@ from events import (
     publish_ready,
     publish_status_update,
 )
-from components.instance import sanitize_hostname
 from executors.aws_executor import AWSExecutor
 from executors.ssh_executor import SSHExecutor
 from executors.ssm_executor import SSMExecutor
+from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.base import SetupStep
@@ -893,7 +899,6 @@ def poll_for_serial_number(
     Raises:
         RuntimeError: If serial not found within timeout.
     """
-    import time
 
     start_time = time.time()
 
@@ -979,7 +984,6 @@ def poll_for_serial_and_cert(
         RuntimeError: If either check fails within timeout, with details
             on which check(s) failed.
     """
-    import time
 
     start_time = time.time()
     serial_value = None
@@ -2306,6 +2310,345 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 
 
+def run_range_terraform(operation: str, request_id: str) -> None:
+    """Run Range Terraform operation (provision or destroy).
+
+    This is the Terraform equivalent of run_pulumi for ranges. It uses
+    range_terraform_runner for infrastructure and the existing instance
+    setup code for configuration.
+
+    Args:
+        operation: Either 'up' (provision) or 'destroy' (teardown).
+        request_id: UUID string of the Request.
+
+    Raises:
+        Exception: If the Terraform operation fails.
+    """
+    logger.info("run_range_terraform: starting operation=%s request_id=%s", operation, request_id)
+
+    range_data = get_range_data_by_request_id(request_id)
+    range_id = range_data["range_id"]
+    user_id = range_data["user_id"]
+    range_spec = range_data.get("spec", {})
+
+    # If NGFW is enabled, start it if stopped (must be running for subnet config)
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        if ngfw_data and ngfw_data.get("management_ip"):
+            logger.info("NGFW enabled for range %s", range_id)
+            ngfw_status = ngfw_data.get("status")
+            if ngfw_status in ("stopped", "stopping"):
+                ec2_instance_id = ngfw_data.get("ec2_instance_id")
+                if ngfw_status == "stopping" and ec2_instance_id:
+                    logger.info("NGFW is stopping, waiting for stop to complete...")
+                    aws_executor = AWSExecutor()
+                    aws_executor.wait_for_stopped(ec2_instance_id)
+                logger.info("Starting stopped NGFW for range provisioning...")
+                run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+
+    try:
+        if operation == "up":
+            _run_terraform_provision(request_id, range_id, user_id, range_spec)
+        elif operation == "destroy":
+            _run_terraform_destroy(request_id, range_id, user_id, range_spec)
+        else:
+            raise ValueError(f"Unknown operation: {operation}")
+
+    except Exception as e:
+        error_msg = str(e)[:1000]
+        logger.error("Range Terraform operation failed: %s", error_msg)
+
+        if operation == "up":
+            logger.info("Provision failed - attempting Terraform cleanup...")
+            try:
+                range_terraform_runner.destroy_range(request_id, range_terraform_runner.RANGE_MODULE_PATH)
+                range_terraform_runner.cleanup_range_state(request_id)
+            except Exception as cleanup_error:
+                logger.warning("Auto-cleanup failed: %s", cleanup_error)
+
+        publish_failed(
+            request_id=request_id,
+            range_id=range_id,
+            user_id=user_id,
+            error_message=error_msg,
+        )
+        raise
+
+
+def _run_terraform_provision(
+    request_id: str,
+    range_id: int,
+    user_id: int,
+    range_spec: dict,
+) -> None:
+    """Run Terraform apply for range, then run instance setup.
+
+    Sequence:
+    1. Run Terraform apply (creates subnets and instances)
+    2. Validate outputs
+    3. Configure NGFW subnets (routes for traffic flow)
+    4. Run instance setup (DC first, then others in parallel)
+    5. Write to DB
+    6. Publish ready event
+    """
+    publish_status_update(
+        request_id=request_id,
+        range_id=range_id,
+        user_id=user_id,
+        new_status="provisioning",
+    )
+
+    logger.info("Running terraform apply for range...")
+
+    # Allocate CIDRs for subnets before Terraform
+    spec_subnets = range_spec.get("subnets", [])
+    if spec_subnets:
+        from components.network import allocate_subnets
+
+        vpc_id = os.environ.get("RANGE_VPC_ID", "")
+        vpc_cidr = os.environ.get("RANGE_VPC_CIDR", "10.1.0.0/16")
+        # Extract CIDR prefix (e.g., "10.1" from "10.1.0.0/16")
+        cidr_prefix = ".".join(vpc_cidr.split("/")[0].split(".")[:2])
+
+        subnet_count = len(spec_subnets)
+        logger.info("Allocating %d subnet CIDRs in VPC %s", subnet_count, vpc_id)
+
+        allocated_cidrs = allocate_subnets(vpc_id, cidr_prefix, subnet_count, subnet_size=28)
+        logger.info("Allocated CIDRs: %s", allocated_cidrs)
+
+        # Add CIDRs to range_spec subnets
+        for i, subnet in enumerate(spec_subnets):
+            subnet["cidr"] = allocated_cidrs[i]
+
+    # Build Terraform variables from range spec (now with CIDRs)
+    tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
+
+    # Run Terraform apply
+    output_data = range_terraform_runner.apply_range(
+        request_id,
+        tf_variables,
+        range_terraform_runner.RANGE_MODULE_PATH,
+    )
+    logger.info("Terraform outputs: %s", json.dumps(output_data, indent=2))
+
+    subnets_output = output_data.get("subnets", {})
+    instances_output = output_data.get("instances", [])
+
+    expected_subnet_names = {s.get("name") for s in spec_subnets}
+    _validate_provisioned_outputs(
+        subnets=subnets_output,
+        instances=instances_output,
+        expected_subnet_names=expected_subnet_names,
+    )
+
+    # Configure NGFW with routes for range subnets
+    ngfw_data = get_user_ngfw_data(user_id)
+    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
+    if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
+        logger.info("Configuring NGFW with subnet routes...")
+        subnets_for_ngfw = []
+        for spec_subnet in spec_subnets:
+            subnet_name = spec_subnet.get("name", "")
+            subnet_output = subnets_output.get(subnet_name, {})
+            subnets_for_ngfw.append(
+                {
+                    "name": subnet_name,
+                    "cidr": subnet_output.get("subnet_cidr", ""),
+                    "connected_to": spec_subnet.get("connected_to", []),
+                }
+            )
+        configure_ngfw_subnets(
+            subnets=subnets_for_ngfw,
+            range_id=range_id,
+            management_ip=ngfw_data["management_ip"],
+            ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
+            ngfw_subnet_cidr=ngfw_subnet_cidr,
+        )
+
+    # Run instance setup (DC first, then others in parallel)
+    logger.info("Running instance setup...")
+    run_instance_setup(
+        instances_output=instances_output,
+        range_spec=range_spec,
+    )
+
+    # Write provisioned state to DB
+    range_data = get_range_data_by_request_id(request_id)
+    write_provisioned_state(
+        range_id=range_id,
+        subnets=subnets_output,
+        instances=instances_output,
+        ngfw_instance_id=range_data.get("ngfw_instance_id"),
+    )
+
+    publish_ready(request_id=request_id, range_id=range_id, user_id=user_id)
+
+
+def _run_terraform_destroy(
+    request_id: str,
+    range_id: int,
+    user_id: int,
+    range_spec: dict,
+) -> None:
+    """Run Terraform destroy for range."""
+    # Pre-destroy validation
+    try:
+        range_data = get_range_data_by_request_id(request_id)
+    except ValueError as e:
+        logger.warning("Range not found for request %s, skipping destroy: %s", request_id, e)
+        return
+
+    current_status = range_data.get("status")
+    if current_status in ("destroyed", "failed"):
+        logger.info("Range %d already in terminal state '%s', skipping", range_id, current_status)
+        return
+
+    # Remove NGFW subnet config
+    spec_subnets = range_spec.get("subnets", [])
+    if spec_subnets:
+        try:
+            remove_ngfw_subnets(user_id, spec_subnets, range_id)
+        except Exception as e:
+            logger.warning("NGFW subnet removal failed (continuing): %s", e)
+
+    logger.info("Running terraform destroy for range...")
+
+    terraform_succeeded = False
+    try:
+        range_terraform_runner.destroy_range(request_id, range_terraform_runner.RANGE_MODULE_PATH)
+        terraform_succeeded = True
+
+        logger.info("Cleaning up Terraform state...")
+        range_terraform_runner.cleanup_range_state(request_id)
+
+    finally:
+        if terraform_succeeded:
+            try:
+                mark_range_instances_destroyed(range_id)
+            except Exception as e:
+                logger.error("Failed to mark range %d as destroyed: %s", range_id, e)
+
+        # Auto-stop NGFW if no other active ranges
+        try:
+            if not user_has_active_ranges(user_id, range_id):
+                ngfw_data = get_user_ngfw_data(user_id)
+                if ngfw_data and ngfw_data["status"] == "active":
+                    logger.info("No other active ranges, stopping NGFW")
+                    run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
+        except Exception as e:
+            logger.warning("Failed to stop NGFW (non-fatal): %s", e)
+
+    publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
+
+
+def _build_range_terraform_variables(
+    request_id: str,
+    range_id: int,
+    user_id: int,
+    range_spec: dict,
+) -> dict:
+    """Build Terraform variables dict from range spec and environment.
+
+    Args:
+        request_id: Provisioning request UUID for state isolation.
+        range_id: Range database ID.
+        user_id: Owner's Django user ID.
+        range_spec: Range specification from database.
+
+    Returns:
+        Dict of Terraform variables matching modules/range/variables.tf.
+    """
+    spec_subnets = range_spec.get("subnets", [])
+
+    # Build subnets with nested instances (Terraform expected format)
+    tf_subnets = []
+    for subnet in spec_subnets:
+        subnet_instances = []
+        for inst in subnet.get("instances", []):
+            os_type = inst.get("os_type", "ubuntu")
+            role = inst.get("role", "victim")
+
+            # Map to Terraform os_type values
+            # DC role always uses Windows (domain controller)
+            # Attacker role always uses Kali
+            if role == "dc":
+                tf_os_type = "windows"
+            elif role == "attacker" or os_type == "kali":
+                tf_os_type = "kali"
+            elif os_type == "windows":
+                tf_os_type = "windows"
+            else:
+                tf_os_type = "ubuntu"
+
+            # Get instance_type from role/os-based defaults (not in spec)
+            if role == "attacker":
+                instance_type = _get_kali_instance_type()
+            elif role == "dc":
+                instance_type = _get_dc_instance_type()
+            elif tf_os_type == "windows":
+                instance_type = _get_windows_instance_type()
+            else:
+                instance_type = _get_victim_instance_type()
+
+            # Get agent presigned URL from agent.s3_key (spec has nested structure)
+            agent_data = inst.get("agent") or {}
+            agent_s3_key = agent_data.get("s3_key")
+            agent_presigned_url = ""
+            if agent_s3_key:
+                agent_presigned_url = generate_presigned_url(
+                    bucket=os.environ.get("AGENT_S3_BUCKET", ""),
+                    key=agent_s3_key,
+                )
+
+            subnet_instances.append(
+                {
+                    "uuid": inst.get("uuid", ""),
+                    "role": role,
+                    "os_type": tf_os_type,
+                    "instance_type": instance_type,
+                    "agent_presigned_url": agent_presigned_url,
+                    "join_domain": inst.get("join_domain", False),
+                }
+            )
+
+        tf_subnets.append(
+            {
+                "name": subnet.get("name", ""),
+                "uuid": subnet.get("uuid", ""),
+                "cidr": subnet.get("cidr", ""),  # Pre-allocated CIDR
+                "connected_to": subnet.get("connected_to", []),
+                "instances": subnet_instances,
+            }
+        )
+
+    return {
+        # Core identifiers
+        "range_id": range_id,
+        "user_id": user_id,
+        "request_uuid": request_id,
+        "environment": os.environ.get("ENVIRONMENT", "dev"),
+        # VPC configuration
+        "vpc_id": os.environ.get("RANGE_VPC_ID", ""),
+        "vpc_cidr": os.environ.get("RANGE_VPC_CIDR", ""),
+        "availability_zone": os.environ.get("AVAILABILITY_ZONE", "us-east-2b"),
+        # Network integration
+        "s3_endpoint_id": os.environ.get("S3_ENDPOINT_ID", ""),
+        "firewall_endpoint_id": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
+        "portal_vpc_cidr": os.environ.get("PORTAL_VPC_CIDR", ""),
+        "portal_vpc_peering_id": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
+        "ngfw_data_eni_id": os.environ.get("NGFW_ENI_ID", ""),
+        # AMI IDs
+        "kali_ami_id": get_ami_id("kali"),
+        "victim_ami_id": get_ami_id("victim"),
+        "windows_ami_id": get_ami_id("windows"),
+        "dc_ami_id": get_ami_id("dc"),
+        # IAM
+        "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
+        # Subnets specification
+        "subnets": tf_subnets,
+    }
+
+
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     """Run NGFW runtime operation (start/stop/complete-setup).
 
@@ -2603,408 +2946,6 @@ def _run_complete_setup(request_id: str) -> None:
         raise
 
 
-def run_ngfw_pulumi(operation: str, request_id: str) -> None:
-    """Run NGFW Pulumi operation (provision or deprovision).
-
-    Args:
-        operation: Either 'up' (provision) or 'destroy' (deprovision).
-        request_id: UUID string of the Request.
-
-    Raises:
-        ValueError: If unknown operation or Request not found.
-        Exception: If the Pulumi operation fails.
-    """
-    logger.info("run_ngfw_pulumi: starting operation=%s request_id=%s", operation, request_id)
-
-    # Get NGFW data from database (needed for correlation IDs and credentials)
-    ngfw_data = get_ngfw_data_by_request_id(request_id)
-    # NOTE: "instance_id" here is the Django Instance UUID (e.g., "5eb96281-a4a8-...")
-    # NOT the AWS EC2 Instance ID. Variable named for event publishing compatibility.
-    instance_id = ngfw_data["instance_id"]
-    app_id = ngfw_data["app_id"]
-    app_spec = ngfw_data.get("app_spec", {})
-
-    # Use request_id for stack naming (deterministic from UUID)
-    stack_name = f"ngfw-{request_id}"
-    env = os.environ.copy()
-    # Security: Empty passphrase is intentional - we use AWS KMS via PULUMI_SECRETS_PROVIDER.
-    env["PULUMI_CONFIG_PASSPHRASE"] = ""  # nosec B105
-
-    try:
-        # Select or create stack with proper secrets provider
-        _select_or_create_stack(stack_name, env)
-
-        # Set NGFW stack configuration from environment and app_spec credentials
-        _set_ngfw_stack_config(env, request_id, instance_id, app_spec)
-
-        if operation == "up":
-            sls_region = app_spec.get("sls_region", "americas")
-            _run_ngfw_provision(request_id, instance_id, app_id, stack_name, env, sls_region)
-        elif operation == "destroy":
-            _run_ngfw_deprovision(request_id, instance_id, app_id, stack_name, env)
-        else:
-            raise ValueError(f"Unknown operation: {operation}")
-
-    except Exception as e:
-        error_msg = str(e)[:1000]
-        logger.error(f"NGFW operation failed: {error_msg}")
-
-        if operation == "up":
-            # Auto-cleanup on failure to avoid orphaned resources
-            logger.info("NGFW provision failed - attempting auto-cleanup...")
-            subprocess.run(
-                ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
-                cwd=_get_working_dir(),
-                env=env,
-                capture_output=True,
-            )
-
-        # Update local DB and emit failure event
-        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_id,
-            app_id=app_id,
-            status=STATUS_FAILED,
-        )
-        raise
-
-
-def _set_ngfw_stack_config(env: dict, request_id: str, instance_uuid: str, app_spec: dict) -> None:
-    """Set Pulumi stack configuration for NGFW from environment and app_spec.
-
-    Infrastructure config (VPC, subnet, AMI, etc.) comes from environment variables.
-    Credential config (PIN, authcode, folder) comes from app_spec (hydrated by CMS).
-
-    Args:
-        env: Environment dictionary for subprocess.
-        request_id: UUID string of the Request.
-        instance_uuid: UUID string of the Instance (for tagging/correlation).
-        app_spec: Hydrated NGFWAppSpec dict containing credentials.
-    """
-    # Infrastructure config from environment (same for all NGFWs)
-    config_values = {
-        "requestId": request_id,
-        "instanceUuid": instance_uuid,
-        "environment": os.environ.get("ENVIRONMENT", "dev"),
-        "ngfwVpcId": os.environ.get("NGFW_VPC_ID", ""),
-        "ngfwSubnetId": os.environ.get("NGFW_SUBNET_ID", ""),
-        "ngfwMgmtSecurityGroupId": os.environ.get("NGFW_MGMT_SECURITY_GROUP_ID", ""),
-        "ngfwDataSecurityGroupId": os.environ.get("NGFW_DATA_SECURITY_GROUP_ID", ""),
-        "ngfwAmiId": os.environ.get("NGFW_AMI_ID", ""),
-        "bootstrapBucket": os.environ.get("NGFW_BOOTSTRAP_BUCKET", ""),
-        "ngfwInstanceType": os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
-        "ngfwInstanceProfileName": os.environ.get("NGFW_INSTANCE_PROFILE_NAME", ""),
-        # Credential config from app_spec (per-NGFW, hydrated by CMS)
-        "scmPinId": app_spec.get("scm_pin_id", ""),
-        "scmPinValue": app_spec.get("scm_pin_value", ""),
-        "scmFolderName": app_spec.get("scm_folder_name", ""),
-        "authcode": app_spec.get("authcode", ""),
-        "userId": str(app_spec.get("user_id", "")),
-    }
-
-    for key, value in config_values.items():
-        if value:
-            subprocess.run(  # noqa: S603
-                ["pulumi", "config", "set", key, value],  # noqa: S607
-                cwd=_get_working_dir(),
-                env=env,
-                capture_output=True,
-            )
-        else:
-            subprocess.run(  # noqa: S603
-                ["pulumi", "config", "rm", key],  # noqa: S607
-                cwd=_get_working_dir(),
-                env=env,
-                capture_output=True,
-            )
-
-
-def _run_ngfw_provision(
-    request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict, sls_region: str
-) -> None:
-    """Run Pulumi up to provision the NGFW, then run post-Pulumi configuration.
-
-    Args:
-        request_id: UUID string of the Request.
-        instance_id: Django Instance UUID (e.g., "5eb96281-a4a8-..."), NOT AWS EC2 ID.
-        app_id: UUID string of the App (NGFW).
-        stack_name: The Pulumi stack name.
-        env: Environment dictionary for subprocess.
-        sls_region: Strata Logging Service region (e.g., "americas", "europe").
-    """
-    # Update local DB and emit provisioning status event
-    update_instance_state(request_id, STATUS_PROVISIONING)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status=STATUS_PROVISIONING,
-    )
-    logger.info("Running pulumi up for NGFW...")
-
-    result = subprocess.run(
-        ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
-        cwd=_get_working_dir(),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    logger.info(f"Pulumi stdout:\n{result.stdout}")
-    if result.stderr:
-        logger.warning(f"Pulumi stderr:\n{result.stderr}")
-
-    if result.returncode != 0:
-        raise RuntimeError(f"NGFW Pulumi up failed: {result.stderr}")
-
-    # Get outputs
-    logger.info("Retrieving NGFW stack outputs...")
-    outputs = subprocess.run(
-        ["pulumi", "stack", "output", "--json"],  # noqa: S607
-        cwd=_get_working_dir(),
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    output_data = json.loads(outputs.stdout)
-    logger.info(f"NGFW Stack outputs: {json.dumps(output_data, indent=2)}")
-
-    # Run post-Pulumi configuration (wait for SSH, configure cloud logging, etc.)
-    # Skip in local dev mode (DB_PASSWORD set) - post-Pulumi config requires real AWS resources
-    if os.environ.get("DB_PASSWORD"):
-        logger.info("LOCAL DEV MODE: Skipping post-Pulumi NGFW configuration")
-        # Update state with mock outputs and mark as ready
-        update_instance_state(
-            request_id,
-            STATUS_READY,
-            **output_data,
-        )
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_id,
-            app_id=app_id,
-            status=STATUS_READY,
-        )
-        # Auto-stop: In local dev, just update status (no real EC2 to stop)
-        logger.info("LOCAL DEV MODE: Setting NGFW status to stopped: request_id=%s", request_id)
-        update_instance_state(request_id, "stopped")
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_id,
-            app_id=app_id,
-            status="stopped",
-        )
-        return
-
-    logger.info("Running post-Pulumi NGFW configuration...")
-
-    # Get SSH private key from Secrets Manager
-    management_ip = output_data.get("management_ip")
-    ssh_key_secret_arn = output_data.get("ssh_key_secret_arn")
-    if not ssh_key_secret_arn:
-        raise RuntimeError("NGFW stack missing ssh_key_secret_arn output")
-    if not management_ip:
-        raise RuntimeError("NGFW stack missing management_ip output")
-
-    secrets_client = boto3.client("secretsmanager")
-    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-    private_key = secret_response["SecretString"]
-
-    # Create SSH executor and wait for NGFW to be ready (15-25 min boot time)
-    ssh_executor = SSHExecutor(private_key=private_key)
-    ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
-    logger.info(f"Waiting for SSH on NGFW at {management_ip}...")
-    ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
-
-    # Poll for serial number BEFORE running provision plan - this ensures management
-    # plane is ready to accept configuration commands. Serial number appearing
-    # indicates the PAN-OS management server is operational.
-    logger.info("Polling for NGFW serial number (management plane readiness check)...")
-    serial_number = poll_for_serial_number(
-        ssh_executor=ssh_executor,
-        host=management_ip,
-        timeout_seconds=600,  # 10 min - serial should appear after mgmt plane is up
-        poll_interval=30,
-    )
-    logger.info("NGFW management plane ready, serial=%s", serial_number)
-
-    # Brief pause after serial poll to let management plane stabilize
-    logger.info("Waiting 30s for management plane to stabilize before configuration...")
-    time.sleep(30)
-
-    # Create orchestrator with SSH executor
-    orchestrator = SetupOrchestrator(ssh_executor)
-
-    # Create context dict with the stack outputs for template rendering
-    context = {
-        "ec2_instance_id": output_data.get("ec2_instance_id"),
-        "management_ip": management_ip,
-        "dataplane_ip": output_data.get("dataplane_ip"),
-        "data_eni_id": output_data.get("data_eni_id"),
-        "sls_region": sls_region,
-    }
-
-    # Import and run the NGFW provision plan
-    from plans.ngfw_provision import NGFWProvisionPlan
-
-    provision_plan = NGFWProvisionPlan()
-    # NOTE: SetupOrchestrator.orchestrate() uses "instance_id" as the SSH target.
-    # For SSH-based plans, this is the management IP address, not a UUID or EC2 ID.
-    logger.info("Running NGFW provision plan...")
-    provision_result = orchestrator.orchestrate(
-        instance_id=management_ip,
-        plan=provision_plan,
-        context=context,
-    )
-
-    if not provision_result.success:
-        raise RuntimeError("NGFW post-Pulumi configuration failed")
-
-    # Build state dict with all outputs including data_eni_id for range routing
-    state = {
-        "ec2_instance_id": output_data.get("ec2_instance_id"),
-        "management_ip": output_data.get("management_ip"),
-        "dataplane_ip": output_data.get("dataplane_ip"),
-        "data_eni_id": output_data.get("data_eni_id"),
-        "ssh_key_secret_arn": ssh_key_secret_arn,
-        "pulumi_stack": stack_name,
-        "serial_number": serial_number,
-    }
-
-    # Save state to DB FIRST so run_ngfw_operation can find ec2_instance_id
-    # Keep status as provisioning for now - will update to awaiting_association after stop
-    update_instance_state(request_id, STATUS_PROVISIONING, **state)
-
-    # Auto-stop NGFW to save costs while user completes association
-    # Stop BEFORE emitting awaiting_association status so NGFW is fully stopped
-    # when user sees the Complete Setup button (prevents race condition)
-    logger.info("Auto-stopping NGFW after provisioning (awaiting association): request_id=%s", request_id)
-    try:
-        run_ngfw_operation("stop", request_id)
-        logger.info("Auto-stop completed successfully: request_id=%s", request_id)
-    except Exception:
-        logger.exception("Auto-stop FAILED: request_id=%s - NGFW remains running (cost impact)", request_id)
-
-    # Update status to awaiting_association - user must complete setup
-    # User must: 1) Associate device in SCM, 2) Connect to XDR/XSIAM
-    update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION)
-
-    # Emit awaiting_association event for UI to show user action prompt
-    # Serial number included so users can copy it for SCM device association
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status=STATUS_AWAITING_ASSOCIATION,
-        serial_number=serial_number,
-    )
-
-
-def _run_ngfw_deprovision(request_id: str, instance_id: str, app_id: str, stack_name: str, env: dict) -> None:
-    """Run license deactivation then Pulumi destroy for NGFW.
-
-    Args:
-        request_id: UUID string of the Request.
-        instance_id: Django Instance UUID (e.g., "5eb96281-a4a8-..."), NOT AWS EC2 ID.
-        app_id: UUID string of the App (NGFW).
-        stack_name: The Pulumi stack name.
-        env: Environment dictionary for subprocess.
-    """
-    # Update local DB and emit destroying status event
-    update_instance_state(request_id, STATUS_DESTROYING)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status=STATUS_DESTROYING,
-    )
-
-    # Get current instance state for management_ip and ssh_key needed by license deactivation
-    ngfw_data = get_ngfw_data_by_request_id(request_id)
-    current_state = ngfw_data.get("state", {})
-    management_ip = current_state.get("management_ip")
-    ssh_key_secret_arn = current_state.get("ssh_key_secret_arn")
-
-    # Run pre-destroy license deactivation (requires SSH to NGFW)
-    if management_ip and ssh_key_secret_arn:
-        logger.info("Running NGFW license deactivation...")
-        try:
-            # Get SSH private key from Secrets Manager
-            secrets_client = boto3.client("secretsmanager")
-            secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-            private_key = secret_response["SecretString"]
-
-            # Create SSH executor
-            ssh_executor = SSHExecutor(private_key=private_key)
-            orchestrator = SetupOrchestrator(ssh_executor)
-
-            # Import and run the NGFW deprovision plan (license deactivation)
-            from plans.ngfw_deprovision import NGFWDeprovisionPlan
-
-            deprovision_plan = NGFWDeprovisionPlan()
-
-            # Create context dict with management_ip from stored state
-            context = {"management_ip": management_ip}
-
-            # NOTE: SetupOrchestrator uses "instance_id" as the SSH target (IP address here).
-            deprovision_result = orchestrator.orchestrate(
-                instance_id=management_ip,
-                plan=deprovision_plan,
-                context=context,
-            )
-            if not deprovision_result.success:
-                logger.warning("License deactivation failed, proceeding with destroy anyway")
-        except Exception as e:
-            logger.warning(f"License deactivation error: {e}, proceeding with destroy")
-    else:
-        logger.warning("Missing management_ip or ssh_key_secret_arn in state, skipping license deactivation")
-
-    # Run Pulumi destroy
-    logger.info("Running pulumi destroy for NGFW...")
-
-    result = subprocess.run(  # noqa: S603
-        [
-            _get_pulumi_path(),
-            "destroy",
-            "--yes",
-            "--non-interactive",
-            "--skip-preview",
-        ],
-        cwd=_get_working_dir(),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    logger.info(f"Pulumi stdout:\n{result.stdout}")
-    if result.stderr:
-        logger.warning(f"Pulumi stderr:\n{result.stderr}")
-
-    if result.returncode != 0:
-        raise RuntimeError(f"NGFW Pulumi destroy failed: {result.stderr}")
-
-    # Remove stack
-    logger.info(f"Removing NGFW stack: {stack_name}")
-    subprocess.run(  # noqa: S603
-        ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
-        cwd=_get_working_dir(),
-        env=env,
-        check=True,
-        capture_output=True,
-    )
-
-    # Update local DB and emit destroyed event
-    update_instance_state(request_id, STATUS_DESTROYED)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status=STATUS_DESTROYED,
-    )
-
-
 if __name__ == "__main__":
     from logging_config import configure_logging
 
@@ -3019,8 +2960,8 @@ if __name__ == "__main__":
     range_parser = subparsers.add_parser("range", help="Range lifecycle operations")
     range_parser.add_argument(
         "operation",
-        choices=["provision", "destroy"],
-        help="Operation to perform: provision (create) or destroy (teardown)",
+        choices=["provision", "destroy", "pause", "resume"],
+        help="Operation to perform: provision (create), destroy (teardown), pause, or resume",
     )
     range_parser.add_argument(
         "--request-id",
@@ -3063,11 +3004,10 @@ if __name__ == "__main__":
         logger.info(f"Starting NGFW {args.operation} for request_id={args.request_id}")
         logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
-        # Pulumi operations vs runtime operations
+        # Infrastructure operations use Terraform, runtime operations use boto3
         if args.operation in ("provision", "deprovision"):
-            # Map to Pulumi operations
-            pulumi_op = "up" if args.operation == "provision" else "destroy"
-            run_ngfw_pulumi(pulumi_op, args.request_id)
+            tf_op = "up" if args.operation == "provision" else "destroy"
+            run_ngfw_terraform(tf_op, args.request_id)
         else:
             # Runtime operations (start, stop, complete-setup)
             kwargs = {}
@@ -3079,16 +3019,22 @@ if __name__ == "__main__":
         logger.info(f"Completed NGFW {args.operation} for request_id={args.request_id}")
 
     elif args.resource == "range":
-        # Handle range operations
         request_id = args.request_id
+        tf_op = "up" if args.operation == "provision" else "destroy"
 
-        # Map Django command names to Pulumi operations
-        operation_map = {"provision": "up", "destroy": "destroy"}
-        pulumi_op = operation_map[args.operation]
-
-        logger.info(f"Starting {pulumi_op} for request_id={request_id}")
+        logger.info(f"Starting range {args.operation} for request_id={request_id}")
         logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
 
-        run_pulumi(pulumi_op, request_id)
+        if args.operation in ("provision", "destroy"):
+            # Use Terraform for ranges
+            run_range_terraform(tf_op, request_id)
+        elif args.operation == "pause":
+            from range_ops import run_range_pause
 
-        logger.info(f"Completed {pulumi_op} for request_id={request_id}")
+            run_range_pause(request_id)
+        elif args.operation == "resume":
+            from range_ops import run_range_resume
+
+            run_range_resume(request_id)
+
+        logger.info(f"Completed range {args.operation} for request_id={request_id}")

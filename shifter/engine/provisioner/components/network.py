@@ -138,11 +138,6 @@ def _publish_subnet_exhaustion_alarm(vpc_id: str, cidr_prefix: str, subnet_size:
         subnet_size,
         cidr_prefix,
     )
-    pulumi.log.error(
-        f"CRITICAL: Subnet exhaustion in VPC {vpc_id}. "
-        f"No free /{subnet_size} subnet available in prefix {cidr_prefix}. "
-        "This is user-impacting - investigate immediately."
-    )
 
 
 def _get_existing_subnets(vpc_id: str) -> list[ipaddress.IPv4Network]:
@@ -247,7 +242,7 @@ def _allocate_subnets_internal(vpc_id: str, cidr_prefix: str, count: int, subnet
         RuntimeError: If not enough free subnets can be found.
     """
     existing_networks = _get_existing_subnets(vpc_id)
-    pulumi.log.info(f"Found {len(existing_networks)} existing subnets in VPC {vpc_id}")
+    logger.info("Found %d existing subnets in VPC %s", len(existing_networks), vpc_id)
 
     # Generate candidate CIDRs based on subnet size
     if subnet_size == 24:
@@ -272,7 +267,6 @@ def _allocate_subnets_internal(vpc_id: str, cidr_prefix: str, count: int, subnet
 
         if not has_aws_conflict and not has_batch_conflict:
             logger.info("Allocated subnet: %s", candidate_cidr)
-            pulumi.log.info(f"Allocated subnet: {candidate_cidr}")
             allocated.append(candidate_cidr)
             allocated_networks.append(candidate_network)
 
@@ -367,7 +361,7 @@ def _find_free_subnet_internal(vpc_id: str, cidr_prefix: str, subnet_size: int) 
         RuntimeError: If no free subnet can be found.
     """
     existing_networks = _get_existing_subnets(vpc_id)
-    pulumi.log.info(f"Found {len(existing_networks)} existing subnets in VPC {vpc_id}")
+    logger.info("Found %d existing subnets in VPC %s", len(existing_networks), vpc_id)
 
     # Generate candidate CIDRs based on subnet size
     if subnet_size == 24:
@@ -386,7 +380,6 @@ def _find_free_subnet_internal(vpc_id: str, cidr_prefix: str, subnet_size: int) 
 
         if not has_conflict:
             logger.info("Found free subnet: %s", candidate_cidr)
-            pulumi.log.info(f"Found free subnet: {candidate_cidr}")
             return candidate_cidr
 
     # No free subnet found - critical infrastructure issue

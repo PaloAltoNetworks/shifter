@@ -184,52 +184,6 @@ class RangeConfig:
     firewall_endpoint_id: str = ""
 
 
-@dataclass
-class NGFWConfig:
-    """Configuration for NGFW (UserNGFWStack) provisioning.
-
-    Infrastructure config comes from Pulumi config (set from environment).
-    Credential config comes from Pulumi config (set from app_spec in DB).
-
-    Attributes:
-        request_id: UUID of the provisioning request (for tagging/correlation).
-        instance_uuid: UUID of the NGFW instance (for tagging/DB correlation).
-        user_id: Django User ID who owns this NGFW.
-        environment: Deployment environment (dev, staging, prod).
-        vpc_id: AWS VPC ID for NGFW deployment.
-        subnet_id: Subnet ID for NGFW ENIs.
-        mgmt_security_group_id: Security group for management ENI.
-        data_security_group_id: Security group for data ENI.
-        ami_id: VM-Series AMI ID.
-        bootstrap_bucket: S3 bucket for bootstrap configuration.
-        instance_type: EC2 instance type.
-        instance_profile_name: IAM instance profile name.
-        scm_pin_id: SCM auto-registration PIN ID.
-        scm_pin_value: SCM auto-registration PIN value.
-        scm_folder_name: SCM folder name (dgname).
-        authcode: VM-Series authcode for licensing.
-    """
-
-    request_id: str
-    instance_uuid: str  # Required: for tagging and DB correlation
-    user_id: int
-    environment: str
-    # Infrastructure
-    vpc_id: str
-    subnet_id: str
-    mgmt_security_group_id: str
-    data_security_group_id: str
-    ami_id: str
-    bootstrap_bucket: str
-    instance_type: str
-    instance_profile_name: str
-    # Credentials (from app_spec)
-    scm_pin_id: str
-    scm_pin_value: str
-    scm_folder_name: str
-    authcode: str
-
-
 def get_db_connection() -> psycopg.Connection:
     """Get database connection.
 
@@ -626,49 +580,4 @@ def load_config() -> RangeConfig:
         s3_endpoint_id=config.get("s3EndpointId") or "",
         # AWS Network Firewall endpoint for internet egress
         firewall_endpoint_id=config.get("firewallEndpointId") or "",
-    )
-
-
-def load_ngfw_config() -> NGFWConfig:
-    """Load NGFW configuration from Pulumi config.
-
-    All values are set by _set_ngfw_stack_config() in main.py before pulumi up.
-    Infrastructure values come from environment, credentials from app_spec.
-
-    Returns:
-        NGFWConfig: Complete configuration for NGFW provisioning.
-    """
-    logger.info("Loading NGFW configuration")
-    config = pulumi.Config()
-
-    request_id = config.require("requestId")
-    instance_uuid = config.require("instanceUuid")
-    user_id = config.require_int("userId")
-
-    logger.debug(
-        "load_ngfw_config: request_id=%s instance_uuid=%s user_id=%s",
-        request_id,
-        instance_uuid,
-        user_id,
-    )
-
-    return NGFWConfig(
-        request_id=request_id,
-        instance_uuid=instance_uuid,
-        user_id=user_id,
-        environment=config.require("environment"),
-        # Infrastructure
-        vpc_id=config.require("ngfwVpcId"),
-        subnet_id=config.require("ngfwSubnetId"),
-        mgmt_security_group_id=config.require("ngfwMgmtSecurityGroupId"),
-        data_security_group_id=config.require("ngfwDataSecurityGroupId"),
-        ami_id=config.require("ngfwAmiId"),
-        bootstrap_bucket=config.require("bootstrapBucket"),
-        instance_type=config.get("ngfwInstanceType") or "m5.xlarge",
-        instance_profile_name=config.get("ngfwInstanceProfileName") or "",
-        # Credentials (secrets - use require_secret for sensitive values)
-        scm_pin_id=config.require("scmPinId"),
-        scm_pin_value=config.require("scmPinValue"),
-        scm_folder_name=config.require("scmFolderName"),
-        authcode=config.require("authcode"),
     )

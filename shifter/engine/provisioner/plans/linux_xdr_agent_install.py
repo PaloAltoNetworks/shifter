@@ -22,77 +22,21 @@ set -euo pipefail
 
 presigned_url="{{ agent_presigned_url }}"
 installer_path="/tmp/agent-installer"
-max_retries=5
-retry_delay=10
 
 echo "Downloading XDR agent installer..."
 
-# Cleanup any existing file from previous attempts (prevents issues on retry)
+# Download using curl with proper options for S3 presigned URLs
+curl -sSf -o "$installer_path" "$presigned_url"
+
 if [ -f "$installer_path" ]; then
-    echo "Removing existing installer file..."
-    rm -f "$installer_path" || true
-    sleep 1
-fi
-
-# Extract hostname from presigned URL for diagnostics
-s3_host=$(echo "$presigned_url" | sed -E 's|^https?://([^/]+)/.*|\\1|')
-echo "S3 endpoint: $s3_host"
-
-# Test DNS resolution
-echo "Testing DNS resolution..."
-if command -v host &> /dev/null; then
-    host "$s3_host" || echo "WARNING: DNS resolution failed"
-elif command -v nslookup &> /dev/null; then
-    nslookup "$s3_host" || echo "WARNING: DNS resolution failed"
+    file_size=$(stat -c%s "$installer_path" 2>/dev/null || stat -f%z "$installer_path")
+    echo "Download complete: $installer_path ($file_size bytes)"
 else
-    echo "No DNS lookup tool available, skipping DNS test"
+    echo "ERROR: Failed to download installer"
+    exit 1
 fi
 
-# Download with retry logic
-last_error=""
-for attempt in $(seq 1 $max_retries); do
-    echo "Download attempt $attempt of $max_retries at $(date '+%H:%M:%S')..."
-
-    # Use curl with retry-friendly options:
-    # --connect-timeout: max time for connection
-    # --max-time: total max time for the operation
-    # --retry-connrefused: retry on connection refused
-    if curl -sSf -o "$installer_path" \
-        --connect-timeout 30 \
-        --max-time 120 \
-        "$presigned_url" 2>&1; then
-
-        if [ -f "$installer_path" ]; then
-            file_size=$(stat -c%s "$installer_path" 2>/dev/null || stat -f%z "$installer_path")
-            if [ "$file_size" -gt 0 ]; then
-                echo "Download complete: $installer_path ($file_size bytes)"
-                exit 0
-            else
-                last_error="Downloaded file is empty"
-                echo "ERROR: $last_error"
-            fi
-        else
-            last_error="File not found after download"
-            echo "ERROR: $last_error"
-        fi
-    else
-        last_error="curl failed with exit code $?"
-        echo "ERROR: $last_error"
-    fi
-
-    if [ "$attempt" -lt "$max_retries" ]; then
-        # Exponential backoff: 10s, 20s, 40s, 80s
-        delay=$((retry_delay * (2 ** (attempt - 1))))
-        echo "Retrying in $delay seconds..."
-        sleep "$delay"
-        # Cleanup partial download
-        rm -f "$installer_path" 2>/dev/null || true
-    fi
-done
-
-echo "All $max_retries download attempts failed"
-echo "Last error: $last_error"
-exit 1
+exit 0
 """
 
 # Bash script to install XDR agent

@@ -59,3 +59,18 @@ ignore = ["S101"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+exclude = [
+    "venv/",
+    ".venv/",
+    "tests/",
+]
+# Start permissive, tighten over time (matches shifter-platform)
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_ignores = true
+show_error_codes = true
+# Disable untyped library checks - stubs not worth installing for these
+disable_error_code = ["import-untyped"]

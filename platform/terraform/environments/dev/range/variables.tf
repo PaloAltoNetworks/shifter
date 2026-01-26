@@ -73,3 +73,13 @@ variable "enable_ngfw_infrastructure" {
   description = "Enable persistent NGFW infrastructure (subnet, security groups, IAM role)"
   type        = bool
 }
+
+# ------------------------------------------------------------------------------
+# Network Firewall IP Allowlist
+# ------------------------------------------------------------------------------
+
+variable "victim_allowed_cidrs" {
+  description = "IP CIDR allowlist for Victim egress (GCP/PANW ranges for XDR)"
+  type        = list(string)
+  default     = []
+}

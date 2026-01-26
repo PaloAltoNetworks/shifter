@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [10.0.9] - 2026-01-13
+## [1.0.2] - 2026-01-25
 
 ### Added
 - Add CloudWatch alarms for Redis memory usage and connections
@@ -15,10 +15,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Upgrade Redis prod to support ~1000 concurrent connections
 -
-## [10.0.8] - 2026-01-13
+## [1.0.1] - 2026-01-25
+
+### Added
+- Range pause/resume flow and UI
+
+## [1.0.0] - 2026-01-25
+
+### Added
+- Cortex BYOT scenario (automation except for CIE and XDR collector)
+- Cortex Deployment Experience scenario
+
+### Changed
+- Dashboard renamed to Ranges
+- Ranges view uses multiple tiles for launch and active ranges
+- NGFW flow handles prompting user to associate NGFW to SCM and XDR
+- Removed legacy Terraform-based range provisioning
+- Ubuntu box supports RDP/desktop access
+- Users can set MFA to remember devices
 
 ### Fixed
 - Django build does not include cyberscript shared library
+- Extend and streamline NGFW stand up plan
+- Dynamic subnet creation for ranges misses Shifter Platform creation
+- Missing VPC route for kali
+- VPC Internet egress not enforcing drop rule
+- Kali RDP not working due to permissions on logs
+- XDR not deployed on BYOT scenario DC
+- Race condition in DC readiness and target attempt to join domain
 
 ## [0.10.7] - 2026-01-12
 
@@ -65,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Draft Cortex BYOT scenario template
 - venv enforcer hook for Claude Code
 - Guacamole RDP for Range instances
+- User (not just technical) docs in Shifter
 
 ### Changed
 - NGFW models and services refactored to use schemas
@@ -75,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AaC gate (service layer boundary violations at code or model level) fails will now block PRs
 - AWS assets tagged to requests for cost tracking and cleanup
 - Patched vulnerable urllib3, now on 2.6.3
+- Update technical docs
 
 ### Fixed
 - Dashboard range status updates and styling
@@ -83,6 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tmux now used for Terminal UI sessions
 - RDP copy/paste not working
 - Packer does not clean up EC2 instance after build
+- tmux Terminal UI sessions not allowing mouse scrolling
 
 ## [0.10.6] - 2025-01-09
 

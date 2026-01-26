@@ -15,6 +15,8 @@ class DashboardManager {
         this.launchUrl = options.launchUrl;
         this.cancelUrl = options.cancelUrl;
         this.destroyUrl = options.destroyUrl;
+        this.pauseUrl = options.pauseUrl;
+        this.resumeUrl = options.resumeUrl;
         this.agentsUrl = options.agentsUrl;
         this.scenariosUrl = options.scenariosUrl;
         this.loginUrl = options.loginUrl || '/oidc/authenticate/';
@@ -34,13 +36,6 @@ class DashboardManager {
         // Status polling fallback (catches missed WebSocket updates)
         this.statusPollInterval = null;
         this.statusPollDelay = 30000; // 30 seconds
-
-        // UI Elements
-        this.noRangeState = document.getElementById('no-range-state');
-        this.provisioningState = document.getElementById('provisioning-state');
-        this.activeRangeState = document.getElementById('active-range-state');
-        this.pausedRangeState = document.getElementById('paused-range-state');
-        this.failedState = document.getElementById('failed-state');
 
         // Scenario dropdown
         this.scenarioDropdown = document.getElementById('scenario-dropdown');
@@ -69,17 +64,33 @@ class DashboardManager {
         this.linuxAgentSelect = document.getElementById('linux-agent-select-value');
         this.linuxAgentItems = document.getElementById('linux-agent-items');
 
-        // Buttons
+        // Launch button (in launch tile - always present)
         this.launchBtn = document.getElementById('launch-btn');
-        this.cancelBtn = document.getElementById('cancel-btn');
-        this.pauseBtn = document.getElementById('pause-btn');
-        this.destroyBtn = document.getElementById('destroy-btn');
-        this.resumeBtn = document.getElementById('resume-btn');
-        this.destroyPausedBtn = document.getElementById('destroy-paused-btn');
-        this.dismissErrorBtn = document.getElementById('dismiss-error-btn');
 
         // Scenario requirements cache
         this.scenarioRequirements = {};
+
+        // Scenario data cache (for info panel)
+        this.scenarioData = {};
+
+        // Scenario info panel elements
+        this.scenarioInfoPanel = document.getElementById('scenario-info-panel');
+        this.scenarioInfoTitle = document.getElementById('scenario-info-title');
+        this.scenarioInfoDescription = document.getElementById('scenario-info-description');
+
+        // Range tiles
+        this.launchTile = document.getElementById('launch-tile');
+        this.rangeTiles = [
+            document.getElementById('range-tile-1'),
+            document.getElementById('range-tile-2'),
+            document.getElementById('range-tile-3'),
+        ];
+
+        // Templates for range states
+        this.provisioningTemplate = document.getElementById('provisioning-template');
+        this.activeTemplate = document.getElementById('active-template');
+        this.pausedTemplate = document.getElementById('paused-template');
+        this.failedTemplate = document.getElementById('failed-template');
 
         this._bindEvents();
         this._bindCleanup();
@@ -163,7 +174,7 @@ class DashboardManager {
             });
         }
 
-        // Launch button
+        // Launch button (always present in launch tile)
         if (this.launchBtn) {
             this.launchBtn.addEventListener('click', () => this.launchRange());
         }
@@ -181,6 +192,16 @@ class DashboardManager {
             this.destroyPausedBtn.addEventListener('click', () => this.destroyRange());
         }
 
+        // Pause button
+        if (this.pauseBtn) {
+            this.pauseBtn.addEventListener('click', () => this.pauseRange());
+        }
+
+        // Resume button
+        if (this.resumeBtn) {
+            this.resumeBtn.addEventListener('click', () => this.resumeRange());
+        }
+
         // Dismiss error button
         if (this.dismissErrorBtn) {
             this.dismissErrorBtn.addEventListener('click', () => this.dismissError());
@@ -193,6 +214,9 @@ class DashboardManager {
      */
     _onScenarioChange(scenario) {
         const req = this.scenarioRequirements[scenario] || {};
+
+        // Update scenario info panel
+        this._updateScenarioInfoPanel(scenario);
 
         // Hide all agent sections first
         this._hideAllAgentSections();
@@ -228,6 +252,27 @@ class DashboardManager {
         }
 
         this._updateLaunchButtonState();
+    }
+
+    /**
+     * Update the scenario info panel with the selected scenario's details.
+     */
+    _updateScenarioInfoPanel(scenarioId) {
+        const scenario = this.scenarioData[scenarioId];
+
+        if (!this.scenarioInfoPanel) return;
+
+        if (scenario) {
+            if (this.scenarioInfoTitle) {
+                this.scenarioInfoTitle.textContent = scenario.name;
+            }
+            if (this.scenarioInfoDescription) {
+                this.scenarioInfoDescription.textContent = scenario.description || 'No description available.';
+            }
+            this.scenarioInfoPanel.classList.add('visible');
+        } else {
+            this.scenarioInfoPanel.classList.remove('visible');
+        }
     }
 
     /**
@@ -317,9 +362,10 @@ class DashboardManager {
         this._initScenarioDropdown();
         this._initDropdown(this.osDropdown);
 
-        // Load scenarios, agents and current status in parallel
+        // Load scenarios first (needs to complete before agents for _onScenarioChange)
+        // Then load agents and range status in parallel
+        await this.loadScenarios();
         await Promise.all([
-            this.loadScenarios(),
             this.loadAgents(),
             this.loadRange(),
         ]);
@@ -343,9 +389,52 @@ class DashboardManager {
             return;
         }
 
-        // Cache agent requirements by scenario ID
-        for (const scenario of data.scenarios) {
-            this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
+        // Cache agent requirements and scenario data, then populate dropdown
+        const scenarioItems = document.getElementById('scenario-items');
+        if (scenarioItems && data.scenarios.length > 0) {
+            scenarioItems.innerHTML = '';
+
+            for (const scenario of data.scenarios) {
+                // Cache requirements and full scenario data
+                this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
+                this.scenarioData[scenario.id] = scenario;
+
+                // Create dropdown item - NAME ONLY (no description)
+                const li = document.createElement('li');
+                li.className = 'xdr-dropdown-item';
+                li.dataset.value = scenario.id;
+                li.textContent = scenario.name;
+
+                scenarioItems.appendChild(li);
+            }
+
+            // Select first scenario by default
+            const firstScenario = data.scenarios[0];
+            if (firstScenario && this.scenarioSelect) {
+                this.scenarioSelect.value = firstScenario.id;
+                // Update dropdown display
+                const trigger = this.scenarioDropdown?.querySelector('.xdr-dropdown-value');
+                if (trigger) {
+                    trigger.textContent = firstScenario.name;
+                    trigger.classList.remove('placeholder');
+                }
+                // Mark first item as selected
+                const firstItem = scenarioItems.querySelector('.xdr-dropdown-item');
+                if (firstItem) {
+                    firstItem.classList.add('selected');
+                }
+                // Update scenario info panel
+                this._updateScenarioInfoPanel(firstScenario.id);
+            }
+
+            // Re-init dropdown to bind events to new items
+            this._initDropdown(this.scenarioDropdown);
+        } else {
+            // Still cache requirements even if dropdown doesn't exist
+            for (const scenario of data.scenarios) {
+                this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
+                this.scenarioData[scenario.id] = scenario;
+            }
         }
     }
 
@@ -421,40 +510,39 @@ class DashboardManager {
     }
 
     _isTransitionalState(status) {
-        return ['pending', 'provisioning', 'resuming'].includes(status);
+        return ['pending', 'provisioning', 'pausing', 'resuming'].includes(status);
     }
 
     _updateUI() {
-        // Hide all states first
-        this.noRangeState.style.display = 'none';
-        this.provisioningState.style.display = 'none';
-        this.activeRangeState.style.display = 'none';
-        this.pausedRangeState.style.display = 'none';
-        if (this.failedState) {
-            this.failedState.style.display = 'none';
-        }
+        // Reset all range tiles to empty state
+        this._resetRangeTiles();
 
         if (!this.currentRange) {
-            this.noRangeState.style.display = 'block';
             this._resetLaunchButton();
             return;
         }
 
+        // Use first available tile for the current range
+        const tile = this.rangeTiles[0];
+        if (!tile) return;
+
         switch (this.currentRange.status) {
             case 'pending':
             case 'provisioning':
-                this.provisioningState.style.display = 'block';
-                this._updateProvisioningState();
+                this._renderProvisioningTile(tile);
                 break;
 
             case 'ready':
-                this.activeRangeState.style.display = 'block';
-                this._updateActiveState();
+                this._renderActiveTile(tile);
                 break;
 
             case 'paused':
-                this.pausedRangeState.style.display = 'block';
-                this._updatePausedState();
+                this._renderPausedTile(tile);
+                break;
+
+            case 'pausing':
+                this.provisioningState.style.display = 'block';
+                this._updateProvisioningState('Pausing Range', 'Stopping instances...');
                 break;
 
             case 'resuming':
@@ -463,66 +551,118 @@ class DashboardManager {
                 break;
 
             case 'failed':
-                if (this.failedState) {
-                    this.failedState.style.display = 'block';
-                    this._updateFailedState();
-                } else {
-                    // Fallback to no-range state if failed state doesn't exist
-                    this.noRangeState.style.display = 'block';
-                    alert(`Range provisioning failed: ${this.currentRange.error_message}`);
-                }
+                this._renderFailedTile(tile);
                 break;
 
             default:
-                // destroyed or unknown - show no range
-                this.noRangeState.style.display = 'block';
+                // destroyed or unknown - keep empty
+                break;
         }
     }
 
-    _updateProvisioningState(title = 'Provisioning Range', message = 'Setting up infrastructure...') {
-        const cardTitle = this.provisioningState.querySelector('.card-title');
-        if (cardTitle) {
-            cardTitle.textContent = title;
-        }
-        const statusText = this.provisioningState.querySelector('.status span:last-child');
-        if (statusText) {
-            statusText.textContent = message;
-        }
-    }
-
-    _updateActiveState() {
-        const rangeAgent = document.getElementById('range-agent');
-
-        if (rangeAgent && this.currentRange.agent_name) {
-            rangeAgent.textContent = this.currentRange.agent_name;
+    /**
+     * Reset all range tiles to empty state.
+     */
+    _resetRangeTiles() {
+        for (const tile of this.rangeTiles) {
+            if (!tile) continue;
+            tile.className = 'range-tile empty-tile';
+            tile.innerHTML = '<span class="text-muted">No active range</span>';
         }
     }
 
-    _isValidHttpUrl(urlString) {
-        try {
-            const url = new URL(urlString);
-            return url.protocol === 'http:' || url.protocol === 'https:';
-        } catch {
-            return false;
+    /**
+     * Render a tile in provisioning state.
+     */
+    _renderProvisioningTile(tile, title = 'Provisioning Range', message = 'Setting up infrastructure...') {
+        if (!this.provisioningTemplate) return;
+
+        tile.className = 'range-tile provisioning-tile';
+        tile.innerHTML = this.provisioningTemplate.innerHTML;
+
+        // Update title and message
+        const titleEl = tile.querySelector('.tile-title');
+        if (titleEl) titleEl.textContent = title;
+
+        const statusText = tile.querySelector('.status-text');
+        if (statusText) statusText.textContent = message;
+
+        // Bind cancel button
+        const cancelBtn = tile.querySelector('.cancel-range-btn');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => this.cancelRange());
         }
     }
 
-    _updatePausedState() {
-        const pausedAt = document.getElementById('range-paused-at');
-        const pausedAgent = document.getElementById('paused-range-agent');
+    /**
+     * Render a tile in active state.
+     */
+    _renderActiveTile(tile) {
+        if (!this.activeTemplate) return;
 
-        if (pausedAt && this.currentRange.paused_at) {
-            pausedAt.textContent = this._formatDate(this.currentRange.paused_at);
+        tile.className = 'range-tile active-tile';
+        tile.innerHTML = this.activeTemplate.innerHTML;
+
+        // Update agent name
+        const agentEl = tile.querySelector('.range-agent');
+        if (agentEl && this.currentRange.agent_name) {
+            agentEl.textContent = this.currentRange.agent_name;
         }
-        if (pausedAgent && this.currentRange.agent_name) {
-            pausedAgent.textContent = this.currentRange.agent_name;
+
+        // Bind destroy button
+        const destroyBtn = tile.querySelector('.destroy-btn');
+        if (destroyBtn) {
+            destroyBtn.addEventListener('click', () => this.destroyRange());
         }
     }
 
-    _updateFailedState() {
-        const errorMessage = document.getElementById('error-message');
-        if (errorMessage && this.currentRange.error_message) {
-            errorMessage.textContent = this.currentRange.error_message;
+    /**
+     * Render a tile in paused state.
+     */
+    _renderPausedTile(tile) {
+        if (!this.pausedTemplate) return;
+
+        tile.className = 'range-tile paused-tile';
+        tile.innerHTML = this.pausedTemplate.innerHTML;
+
+        // Update paused at time
+        const pausedAtEl = tile.querySelector('.range-paused-at');
+        if (pausedAtEl && this.currentRange.paused_at) {
+            pausedAtEl.textContent = this._formatDate(this.currentRange.paused_at);
+        }
+
+        // Update agent name
+        const agentEl = tile.querySelector('.range-agent');
+        if (agentEl && this.currentRange.agent_name) {
+            agentEl.textContent = this.currentRange.agent_name;
+        }
+
+        // Bind destroy button
+        const destroyBtn = tile.querySelector('.destroy-btn');
+        if (destroyBtn) {
+            destroyBtn.addEventListener('click', () => this.destroyRange());
+        }
+    }
+
+    /**
+     * Render a tile in failed state.
+     */
+    _renderFailedTile(tile) {
+        if (!this.failedTemplate) return;
+
+        tile.className = 'range-tile failed-tile';
+        tile.innerHTML = this.failedTemplate.innerHTML;
+
+        // Update error message
+        const errorEl = tile.querySelector('.error-message');
+        if (errorEl && this.currentRange.error_message) {
+            errorEl.textContent = this.currentRange.error_message;
+        }
+
+        // Bind dismiss button
+        const dismissBtn = tile.querySelector('.dismiss-error-btn');
+        if (dismissBtn) {
+            dismissBtn.addEventListener('click', () => this.dismissError());
         }
     }
 
@@ -561,8 +701,9 @@ class DashboardManager {
             agents.linux = Number.parseInt(this.linuxAgentSelect.value, 10);
         }
 
-        // Validate we have at least one agent
-        if (Object.keys(agents).length === 0) {
+        // Validate we have required agents (scenarios without agent requirements can proceed)
+        const requiresAgents = req.has_from_agent || req.requires_windows || req.requires_linux;
+        if (requiresAgents && Object.keys(agents).length === 0) {
             return;
         }
 
@@ -659,6 +800,68 @@ class DashboardManager {
             this._closeStatusSocket();
             this.currentRange = null;
             this._updateUI();
+
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    async pauseRange() {
+        if (!confirm('Are you sure you want to pause this range? Instances will be stopped.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(this.pauseUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': this.csrfToken,
+                },
+                body: JSON.stringify({ request_id: this.currentRange.request_id }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to pause range');
+            }
+
+            // Update local state to pausing and connect WebSocket for updates
+            this.currentRange.status = 'pausing';
+            this._updateUI();
+            this._connectStatusSocket(this.currentRange.request_id);
+
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    async resumeRange() {
+        if (!confirm('Are you sure you want to resume this range?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(this.resumeUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': this.csrfToken,
+                },
+                body: JSON.stringify({ request_id: this.currentRange.request_id }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to resume range');
+            }
+
+            // Update local state to resuming and connect WebSocket for updates
+            this.currentRange.status = 'resuming';
+            this._updateUI();
+            this._connectStatusSocket(this.currentRange.request_id);
 
         } catch (error) {
             alert(error.message);

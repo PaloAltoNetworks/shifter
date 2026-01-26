@@ -4,8 +4,8 @@ Tests for:
 - Domain Controller PowerShell template (dc_windows.ps1.j2)
 - NGFW init-cfg.txt template (ngfw_init_cfg.txt.j2)
 
-NOTE: The DC template is now a minimal bootstrap script (hostname, SSH).
-AD DS installation is handled via SSM Run Command orchestration.
+NOTE: The DC template is now a minimal bootstrap script.
+AD DS installation is handled via SSM plans.
 See test_dc_setup_plan.py for AD DS setup tests.
 """
 
@@ -31,11 +31,10 @@ class TestDCTemplateRendering:
     """Tests for DC user_data template rendering.
 
     ARCHITECTURE NOTE: DC user_data is intentionally minimal.
-    All setup (hostname, SSH, AD DS) is handled via SSM Run Command orchestration:
-    - BootstrapPlan: hostname + SSH + reboot
-    - DCSetupPlan: AD DS install + promote
+    All setup (hostname, SSH, AD DS) is handled via SSM plans:
+    - DCSetupPlan: hostname, SSH, AD DS install + promote
 
-    See test_bootstrap_plan.py and test_dc_setup_plan.py for setup tests.
+    See test_dc_setup_plan.py for AD DS setup tests.
     """
 
     @pytest.fixture

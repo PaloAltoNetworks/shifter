@@ -30,6 +30,14 @@ class OpsResult:
     success: bool
     step_results: list[StepResult] = field(default_factory=list)
 
+    @property
+    def error(self) -> str | None:
+        """Get error message from failed step, if any."""
+        for step_result in self.step_results:
+            if not step_result.success:
+                return step_result.stderr or f"Step '{step_result.step_name}' failed"
+        return None
+
 
 @runtime_checkable
 class OpsStep(Protocol):

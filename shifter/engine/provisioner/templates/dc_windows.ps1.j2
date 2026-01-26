@@ -7,14 +7,55 @@
 # This script ensures access (SSH/RDP) is available even if SSM is flaky.
 
 $LogFile = "C:\Windows\Temp\dc-userdata.log"
-$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-"$timestamp - DC instance started. Setup will be orchestrated via SSM." | Out-File -FilePath $LogFile
+
+function Log-Message {
+    param([string]$Message)
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$ts - $Message" | Out-File -FilePath $LogFile -Append
+    Write-Host $Message
+}
+
+Log-Message "DC instance started. Setup will be orchestrated via SSM."
+Log-Message "Hostname: $env:COMPUTERNAME"
+
+# Check if this is a Domain Controller (prebaked AMI)
+$isDC = $false
+try {
+    $dcInfo = Get-ADDomainController -ErrorAction Stop
+    $isDC = $true
+    Log-Message "This is a Domain Controller: $($dcInfo.Domain)"
+} catch {
+    Log-Message "Not a Domain Controller yet (AD cmdlets not available or not promoted)"
+}
 
 # Set Administrator password for RDP/SSH access
 # TODO: Move to CMS-managed instance credentials (#542)
 $AdminPassword = "{{ admin_password }}"
-net user Administrator $AdminPassword
-"$timestamp - Administrator password configured" | Out-File -FilePath $LogFile -Append
+
+if ($isDC) {
+    # On a DC, Administrator is a domain account - use AD cmdlet
+    Log-Message "Attempting to set domain Administrator password via Set-ADAccountPassword..."
+    try {
+        $securePassword = ConvertTo-SecureString $AdminPassword -AsPlainText -Force
+        Set-ADAccountPassword -Identity Administrator -Reset -NewPassword $securePassword -ErrorAction Stop
+        Log-Message "SUCCESS: Domain Administrator password set via Set-ADAccountPassword"
+    } catch {
+        Log-Message "FAILED: Set-ADAccountPassword error: $($_.Exception.Message)"
+        Log-Message "SSM setup will retry password configuration"
+    }
+} else {
+    # Not a DC yet - use net user for local account
+    Log-Message "Attempting to set local Administrator password via net user..."
+    $netUserResult = net user Administrator $AdminPassword 2>&1
+    $netUserExitCode = $LASTEXITCODE
+    Log-Message "net user exit code: $netUserExitCode"
+    Log-Message "net user output: $netUserResult"
+    if ($netUserExitCode -eq 0) {
+        Log-Message "SUCCESS: Local Administrator password set via net user"
+    } else {
+        Log-Message "FAILED: net user failed with exit code $netUserExitCode"
+    }
+}
 
 # Configure SSH key for Terminal UI (OpenSSH is baked into AMI)
 $PublicKey = "{{ public_key }}"
@@ -30,9 +71,9 @@ if ($PublicKey) {
     icacls "$sshDir\\administrators_authorized_keys" /inheritance:r `
         /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
 
-    "$timestamp - SSH key configured" | Out-File -FilePath $LogFile -Append
+    Log-Message "SSH key configured at $sshDir\\administrators_authorized_keys"
 } else {
-    "$timestamp - No public key provided, skipping SSH key setup" | Out-File -FilePath $LogFile -Append
+    Log-Message "No public key provided, skipping SSH key setup"
 }
 
 # Ensure sshd service is running (installed in AMI)
@@ -40,12 +81,42 @@ $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
 if ($sshdService) {
     Start-Service sshd -ErrorAction SilentlyContinue
     Set-Service -Name sshd -StartupType Automatic
-    "$timestamp - sshd service started" | Out-File -FilePath $LogFile -Append
+    $sshdStatus = (Get-Service -Name sshd).Status
+    Log-Message "sshd service status: $sshdStatus"
 } else {
-    "$timestamp - sshd service not found" | Out-File -FilePath $LogFile -Append
+    Log-Message "WARNING: sshd service not found"
 }
 
 # Ensure RDP service is running
-Set-Service -Name TermService -StartupType Automatic -ErrorAction SilentlyContinue
-Start-Service -Name TermService -ErrorAction SilentlyContinue
+Log-Message "Configuring RDP (TermService)..."
+try {
+    Set-Service -Name TermService -StartupType Automatic -ErrorAction Stop
+    Start-Service -Name TermService -ErrorAction Stop
+    $rdpStatus = (Get-Service -Name TermService).Status
+    Log-Message "TermService (RDP) status: $rdpStatus"
+} catch {
+    Log-Message "ERROR: Failed to start TermService: $($_.Exception.Message)"
+}
+
+# Check RDP port is listening
+$rdpPort = Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue
+if ($rdpPort) {
+    Log-Message "RDP port 3389 is LISTENING"
+} else {
+    Log-Message "WARNING: RDP port 3389 is NOT listening"
+}
+
+# Check firewall rules for RDP
+$rdpFwRule = Get-NetFirewallRule -DisplayName "*Remote Desktop*" -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq $true }
+if ($rdpFwRule) {
+    Log-Message "RDP firewall rules enabled: $($rdpFwRule.Count) rules"
+} else {
+    Log-Message "WARNING: No enabled RDP firewall rules found"
+}
+
+# Final summary
+Log-Message "=== DC user_data complete ==="
+Log-Message "Password method: $(if ($isDC) { 'Set-ADAccountPassword' } else { 'net user' })"
+Log-Message "SSH key: $(if ($PublicKey) { 'configured' } else { 'not provided' })"
+Log-Message "SSM will handle remaining setup (AD verification, XDR agent)"
 </powershell>

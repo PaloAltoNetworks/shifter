@@ -42,7 +42,8 @@ for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
     # --connect-timeout: connection timeout
     # --max-time: total operation timeout
     # --ssl-no-revoke: skip certificate revocation check (CRL/OCSP servers unreachable in private subnet)
-    $curlResult = & curl.exe -sSfL -o $installerPath --connect-timeout 30 --max-time 120 --ssl-no-revoke $presignedUrl 2>&1
+    $curlResult = & curl.exe -sSfL -o $installerPath ``
+        --connect-timeout 30 --max-time 120 --ssl-no-revoke $presignedUrl 2>&1
     $curlExitCode = $LASTEXITCODE
 
     $duration = (Get-Date) - $startTime

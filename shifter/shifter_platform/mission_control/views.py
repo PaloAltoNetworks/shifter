@@ -570,6 +570,88 @@ def destroy_range(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
+@require_POST
+def pause_range(request: HttpRequest) -> JsonResponse:
+    """
+    Pause an active range.
+
+    Request body (JSON):
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to pause (legacy, deprecated)
+
+    Sets status to PAUSING and triggers async instance stop.
+    """
+    from cms import pause_range as cms_pause_range_by_id
+    from cms.services import pause_range_by_request_id as cms_pause_range_by_request
+
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
+    range_id = data.get("range_id")
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
+
+    try:
+        if request_id:
+            cms_pause_range_by_request(user, request_id)
+            logger.info("Range paused: user=%s request_id=%s", user.email, request_id)
+        else:
+            cms_pause_range_by_id(user, range_id)
+            logger.info("Range paused: user=%s range_id=%s", user.email, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
+@require_POST
+def resume_range(request: HttpRequest) -> JsonResponse:
+    """
+    Resume a paused range.
+
+    Request body (JSON):
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to resume (legacy, deprecated)
+
+    Sets status to RESUMING and triggers async instance start.
+    """
+    from cms import resume_range as cms_resume_range_by_id
+    from cms.services import resume_range_by_request_id as cms_resume_range_by_request
+
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
+    range_id = data.get("range_id")
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
+
+    try:
+        if request_id:
+            cms_resume_range_by_request(user, request_id)
+            logger.info("Range resumed: user=%s request_id=%s", user.email, request_id)
+        else:
+            cms_resume_range_by_id(user, range_id)
+            logger.info("Range resumed: user=%s range_id=%s", user.email, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
 @require_GET
 def list_agents(request: HttpRequest) -> JsonResponse:
     """

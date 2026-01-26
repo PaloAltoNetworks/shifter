@@ -105,7 +105,7 @@ class TestXDRAgentInstallPlanScripts:
     """Tests for XDRAgentInstallPlan script contents."""
 
     def test_download_script_uses_curl(self):
-        """Download script should use curl.exe for faster downloads."""
+        """Download script should use curl.exe for downloads."""
         plan = XDRAgentInstallPlan()
         download_script = plan.steps[0].script
         assert "curl.exe" in download_script

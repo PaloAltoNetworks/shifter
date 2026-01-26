@@ -22,6 +22,8 @@ urlpatterns = [
     path("api/range/launch/", views.launch_range, name="launch_range"),
     path("api/range/cancel/", views.cancel_range, name="cancel_range"),
     path("api/range/destroy/", views.destroy_range, name="destroy_range"),
+    path("api/range/pause/", views.pause_range, name="pause_range"),
+    path("api/range/resume/", views.resume_range, name="resume_range"),
     path("api/agents/", views.list_agents, name="list_agents"),
     path("api/scenarios/", views.list_scenarios, name="list_scenarios"),
     # Guacamole RDP API
@@ -35,6 +37,7 @@ urlpatterns = [
     path("api/ngfw/", views.api_ngfw_create, name="api_ngfw_create"),
     path("api/ngfw/list/", views.api_ngfw_list, name="api_ngfw_list"),
     path("api/ngfw/<uuid:app_id>/destroy/", views.api_ngfw_destroy, name="api_ngfw_destroy"),
+    path("api/ngfw/<uuid:app_id>/complete-setup/", views.api_ngfw_complete_setup, name="api_ngfw_complete_setup"),
     # Credential views
     path("credentials/", views.credentials_list, name="credentials_list"),
     path("credentials/add/", views.credential_add, name="credential_add"),

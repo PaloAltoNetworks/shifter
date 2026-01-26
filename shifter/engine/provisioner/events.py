@@ -65,6 +65,7 @@ EVENT_TYPE_NGFW = "ngfw.event"
 # Resource status constants (matching shared.enums.ResourceStatus)
 STATUS_PENDING = "pending"
 STATUS_PROVISIONING = "provisioning"
+STATUS_AWAITING_ASSOCIATION = "awaiting_association"
 STATUS_READY = "ready"
 STATUS_FAILED = "failed"
 STATUS_DESTROYING = "destroying"
@@ -324,7 +325,7 @@ def publish_cancelled(request_id: str, range_id: int, user_id: int) -> None:
 def publish_ngfw_event(
     request_id: str,
     instance_id: str,
-    app_id: str,
+    app_id: str | None,
     status: str,
     serial_number: str | None = None,
 ) -> None:
@@ -337,7 +338,7 @@ def publish_ngfw_event(
     Args:
         request_id: UUID of the provisioning request (RequestSpec.id)
         instance_id: UUID of the instantiation (Instantiation.id)
-        app_id: UUID of the CMS app (NGFW.app_id)
+        app_id: UUID of the CMS app (NGFW.app_id), or None if not yet associated
         status: ResourceStatus value (e.g., "provisioning", "ready", "failed", "destroyed")
         serial_number: PAN-OS serial number (included in "ready" events for CSP registration)
     """

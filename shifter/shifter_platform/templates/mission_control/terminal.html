@@ -11,7 +11,7 @@
         <div class="terminal-header-left">
             <h1 class="terminal-title">Terminal</h1>
             {% if has_active_range %}
-            <span class="terminal-range-info">Range #{{ active_range.range_id }}</span>
+            <span class="terminal-range-info">{{ scenario_name|default:active_range.scenario_id }}</span>
             {% else %}
             <span class="terminal-range-info text-muted">No active range</span>
             {% endif %}
@@ -80,6 +80,14 @@
                 <select class="pane-select" id="left-pane-select">
                     <!-- Options populated by JavaScript -->
                 </select>
+                <button class="pane-action-btn rdp-btn split-rdp-btn" title="Open RDP Session" id="left-pane-rdp-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>RDP</span>
+                </button>
                 <div class="pane-status" id="left-pane-status">
                     <span class="status-indicator"></span>
                     <span class="status-text">Not connected</span>
@@ -94,6 +102,14 @@
                 <select class="pane-select" id="right-pane-select">
                     <!-- Options populated by JavaScript -->
                 </select>
+                <button class="pane-action-btn rdp-btn split-rdp-btn" title="Open RDP Session" id="right-pane-rdp-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>RDP</span>
+                </button>
                 <div class="pane-status" id="right-pane-status">
                     <span class="status-indicator"></span>
                     <span class="status-text">Not connected</span>
@@ -171,47 +187,61 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     terminalManager.init();
 
-    // Setup RDP button click handlers
-    document.querySelectorAll('.rdp-btn').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
+    // Helper function to open RDP session
+    async function openRdpSession(button, instanceUuid) {
+        if (!instanceUuid) {
+            alert('Instance not available');
+            return;
+        }
+
+        // Disable button while loading
+        button.disabled = true;
+        button.classList.add('loading');
+
+        try {
+            const response = await fetch('{% url "mission_control:guacamole_rdp_url" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}',
+                },
+                body: JSON.stringify({ instance_uuid: instanceUuid }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to generate RDP URL');
+            }
+
+            // Open RDP session in new tab
+            window.open(data.url, '_blank');
+        } catch (error) {
+            console.error('RDP button error:', error);
+            alert('Failed to open RDP session: ' + error.message);
+        } finally {
+            button.disabled = false;
+            button.classList.remove('loading');
+        }
+    }
+
+    // Setup RDP button click handlers for tabbed view (has data-uuid)
+    document.querySelectorAll('.rdp-btn[data-uuid]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
             const button = e.currentTarget;
-            const instanceUuid = button.dataset.uuid;
-
-            if (!instanceUuid) {
-                alert('Instance not available');
-                return;
-            }
-
-            // Disable button while loading
-            button.disabled = true;
-            button.classList.add('loading');
-
-            try {
-                const response = await fetch('{% url "mission_control:guacamole_rdp_url" %}', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}',
-                    },
-                    body: JSON.stringify({ instance_uuid: instanceUuid }),
-                });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to generate RDP URL');
-                }
-
-                // Open RDP session in new tab
-                window.open(data.url, '_blank');
-            } catch (error) {
-                console.error('RDP button error:', error);
-                alert('Failed to open RDP session: ' + error.message);
-            } finally {
-                button.disabled = false;
-                button.classList.remove('loading');
-            }
+            openRdpSession(button, button.dataset.uuid);
         });
+    });
+
+    // Setup RDP button click handlers for split view (gets uuid from select)
+    document.getElementById('left-pane-rdp-btn')?.addEventListener('click', (e) => {
+        const select = document.getElementById('left-pane-select');
+        openRdpSession(e.currentTarget, select?.value);
+    });
+
+    document.getElementById('right-pane-rdp-btn')?.addEventListener('click', (e) => {
+        const select = document.getElementById('right-pane-select');
+        openRdpSession(e.currentTarget, select?.value);
     });
 });
 </script>

@@ -16,12 +16,6 @@ from pydantic import ValidationError
 class TestAgentDetails:
     """Tests for AgentDetails Pydantic model."""
 
-    def test_import_agent_details(self):
-        """AgentDetails can be imported from shared.schemas.range."""
-        from shared.schemas.range import AgentDetails
-
-        assert AgentDetails is not None
-
     def test_create_with_all_required_fields(self):
         """AgentDetails can be created with all required fields."""
         from shared.schemas.range import AgentDetails
@@ -89,12 +83,6 @@ class TestAgentDetails:
 class TestDCConfig:
     """Tests for DCConfig Pydantic model."""
 
-    def test_import_dc_config(self):
-        """DCConfig can be imported from shared.schemas.range."""
-        from shared.schemas.range import DCConfig
-
-        assert DCConfig is not None
-
     def test_create_with_all_required_fields(self):
         """DCConfig can be created with domain_name and netbios_name."""
         from shared.schemas.range import DCConfig
@@ -139,12 +127,6 @@ class TestDCConfig:
 
 class TestInstanceSpec:
     """Tests for InstanceSpec Pydantic model."""
-
-    def test_import_instance_spec(self):
-        """InstanceSpec can be imported from shared.schemas.range."""
-        from shared.schemas.range import InstanceSpec
-
-        assert InstanceSpec is not None
 
     def test_create_with_required_fields(self):
         """InstanceSpec can be created with name, role, and os_type."""
@@ -297,12 +279,6 @@ class TestRangeSpec:
     RangeSpec uses subnets containing instances. Access all_instances
     property to get flattened list of instances across all subnets.
     """
-
-    def test_import_range_request(self):
-        """RangeSpec can be imported from shared.schemas.range."""
-        from shared.schemas.range import RangeSpec
-
-        assert RangeSpec is not None
 
     def test_create_with_required_fields(self):
         """RangeSpec can be created with scenario_id, user_id, and subnets."""
@@ -523,12 +499,6 @@ class TestRangeSpec:
 class TestInstanceContextBase:
     """Tests for InstanceContextBase - base projection for all instance types."""
 
-    def test_import_instance_context_base(self):
-        """InstanceContextBase can be imported from shared.schemas.range."""
-        from shared.schemas.range import InstanceContextBase
-
-        assert InstanceContextBase is not None
-
     def test_create_with_required_fields(self):
         """InstanceContextBase can be created with role and os_type."""
         from shared.schemas.range import InstanceContextBase
@@ -603,12 +573,6 @@ class TestInstanceContextBase:
 class TestInstanceContext:
     """Tests for InstanceContext Pydantic model (template-safe projection)."""
 
-    def test_import_instance_context(self):
-        """InstanceContext can be imported from shared.schemas.range."""
-        from shared.schemas.range import InstanceContext
-
-        assert InstanceContext is not None
-
     def test_create_with_required_fields(self):
         """InstanceContext can be created with role and os_type."""
         from shared.schemas.range import InstanceContext
@@ -680,12 +644,6 @@ class TestRangeContext:
     # ---------------------------------------------------------------------
     # Happy path - creation with valid data
     # ---------------------------------------------------------------------
-
-    def test_import_range_context(self):
-        """RangeContext can be imported from shared.schemas.range."""
-        from shared.schemas.range import RangeContext
-
-        assert RangeContext is not None
 
     def test_create_with_required_fields(self):
         """RangeContext can be created with all required fields."""
@@ -1217,12 +1175,6 @@ class TestRangeRef:
     # ---------------------------------------------------------------------
     # Happy path - creation with valid data
     # ---------------------------------------------------------------------
-
-    def test_import_range_ref(self):
-        """RangeRef can be imported from shared.schemas.range."""
-        from shared.schemas.range import RangeRef
-
-        assert RangeRef is not None
 
     def test_create_with_required_fields(self):
         """RangeRef can be created with all required fields."""

@@ -31,21 +31,6 @@ output "public_route_table_id" {
   value       = module.vpc.public_route_table_id
 }
 
-output "victim_security_group_id" {
-  description = "ID of the security group for victim EC2 instances"
-  value       = module.vpc.victim_security_group_id
-}
-
-output "kali_security_group_id" {
-  description = "ID of the security group for Kali attack instances"
-  value       = module.vpc.kali_security_group_id
-}
-
-output "dc_security_group_id" {
-  description = "ID of the security group for Domain Controller instances"
-  value       = module.vpc.dc_security_group_id
-}
-
 # ------------------------------------------------------------------------------
 # VM-Series NGFW
 # ------------------------------------------------------------------------------
@@ -83,6 +68,11 @@ output "s3_endpoint_id" {
 output "firewall_arn" {
   description = "ARN of the Network Firewall (null if disabled)"
   value       = module.vpc.firewall_arn
+}
+
+output "firewall_endpoint_id" {
+  description = "ID of the Network Firewall endpoint (null if firewall disabled)"
+  value       = module.vpc.firewall_endpoint_id
 }
 
 # ------------------------------------------------------------------------------

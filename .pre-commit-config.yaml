@@ -157,6 +157,14 @@ repos:
         pass_filenames: false
         types: [python]
 
+      - id: mypy-provisioner
+        name: mypy (provisioner)
+        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && mypy .'
+        language: system
+        files: ^shifter/engine/provisioner/
+        pass_filenames: false
+        types: [python]
+
   # =============================================================================
   # STAGE 4: Architecture checks (hard fail - zero tolerance)
   # =============================================================================

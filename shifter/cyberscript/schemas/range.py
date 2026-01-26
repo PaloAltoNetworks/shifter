@@ -118,7 +118,7 @@ class InstanceSpec(SpecBase):
         dc_config = _build_dc_config(data.get("dc_config"))
 
         return cls(
-            name=f"{role}-{os_type}",
+            name=name,
             uuid=str(uuid_module.uuid4()),
             role=cast(Literal["attacker", "victim", "dc", "ngfw"], role),
             os_type=cast(Literal["kali", "ubuntu", "windows", "panos"], os_type),
@@ -244,9 +244,11 @@ class RangeSpec(RangeSpecBase):
 
     Attributes:
         range_type: Discriminator field, always 'demo'.
+        ngfw: Whether this range requires NGFW traffic inspection.
     """
 
     range_type: Literal["demo"] = "demo"
+    ngfw: bool = False
 
 
 # =============================================================================

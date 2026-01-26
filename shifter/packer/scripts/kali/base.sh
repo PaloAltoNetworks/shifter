@@ -60,10 +60,31 @@ chmod +x /etc/xrdp/startwm.sh
 # Add kali user to ssl-cert group (required for xrdp)
 usermod -aG ssl-cert kali
 
-# Set kali user password for RDP login
+# Set kali user password for RDP login and SSH
 echo "kali:kali" | chpasswd
 
+# Override cloud-init's lock_passwd setting (20_kali.cfg sets lock_passwd: True)
+# This prevents cloud-init from re-locking the account on boot
+cat > /etc/cloud/cloud.cfg.d/90_shifter.cfg << 'EOF'
+system_info:
+  default_user:
+    name: kali
+    lock_passwd: false
+EOF
+
+# Enable SSH password authentication for SFTP file transfers via Guacamole
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+# Ensure it exists in config
+if ! grep -q '^PasswordAuthentication' /etc/ssh/sshd_config; then
+    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+fi
+
+# Set home directory permissions for SFTP access
+# Guacamole's SFTP (libssh2) needs read+execute on the directory
+chmod 755 /home/kali
+
 # Fix polkit for xrdp sessions (allows shutdown/restart from desktop)
+mkdir -p /etc/polkit-1/localauthority/50-local.d
 cat > /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla << 'EOF'
 [Allow Colord all Users]
 Identity=unix-user:*

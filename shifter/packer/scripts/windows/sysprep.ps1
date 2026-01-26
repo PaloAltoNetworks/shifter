@@ -84,6 +84,12 @@ wevtutil cl System 2>$null
 Write-Host "Temp files cleaned"
 
 # ------------------------------------------------------------------------------
+# NOTE: Administrator password is NOT set here
+# Setting password breaks WinRM session before sysprep can run.
+# Password should be set via EC2Launch user data on first boot.
+# ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # Run EC2Launch sysprep
 # This MUST be the last step - it shuts down the instance
 # ------------------------------------------------------------------------------

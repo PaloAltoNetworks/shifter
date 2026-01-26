@@ -11,6 +11,7 @@ on:
           - kali
           - ubuntu
           - windows
+          - dc
       ref:
         description: 'Branch to build from'
         required: false
@@ -22,8 +23,46 @@ permissions:
   contents: read
 
 jobs:
+  # DC AMIs are prebaked - just update SSM from config file
+  update-dc:
+    name: Update DC AMI in dev SSM
+    if: inputs.ami_type == 'dc'
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-2
+
+      - name: Update dev SSM from config
+        run: |
+          AMI_ID=$(jq -r '.dev' shifter/packer/dc-amis.json)
+          echo "## DC AMI Update (Dev)" >> $GITHUB_STEP_SUMMARY
+          echo "- **AMI ID:** \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source:** dc-amis.json (prebaked AMI)" >> $GITHUB_STEP_SUMMARY
+
+          aws ssm put-parameter \
+            --name "/shifter/ami/dc" \
+            --type String \
+            --value "$AMI_ID" \
+            --overwrite \
+            --description "Prebaked DC AMI from dc-amis.json, run ${{ github.run_id }}"
+
+          echo "- **SSM Parameter:** \`/shifter/ami/dc\` updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next step:** Test in dev, then run 'Packer AMI Promote to Prod' workflow" >> $GITHUB_STEP_SUMMARY
+
+  # Other AMIs are built with Packer
   build:
     name: Build ${{ inputs.ami_type }} AMI in dev
+    if: inputs.ami_type != 'dc'
     runs-on: self-hosted
     defaults:
       run:

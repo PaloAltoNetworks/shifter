@@ -398,3 +398,116 @@
     color: var(--xdr-text-secondary);
     margin: 0 0 24px;
 }
+
+/* Awaiting association state */
+.awaiting-association-state {
+    text-align: center;
+    padding: 32px;
+}
+
+.warning-icon {
+    width: 64px;
+    height: 64px;
+    background: rgb(255, 149, 0, 0.1);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 24px;
+    color: #ff9500;
+    font-size: 32px;
+    font-weight: 700;
+}
+
+.warning-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 0 0 8px;
+}
+
+.warning-subtitle {
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin: 0 0 24px;
+}
+
+.setup-instructions {
+    text-align: left;
+    max-width: 480px;
+    margin: 0 auto 24px;
+}
+
+.setup-step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.setup-step:last-child {
+    margin-bottom: 0;
+}
+
+.setup-step-number {
+    width: 28px;
+    height: 28px;
+    background: #ff9500;
+    color: #000;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.setup-step-content {
+    flex: 1;
+}
+
+.setup-step-content h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--xdr-text);
+    margin: 0 0 4px;
+}
+
+.setup-step-content p {
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.serial-number-row {
+    margin-top: 8px !important;
+}
+
+.serial-number-row code {
+    background: var(--xdr-bg-tertiary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+    color: var(--xdr-text);
+    user-select: all;
+}
+
+.setup-note {
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin: 0 0 16px;
+}
+
+.setup-timing-note {
+    font-size: 12px;
+    color: var(--xdr-text-tertiary);
+    margin: 16px 0 0;
+}
+
+/* Configuring state */
+.configuring-state {
+    text-align: center;
+    padding: 32px;
+}

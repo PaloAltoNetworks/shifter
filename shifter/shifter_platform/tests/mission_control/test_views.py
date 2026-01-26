@@ -47,10 +47,10 @@ class TestDashboardView:
         response = client.get(reverse("mission_control:dashboard"))
 
         assert response.status_code == 200
-        assert "dashboard" in response.content.decode().lower()
+        assert "ranges" in response.content.decode().lower()
         # Check context
-        assert response.context["page_title"] == "Dashboard"
-        assert response.context["active_nav"] == "dashboard"
+        assert response.context["page_title"] == "Ranges"
+        assert response.context["active_nav"] == "ranges"
 
 
 # -----------------------------------------------------------------------------

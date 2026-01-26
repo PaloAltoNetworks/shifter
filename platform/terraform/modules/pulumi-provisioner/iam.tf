@@ -492,6 +492,16 @@ resource "aws_iam_role_policy" "ssm_parameters" {
         Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/${var.environment}/range/*"
       },
       {
+        # Read-only access to AMI parameters (set by Packer builds)
+        Sid    = "SSMReadAMIParameters"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/ami/*"
+      },
+      {
         # DescribeParameters required by Pulumi/Terraform for metadata lookup
         # Must be * resource per AWS API requirements
         Sid      = "SSMDescribeParameters"

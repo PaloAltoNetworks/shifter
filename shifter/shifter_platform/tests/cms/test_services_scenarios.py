@@ -51,14 +51,10 @@ class TestListScenarios:
 
     # --- Returns expected scenarios ---
 
-    def test_returns_list(self, user):
-        """Service returns a list."""
+    def test_returns_non_empty_list_of_scenarios(self, user):
+        """Service returns a non-empty list of scenarios."""
         result = services.list_scenarios(user)
         assert isinstance(result, list)
-
-    def test_returns_non_empty_list(self, user):
-        """Service returns non-empty list of scenarios."""
-        result = services.list_scenarios(user)
         assert len(result) > 0
 
     def test_returns_basic_scenario(self, user):
@@ -75,35 +71,22 @@ class TestListScenarios:
 
     # --- Scenario metadata structure ---
 
-    def test_scenario_has_id(self, user):
-        """Each scenario has an id field."""
+    def test_scenarios_have_required_metadata(self, user):
+        """Each scenario has required metadata fields with correct types."""
         result = services.list_scenarios(user)
         for scenario in result:
-            assert "id" in scenario
+            # Required fields
             assert isinstance(scenario["id"], str)
-
-    def test_scenario_has_name(self, user):
-        """Each scenario has a name field."""
-        result = services.list_scenarios(user)
-        for scenario in result:
-            assert "name" in scenario
-            assert isinstance(scenario["name"], str)
-            assert len(scenario["name"]) > 0
-
-    def test_scenario_has_description(self, user):
-        """Each scenario has a description field."""
-        result = services.list_scenarios(user)
-        for scenario in result:
-            assert "description" in scenario
+            assert isinstance(scenario["name"], str) and len(scenario["name"]) > 0
             assert isinstance(scenario["description"], str)
+            assert isinstance(scenario["instances"], list) and len(scenario["instances"]) > 0
 
-    def test_scenario_has_instances(self, user):
-        """Each scenario has instances list showing what gets created."""
-        result = services.list_scenarios(user)
-        for scenario in result:
-            assert "instances" in scenario
-            assert isinstance(scenario["instances"], list)
-            assert len(scenario["instances"]) > 0
+            # Agent requirements structure
+            reqs = scenario["agent_requirements"]
+            assert isinstance(reqs, dict)
+            assert "has_from_agent" in reqs
+            assert "requires_windows" in reqs
+            assert "requires_linux" in reqs
 
     def test_basic_scenario_has_two_instances(self, user):
         """Basic scenario has attacker and victim instances."""
@@ -126,17 +109,6 @@ class TestListScenarios:
         assert "dc" in roles
         assert "victim" in roles
 
-    def test_scenario_has_agent_requirements(self, user):
-        """Each scenario has agent_requirements field."""
-        result = services.list_scenarios(user)
-        for scenario in result:
-            assert "agent_requirements" in scenario
-            reqs = scenario["agent_requirements"]
-            assert isinstance(reqs, dict)
-            assert "has_from_agent" in reqs
-            assert "requires_windows" in reqs
-            assert "requires_linux" in reqs
-
     def test_ad_attack_lab_has_from_agent(self, user):
         """AD attack lab uses from_agent for victim."""
         result = services.list_scenarios(user)
@@ -146,18 +118,17 @@ class TestListScenarios:
 
     # --- Input validation ---
 
-    def test_raises_type_error_when_user_is_none(self):
-        """Service raises TypeError when user is None."""
+    def test_validates_user_parameter(self, db):
+        """Service validates user parameter."""
+        # None user
         with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.list_scenarios(None)
 
-    def test_raises_type_error_when_user_invalid_type(self):
-        """Service raises TypeError when user is not a User instance."""
+        # Invalid type
         with pytest.raises(TypeError, match="user must be a User instance"):
             services.list_scenarios("not_a_user")
 
-    def test_raises_value_error_when_user_unsaved(self, db):
-        """Service raises ValueError when user has no ID."""
+        # Unsaved user (no ID)
         unsaved_user = User(username="unsaved@example.com")
         with pytest.raises(ValueError, match="user must be saved"):
             services.list_scenarios(unsaved_user)

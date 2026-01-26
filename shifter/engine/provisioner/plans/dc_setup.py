@@ -13,20 +13,75 @@ from .base import SetupStep
 SET_ADMIN_CREDENTIAL_SCRIPT = """
 $ErrorActionPreference = "Stop"
 
+Write-Host "=========================================="
 Write-Host "=== Setting Administrator Password ==="
+Write-Host "=========================================="
+Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Host "Hostname: $env:COMPUTERNAME"
 
+# Verify this is a Domain Controller
+Write-Host ""
+Write-Host "[Step 1] Verifying Domain Controller status..."
+try {
+    $dcInfo = Get-ADDomainController -ErrorAction Stop
+    Write-Host "  SUCCESS: This is a Domain Controller"
+    Write-Host "  Domain: $($dcInfo.Domain)"
+    Write-Host "  HostName: $($dcInfo.HostName)"
+    Write-Host "  Site: $($dcInfo.Site)"
+} catch {
+    Write-Host "  ERROR: Not a Domain Controller or AD services not running"
+    Write-Host "  Exception: $($_.Exception.Message)"
+    Write-Host "  Cannot set domain Administrator password on non-DC"
+    exit 1
+}
+
+# Check current Administrator account status
+Write-Host ""
+Write-Host "[Step 2] Checking Administrator account status..."
+try {
+    $adminUser = Get-ADUser -Identity Administrator -Properties PasswordLastSet,Enabled,LockedOut -ErrorAction Stop
+    Write-Host "  Account Enabled: $($adminUser.Enabled)"
+    Write-Host "  Account LockedOut: $($adminUser.LockedOut)"
+    Write-Host "  PasswordLastSet: $($adminUser.PasswordLastSet)"
+} catch {
+    Write-Host "  WARNING: Could not query Administrator account: $($_.Exception.Message)"
+}
+
+# Set the password
+Write-Host ""
+Write-Host "[Step 3] Setting Administrator password..."
 $newPassword = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
 
 try {
     Set-ADAccountPassword -Identity Administrator -Reset -NewPassword $newPassword -ErrorAction Stop
-    Write-Host "Administrator password set successfully"
+    Write-Host "  SUCCESS: Administrator password set via Set-ADAccountPassword"
 } catch {
-    Write-Host "ERROR: Failed to set Administrator password"
-    Write-Host "Exception: $($_.Exception.Message)"
+    Write-Host "  ERROR: Failed to set Administrator password"
+    Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+    Write-Host "  Exception Message: $($_.Exception.Message)"
+    if ($_.Exception.InnerException) {
+        Write-Host "  Inner Exception: $($_.Exception.InnerException.Message)"
+    }
     exit 1
 }
 
+# Verify RDP access is configured
+Write-Host ""
+Write-Host "[Step 4] Verifying RDP configuration..."
+$rdpService = Get-Service -Name TermService -ErrorAction SilentlyContinue
+Write-Host "  TermService Status: $($rdpService.Status)"
+
+$rdpPort = Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue
+if ($rdpPort) {
+    Write-Host "  RDP Port 3389: LISTENING"
+} else {
+    Write-Host "  WARNING: RDP Port 3389 not listening"
+}
+
+Write-Host ""
+Write-Host "=========================================="
 Write-Host "=== Administrator Password Set ==="
+Write-Host "=========================================="
 """
 
 # PowerShell script to enable SSH with password auth

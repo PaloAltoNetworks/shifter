@@ -9,9 +9,12 @@ packer {
 
 source "amazon-ebs" "kali" {
   ami_name        = "${var.ami_prefix}-kali-{{timestamp}}"
-  ami_description = "Kali Linux Rolling with SSM, kali-linux-headless, sshpass, Claude Code configured for Bedrock"
+  ami_description = "Kali Linux Rolling with SSM, kali-linux-headless, sshpass, Caldera, Claude Code configured for Bedrock"
   instance_type   = var.instance_type
   region          = var.aws_region
+
+  // Ensure instance is terminated (not just stopped) if Packer exits ungracefully
+  shutdown_behavior = "terminate"
 
   // Official Kali Linux from AWS Marketplace
   // Requires free subscription: https://aws.amazon.com/marketplace/pp/prodview-fznsw3f7mq7to
@@ -52,6 +55,7 @@ build {
     scripts = [
       "scripts/kali/base.sh",
       "scripts/kali/tools.sh",
+      "scripts/kali/caldera.sh",
       "scripts/kali/claude-code.sh",
       "scripts/common/cleanup.sh"
     ]

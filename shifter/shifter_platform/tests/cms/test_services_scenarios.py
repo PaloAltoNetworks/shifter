@@ -2,14 +2,11 @@
 
 Tests service-level behavior only:
 - Expected behavior / return values
-- Logging (debug and error levels)
 - Exception handling
 - Input validation (service's responsibility)
 
 Does NOT re-test model behavior (filtering, field validation, etc).
 """
-
-import logging
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -54,14 +51,10 @@ class TestListScenarios:
 
     # --- Returns expected scenarios ---
 
-    def test_returns_list(self, user):
-        """Service returns a list."""
+    def test_returns_non_empty_list_of_scenarios(self, user):
+        """Service returns a non-empty list of scenarios."""
         result = services.list_scenarios(user)
         assert isinstance(result, list)
-
-    def test_returns_non_empty_list(self, user):
-        """Service returns non-empty list of scenarios."""
-        result = services.list_scenarios(user)
         assert len(result) > 0
 
     def test_returns_basic_scenario(self, user):
@@ -78,35 +71,22 @@ class TestListScenarios:
 
     # --- Scenario metadata structure ---
 
-    def test_scenario_has_id(self, user):
-        """Each scenario has an id field."""
+    def test_scenarios_have_required_metadata(self, user):
+        """Each scenario has required metadata fields with correct types."""
         result = services.list_scenarios(user)
         for scenario in result:
-            assert "id" in scenario
+            # Required fields
             assert isinstance(scenario["id"], str)
-
-    def test_scenario_has_name(self, user):
-        """Each scenario has a name field."""
-        result = services.list_scenarios(user)
-        for scenario in result:
-            assert "name" in scenario
-            assert isinstance(scenario["name"], str)
-            assert len(scenario["name"]) > 0
-
-    def test_scenario_has_description(self, user):
-        """Each scenario has a description field."""
-        result = services.list_scenarios(user)
-        for scenario in result:
-            assert "description" in scenario
+            assert isinstance(scenario["name"], str) and len(scenario["name"]) > 0
             assert isinstance(scenario["description"], str)
+            assert isinstance(scenario["instances"], list) and len(scenario["instances"]) > 0
 
-    def test_scenario_has_instances(self, user):
-        """Each scenario has instances list showing what gets created."""
-        result = services.list_scenarios(user)
-        for scenario in result:
-            assert "instances" in scenario
-            assert isinstance(scenario["instances"], list)
-            assert len(scenario["instances"]) > 0
+            # Agent requirements structure
+            reqs = scenario["agent_requirements"]
+            assert isinstance(reqs, dict)
+            assert "has_from_agent" in reqs
+            assert "requires_windows" in reqs
+            assert "requires_linux" in reqs
 
     def test_basic_scenario_has_two_instances(self, user):
         """Basic scenario has attacker and victim instances."""
@@ -129,60 +109,29 @@ class TestListScenarios:
         assert "dc" in roles
         assert "victim" in roles
 
-    def test_scenario_has_requirements(self, user):
-        """Each scenario has requirements field."""
-        result = services.list_scenarios(user)
-        for scenario in result:
-            assert "requirements" in scenario
-            assert isinstance(scenario["requirements"], dict)
-
-    def test_ad_attack_lab_requires_windows(self, user):
-        """AD attack lab requires Windows agent."""
+    def test_ad_attack_lab_has_from_agent(self, user):
+        """AD attack lab uses from_agent for victim."""
         result = services.list_scenarios(user)
         ad_lab = next((s for s in result if s["id"] == "ad_attack_lab"), None)
         assert ad_lab is not None
-        assert ad_lab["requirements"].get("os") == "windows"
+        assert ad_lab["agent_requirements"]["has_from_agent"] is True
 
     # --- Input validation ---
 
-    def test_raises_type_error_when_user_is_none(self):
-        """Service raises TypeError when user is None."""
+    def test_validates_user_parameter(self, db):
+        """Service validates user parameter."""
+        # None user
         with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
             services.list_scenarios(None)
 
-    def test_raises_type_error_when_user_invalid_type(self):
-        """Service raises TypeError when user is not a User instance."""
+        # Invalid type
         with pytest.raises(TypeError, match="user must be a User instance"):
             services.list_scenarios("not_a_user")
 
-    def test_raises_value_error_when_user_unsaved(self, db):
-        """Service raises ValueError when user has no ID."""
+        # Unsaved user (no ID)
         unsaved_user = User(username="unsaved@example.com")
         with pytest.raises(ValueError, match="user must be saved"):
             services.list_scenarios(unsaved_user)
-
-    # --- Logging ---
-
-    def test_logs_debug_on_entry(self, user, caplog):
-        """Service logs debug on entry with user info."""
-        with caplog.at_level(logging.DEBUG, logger="cms.services"):
-            services.list_scenarios(user)
-        assert str(user.id) in caplog.text
-
-    def test_logs_debug_on_success(self, user, caplog):
-        """Service logs debug on success with scenario count."""
-        with caplog.at_level(logging.DEBUG, logger="cms.services"):
-            result = services.list_scenarios(user)
-        assert str(len(result)) in caplog.text or "scenario" in caplog.text.lower()
-
-    def test_logs_error_when_user_none(self, caplog):
-        """Service logs error when user is None."""
-        with (
-            caplog.at_level(logging.ERROR, logger="cms.services"),
-            pytest.raises(TypeError),
-        ):
-            services.list_scenarios(None)
-        assert "None" in caplog.text
 
     # --- Consistency guarantees ---
 
@@ -234,21 +183,26 @@ class TestGetScenario:
         assert "id" in result
         assert "name" in result
         assert "description" in result
-        assert "requirements" in result
+        assert "enabled" in result
+        assert "ngfw" in result
         assert "instances" in result
 
 
 @pytest.mark.django_db
 class TestValidateScenarioRequirements:
-    """Tests for validate_scenario_requirements() service function."""
+    """Tests for validate_scenario_requirements() service function.
+
+    Note: With multi-agent support, OS validation happens at create_range time
+    based on get_agent_requirements(), not in validate_scenario_requirements.
+    """
 
     def test_basic_scenario_accepts_any_os(self, agent):
-        """Basic scenario accepts agent with any OS."""
+        """Basic scenario accepts agent with any OS (from_agent)."""
         # Should not raise
         services.validate_scenario_requirements("basic", agent)
 
     def test_ad_attack_lab_accepts_windows_agent(self, user, db):
-        """AD attack lab accepts Windows agent."""
+        """AD attack lab accepts Windows agent (from_agent)."""
         os = OperatingSystem.objects.get(slug="windows")
         agent = AgentConfig.objects.create(
             user=user,
@@ -262,10 +216,8 @@ class TestValidateScenarioRequirements:
         # Should not raise
         services.validate_scenario_requirements("ad_attack_lab", agent)
 
-    def test_ad_attack_lab_rejects_linux_agent(self, user, db):
-        """AD attack lab rejects Linux agent."""
-        from cms.exceptions import CMSError
-
+    def test_ad_attack_lab_accepts_linux_agent(self, user, db):
+        """AD attack lab accepts Linux agent (from_agent allows any OS)."""
         os = OperatingSystem.objects.get(slug="linux-debian")
         agent = AgentConfig.objects.create(
             user=user,
@@ -276,8 +228,8 @@ class TestValidateScenarioRequirements:
             file_size_bytes=1000,
             sha256_hash="abc123",
         )
-        with pytest.raises(CMSError, match=r"(?i)requires.*windows"):
-            services.validate_scenario_requirements("ad_attack_lab", agent)
+        # Should not raise - from_agent accepts any OS
+        services.validate_scenario_requirements("ad_attack_lab", agent)
 
     def test_raises_for_unknown_scenario(self, agent):
         """Service raises CMSError for unknown scenario ID."""

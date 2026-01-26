@@ -8,7 +8,7 @@ import pytest
 
 
 @pytest.mark.django_db
-class TestGetRangeStatus:
+class TestGetResourceStatus:
     """Tests for get_range_status() in engine/services.py.
 
     Tests the service contract:
@@ -23,52 +23,13 @@ class TestGetRangeStatus:
     # Outputs - returns dict with status info
     # -------------------------------------------------------------------------
 
-    def test_returns_dict_with_status(self):
-        """Service returns dict containing status field."""
+    def test_returns_complete_status_dict(self):
+        """Service returns dict with all required fields."""
         from engine.models import Range
         from engine.services import get_range_status
 
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.READY,
-            error_message="",
-            provisioned_instances=[],
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
-        )
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = get_range_status(42)
-
-            assert result is not None
-            assert result["status"] == Range.Status.READY
-
-    def test_returns_error_message(self):
-        """Service returns error_message field."""
-        from engine.models import Range
-        from engine.services import get_range_status
-
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.FAILED,
-            error_message="Provisioning failed: subnet exhausted",
-            provisioned_instances=[],
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=None,
-        )
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = get_range_status(42)
-
-            assert result["error_message"] == "Provisioning failed: subnet exhausted"
-
-    def test_returns_instances(self):
-        """Service returns provisioned_instances as instances field."""
-        from engine.models import Range
-        from engine.services import get_range_status
-
+        created = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+        ready = datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC)
         instances = [
             {"uuid": "abc-123", "role": "attacker", "private_ip": "10.1.1.10"},
             {"uuid": "def-456", "role": "victim", "private_ip": "10.1.1.20"},
@@ -77,19 +38,24 @@ class TestGetRangeStatus:
             spec=Range,
             id=42,
             status=Range.Status.READY,
-            error_message="",
+            error_message="Provisioning failed: subnet exhausted",
             provisioned_instances=instances,
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
+            created_at=created,
+            ready_at=ready,
         )
 
         with patch.object(Range.objects, "get", return_value=mock_range):
             result = get_range_status(42)
 
+            assert result is not None
+            assert result["status"] == Range.Status.READY
+            assert result["error_message"] == "Provisioning failed: subnet exhausted"
             assert result["instances"] == instances
+            assert result["created_at"] == created.isoformat()
+            assert result["ready_at"] == ready.isoformat()
 
-    def test_returns_empty_list_when_no_instances(self):
-        """Service returns empty list when provisioned_instances is None."""
+    def test_handles_null_fields(self):
+        """Service handles None values for optional fields."""
         from engine.models import Range
         from engine.services import get_range_status
 
@@ -106,50 +72,8 @@ class TestGetRangeStatus:
         with patch.object(Range.objects, "get", return_value=mock_range):
             result = get_range_status(42)
 
-            assert result["instances"] == []
-
-    def test_returns_timestamps_as_iso_strings(self):
-        """Service returns timestamps as ISO format strings."""
-        from engine.models import Range
-        from engine.services import get_range_status
-
-        created = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
-        ready = datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC)
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.READY,
-            error_message="",
-            provisioned_instances=[],
-            created_at=created,
-            ready_at=ready,
-        )
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = get_range_status(42)
-
-            assert result["created_at"] == created.isoformat()
-            assert result["ready_at"] == ready.isoformat()
-
-    def test_returns_none_for_null_timestamps(self):
-        """Service returns None for timestamps that are not set."""
-        from engine.models import Range
-        from engine.services import get_range_status
-
-        mock_range = Mock(
-            spec=Range,
-            id=42,
-            status=Range.Status.PROVISIONING,
-            error_message="",
-            provisioned_instances=[],
-            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            ready_at=None,
-        )
-
-        with patch.object(Range.objects, "get", return_value=mock_range):
-            result = get_range_status(42)
-
-            assert result["ready_at"] is None
+            assert result["instances"] == []  # None becomes empty list
+            assert result["ready_at"] is None  # None timestamp stays None
 
     def test_returns_none_when_range_not_found(self):
         """Service returns None when range doesn't exist."""

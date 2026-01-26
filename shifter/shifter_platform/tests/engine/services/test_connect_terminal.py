@@ -11,11 +11,13 @@ class TestConnectTerminal:
     """Tests for connect_terminal() in engine/services.py.
 
     Tests the service contract:
-    - Inputs: user (required), range_id (required positive int), instance_uuid (required string)
+    - Inputs: user (required), instance_uuid (required string)
     - Outputs: SSHConnection for the specified instance
     - Side effects: none (read-only operation)
     - Errors: validates inputs, ownership, range status, instance existence
     - Logging: DEBUG on success, ERROR on failures
+
+    The function looks up Range by instance_uuid in provisioned_instances JSONB.
     """
 
     # -------------------------------------------------------------------------
@@ -38,12 +40,15 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            result = connect_terminal(mock_user, 42, "instance-uuid-123")
+            result = connect_terminal(mock_user, "instance-uuid-123")
             assert isinstance(result, SSHConnection)
 
     def test_calls_get_instance_by_uuid_with_uuid(self):
@@ -62,17 +67,20 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            result = connect_terminal(mock_user, 42, "victim-uuid-456")
+            result = connect_terminal(mock_user, "victim-uuid-456")
             assert isinstance(result, SSHConnection)
             mock_range.get_instance_by_uuid.assert_called_once_with("victim-uuid-456")
 
-    def test_calls_range_get_with_range_id(self):
-        """Service queries Range by id."""
+    def test_filters_range_by_instance_uuid_and_user(self):
+        """Service queries Range by instance_uuid in provisioned_instances."""
         from engine import connect_terminal
         from engine.models import Range
 
@@ -86,13 +94,19 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range) as mock_get,
+            patch.object(Range.objects, "filter", return_value=mock_queryset) as mock_filter,
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            connect_terminal(mock_user, 42, "instance-uuid-123")
-            mock_get.assert_called_once_with(id=42)
+            connect_terminal(mock_user, "instance-uuid-123")
+            mock_filter.assert_called_once_with(
+                provisioned_instances__contains=[{"uuid": "instance-uuid-123"}],
+                user=mock_user,
+            )
 
     # -------------------------------------------------------------------------
     # Side effects - none expected (read-only)
@@ -113,12 +127,15 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            connect_terminal(mock_user, 42, "instance-uuid-123")
+            connect_terminal(mock_user, "instance-uuid-123")
             mock_range.save.assert_not_called()
 
     # -------------------------------------------------------------------------
@@ -130,45 +147,14 @@ class TestConnectTerminal:
         from engine import connect_terminal
 
         with pytest.raises(TypeError):
-            connect_terminal(range_id=42, instance_uuid="uuid-123")
+            connect_terminal(instance_uuid="uuid-123")
 
     def test_raises_on_none_user(self):
         """Service raises error if user is None."""
         from engine import connect_terminal
 
         with pytest.raises((TypeError, ValueError)):
-            connect_terminal(None, 42, "uuid-123")
-
-    # -------------------------------------------------------------------------
-    # Input validation - range_id parameter
-    # -------------------------------------------------------------------------
-
-    def test_raises_on_none_range_id(self):
-        """Service raises error if range_id is None."""
-        from engine import connect_terminal
-
-        mock_user = Mock(id=1)
-
-        with pytest.raises((TypeError, ValueError)):
-            connect_terminal(mock_user, None, "uuid-123")
-
-    def test_raises_on_invalid_range_id_type(self):
-        """Service raises error if range_id is wrong type."""
-        from engine import connect_terminal
-
-        mock_user = Mock(id=1)
-
-        with pytest.raises((TypeError, ValueError)):
-            connect_terminal(mock_user, "not-an-id", "uuid-123")
-
-    def test_raises_on_negative_range_id(self):
-        """Service raises error if range_id is negative."""
-        from engine import connect_terminal
-
-        mock_user = Mock(id=1)
-
-        with pytest.raises((TypeError, ValueError)):
-            connect_terminal(mock_user, -1, "uuid-123")
+            connect_terminal(None, "uuid-123")
 
     # -------------------------------------------------------------------------
     # Input validation - instance_uuid parameter
@@ -181,7 +167,7 @@ class TestConnectTerminal:
         mock_user = Mock(id=1)
 
         with pytest.raises((TypeError, ValueError)):
-            connect_terminal(mock_user, 42, None)
+            connect_terminal(mock_user, None)
 
     def test_raises_on_empty_instance_uuid(self):
         """Service raises error if instance_uuid is empty string."""
@@ -190,24 +176,27 @@ class TestConnectTerminal:
         mock_user = Mock(id=1)
 
         with pytest.raises((TypeError, ValueError)):
-            connect_terminal(mock_user, 42, "")
+            connect_terminal(mock_user, "")
 
     # -------------------------------------------------------------------------
-    # Error handling - ownership
+    # Error handling - range not found
     # -------------------------------------------------------------------------
 
-    def test_raises_when_user_does_not_own_range(self):
-        """Service raises PermissionError when user doesn't own range."""
+    def test_raises_when_no_range_found_for_instance(self):
+        """Service raises ValueError when no range contains the instance."""
         from engine import connect_terminal
         from engine.models import Range
 
         mock_user = Mock(id=1)
-        other_user = Mock(id=999)
 
-        mock_range = Mock(spec=Range, id=42, user=other_user, status=Range.Status.READY)
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=None)
 
-        with patch.object(Range.objects, "get", return_value=mock_range), pytest.raises(PermissionError):
-            connect_terminal(mock_user, 42, "uuid-123")
+        with (
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
+            pytest.raises(ValueError, match=r"No range found"),
+        ):
+            connect_terminal(mock_user, "non-existent-uuid")
 
     # -------------------------------------------------------------------------
     # Error handling - range status
@@ -222,8 +211,14 @@ class TestConnectTerminal:
 
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.FAILED)
 
-        with patch.object(Range.objects, "get", return_value=mock_range), pytest.raises(ValueError, match="not ready"):
-            connect_terminal(mock_user, 42, "uuid-123")
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
+        with (
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
+            pytest.raises(ValueError, match="not ready"),
+        ):
+            connect_terminal(mock_user, "uuid-123")
 
     def test_raises_when_range_provisioning(self):
         """Service raises ValueError when range is PROVISIONING."""
@@ -234,14 +229,20 @@ class TestConnectTerminal:
 
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.PROVISIONING)
 
-        with patch.object(Range.objects, "get", return_value=mock_range), pytest.raises(ValueError, match="not ready"):
-            connect_terminal(mock_user, 42, "uuid-123")
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
+        with (
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
+            pytest.raises(ValueError, match="not ready"),
+        ):
+            connect_terminal(mock_user, "uuid-123")
 
     # -------------------------------------------------------------------------
-    # Error handling - instance not found
+    # Error handling - instance not found in range
     # -------------------------------------------------------------------------
 
-    def test_raises_when_instance_uuid_not_found(self):
+    def test_raises_when_instance_uuid_not_found_in_range(self):
         """Service raises ValueError when instance UUID doesn't exist in range."""
         from engine import connect_terminal
         from engine.models import Range
@@ -251,32 +252,21 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=None)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             pytest.raises(ValueError, match=r"(?i)instance.*not found"),
         ):
-            connect_terminal(mock_user, 42, "non-existent-uuid")
-
-    # -------------------------------------------------------------------------
-    # Error propagation
-    # -------------------------------------------------------------------------
-
-    def test_propagates_range_does_not_exist(self):
-        """Service propagates Range.DoesNotExist."""
-        from engine import connect_terminal
-        from engine.models import Range
-
-        mock_user = Mock(id=1)
-
-        with patch.object(Range.objects, "get", side_effect=Range.DoesNotExist), pytest.raises(Range.DoesNotExist):
-            connect_terminal(mock_user, 42, "uuid-123")
+            connect_terminal(mock_user, "non-existent-uuid")
 
     # -------------------------------------------------------------------------
     # Logging - DEBUG on success
     # -------------------------------------------------------------------------
 
     def test_logs_debug_on_entry(self, caplog):
-        """Service logs debug on entry with range_id and instance_uuid."""
+        """Service logs debug on entry with user_id and instance_uuid."""
         from engine import connect_terminal
         from engine.models import Range
 
@@ -290,15 +280,17 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
-            connect_terminal(mock_user, 42, "instance-uuid-123")
+            connect_terminal(mock_user, "instance-uuid-123")
 
-        assert "42" in caplog.text
         assert "instance-uuid-123" in caplog.text
 
     # -------------------------------------------------------------------------
@@ -306,18 +298,21 @@ class TestConnectTerminal:
     # -------------------------------------------------------------------------
 
     def test_logs_error_when_range_not_found(self, caplog):
-        """Service logs error when range not found."""
+        """Service logs error when no range found for instance."""
         from engine import connect_terminal
         from engine.models import Range
 
         mock_user = Mock(id=1)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=None)
+
         with (
-            patch.object(Range.objects, "get", side_effect=Range.DoesNotExist),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             caplog.at_level(logging.ERROR, logger="engine"),
-            pytest.raises(Range.DoesNotExist),
+            pytest.raises(ValueError),
         ):
-            connect_terminal(mock_user, 999, "uuid-123")
+            connect_terminal(mock_user, "missing-uuid")
 
         assert "error" in caplog.text.lower() or "not found" in caplog.text.lower()
 
@@ -330,12 +325,15 @@ class TestConnectTerminal:
 
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.PROVISIONING)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             caplog.at_level(logging.ERROR, logger="engine"),
             pytest.raises(ValueError),
         ):
-            connect_terminal(mock_user, 42, "uuid-123")
+            connect_terminal(mock_user, "uuid-123")
 
         assert "error" in caplog.text.lower() or "not ready" in caplog.text.lower()
 
@@ -349,12 +347,15 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=None)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             caplog.at_level(logging.ERROR, logger="engine"),
             pytest.raises(ValueError),
         ):
-            connect_terminal(mock_user, 42, "missing-uuid")
+            connect_terminal(mock_user, "missing-uuid")
 
         assert "error" in caplog.text.lower() or "not found" in caplog.text.lower()
 
@@ -378,12 +379,15 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            result = connect_terminal(mock_user, 42, "kali-uuid-123")
+            result = connect_terminal(mock_user, "kali-uuid-123")
             assert result.username == "kali"
 
     def test_uses_ubuntu_username_for_ubuntu_os_type(self):
@@ -402,12 +406,15 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            result = connect_terminal(mock_user, 42, "ubuntu-uuid-456")
+            result = connect_terminal(mock_user, "ubuntu-uuid-456")
             assert result.username == "ubuntu"
 
     def test_uses_ec2_user_username_for_amazon_linux_os_type(self):
@@ -426,12 +433,15 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            result = connect_terminal(mock_user, 42, "al-uuid-789")
+            result = connect_terminal(mock_user, "al-uuid-789")
             assert result.username == "ec2-user"
 
     def test_defaults_to_ubuntu_when_os_type_missing(self):
@@ -450,12 +460,15 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            result = connect_terminal(mock_user, 42, "no-os-uuid")
+            result = connect_terminal(mock_user, "no-os-uuid")
             assert result.username == "ubuntu"
 
     def test_handles_uppercase_os_type(self):
@@ -474,12 +487,15 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            result = connect_terminal(mock_user, 42, "upper-uuid")
+            result = connect_terminal(mock_user, "upper-uuid")
             assert result.username == "kali"
 
     def test_uses_administrator_username_for_windows_os_type(self):
@@ -498,10 +514,98 @@ class TestConnectTerminal:
         mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
         mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
 
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
         ssh_key = "fake-ssh-key-for-testing"
         with (
-            patch.object(Range.objects, "get", return_value=mock_range),
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
             patch("engine.secrets.get_ssh_key", return_value=ssh_key),
         ):
-            result = connect_terminal(mock_user, 42, "win-uuid-123")
+            result = connect_terminal(mock_user, "win-uuid-123")
             assert result.username == "Administrator"
+
+    # -------------------------------------------------------------------------
+    # Persistent tmux sessions (session_id)
+    # -------------------------------------------------------------------------
+
+    def test_sets_session_id_for_kali_instances(self):
+        """Service sets session_id for Kali instances (tmux persistent session)."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "kali-uuid-789",
+            "role": "attacker",
+            "os_type": "kali",
+            "private_ip": "10.1.1.10",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, "kali-uuid-789")
+            assert result.session_id == "kali-uuid-789"
+
+    def test_sets_session_id_for_ubuntu_instances(self):
+        """Service sets session_id for Ubuntu instances (tmux persistent session)."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "ubuntu-uuid-789",
+            "role": "victim",
+            "os_type": "ubuntu",
+            "private_ip": "10.1.1.20",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, "ubuntu-uuid-789")
+            assert result.session_id == "ubuntu-uuid-789"
+
+    def test_no_session_id_for_windows_instances(self):
+        """Service does NOT set session_id for Windows instances (no tmux)."""
+        from engine import connect_terminal
+        from engine.models import Range
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "windows-uuid-789",
+            "role": "victim",
+            "os_type": "windows",
+            "private_ip": "10.1.1.60",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, "windows-uuid-789")
+            assert result.session_id is None

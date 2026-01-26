@@ -31,28 +31,18 @@ output "public_route_table_id" {
   value       = module.vpc.public_route_table_id
 }
 
-output "victim_security_group_id" {
-  description = "ID of the security group for victim EC2 instances"
-  value       = module.vpc.victim_security_group_id
-}
-
-output "kali_security_group_id" {
-  description = "ID of the security group for Kali attack instances"
-  value       = module.vpc.kali_security_group_id
-}
-
-output "dc_security_group_id" {
-  description = "ID of the security group for Domain Controller instances"
-  value       = module.vpc.dc_security_group_id
-}
-
 # ------------------------------------------------------------------------------
 # VM-Series NGFW
 # ------------------------------------------------------------------------------
 
-output "ngfw_security_group_id" {
-  description = "ID of the security group for VM-Series NGFW instances (null if disabled)"
-  value       = module.vpc.ngfw_security_group_id
+output "ngfw_mgmt_security_group_id" {
+  description = "Security group for NGFW management ENI (SSH, HTTPS from portal)"
+  value       = module.vpc.ngfw_mgmt_security_group_id
+}
+
+output "ngfw_data_security_group_id" {
+  description = "Security group for NGFW data ENI (all traffic from VPC for GENEVE)"
+  value       = module.vpc.ngfw_data_security_group_id
 }
 
 output "vm_series_ami_id" {
@@ -70,9 +60,19 @@ output "nat_gateway_id" {
   value       = module.vpc.nat_gateway_id
 }
 
+output "s3_endpoint_id" {
+  description = "ID of the S3 Gateway Endpoint for range subnet S3 access"
+  value       = module.vpc.s3_endpoint_id
+}
+
 output "firewall_arn" {
   description = "ARN of the Network Firewall (null if disabled)"
   value       = module.vpc.firewall_arn
+}
+
+output "firewall_endpoint_id" {
+  description = "ID of the Network Firewall endpoint (null if firewall disabled)"
+  value       = module.vpc.firewall_endpoint_id
 }
 
 # ------------------------------------------------------------------------------
@@ -140,16 +140,6 @@ output "ngfw_subnet_id" {
 output "ngfw_subnet_cidr" {
   description = "CIDR block of the NGFW subnet (null if NGFW infrastructure disabled)"
   value       = module.vpc.ngfw_subnet_cidr
-}
-
-output "ngfw_mgmt_security_group_id" {
-  description = "ID of the NGFW management security group (null if NGFW infrastructure disabled)"
-  value       = module.vpc.ngfw_mgmt_security_group_id
-}
-
-output "ngfw_data_security_group_id" {
-  description = "ID of the NGFW dataplane security group (null if NGFW infrastructure disabled)"
-  value       = module.vpc.ngfw_data_security_group_id
 }
 
 output "ngfw_instance_role_arn" {

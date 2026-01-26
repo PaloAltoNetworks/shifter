@@ -182,6 +182,78 @@
         fill: currentColor;
         stroke: currentColor;
     }
+
+    /* Management Access section */
+    .management-access-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+    }
+
+    .access-card {
+        background: var(--xdr-bg-tertiary);
+        border-radius: 8px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .access-card-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .access-card-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--xdr-bg-secondary);
+    }
+
+    .access-card-icon svg {
+        width: 20px;
+        height: 20px;
+        color: var(--xdr-text-secondary);
+    }
+
+    .access-card-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--xdr-text);
+    }
+
+    .access-card-description {
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+        margin: 0;
+        line-height: 1.4;
+    }
+
+    .access-card .btn {
+        align-self: flex-start;
+        margin-top: auto;
+    }
+
+    .management-ip-display {
+        font-family: monospace;
+        background: var(--xdr-bg-secondary);
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 13px;
+        color: var(--xdr-text);
+        margin-top: 8px;
+    }
+
+    .access-unavailable {
+        color: var(--xdr-text-tertiary);
+        font-style: italic;
+        font-size: 13px;
+    }
 </style>
 {% endblock %}
 
@@ -240,6 +312,66 @@
             <span class="detail-label">Created</span>
             <span class="detail-value">{{ ngfw.created_at|date:"M d, Y H:i" }}</span>
         </div>
+    </div>
+</div>
+
+<!-- Management Access Section -->
+<div class="card" id="management-access-card">
+    <h2 class="section-title">Management Access</h2>
+    <p style="color: var(--xdr-text-secondary); margin: 0 0 16px; font-size: 13px;">
+        Direct access to your NGFW for fine-grained configuration control.
+    </p>
+
+    <div class="management-access-grid">
+        <!-- CLI Access -->
+        <div class="access-card">
+            <div class="access-card-header">
+                <div class="access-card-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="4 17 10 11 4 5"></polyline>
+                        <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                </div>
+                <span class="access-card-title">CLI Access</span>
+            </div>
+            <p class="access-card-description">
+                Open a terminal session to the NGFW command line interface.
+                Use PAN-OS CLI commands for advanced configuration.
+            </p>
+            <button type="button" class="btn btn-primary btn-small" id="cli-access-btn" data-app-id="{{ ngfw.app_id }}">
+                Open CLI
+            </button>
+        </div>
+
+        <!-- Web Portal -->
+        <div class="access-card">
+            <div class="access-card-header">
+                <div class="access-card-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    </svg>
+                </div>
+                <span class="access-card-title">Web Portal</span>
+            </div>
+            <p class="access-card-description">
+                Access the PAN-OS web management interface for visual configuration
+                of policies, objects, and system settings.
+            </p>
+            <div id="management-ip-container" style="display: none;">
+                <div class="management-ip-display">
+                    <span id="management-ip-value"></span>
+                </div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" id="web-portal-btn" data-app-id="{{ ngfw.app_id }}">
+                View Details
+            </button>
+        </div>
+    </div>
+
+    <div id="management-access-status" style="margin-top: 16px; display: none;">
+        <p class="access-unavailable" id="access-unavailable-msg"></p>
     </div>
 </div>
 
@@ -343,6 +475,9 @@
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    const appId = '{{ ngfw.app_id }}';
+    const csrfToken = '{{ csrf_token }}';
+
     // Refresh button handler
     const refreshBtn = document.querySelector('.ngfw-refresh-btn');
     if (refreshBtn) {
@@ -382,7 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
+                        'X-CSRFToken': csrfToken
                     }
                 });
 
@@ -420,6 +555,119 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert('An error occurred. Please try again.');
                 this.disabled = false;
                 this.textContent = 'Complete Setup';
+            }
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Management Access Handlers
+    // -------------------------------------------------------------------------
+
+    const cliAccessBtn = document.getElementById('cli-access-btn');
+    const webPortalBtn = document.getElementById('web-portal-btn');
+    const managementIpContainer = document.getElementById('management-ip-container');
+    const managementIpValue = document.getElementById('management-ip-value');
+    const accessStatusDiv = document.getElementById('management-access-status');
+    const accessUnavailableMsg = document.getElementById('access-unavailable-msg');
+
+    // Check initial access status based on NGFW status
+    const ngfwStatus = '{{ ngfw.status }}';
+    const accessibleStatuses = ['ready', 'awaiting_association', 'configuring'];
+
+    if (!accessibleStatuses.includes(ngfwStatus)) {
+        // Disable buttons and show message for inaccessible states
+        if (cliAccessBtn) cliAccessBtn.disabled = true;
+        if (webPortalBtn) webPortalBtn.disabled = true;
+        if (accessStatusDiv) {
+            accessStatusDiv.style.display = 'block';
+            accessUnavailableMsg.textContent = `Management access is unavailable while NGFW is ${ngfwStatus.replace('_', ' ')}.`;
+        }
+    }
+
+    // CLI Access button - opens SSH via Guacamole
+    if (cliAccessBtn) {
+        cliAccessBtn.addEventListener('click', async function() {
+            this.disabled = true;
+            this.textContent = 'Connecting...';
+
+            try {
+                const response = await fetch(`/mission-control/api/ngfw/${appId}/ssh-url/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    this.disabled = false;
+                    this.textContent = 'Open CLI';
+                    return;
+                }
+
+                if (data.url) {
+                    // Open Guacamole SSH session in new tab
+                    window.open(data.url, '_blank');
+                }
+
+                this.disabled = false;
+                this.textContent = 'Open CLI';
+
+            } catch (err) {
+                console.error('CLI access error:', err);
+                alert('Failed to connect. Please try again.');
+                this.disabled = false;
+                this.textContent = 'Open CLI';
+            }
+        });
+    }
+
+    // Web Portal button - show management info
+    if (webPortalBtn) {
+        webPortalBtn.addEventListener('click', async function() {
+            this.disabled = true;
+            const originalText = this.textContent;
+            this.textContent = 'Loading...';
+
+            try {
+                const response = await fetch(`/mission-control/api/ngfw/${appId}/management-info/`);
+                const data = await response.json();
+
+                if (data.error && !data.management_ip) {
+                    alert('Error: ' + data.error);
+                    this.disabled = false;
+                    this.textContent = originalText;
+                    return;
+                }
+
+                if (data.management_ip) {
+                    // Show management IP info
+                    managementIpValue.innerHTML = `
+                        <strong>Management IP:</strong> ${data.management_ip}<br>
+                        <strong>Web URL:</strong> <a href="${data.web_url}" target="_blank" rel="noopener noreferrer" style="color: var(--xdr-link);">${data.web_url}</a><br>
+                        <small style="color: var(--xdr-text-tertiary);">
+                            Note: Direct access requires VPN or network connectivity to the range VPC.
+                            Use CLI access via the button above for browser-based access.
+                        </small>
+                    `;
+                    managementIpContainer.style.display = 'block';
+                    this.textContent = 'Refresh';
+                } else {
+                    managementIpValue.textContent = 'Management IP not available';
+                    managementIpContainer.style.display = 'block';
+                    this.textContent = originalText;
+                }
+
+                this.disabled = false;
+
+            } catch (err) {
+                console.error('Management info error:', err);
+                alert('Failed to retrieve management information.');
+                this.disabled = false;
+                this.textContent = originalText;
             }
         });
     }

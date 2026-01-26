@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from typing import cast
+from uuid import UUID
 
 from django.conf import settings as django_settings
 from django.contrib import messages
@@ -890,6 +891,105 @@ def api_ngfw_complete_setup(request: HttpRequest, app_id: str) -> JsonResponse:
             "instance_id": str(result.instance_id),
         }
     )
+
+
+@login_required
+@require_POST
+def api_ngfw_ssh_url(request: HttpRequest, app_id: UUID) -> JsonResponse:
+    """Generate a signed Guacamole URL for SSH access to NGFW CLI.
+
+    Request body (JSON): None required
+
+    Response (JSON):
+        - url: Signed Guacamole URL that opens SSH session to NGFW
+
+    Security:
+        - User must own the NGFW
+        - NGFW must be in a connectable state (ready, awaiting_association, configuring)
+        - URL is signed with HMAC-SHA256 and expires in 5 minutes
+    """
+    from engine.services import get_ngfw_connection_info
+    from mission_control.guacamole import create_guacamole_ssh_url
+
+    user = _get_user(request)
+
+    try:
+        conn_info = get_ngfw_connection_info(user, str(app_id))
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except PermissionError as e:
+        return JsonResponse({"error": str(e)}, status=403)
+
+    # Get Guacamole configuration from settings
+    guacamole_base_url = django_settings.GUACAMOLE_URL
+    guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_URL", None)
+    secret_key = django_settings.GUACAMOLE_SECRET_KEY
+
+    if not guacamole_base_url or not secret_key:
+        logger.error("Guacamole not configured")
+        return JsonResponse({"error": "Remote access not configured"}, status=503)
+
+    try:
+        url = create_guacamole_ssh_url(
+            base_url=guacamole_base_url,
+            secret_key=secret_key,
+            username=request.user.email,
+            connection_name=f"NGFW-{conn_info['connection_name']}",
+            hostname=conn_info["management_ip"],
+            port=22,
+            expires_minutes=5,
+            ssh_username="admin",  # PAN-OS admin user
+            ssh_private_key=conn_info.get("ssh_key"),
+            api_base_url=guacamole_api_url,
+        )
+    except ValueError as e:
+        logger.error("Failed to create Guacamole SSH URL: %s", e)
+        return JsonResponse({"error": "Failed to generate access URL"}, status=500)
+
+    logger.info("NGFW SSH URL generated: user=%s app_id=%s", user.email, app_id)
+    return JsonResponse({"url": url})
+
+
+@login_required
+@require_GET
+def api_ngfw_management_info(request: HttpRequest, app_id: UUID) -> JsonResponse:
+    """Get NGFW management connection information.
+
+    Returns the management IP and port for the NGFW web interface.
+    The web interface is accessible via HTTPS on port 443.
+
+    Response (JSON):
+        - management_ip: NGFW management interface IP address
+        - web_url: URL for NGFW web management interface (via proxy)
+        - status: Current NGFW status
+        - accessible: Boolean indicating if NGFW is currently accessible
+    """
+    from engine.services import get_ngfw_connection_info
+
+    user = _get_user(request)
+
+    try:
+        conn_info = get_ngfw_connection_info(user, str(app_id))
+        accessible = True
+    except ValueError as e:
+        # Return partial info even if not fully accessible
+        return JsonResponse({
+            "accessible": False,
+            "error": str(e),
+        })
+    except PermissionError as e:
+        return JsonResponse({"error": str(e)}, status=403)
+
+    # Build web management URL - the NGFW web interface runs on HTTPS port 443
+    # Users access it via Guacamole's VNC/browser or direct HTTPS if network allows
+    management_ip = conn_info["management_ip"]
+
+    return JsonResponse({
+        "management_ip": management_ip,
+        "web_url": f"https://{management_ip}",
+        "status": conn_info["status"],
+        "accessible": accessible,
+    })
 
 
 # -----------------------------------------------------------------------------

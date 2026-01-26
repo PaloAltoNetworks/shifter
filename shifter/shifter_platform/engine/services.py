@@ -1027,3 +1027,93 @@ def complete_ngfw_setup(request_id: UUID) -> bool:
         )
 
     return task_arn is not None
+
+
+def get_ngfw_connection_info(user: User, app_id: str) -> dict[str, Any]:
+    """Get connection info for management access to an NGFW.
+
+    Args:
+        user: Authenticated user requesting connection
+        app_id: UUID of the NGFW App to connect to
+
+    Returns:
+        Dict with keys: management_ip, ssh_key, connection_name, status
+
+    Raises:
+        ValueError: If NGFW not found, not owned by user, or not ready
+        PermissionError: If user doesn't own the NGFW
+    """
+    from uuid import UUID
+
+    from cms.models import App
+    from engine.models import Instance, Request
+    from engine.secrets import get_ssh_key
+
+    if user is None:
+        raise ValueError("user is required")
+    if not app_id:
+        raise ValueError("app_id is required")
+
+    # Parse UUID
+    try:
+        app_uuid = UUID(app_id) if isinstance(app_id, str) else app_id
+    except ValueError:
+        raise ValueError(f"Invalid app_id: {app_id}") from None
+
+    logger.debug("get_ngfw_connection_info: user=%s app_id=%s", user.id, app_id)
+
+    # Look up CMS App to verify ownership
+    try:
+        cms_app = App.objects.select_related("instance", "instance__request").get(
+            id=app_uuid,
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
+        )
+    except App.DoesNotExist:
+        raise ValueError("NGFW not found or not owned by user") from None
+
+    # Get request_id from CMS app's instance's request
+    request_id = cms_app.instance.request.request_id
+
+    # Find Engine Instance by request
+    try:
+        engine_request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        raise ValueError("NGFW infrastructure not found") from None
+
+    engine_instance = Instance.objects.filter(request=engine_request, role="ngfw").first()
+    if not engine_instance:
+        raise ValueError("NGFW instance not found")
+
+    # Verify NGFW is in a connectable state
+    connectable_statuses = ["ready", "awaiting_association", "configuring"]
+    if engine_instance.status not in connectable_statuses:
+        raise ValueError(
+            f"NGFW is not accessible (status: {engine_instance.status}). "
+            f"NGFW must be in one of: {', '.join(connectable_statuses)}"
+        )
+
+    # Get state data from engine instance
+    state = engine_instance.state or {}
+    management_ip = state.get("management_ip")
+    ssh_key_arn = state.get("ssh_key_secret_arn")
+
+    if not management_ip:
+        raise ValueError("NGFW management IP not available")
+
+    # Get SSH key from Secrets Manager
+    ssh_key = None
+    if ssh_key_arn:
+        try:
+            ssh_key = get_ssh_key(ssh_key_arn)
+        except Exception as e:
+            logger.warning("Failed to get SSH key for NGFW: %s", e)
+            raise ValueError("Failed to retrieve NGFW SSH key") from e
+
+    return {
+        "management_ip": management_ip,
+        "ssh_key": ssh_key,
+        "connection_name": cms_app.name,
+        "status": engine_instance.status,
+    }

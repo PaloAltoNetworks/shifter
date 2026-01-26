@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-import re
+from uuid import uuid4
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
-from encrypted_model_fields.fields import EncryptedCharField
+
+from shared.enums import TERMINAL_STATUSES, RequestType, ResourceStatus
 
 # CredentialBase is defined locally below (migrated from mission_control)
 
@@ -19,6 +19,121 @@ logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 # Abstract Base Models
 # -----------------------------------------------------------------------------
+
+
+class CatalogBase(models.Model):
+    """Abstract base for catalog entities (system-defined types).
+
+    Catalog entities are reference data that define available types,
+    not user-owned instances. Examples: CredentialType, ScenarioType.
+
+    Subclasses should define a `spec_class` CharField pointing to
+    the Pydantic spec class for validation.
+
+    Attributes:
+        name: Human-readable name for display.
+        slug: URL-safe identifier for lookups.
+        created_at: When this catalog entry was created.
+    """
+
+    name = models.CharField(max_length=100, help_text="Display name")
+    slug = models.SlugField(max_length=50, unique=True, help_text="URL-safe identifier")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return self.name
+
+    def get_spec_class(self):
+        """Load and return the Pydantic spec class.
+
+        Requires subclass to define a `spec_class` CharField.
+
+        Returns:
+            The Pydantic model class for validating data.
+
+        Raises:
+            AttributeError: If subclass doesn't define spec_class.
+            ImportError: If the spec_class path is invalid.
+        """
+        from importlib import import_module
+
+        module_path, class_name = self.spec_class.rsplit(".", 1)
+        module = import_module(module_path)
+        return getattr(module, class_name)
+
+    def validate_data(self, data: dict) -> dict:
+        """Validate data against this type's spec.
+
+        Args:
+            data: Raw data to validate.
+
+        Returns:
+            Validated and normalized data dict.
+
+        Raises:
+            pydantic.ValidationError: If data doesn't match the spec.
+        """
+        spec_class = self.get_spec_class()
+        validated = spec_class.model_validate(data)
+        return validated.model_dump()
+
+
+class EntityBase(models.Model):
+    """Abstract base for concrete entities in ranges (Instance, App).
+
+    Entities represent materialized "things" that exist in provisioned ranges.
+    Each entity has a UUID primary key for correlation across CMS, Engine,
+    and events.
+
+    The UUID is auto-generated on first save and included in specs sent to Engine.
+    Status tracks lifecycle and automatically soft-deletes on terminal states.
+
+    Attributes:
+        id: UUID primary key (auto-generated).
+        status: Lifecycle status (pending, provisioning, ready, etc.).
+        created_at: When this entity was created.
+        deleted_at: Soft delete timestamp (None = active).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    status = models.CharField(
+        max_length=20,
+        default=ResourceStatus.PENDING.value,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        """Save with terminal status invariant enforcement.
+
+        When status is set to a terminal value (DESTROYED, FAILED),
+        deleted_at is automatically set if not already set.
+        """
+        # Auto-set deleted_at for terminal statuses
+        try:
+            status_enum = ResourceStatus(self.status)
+            if status_enum in TERMINAL_STATUSES and not self.deleted_at:
+                self.deleted_at = timezone.now()
+                # If update_fields specified, ensure deleted_at is included
+                update_fields = kwargs.get("update_fields")
+                if update_fields is not None and "deleted_at" not in update_fields:
+                    kwargs["update_fields"] = [*list(update_fields), "deleted_at"]
+        except ValueError:
+            pass  # Invalid status, let save proceed and fail validation elsewhere
+
+        super().save(*args, **kwargs)
+
+    @property
+    def is_deleted(self):
+        """Return True if this entity has been soft-deleted."""
+        return self.deleted_at is not None
 
 
 class Asset(models.Model):
@@ -119,6 +234,15 @@ class CredentialBase(Asset):
             return False
         return timezone.now() > self.expires_at
 
+    @property
+    def expires_soon(self):
+        """Return True if this credential expires within 30 days."""
+        if not self.expires_at:
+            return False
+        if self.is_expired:
+            return False
+        return self.expires_at <= timezone.now() + timezone.timedelta(days=30)
+
 
 # -----------------------------------------------------------------------------
 # Reference Models
@@ -167,365 +291,333 @@ class OperatingSystem(models.Model):
 # -----------------------------------------------------------------------------
 
 
-class Credential(CredentialBase):
-    """Unified credential model with type discrimination.
+class CredentialType(CatalogBase):
+    """Catalog of credential types.
 
-    Consolidates SCMCredential and NGFWDeploymentProfile into a single table
-    with type-based field validation.
+    Type Object pattern: types are data rows, not code enums.
+    Each row defines a credential type and points to its Pydantic spec class.
 
-    Fields inherited from Asset (via CredentialBase):
-        - name: User-friendly name (max 100 chars)
-        - created_at: Auto-set on creation
-        - deleted_at: Soft delete timestamp
-        - is_deleted: Property
+    Attributes (inherited from CatalogBase):
+        name: Display name (e.g., "SCM Registration").
+        slug: Lookup key (e.g., "scm").
+        created_at: When this type was added.
+        get_spec_class(): Load the Pydantic spec class.
+        validate_data(): Validate data against the spec.
 
-    Fields inherited from Credential abstract base:
-        - expires_at: Expiration timestamp
-        - last_verified_at: Last external validation
-        - last_used_at: Last provisioning use
-        - is_expired: Property
-
-    Type-specific fields:
-        SCM:
-            - scm_folder_name (required)
-            - scm_pin_id (required)
-            - scm_pin_value (required, encrypted)
-            - sls_region (required)
-        DEPLOYMENT_PROFILE:
-            - authcode (required, encrypted)
+    Attributes:
+        spec_class: Dotted path to the Pydantic spec class for validation.
     """
 
-    class Type(models.TextChoices):
-        SCM = "scm", "SCM Registration"
-        DEPLOYMENT_PROFILE = "deployment_profile", "NGFW Deployment Profile"
+    spec_class = models.CharField(
+        max_length=255,
+        help_text="Dotted path to Pydantic spec class (e.g., 'shared.schemas.SCMCredentialSpec')",
+    )
 
-    class SLSRegion(models.TextChoices):
-        AMERICAS = "americas", "Americas"
-        EUROPE = "europe", "Europe"
-        JAPAN = "japan", "Japan"
-        ASIAPACIFIC = "asiapacific", "Asia Pacific"
+    class Meta:
+        verbose_name = "Credential Type"
+        verbose_name_plural = "Credential Types"
 
-    # Core fields
+
+class Credential(models.Model):
+    """User's credential instance.
+
+    Stores user credentials with type-specific data in a JSON field.
+    Validation is delegated to Pydantic spec classes referenced by CredentialType.
+
+    Attributes:
+        name: User-friendly name for this credential.
+        user: Owner of this credential.
+        credential_type: FK to CredentialType catalog.
+        data: Type-specific fields as JSON (validated by spec_class).
+        created_at: When this credential was created.
+        expires_at: When this credential expires (optional).
+        deleted_at: Soft delete timestamp (None = active).
+    """
+
+    name = models.CharField(max_length=100, help_text="User-friendly name")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="cms_credentials",
+        related_name="credentials",
     )
-    credential_type = models.CharField(
-        max_length=30,
-        choices=Type.choices,
+    credential_type = models.ForeignKey(
+        CredentialType,
+        on_delete=models.PROTECT,
+        related_name="credentials",
     )
-
-    # SCM fields (required for SCM type)
-    scm_folder_name = models.CharField(max_length=255, blank=True, default="")
-    scm_pin_id = models.CharField(max_length=255, blank=True, default="")
-    scm_pin_value = EncryptedCharField(max_length=255, blank=True, default="")
-    sls_region = models.CharField(
-        max_length=50,
-        choices=SLSRegion.choices,
-        blank=True,
-        default="",
+    data = models.JSONField(
+        default=dict,
+        help_text="Type-specific credential data (validated by spec_class)",
     )
-
-    # Deployment profile fields (required for DEPLOYMENT_PROFILE type)
-    authcode = EncryptedCharField(max_length=100, blank=True, default="")
-
-    # Track original values for immutability checks
-    _original_credential_type: str | None = None
-    _original_user_id: int | None = None
-    _original_authcode: str | None = None
-    _original_deleted_at = None
-    _is_new: bool = True
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
         verbose_name = "Credential"
         verbose_name_plural = "Credentials"
-        # Uniqueness constraints - only for non-deleted credentials
         constraints = [
-            # User + name must be unique (for non-deleted)
             models.UniqueConstraint(
                 fields=["user", "name"],
                 condition=models.Q(deleted_at__isnull=True),
                 name="unique_active_credential_name_per_user",
             ),
-            # User + authcode must be unique for deployment profiles (for non-deleted)
-            models.UniqueConstraint(
-                fields=["user", "authcode"],
-                condition=models.Q(
-                    deleted_at__isnull=True,
-                    credential_type="deployment_profile",
-                ),
-                name="unique_active_authcode_per_user",
-            ),
-            # User + folder + pin_id must be unique for SCM (for non-deleted)
-            models.UniqueConstraint(
-                fields=["user", "scm_folder_name", "scm_pin_id"],
-                condition=models.Q(
-                    deleted_at__isnull=True,
-                    credential_type="scm",
-                ),
-                name="unique_active_scm_folder_pin_per_user",
-            ),
         ]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Store original values after loading from DB
-        self._store_original_values()
-
     def __str__(self):
-        """Return credential name (no sensitive data)."""
         return self.name
 
-    def __repr__(self):
-        """Return safe representation (no sensitive data)."""
-        return f"<Credential(id={self.pk}, name='{self.name}', type='{self.credential_type}')>"
+    @property
+    def is_deleted(self):
+        """Return True if this credential has been soft-deleted."""
+        return self.deleted_at is not None
 
-    def save(self, *args, **kwargs):
-        """Save with validation.
+    @property
+    def is_expired(self):
+        """Return True if this credential has expired."""
+        if not self.expires_at:
+            return False
+        return timezone.now() > self.expires_at
 
-        Logs DEBUG on successful save (create or update).
-        Exceptions from validation or database are propagated, not swallowed.
+    @property
+    def expires_soon(self):
+        """Return True if this credential expires within 30 days."""
+        if not self.expires_at:
+            return False
+        if self.is_expired:
+            return False
+        return self.expires_at <= timezone.now() + timezone.timedelta(days=30)
 
-        Raises:
-            ValidationError: If validation fails
-            DatabaseError: If database operation fails
-        """
-        is_create = self._is_new
-        self.full_clean()
+
+# -----------------------------------------------------------------------------
+# Instance Models
+# -----------------------------------------------------------------------------
+
+
+class InstanceType(CatalogBase):
+    """Catalog of instance types (container, vm, etc).
+
+    Type Object pattern: types are data rows, not code enums.
+    Each row defines an instance type and points to its Pydantic spec class.
+
+    Attributes (inherited from CatalogBase):
+        name: Display name (e.g., "Container").
+        slug: Lookup key (e.g., "container").
+        created_at: When this type was added.
+        get_spec_class(): Load the Pydantic spec class.
+        validate_data(): Validate data against the spec.
+
+    Attributes:
+        spec_class: Dotted path to the Pydantic spec class for validation.
+    """
+
+    spec_class = models.CharField(
+        max_length=255,
+        help_text="Dotted path to Pydantic spec class",
+    )
+
+    class Meta:
+        verbose_name = "Instance Type"
+        verbose_name_plural = "Instance Types"
+
+
+class Instance(EntityBase):
+    """Instance definition - a concrete compute resource in a range.
+
+    Stores instance config with type-specific data in a JSON field.
+    Validation is delegated to Pydantic spec classes referenced by InstanceType.
+
+    Inherits from EntityBase:
+        id: UUID primary key (auto-generated, used for event correlation).
+        status: Lifecycle status (pending, provisioning, ready, etc.).
+        created_at: When this instance was created.
+        deleted_at: Soft delete timestamp (auto-set on terminal status).
+
+    Attributes:
+        request: FK to Request (provides user context).
+        name: User-friendly name for this instance.
+        instance_type: FK to InstanceType catalog.
+        data: Type-specific fields as JSON (validated by spec_class).
+    """
+
+    request = models.ForeignKey(
+        "Request",
+        on_delete=models.CASCADE,
+        related_name="instances",
+    )
+    name = models.CharField(max_length=100, help_text="User-friendly name")
+    instance_type = models.ForeignKey(
+        InstanceType,
+        on_delete=models.PROTECT,
+        related_name="instance_configs",
+    )
+    data = models.JSONField(
+        default=dict,
+        help_text="Type-specific instance data (validated by spec_class)",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Instance"
+        verbose_name_plural = "Instances"
+
+    def __str__(self):
+        return f"{self.name} ({self.id})"
+
+
+# -----------------------------------------------------------------------------
+# App Models
+# -----------------------------------------------------------------------------
+
+
+class AppType(CatalogBase):
+    """Catalog of app types (os, ngfw, agent, other).
+
+    Type Object pattern: types are data rows, not code enums.
+    Each row defines an app type and points to its Pydantic spec class.
+
+    Attributes:
+        name: Display name (inherited from CatalogBase).
+        slug: URL-safe identifier (inherited from CatalogBase).
+        spec_class: Dotted path to Pydantic spec class.
+    """
+
+    spec_class = models.CharField(
+        max_length=255,
+        help_text="Dotted path to Pydantic spec class",
+    )
+
+    class Meta:
+        verbose_name = "App Type"
+        verbose_name_plural = "App Types"
+
+
+class App(EntityBase):
+    """App definition - a concrete application running on an instance.
+
+    Stores app config with type-specific data in a JSON field.
+    Validation is delegated to Pydantic spec classes referenced by AppType.
+
+    Inherits from EntityBase:
+        id: UUID primary key (auto-generated, used for event correlation).
+        status: Lifecycle status (pending, provisioning, ready, etc.).
+        created_at: When this app was created.
+        deleted_at: Soft delete timestamp (auto-set on terminal status).
+
+    Attributes:
+        name: User-friendly name for this app.
+        app_type: FK to AppType catalog.
+        instance: Parent Instance this app runs on.
+        data: Type-specific fields as JSON (validated by spec_class).
+    """
+
+    name = models.CharField(max_length=100, help_text="User-friendly name")
+    app_type = models.ForeignKey(
+        AppType,
+        on_delete=models.PROTECT,
+        related_name="apps",
+    )
+    instance = models.ForeignKey(
+        Instance,
+        on_delete=models.CASCADE,
+        related_name="apps",
+        null=True,
+        blank=True,
+        help_text="Parent instance this app runs on",
+    )
+    data = models.JSONField(
+        default=dict,
+        help_text="Type-specific app data (validated by spec_class)",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "App"
+        verbose_name_plural = "Apps"
+
+    def __str__(self):
+        return f"{self.name} ({self.id})"
+
+
+# -----------------------------------------------------------------------------
+# Subnet Models
+# -----------------------------------------------------------------------------
+
+
+class Subnet(EntityBase):
+    """Logical network segment in a range.
+
+    Subnets group instances for routing policy purposes. When a range
+    has an NGFW, inter-subnet traffic flows through it via connections.
+
+    Inherits from EntityBase:
+        id: UUID primary key (auto-generated, used for event correlation).
+        status: Lifecycle status (pending, provisioning, ready, etc.).
+        created_at: When this subnet was created.
+        deleted_at: Soft delete timestamp (auto-set on terminal status).
+
+    Attributes:
+        request: FK to Request (provides user context).
+        name: Subnet name (e.g., 'dc_network', 'server_network').
+        data: SubnetSpec data as JSON (instances list, connected_to).
+    """
+
+    request = models.ForeignKey(
+        "Request",
+        on_delete=models.CASCADE,
+        related_name="subnets",
+    )
+    name = models.CharField(max_length=100, help_text="Subnet name")
+    data = models.JSONField(
+        default=dict,
+        help_text="SubnetSpec data (instances, connected_to)",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Subnet"
+        verbose_name_plural = "Subnets"
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.id})"
+
+    def save(self, *args, **kwargs) -> None:
+        """Save with validation and logging."""
+        is_new = self._state.adding
+        self.validate_data()
         super().save(*args, **kwargs)
 
-        # Log success
-        user_context = f"user_id={self.user_id}"
-        if is_create:
-            logger.debug(
-                "Credential created: id=%s, %s, credential_type=%s, name='%s'",
-                self.pk,
-                user_context,
-                self.credential_type,
+        if is_new:
+            logger.info(
+                "Subnet created: name=%s, id=%s, instances=%r",
                 self.name,
-            )
-        else:
-            logger.debug(
-                "Credential updated: id=%s, %s, credential_type=%s, name='%s'",
-                self.pk,
-                user_context,
-                self.credential_type,
-                self.name,
+                self.id,
+                self.instances,
             )
 
-        # Update stored original values after save
-        self._store_original_values()
-
-    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
-        """Refresh and update original values."""
-        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
-        self._store_original_values()
-
-    def clean(self):
-        """Validate the credential based on its type and state.
-
-        Logs DEBUG on successful validation, ERROR on validation failure.
+    def validate_data(self) -> None:
+        """Validate data against SubnetSpec.
 
         Raises:
-            ValidationError: If validation fails (with descriptive error messages)
+            pydantic.ValidationError: If data is invalid.
         """
-        errors = {}
-        user_context = f"user_id={self.user_id}" if self.user_id else "user_id=None"
+        from shared.schemas import SubnetSpec
 
-        # Validate name
-        if not self.name:
-            errors["name"] = "Name is required."
-        elif not self.name.strip():
-            errors["name"] = "Name cannot be whitespace only."
+        spec_data: dict = {"name": self.name, **self.data}
+        if self.id:
+            spec_data["uuid"] = str(self.id)
+        SubnetSpec.model_validate(spec_data)
 
-        # Validate credential_type
-        if not self.credential_type:
-            errors["credential_type"] = "Credential type is required."
-        elif self.credential_type not in [c[0] for c in self.Type.choices]:
-            errors["credential_type"] = f"'{self.credential_type}' is not a valid credential type."
+    @property
+    def instances(self) -> list[str]:
+        """Return list of instance names in this subnet."""
+        return self.data.get("instances", [])
 
-        # Immutability checks (only for existing records)
-        if not self._is_new:
-            # Check credential_type immutability
-            if self._original_credential_type and self.credential_type != self._original_credential_type:
-                errors["credential_type"] = "Credential type cannot be changed after creation."
-
-            # Check user immutability
-            if self._original_user_id and self.user_id != self._original_user_id:
-                errors["user"] = "User (ownership) cannot be changed after creation."
-
-            # Check authcode immutability for deployment profiles
-            if (
-                self._original_credential_type == self.Type.DEPLOYMENT_PROFILE
-                and self._original_authcode
-                and self.authcode != self._original_authcode
-            ):
-                errors["authcode"] = "Authcode cannot be changed after creation."
-
-            # Check undelete attempt
-            if self._original_deleted_at is not None and self.deleted_at is None:
-                errors["deleted_at"] = "Cannot undelete a credential."
-
-            # Check modification of deleted credential
-            # Only allow if nothing else changed. For simplicity, we reject any save
-            # on deleted credentials (comparing all fields is complex)
-            if (
-                self._original_deleted_at is not None
-                and self.deleted_at is not None
-                and self.name != self._get_db_value("name")
-            ):
-                errors["name"] = "Cannot modify a deleted credential."
-
-        # Type-specific validation (only if type is valid)
-        if self.credential_type and self.credential_type in [c[0] for c in self.Type.choices]:
-            if self.credential_type == self.Type.SCM:
-                self._validate_scm_fields(errors)
-            elif self.credential_type == self.Type.DEPLOYMENT_PROFILE:
-                self._validate_deployment_profile_fields(errors)
-
-        # Uniqueness validation (supplements DB constraints)
-        if not errors:
-            self._validate_uniqueness(errors)
-
-        if errors:
-            # Log ERROR with field names and user context
-            field_names = ", ".join(errors.keys())
-            logger.error(
-                "Credential validation failed: fields=[%s], %s, credential_type=%s",
-                field_names,
-                user_context,
-                self.credential_type or "None",
-            )
-            raise ValidationError(errors)
-
-        # Log DEBUG on successful validation
-        logger.debug(
-            "Credential validation passed: %s, credential_type=%s, name='%s'",
-            user_context,
-            self.credential_type,
-            self.name,
-        )
-
-    def _get_db_value(self, field_name: str):
-        """Get the current database value for a field."""
-        if not self.pk:
-            return None
-        try:
-            db_instance = Credential.objects.get(pk=self.pk)
-            return getattr(db_instance, field_name)
-        except Credential.DoesNotExist:
-            return None
-
-    def _validate_scm_fields(self, errors: dict):
-        """Validate SCM-specific fields."""
-        if not self.scm_folder_name:
-            errors["scm_folder_name"] = "SCM folder name is required for SCM credentials."
-        elif not self.scm_folder_name.strip():
-            errors["scm_folder_name"] = "SCM folder name cannot be whitespace only."
-
-        if not self.scm_pin_id:
-            errors["scm_pin_id"] = "SCM PIN ID is required for SCM credentials."
-        elif not self.scm_pin_id.strip():
-            errors["scm_pin_id"] = "SCM PIN ID cannot be whitespace only."
-
-        if not self.scm_pin_value:
-            errors["scm_pin_value"] = "SCM PIN value is required for SCM credentials."
-
-        if not self.sls_region:
-            errors["sls_region"] = "SLS region is required for SCM credentials."
-        elif self.sls_region not in [c[0] for c in self.SLSRegion.choices]:
-            errors["sls_region"] = f"'{self.sls_region}' is not a valid SLS region."
-
-    def _validate_deployment_profile_fields(self, errors: dict):
-        """Validate deployment profile-specific fields."""
-        if not self.authcode:
-            errors["authcode"] = "Authcode is required for deployment profiles."
-        else:
-            # Validate authcode format: letter followed by 7 digits
-            if not re.match(r"^[A-Z][0-9]{7}$", self.authcode):
-                errors["authcode"] = "Authcode must be a letter followed by 7 digits (e.g., D9232090)."
-
-    def _validate_uniqueness(self, errors: dict):
-        """Validate uniqueness constraints at application level.
-
-        Supplements database constraints for early validation.
-        Logs DEBUG for uniqueness checks performed.
-        """
-        if not self.user_id:
-            logger.debug("Skipping uniqueness validation: no user_id set")
-            return  # Can't check uniqueness without user
-
-        # Build queryset for active credentials of same user (exclude self)
-        qs = Credential.objects.filter(user_id=self.user_id, deleted_at__isnull=True)
-        if self.pk:
-            qs = qs.exclude(pk=self.pk)
-
-        logger.debug(
-            "Uniqueness check: user_id=%s, pk=%s, existing_count=%d",
-            self.user_id,
-            self.pk,
-            qs.count(),
-        )
-
-        # Check unique name per user
-        if self.name and qs.filter(name=self.name).exists():
-            logger.debug(
-                "Uniqueness violation: duplicate name '%s' for user_id=%s",
-                self.name,
-                self.user_id,
-            )
-            errors["name"] = f"A credential named '{self.name}' already exists."
-
-        # Check unique authcode per user (for deployment profiles)
-        # Note: authcode uses EncryptedCharField with Fernet (non-deterministic).
-        # We must load records and compare decrypted values in Python.
-        if self.credential_type == self.Type.DEPLOYMENT_PROFILE and self.authcode:
-            existing_profiles = list(qs.filter(credential_type=self.Type.DEPLOYMENT_PROFILE))
-            # Compare decrypted authcodes (field decrypts automatically on access)
-            authcode_exists = any(p.authcode == self.authcode for p in existing_profiles)
-            logger.debug(
-                "Authcode uniqueness check: authcode=%s, type=%s, checked=%d, exists=%s",
-                self.authcode[:4] + "****" if self.authcode else None,
-                self.credential_type,
-                len(existing_profiles),
-                authcode_exists,
-            )
-            if authcode_exists:
-                errors["authcode"] = "A deployment profile with this authcode already exists."
-
-        # Check unique SCM folder+pin combo per user
-        if self.credential_type == self.Type.SCM and self.scm_folder_name and self.scm_pin_id:
-            scm_exists = qs.filter(
-                credential_type=self.Type.SCM,
-                scm_folder_name=self.scm_folder_name,
-                scm_pin_id=self.scm_pin_id,
-            ).exists()
-            logger.debug(
-                "SCM uniqueness check: folder=%s, pin_id=%s, exists=%s",
-                self.scm_folder_name,
-                self.scm_pin_id,
-                scm_exists,
-            )
-            if scm_exists:
-                errors["scm_folder_name"] = "An SCM credential with this folder and PIN ID already exists."
-
-    def _store_original_values(self):
-        """Store original values for immutability checks.
-
-        Uses __dict__ access to avoid triggering deferred field loading,
-        which would cause infinite recursion during Django's .only() queries.
-        """
-        if self.pk:
-            self._is_new = False
-            # Access via __dict__ to avoid triggering deferred field refresh
-            self._original_credential_type = self.__dict__.get("credential_type")
-            self._original_user_id = self.__dict__.get("user_id")
-            self._original_authcode = self.__dict__.get("authcode", "")
-            self._original_deleted_at = self.__dict__.get("deleted_at")
-        else:
-            self._is_new = True
+    @property
+    def connected_to(self) -> list[str]:
+        """Return list of subnet names this subnet connects to."""
+        return self.data.get("connected_to", [])
 
 
 # -----------------------------------------------------------------------------
@@ -566,69 +658,54 @@ class AgentConfig(FileAsset):
 
 
 # -----------------------------------------------------------------------------
-# Range Instance Tracking
+# Request Tracking
 # -----------------------------------------------------------------------------
 
 
-class UserNGFW(Asset):
-    """Persistent NGFW instance. Users can have multiple."""
+class Request(models.Model):
+    """Provisioning request container.
 
-    class Status(models.TextChoices):
-        NOT_PROVISIONED = "not_provisioned", "Not Provisioned"
-        PROVISIONING = "provisioning", "Provisioning"
-        READY = "ready", "Ready"
-        STARTING = "starting", "Starting"
-        ACTIVE = "active", "Active"
-        STOPPING = "stopping", "Stopping"
-        STOPPED = "stopped", "Stopped"
-        DEPROVISIONING = "deprovisioning", "Deprovisioning"
-        FAILED = "failed", "Failed"
+    Groups items requested together while allowing independent lifecycles.
+    Maps 1:1 with RequestSpec schema.
 
+    Attributes:
+        request_id: UUID identifier for this request (correlation key).
+        user: User who made the request.
+        created_at: When the request was created.
+        deleted_at: Soft delete timestamp (None = active).
+    """
+
+    request_id = models.UUIDField(unique=True, db_index=True)
+    request_type = models.CharField(
+        max_length=20,
+        choices=[(t.value, t.name) for t in RequestType],
+        db_index=True,
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="ngfws",
+        related_name="requests",
     )
-
-    # Note: Credentials are managed by CMS, not stored here.
-    # Engine receives hydrated config with decrypted values at provisioning time.
-    # CMS tracks credential→range associations if needed.
-
-    # Lifecycle
-    status = models.CharField(
-        max_length=20,
-        choices=Status.choices,
-        default=Status.NOT_PROVISIONED,
-    )
-
-    # AWS Resources - NGFW
-    instance_id = models.CharField(max_length=32, blank=True)
-    mgmt_eni_id = models.CharField(max_length=32, blank=True)
-    data_eni_id = models.CharField(max_length=32, blank=True)
-    management_ip = models.GenericIPAddressField(null=True, blank=True)
-    dataplane_ip = models.GenericIPAddressField(null=True, blank=True)
-
-    # AWS Resources - GWLB
-    gwlb_arn = models.CharField(max_length=256, blank=True)
-    target_group_arn = models.CharField(max_length=256, blank=True)
-    gwlb_service_name = models.CharField(max_length=256, blank=True)
-
-    # PAN-OS Info
-    serial_number = models.CharField(max_length=32, blank=True)
-    device_cert_status = models.CharField(max_length=32, blank=True)
-    xdr_configured = models.BooleanField(default=False)
-
-    # Timestamps (beyond Asset's created_at, deleted_at)
-    provisioned_at = models.DateTimeField(null=True, blank=True)
-    last_started_at = models.DateTimeField(null=True, blank=True)
-    last_stopped_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "User NGFW"
-        verbose_name_plural = "User NGFWs"
-        # Keep using original table name from mission_control
-        db_table = "mission_control_userngfw"
+        verbose_name = "Request"
+        verbose_name_plural = "Requests"
+
+    def __str__(self):
+        return f"Request {self.request_id}"
+
+    @property
+    def is_deleted(self):
+        """Return True if this request has been soft-deleted."""
+        return self.deleted_at is not None
+
+
+# -----------------------------------------------------------------------------
+# Range Instance Tracking
+# -----------------------------------------------------------------------------
 
 
 class ActiveRangeInstanceManager(models.Manager):
@@ -650,11 +727,16 @@ class RangeInstance(models.Model):
     - status tracks CMS's view of range lifecycle (from pub/sub events)
     - deleted_at enables soft deletion for history preservation
 
+    After GH issue #416:
+    - request FK links to CMS Request (new pattern)
+    - range_id is now nullable for new Request-based ranges
+
     Invariant: Terminal statuses (DESTROYED, FAILED) automatically set deleted_at.
     This is enforced in save() to prevent orphaned terminal records.
 
     Attributes:
-        range_id: ID of the Range created by engine (IntegerField, not FK)
+        request: CMS Request that spawned this range (new pattern, nullable).
+        range_id: ID of the Range created by engine (legacy, nullable for new ranges).
         scenario_id: Template name used (e.g., 'basic', 'ad_attack_lab')
         user_id: ID of the user who requested creation (IntegerField, not FK)
         agent: AgentConfig used, if any (FK, nullable)
@@ -664,7 +746,15 @@ class RangeInstance(models.Model):
         deleted_at: When this record was soft-deleted (null if active)
     """
 
-    range_id = models.IntegerField(unique=True)
+    request = models.ForeignKey(
+        "Request",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="range_instances",
+        help_text="CMS Request that spawned this range (new pattern)",
+    )
+    range_id = models.IntegerField(unique=True, null=True, blank=True)
     scenario_id = models.CharField(max_length=50)
     user_id = models.IntegerField()
     agent = models.ForeignKey(

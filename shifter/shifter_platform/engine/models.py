@@ -2,11 +2,187 @@
 
 Infrastructure lifecycle models for Shifter platform.
 
+- Request: Provisioning request container (1:1 with RequestSpec)
+- Instantiation: Abstract base for materialized specs
 - Range: User's cyber range instance with provisioned infrastructure
+- NGFW: User's Next-Generation Firewall with AWS resources
 """
+
+import uuid
 
 from django.conf import settings
 from django.db import models, transaction
+
+from shared.enums import RequestType
+
+
+class Request(models.Model):
+    """Provisioning request container.
+
+    Groups items requested together while allowing independent lifecycles.
+    Maps 1:1 with RequestSpec schema.
+
+    Engine owns its own Request record - separate from CMS's Request.
+    Correlation is via request_id UUID.
+
+    Attributes:
+        request_id: UUID identifier for this request (correlation key).
+        user: User who made the request.
+        created_at: When the request was created.
+    """
+
+    request_id = models.UUIDField(unique=True, db_index=True)
+    request_type = models.CharField(
+        max_length=20,
+        choices=[(t.value, t.name) for t in RequestType],
+        db_index=True,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="engine_requests",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Request"
+        verbose_name_plural = "Requests"
+
+    def __str__(self):
+        return f"Request {self.request_id}"
+
+
+class Instantiation(models.Model):
+    """Abstract base for any materialized spec.
+
+    Provides common fields for tracking lifecycle of specs that have been
+    interpreted into concrete infrastructure or behavior.
+
+    Attributes:
+        uuid: The UUID from the spec being instantiated (instance uuid, range uuid,
+            app uuid, etc). This is the correlation key for events, WebSocket
+            subscriptions, and linking to Terraform/Pulumi outputs.
+        request: The request that spawned this instantiation.
+        spec: The hydrated spec JSON (what was asked for).
+        status: Current lifecycle status.
+        created_at: When this was instantiated.
+        deleted_at: When removal was requested (soft delete).
+        destroyed_at: When infrastructure was actually torn down.
+    """
+
+    uuid = models.UUIDField(unique=True, db_index=True, default=uuid.uuid4, help_text="UUID from the spec")
+    request = models.ForeignKey(
+        Request,
+        on_delete=models.CASCADE,
+        related_name="%(class)s_instantiations",
+        null=True,
+        blank=True,
+    )
+    spec = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Hydrated spec JSON from CMS (what was asked for)",
+    )
+    state = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Infrastructure state (resource IDs, IPs, etc.)",
+    )
+    status = models.CharField(max_length=20, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    destroyed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def is_deleted(self) -> bool:
+        """Return True if removal has been requested."""
+        return self.deleted_at is not None
+
+    @property
+    def is_destroyed(self) -> bool:
+        """Return True if infrastructure has been torn down."""
+        return self.destroyed_at is not None
+
+
+class Instance(Instantiation):
+    """Materialized InstanceSpec - compute resource.
+
+    Represents an EC2 instance, container, or other compute unit.
+    Apps run on Instances (1:N relationship).
+
+    Attributes:
+        role: Instance role from InstanceSpec (attacker, victim, dc, ngfw).
+        os_type: Operating system type (kali, ubuntu, windows, panos).
+    """
+
+    class Role(models.TextChoices):
+        ATTACKER = "attacker", "Attacker"
+        VICTIM = "victim", "Victim"
+        DC = "dc", "Domain Controller"
+        NGFW = "ngfw", "NGFW"
+
+    class OSType(models.TextChoices):
+        KALI = "kali", "Kali Linux"
+        UBUNTU = "ubuntu", "Ubuntu"
+        WINDOWS = "windows", "Windows"
+        PANOS = "panos", "PAN-OS"
+
+    role = models.CharField(max_length=20, choices=Role.choices, db_index=True)
+    os_type = models.CharField(max_length=20, choices=OSType.choices)
+    subnet = models.ForeignKey(
+        "Subnet",
+        on_delete=models.CASCADE,
+        related_name="instances",
+        null=True,
+        blank=True,
+        help_text="Logical subnet this instance belongs to",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Instance"
+        verbose_name_plural = "Instances"
+
+    def __str__(self):
+        return f"Instance {self.uuid} ({self.role}/{self.os_type})"
+
+
+class App(Instantiation):
+    """Materialized AppSpec - application running on compute.
+
+    Represents an app (NGFW, Agent, OS, Other) that runs on an Instance.
+    Child of Instance - mirrors the spec nesting.
+
+    Attributes:
+        app_type: App type discriminator (os, ngfw, agent, other).
+        instance: Parent Instance this App runs on.
+    """
+
+    class AppType(models.TextChoices):
+        OS = "os", "OS"
+        NGFW = "ngfw", "NGFW"
+        AGENT = "agent", "Agent"
+        OTHER = "other", "Other"
+
+    app_type = models.CharField(max_length=20, choices=AppType.choices, db_index=True)
+    instance = models.ForeignKey(
+        Instance,
+        on_delete=models.CASCADE,
+        related_name="apps",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "App"
+        verbose_name_plural = "Apps"
+
+    def __str__(self):
+        return f"App {self.uuid} ({self.app_type})"
 
 
 class Range(models.Model):
@@ -22,25 +198,40 @@ class Range(models.Model):
         DESTROYED = "destroyed", "Destroyed"
         FAILED = "failed", "Failed"
 
+    uuid = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        db_index=True,
+        editable=False,
+        help_text="Unique identifier for cross-service correlation",
+    )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ranges")
+    request = models.ForeignKey(
+        Request,
+        on_delete=models.CASCADE,
+        related_name="ranges",
+        null=True,
+        blank=True,
+        help_text="Request that spawned this range (new pattern)",
+    )
     cms_user_id = models.PositiveIntegerField(
         null=True,
         blank=True,
         help_text="User ID from CMS (may differ from Django user.id)",
     )
-    ngfw = models.ForeignKey(
-        "cms.UserNGFW",
+    ngfw_instance = models.ForeignKey(
+        "Instance",
         on_delete=models.SET_NULL,
+        related_name="attached_ranges",
         null=True,
         blank=True,
-        related_name="ranges",
-        help_text="Persistent NGFW instance for this range",
+        help_text="NGFW Instance this range is attached to (for egress filtering)",
     )
     gwlb_endpoint_id = models.CharField(
         max_length=32,
         blank=True,
         default="",
-        help_text="GWLB endpoint ID for this range's NGFW",
+        help_text="GWLB endpoint ID for this range's NGFW (AWS resource ID)",
     )
     status = models.CharField(
         max_length=20,
@@ -49,22 +240,44 @@ class Range(models.Model):
         db_index=True,
     )
     # AWS resource IDs (populated by provisioner Lambda)
-    subnet_id = models.CharField(max_length=50, blank=True, default="", help_text="AWS subnet ID (e.g., subnet-abc123)")
-    subnet_cidr = models.CharField(max_length=18, blank=True, default="", help_text="Subnet CIDR (e.g., 10.1.5.0/24)")
+    subnet_id = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="AWS subnet ID (e.g., subnet-abc123)",
+    )
+    subnet_cidr = models.CharField(
+        max_length=18,
+        blank=True,
+        default="",
+        help_text="Subnet CIDR (e.g., 10.1.5.0/24)",
+    )
     subnet_index = models.PositiveIntegerField(null=True, blank=True, help_text="Unique index for CIDR allocation")
     victim_ip = models.GenericIPAddressField(null=True, blank=True)
     victim_instance_id = models.CharField(
-        max_length=50, blank=True, default="", help_text="EC2 instance ID (e.g., i-abc123)"
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="EC2 instance ID (e.g., i-abc123)",
     )
     kali_ip = models.GenericIPAddressField(null=True, blank=True)
     kali_instance_id = models.CharField(
-        max_length=50, blank=True, default="", help_text="Kali EC2 instance ID (e.g., i-abc123)"
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="Kali EC2 instance ID (e.g., i-abc123)",
     )
     kali_ssh_key_secret_arn = models.CharField(
-        max_length=500, blank=True, default="", help_text="Secrets Manager ARN for Kali SSH private key"
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Secrets Manager ARN for Kali SSH private key",
     )
     victim_ssh_key_secret_arn = models.CharField(
-        max_length=500, blank=True, default="", help_text="Secrets Manager ARN for Victim SSH private key"
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Secrets Manager ARN for Victim SSH private key",
     )
     chat_url = models.URLField(max_length=500, blank=True, default="")
 
@@ -77,7 +290,7 @@ class Range(models.Model):
     range_config = models.JSONField(
         null=True,
         blank=True,
-        help_text="Full RangeSpec from CMS (scenario_id, user_id, instances)",
+        help_text="Full RangeSpec from CMS (scenario_id, user_id, subnets)",
     )
     provisioned_instances = models.JSONField(
         null=True,
@@ -285,3 +498,59 @@ class Range(models.Model):
         if not victims:
             return None
         return victims[0].get("private_ip")
+
+
+class Subnet(Instantiation):
+    """Logical subnet for CyberScript DSL routing.
+
+    Represents a logical network segment from the CyberScript DSL.
+    NOT an AWS subnet - this is realized as NGFW routes when a range
+    with NGFW is provisioned.
+
+    Tracks lifecycle for:
+    - Creating NGFW address objects and routes on provision
+    - Removing NGFW routes on destroy
+    - Cleanup on failures
+
+    Attributes:
+        name: Logical subnet name from DSL (e.g., 'dc_network', 'server_network').
+        connected_to: List of subnet names this subnet can reach (for NGFW routes).
+        range: The Range this subnet belongs to.
+    """
+
+    name = models.CharField(
+        max_length=100,
+        db_index=True,
+        help_text="Logical subnet name from CyberScript DSL",
+    )
+    connected_to = models.JSONField(
+        default=list,
+        help_text="List of subnet names this subnet connects to (for NGFW routes)",
+    )
+    range = models.ForeignKey(
+        Range,
+        on_delete=models.CASCADE,
+        related_name="logical_subnets",
+        null=True,
+        blank=True,
+        help_text="Range this logical subnet belongs to",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Logical Subnet"
+        verbose_name_plural = "Logical Subnets"
+
+    def __str__(self):
+        return f"Subnet {self.name} ({self.uuid})"
+
+    @property
+    def instance_uuids(self) -> list[str]:
+        """Return list of instance UUIDs in this subnet.
+
+        Extracts from spec if available, otherwise empty list.
+        """
+        if not self.spec:
+            return []
+        instances = self.spec.get("instances", [])
+        return [inst.get("uuid") for inst in instances if inst.get("uuid")]

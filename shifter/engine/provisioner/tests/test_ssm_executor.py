@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # These imports will fail initially - that's expected for TDD
+from executors.base import CommandResult
 from executors.ssm_executor import (
     CommandError,
-    CommandResult,
     InstanceNotFoundError,
     InstanceTerminatedError,
     SSMExecutor,

@@ -20,4 +20,10 @@ chmod 600 /home/kali/.ssh/authorized_keys
 chown -R kali:kali /home/kali/.ssh
 echo "SSH access configured"
 
+# Ensure xrdp is running for RDP access via Guacamole
+echo "Starting xrdp service..."
+systemctl start xrdp
+systemctl status xrdp --no-pager || true
+echo "xrdp service started"
+
 echo "Kali setup complete"

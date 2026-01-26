@@ -11,14 +11,58 @@ on:
           - kali
           - ubuntu
           - windows
+          - dc
+      ref:
+        description: 'Branch to build from'
+        required: false
+        type: string
+        default: 'dev'
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
+  # DC AMIs are prebaked - just update SSM from config file
+  update-dc:
+    name: Update DC AMI in dev SSM
+    if: inputs.ami_type == 'dc'
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-2
+
+      - name: Update dev SSM from config
+        run: |
+          AMI_ID=$(jq -r '.dev' shifter/packer/dc-amis.json)
+          echo "## DC AMI Update (Dev)" >> $GITHUB_STEP_SUMMARY
+          echo "- **AMI ID:** \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source:** dc-amis.json (prebaked AMI)" >> $GITHUB_STEP_SUMMARY
+
+          aws ssm put-parameter \
+            --name "/shifter/ami/dc" \
+            --type String \
+            --value "$AMI_ID" \
+            --overwrite \
+            --description "Prebaked DC AMI from dc-amis.json, run ${{ github.run_id }}"
+
+          echo "- **SSM Parameter:** \`/shifter/ami/dc\` updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next step:** Test in dev, then run 'Packer AMI Promote to Prod' workflow" >> $GITHUB_STEP_SUMMARY
+
+  # Other AMIs are built with Packer
   build:
     name: Build ${{ inputs.ami_type }} AMI in dev
+    if: inputs.ami_type != 'dc'
     runs-on: self-hosted
     defaults:
       run:
@@ -27,6 +71,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -85,3 +131,21 @@ jobs:
         with:
           name: ${{ inputs.ami_type }}-manifest
           path: shifter/packer/${{ inputs.ami_type }}-manifest.json
+
+      - name: Cleanup Packer builder instances
+        if: always()
+        run: |
+          echo "Terminating any packer-builder-${{ inputs.ami_type }} instances..."
+          INSTANCE_IDS=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=packer-builder-${{ inputs.ami_type }}" \
+                      "Name=instance-state-name,Values=running,pending,stopping,stopped" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text)
+
+          if [ -n "$INSTANCE_IDS" ]; then
+            echo "Terminating: $INSTANCE_IDS"
+            aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
+            echo "- **Cleanup:** Terminated builder instance(s)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No orphaned instances found"
+          fi

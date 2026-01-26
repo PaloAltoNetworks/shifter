@@ -2,331 +2,436 @@
  * NGFW Wizard Manager
  *
  * Handles the multi-step wizard for NGFW provisioning.
- * Supports WebSocket for real-time provisioning status updates.
+ * Manages form state, validation, API calls, and status polling.
  */
 class NGFWWizardManager {
     constructor(options) {
         this.csrfToken = options.csrfToken;
         this.provisionUrl = options.provisionUrl;
-        this.statusWsUrl = options.statusWsUrl;
+        this.statusUrlTemplate = options.statusUrlTemplate;
+        this.detailUrlTemplate = options.detailUrlTemplate;
 
         this.currentStep = 1;
         this.formData = {
             name: '',
-            deploymentProfileId: null,
-            deploymentProfileName: '',
-            scmCredentialId: null,
-            scmCredentialName: '',
-            registrationMethod: 'otp',
-            otpValue: '',
-            otpFolder: '',
-            slsRegion: 'americas',
+            deployment_profile_id: null,
+            deployment_profile_name: '',
+            registration_method: 'pin',  // Default to PIN (OTP hidden in UI for now)
+            scm_credential_id: null,
+            scm_credential_name: '',
+            otp_value: '',
+            otp_folder: '',
+            sls_region: 'americas'
         };
 
-        this.ws = null;
         this.ngfwId = null;
+        this.ws = null;
     }
 
     init() {
-        this.bindEvents();
+        this.cacheElements();
         this.initDropdowns();
+        this.bindEvents();
+        this.setInitialState();
     }
 
-    bindEvents() {
-        // Step navigation
-        document.getElementById('step-1-next')?.addEventListener('click', () => this.goToStep(2));
-        document.getElementById('step-2-back')?.addEventListener('click', () => this.goToStep(1));
-        document.getElementById('step-2-next')?.addEventListener('click', () => this.goToStep(3));
-        document.getElementById('step-3-back')?.addEventListener('click', () => this.goToStep(2));
-        document.getElementById('step-3-provision')?.addEventListener('click', () => this.startProvisioning());
-
-        // Form inputs
-        document.getElementById('ngfw-name')?.addEventListener('input', (e) => {
-            this.formData.name = e.target.value;
-        });
-
-        // Registration method toggle
-        document.querySelectorAll('input[name="registration_method"]').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                this.formData.registrationMethod = e.target.value;
-                this.toggleOtpFields();
-            });
-        });
-
-        // OTP fields
-        document.getElementById('otp-value')?.addEventListener('input', (e) => {
-            this.formData.otpValue = e.target.value;
-        });
-        document.getElementById('otp-folder')?.addEventListener('input', (e) => {
-            this.formData.otpFolder = e.target.value;
-        });
-        document.getElementById('otp-sls-region')?.addEventListener('change', (e) => {
-            this.formData.slsRegion = e.target.value;
-        });
+    cacheElements() {
+        this.elements = {
+            steps: document.querySelectorAll('.wizard-step'),
+            panels: document.querySelectorAll('.wizard-panel'),
+            nameInput: document.getElementById('ngfw-name'),
+            profileDropdown: document.getElementById('profile-dropdown'),
+            scmDropdown: document.getElementById('scm-dropdown'),
+            regionDropdown: document.getElementById('region-dropdown'),
+            radioOptions: document.querySelectorAll('.radio-option'),
+            pinFields: document.getElementById('pin-fields'),
+            otpFields: document.getElementById('otp-fields'),
+            otpValueInput: document.getElementById('otp-value'),
+            otpFolderInput: document.getElementById('otp-folder'),
+            provisioningProgress: document.getElementById('provisioning-progress'),
+            successState: document.getElementById('success-state'),
+            awaitingAssociationState: document.getElementById('awaiting-association-state'),
+            configuringState: document.getElementById('configuring-state'),
+            completeSetupBtn: document.getElementById('complete-setup-btn'),
+            ngfwSerial: document.getElementById('ngfw-serial'),
+            viewNgfwBtn: document.getElementById('view-ngfw-btn'),
+            step1NextBtn: document.getElementById('step1-next'),
+        };
     }
 
     initDropdowns() {
         // Deployment Profile dropdown
-        this.initDropdown('deployment-profile', (value, label) => {
-            this.formData.deploymentProfileId = value;
-            this.formData.deploymentProfileName = label;
+        this.initDropdown('profile-dropdown', (value, el) => {
+            this.formData.deployment_profile_id = value;
+            this.formData.deployment_profile_name = el.dataset.name;
+            this.validateStep1();
         });
 
         // SCM Credential dropdown
-        this.initDropdown('scm-credential', (value, label) => {
-            this.formData.scmCredentialId = value;
-            this.formData.scmCredentialName = label;
-            this.updateRegistrationOptions();
+        this.initDropdown('scm-dropdown', (value, el) => {
+            this.formData.scm_credential_id = value;
+            this.formData.scm_credential_name = el.dataset.name;
+            this.formData.sls_region = el.dataset.region || 'americas';
+        });
+
+        // Region dropdown
+        this.initDropdown('region-dropdown', (value) => {
+            this.formData.sls_region = value;
         });
     }
 
-    initDropdown(prefix, onChange) {
-        const dropdown = document.getElementById(`${prefix}-dropdown`);
+    initDropdown(id, onChange) {
+        const dropdown = document.getElementById(id);
         if (!dropdown) return;
 
         const trigger = dropdown.querySelector('.xdr-dropdown-trigger');
-        const panel = dropdown.querySelector('.xdr-dropdown-panel');
         const items = dropdown.querySelectorAll('.xdr-dropdown-item');
-        const valueInput = document.getElementById(`${prefix}-value`);
-        const valueDisplay = trigger.querySelector('.xdr-dropdown-value');
+        const valueDisplay = dropdown.querySelector('.xdr-dropdown-value');
+        const hiddenInput = dropdown.querySelector('input[type="hidden"]');
 
-        trigger.addEventListener('click', () => {
-            panel.classList.toggle('open');
+        trigger?.addEventListener('click', (e) => {
+            e.preventDefault();
+            dropdown.classList.toggle('open');
         });
 
-        items.forEach(item => {
+        items.forEach((item) => {
             item.addEventListener('click', () => {
                 const value = item.dataset.value;
-                const label = item.querySelector('.item-label').textContent;
-
-                valueInput.value = value;
-                valueDisplay.textContent = label;
-                valueDisplay.classList.remove('placeholder');
+                const label = item.querySelector('.item-label')?.textContent || item.textContent;
 
                 items.forEach(i => i.classList.remove('selected'));
                 item.classList.add('selected');
 
-                panel.classList.remove('open');
-                onChange(value, label);
+                if (valueDisplay) {
+                    valueDisplay.textContent = label;
+                    valueDisplay.classList.remove('placeholder');
+                }
+                if (hiddenInput) hiddenInput.value = value;
+
+                dropdown.classList.remove('open');
+
+                if (onChange) onChange(value, item);
             });
         });
 
         // Close on outside click
         document.addEventListener('click', (e) => {
             if (!dropdown.contains(e.target)) {
-                panel.classList.remove('open');
+                dropdown.classList.remove('open');
             }
         });
     }
 
-    updateRegistrationOptions() {
-        const pinOption = document.getElementById('pin-option');
-        const otpRadio = document.getElementById('otp-radio');
+    bindEvents() {
+        // Step navigation
+        document.getElementById('step1-next')?.addEventListener('click', () => {
+            if (this.validateStep1()) this.goToStep(2);
+        });
+        document.getElementById('step2-back')?.addEventListener('click', () => this.goToStep(1));
+        document.getElementById('step2-next')?.addEventListener('click', () => {
+            if (this.validateStep2()) {
+                this.updateSummary();
+                this.goToStep(3);
+            }
+        });
+        document.getElementById('step3-back')?.addEventListener('click', () => this.goToStep(2));
+        document.getElementById('step3-provision')?.addEventListener('click', () => this.startProvisioning());
 
-        if (this.formData.scmCredentialId) {
-            pinOption.style.display = 'block';
-            this.formData.registrationMethod = 'pin';
-            document.querySelector('input[value="pin"]').checked = true;
-        } else {
-            pinOption.style.display = 'none';
-            this.formData.registrationMethod = 'otp';
-            otpRadio.checked = true;
-        }
-        this.toggleOtpFields();
+        // Name input
+        this.elements.nameInput?.addEventListener('input', (e) => {
+            this.formData.name = e.target.value.trim();
+            this.validateStep1();
+        });
+
+        // Registration method toggle
+        this.elements.radioOptions.forEach((option) => {
+            option.addEventListener('click', () => {
+                const method = option.dataset.method;
+                this.formData.registration_method = method;
+
+                this.elements.radioOptions.forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+                option.querySelector('input').checked = true;
+
+                this.elements.pinFields?.classList.toggle('visible', method === 'pin');
+                this.elements.otpFields?.classList.toggle('visible', method === 'otp');
+            });
+        });
+
+        // OTP inputs
+        this.elements.otpValueInput?.addEventListener('input', (e) => {
+            this.formData.otp_value = e.target.value.trim();
+        });
+        this.elements.otpFolderInput?.addEventListener('input', (e) => {
+            this.formData.otp_folder = e.target.value.trim();
+        });
     }
 
-    toggleOtpFields() {
-        const otpFields = document.getElementById('otp-fields');
-        if (this.formData.registrationMethod === 'otp') {
-            otpFields.style.display = 'block';
-        } else {
-            otpFields.style.display = 'none';
-        }
+    setInitialState() {
+        // PIN is the default method (set in HTML as selected/checked)
+        // Nothing extra needed here since OTP option is hidden
     }
 
     goToStep(step) {
-        // Validate current step before proceeding
-        if (step > this.currentStep && !this.validateStep(this.currentStep)) {
-            return;
-        }
+        this.currentStep = step;
 
         // Update step indicators
-        document.querySelectorAll('.wizard-step').forEach((el, idx) => {
-            const stepNum = idx + 1;
-            el.classList.remove('active', 'complete');
+        this.elements.steps.forEach((s, i) => {
+            const stepNum = i + 1;
+            s.classList.remove('active', 'completed');
             if (stepNum < step) {
-                el.classList.add('complete');
+                s.classList.add('completed');
             } else if (stepNum === step) {
-                el.classList.add('active');
+                s.classList.add('active');
             }
         });
 
-        // Show/hide panels
-        document.querySelectorAll('.wizard-panel').forEach(panel => {
-            panel.style.display = 'none';
+        // Show panel
+        this.elements.panels.forEach((p) => {
+            p.classList.remove('active');
         });
-        document.getElementById(`step-${step}`).style.display = 'block';
-
-        // Update confirmation summary for step 3
-        if (step === 3) {
-            this.updateConfirmation();
+        const targetPanel = document.getElementById('step-' + step);
+        if (targetPanel) {
+            targetPanel.classList.add('active');
         }
-
-        this.currentStep = step;
     }
 
-    validateStep(step) {
-        if (step === 1) {
-            if (!this.formData.name.trim()) {
-                alert('Please enter an NGFW name');
-                return false;
-            }
-            if (!this.formData.deploymentProfileId) {
-                alert('Please select a deployment profile');
-                return false;
-            }
-            return true;
+    validateStep1() {
+        const nameValid = this.formData.name.length > 0;
+        const profileValid = this.formData.deployment_profile_id !== null;
+
+        if (this.elements.step1NextBtn) {
+            this.elements.step1NextBtn.disabled = !(nameValid && profileValid);
         }
-        if (step === 2) {
-            if (this.formData.registrationMethod === 'otp') {
-                if (!this.formData.otpValue.trim()) {
-                    alert('Please enter the OTP value');
-                    return false;
-                }
-                if (!this.formData.otpFolder.trim()) {
-                    alert('Please enter the SCM folder name');
-                    return false;
-                }
-            }
-            return true;
-        }
-        return true;
+        return nameValid && profileValid;
     }
 
-    updateConfirmation() {
-        document.getElementById('confirm-name').textContent = this.formData.name;
-        document.getElementById('confirm-profile').textContent = this.formData.deploymentProfileName;
-        document.getElementById('confirm-registration').textContent =
-            this.formData.registrationMethod === 'pin' ? 'Auto-Registration PIN' : 'One-Time Password';
-        document.getElementById('confirm-folder').textContent =
-            this.formData.registrationMethod === 'pin'
-                ? this.formData.scmCredentialName
-                : this.formData.otpFolder;
-        document.getElementById('confirm-sls').textContent =
-            this.formData.slsRegion.charAt(0).toUpperCase() + this.formData.slsRegion.slice(1);
+    validateStep2() {
+        if (this.formData.registration_method === 'pin') {
+            return this.formData.scm_credential_id !== null;
+        } else {
+            return this.formData.otp_value.length > 0 && this.formData.otp_folder.length > 0;
+        }
+    }
+
+    updateSummary() {
+        const setTextContent = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        };
+
+        setTextContent('summary-name', this.formData.name);
+        setTextContent('summary-profile', this.formData.deployment_profile_name);
+
+        const credentialRow = document.getElementById('summary-credential-row');
+        const folderRow = document.getElementById('summary-folder-row');
+
+        if (this.formData.registration_method === 'pin') {
+            setTextContent('summary-method', 'Stored PIN');
+            setTextContent('summary-credential', this.formData.scm_credential_name);
+            if (credentialRow) credentialRow.style.display = '';
+            if (folderRow) folderRow.style.display = 'none';
+        } else {
+            setTextContent('summary-method', 'One-Time Password');
+            if (credentialRow) credentialRow.style.display = 'none';
+            setTextContent('summary-folder', this.formData.otp_folder);
+            if (folderRow) folderRow.style.display = '';
+        }
+
+        const regionNames = {
+            americas: 'Americas',
+            europe: 'Europe',
+            japan: 'Japan',
+            asiapacific: 'Asia Pacific'
+        };
+        setTextContent('summary-region', regionNames[this.formData.sls_region] || this.formData.sls_region);
     }
 
     async startProvisioning() {
         this.goToStep(4);
 
-        // TODO: Replace with actual API call when backend is ready
-        // For now, simulate provisioning progress
-        this.simulateProvisioning();
-    }
+        // Build request payload
+        const payload = {
+            name: this.formData.name,
+            deployment_profile_id: this.formData.deployment_profile_id,
+            registration_method: this.formData.registration_method
+        };
 
-    simulateProvisioning() {
-        const steps = ['pstep-ec2', 'pstep-ssh', 'pstep-license', 'pstep-cert', 'pstep-xdr', 'pstep-gwlb'];
-        const statusMessages = [
-            'Launching EC2 instance...',
-            'Waiting for SSH to become available...',
-            'Activating license...',
-            'Obtaining device certificate...',
-            'Configuring XDR integration...',
-            'Setting up Gateway Load Balancer...',
-        ];
+        if (this.formData.registration_method === 'pin') {
+            payload.scm_credential_id = this.formData.scm_credential_id;
+        } else {
+            payload.otp_value = this.formData.otp_value;
+            payload.otp_folder = this.formData.otp_folder;
+            payload.sls_region = this.formData.sls_region;
+        }
 
-        let currentIdx = 0;
-        const progressFill = document.getElementById('progress-fill');
-        const progressStatus = document.getElementById('progress-status');
+        try {
+            const response = await fetch(this.provisionUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': this.csrfToken
+                },
+                body: JSON.stringify(payload)
+            });
 
-        const interval = setInterval(() => {
-            if (currentIdx > 0) {
-                document.getElementById(steps[currentIdx - 1]).classList.remove('active');
-                document.getElementById(steps[currentIdx - 1]).classList.add('complete');
-            }
+            const data = await response.json();
 
-            if (currentIdx >= steps.length) {
-                clearInterval(interval);
-                this.onProvisioningComplete();
+            if (data.error) {
+                alert('Error: ' + data.error);
+                this.goToStep(3);
                 return;
             }
 
-            document.getElementById(steps[currentIdx]).classList.add('active');
-            progressStatus.textContent = statusMessages[currentIdx];
-            progressFill.style.width = `${((currentIdx + 1) / steps.length) * 100}%`;
+            // Connect WebSocket for status updates
+            this.ngfwId = data.id;
+            if (this.elements.viewNgfwBtn) {
+                this.elements.viewNgfwBtn.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
+            }
+            this.connectWebSocket();
 
-            currentIdx++;
-        }, 2000); // Simulate 2 seconds per step
+        } catch (err) {
+            console.error('Provisioning error:', err);
+            alert('An error occurred. Please try again.');
+            this.goToStep(3);
+        }
     }
 
-    onProvisioningComplete() {
-        // Simulated serial number - will be returned by actual API
-        const serialNumber = '0012345' + Math.floor(Math.random() * 100000);
+    connectWebSocket() {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/ngfw-status/${this.ngfwId}/`;
 
-        document.getElementById('ngfw-serial').textContent = serialNumber;
-        document.getElementById('serial-in-steps').textContent = serialNumber;
-
-        // Update view button URL (will be actual NGFW ID from API response)
-        const viewBtn = document.getElementById('view-ngfw-btn');
-        viewBtn.href = this.provisionUrl; // Placeholder
-
-        this.goToStep(5);
-    }
-
-    // WebSocket methods for real-time status updates
-    connectWebSocket(ngfwId) {
-        this.ngfwId = ngfwId;
-        this.ws = new WebSocket(this.statusWsUrl);
+        console.log('Connecting to WebSocket:', wsUrl);
+        this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
             console.log('NGFW status WebSocket connected');
-            this.ws.send(JSON.stringify({ type: 'subscribe', ngfw_id: ngfwId }));
         };
 
         this.ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            this.handleStatusUpdate(data);
-        };
+            try {
+                const data = JSON.parse(event.data);
+                console.log('NGFW status update:', data);
 
-        this.ws.onclose = () => {
-            console.log('NGFW status WebSocket closed');
+                if (data.status === 'ready' || data.status === 'active') {
+                    this.showSuccess();
+                    this.ws.close();
+                } else if (data.status === 'awaiting_association') {
+                    // Show user action required state
+                    this.showAwaitingAssociation(data.serial_number);
+                    // Keep WebSocket open for status updates when user clicks complete
+                } else if (data.status === 'configuring') {
+                    // Show configuring state (triggered by complete-setup)
+                    this.showConfiguring();
+                } else if (data.status === 'failed') {
+                    alert('Provisioning failed: ' + (data.error || 'Unknown error'));
+                    window.location.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
+                }
+                // For other statuses (pending, provisioning, stopped), just wait for next message
+            } catch (err) {
+                console.error('Error parsing WebSocket message:', err);
+            }
         };
 
         this.ws.onerror = (error) => {
-            console.error('NGFW status WebSocket error:', error);
+            console.error('WebSocket error:', error);
+        };
+
+        this.ws.onclose = (event) => {
+            console.log('WebSocket closed:', event.code, event.reason);
         };
     }
 
-    handleStatusUpdate(data) {
-        // Update progress based on status updates from backend
-        const { step, status, progress, serial_number } = data;
-
-        if (progress) {
-            document.getElementById('progress-fill').style.width = `${progress}%`;
+    showSuccess() {
+        if (this.elements.provisioningProgress) {
+            this.elements.provisioningProgress.style.display = 'none';
         }
-
-        if (status) {
-            document.getElementById('progress-status').textContent = status;
+        if (this.elements.awaitingAssociationState) {
+            this.elements.awaitingAssociationState.style.display = 'none';
         }
-
-        if (serial_number) {
-            document.getElementById('ngfw-serial').textContent = serial_number;
-            document.getElementById('serial-in-steps').textContent = serial_number;
+        if (this.elements.configuringState) {
+            this.elements.configuringState.style.display = 'none';
         }
-
-        if (step === 'complete') {
-            this.goToStep(5);
-            this.ws?.close();
+        if (this.elements.successState) {
+            this.elements.successState.style.display = 'block';
         }
     }
 
-    disconnectWebSocket() {
-        if (this.ws) {
-            this.ws.close();
-            this.ws = null;
+    showAwaitingAssociation(serialNumber) {
+        if (this.elements.provisioningProgress) {
+            this.elements.provisioningProgress.style.display = 'none';
         }
+        if (this.elements.awaitingAssociationState) {
+            this.elements.awaitingAssociationState.style.display = 'block';
+        }
+        if (this.elements.ngfwSerial && serialNumber) {
+            this.elements.ngfwSerial.textContent = serialNumber;
+        }
+        // Bind complete setup button if not already bound
+        this.bindCompleteSetupButton();
+    }
+
+    showConfiguring() {
+        if (this.elements.provisioningProgress) {
+            this.elements.provisioningProgress.style.display = 'none';
+        }
+        if (this.elements.awaitingAssociationState) {
+            this.elements.awaitingAssociationState.style.display = 'none';
+        }
+        if (this.elements.configuringState) {
+            this.elements.configuringState.style.display = 'block';
+        }
+    }
+
+    bindCompleteSetupButton() {
+        const btn = this.elements.completeSetupBtn;
+        if (!btn || btn.dataset.bound) return;
+        btn.dataset.bound = 'true';
+
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            btn.textContent = 'Completing Setup...';
+
+            try {
+                const response = await fetch(`/mission-control/api/ngfw/${this.ngfwId}/complete-setup/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': this.csrfToken
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    btn.disabled = false;
+                    btn.textContent = 'Complete Setup';
+                    return;
+                }
+
+                // Show configuring state - WebSocket will handle transition to success
+                this.showConfiguring();
+
+            } catch (err) {
+                console.error('Complete setup error:', err);
+                alert('An error occurred. Please try again.');
+                btn.disabled = false;
+                btn.textContent = 'Complete Setup';
+            }
+        });
+    }
+
+    // Debug helpers - call from console: wizard.debugShowSuccess() or wizard.debugGoToStep(4)
+    debugShowSuccess() {
+        this.goToStep(4);
+        this.showSuccess();
+    }
+
+    debugGoToStep(step) {
+        this.goToStep(step);
     }
 }
 
 // Export for use in templates
-window.NGFWWizardManager = NGFWWizardManager;
+globalThis.NGFWWizardManager = NGFWWizardManager;

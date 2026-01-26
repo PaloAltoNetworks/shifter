@@ -12,7 +12,7 @@ Reproducible AMI builds for Shifter range instances.
 
 | AMI | Template | Description |
 |-----|----------|-------------|
-| Kali | `kali.pkr.hcl` | Kali Linux with pentesting tools, sshpass, Claude Code |
+| Kali | `kali.pkr.hcl` | Kali Linux with pentesting tools, sshpass, Caldera, Claude Code |
 | Ubuntu | `ubuntu.pkr.hcl` | Ubuntu 22.04 victim with Apache, MySQL, Docker, Claude Code |
 | Windows | `windows.pkr.hcl` | Windows Server 2022 with XAMPP, IIS, OpenSSH, Claude Code |
 
@@ -51,6 +51,12 @@ After a successful build:
 - Python 3, pip, venv
 - Node.js, npm
 - build-essential
+
+**Caldera:**
+- MITRE Caldera adversary emulation platform
+- Pre-installed in `/opt/caldera` with venv
+- All plugins via `--recursive` (Sandcat, Stockpile, Emu, Atomic, Manx, Compass)
+- Start: `start-caldera` → http://localhost:8888 (red/admin)
 
 **Claude Code:**
 - `@anthropic-ai/claude-code`

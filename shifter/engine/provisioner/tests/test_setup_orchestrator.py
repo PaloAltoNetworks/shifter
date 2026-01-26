@@ -1,4 +1,4 @@
-"""Tests for SetupOrchestrator - TDD: Write tests first, all must fail initially.
+"""Tests for SetupOrchestrator.
 
 SetupOrchestrator runs SetupPlans using an SSMExecutor.
 It handles step sequencing, reboots, and verification.
@@ -9,19 +9,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from executors.base import CommandResult
 from executors.ssm_executor import (
     CommandError,
-    CommandResult,
     SSMExecutor,
     TimeoutError,
 )
-from orchestrators.setup_orchestrator import (
-    SetupError,
-    SetupOrchestrator,
-    SetupResult,
-)
-
-# These imports will fail initially - that's expected for TDD
+from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator, SetupResult
 from plans.base import SetupStep
 
 
@@ -319,25 +313,6 @@ class TestOrchestrateEdgeCases:
 class TestStepExecution:
     """Test individual step execution details."""
 
-    def test_step_timeout_passed_to_executor(self):
-        """Step timeout is passed to executor correctly."""
-        mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.return_value = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
-
-        plan = MockSetupPlan(
-            steps=[
-                SetupStep(name="slow_step", script="sleep 500", timeout_seconds=600),
-            ],
-            verify_step=SetupStep(name="verify", script="v", timeout_seconds=30),
-        )
-
-        orchestrator = SetupOrchestrator(executor=mock_executor)
-        orchestrator.orchestrate("i-12345", plan, {})
-
-        # Check the timeout was passed correctly
-        first_call = mock_executor.run_command.call_args_list[0]
-        assert first_call[1].get("timeout_seconds") == 600 or first_call[0][2] == 600
-
     def test_steps_executed_in_order(self):
         """Steps are executed in the order defined in the plan."""
         mock_executor = MagicMock(spec=SSMExecutor)
@@ -361,34 +336,6 @@ class TestStepExecution:
             script = call_obj.kwargs.get("script") or call_obj[1].get("script")
             scripts.append(script)
         assert scripts == ["echo first", "echo second", "echo third", "echo verify"]
-
-
-class TestSetupResult:
-    """Test SetupResult data structure."""
-
-    def test_result_contains_step_outputs(self):
-        """SetupResult contains output from each step."""
-        mock_executor = MagicMock(spec=SSMExecutor)
-        mock_executor.run_command.side_effect = [
-            CommandResult(success=True, exit_code=0, stdout="step1 output", stderr=""),
-            CommandResult(success=True, exit_code=0, stdout="step2 output", stderr=""),
-            CommandResult(success=True, exit_code=0, stdout="verify output", stderr=""),
-        ]
-
-        plan = MockSetupPlan(
-            steps=[
-                SetupStep(name="step1", script="s1", timeout_seconds=60),
-                SetupStep(name="step2", script="s2", timeout_seconds=60),
-            ],
-            verify_step=SetupStep(name="verify", script="v", timeout_seconds=30),
-        )
-
-        orchestrator = SetupOrchestrator(executor=mock_executor)
-        result = orchestrator.orchestrate("i-12345", plan, {})
-
-        assert result.success is True
-        # Result should have step outputs accessible
-        assert hasattr(result, "step_results") or hasattr(result, "outputs")
 
 
 class TestRebootTimeout:

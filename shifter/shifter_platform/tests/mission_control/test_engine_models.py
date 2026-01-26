@@ -1,6 +1,6 @@
 """Tests for Engine models.
 
-These tests verify that Range and UserNGFW models are properly located
+These tests verify that Range model is properly located
 in engine.models as per the architecture documentation.
 """
 
@@ -25,12 +25,6 @@ class TestRangeModel:
     # Import tests - Range should be importable from engine.models
     # -------------------------------------------------------------------------
 
-    def test_range_importable_from_engine(self):
-        """Range model can be imported from engine.models."""
-        from engine.models import Range
-
-        assert Range is not None
-
     def test_range_status_enum_exists(self):
         """Range.Status enum exists with expected values."""
         from engine.models import Range
@@ -47,17 +41,17 @@ class TestRangeModel:
 
     def test_terminal_statuses_defined(self):
         """shared.enums.TERMINAL_STATUSES contains terminal states."""
-        from shared.enums import TERMINAL_STATUSES, RangeStatus
+        from shared.enums import TERMINAL_STATUSES, ResourceStatus
 
-        assert RangeStatus.DESTROYED in TERMINAL_STATUSES
-        assert RangeStatus.FAILED in TERMINAL_STATUSES
+        assert ResourceStatus.DESTROYED in TERMINAL_STATUSES
+        assert ResourceStatus.FAILED in TERMINAL_STATUSES
 
     def test_cancellable_statuses_defined(self):
         """shared.enums.CANCELLABLE_STATUSES contains cancellable states."""
-        from shared.enums import CANCELLABLE_STATUSES, RangeStatus
+        from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
 
-        assert RangeStatus.PENDING in CANCELLABLE_STATUSES
-        assert RangeStatus.PROVISIONING in CANCELLABLE_STATUSES
+        assert ResourceStatus.PENDING in CANCELLABLE_STATUSES
+        assert ResourceStatus.PROVISIONING in CANCELLABLE_STATUSES
 
     # -------------------------------------------------------------------------
     # Model method tests
@@ -173,98 +167,6 @@ class TestRangeModel:
 
 
 @pytest.mark.django_db
-class TestUserNGFWModel:
-    """Tests for UserNGFW model in cms.models.
-
-    Note: UserNGFW was moved from engine.models to cms.models as part of
-    the architecture refactor to enforce clean layer boundaries.
-    """
-
-    @pytest.fixture
-    def user(self):
-        return User.objects.create_user(
-            username="ngfwtest@example.com",
-            email="ngfwtest@example.com",
-        )
-
-    # -------------------------------------------------------------------------
-    # Import tests - UserNGFW should be importable from cms.models
-    # -------------------------------------------------------------------------
-
-    def test_userngfw_importable_from_engine(self):
-        """UserNGFW model can be imported from cms.models."""
-        from cms.models import UserNGFW
-
-        assert UserNGFW is not None
-
-    def test_userngfw_status_enum_exists(self):
-        """UserNGFW.Status enum exists with expected values."""
-        from cms.models import UserNGFW
-
-        assert hasattr(UserNGFW, "Status")
-        assert UserNGFW.Status.NOT_PROVISIONED == "not_provisioned"
-        assert UserNGFW.Status.PROVISIONING == "provisioning"
-        assert UserNGFW.Status.READY == "ready"
-        assert UserNGFW.Status.STARTING == "starting"
-        assert UserNGFW.Status.ACTIVE == "active"
-        assert UserNGFW.Status.STOPPING == "stopping"
-        assert UserNGFW.Status.STOPPED == "stopped"
-        assert UserNGFW.Status.DEPROVISIONING == "deprovisioning"
-        assert UserNGFW.Status.FAILED == "failed"
-
-    # -------------------------------------------------------------------------
-    # Model method tests
-    # -------------------------------------------------------------------------
-
-    def test_active_for_user_excludes_deleted(self, user):
-        """active_for_user excludes soft-deleted NGFWs."""
-        from django.utils import timezone
-
-        from cms.models import UserNGFW
-
-        active_ngfw = UserNGFW.objects.create(user=user, name="Active NGFW")
-        UserNGFW.objects.create(
-            user=user,
-            name="Deleted NGFW",
-            deleted_at=timezone.now(),
-        )
-
-        result = list(UserNGFW.active_for_user(user))
-        assert len(result) == 1
-        assert result[0] == active_ngfw
-
-    def test_active_for_user_filters_by_user(self, user):
-        """active_for_user only returns NGFWs for specified user."""
-        from cms.models import UserNGFW
-
-        other_user = User.objects.create_user(
-            username="other@example.com",
-            email="other@example.com",
-        )
-
-        my_ngfw = UserNGFW.objects.create(user=user, name="My NGFW")
-        UserNGFW.objects.create(user=other_user, name="Other NGFW")
-
-        result = list(UserNGFW.active_for_user(user))
-        assert len(result) == 1
-        assert result[0] == my_ngfw
-
-    def test_default_status_is_not_provisioned(self, user):
-        """Default status is NOT_PROVISIONED."""
-        from cms.models import UserNGFW
-
-        ngfw = UserNGFW.objects.create(user=user, name="New NGFW")
-        assert ngfw.status == UserNGFW.Status.NOT_PROVISIONED
-
-    def test_str_returns_name(self, user):
-        """__str__ returns the NGFW name."""
-        from cms.models import UserNGFW
-
-        ngfw = UserNGFW(user=user, name="Test NGFW")
-        assert str(ngfw) == "Test NGFW"
-
-
-@pytest.mark.django_db
 class TestRangeGetInstanceByUUID:
     """Tests for Range.get_instance_by_uuid().
 
@@ -350,40 +252,26 @@ class TestRangeGetInstanceByUUID:
 
         assert result is None
 
-    def test_returns_none_when_provisioned_instances_empty(self, user):
-        """Method returns None when provisioned_instances is empty list."""
+    def test_returns_none_when_provisioned_instances_empty_or_null(self, user):
+        """Method returns None when provisioned_instances is empty or None."""
         from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            provisioned_instances=[],
-        )
+        for instances_value in [[], None]:
+            range_obj = Range.objects.create(
+                user=user,
+                status=Range.Status.READY,
+                provisioned_instances=instances_value,
+            )
 
-        result = range_obj.get_instance_by_uuid("any-uuid")
-
-        assert result is None
-
-    def test_returns_none_when_provisioned_instances_null(self, user):
-        """Method returns None when provisioned_instances is None."""
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            provisioned_instances=None,
-        )
-
-        result = range_obj.get_instance_by_uuid("any-uuid")
-
-        assert result is None
+            result = range_obj.get_instance_by_uuid("any-uuid")
+            assert result is None, f"Expected None for provisioned_instances={instances_value}"
 
     # -------------------------------------------------------------------------
     # Input validation - uuid parameter
     # -------------------------------------------------------------------------
 
-    def test_raises_on_none_uuid(self, user):
-        """Method raises ValueError when uuid is None."""
+    def test_raises_on_invalid_uuid(self, user):
+        """Method raises ValueError for None or empty uuid."""
         from engine.models import Range
 
         range_obj = Range.objects.create(
@@ -392,28 +280,16 @@ class TestRangeGetInstanceByUUID:
             provisioned_instances=[{"uuid": "test", "role": "attacker"}],
         )
 
-        with pytest.raises(ValueError, match="uuid"):
-            range_obj.get_instance_by_uuid(None)
-
-    def test_raises_on_empty_uuid(self, user):
-        """Method raises ValueError when uuid is empty string."""
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            provisioned_instances=[{"uuid": "test", "role": "attacker"}],
-        )
-
-        with pytest.raises(ValueError, match="uuid"):
-            range_obj.get_instance_by_uuid("")
+        for invalid_uuid in [None, ""]:
+            with pytest.raises(ValueError, match="uuid"):
+                range_obj.get_instance_by_uuid(invalid_uuid)
 
     # -------------------------------------------------------------------------
     # Side effects - none expected (pure read operation)
     # -------------------------------------------------------------------------
 
-    def test_does_not_modify_provisioned_instances(self, user):
-        """Method does not modify the provisioned_instances data."""
+    def test_has_no_side_effects(self, user):
+        """Method does not modify data or save to database."""
         from engine.models import Range
 
         instance_data = {
@@ -427,25 +303,12 @@ class TestRangeGetInstanceByUUID:
             provisioned_instances=[instance_data],
         )
         original_data = range_obj.provisioned_instances.copy()
-
-        range_obj.get_instance_by_uuid("abc-123-def")
-
-        assert range_obj.provisioned_instances == original_data
-
-    def test_does_not_save_to_database(self, user):
-        """Method does not trigger database save."""
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            provisioned_instances=[{"uuid": "test", "role": "attacker"}],
-        )
         original_updated_at = range_obj.updated_at
 
-        range_obj.get_instance_by_uuid("test")
+        range_obj.get_instance_by_uuid("abc-123-def")
         range_obj.refresh_from_db()
 
+        assert range_obj.provisioned_instances == original_data
         assert range_obj.updated_at == original_updated_at
 
     # -------------------------------------------------------------------------

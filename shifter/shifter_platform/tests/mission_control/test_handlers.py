@@ -1,11 +1,96 @@
 """Tests for Mission Control handlers."""
 
 import json
+import logging
 from unittest.mock import MagicMock, patch
+from uuid import UUID
 
 import pytest
 
-from shared.enums import RangeStatus
+from shared.enums import ResourceStatus
+
+# Test UUID for request_id
+TEST_REQUEST_ID = UUID("12345678-1234-5678-1234-567812345678")
+
+
+@pytest.mark.django_db
+class TestProcessEvent:
+    """Tests for process_event dispatcher."""
+
+    def test_routes_range_events_to_range_handler(self):
+        """Dispatcher routes range.* events to process_range_event."""
+        from mission_control.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "range_id": 1,
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with patch("mission_control.handlers.process_range_event") as mock_range_handler:
+            process_event(message)
+            mock_range_handler.assert_called_once_with(message)
+
+    def test_routes_ngfw_events_to_ngfw_handler(self):
+        """Dispatcher routes ngfw.* events to process_ngfw_event."""
+        from mission_control.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "ngfw.status.updated",
+                    "ngfw_id": 1,
+                    "user_id": 42,
+                }
+            )
+        }
+
+        with patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler:
+            process_event(message)
+            mock_ngfw_handler.assert_called_once_with(message)
+
+    def test_ignores_unknown_event_types(self):
+        """Dispatcher ignores events with unknown event_type prefix."""
+        from mission_control.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "unknown.event",
+                    "some_id": 1,
+                }
+            )
+        }
+
+        with (
+            patch("mission_control.handlers.process_range_event") as mock_range_handler,
+            patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler,
+            patch("mission_control.handlers.logger") as mock_logger,
+        ):
+            process_event(message)
+            mock_range_handler.assert_not_called()
+            mock_ngfw_handler.assert_not_called()
+            mock_logger.debug.assert_called_once()
+            assert "unknown" in str(mock_logger.debug.call_args)
+
+    def test_handles_missing_event_type(self, caplog):
+        """Dispatcher handles messages without event_type gracefully."""
+        from mission_control.handlers import process_event
+
+        message = {"Message": json.dumps({"range_id": 1})}
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="mission_control.handlers"),
+            patch("mission_control.handlers.process_range_event") as mock_range_handler,
+            patch("mission_control.handlers.process_ngfw_event") as mock_ngfw_handler,
+        ):
+            process_event(message)
+            mock_range_handler.assert_not_called()
+            mock_ngfw_handler.assert_not_called()
 
 
 @pytest.mark.django_db
@@ -84,8 +169,9 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 1,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -104,14 +190,14 @@ class TestProcessRangeEvent:
             mock_send.assert_called_once()
             args, _ = mock_send.call_args
 
-            # Verify group name
-            assert args[0] == "range_status_1"
+            # Verify group name uses request_id
+            assert args[0] == f"range_status_{TEST_REQUEST_ID}"
 
-            # Verify message content
+            # Verify message content uses request_id
             sent_message = args[1]
             assert sent_message["type"] == "range.status"
-            assert sent_message["range_id"] == 1
-            assert sent_message["new_status"] == RangeStatus.PROVISIONING.value
+            assert sent_message["request_id"] == str(TEST_REQUEST_ID)
+            assert sent_message["new_status"] == ResourceStatus.PROVISIONING.value
 
     def test_broadcasts_error_message_when_present(self):
         """Handler includes error_message in broadcast when present."""
@@ -121,8 +207,9 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 2,
-                    "new_status": RangeStatus.FAILED.value,
+                    "new_status": ResourceStatus.FAILED.value,
                     "user_id": 42,
                     "error_message": "Subnet exhausted",
                 }
@@ -148,8 +235,9 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 3,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
                 }
             )
@@ -205,8 +293,9 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 5,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )
@@ -225,8 +314,8 @@ class TestProcessRangeEvent:
         mock_logger.info.assert_called_once()
         call_args = mock_logger.info.call_args[0]
         assert "MC broadcast to group" in call_args[0]
-        assert "range_status_5" in call_args[1]
-        assert call_args[2] == 5  # range_id
+        assert f"range_status_{TEST_REQUEST_ID}" in call_args[1]
+        assert call_args[2] == str(TEST_REQUEST_ID)  # request_id
 
     def test_logs_debug_on_event_ignore(self):
         """Handler logs DEBUG when ignoring non-status events."""
@@ -236,6 +325,7 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.destroyed",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 1,
                     "user_id": 42,
                 }
@@ -257,15 +347,38 @@ class TestProcessRangeEvent:
         assert "Ignoring event_type" in call_args[0]
         assert call_args[1] == "range.destroyed"
 
-    # ---------------------------------------------------------------------
-    # Handler is callable
-    # ---------------------------------------------------------------------
-
-    def test_handler_is_callable(self):
-        """Handler is a callable function."""
+    def test_logs_error_when_request_id_missing(self):
+        """Handler logs ERROR when request_id is missing from event."""
         from mission_control.handlers import process_range_event
 
-        assert callable(process_range_event)
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "range_id": 1,
+                    "new_status": ResourceStatus.PROVISIONING.value,
+                    "user_id": 42,
+                    # No request_id
+                }
+            )
+        }
+
+        with (
+            patch("mission_control.handlers.async_to_sync") as mock_async_to_sync,
+            patch("mission_control.handlers.logger") as mock_logger,
+        ):
+            mock_send = MagicMock()
+            mock_async_to_sync.return_value = mock_send
+
+            process_range_event(message)
+
+        # Verify logger.error was called
+        mock_logger.error.assert_called_once()
+        call_args = mock_logger.error.call_args[0]
+        assert "Missing request_id" in call_args[0]
+
+        # Should NOT have broadcast
+        mock_async_to_sync.assert_not_called()
 
     # ---------------------------------------------------------------------
     # Group name
@@ -279,8 +392,9 @@ class TestProcessRangeEvent:
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 123,
-                    "new_status": RangeStatus.READY.value,
+                    "new_status": ResourceStatus.READY.value,
                     "user_id": 42,
                 }
             )
@@ -293,23 +407,24 @@ class TestProcessRangeEvent:
             process_range_event(message)
 
             args, _ = mock_send.call_args
-            assert args[0] == "range_status_123"
+            assert args[0] == f"range_status_{TEST_REQUEST_ID}"
 
     # ---------------------------------------------------------------------
     # Minimum required input
     # ---------------------------------------------------------------------
 
     def test_succeeds_with_minimum_required_input(self):
-        """Handler works with minimal event fields."""
+        """Handler works with minimal event fields (request_id required)."""
         from mission_control.handlers import process_range_event
 
-        # Minimal SNS message - no error_message
+        # Minimal SNS message - no error_message, but request_id is required
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
+                    "request_id": str(TEST_REQUEST_ID),
                     "range_id": 6,
-                    "new_status": RangeStatus.PROVISIONING.value,
+                    "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": 42,
                 }
             )

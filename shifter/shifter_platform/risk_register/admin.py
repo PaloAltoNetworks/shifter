@@ -53,10 +53,9 @@ class RiskAdmin(admin.ModelAdmin):
         ),
     ]
 
+    @admin.display(boolean=True)
     def is_deleted(self, obj):
         return obj.is_deleted
-
-    is_deleted.boolean = True
 
 
 @admin.register(Comment)
@@ -69,10 +68,9 @@ class CommentAdmin(admin.ModelAdmin):
     readonly_fields = ["created_at", "author_display"]
     raw_id_fields = ["risk", "author_user", "author_apikey", "parent_comment"]
 
+    @admin.display(boolean=True)
     def is_deleted(self, obj):
         return obj.is_deleted
-
-    is_deleted.boolean = True
 
 
 @admin.register(APIKey)
@@ -92,10 +90,9 @@ class APIKeyAdmin(admin.ModelAdmin):
     readonly_fields = ["prefix", "key_hash", "created_at", "last_used_at"]
     raw_id_fields = ["created_by"]
 
+    @admin.display(boolean=True)
     def is_active(self, obj):
         return obj.is_active
-
-    is_active.boolean = True
 
 
 @admin.register(AuditLog)

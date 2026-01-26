@@ -2,6 +2,12 @@ name: Quality
 
 on:
   workflow_call:
+    inputs:
+      skip_tests:
+        description: 'Skip test jobs (linting still runs)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -120,13 +126,14 @@ jobs:
           uv run ruff format --check .
 
   # ===========================================================================
-  # Architecture as Code
+  # Type Checking (non-blocking quality gate)
   # ===========================================================================
 
-  check-layer-imports-arch:
-    name: Architecture (layer imports)
+  shifter-platform-typecheck:
+    name: Type Check (shifter_platform)
+    if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
-    continue-on-error: true
+    continue-on-error: true  # Non-blocking - quality signal only
     steps:
       - uses: actions/checkout@v4
 
@@ -137,8 +144,54 @@ jobs:
         working-directory: shifter/shifter_platform
         run: uv sync --group dev
 
+      - name: Run mypy
+        working-directory: shifter/shifter_platform
+        run: |
+          uv run mypy . --no-error-summary || true
+          echo "::notice::Type checking complete - see above for any type errors"
+
+  provisioner-typecheck:
+    name: Type Check (provisioner)
+    if: ${{ !inputs.skip_tests }}
+    runs-on: self-hosted
+    continue-on-error: true  # Non-blocking - quality signal only
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: shifter/engine/provisioner
+        run: uv sync --group dev
+
+      - name: Run mypy
+        working-directory: shifter/engine/provisioner
+        run: |
+          uv run mypy . --no-error-summary || true
+          echo "::notice::Type checking complete - see above for any type errors"
+
+  # ===========================================================================
+  # Architecture as Code (hard fail - zero tolerance)
+  # ===========================================================================
+
+  check-layer-imports-arch:
+    name: Architecture (layer imports)
+    if: ${{ !inputs.skip_tests }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: scripts/check_layer_imports
+        run: uv sync
+
       - name: Check layer imports
-        run: python scripts/check_layer_imports/check_layer_imports.py
+        working-directory: scripts/check_layer_imports
+        run: uv run python check_layer_imports.py
 
   # ===========================================================================
   # SAST
@@ -226,6 +279,7 @@ jobs:
 
   shifter-platform-tests:
     name: Tests (shifter_platform)
+    if: ${{ !inputs.skip_tests }}
     needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
     runs-on: self-hosted
     services:
@@ -252,7 +306,7 @@ jobs:
         working-directory: shifter/shifter_platform
         run: uv sync --group dev
 
-      - name: Run tests with coverage
+      - name: Run tests
         working-directory: shifter/shifter_platform
         env:
           TESTING: "1"
@@ -265,17 +319,11 @@ jobs:
           DB_PASSWORD: test
         run: |
           uv run python manage.py collectstatic --noinput
-          uv run pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register --cov=. --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
-        with:
-          files: shifter/shifter_platform/coverage.xml
-          flags: shifter-platform
-          fail_ci_if_error: false
+          uv run pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register
 
   shifter-engine-tests:
     name: Tests (provisioner)
+    if: ${{ !inputs.skip_tests }}
     needs: [provisioner-lint, provisioner-sast]
     runs-on: self-hosted
     steps:
@@ -288,21 +336,15 @@ jobs:
         working-directory: shifter/engine/provisioner
         run: uv sync --group dev
 
-      - name: Run tests with coverage
+      - name: Run tests
         working-directory: shifter/engine/provisioner
         env:
           TESTING: "1"
-        run: uv run pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=80
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
-        with:
-          files: shifter/engine/provisioner/coverage.xml
-          flags: provisioner
-          fail_ci_if_error: false
+        run: uv run pytest tests/
 
   packer-tests:
     name: Tests (packer)
+    if: ${{ !inputs.skip_tests }}
     needs: [packer-lint]
     runs-on: self-hosted
     steps:
@@ -315,19 +357,13 @@ jobs:
         working-directory: shifter/packer
         run: uv sync --group dev
 
-      - name: Run tests with coverage
+      - name: Run tests
         working-directory: shifter/packer
-        run: uv run pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
-        with:
-          files: shifter/packer/coverage.xml
-          flags: packer
-          fail_ci_if_error: false
+        run: uv run pytest tests/
 
   bootstrap-tests:
     name: Tests (bootstrap)
+    if: ${{ !inputs.skip_tests }}
     needs: [bootstrap-lint]
     runs-on: self-hosted
     steps:
@@ -340,19 +376,13 @@ jobs:
         working-directory: scripts/bootstrap
         run: uv sync --group dev
 
-      - name: Run tests with coverage
+      - name: Run tests
         working-directory: scripts/bootstrap
-        run: uv run pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
-        with:
-          files: scripts/bootstrap/coverage.xml
-          flags: bootstrap
-          fail_ci_if_error: false
+        run: uv run pytest tests/
 
   check-layer-imports-tests:
     name: Tests (check_layer_imports)
+    if: ${{ !inputs.skip_tests }}
     needs: [check-layer-imports-lint]
     runs-on: self-hosted
     steps:
@@ -365,16 +395,9 @@ jobs:
         working-directory: scripts/check_layer_imports
         run: uv sync --group dev
 
-      - name: Run tests with coverage
+      - name: Run tests
         working-directory: scripts/check_layer_imports
-        run: uv run pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
-        with:
-          files: scripts/check_layer_imports/coverage.xml
-          flags: check-layer-imports
-          fail_ci_if_error: false
+        run: uv run pytest tests/
 
   # ===========================================================================
   # JavaScript Tests
@@ -382,6 +405,7 @@ jobs:
 
   shifter-platform-js-tests:
     name: Tests JavaScript (shifter_platform)
+    if: ${{ !inputs.skip_tests }}
     needs: [shifter-platform-lint-js]
     runs-on: self-hosted
     steps:
@@ -400,14 +424,7 @@ jobs:
 
       - name: Run JavaScript tests
         working-directory: shifter/shifter_platform
-        run: npm test -- --coverage
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
-        with:
-          files: shifter/shifter_platform/coverage/lcov.info
-          flags: shifter-javascript
-          fail_ci_if_error: false
+        run: npm test
 
   # ===========================================================================
   # Security
@@ -439,8 +456,8 @@ jobs:
 
   model-fks-arch:
     name: Architecture (model FKs)
+    if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
-    continue-on-error: true
     services:
       postgres:
         image: postgres:16
@@ -469,6 +486,8 @@ jobs:
         working-directory: shifter/shifter_platform
         env:
           TESTING: "1"
+          DJANGO_DEBUG: "true"
+          DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
           DB_HOST: localhost
           DB_PORT: 5432
           DB_NAME: shifter

@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
-from shared.enums import CANCELLABLE_STATUSES, RangeStatus
-from shared.schemas import RangeContext, RangeSpec
+from django.db import transaction
+
+from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
+from shared.schemas import InstanceSpec, RangeContext, RangeSpec, RequestSpec
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -25,70 +28,136 @@ class EngineError(Exception):
     pass
 
 
-def create_range(request: RangeSpec) -> int:
+def create_range(request_spec: RequestSpec) -> UUID:
     """Provision infrastructure for range.
 
-    Creates a Range record, allocates subnet, and triggers ECS provisioning.
+    Interprets the RequestSpec into Engine models (Request, Instance),
+    creates a Range record for backward compat, and triggers ECS provisioning.
 
     Args:
-        request: Validated RangeSpec with scenario, user, and instances.
+        request_spec: RequestSpec containing a RangeSpec item.
+            The RangeSpec must have scenario_id, user_id, and instances.
 
     Returns:
-        range_id: The ID of the created range.
+        The request_id UUID for correlation with CMS.
 
     Raises:
-        TypeError: If request is not a RangeSpec
-        ValueError: If subnet allocation fails (capacity exhausted)
-        User.DoesNotExist: If user_id doesn't map to a Django user
+        TypeError: If request_spec is not a RequestSpec.
+        ValueError: If request_spec doesn't contain a RangeSpec,
+            or subnet allocation fails (capacity exhausted).
+        User.DoesNotExist: If user_id doesn't map to a Django user.
+        EngineError: If no subnets were linked (invalid scenario template).
     """
     from django.contrib.auth import get_user_model
 
-    from engine.ecs import start_provisioning
+    from engine.ecs import start_range_provisioning
+    from engine.interpreter import interpret
     from engine.models import Range
 
     User = get_user_model()
 
     # Validate request type
-    if not isinstance(request, RangeSpec):
-        raise TypeError(f"request must be RangeSpec, got {type(request).__name__}")
+    if not isinstance(request_spec, RequestSpec):
+        raise TypeError(f"request_spec must be RequestSpec, got {type(request_spec).__name__}")
+
+    # Extract RangeSpec from items
+    range_spec: RangeSpec | None = None
+    for item in request_spec.items:
+        if isinstance(item, RangeSpec):
+            range_spec = item
+            break
+
+    if range_spec is None:
+        raise ValueError("RequestSpec must contain a RangeSpec item")
 
     logger.debug(
-        "create_range: scenario=%s user_id=%s instances=%d",
-        request.scenario_id,
-        request.user_id,
-        len(request.instances),
+        "create_range: scenario=%s user_id=%s subnets=%d instances=%d",
+        range_spec.scenario_id,
+        range_spec.user_id,
+        len(range_spec.subnets),
+        len(range_spec.all_instances),
     )
 
-    # Get Django user for FK (required for auth)
-    user = User.objects.get(id=request.user_id)
+    # All DB operations in a single transaction - if anything fails, rollback everything
+    with transaction.atomic():
+        # Interpret spec into models (creates Request + Instances + Subnets)
+        # interpret() has its own transaction.atomic() which becomes a savepoint here
+        request = interpret(request_spec)
 
-    # Allocate subnet index
-    subnet_index = Range.allocate_subnet_index()
+        logger.info(
+            "create_range: interpreted request_id=%s",
+            request_spec.request_id,
+        )
 
-    # Create range with full config
-    range_obj = Range.objects.create(
-        user=user,
-        cms_user_id=request.user_id,
-        status=Range.Status.PROVISIONING,
-        subnet_index=subnet_index,
-        range_config=request.model_dump(),
-    )
+        # Get Django user for FK (required for auth)
+        user = User.objects.get(id=range_spec.user_id)
 
-    logger.info(
-        "create_range: created range_id=%s subnet_index=%s",
-        range_obj.id,
-        subnet_index,
-    )
+        # Allocate subnet index
+        subnet_index = Range.allocate_subnet_index()
 
-    # Trigger ECS provisioning
-    task_arn = start_provisioning(range_obj.id, request.user_id)
+        # Create Range model for backward compat with provisioner
+        # Links to Request via FK
+        # Parse UUID from RangeSpec (assigned during hydration)
+        range_uuid = range_spec.uuid
+        if range_uuid:
+            import uuid as uuid_module
+
+            range_obj = Range.objects.create(
+                uuid=uuid_module.UUID(range_uuid),
+                user=user,
+                request=request,
+                cms_user_id=range_spec.user_id,
+                status=Range.Status.PROVISIONING,
+                subnet_index=subnet_index,
+                range_config=range_spec.model_dump(),
+            )
+        else:
+            # Fallback for old specs without UUID (auto-generated by model)
+            range_obj = Range.objects.create(
+                user=user,
+                request=request,
+                cms_user_id=range_spec.user_id,
+                status=Range.Status.PROVISIONING,
+                subnet_index=subnet_index,
+                range_config=range_spec.model_dump(),
+            )
+
+        logger.info(
+            "create_range: created range_id=%s uuid=%s subnet_index=%s request_id=%s",
+            range_obj.id,
+            range_obj.uuid,
+            subnet_index,
+            request_spec.request_id,
+        )
+
+        # Link logical subnets to Range (created by interpreter, need Range FK)
+        from engine.models import Subnet
+
+        subnet_count = Subnet.objects.filter(request=request).update(range=range_obj)
+
+        # Validate subnets were linked - if 0, the range is in undefined state
+        if subnet_count == 0:
+            raise EngineError(
+                f"No subnets linked to range {range_obj.id} for request {request_spec.request_id}. "
+                "This indicates the scenario template is missing subnet definitions."
+            )
+
+        logger.info(
+            "create_range: linked %d subnets to range_id=%s",
+            subnet_count,
+            range_obj.id,
+        )
+
+    # Transaction committed - safe to trigger external systems
+    # Trigger ECS provisioning using request_id (matches NGFW pattern)
+    task_arn = start_range_provisioning(request_spec.request_id)
 
     if task_arn:
         range_obj.step_function_execution_arn = task_arn
         range_obj.save(update_fields=["step_function_execution_arn"])
         logger.info("create_range: started ECS task=%s", task_arn)
 
-    return range_obj.id
+    return request_spec.request_id
 
 
 def destroy_range(request: RangeContext) -> bool:
@@ -97,15 +166,26 @@ def destroy_range(request: RangeContext) -> bool:
     Sets status to DESTROYING and triggers async ECS teardown.
     Idempotent: returns True if range is already being destroyed.
 
+    Supports both legacy (range_id) and new (request_id) patterns.
+    When range_id is None but request_id is provided, delegates to
+    destroy_range_by_request().
+
     Args:
-        request: RangeContext with range_id and metadata.
+        request: RangeContext with range_id or request_id and metadata.
 
     Returns:
         True if range exists and destruction initiated (or already in progress).
-        False if range not found or already destroyed.
+        False if range not found, already destroyed, or both IDs are None.
     """
     from engine.ecs import start_teardown
     from engine.models import Range
+
+    # Try request_id first (new pattern) when range_id is None
+    if request.range_id is None:
+        if request.request_id:
+            return destroy_range_by_request(request.request_id)
+        logger.warning("destroy_range: both range_id and request_id are None")
+        return False
 
     logger.debug("destroy_range: range_id=%s", request.range_id)
 
@@ -116,17 +196,17 @@ def destroy_range(request: RangeContext) -> bool:
         return False
 
     # Already destroyed - nothing to do
-    if range_obj.status == RangeStatus.DESTROYED:
+    if range_obj.status == ResourceStatus.DESTROYED:
         logger.warning("destroy_range: range already destroyed range_id=%s", request.range_id)
         return False
 
     # Already destroying - idempotent success
-    if range_obj.status == RangeStatus.DESTROYING:
+    if range_obj.status == ResourceStatus.DESTROYING:
         logger.info("destroy_range: range already destroying range_id=%s", request.range_id)
         return True
 
     # Set status and trigger teardown
-    range_obj.status = RangeStatus.DESTROYING.value
+    range_obj.status = ResourceStatus.DESTROYING.value
     range_obj.save(update_fields=["status"])
 
     logger.info("destroy_range: set status to DESTROYING range_id=%s", request.range_id)
@@ -145,21 +225,25 @@ def cancel_range(range_ctx: RangeContext) -> None:
     """Cancel in-progress provisioning.
 
     Only works for ranges in PENDING or PROVISIONING status.
-    Sets status directly to DESTROYED without triggering teardown.
+    Sets status directly to DESTROYING without triggering teardown.
+
+    Supports both legacy (range_id) and new (request_id) patterns.
+    When range_id is None but request_id is provided, delegates to
+    cancel_range_by_request().
 
     Note: This does NOT clean up any AWS resources that may have been
     partially created. A proper implementation would signal the provisioner
     to abort and clean up. See GitHub issue for tracking.
 
     Args:
-        range_ctx: RangeContext with range_id and metadata.
+        range_ctx: RangeContext with range_id or request_id and metadata.
 
     Returns:
         None
 
     Raises:
         TypeError: If range_ctx is None or not a RangeContext.
-        ValueError: If range_ctx.range_id is None or negative.
+        ValueError: If both range_id and request_id are None, or range_id is invalid.
     """
     # Input validation
     if range_ctx is None:
@@ -173,9 +257,13 @@ def cancel_range(range_ctx: RangeContext) -> None:
         )
         raise TypeError(f"range_ctx must be RangeContext, got {type(range_ctx).__name__}")
 
+    # Try request_id first (new pattern) when range_id is None
     if range_ctx.range_id is None:
-        logger.error("cancel_range called with None range_id")
-        raise ValueError("range_ctx.range_id cannot be None")
+        if range_ctx.request_id:
+            cancel_range_by_request(range_ctx.request_id)
+            return
+        logger.error("cancel_range called with both range_id and request_id as None")
+        raise ValueError("range_ctx must have either range_id or request_id")
 
     if not isinstance(range_ctx.range_id, int) or range_ctx.range_id < 0:
         logger.error(
@@ -208,7 +296,7 @@ def cancel_range(range_ctx: RangeContext) -> None:
         )
         return
 
-    range_ctx.status = RangeStatus.DESTROYING
+    range_ctx.status = ResourceStatus.DESTROYING
     range_obj.status = Range.Status.DESTROYING
     range_obj.save(update_fields=["status"])
 
@@ -216,6 +304,110 @@ def cancel_range(range_ctx: RangeContext) -> None:
     # accept small risk of race condition. TODO: #465
 
     logger.info("cancel_range: cancelled range_id=%s", range_id)
+
+
+# =============================================================================
+# Request-based Range Functions (new pattern matching NGFW)
+# =============================================================================
+
+
+def destroy_range_by_request(request_id: UUID) -> bool:
+    """Tear down range infrastructure by request_id.
+
+    Follows same pattern as destroy_ngfw(). Looks up Range via Request FK
+    and triggers ECS teardown.
+
+    Args:
+        request_id: UUID of the request containing the Range.
+
+    Returns:
+        True if teardown initiated or already in progress.
+        False if not found or already destroyed.
+    """
+    from engine.ecs import start_range_teardown
+    from engine.models import Range
+
+    logger.debug("destroy_range_by_request: request_id=%s", request_id)
+
+    range_obj = Range.objects.filter(request__request_id=request_id).first()
+    if not range_obj:
+        logger.warning("destroy_range_by_request: no range for request_id=%s", request_id)
+        return False
+
+    # Already destroyed - nothing to do
+    if range_obj.status == ResourceStatus.DESTROYED.value:
+        logger.warning(
+            "destroy_range_by_request: already destroyed request_id=%s",
+            request_id,
+        )
+        return False
+
+    # Already destroying - idempotent success
+    if range_obj.status == ResourceStatus.DESTROYING.value:
+        logger.info(
+            "destroy_range_by_request: already destroying request_id=%s",
+            request_id,
+        )
+        return True
+
+    # Set status and trigger teardown
+    range_obj.status = ResourceStatus.DESTROYING.value
+    range_obj.save(update_fields=["status"])
+
+    logger.info(
+        "destroy_range_by_request: set DESTROYING request_id=%s range_id=%s",
+        request_id,
+        range_obj.id,
+    )
+
+    task_arn = start_range_teardown(request_id)
+
+    if task_arn:
+        range_obj.step_function_execution_arn = task_arn
+        range_obj.save(update_fields=["step_function_execution_arn"])
+        logger.info("destroy_range_by_request: started ECS task=%s", task_arn)
+
+    return True
+
+
+def cancel_range_by_request(request_id: UUID) -> bool:
+    """Cancel in-progress range provisioning by request_id.
+
+    Only works for ranges in PENDING or PROVISIONING status.
+
+    Args:
+        request_id: UUID of the request containing the Range.
+
+    Returns:
+        True if cancelled, False if not found or not cancellable.
+    """
+    from engine.models import Range
+
+    logger.debug("cancel_range_by_request: request_id=%s", request_id)
+
+    range_obj = Range.objects.filter(request__request_id=request_id).first()
+    if not range_obj:
+        logger.warning("cancel_range_by_request: no range for request_id=%s", request_id)
+        return False
+
+    if range_obj.status not in (Range.Status.PENDING, Range.Status.PROVISIONING):
+        logger.warning(
+            "cancel_range_by_request: not cancellable status=%s request_id=%s",
+            range_obj.status,
+            request_id,
+        )
+        return False
+
+    range_obj.status = Range.Status.DESTROYING
+    range_obj.save(update_fields=["status"])
+
+    logger.info(
+        "cancel_range_by_request: cancelled request_id=%s range_id=%s",
+        request_id,
+        range_obj.id,
+    )
+
+    return True
 
 
 def get_range_status(range_id: int) -> dict[str, Any] | None:
@@ -242,37 +434,227 @@ def get_range_status(range_id: int) -> dict[str, Any] | None:
         "status": range_obj.status,
         "error_message": range_obj.error_message,
         "instances": range_obj.provisioned_instances or [],
-        "created_at": range_obj.created_at.isoformat() if range_obj.created_at else None,
+        "created_at": (range_obj.created_at.isoformat() if range_obj.created_at else None),
         "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
     }
 
 
-def pause_range(range_id: int) -> None:
-    """Pause range instances."""
-    raise NotImplementedError
+def pause_range(request_id: UUID) -> bool:
+    """Pause all instances in a range.
+
+    Stops all EC2 instances belonging to the range. Idempotent - returns
+    True if already paused.
+
+    Args:
+        request_id: UUID of the Request containing the Range.
+
+    Returns:
+        True if pause initiated or already paused.
+        False if range not found or not in pausable state.
+    """
+    from engine.ecs import start_range_operation
+    from engine.models import Range
+
+    logger.debug("pause_range: request_id=%s", request_id)
+
+    range_obj = Range.objects.filter(request__request_id=request_id).first()
+    if not range_obj:
+        logger.warning("pause_range: no range for request_id=%s", request_id)
+        return False
+
+    # Idempotent: already paused or pausing
+    if range_obj.status in (ResourceStatus.PAUSED.value, ResourceStatus.PAUSING.value):
+        logger.info("pause_range: already paused/pausing request_id=%s", request_id)
+        return True
+
+    # Can only pause from READY state
+    if range_obj.status != ResourceStatus.READY.value:
+        logger.warning(
+            "pause_range: cannot pause range in status=%s request_id=%s",
+            range_obj.status,
+            request_id,
+        )
+        return False
+
+    # Update status to PAUSING
+    range_obj.status = ResourceStatus.PAUSING.value
+    range_obj.save(update_fields=["status", "updated_at"])
+
+    # Invoke ECS task
+    task_arn = start_range_operation(request_id, "pause")
+    if task_arn:
+        logger.info("pause_range: started ECS task=%s request_id=%s", task_arn, request_id)
+    else:
+        logger.warning("pause_range: ECS not configured, task not started request_id=%s", request_id)
+
+    return True
 
 
-def resume_range(range_id: int) -> None:
-    """Resume range instances."""
-    raise NotImplementedError
+def resume_range(request_id: UUID) -> bool:
+    """Resume all instances in a range.
+
+    Starts all EC2 instances belonging to the range. Idempotent - returns
+    True if already ready.
+
+    Args:
+        request_id: UUID of the Request containing the Range.
+
+    Returns:
+        True if resume initiated or already ready.
+        False if range not found or not in resumable state.
+    """
+    from engine.ecs import start_range_operation
+    from engine.models import Range
+
+    logger.debug("resume_range: request_id=%s", request_id)
+
+    range_obj = Range.objects.filter(request__request_id=request_id).first()
+    if not range_obj:
+        logger.warning("resume_range: no range for request_id=%s", request_id)
+        return False
+
+    # Idempotent: already ready or resuming
+    if range_obj.status in (ResourceStatus.READY.value, ResourceStatus.RESUMING.value):
+        logger.info("resume_range: already ready/resuming request_id=%s", request_id)
+        return True
+
+    # Can only resume from PAUSED state
+    if range_obj.status != ResourceStatus.PAUSED.value:
+        logger.warning(
+            "resume_range: cannot resume range in status=%s request_id=%s",
+            range_obj.status,
+            request_id,
+        )
+        return False
+
+    # Update status to RESUMING
+    range_obj.status = ResourceStatus.RESUMING.value
+    range_obj.save(update_fields=["status", "updated_at"])
+
+    # Invoke ECS task
+    task_arn = start_range_operation(request_id, "resume")
+    if task_arn:
+        logger.info("resume_range: started ECS task=%s request_id=%s", task_arn, request_id)
+    else:
+        logger.warning("resume_range: ECS not configured, task not started request_id=%s", request_id)
+
+    return True
 
 
-def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnection:
-    """Get SSH connection to instance.
+def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
+    """Get connection info for RDP access to a range instance.
 
     Args:
         user: Authenticated user requesting connection
-        range_id: ID of the range containing the instance
+        instance_uuid: UUID of the instance to connect to
+
+    Returns:
+        Dict with keys: private_ip, os_type, connection_name
+
+    Raises:
+        ValueError: If no active range, range not READY, instance not found,
+            or instance has no GUI (ubuntu)
+        PermissionError: If user doesn't own the range
+    """
+    from engine.models import Range
+
+    if user is None:
+        raise ValueError("user is required")
+    if not instance_uuid:
+        raise ValueError("instance_uuid is required")
+
+    logger.debug("get_rdp_connection_info: user=%s instance_uuid=%s", user.id, instance_uuid)
+
+    # Get user's active range
+    range_obj = Range.get_active_for_user(user)
+    if not range_obj:
+        raise ValueError("No active range found")
+
+    # Verify range is ready
+    if range_obj.status != Range.Status.READY:
+        raise ValueError(f"Range is not ready (status: {range_obj.status})")
+
+    # Find instance by UUID
+    instance = range_obj.get_instance_by_uuid(instance_uuid)
+    if not instance:
+        raise ValueError(f"Instance {instance_uuid} not found in range")
+
+    # Check if instance has GUI
+    os_type = instance.get("os_type", "")
+    if os_type not in ("kali", "ubuntu", "windows"):
+        raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
+
+    # Get IP
+    private_ip = instance.get("private_ip")
+    if not private_ip:
+        raise ValueError(f"Instance {instance_uuid} has no IP address")
+
+    # Build connection name from instance name (falls back to role-based name)
+    role = instance.get("role", "instance")
+    instance_name = instance.get("name")
+    if instance_name:
+        connection_name = instance_name
+    else:
+        # Fallback for older ranges without name field
+        display_role = "target" if role == "victim" else role
+        connection_name = f"{display_role}-{os_type}"
+
+    # Get RDP credentials based on OS type and role
+    # TODO: Move instance default passwords to CMS (#542)
+    rdp_username = None
+    rdp_password = None
+    if os_type == "windows":
+        rdp_username = "Administrator"
+        # DC uses domain admin password (prebaked AMI), others use demo password
+        rdp_password = "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!"  # nosec B105
+    elif os_type == "kali":
+        rdp_username = "kali"
+        rdp_password = "kali"  # nosec B105 - Kali OS default
+    elif os_type == "ubuntu":
+        rdp_username = "ubuntu"
+        rdp_password = "ubuntu"  # nosec B105 - demo environment
+
+    # Get SSH key for SFTP file transfers
+    # Windows uses key-based auth; Linux uses password auth for simplicity
+    from engine.secrets import get_ssh_key
+
+    ssh_key = None
+    if os_type == "windows":
+        ssh_key_arn = instance.get("ssh_key_secret_arn")
+        if ssh_key_arn:
+            try:
+                ssh_key = get_ssh_key(ssh_key_arn)
+            except Exception as e:
+                logger.warning("Failed to get SSH key for SFTP: %s", e)
+
+    return {
+        "private_ip": private_ip,
+        "os_type": os_type,
+        "connection_name": connection_name,
+        "rdp_username": rdp_username,
+        "rdp_password": rdp_password,
+        "ssh_key": ssh_key,
+    }
+
+
+def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
+    """Get SSH connection to instance.
+
+    Looks up the Range containing the instance by searching provisioned_instances
+    JSONB for matching UUID. This supports the new request_id-based provisioning
+    pattern where range_id may not be populated in CMS.
+
+    Args:
+        user: Authenticated user requesting connection
         instance_uuid: UUID of the instance to connect to
 
     Returns:
         SSHConnection configured for the instance
 
     Raises:
-        ValueError: If user is None, range_id invalid, instance_uuid invalid,
+        ValueError: If user is None, instance_uuid invalid,
             range not READY, or instance not found
         PermissionError: If user doesn't own the range
-        Range.DoesNotExist: If range not found
     """
     # Lazy imports to avoid circular dependencies
     from engine.models import Range
@@ -282,34 +664,43 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     # Input validation
     if user is None:
         raise ValueError("user is required")
-    if range_id is None or not isinstance(range_id, int) or range_id < 0:
-        raise ValueError("range_id must be a positive integer")
     if not instance_uuid:
         raise ValueError("instance_uuid is required")
 
-    logger.debug("connect_terminal: range_id=%s instance_uuid=%s", range_id, instance_uuid)
+    logger.debug("connect_terminal: user_id=%s instance_uuid=%s", user.id, instance_uuid)
 
-    # Fetch range
-    try:
-        range_obj = Range.objects.get(id=range_id)
-    except Range.DoesNotExist:
-        logger.error("Range not found: range_id=%s", range_id)
-        raise
+    # Find Range containing this instance by searching provisioned_instances JSONB
+    # PostgreSQL JSONB containment query: find where array contains object with uuid
+    range_obj = Range.objects.filter(
+        provisioned_instances__contains=[{"uuid": instance_uuid}],
+        user=user,
+    ).first()
 
-    # Verify ownership
-    if range_obj.user.id != user.id:
-        logger.error("Permission denied: user=%s does not own range=%s", user.id, range_id)
-        raise PermissionError("User does not own this range")
+    if not range_obj:
+        logger.error(
+            "Range not found for instance: user_id=%s instance_uuid=%s",
+            user.id,
+            instance_uuid,
+        )
+        raise ValueError(f"No range found containing instance {instance_uuid}")
 
     # Verify range is ready
     if range_obj.status != Range.Status.READY:
-        logger.error("Range not ready: range_id=%s status=%s", range_id, range_obj.status)
+        logger.error(
+            "Range not ready: range_id=%s status=%s",
+            range_obj.id,
+            range_obj.status,
+        )
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
     # Find instance by UUID
     instance = range_obj.get_instance_by_uuid(instance_uuid)
     if instance is None:
-        logger.error("Instance not found: range_id=%s instance_uuid=%s", range_id, instance_uuid)
+        logger.error(
+            "Instance not found: range_id=%s instance_uuid=%s",
+            range_obj.id,
+            instance_uuid,
+        )
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     # Get SSH key from secrets
@@ -337,8 +728,302 @@ def connect_terminal(user: User, range_id: int, instance_uuid: str) -> SSHConnec
     else:
         username = "ubuntu"  # Default for ubuntu and other Linux distros
 
+    # Use tmux for persistent sessions on Linux instances
+    # Windows doesn't have tmux, so skip session_id for Windows
+    session_id = None
+    if os_type != "windows":
+        session_id = instance_uuid
+
     return SSHConnection(
         host=host,
         username=username,
         private_key=ssh_key,
+        session_id=session_id,
     )
+
+
+def create_ngfw(request_spec: RequestSpec) -> UUID:
+    """Provision NGFW infrastructure.
+
+    Interprets the RequestSpec into Engine models (Request, Instance, App),
+    then triggers ECS provisioning.
+
+    Args:
+        request_spec: RequestSpec containing an NGFW InstanceSpec item.
+            The InstanceSpec must have role="ngfw" and ngfw_app populated
+            with hydrated credentials.
+
+    Returns:
+        The request_id UUID for correlation with CMS.
+
+    Raises:
+        TypeError: If request_spec is not a RequestSpec.
+        ValueError: If request_spec or its NGFW item is invalid.
+        User.DoesNotExist: If user_id doesn't map to a Django user.
+    """
+    from engine.ecs import start_ngfw_provisioning
+    from engine.interpreter import interpret
+
+    # Validate NGFW-specific requirements before interpreting
+    ngfw_spec: InstanceSpec | None = None
+    for item in request_spec.items:
+        if isinstance(item, InstanceSpec) and item.role == "ngfw":
+            ngfw_spec = item
+            break
+
+    if ngfw_spec is None:
+        raise ValueError("RequestSpec must contain an NGFW InstanceSpec")
+    if ngfw_spec.ngfw_app is None:
+        raise ValueError("ngfw_app is required for NGFW provisioning")
+    if not ngfw_spec.ngfw_app.is_hydrated:
+        raise ValueError("ngfw_app must be hydrated with credential values")
+
+    # Interpret spec into models
+    request = interpret(request_spec)
+
+    logger.info(
+        "create_ngfw: interpreted request_id=%s",
+        request_spec.request_id,
+    )
+
+    # Get the NGFW instance for provisioning
+    ngfw_instance = request.instance_instantiations.filter(role="ngfw").first()
+
+    if ngfw_instance:
+        # Trigger ECS provisioning with Request UUID
+        task_arn = start_ngfw_provisioning(request.request_id)
+
+        if task_arn:
+            logger.info(
+                "create_ngfw: started ECS task=%s for request=%s",
+                task_arn,
+                request.request_id,
+            )
+
+    return request.request_id
+
+
+def destroy_ngfw(request_id: UUID) -> bool:
+    """Tear down NGFW infrastructure.
+
+    Looks up the NGFW Instance by request_id and triggers ECS teardown.
+
+    Args:
+        request_id: UUID of the request containing the NGFW to destroy.
+
+    Returns:
+        True if teardown initiated, False if request/instance not found.
+
+    Raises:
+        EngineError: If ranges are still attached to this NGFW.
+    """
+    from engine.ecs import start_ngfw_teardown
+    from engine.models import Instance, Range, Request
+
+    logger.debug("destroy_ngfw: request_id=%s", request_id)
+
+    # Look up the request and its NGFW instance
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("destroy_ngfw: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("destroy_ngfw: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    # Check for attached ranges - must be deleted before NGFW can be destroyed
+    attached_ranges = Range.objects.filter(
+        ngfw_instance=ngfw_instance,
+        status__in=[
+            Range.Status.READY,
+            Range.Status.PENDING,
+            Range.Status.PROVISIONING,
+            Range.Status.PAUSED,
+            Range.Status.RESUMING,
+        ],
+    )
+    if attached_ranges.exists():
+        count = attached_ranges.count()
+        range_ids = list(attached_ranges.values_list("id", flat=True)[:5])
+        raise EngineError(
+            f"Cannot delete NGFW: {count} range(s) are still attached. Delete these ranges first: {range_ids}"
+        )
+
+    task_arn = start_ngfw_teardown(request_id)
+
+    if task_arn:
+        logger.info(
+            "destroy_ngfw: started ECS task=%s for request=%s",
+            task_arn,
+            request_id,
+        )
+
+    return task_arn is not None
+
+
+def start_ngfw(request_id: UUID) -> bool:
+    """Start a stopped NGFW instance.
+
+    Validates the Instance is in a stoppable state (stopped or failed),
+    then triggers ECS to run the start operation.
+
+    Args:
+        request_id: UUID of the request containing the NGFW.
+
+    Returns:
+        True if start initiated, False if request/instance not found
+        or invalid status.
+    """
+    from engine.ecs import start_ngfw_operation
+    from engine.models import Instance, Request
+
+    logger.debug("start_ngfw: request_id=%s", request_id)
+
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("start_ngfw: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("start_ngfw: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    # Only allow starting from paused or failed status
+    if ngfw_instance.status not in (
+        ResourceStatus.PAUSED.value,
+        ResourceStatus.FAILED.value,
+    ):
+        logger.warning(
+            "start_ngfw: invalid status=%s for request_id=%s (must be stopped or failed)",
+            ngfw_instance.status,
+            request_id,
+        )
+        return False
+
+    task_arn = start_ngfw_operation(request_id, "start")
+
+    if task_arn:
+        logger.info(
+            "start_ngfw: started ECS task=%s for request=%s",
+            task_arn,
+            request_id,
+        )
+
+    return task_arn is not None
+
+
+def stop_ngfw(request_id: UUID) -> bool:
+    """Stop a running NGFW instance.
+
+    Validates the Instance is in a running state (ready or active),
+    then triggers ECS to run the stop operation.
+
+    Args:
+        request_id: UUID of the request containing the NGFW.
+
+    Returns:
+        True if stop initiated, False if request/instance not found
+        or invalid status.
+    """
+    from engine.ecs import start_ngfw_operation
+    from engine.models import Instance, Request
+
+    logger.debug("stop_ngfw: request_id=%s", request_id)
+
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("stop_ngfw: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("stop_ngfw: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    # Only allow stopping from ready status
+    if ngfw_instance.status != ResourceStatus.READY.value:
+        logger.warning(
+            "stop_ngfw: invalid status=%s for request_id=%s (must be ready)",
+            ngfw_instance.status,
+            request_id,
+        )
+        return False
+
+    task_arn = start_ngfw_operation(request_id, "stop")
+
+    if task_arn:
+        logger.info(
+            "stop_ngfw: started ECS task=%s for request=%s",
+            task_arn,
+            request_id,
+        )
+
+    return task_arn is not None
+
+
+def complete_ngfw_setup(request_id: UUID) -> bool:
+    """Complete NGFW setup after user associates device in SCM/XDR.
+
+    Validates the Instance is in awaiting_association or stopped status,
+    then triggers ECS to run the complete-setup operation.
+
+    The complete-setup operation will:
+    1. Start the NGFW if stopped
+    2. Fetch license (to get Logging Service license from CDL)
+    3. Wait for CSP certificate sync
+    4. Poll for valid device certificate
+    5. Mark NGFW as ready and auto-stop
+
+    Args:
+        request_id: UUID of the request containing the NGFW.
+
+    Returns:
+        True if complete-setup initiated, False if request/instance not found.
+
+    Raises:
+        EngineError: If NGFW is not in a valid status for setup completion.
+    """
+    from engine.ecs import start_ngfw_operation
+    from engine.models import Instance, Request
+
+    logger.debug("complete_ngfw_setup: request_id=%s", request_id)
+
+    try:
+        request = Request.objects.get(request_id=request_id)
+    except Request.DoesNotExist:
+        logger.warning("complete_ngfw_setup: request not found request_id=%s", request_id)
+        return False
+
+    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
+    if not ngfw_instance:
+        logger.warning("complete_ngfw_setup: no NGFW instance found for request_id=%s", request_id)
+        return False
+
+    # Allow completion from awaiting_association or stopped (after auto-stop)
+    valid_statuses = [
+        ResourceStatus.AWAITING_ASSOCIATION.value,
+        ResourceStatus.PAUSED.value,  # PAUSED = "paused" which maps to "stopped" in UI
+        "stopped",  # Direct status value used in some places
+    ]
+    if ngfw_instance.status not in valid_statuses:
+        raise EngineError(
+            f"Cannot complete setup: NGFW is in '{ngfw_instance.status}' status. "
+            f"Expected one of: awaiting_association, stopped"
+        )
+
+    task_arn = start_ngfw_operation(request_id, "complete-setup")
+
+    if task_arn:
+        logger.info(
+            "complete_ngfw_setup: started ECS task=%s for request=%s",
+            task_arn,
+            request_id,
+        )
+
+    return task_arn is not None

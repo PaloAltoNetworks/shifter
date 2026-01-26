@@ -7,7 +7,7 @@ The license deactivation is critical to avoid license leakage.
 Command: request license deactivate VM-Capacity mode auto
 """
 
-from typing import Any, ClassVar
+from typing import Any
 
 from .base import SetupStep
 
@@ -68,22 +68,24 @@ class NGFWDeprovisionPlan:
     The license deactivation is critical to prevent license leakage.
     """
 
-    steps: ClassVar[list[SetupStep]] = [
-        SetupStep(
-            name="deactivate_license",
-            script=DEACTIVATE_LICENSE_SCRIPT,
-            timeout_seconds=300,  # 5 min - license deactivation can take time
-            requires_reboot=False,
-        ),
-    ]
+    def __init__(self) -> None:
+        """Initialize plan with steps as instance attributes."""
+        self.steps: list[SetupStep] = [
+            SetupStep(
+                name="deactivate_license",
+                script=DEACTIVATE_LICENSE_SCRIPT,
+                timeout_seconds=300,  # 5 min - license deactivation can take time
+                requires_reboot=False,
+            ),
+        ]
 
-    verify_step: ClassVar[SetupStep] = SetupStep(
-        name="verify_cleanup",
-        script=VERIFY_CLEANUP_SCRIPT,
-        timeout_seconds=120,  # 2 min
-        requires_reboot=False,
-        is_verification=True,
-    )
+        self.verify_step: SetupStep | None = SetupStep(
+            name="verify_cleanup",
+            script=VERIFY_CLEANUP_SCRIPT,
+            timeout_seconds=120,  # 2 min
+            requires_reboot=False,
+            is_verification=True,
+        )
 
     def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for deprovision scripts.

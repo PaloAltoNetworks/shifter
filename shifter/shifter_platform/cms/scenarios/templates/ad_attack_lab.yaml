@@ -1,24 +1,33 @@
 id: ad_attack_lab
 name: AD Attack Lab
 description: Active Directory attack lab with domain controller, Kali attacker, and domain-joined Windows victim.
-
-requirements:
-  required: true
-  os: windows
+enabled: true
+ngfw: true
 
 instances:
-  - role: attacker
+  - name: Attacker
+    role: attacker
     os_type: kali
+    xdr_agent: false
+    ai_agent: true
 
-  - role: dc
+  - name: Domain Controller
+    role: dc
     os_type: windows
     domain_controller: true
-    agent_slot: primary
+    xdr_agent: true
+    ai_agent: true
     dc_config:
-      domain_name: psycho.lab
-      netbios_name: PSYCHO
+      domain_name: internal.shifter
+      netbios_name: INTSHIFTER
 
-  - role: victim
+  - name: Workstation
+    role: victim
     os_type: from_agent
-    agent_slot: primary
+    xdr_agent: true
+    ai_agent: true
     join_domain: true
+
+subnets:
+  - name: core
+    instances: [Attacker, Domain Controller, Workstation]

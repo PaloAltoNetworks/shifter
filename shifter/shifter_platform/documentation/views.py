@@ -100,7 +100,7 @@ def _build_nav_tree(base_path: Path, current_path: str = "") -> list[dict]:
     - Hidden files/folders (starting with .)
     - Empty folders (no .md files)
     """
-    items = []
+    items: list[dict[str, object]] = []
 
     try:
         entries = sorted(base_path.iterdir())

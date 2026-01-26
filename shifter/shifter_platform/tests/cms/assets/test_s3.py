@@ -15,6 +15,7 @@ from cms.assets.s3 import (
 
 
 class TestGetS3Client:
+    @patch.dict("os.environ", {"AWS_ENDPOINT_URL": ""}, clear=False)
     @patch("cms.assets.s3.boto3")
     def test_creates_client_with_region(self, mock_boto3, settings):
         settings.AWS_S3_REGION = "us-west-2"

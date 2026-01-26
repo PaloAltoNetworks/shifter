@@ -15,3 +15,15 @@ variable "pulumi_provisioner_repository_name" {
   type        = string
   default     = "shifter-dev-pulumi-provisioner"
 }
+
+variable "guacd_repository_name" {
+  description = "Name for the guacd ECR repository"
+  type        = string
+  default     = "shifter-dev-guacd"
+}
+
+variable "guacamole_client_repository_name" {
+  description = "Name for the guacamole-client ECR repository"
+  type        = string
+  default     = "shifter-dev-guacamole-client"
+}

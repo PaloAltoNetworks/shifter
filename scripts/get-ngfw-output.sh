@@ -43,7 +43,7 @@ rm -f "$TMPFILE"
 echo "Command ID: $CMD_ID"
 echo "Waiting..."
 
-for i in {1..30}; do
+for _ in {1..30}; do
   sleep 2
   STATUS=$(aws ssm get-command-invocation \
     --profile "$PROFILE" \

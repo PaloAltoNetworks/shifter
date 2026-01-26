@@ -1,7 +1,7 @@
 id: basic
 name: Basic Range
 description: A basic attacker-victim range with Kali Linux attacker and user-provided agent on victim.
-enabled: true
+enabled: false
 ngfw: false
 
 instances:

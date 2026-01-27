@@ -558,7 +558,7 @@ def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> C
 
         # Apply defaults for SCM credentials
         if credential_type_slug == "scm" and not kwargs.get("scm_folder_name"):
-            kwargs["scm_folder_name"] = "All Firewalls"
+            kwargs["scm_folder_name"] = ""
 
         # Remaining kwargs go into the data JSON field
         data = kwargs

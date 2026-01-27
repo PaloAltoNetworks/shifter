@@ -214,6 +214,12 @@ def _run_provision(
     logger.info("Waiting 30s for management plane to stabilize before configuration...")
     time.sleep(30)
 
+    # Re-verify SSH availability with extended timeout to handle potential NGFW reboots
+    # PAN-OS may auto-reboot after licensing, causing SSH to become temporarily unavailable
+    logger.info("Re-verifying SSH availability (allowing for potential NGFW reboot)...")
+    ssh_executor.wait_for_agent(management_ip, timeout_seconds=600)  # 10 min retry period
+    logger.info("SSH confirmed available, proceeding with configuration...")
+
     # Create orchestrator with SSH executor
     orchestrator = SetupOrchestrator(executor=ssh_executor)
 

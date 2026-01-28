@@ -256,6 +256,53 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
 }
 
 # ------------------------------------------------------------------------------
+# DNS and NTP Allow Rules
+# ------------------------------------------------------------------------------
+
+resource "aws_networkfirewall_rule_group" "allow_dns" {
+  count = var.enable_network_firewall ? 1 : 0
+
+  capacity = 10
+  name     = "${var.name_prefix}-allow-dns"
+  type     = "STATEFUL"
+
+  rule_group {
+    rule_variables {
+      ip_sets {
+        key = "HOME_NET"
+        ip_set {
+          definition = [var.vpc_cidr]
+        }
+      }
+      ip_sets {
+        key = "EXTERNAL_NET"
+        ip_set {
+          definition = ["0.0.0.0/0"]
+        }
+      }
+    }
+
+    rules_source {
+      # Allow DNS to Google Public DNS only
+      # Allow NTP to any server (needed for Windows AD/Kerberos time sync)
+      rules_string = <<-EOT
+        pass udp $HOME_NET any -> 8.8.8.8 53 (msg:"Allow DNS to 8.8.8.8"; sid:1000020; rev:1;)
+        pass tcp $HOME_NET any -> 8.8.8.8 53 (msg:"Allow DNS to 8.8.8.8"; sid:1000021; rev:1;)
+        pass udp $HOME_NET any -> $EXTERNAL_NET 123 (msg:"Allow NTP"; sid:1000022; rev:1;)
+      EOT
+    }
+
+    stateful_rule_options {
+      rule_order = "STRICT_ORDER"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-allow-dns"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Drop All Unmatched Traffic (default deny)
 # ------------------------------------------------------------------------------
 
@@ -283,11 +330,11 @@ resource "aws_networkfirewall_rule_group" "drop_all" {
     }
 
     rules_source {
-      # Drop all outbound traffic that wasn't explicitly allowed by previous rules
-      # This enforces the allowlist - only traffic to allowed domains/IPs passes
+      # Drop ALL outbound traffic that wasn't explicitly allowed by previous rules
+      # This enforces the allowlist - only traffic to allowed domains/IPs/DNS passes
+      # CRITICAL: This blocks all protocols and ports, not just HTTP/HTTPS
       rules_string = <<-EOT
-        drop tcp $HOME_NET any -> $EXTERNAL_NET 443 (msg:"Drop unmatched HTTPS egress"; sid:9999998; rev:1;)
-        drop tcp $HOME_NET any -> $EXTERNAL_NET 80 (msg:"Drop unmatched HTTP egress"; sid:9999997; rev:1;)
+        drop ip $HOME_NET any -> $EXTERNAL_NET any (msg:"Drop all unmatched egress"; sid:9999999; rev:1;)
       EOT
     }
 
@@ -326,7 +373,8 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     # Priority 2-N: Victim IPs - allow HTTPS to GCP/PANW IP ranges (chunked)
     # Priority N+1: Victim domains - allow listed domains (SNI-based)
     # Priority N+2: Kali domains - allow listed domains (if configured)
-    # Priority 100: Drop all - drop unmatched HTTP/HTTPS (default deny)
+    # Priority 99: DNS/NTP allow - allow DNS to 8.8.8.8 and NTP to any
+    # Priority 100: Drop all - drop ALL unmatched traffic (default deny)
 
     # NGFW bypass - allow all egress for SCM/licensing (priority 1)
     dynamic "stateful_rule_group_reference" {
@@ -361,7 +409,13 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       }
     }
 
-    # Drop all unmatched HTTP/HTTPS traffic (priority 100 - last)
+    # DNS allow - allow DNS to 8.8.8.8 (priority 99 - just before drop all)
+    stateful_rule_group_reference {
+      resource_arn = aws_networkfirewall_rule_group.allow_dns[0].arn
+      priority     = 99
+    }
+
+    # Drop all unmatched traffic (priority 100 - last, default deny)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.drop_all[0].arn
       priority     = 100

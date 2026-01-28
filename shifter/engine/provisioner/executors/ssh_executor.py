@@ -338,7 +338,8 @@ class SSHExecutor:
 
             # Verify CLI is ready by running a simple command
             # PAN-OS SSH may accept connections before management plane is ready
-            stdin, stdout, stderr = client.exec_command(
+            # Security: Hardcoded command string, no user input
+            _stdin, stdout, _stderr = client.exec_command(  # nosec B601
                 "show system info",
                 timeout=10,
             )
@@ -349,12 +350,7 @@ class SSHExecutor:
 
             # Verify command succeeded with valid system info output
             # Check for key fields that will always be present in valid output
-            return (
-                exit_code == 0
-                and "hostname" in output
-                and "ip-address" in output
-                and "netmask" in output
-            )
+            return exit_code == 0 and "hostname" in output and "ip-address" in output and "netmask" in output
         except Exception:
             return False
 

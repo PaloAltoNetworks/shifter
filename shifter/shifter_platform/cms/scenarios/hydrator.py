@@ -169,7 +169,7 @@ def hydrate_ngfw(
         scm_pin_value = scm_data.get("scm_pin_value")
         sls_region = scm_data.get("sls_region")
 
-        if not all([scm_folder_name, scm_pin_id, scm_pin_value]):
+        if not all([scm_pin_id, scm_pin_value]):
             logger.error(
                 "hydrate_ngfw: scm_credential id=%s missing required fields",
                 scm_credential.id,

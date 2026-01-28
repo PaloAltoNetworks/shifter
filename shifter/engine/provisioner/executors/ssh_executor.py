@@ -314,7 +314,12 @@ class SSHExecutor:
             time.sleep(self._poll_interval)
 
     def _check_ssh_available(self, host: str) -> bool:
-        """Check if SSH port is accepting connections and auth works."""
+        """Check if SSH is available and PAN-OS CLI is ready.
+
+        Not only checks if SSH accepts connections, but also verifies
+        the management plane can process CLI commands by running a simple
+        test command.
+        """
         try:
             client = paramiko.SSHClient()
             # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
@@ -330,8 +335,26 @@ class SSHExecutor:
                 allow_agent=False,
                 look_for_keys=False,
             )
+
+            # Verify CLI is ready by running a simple command
+            # PAN-OS SSH may accept connections before management plane is ready
+            stdin, stdout, stderr = client.exec_command(
+                "show system info",
+                timeout=10,
+            )
+            output = stdout.read().decode("utf-8", errors="replace")
+            exit_code = stdout.channel.recv_exit_status()
+
             client.close()
-            return True
+
+            # Verify command succeeded with valid system info output
+            # Check for key fields that will always be present in valid output
+            return (
+                exit_code == 0
+                and "hostname" in output
+                and "ip-address" in output
+                and "netmask" in output
+            )
         except Exception:
             return False
 

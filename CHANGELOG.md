@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-01-28
+
+### Changed
+- Updated SSH connection validation to handle difference between SSH being up and management plane being fully up
+
 ## [1.0.4] - 2026-01-28
 
 ### Fixed

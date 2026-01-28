@@ -256,7 +256,7 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
 }
 
 # ------------------------------------------------------------------------------
-# DNS and NTP Allow Rules
+# DNS Allow Rule (8.8.8.8 only)
 # ------------------------------------------------------------------------------
 
 resource "aws_networkfirewall_rule_group" "allow_dns" {
@@ -274,21 +274,14 @@ resource "aws_networkfirewall_rule_group" "allow_dns" {
           definition = [var.vpc_cidr]
         }
       }
-      ip_sets {
-        key = "EXTERNAL_NET"
-        ip_set {
-          definition = ["0.0.0.0/0"]
-        }
-      }
     }
 
     rules_source {
       # Allow DNS to Google Public DNS only
-      # Allow NTP to any server (needed for Windows AD/Kerberos time sync)
+      # Time sync: EC2 instances can use AWS Time Sync Service at 169.254.169.123 (no firewall rule needed)
       rules_string = <<-EOT
         pass udp $HOME_NET any -> 8.8.8.8 53 (msg:"Allow DNS to 8.8.8.8"; sid:1000020; rev:1;)
         pass tcp $HOME_NET any -> 8.8.8.8 53 (msg:"Allow DNS to 8.8.8.8"; sid:1000021; rev:1;)
-        pass udp $HOME_NET any -> $EXTERNAL_NET 123 (msg:"Allow NTP"; sid:1000022; rev:1;)
       EOT
     }
 
@@ -373,7 +366,7 @@ resource "aws_networkfirewall_firewall_policy" "this" {
     # Priority 2-N: Victim IPs - allow HTTPS to GCP/PANW IP ranges (chunked)
     # Priority N+1: Victim domains - allow listed domains (SNI-based)
     # Priority N+2: Kali domains - allow listed domains (if configured)
-    # Priority 99: DNS/NTP allow - allow DNS to 8.8.8.8 and NTP to any
+    # Priority 99: DNS allow - allow DNS to 8.8.8.8 only
     # Priority 100: Drop all - drop ALL unmatched traffic (default deny)
 
     # NGFW bypass - allow all egress for SCM/licensing (priority 1)

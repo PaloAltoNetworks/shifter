@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "shifter-db": {
+      "command": "node",
+      "args": ["mcp/shifter-db/index.js"],
+      "env": {
+        "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
+        "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"
+      }
+    }
+  }
+}

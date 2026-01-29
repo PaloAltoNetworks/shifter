@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - NGFW destroy flow does not remove EC2 instances
 - NGFW commands not piped to SSH as required
+- Provisioner missing permission for deleting NGFW resources
 
 ## [1.0.5] - 2026-01-28
 

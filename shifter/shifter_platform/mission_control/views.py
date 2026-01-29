@@ -859,39 +859,6 @@ def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
     return JsonResponse({"status": "deprovisioning"})
 
 
-@login_required
-@require_POST
-def api_ngfw_complete_setup(request: HttpRequest, app_id: str) -> JsonResponse:
-    """Complete NGFW setup after user associates device in SCM/XDR.
-
-    After provisioning ends with awaiting_association status, the user must:
-    1. Associate the device in Strata Cloud Manager (Device Associations)
-    2. Connect the firewall to XDR/XSIAM
-
-    This endpoint triggers the final setup which fetches the license,
-    waits for CSP certificate sync, and marks the NGFW as ready.
-    """
-    from cms.services import complete_ngfw_setup as cms_complete_ngfw_setup
-
-    user = _get_user(request)
-
-    try:
-        result = cms_complete_ngfw_setup(user, app_id)
-    except CMSError as e:
-        if "not found" in str(e).lower():
-            raise Http404(_NGFW_NOT_FOUND) from None
-        return JsonResponse({"error": str(e)}, status=400)
-
-    logger.info("NGFW complete-setup triggered: user=%s app_id=%s", user.email, app_id)
-    return JsonResponse(
-        {
-            "status": "configuring",
-            "app_id": str(result.app_id),
-            "instance_id": str(result.instance_id),
-        }
-    )
-
-
 # -----------------------------------------------------------------------------
 # Credential Views
 # -----------------------------------------------------------------------------

@@ -37,9 +37,7 @@
     .status-provisioning .status-dot,
     .status-starting .status-dot,
     .status-stopping .status-dot,
-    .status-configuring .status-dot,
     .status-deprovisioning .status-dot { background: #faad14; animation: pulse 1.5s infinite; }
-    .status-awaiting_association .status-dot { background: #ff9500; animation: pulse 1.5s infinite; }
     .status-stopped .status-dot { background: #707070; }
     .status-failed .status-dot { background: #ff4d4f; }
     .status-not_provisioned .status-dot { background: #484848; }
@@ -243,50 +241,18 @@
     </div>
 </div>
 
-{% if ngfw.status == 'awaiting_association' or ngfw.status == 'stopped' and not ngfw.serial_number %}
-<!-- Complete Setup Section - shown when user needs to finish setup -->
-<div class="card" style="border-color: #ff9500;">
-    <h2 class="section-title" style="color: #ff9500;">Action Required</h2>
-    <p style="color: var(--xdr-text-secondary); margin: 0 0 16px; font-size: 13px;">
-        Your NGFW infrastructure is ready. Complete these steps to finish setup:
-    </p>
-
-    <div style="margin-bottom: 20px;">
-        <div style="display: flex; gap: 12px; margin-bottom: 12px;">
-            <span style="background: #ff9500; color: #000; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;">1</span>
-            <div>
-                <strong>Associate Device in Strata Cloud Manager</strong>
-                <p style="margin: 4px 0 0; color: var(--xdr-text-secondary); font-size: 13px;">
-                    Go to <strong>Strata Cloud Manager &rarr; Configuration &rarr; Device Associations</strong> and click <strong>Add Device</strong>.
-                    {% if ngfw.serial_number %}
-                    <br>Serial Number: <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px;">{{ ngfw.serial_number }}</code>
-                    {% endif %}
-                </p>
-            </div>
-        </div>
-
-        <div style="display: flex; gap: 12px;">
-            <span style="background: #ff9500; color: #000; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;">2</span>
-            <div>
-                <strong>Connect to XDR/XSIAM</strong>
-                <p style="margin: 4px 0 0; color: var(--xdr-text-secondary); font-size: 13px;">
-                    Go to <strong>XDR/XSIAM &rarr; Settings &rarr; NGFW &rarr; Add New Instance</strong> and connect the firewall.
-                    If the firewall is not in the dropdown, use the sync button to refresh.
-                </p>
-            </div>
-        </div>
-    </div>
-
+{% if ngfw.status == 'ready' or ngfw.status == 'stopped' %}
+<!-- Data Source Instruction - shown when NGFW is ready -->
+<div class="card" style="border-color: #00d26a;">
+    <h2 class="section-title" style="color: #00d26a;">Next Step</h2>
     <p style="color: var(--xdr-text-secondary); margin: 0 0 12px; font-size: 13px;">
-        Once you've completed both steps above, click the button below to finish configuration:
+        Add this NGFW as a data source in your XDR/XSIAM tenant.
     </p>
-
-    <button type="button" class="btn btn-primary" id="detail-complete-setup-btn" data-app-id="{{ ngfw.app_id }}">
-        Complete Setup
-    </button>
-
-    <p style="color: var(--xdr-text-tertiary); margin: 12px 0 0; font-size: 12px;">
-        This will configure logging service and may take up to 15 minutes.
+    <p style="color: var(--xdr-text-secondary); margin: 0; font-size: 13px;">
+        Go to <strong>XDR/XSIAM &rarr; Settings &rarr; Data Sources &rarr; Add Data Source</strong> and select this firewall.
+        {% if ngfw.serial_number %}
+        <br>Serial Number: <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px;">{{ ngfw.serial_number }}</code>
+        {% endif %}
     </p>
 </div>
 {% endif %}
@@ -369,60 +335,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Complete setup button handler
-    const completeSetupBtn = document.getElementById('detail-complete-setup-btn');
-    if (completeSetupBtn) {
-        completeSetupBtn.addEventListener('click', async function() {
-            const appId = this.dataset.appId;
-            this.disabled = true;
-            this.textContent = 'Completing Setup...';
-
-            try {
-                const response = await fetch(`/mission-control/api/ngfw/${appId}/complete-setup/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    }
-                });
-
-                const data = await response.json();
-
-                if (data.error) {
-                    alert('Error: ' + data.error);
-                    this.disabled = false;
-                    this.textContent = 'Complete Setup';
-                    return;
-                }
-
-                // Update the UI immediately to show configuring state
-                // Update status badge in header
-                const statusContainer = document.querySelector('.page-subtitle .status');
-                if (statusContainer) {
-                    statusContainer.className = 'status status-configuring';
-                    statusContainer.querySelector('span:last-child').textContent = 'Configuring';
-                }
-
-                // Update status in overview card
-                const overviewStatus = document.querySelector('.details-grid .detail-item:nth-child(2) .detail-value');
-                if (overviewStatus) {
-                    overviewStatus.textContent = 'Configuring';
-                }
-
-                // Hide the action required card
-                const actionCard = this.closest('.card');
-                if (actionCard) {
-                    actionCard.style.display = 'none';
-                }
-
-            } catch (err) {
-                console.error('Complete setup error:', err);
-                alert('An error occurred. Please try again.');
-                this.disabled = false;
-                this.textContent = 'Complete Setup';
-            }
-        });
-    }
 });
 </script>
 {% endblock %}

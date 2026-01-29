@@ -319,6 +319,9 @@ class SSHExecutor:
         Not only checks if SSH accepts connections, but also verifies
         the management plane can process CLI commands by running a simple
         test command.
+
+        Uses invoke_shell() instead of exec_command() because PAN-OS
+        does not support the SSH exec channel.
         """
         try:
             client = paramiko.SSHClient()
@@ -336,21 +339,23 @@ class SSHExecutor:
                 look_for_keys=False,
             )
 
-            # Verify CLI is ready by running a simple command
-            # PAN-OS SSH may accept connections before management plane is ready
-            # Security: Hardcoded command string, no user input
-            _stdin, stdout, _stderr = client.exec_command(  # nosec B601
-                "show system info",
-                timeout=10,
-            )
-            output = stdout.read().decode("utf-8", errors="replace")
-            exit_code = stdout.channel.recv_exit_status()
+            # Use interactive shell - PAN-OS does not support SSH exec channel
+            channel = client.invoke_shell()
+            time.sleep(2)
+            channel.send("show system info\n")  # nosec B601
+            time.sleep(3)
 
+            output = ""
+            while channel.recv_ready():
+                output += channel.recv(65535).decode("utf-8", errors="replace")
+
+            channel.send("exit\n")
+            channel.close()
             client.close()
 
             # Verify command succeeded with valid system info output
             # Check for key fields that will always be present in valid output
-            return exit_code == 0 and "hostname" in output and "ip-address" in output and "netmask" in output
+            return "hostname" in output and "ip-address" in output and "netmask" in output
         except Exception:
             return False
 

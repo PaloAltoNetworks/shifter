@@ -251,7 +251,7 @@ class NGFWProvisionPlan:
                 name="download_threat_content",
                 script="",
                 stdin_input=DOWNLOAD_CONTENT_INPUT,
-                timeout_seconds=600,  # 10 min - download can take a while
+                timeout_seconds=2700,  # 45 min - threat content download is large
                 poll_for_job=True,
             ),
             # Install threat content (async - polls for job completion)

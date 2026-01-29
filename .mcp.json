@@ -7,6 +7,14 @@
         "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
         "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"
       }
+    },
+    "shifter-ngfw": {
+      "command": "node",
+      "args": ["mcp/ngfw/index.js"],
+      "env": {
+        "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
+        "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"
+      }
     }
   }
 }

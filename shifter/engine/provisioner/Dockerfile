@@ -4,7 +4,7 @@ FROM python:3.12-slim-trixie
 ARG TERRAFORM_VERSION=1.14.3
 ARG PULUMI_VERSION=3.142.0
 
-RUN apt-get update && apt-get install -y curl unzip && \
+RUN apt-get update && apt-get install -y curl openssh-client unzip && \
     # Install Terraform
     curl -fsSL -o terraform.zip \
       "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" && \

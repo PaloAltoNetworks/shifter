@@ -40,7 +40,7 @@ from events import (
     publish_status_update,
 )
 from executors.aws_executor import AWSExecutor
-from executors.ssh_executor import SSHExecutor
+from executors.ngfw_executor import NGFWExecutor
 from executors.ssm_executor import SSMExecutor
 from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import OpsOrchestrator
@@ -651,8 +651,8 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
     private_key = secret_response["SecretString"]
 
-    # Create SSH executor and wait for NGFW to be ready
-    ssh_executor = SSHExecutor(private_key=private_key)
+    # Create NGFW executor and wait for NGFW to be ready
+    ssh_executor = NGFWExecutor(private_key=private_key)
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
 
@@ -877,7 +877,7 @@ def parse_serial_number(system_info_output: str) -> str | None:
 
 
 def poll_for_serial_number(
-    ssh_executor: "SSHExecutor",
+    ssh_executor: NGFWExecutor,
     host: str,
     timeout_seconds: int = 600,
     poll_interval: int = 30,
@@ -888,7 +888,7 @@ def poll_for_serial_number(
     This function polls 'show system info' until a valid serial number appears.
 
     Args:
-        ssh_executor: SSHExecutor instance for running commands.
+        ssh_executor: NGFWExecutor instance for running commands.
         host: NGFW management IP address.
         timeout_seconds: Maximum time to wait for serial (default 10 min).
         poll_interval: Seconds between poll attempts (default 30s).
@@ -960,7 +960,7 @@ def parse_device_certificate_status(system_info_output: str) -> str | None:
 
 
 def poll_for_serial_and_cert(
-    ssh_executor: "SSHExecutor",
+    ssh_executor: NGFWExecutor,
     host: str,
     timeout_seconds: int = 1800,
     poll_interval: int = 30,
@@ -972,7 +972,7 @@ def poll_for_serial_and_cert(
     independently since they may appear at different times.
 
     Args:
-        ssh_executor: SSHExecutor instance for running commands.
+        ssh_executor: NGFWExecutor instance for running commands.
         host: NGFW management IP address.
         timeout_seconds: Maximum time to wait (default 30 min).
         poll_interval: Seconds between poll attempts (default 30s).
@@ -1057,7 +1057,7 @@ def poll_for_serial_and_cert(
 
 
 def wait_for_autocommit(
-    ssh_executor: "SSHExecutor",
+    ssh_executor: NGFWExecutor,
     host: str,
     timeout_seconds: int = 600,
     poll_interval: int = 15,
@@ -1069,7 +1069,7 @@ def wait_for_autocommit(
     until there are no active (ACT) commit jobs.
 
     Args:
-        ssh_executor: SSHExecutor instance for running commands.
+        ssh_executor: NGFWExecutor instance for running commands.
         host: NGFW management IP address.
         timeout_seconds: Maximum time to wait (default 10 min).
         poll_interval: Seconds between poll attempts (default 15s).
@@ -1225,7 +1225,7 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
 
 
 def find_stale_routes_by_cidr(
-    ssh_executor: SSHExecutor,
+    ssh_executor: NGFWExecutor,
     management_ip: str,
     target_cidrs: set[str],
 ) -> list[str]:
@@ -1291,7 +1291,7 @@ def find_stale_routes_by_cidr(
 
 
 def find_stale_routes_by_db(
-    ssh_executor: SSHExecutor,
+    ssh_executor: NGFWExecutor,
     management_ip: str,
     current_range_id: int,
 ) -> list[str]:
@@ -1414,8 +1414,8 @@ def configure_ngfw_subnets(
     secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
     private_key = secret_response["SecretString"]
 
-    # Create SSH executor
-    ssh_executor = SSHExecutor(private_key=private_key)
+    # Create NGFW executor
+    ssh_executor = NGFWExecutor(private_key=private_key)
 
     # Wait for SSH to be available
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
@@ -2875,7 +2875,7 @@ def _run_complete_setup(request_id: str) -> None:
         secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
         private_key: str = secret_response["SecretString"]
 
-        ssh_executor = SSHExecutor(private_key=private_key)
+        ssh_executor = NGFWExecutor(private_key=private_key)
         ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
         ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
 

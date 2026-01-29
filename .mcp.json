@@ -15,6 +15,14 @@
         "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
         "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"
       }
+    },
+    "shifter-aws": {
+      "command": "node",
+      "args": ["mcp/aws/index.js"],
+      "env": {
+        "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
+        "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"
+      }
     }
   }
 }

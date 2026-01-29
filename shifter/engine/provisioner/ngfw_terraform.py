@@ -21,7 +21,7 @@ from events import (
     STATUS_READY,
     publish_ngfw_event,
 )
-from executors.ssh_executor import SSHExecutor
+from executors.ngfw_executor import NGFWExecutor
 from orchestrators.setup_orchestrator import SetupOrchestrator
 from plans.ngfw_provision import NGFWProvisionPlan
 
@@ -85,7 +85,12 @@ def run_ngfw_terraform(operation: str, request_id: str) -> None:
             # Auto-cleanup on failure
             logger.info("NGFW provision failed - attempting auto-cleanup...")
             try:
-                terraform_runner.destroy_ngfw(request_id, terraform_runner.NGFW_MODULE_PATH)
+                tf_vars = _build_tf_variables(request_id, instance_id, app_spec)
+                terraform_runner.destroy_ngfw(
+                    request_id,
+                    terraform_runner.NGFW_MODULE_PATH,
+                    variables=tf_vars,
+                )
                 terraform_runner.cleanup_ngfw_state(request_id)
             except Exception as cleanup_error:
                 logger.warning("Auto-cleanup failed: %s", cleanup_error)
@@ -99,6 +104,37 @@ def run_ngfw_terraform(operation: str, request_id: str) -> None:
             status=STATUS_FAILED,
         )
         raise
+
+
+def _build_tf_variables(
+    request_id: str,
+    instance_id: str,
+    app_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Build Terraform variables from environment and app_spec.
+
+    Used by both provision and deprovision paths so Terraform has
+    all declared variables available.
+    """
+    user_id = app_spec.get("user_id", 0)
+    return {
+        "name_prefix": f"ngfw-user-{user_id}",
+        "user_id": user_id,
+        "instance_uuid": instance_id,
+        "request_uuid": request_id,
+        "environment": os.environ.get("ENVIRONMENT", "dev"),
+        "subnet_id": os.environ.get("NGFW_SUBNET_ID", ""),
+        "mgmt_security_group_id": os.environ.get("NGFW_MGMT_SECURITY_GROUP_ID", ""),
+        "data_security_group_id": os.environ.get("NGFW_DATA_SECURITY_GROUP_ID", ""),
+        "ami_id": os.environ.get("NGFW_AMI_ID", ""),
+        "bootstrap_bucket": os.environ.get("NGFW_BOOTSTRAP_BUCKET", ""),
+        "instance_type": os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
+        "instance_profile_name": os.environ.get("NGFW_INSTANCE_PROFILE_NAME") or None,
+        "scm_pin_id": app_spec.get("scm_pin_id", ""),
+        "scm_pin_value": app_spec.get("scm_pin_value", ""),
+        "scm_folder_name": app_spec.get("scm_folder_name", ""),
+        "authcode": app_spec.get("authcode", ""),
+    }
 
 
 def _run_provision(
@@ -125,26 +161,7 @@ def _run_provision(
 
     logger.info("Running terraform apply for NGFW...")
 
-    # Build Terraform variables from environment and app_spec
-    user_id = app_spec.get("user_id", 0)
-    tf_variables = {
-        "name_prefix": f"ngfw-user-{user_id}",
-        "user_id": user_id,
-        "instance_uuid": instance_id,
-        "request_uuid": request_id,
-        "environment": os.environ.get("ENVIRONMENT", "dev"),
-        "subnet_id": os.environ.get("NGFW_SUBNET_ID", ""),
-        "mgmt_security_group_id": os.environ.get("NGFW_MGMT_SECURITY_GROUP_ID", ""),
-        "data_security_group_id": os.environ.get("NGFW_DATA_SECURITY_GROUP_ID", ""),
-        "ami_id": os.environ.get("NGFW_AMI_ID", ""),
-        "bootstrap_bucket": os.environ.get("NGFW_BOOTSTRAP_BUCKET", ""),
-        "instance_type": os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
-        "instance_profile_name": os.environ.get("NGFW_INSTANCE_PROFILE_NAME") or None,
-        "scm_pin_id": app_spec.get("scm_pin_id", ""),
-        "scm_pin_value": app_spec.get("scm_pin_value", ""),
-        "scm_folder_name": app_spec.get("scm_folder_name", ""),
-        "authcode": app_spec.get("authcode", ""),
-    }
+    tf_variables = _build_tf_variables(request_id, instance_id, app_spec)
 
     # Run Terraform apply and get outputs
     output_data = terraform_runner.apply_ngfw(request_id, tf_variables, terraform_runner.NGFW_MODULE_PATH)
@@ -187,8 +204,8 @@ def _run_provision(
     except Exception as e:
         raise RuntimeError(f"Failed to retrieve SSH key from Secrets Manager: {e}") from e
 
-    # Create SSHExecutor for all SSH operations
-    ssh_executor = SSHExecutor(private_key=private_key)
+    # Create NGFWExecutor for all SSH operations (uses piping, not paramiko)
+    ssh_executor = NGFWExecutor(private_key=private_key)
 
     # Wait for SSH availability (NGFW can take 15-25 min to boot)
     ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
@@ -351,8 +368,8 @@ def _run_deprovision(
             secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
             private_key = secret_response["SecretString"]
 
-            # Create SSHExecutor and wait for SSH
-            ssh_executor = SSHExecutor(private_key=private_key)
+            # Create NGFWExecutor and wait for SSH (uses piping, not paramiko)
+            ssh_executor = NGFWExecutor(private_key=private_key)
             logger.info("Waiting for SSH availability before license deactivation...")
             ssh_executor.wait_for_agent(management_ip, timeout_seconds=300)
 
@@ -374,9 +391,17 @@ def _run_deprovision(
             bool(ec2_instance_id),
         )
 
+    # Build variables for destroy (Terraform needs all declared variables)
+    app_spec: dict[str, Any] = ngfw_data.get("app_spec", {})
+    tf_variables = _build_tf_variables(request_id, instance_id, app_spec)
+
     # Run Terraform destroy
     logger.info("Running terraform destroy for NGFW...")
-    terraform_runner.destroy_ngfw(request_id, terraform_runner.NGFW_MODULE_PATH)
+    terraform_runner.destroy_ngfw(
+        request_id,
+        terraform_runner.NGFW_MODULE_PATH,
+        variables=tf_variables,
+    )
 
     # Cleanup state file from S3
     logger.info("Cleaning up Terraform state...")

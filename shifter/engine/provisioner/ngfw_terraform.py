@@ -14,7 +14,6 @@ import boto3
 
 import terraform_runner
 from events import (
-    STATUS_AWAITING_ASSOCIATION,
     STATUS_DESTROYED,
     STATUS_DESTROYING,
     STATUS_FAILED,
@@ -250,38 +249,61 @@ def _run_provision(
         "serial_number": serial_number,
     }
 
-    # Save state to DB FIRST so run_ngfw_operation can find ec2_instance_id
-    # Keep status as provisioning for now - will update to awaiting_association after stop
+    # Save state to DB so run_ngfw_operation can find ec2_instance_id
     update_instance_state(request_id, STATUS_PROVISIONING, **state)
 
-    # Auto-stop NGFW to save costs while user completes association
-    # Stop BEFORE emitting awaiting_association status so NGFW is fully stopped
-    # when user sees the Complete Setup button (prevents race condition)
-    from main import run_ngfw_operation
-
-    logger.info(
-        "Auto-stopping NGFW after provisioning (awaiting association): request_id=%s",
-        request_id,
+    # Fetch license (retrieves Logging Service license)
+    logger.info("Fetching NGFW license: request_id=%s", request_id)
+    license_result = ssh_executor.run_command(
+        instance_id=management_ip,
+        script="request license fetch",
+        timeout_seconds=120,
     )
-    try:
-        run_ngfw_operation("stop", request_id)
-        logger.info("Auto-stop completed successfully: request_id=%s", request_id)
-    except Exception:
-        logger.exception(
-            "Auto-stop FAILED: request_id=%s - NGFW remains running (cost impact)",
-            request_id,
-        )
+    if not license_result.success:
+        logger.warning("License fetch returned non-success: %s", license_result.stderr)
+    logger.info(
+        "License fetch output: %s",
+        license_result.stdout[:500] if license_result.stdout else "(empty)",
+    )
 
-    # Update status to awaiting_association - user must complete setup
-    # User must: 1) Associate device in SCM, 2) Connect to XDR/XSIAM
-    update_instance_state(request_id, STATUS_AWAITING_ASSOCIATION)
+    # Poll for valid device certificate
+    from main import poll_for_serial_and_cert
+
+    logger.info("Polling for valid device certificate: request_id=%s", request_id)
+    poll_timeout = int(os.environ.get("NGFW_CERT_POLL_TIMEOUT", 2400))  # 40 min default
+    cert_serial = poll_for_serial_and_cert(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=poll_timeout,
+        poll_interval=30,
+    )
+    # Use cert poll serial if available (more recent), otherwise keep initial serial
+    if cert_serial:
+        serial_number = cert_serial
+
+    # Mark NGFW as ready
+    update_instance_state(request_id, STATUS_READY, serial_number=serial_number)
     publish_ngfw_event(
         request_id=request_id,
         instance_id=instance_id,
         app_id=app_id,
-        status=STATUS_AWAITING_ASSOCIATION,
+        status=STATUS_READY,
         serial_number=serial_number,
     )
+    logger.info("NGFW provisioning complete, serial=%s: request_id=%s", serial_number, request_id)
+
+    # Auto-stop NGFW to save costs (non-fatal)
+    from main import run_ngfw_operation
+
+    logger.info("Auto-stopping NGFW: request_id=%s", request_id)
+    try:
+        run_ngfw_operation("stop", request_id)
+        logger.info("Auto-stop completed: request_id=%s", request_id)
+    except Exception:
+        logger.exception(
+            "Auto-stop failed (non-fatal) - NGFW remains running: request_id=%s",
+            request_id,
+        )
 
 
 def _run_deprovision(

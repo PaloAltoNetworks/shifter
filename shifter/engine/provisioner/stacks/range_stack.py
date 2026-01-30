@@ -28,7 +28,7 @@ import pulumi
 from components.instance import InstanceComponent
 from components.network import NetworkComponent, allocate_subnets
 from config import InstanceConfig, RangeConfig
-from executors.ssh_executor import SSHExecutor
+from executors.ngfw_executor import NGFWExecutor
 from main import poll_for_serial_number
 from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
 
@@ -247,8 +247,8 @@ class RangeStack(pulumi.ComponentResource):
         secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
         private_key = secret_response["SecretString"]
 
-        # Create SSH executor
-        ssh_executor = SSHExecutor(private_key=private_key)
+        # Create NGFW executor
+        ssh_executor = NGFWExecutor(private_key=private_key)
 
         # Wait for SSH to be available
         logger.info("Waiting for SSH on NGFW at %s...", management_ip)

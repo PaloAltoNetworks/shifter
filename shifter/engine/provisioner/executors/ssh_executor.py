@@ -338,6 +338,7 @@ class SSHExecutor:
                 allow_agent=False,
                 look_for_keys=False,
             )
+            logger.info(f"SSH readiness check: connected to {host}")
 
             # Use interactive shell - PAN-OS does not support SSH exec channel
             channel = client.invoke_shell()
@@ -355,8 +356,23 @@ class SSHExecutor:
 
             # Verify command succeeded with valid system info output
             # Check for key fields that will always be present in valid output
-            return "hostname" in output and "ip-address" in output and "netmask" in output
-        except Exception:
+            has_hostname = "hostname" in output
+            has_ip = "ip-address" in output
+            has_netmask = "netmask" in output
+            is_ready = has_hostname and has_ip and has_netmask
+
+            if is_ready:
+                logger.info(f"SSH readiness check passed for {host}")
+            else:
+                logger.info(
+                    f"SSH readiness check failed for {host}: "
+                    f"hostname={has_hostname} ip-address={has_ip} netmask={has_netmask} "
+                    f"output_length={len(output)} output={output!r:.500}"
+                )
+
+            return is_ready
+        except Exception as exc:
+            logger.info(f"SSH readiness check exception for {host}: {exc}")
             return False
 
     def reboot_and_wait(

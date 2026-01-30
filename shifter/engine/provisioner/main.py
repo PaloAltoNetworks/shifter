@@ -570,7 +570,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
 
     Returns:
         Dictionary with ec2_instance_id, management_ip, ssh_key_secret_arn,
-        and ngfw_request_id. Returns None if user has no NGFW.
+        data_eni_id, and ngfw_request_id. Returns None if user has no NGFW.
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -602,6 +602,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
             "ec2_instance_id": state.get("ec2_instance_id"),
             "management_ip": state.get("management_ip"),
             "ssh_key_secret_arn": state.get("ssh_key_secret_arn"),
+            "data_eni_id": state.get("data_eni_id"),
             "status": status,
         }
 
@@ -2440,6 +2441,19 @@ def _run_terraform_provision(
         expected_subnet_names=expected_subnet_names,
     )
 
+    # Validate NGFW routes were created if range requires NGFW
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        if not ngfw_data or not ngfw_data.get("data_eni_id"):
+            raise RuntimeError(
+                "NGFW routing validation failed: Range requires NGFW but data_eni_id is missing. "
+                "This should have been caught earlier - investigation required."
+            )
+        logger.info(
+            "NGFW-enabled range validated: inter-subnet routes created via data_eni_id=%s",
+            ngfw_data["data_eni_id"],
+        )
+
     # Configure NGFW with routes for range subnets
     ngfw_data = get_user_ngfw_data(user_id)
     ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
@@ -2620,6 +2634,24 @@ def _build_range_terraform_variables(
             }
         )
 
+    # Get NGFW data ENI ID from database for inter-subnet routing
+    ngfw_data_eni_id = ""
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        if not ngfw_data:
+            raise ValueError(
+                f"Range requires NGFW (ngfw: true in spec) but user {user_id} has no provisioned NGFW. "
+                "User must provision an NGFW before creating NGFW-enabled ranges."
+            )
+        ngfw_data_eni_id = ngfw_data.get("data_eni_id", "")
+        if not ngfw_data_eni_id:
+            raise ValueError(
+                f"Range requires NGFW but user {user_id}'s NGFW is missing data_eni_id in state. "
+                "NGFW may have failed provisioning or is from an old version. "
+                f"NGFW request_id: {ngfw_data.get('ngfw_request_id')}"
+            )
+        logger.info("Using NGFW data_eni_id=%s for range %s inter-subnet routing", ngfw_data_eni_id, range_id)
+
     return {
         # Core identifiers
         "range_id": range_id,
@@ -2635,7 +2667,7 @@ def _build_range_terraform_variables(
         "firewall_endpoint_id": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
         "portal_vpc_cidr": os.environ.get("PORTAL_VPC_CIDR", ""),
         "portal_vpc_peering_id": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
-        "ngfw_data_eni_id": os.environ.get("NGFW_ENI_ID", ""),
+        "ngfw_data_eni_id": ngfw_data_eni_id,
         # AMI IDs
         "kali_ami_id": get_ami_id("kali"),
         "victim_ami_id": get_ami_id("victim"),

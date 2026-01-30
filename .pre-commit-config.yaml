@@ -73,6 +73,27 @@ repos:
         files: ^shifter/shifter_platform/static/js/.*\.js$
         types: [javascript]
 
+      - id: eslint-mcp-shifter-db
+        name: eslint (mcp/shifter-db)
+        entry: bash -c 'cd mcp/shifter-db && npx eslint .'
+        language: system
+        files: ^mcp/shifter-db/.*\.js$
+        types: [javascript]
+
+      - id: eslint-mcp-ngfw
+        name: eslint (mcp/ngfw)
+        entry: bash -c 'cd mcp/ngfw && npx eslint .'
+        language: system
+        files: ^mcp/ngfw/.*\.js$
+        types: [javascript]
+
+      - id: eslint-mcp-aws
+        name: eslint (mcp/aws)
+        entry: bash -c 'cd mcp/aws && npx eslint .'
+        language: system
+        files: ^mcp/aws/.*\.js$
+        types: [javascript]
+
       - id: stylelint-shifter-platform
         name: stylelint (shifter_platform)
         entry: bash -c 'cd shifter/shifter_platform && npx stylelint --fix static/css/'
@@ -239,6 +260,30 @@ repos:
         entry: bash -c 'cd shifter/shifter_platform && npm test -- --coverage --coverageReporters=lcov --coverageReporters=text-summary --coverageDirectory=../../coverage/js'
         language: system
         files: ^shifter/shifter_platform/static/js/.*\.js$
+        pass_filenames: false
+
+  # MCP tests (Node.js)
+  - repo: local
+    hooks:
+      - id: test-mcp-shifter-db
+        name: test (mcp/shifter-db)
+        entry: bash -c 'cd mcp/shifter-db && npm test'
+        language: system
+        files: ^mcp/shifter-db/
+        pass_filenames: false
+
+      - id: test-mcp-ngfw
+        name: test (mcp/ngfw)
+        entry: bash -c 'cd mcp/ngfw && npm test'
+        language: system
+        files: ^mcp/ngfw/
+        pass_filenames: false
+
+      - id: test-mcp-aws
+        name: test (mcp/aws)
+        entry: bash -c 'cd mcp/aws && npm test'
+        language: system
+        files: ^mcp/aws/
         pass_filenames: false
 
   # Shifter Platform tests (largest test suite - run last)

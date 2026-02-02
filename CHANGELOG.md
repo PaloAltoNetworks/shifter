@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-02-01
+
+### Fixed
+- Refine Internet egress domains and CIDR to Palo Alto Networks published IPs instead of overbroad GCP IPs
+
 ## [1.0.6] - 2026-01-28
 
 ### Added

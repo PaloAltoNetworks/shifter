@@ -296,6 +296,43 @@ resource "aws_networkfirewall_rule_group" "allow_dns" {
 }
 
 # ------------------------------------------------------------------------------
+# NTP Allow Rule (UDP 123 - required for time sync)
+# ------------------------------------------------------------------------------
+
+resource "aws_networkfirewall_rule_group" "allow_ntp" {
+  count = var.enable_network_firewall ? 1 : 0
+
+  capacity = 10
+  name     = "${var.name_prefix}-allow-ntp"
+  type     = "STATEFUL"
+
+  rule_group {
+    rule_variables {
+      ip_sets {
+        key = "HOME_NET"
+        ip_set {
+          definition = [var.vpc_cidr]
+        }
+      }
+    }
+
+    rules_source {
+      rules_string = <<-EOT
+        pass udp $HOME_NET any -> any 123 (msg:"Allow NTP"; sid:1000030; rev:1;)
+      EOT
+    }
+
+    stateful_rule_options {
+      rule_order = "STRICT_ORDER"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-allow-ntp"
+  })
+}
+
+# ------------------------------------------------------------------------------
 # Drop All Unmatched Traffic (default deny)
 # ------------------------------------------------------------------------------
 
@@ -400,6 +437,12 @@ resource "aws_networkfirewall_firewall_policy" "this" {
         resource_arn = aws_networkfirewall_rule_group.kali_domains[0].arn
         priority     = 2 + length(local.cidr_chunks) + 2
       }
+    }
+
+    # NTP allow - allow NTP to any (priority 98)
+    stateful_rule_group_reference {
+      resource_arn = aws_networkfirewall_rule_group.allow_ntp[0].arn
+      priority     = 98
     }
 
     # DNS allow - allow DNS to 8.8.8.8 (priority 99 - just before drop all)

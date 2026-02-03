@@ -2454,29 +2454,30 @@ def _run_terraform_provision(
             ngfw_data["data_eni_id"],
         )
 
-    # Configure NGFW with routes for range subnets
-    ngfw_data = get_user_ngfw_data(user_id)
-    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
-    if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
-        logger.info("Configuring NGFW with subnet routes...")
-        subnets_for_ngfw = []
-        for spec_subnet in spec_subnets:
-            subnet_name = spec_subnet.get("name", "")
-            subnet_output = subnets_output.get(subnet_name, {})
-            subnets_for_ngfw.append(
-                {
-                    "name": subnet_name,
-                    "cidr": subnet_output.get("subnet_cidr", ""),
-                    "connected_to": spec_subnet.get("connected_to", []),
-                }
+    # Configure NGFW with routes for range subnets (only if range requires NGFW)
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
+        if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
+            logger.info("Configuring NGFW with subnet routes...")
+            subnets_for_ngfw = []
+            for spec_subnet in spec_subnets:
+                subnet_name = spec_subnet.get("name", "")
+                subnet_output = subnets_output.get(subnet_name, {})
+                subnets_for_ngfw.append(
+                    {
+                        "name": subnet_name,
+                        "cidr": subnet_output.get("subnet_cidr", ""),
+                        "connected_to": spec_subnet.get("connected_to", []),
+                    }
+                )
+            configure_ngfw_subnets(
+                subnets=subnets_for_ngfw,
+                range_id=range_id,
+                management_ip=ngfw_data["management_ip"],
+                ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
+                ngfw_subnet_cidr=ngfw_subnet_cidr,
             )
-        configure_ngfw_subnets(
-            subnets=subnets_for_ngfw,
-            range_id=range_id,
-            management_ip=ngfw_data["management_ip"],
-            ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
-            ngfw_subnet_cidr=ngfw_subnet_cidr,
-        )
 
     # Run instance setup (DC first, then others in parallel)
     logger.info("Running instance setup...")

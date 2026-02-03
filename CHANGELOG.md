@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-02-02
+
+### Fixed
+- Fix logic error handling non-NGFW scenarios
+
 ## [1.0.7] - 2026-02-01
 
 ### Fixed

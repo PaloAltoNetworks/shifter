@@ -11,6 +11,8 @@ import logging
 from django.utils import timezone
 
 from engine.models import Range
+from risk_register.models import AuditLog
+from risk_register.services import audit_log_system_event
 from shared.enums import ResourceStatus
 from shared.messages.events import (
     EVENT_TYPE_NGFW,
@@ -19,6 +21,18 @@ from shared.messages.events import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _status_to_action(status: str) -> str:
+    """Map range status to audit action."""
+    status_action_map = {
+        ResourceStatus.READY.value: AuditLog.Action.READY,
+        ResourceStatus.FAILED.value: AuditLog.Action.FAILED,
+        ResourceStatus.DESTROYED.value: AuditLog.Action.DEPROVISION,
+        ResourceStatus.PROVISIONING.value: AuditLog.Action.PROVISION,
+        ResourceStatus.DESTROYING.value: AuditLog.Action.DEPROVISION,
+    }
+    return status_action_map.get(status, AuditLog.Action.UPDATE)
 
 
 def process_event(message: str | dict) -> None:
@@ -143,6 +157,18 @@ def _handle_status_updated(event: dict) -> None:
         logger.exception("DB error saving Range: range_id=%s", range_id)
         return
 
+    # Audit log the status change
+    audit_log_system_event(
+        entity_type=AuditLog.EntityType.RANGE,
+        entity_id=range_id,
+        action=_status_to_action(new_status),
+        source="engine.handlers",
+        previous_state={"status": previous_status},
+        new_state={"status": new_status},
+        context=error_message or "",
+        request_id=event_id,
+    )
+
     logger.info(
         "Engine updated Range: range_id=%s status=%s->%s event_id=%s",
         range_id,
@@ -220,6 +246,19 @@ def _handle_ngfw_event(event: dict) -> None:
     instance_id = event.get("instance_id")
     app_id = event.get("app_id")
     status = event.get("status")
+
+    # Audit log the NGFW status change
+    audit_log_system_event(
+        entity_type=AuditLog.EntityType.NGFW,
+        entity_id=app_id or 0,
+        action=_status_to_action(status) if status else AuditLog.Action.UPDATE,
+        source="engine.handlers",
+        new_state={
+            "status": status,
+            "instance_id": instance_id,
+        },
+        request_id=str(request_id) if request_id else event_id,
+    )
 
     # Log the event for audit purposes
     logger.info(

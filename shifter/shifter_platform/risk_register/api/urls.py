@@ -8,6 +8,7 @@ from risk_register.api import views
 router = DefaultRouter()
 router.register(r"risks", views.RiskViewSet, basename="risk")
 router.register(r"api-keys", views.APIKeyViewSet, basename="apikey")
+router.register(r"audit", views.AuditLogViewSet, basename="auditlog")
 
 urlpatterns = [
     path("", include(router.urls)),

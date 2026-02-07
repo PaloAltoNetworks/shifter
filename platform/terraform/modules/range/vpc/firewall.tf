@@ -207,6 +207,17 @@ resource "aws_networkfirewall_rule_group" "block_ip_sni" {
 # ------------------------------------------------------------------------------
 # IP-based Allowlist (GCP ranges for PANW services)
 # Split into multiple rule groups due to AWS 8192 char rule limit
+#
+# IMPORTANT: Reducing the number of CIDR chunks (victim_allowed_cidrs) requires
+# manual intervention. Terraform cannot properly order the policy update before
+# deleting orphaned rule groups because AWS Network Firewall requires the policy
+# to be updated first. Lifecycle blocks have not resolved this issue historically.
+#
+# Manual fix when reducing chunks:
+#   1. Update the firewall policy via AWS CLI to remove the rule group references:
+#      aws network-firewall update-firewall-policy --firewall-policy-name <name> \
+#        --update-token <token> --firewall-policy '<json without orphaned refs>'
+#   2. Run terraform apply to delete the orphaned rule groups
 # ------------------------------------------------------------------------------
 
 locals {

@@ -259,10 +259,10 @@ module "ssm" {
   s3_bucket_name = var.user_storage_bucket
 
   # Pulumi provisioner configuration
-  pulumi_ecs_cluster_arn       = module.pulumi_provisioner.ecs_cluster_arn
-  pulumi_task_definition_arn   = module.pulumi_provisioner.task_definition_arn
-  pulumi_ecs_security_group_id = module.pulumi_provisioner.ecs_security_group_id
-  pulumi_private_subnet_ids    = join(",", module.vpc.private_subnet_ids)
+  pulumi_ecs_cluster_arn        = module.pulumi_provisioner.ecs_cluster_arn
+  pulumi_task_definition_family = module.pulumi_provisioner.task_definition_family
+  pulumi_ecs_security_group_id  = module.pulumi_provisioner.ecs_security_group_id
+  pulumi_private_subnet_ids     = join(",", module.vpc.private_subnet_ids)
 
   # Messaging configuration
   sqs_cms_url    = module.messaging.sqs_queue_urls["cms"]

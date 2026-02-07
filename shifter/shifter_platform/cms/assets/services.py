@@ -17,9 +17,8 @@ from django.utils import timezone
 from cms.assets.s3 import S3Error
 from cms.assets.s3 import delete_agent as s3_delete
 from cms.models import AgentConfig, OperatingSystem
-
-# TODO: Layer violation - CMS should not import from management. See GH issue #469
-from management.services import log_activity
+from risk_register.models import AuditLog
+from risk_register.services import audit_log
 from shared.exceptions import AssetError
 
 if TYPE_CHECKING:
@@ -96,22 +95,23 @@ def create_agent(
         sha256_hash=sha256,
     )
 
-    # Build activity log metadata
-    log_metadata = {
-        "agent_id": agent.id,
-        "agent_name": name,
-        "filename": filename,
+    # Audit log agent creation
+    new_state = {
+        "name": name,
         "os": os_slug,
+        "filename": filename,
         "file_size": file_size,
     }
     if upload_method:
-        log_metadata["upload_method"] = upload_method
+        new_state["upload_method"] = upload_method
 
-    # Log activity
-    log_activity(
-        "agent_uploaded",
-        user=user,
-        **log_metadata,
+    audit_log(
+        entity_type=AuditLog.EntityType.AGENT,
+        entity_id=agent.id,
+        action=AuditLog.Action.CREATE,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        new_state=new_state,
     )
 
     logger.info("create_agent: success agent_id=%s user_id=%s", agent.id, user.id)
@@ -139,16 +139,24 @@ def delete_agent(agent: AgentConfig) -> None:
         logger.error("delete_agent: S3 delete failed agent_id=%s error=%s", agent.id, e)
         raise AssetError(f"Failed to delete agent from storage: {e}") from e
 
+    # Capture state before deletion
+    previous_state = {
+        "name": agent.name,
+        "os": agent.os.slug,
+    }
+
     # Soft delete the database record
     agent.deleted_at = timezone.now()
     agent.save(update_fields=["deleted_at"])
 
-    # Log activity
-    log_activity(
-        "agent_deleted",
-        user=agent.user,
-        agent_id=agent.id,
-        agent_name=agent.name,
+    # Audit log agent deletion
+    audit_log(
+        entity_type=AuditLog.EntityType.AGENT,
+        entity_id=agent.id,
+        action=AuditLog.Action.DELETE,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=agent.user.id,
+        previous_state=previous_state,
     )
 
     logger.info("delete_agent: success agent_id=%s", agent.id)

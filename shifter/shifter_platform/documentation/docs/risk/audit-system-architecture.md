@@ -277,15 +277,39 @@ def audit_log_system_event(
 
 Future: CSV/JSON export for compliance reporting.
 
-## Retention
+## Retention and Archival
 
-Default: 90 days in database, archived to S3 thereafter.
+Default: 90 days in database, archived to existing logs bucket thereafter.
 
-```python
-# Management command: audit_archive
-# Moves records older than AUDIT_RETENTION_DAYS to S3
-# Deletes from database after successful archive
+### Infrastructure Integration
+
+Uses the existing log-aggregation S3 bucket (`{name_prefix}-logs-{environment}`):
+
 ```
+logs bucket (from Terraform log-aggregation module)
+├── logs/year=YYYY/month=MM/day=DD/  (CloudWatch → Firehose operational logs)
+└── audit-archive/YYYY/MM/           (AuditLog database records)
+```
+
+### Configuration Required
+
+Add to portal container environment (user_data.sh):
+```bash
+COMMON_ENV="$COMMON_ENV -e LOGS_BUCKET_NAME=$LOGS_BUCKET_NAME"
+```
+
+Where `$LOGS_BUCKET_NAME` is the output from `module.log_aggregation.logs_bucket_name`.
+
+### Management Command
+
+```bash
+python manage.py audit_archive              # Archive records older than 90 days
+python manage.py audit_archive --dry-run    # Preview without changes
+python manage.py audit_archive --retention-days 30
+python manage.py audit_archive --no-delete  # Archive but keep in database
+```
+
+Archives to: `s3://{bucket}/audit-archive/{year}/{month}/audit_{timestamp}.jsonl.gz`
 
 ## Security Considerations
 

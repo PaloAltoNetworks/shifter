@@ -88,15 +88,20 @@ class Command(BaseCommand):
             return
 
         # Get S3 bucket from settings or environment
-        bucket_name = getattr(settings, "AUDIT_ARCHIVE_BUCKET", None) or os.environ.get(
-            "AUDIT_ARCHIVE_BUCKET"
+        # Uses the existing logs bucket from log-aggregation infrastructure
+        # Falls back to AUDIT_ARCHIVE_BUCKET for backward compatibility
+        bucket_name = (
+            getattr(settings, "LOGS_BUCKET_NAME", None)
+            or os.environ.get("LOGS_BUCKET_NAME")
+            or getattr(settings, "AUDIT_ARCHIVE_BUCKET", None)
+            or os.environ.get("AUDIT_ARCHIVE_BUCKET")
         )
 
         if not bucket_name:
             self.stdout.write(
                 self.style.ERROR(
-                    "AUDIT_ARCHIVE_BUCKET not configured. "
-                    "Set in settings or environment."
+                    "LOGS_BUCKET_NAME not configured. "
+                    "Set via Terraform log-aggregation module output."
                 )
             )
             return

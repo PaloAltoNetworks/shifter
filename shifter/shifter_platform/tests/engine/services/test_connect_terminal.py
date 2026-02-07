@@ -182,19 +182,24 @@ class TestConnectTerminal:
     # Error handling - range not found
     # -------------------------------------------------------------------------
 
-    def test_raises_when_no_range_found_for_instance(self):
-        """Service raises ValueError when no range contains the instance."""
+    def test_raises_when_no_range_and_no_ngfw_found_for_instance(self):
+        """Service raises ValueError when UUID is neither in a range nor an NGFW."""
         from engine import connect_terminal
-        from engine.models import Range
+        from engine.models import Instance, Range
 
         mock_user = Mock(id=1)
 
-        mock_queryset = Mock()
-        mock_queryset.first = Mock(return_value=None)
+        mock_range_qs = Mock()
+        mock_range_qs.first = Mock(return_value=None)
+
+        # NGFW fallback also returns nothing
+        mock_instance_qs = Mock()
+        mock_instance_qs.select_related.return_value.first.return_value = None
 
         with (
-            patch.object(Range.objects, "filter", return_value=mock_queryset),
-            pytest.raises(ValueError, match=r"No range found"),
+            patch.object(Range.objects, "filter", return_value=mock_range_qs),
+            patch.object(Instance.objects, "filter", return_value=mock_instance_qs),
+            pytest.raises(ValueError, match=r"not found"),
         ):
             connect_terminal(mock_user, "non-existent-uuid")
 
@@ -297,24 +302,29 @@ class TestConnectTerminal:
     # Logging - ERROR on failures
     # -------------------------------------------------------------------------
 
-    def test_logs_error_when_range_not_found(self, caplog):
-        """Service logs error when no range found for instance."""
+    def test_logs_warning_when_neither_range_nor_ngfw_found(self, caplog):
+        """Service logs warning when UUID not found in range or as NGFW."""
         from engine import connect_terminal
-        from engine.models import Range
+        from engine.models import Instance, Range
 
         mock_user = Mock(id=1)
 
-        mock_queryset = Mock()
-        mock_queryset.first = Mock(return_value=None)
+        mock_range_qs = Mock()
+        mock_range_qs.first = Mock(return_value=None)
+
+        # NGFW fallback also returns nothing
+        mock_instance_qs = Mock()
+        mock_instance_qs.select_related.return_value.first.return_value = None
 
         with (
-            patch.object(Range.objects, "filter", return_value=mock_queryset),
-            caplog.at_level(logging.ERROR, logger="engine"),
+            patch.object(Range.objects, "filter", return_value=mock_range_qs),
+            patch.object(Instance.objects, "filter", return_value=mock_instance_qs),
+            caplog.at_level(logging.DEBUG, logger="engine"),
             pytest.raises(ValueError),
         ):
             connect_terminal(mock_user, "missing-uuid")
 
-        assert "error" in caplog.text.lower() or "not found" in caplog.text.lower()
+        assert "not found" in caplog.text.lower() or "ngfw" in caplog.text.lower()
 
     def test_logs_error_when_range_not_ready(self, caplog):
         """Service logs error when range is not READY."""

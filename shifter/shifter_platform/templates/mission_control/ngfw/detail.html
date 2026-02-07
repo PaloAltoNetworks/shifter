@@ -241,6 +241,38 @@
     </div>
 </div>
 
+{% if ngfw.status == 'ready' %}
+<!-- NGFW Access - CLI and GUI buttons -->
+<div class="card" style="border-color: #177ddc;">
+    <h2 class="section-title" style="color: #177ddc;">Access</h2>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+        <a href="{% url 'mission_control:terminal' %}" class="btn btn-primary btn-small" title="Open PAN-OS CLI in terminal">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 4px;">
+                <path d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            CLI Terminal
+        </a>
+        <button class="btn btn-primary btn-small ngfw-gui-btn"
+                data-app-id="{{ ngfw.app_id }}"
+                title="Open Kali desktop to access NGFW web UI">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 4px;">
+                <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                <path d="M8 21H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 17V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            GUI Access
+        </button>
+    </div>
+    {% if ngfw_management_ip %}
+    <p style="color: var(--xdr-text-secondary); margin: 12px 0 0; font-size: 12px;">
+        Management IP: <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px;">{{ ngfw_management_ip }}</code>
+        &mdash; Access the web UI at <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px;">https://{{ ngfw_management_ip }}</code> from your Kali desktop.
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
 {% if ngfw.status == 'ready' or ngfw.status == 'stopped' %}
 <!-- Data Source Instruction - shown when NGFW is ready -->
 <div class="card" style="border-color: #00d26a;">
@@ -335,6 +367,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // GUI Access button handler - opens Kali desktop via Guacamole RDP
+    const guiBtn = document.querySelector('.ngfw-gui-btn');
+    if (guiBtn) {
+        guiBtn.addEventListener('click', async function() {
+            const appId = this.dataset.appId;
+            this.disabled = true;
+            this.classList.add('loading');
+
+            try {
+                const response = await fetch('{% url "mission_control:api_ngfw_gui_url" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}',
+                    },
+                    body: JSON.stringify({ app_id: appId }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to generate GUI access URL');
+                }
+
+                // Open Kali desktop in new tab
+                window.open(data.url, '_blank');
+            } catch (error) {
+                console.error('GUI access error:', error);
+                alert('Failed to open GUI access: ' + error.message);
+            } finally {
+                this.disabled = false;
+                this.classList.remove('loading');
+            }
+        });
+    }
 });
 </script>
 {% endblock %}

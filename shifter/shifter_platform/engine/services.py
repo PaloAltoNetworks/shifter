@@ -667,8 +667,8 @@ def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
     """Get SSH connection to instance.
 
     Looks up the Range containing the instance by searching provisioned_instances
-    JSONB for matching UUID. This supports the new request_id-based provisioning
-    pattern where range_id may not be populated in CMS.
+    JSONB for matching UUID. Falls back to NGFW Instance lookup if not found
+    in range instances.
 
     Args:
         user: Authenticated user requesting connection
@@ -703,12 +703,13 @@ def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
     ).first()
 
     if not range_obj:
-        logger.error(
-            "Range not found for instance: user_id=%s instance_uuid=%s",
+        # Fallback: check if this is an NGFW instance
+        logger.debug(
+            "connect_terminal: UUID not in range instances, trying NGFW fallback: user_id=%s uuid=%s",
             user.id,
             instance_uuid,
         )
-        raise ValueError(f"No range found containing instance {instance_uuid}")
+        return connect_ngfw_terminal(user, instance_uuid)
 
     # Verify range is ready
     if range_obj.status != Range.Status.READY:
@@ -766,6 +767,289 @@ def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
         private_key=ssh_key,
         session_id=session_id,
     )
+
+
+def connect_ngfw_terminal(user: User, instance_uuid: str) -> SSHConnection:
+    """Get SSH connection to NGFW management interface.
+
+    Looks up the NGFW Instance by UUID, validates the user owns the
+    parent Request, and returns an SSHConnection configured for PAN-OS
+    CLI access (admin user, SSH key auth, no tmux).
+
+    Args:
+        user: Authenticated user requesting connection
+        instance_uuid: UUID of the NGFW engine Instance
+
+    Returns:
+        SSHConnection configured for PAN-OS admin SSH
+
+    Raises:
+        ValueError: If user is None, UUID invalid, NGFW not found,
+            not ready, or missing connection details
+        PermissionError: If user doesn't own the NGFW
+    """
+    from engine.models import Instance
+    from engine.secrets import get_ssh_key
+    from engine.ssh import SSHConnection
+
+    if user is None:
+        raise ValueError("user is required")
+    if not instance_uuid:
+        raise ValueError("instance_uuid is required")
+
+    logger.debug(
+        "connect_ngfw_terminal: user_id=%s instance_uuid=%s",
+        user.id,
+        instance_uuid,
+    )
+
+    # Look up NGFW Instance by UUID
+    ngfw_instance = (
+        Instance.objects.filter(
+            uuid=instance_uuid,
+            role=Instance.Role.NGFW,
+        )
+        .select_related("request")
+        .first()
+    )
+
+    if not ngfw_instance:
+        logger.warning(
+            "connect_ngfw_terminal: NGFW instance not found: uuid=%s",
+            instance_uuid,
+        )
+        raise ValueError(f"NGFW instance {instance_uuid} not found")
+
+    # Validate ownership via Request → User FK
+    if ngfw_instance.request is None or ngfw_instance.request.user_id != user.id:
+        logger.warning(
+            "connect_ngfw_terminal: permission denied: user_id=%s ngfw_uuid=%s owner_id=%s",
+            user.id,
+            instance_uuid,
+            ngfw_instance.request.user_id if ngfw_instance.request else None,
+        )
+        raise PermissionError(
+            f"User {user.id} does not own NGFW instance {instance_uuid}"
+        )
+
+    # Validate NGFW is ready
+    if ngfw_instance.status != "ready":
+        logger.warning(
+            "connect_ngfw_terminal: NGFW not ready: uuid=%s status=%s",
+            instance_uuid,
+            ngfw_instance.status,
+        )
+        raise ValueError(f"NGFW is not ready (status: {ngfw_instance.status})")
+
+    # Get management IP and SSH key from instance state
+    state = ngfw_instance.state or {}
+    management_ip = state.get("management_ip")
+    if not management_ip:
+        logger.error(
+            "connect_ngfw_terminal: no management_ip in state: uuid=%s",
+            instance_uuid,
+        )
+        raise ValueError(f"NGFW {instance_uuid} has no management IP")
+
+    ssh_key_arn = state.get("ssh_key_secret_arn")
+    if not ssh_key_arn:
+        logger.error(
+            "connect_ngfw_terminal: no ssh_key_secret_arn in state: uuid=%s",
+            instance_uuid,
+        )
+        raise ValueError(f"NGFW {instance_uuid} has no SSH key configured")
+
+    ssh_key = get_ssh_key(ssh_key_arn)
+
+    logger.info(
+        "connect_ngfw_terminal: connecting to NGFW: uuid=%s host=%s user=admin",
+        instance_uuid,
+        management_ip,
+    )
+
+    # PAN-OS SSH: admin user, no tmux (PAN-OS doesn't support it)
+    return SSHConnection(
+        host=management_ip,
+        username="admin",
+        private_key=ssh_key,
+        session_id=None,
+    )
+
+
+def get_range_ngfw_context(user: User) -> dict[str, Any] | None:
+    """Get NGFW context for user's active range terminal page.
+
+    Returns NGFW instance info suitable for inclusion in the terminal
+    page when the user's active range has an attached NGFW.
+
+    Args:
+        user: Authenticated user
+
+    Returns:
+        Dict with uuid, name, role, os_type, management_ip if NGFW
+        is attached and ready, None otherwise.
+    """
+    from engine.models import Range
+
+    if user is None:
+        return None
+
+    logger.debug("get_range_ngfw_context: user_id=%s", user.id)
+
+    range_obj = Range.get_active_for_user(user)
+    if not range_obj or range_obj.status != Range.Status.READY:
+        logger.debug(
+            "get_range_ngfw_context: no ready range for user_id=%s",
+            user.id,
+        )
+        return None
+
+    ngfw_instance = range_obj.ngfw_instance
+    if not ngfw_instance:
+        logger.debug(
+            "get_range_ngfw_context: range %s has no NGFW attached",
+            range_obj.id,
+        )
+        return None
+
+    if ngfw_instance.status != "ready":
+        logger.debug(
+            "get_range_ngfw_context: NGFW not ready: uuid=%s status=%s",
+            ngfw_instance.uuid,
+            ngfw_instance.status,
+        )
+        return None
+
+    # Get name from spec (ngfw_app.name or instance name)
+    name = "NGFW"
+    if ngfw_instance.spec:
+        ngfw_app = ngfw_instance.spec.get("ngfw_app")
+        if ngfw_app and ngfw_app.get("name"):
+            name = ngfw_app["name"]
+        elif ngfw_instance.spec.get("name"):
+            name = ngfw_instance.spec["name"]
+
+    # Get management IP for GUI access info
+    state = ngfw_instance.state or {}
+    management_ip = state.get("management_ip")
+
+    logger.info(
+        "get_range_ngfw_context: found NGFW for range %s: uuid=%s name=%s",
+        range_obj.id,
+        ngfw_instance.uuid,
+        name,
+    )
+
+    return {
+        "uuid": str(ngfw_instance.uuid),
+        "name": name,
+        "role": "ngfw",
+        "os_type": "panos",
+        "management_ip": management_ip,
+    }
+
+
+def get_ngfw_gui_info(user: User, app_id: str) -> dict[str, Any]:
+    """Get connection info for NGFW GUI access via Kali instance.
+
+    Returns the NGFW management IP and Kali RDP connection info so the
+    user can access the PAN-OS web UI through their Kali desktop.
+
+    Args:
+        user: Authenticated user requesting connection
+        app_id: CMS App UUID of the NGFW
+
+    Returns:
+        Dict with: management_ip, kali connection info for RDP
+
+    Raises:
+        ValueError: If NGFW not found, not ready, no active range,
+            or no Kali instance available
+    """
+    from engine.models import Instance, Range
+    from engine.secrets import get_ssh_key
+
+    if user is None:
+        raise ValueError("user is required")
+    if not app_id:
+        raise ValueError("app_id is required")
+
+    logger.debug("get_ngfw_gui_info: user_id=%s app_id=%s", user.id, app_id)
+
+    # Look up the NGFW engine Instance via CMS App UUID
+    # The engine App model stores the CMS app_id as its UUID
+    from engine.models import App
+
+    ngfw_app = (
+        App.objects.filter(
+            uuid=app_id,
+            app_type=App.AppType.NGFW,
+        )
+        .select_related("instance", "instance__request")
+        .first()
+    )
+
+    if not ngfw_app:
+        raise ValueError(f"NGFW app {app_id} not found")
+
+    ngfw_instance = ngfw_app.instance
+
+    # Validate ownership
+    if ngfw_instance.request is None or ngfw_instance.request.user_id != user.id:
+        raise PermissionError(f"User {user.id} does not own NGFW {app_id}")
+
+    # Validate NGFW is ready
+    if ngfw_instance.status != "ready":
+        raise ValueError(f"NGFW is not ready (status: {ngfw_instance.status})")
+
+    # Get NGFW management IP
+    state = ngfw_instance.state or {}
+    management_ip = state.get("management_ip")
+    if not management_ip:
+        raise ValueError(f"NGFW {app_id} has no management IP")
+
+    # Find user's active range with a Kali instance for GUI access
+    range_obj = Range.get_active_for_user(user)
+    if not range_obj:
+        raise ValueError(
+            "No active range found. Launch a range to access NGFW GUI "
+            "through the Kali desktop."
+        )
+    if range_obj.status != Range.Status.READY:
+        raise ValueError(f"Range is not ready (status: {range_obj.status})")
+
+    # Find Kali (attacker) instance in the range
+    kali_instance = range_obj.get_instance_by_role("attacker")
+    if not kali_instance:
+        raise ValueError("No Kali (attacker) instance found in active range")
+
+    kali_ip = kali_instance.get("private_ip")
+    if not kali_ip:
+        raise ValueError("Kali instance has no IP address")
+
+    # Get Kali SSH key for Guacamole SFTP
+    kali_ssh_key = None
+    kali_ssh_key_arn = kali_instance.get("ssh_key_secret_arn")
+    if kali_ssh_key_arn:
+        try:
+            kali_ssh_key = get_ssh_key(kali_ssh_key_arn)
+        except Exception as e:
+            logger.warning("get_ngfw_gui_info: failed to get Kali SSH key: %s", e)
+
+    logger.info(
+        "get_ngfw_gui_info: NGFW mgmt_ip=%s kali_ip=%s app_id=%s",
+        management_ip,
+        kali_ip,
+        app_id,
+    )
+
+    return {
+        "management_ip": management_ip,
+        "kali_ip": kali_ip,
+        "kali_uuid": kali_instance.get("uuid"),
+        "kali_ssh_key": kali_ssh_key,
+        "connection_name": f"ngfw-gui-{app_id[:8]}",
+    }
 
 
 def create_ngfw(request_spec: RequestSpec) -> UUID:

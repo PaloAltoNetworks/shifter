@@ -224,6 +224,107 @@ def guacamole_rdp_url(request):
 
 
 @login_required
+@require_POST
+def api_ngfw_gui_url(request: HttpRequest) -> JsonResponse:
+    """Generate a Guacamole RDP URL for NGFW GUI access via Kali desktop.
+
+    Opens the user's Kali instance via Guacamole RDP in a new tab.
+    The NGFW management IP is returned so the user can navigate to it
+    from the Kali browser.
+
+    Request body (JSON):
+        - app_id: UUID string of the NGFW CMS App
+
+    Response (JSON):
+        - url: Signed Guacamole RDP URL for Kali desktop
+        - management_ip: NGFW management IP to navigate to
+
+    Security:
+        - User must own the NGFW
+        - NGFW must be in ready status
+        - User must have an active range with a Kali instance
+        - Guacamole URL is HMAC-signed and expires in 5 minutes
+    """
+    from engine.services import get_ngfw_gui_info
+    from mission_control.guacamole import create_guacamole_rdp_url
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    app_id = data.get("app_id", "").strip()
+    if not app_id:
+        return JsonResponse({"error": "app_id is required"}, status=400)
+
+    # Get NGFW GUI connection info from engine
+    try:
+        gui_info = get_ngfw_gui_info(request.user, app_id)
+    except ValueError as e:
+        logger.warning(
+            "NGFW GUI access denied: user=%s app_id=%s error=%s",
+            request.user.email,
+            app_id,
+            str(e),
+        )
+        return JsonResponse({"error": str(e)}, status=400)
+    except PermissionError as e:
+        logger.warning(
+            "NGFW GUI permission denied: user=%s app_id=%s",
+            request.user.email,
+            app_id,
+        )
+        return JsonResponse({"error": str(e)}, status=403)
+
+    # Get Guacamole settings
+    secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
+    if not secret_key:
+        logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
+        return JsonResponse({"error": "RDP service not configured"}, status=503)
+
+    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+    guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
+
+    logger.info(
+        "NGFW GUI access request: user=%s app_id=%s kali_ip=%s ngfw_ip=%s",
+        request.user.email,
+        app_id,
+        gui_info["kali_ip"],
+        gui_info["management_ip"],
+    )
+
+    # Generate Guacamole RDP URL for Kali instance
+    try:
+        url = create_guacamole_rdp_url(
+            base_url=guacamole_base_url,
+            secret_key=secret_key,
+            username=request.user.email,
+            connection_name=gui_info["connection_name"],
+            hostname=gui_info["kali_ip"],
+            expires_minutes=5,
+            rdp_username="kali",
+            rdp_password="kali",
+            api_base_url=guacamole_api_url,
+            sftp_root_directory="/home/kali",
+            sftp_private_key=gui_info.get("kali_ssh_key"),
+        )
+    except ValueError as e:
+        logger.error("Failed to generate Guacamole URL for NGFW GUI: %s", e)
+        return JsonResponse({"error": "Failed to generate RDP URL"}, status=500)
+
+    logger.info(
+        "NGFW GUI URL generated: user=%s app_id=%s",
+        request.user.email,
+        app_id,
+    )
+
+    return JsonResponse({
+        "url": url,
+        "management_ip": gui_info["management_ip"],
+    })
+
+
+@login_required
 @require_GET
 def help_page(request: HttpRequest) -> HttpResponse:
     """Help and documentation."""
@@ -701,7 +802,11 @@ def ngfw_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_GET
 def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
-    """View NGFW details."""
+    """View NGFW details.
+
+    Shows NGFW overview, linked ranges, and access buttons (CLI/GUI)
+    when the NGFW is in ready status.
+    """
     user = _get_user(request)
     try:
         ngfw = cms_get_ngfw(user, app_id)
@@ -711,10 +816,39 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
         messages.warning(request, "NGFW not found. It may have failed during provisioning.")
         return redirect("mission_control:ngfw_list")
 
+    # Get linked ranges for this NGFW
+    linked_ranges = []
+    ngfw_management_ip = None
+    try:
+        from engine.models import Instance as EngineInstance
+        from engine.models import Range as EngineRange
+
+        ngfw_engine_instance = EngineInstance.objects.filter(
+            uuid=ngfw.instance_id,
+            role=EngineInstance.Role.NGFW,
+        ).first()
+
+        if ngfw_engine_instance:
+            linked_ranges = list(
+                EngineRange.objects.filter(
+                    ngfw_instance=ngfw_engine_instance,
+                ).exclude(
+                    status__in=[EngineRange.Status.DESTROYED, EngineRange.Status.FAILED],
+                ).order_by("-created_at")
+            )
+
+            # Get management IP for GUI access
+            state = ngfw_engine_instance.state or {}
+            ngfw_management_ip = state.get("management_ip")
+    except Exception:
+        logger.exception("Error fetching linked ranges for NGFW app_id=%s", app_id)
+
     context = {
         "page_title": ngfw.name,
         "active_nav": "ngfw",
         "ngfw": ngfw,
+        "linked_ranges": linked_ranges,
+        "ngfw_management_ip": ngfw_management_ip,
     }
     return render(request, "mission_control/ngfw/detail.html", context)
 

@@ -55,6 +55,7 @@
                 </span>
                 <span class="pane-title">{{ instance.name|default:instance.role }}</span>
                 <span class="pane-subtitle">{{ instance.os_type }}</span>
+                {% if instance.os_type != 'panos' %}
                 <button class="pane-action-btn rdp-btn" title="Open RDP Session" data-uuid="{{ instance.uuid }}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
@@ -63,6 +64,12 @@
                     </svg>
                     <span>RDP</span>
                 </button>
+                {% endif %}
+                {% if instance.os_type == 'panos' and ngfw_management_ip %}
+                <span class="pane-action-btn" title="NGFW Management IP" style="cursor: default; opacity: 0.7; font-size: 11px;">
+                    https://{{ ngfw_management_ip }}
+                </span>
+                {% endif %}
                 <div class="pane-status" id="status-{{ instance.uuid }}">
                     <span class="status-indicator"></span>
                     <span class="status-text">Not connected</span>

@@ -4,9 +4,41 @@ import logging
 
 from cms.services import get_active_range, get_scenario
 from mission_control.utils import build_connection_urls
-from shared.schemas import RangeContext
+from shared.schemas import InstanceContext, RangeContext
 
 logger = logging.getLogger(__name__)
+
+
+def _get_ngfw_instance_context(user) -> tuple[InstanceContext | None, str | None]:
+    """Get NGFW InstanceContext for user's active range.
+
+    Returns a tuple of (InstanceContext, management_ip) if the range
+    has a ready NGFW attached, (None, None) otherwise.
+
+    Args:
+        user: Authenticated Django user
+
+    Returns:
+        Tuple of (InstanceContext, management_ip) or (None, None)
+    """
+    try:
+        from engine.services import get_range_ngfw_context
+
+        ngfw_info = get_range_ngfw_context(user)
+        if ngfw_info:
+            ctx = InstanceContext(
+                uuid=ngfw_info["uuid"],
+                name=ngfw_info["name"],
+                role=ngfw_info["role"],
+                os_type=ngfw_info["os_type"],
+            )
+            return ctx, ngfw_info.get("management_ip")
+    except Exception:
+        logger.exception(
+            "Error getting NGFW context for user_id=%s",
+            user.id,
+        )
+    return None, None
 
 
 def active_range(request):
@@ -14,10 +46,14 @@ def active_range(request):
     Add active range information to template context.
 
     Uses CMS service to get the user's active range as a RangeContext.
+    Augments with NGFW instance if the range has one attached.
 
     Provides:
         - has_active_range: Boolean indicating if user has a ready range
         - active_range: The user's active RangeContext (or None)
+        - connection_urls: WebSocket terminal URLs for each instance
+        - scenario_name: Display name for the scenario
+        - ngfw_management_ip: NGFW management IP if available (for GUI access)
     """
     if not request.user.is_authenticated:
         return {
@@ -25,6 +61,7 @@ def active_range(request):
             "active_range": None,
             "connection_urls": [],
             "scenario_name": None,
+            "ngfw_management_ip": None,
         }
 
     user_id = request.user.id
@@ -43,7 +80,10 @@ def active_range(request):
                 "active_range": None,
                 "connection_urls": [],
                 "scenario_name": None,
+                "ngfw_management_ip": None,
             }
+
+        ngfw_management_ip = None
 
         if range_context is not None:
             is_ready = range_context.is_ready
@@ -54,6 +94,20 @@ def active_range(request):
                 is_ready,
             )
             has_ready_range = is_ready
+
+            # Add NGFW to terminal context if range has one and both are ready
+            if is_ready:
+                ngfw_ctx, ngfw_management_ip = _get_ngfw_instance_context(
+                    request.user
+                )
+                if ngfw_ctx:
+                    range_context.instances.append(ngfw_ctx)
+                    logger.debug(
+                        "active_range context processor: added NGFW tab for user_id=%s uuid=%s",
+                        user_id,
+                        ngfw_ctx.uuid,
+                    )
+
             connection_urls = build_connection_urls(range_context.instances)
 
             # Look up scenario name for display
@@ -82,6 +136,7 @@ def active_range(request):
             "active_range": range_context,
             "connection_urls": connection_urls,
             "scenario_name": scenario_name,
+            "ngfw_management_ip": ngfw_management_ip,
         }
 
     except Exception:
@@ -94,4 +149,5 @@ def active_range(request):
             "active_range": None,
             "connection_urls": [],
             "scenario_name": None,
+            "ngfw_management_ip": None,
         }

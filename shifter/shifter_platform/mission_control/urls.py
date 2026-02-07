@@ -28,6 +28,8 @@ urlpatterns = [
     path("api/scenarios/", views.list_scenarios, name="list_scenarios"),
     # Guacamole RDP API
     path("api/guacamole/rdp-url/", views.guacamole_rdp_url, name="guacamole_rdp_url"),
+    # NGFW GUI access API (Guacamole RDP to Kali for NGFW web UI)
+    path("api/ngfw/gui-url/", views.api_ngfw_gui_url, name="api_ngfw_gui_url"),
     # NGFW views
     path("ngfw/", views.ngfw_list, name="ngfw_list"),
     path("ngfw/setup/", views.ngfw_wizard, name="ngfw_wizard"),

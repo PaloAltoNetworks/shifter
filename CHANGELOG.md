@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-06
+
+### Changed
+- Range pause/resume flow and UI updates
+
 ## [1.0.9] - 2026-02-02
 
 ### Fixed
@@ -51,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.2] - 2026-01-25
 
 ### Added
-- Range pause/resume flow and UI
+- Range pause/resume flow and UI updates
 
 ## [1.0.1] - 2026-01-25
 

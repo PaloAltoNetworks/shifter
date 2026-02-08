@@ -25,12 +25,6 @@ class TestRangeModel:
     # Import tests - Range should be importable from engine.models
     # -------------------------------------------------------------------------
 
-    def test_range_importable_from_engine(self):
-        """Range model can be imported from engine.models."""
-        from engine.models import Range
-
-        assert Range is not None
-
     def test_range_status_enum_exists(self):
         """Range.Status enum exists with expected values."""
         from engine.models import Range
@@ -145,18 +139,18 @@ class TestRangeModel:
     # Model property tests
     # -------------------------------------------------------------------------
 
-    def test_is_active_property(self, user):
-        """is_active returns True for READY and PAUSED ranges."""
+    def test_is_usable_property(self, user):
+        """is_usable returns True for READY and PAUSED ranges."""
         from engine.models import Range
 
         ready_range = Range.objects.create(user=user, status=Range.Status.READY)
-        assert ready_range.is_active is True
+        assert ready_range.is_usable is True
 
         paused_range = Range.objects.create(user=user, status=Range.Status.PAUSED)
-        assert paused_range.is_active is True
+        assert paused_range.is_usable is True
 
         failed_range = Range.objects.create(user=user, status=Range.Status.FAILED)
-        assert failed_range.is_active is False
+        assert failed_range.is_usable is False
 
     def test_is_terminal_property(self, user):
         """is_terminal returns True for DESTROYED and FAILED ranges."""
@@ -258,40 +252,26 @@ class TestRangeGetInstanceByUUID:
 
         assert result is None
 
-    def test_returns_none_when_provisioned_instances_empty(self, user):
-        """Method returns None when provisioned_instances is empty list."""
+    def test_returns_none_when_provisioned_instances_empty_or_null(self, user):
+        """Method returns None when provisioned_instances is empty or None."""
         from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            provisioned_instances=[],
-        )
+        for instances_value in [[], None]:
+            range_obj = Range.objects.create(
+                user=user,
+                status=Range.Status.READY,
+                provisioned_instances=instances_value,
+            )
 
-        result = range_obj.get_instance_by_uuid("any-uuid")
-
-        assert result is None
-
-    def test_returns_none_when_provisioned_instances_null(self, user):
-        """Method returns None when provisioned_instances is None."""
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            provisioned_instances=None,
-        )
-
-        result = range_obj.get_instance_by_uuid("any-uuid")
-
-        assert result is None
+            result = range_obj.get_instance_by_uuid("any-uuid")
+            assert result is None, f"Expected None for provisioned_instances={instances_value}"
 
     # -------------------------------------------------------------------------
     # Input validation - uuid parameter
     # -------------------------------------------------------------------------
 
-    def test_raises_on_none_uuid(self, user):
-        """Method raises ValueError when uuid is None."""
+    def test_raises_on_invalid_uuid(self, user):
+        """Method raises ValueError for None or empty uuid."""
         from engine.models import Range
 
         range_obj = Range.objects.create(
@@ -300,28 +280,16 @@ class TestRangeGetInstanceByUUID:
             provisioned_instances=[{"uuid": "test", "role": "attacker"}],
         )
 
-        with pytest.raises(ValueError, match="uuid"):
-            range_obj.get_instance_by_uuid(None)
-
-    def test_raises_on_empty_uuid(self, user):
-        """Method raises ValueError when uuid is empty string."""
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            provisioned_instances=[{"uuid": "test", "role": "attacker"}],
-        )
-
-        with pytest.raises(ValueError, match="uuid"):
-            range_obj.get_instance_by_uuid("")
+        for invalid_uuid in [None, ""]:
+            with pytest.raises(ValueError, match="uuid"):
+                range_obj.get_instance_by_uuid(invalid_uuid)
 
     # -------------------------------------------------------------------------
     # Side effects - none expected (pure read operation)
     # -------------------------------------------------------------------------
 
-    def test_does_not_modify_provisioned_instances(self, user):
-        """Method does not modify the provisioned_instances data."""
+    def test_has_no_side_effects(self, user):
+        """Method does not modify data or save to database."""
         from engine.models import Range
 
         instance_data = {
@@ -335,25 +303,12 @@ class TestRangeGetInstanceByUUID:
             provisioned_instances=[instance_data],
         )
         original_data = range_obj.provisioned_instances.copy()
-
-        range_obj.get_instance_by_uuid("abc-123-def")
-
-        assert range_obj.provisioned_instances == original_data
-
-    def test_does_not_save_to_database(self, user):
-        """Method does not trigger database save."""
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            provisioned_instances=[{"uuid": "test", "role": "attacker"}],
-        )
         original_updated_at = range_obj.updated_at
 
-        range_obj.get_instance_by_uuid("test")
+        range_obj.get_instance_by_uuid("abc-123-def")
         range_obj.refresh_from_db()
 
+        assert range_obj.provisioned_instances == original_data
         assert range_obj.updated_at == original_updated_at
 
     # -------------------------------------------------------------------------

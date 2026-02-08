@@ -30,6 +30,7 @@ class TestStartNgfwEcsTask:
         """Function returns ECS task ARN when task starts successfully."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -55,6 +56,7 @@ class TestStartNgfwEcsTask:
         """Function passes command list directly to container overrides."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -84,6 +86,7 @@ class TestStartNgfwEcsTask:
         """Function returns None when PULUMI_ECS_CLUSTER_ARN is not set."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
@@ -102,6 +105,7 @@ class TestStartNgfwEcsTask:
         """Function returns None when subnet IDs is only whitespace."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -119,90 +123,45 @@ class TestStartNgfwEcsTask:
     # Input validation - request_id
     # -------------------------------------------------------------------------
 
-    def test_raises_when_request_id_is_none(self, settings):
-        """Function raises TypeError when request_id is None."""
+    def test_validates_request_id_type(self, settings):
+        """Function raises TypeError for invalid request_id types."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        with pytest.raises(TypeError):
-            _start_ngfw_ecs_task(request_id=None, command=["ngfw", "provision"])
-
-    def test_raises_when_request_id_is_string(self, settings):
-        """Function raises TypeError when request_id is a string (not UUID)."""
-        from engine.ecs import _start_ngfw_ecs_task
-
-        settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
-
-        with pytest.raises(TypeError):
-            _start_ngfw_ecs_task(
-                request_id=str(TEST_REQUEST_ID),
-                command=["ngfw", "provision"],
-            )
-
-    def test_raises_when_request_id_is_int(self, settings):
-        """Function raises TypeError when request_id is an integer."""
-        from engine.ecs import _start_ngfw_ecs_task
-
-        settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
-
-        with pytest.raises(TypeError):
-            _start_ngfw_ecs_task(request_id=42, command=["ngfw", "provision"])
+        invalid_ids = [None, str(TEST_REQUEST_ID), 42]
+        for invalid_id in invalid_ids:
+            with pytest.raises(TypeError):
+                _start_ngfw_ecs_task(request_id=invalid_id, command=["ngfw", "provision"])
 
     # -------------------------------------------------------------------------
     # Input validation - command
     # -------------------------------------------------------------------------
 
-    def test_raises_when_command_is_none(self, settings):
-        """Function raises TypeError when command is None."""
+    def test_validates_command_parameter(self, settings):
+        """Function validates command parameter type and content."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        with pytest.raises(TypeError):
-            _start_ngfw_ecs_task(request_id=TEST_REQUEST_ID, command=None)
+        # TypeError for None and string
+        for invalid_cmd in [None, "ngfw provision"]:
+            with pytest.raises(TypeError):
+                _start_ngfw_ecs_task(request_id=TEST_REQUEST_ID, command=invalid_cmd)
 
-    def test_raises_when_command_is_empty_list(self, settings):
-        """Function raises ValueError when command is empty list."""
-        from engine.ecs import _start_ngfw_ecs_task
-
-        settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
-
+        # ValueError for empty list
         with pytest.raises(ValueError):
             _start_ngfw_ecs_task(request_id=TEST_REQUEST_ID, command=[])
-
-    def test_raises_when_command_is_string(self, settings):
-        """Function raises TypeError when command is a string instead of list."""
-        from engine.ecs import _start_ngfw_ecs_task
-
-        settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
-
-        with pytest.raises(TypeError):
-            _start_ngfw_ecs_task(request_id=TEST_REQUEST_ID, command="ngfw provision")
 
     # -------------------------------------------------------------------------
     # Error handling
@@ -212,6 +171,7 @@ class TestStartNgfwEcsTask:
         """Function raises ClientError when ECS run_task fails."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -236,6 +196,7 @@ class TestStartNgfwEcsTask:
         """Function raises ClientError when ECS returns empty tasks list."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -266,6 +227,7 @@ class TestStartNgfwEcsTask:
         """Function logs WARNING when ECS configuration is incomplete."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
@@ -283,6 +245,7 @@ class TestStartNgfwEcsTask:
         """Function logs INFO when task starts successfully."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -311,6 +274,7 @@ class TestStartNgfwEcsTask:
         """Function logs ERROR when ECS run_task fails."""
         from engine.ecs import _start_ngfw_ecs_task
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"

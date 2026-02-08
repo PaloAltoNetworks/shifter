@@ -5,7 +5,6 @@ wrapping boto3 clients with error handling and result formatting.
 
 This executor provides specific methods for NGFW lifecycle operations:
 - EC2: start_instance, stop_instance, wait_for_running, wait_for_stopped, describe_instance
-- GWLB: register_target, deregister_target
 - VPC Endpoints: create_endpoint, delete_endpoint, describe_endpoint, wait_for_endpoint_available
 - Route Table: create_route, delete_route
 """
@@ -13,6 +12,7 @@ This executor provides specific methods for NGFW lifecycle operations:
 import json
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 import boto3
@@ -101,6 +101,7 @@ class AWSExecutor:
             logger.debug("run_command: success service=%s method=%s", service, method)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -116,6 +117,7 @@ class AWSExecutor:
             )
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
@@ -124,6 +126,7 @@ class AWSExecutor:
             logger.exception("run_command: unexpected error service=%s method=%s", service, method)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=str(e),
             )
@@ -150,20 +153,13 @@ class AWSExecutor:
         """
         logger.debug("execute_action: action=%s context_keys=%s", action, list(context.keys()))
         # Map action names to methods and their required context keys
-        action_map = {
+        action_map: dict[str, tuple[Callable[..., CommandResult], list[str]]] = {
             # EC2 operations
             "start_instance": (self.start_instance, ["instance_id"]),
             "stop_instance": (self.stop_instance, ["instance_id"]),
             "wait_for_running": (self.wait_for_running, ["instance_id"]),
             "wait_for_stopped": (self.wait_for_stopped, ["instance_id"]),
             "describe_instance": (self.describe_instance, ["instance_id"]),
-            # GWLB operations
-            "register_target": (self.register_target, ["target_group_arn", "target_id"]),
-            "deregister_target": (self.deregister_target, ["target_group_arn", "target_id"]),
-            "wait_for_target_healthy": (
-                self.wait_for_target_healthy,
-                ["target_group_arn", "target_id"],
-            ),
             # VPC endpoint operations
             "create_endpoint": (self.create_endpoint, ["vpc_id", "service_name", "subnet_ids"]),
             "delete_endpoint": (self.delete_endpoint, ["endpoint_id"]),
@@ -178,6 +174,7 @@ class AWSExecutor:
             logger.warning("execute_action: unknown action=%s", action)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"Unknown action: {action}",
             )
@@ -195,6 +192,7 @@ class AWSExecutor:
                 )
                 return CommandResult(
                     success=False,
+                    exit_code=-1,
                     stdout="",
                     stderr=f"Missing required parameter '{key}' for action '{action}'",
                 )
@@ -223,6 +221,7 @@ class AWSExecutor:
             logger.info("start_instance: started instance_id=%s", instance_id)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -232,12 +231,13 @@ class AWSExecutor:
             logger.warning("start_instance: failed instance_id=%s code=%s", instance_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("start_instance: unexpected error instance_id=%s", instance_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def stop_instance(self, instance_id: str) -> CommandResult:
         """Stop an EC2 instance.
@@ -255,6 +255,7 @@ class AWSExecutor:
             logger.info("stop_instance: stopped instance_id=%s", instance_id)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -264,12 +265,13 @@ class AWSExecutor:
             logger.warning("stop_instance: failed instance_id=%s code=%s", instance_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("stop_instance: unexpected error instance_id=%s", instance_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def wait_for_running(self, instance_id: str, timeout: int = 300) -> CommandResult:
         """Wait for an EC2 instance to reach the 'running' state.
@@ -294,6 +296,7 @@ class AWSExecutor:
             logger.info("wait_for_running: instance_id=%s is now running", instance_id)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=f"Instance {instance_id} is now running",
                 stderr="",
             )
@@ -301,6 +304,7 @@ class AWSExecutor:
             logger.warning("wait_for_running: timeout instance_id=%s", instance_id)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"Waiter timeout: {e!s}",
             )
@@ -310,19 +314,20 @@ class AWSExecutor:
             logger.warning("wait_for_running: failed instance_id=%s code=%s", instance_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("wait_for_running: unexpected error instance_id=%s", instance_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
-    def wait_for_stopped(self, instance_id: str, timeout: int = 300) -> CommandResult:
+    def wait_for_stopped(self, instance_id: str, timeout: int = 900) -> CommandResult:
         """Wait for an EC2 instance to reach the 'stopped' state.
 
         Args:
             instance_id: The EC2 instance ID to wait for.
-            timeout: Maximum time to wait in seconds (default 300).
+            timeout: Maximum time to wait in seconds (default 900 for NGFW graceful shutdown).
 
         Returns:
             CommandResult with success status.
@@ -339,6 +344,7 @@ class AWSExecutor:
             logger.info("wait_for_stopped: instance_id=%s is now stopped", instance_id)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=f"Instance {instance_id} is now stopped",
                 stderr="",
             )
@@ -346,6 +352,7 @@ class AWSExecutor:
             logger.warning("wait_for_stopped: timeout instance_id=%s", instance_id)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"Waiter timeout: {e!s}",
             )
@@ -355,12 +362,13 @@ class AWSExecutor:
             logger.warning("wait_for_stopped: failed instance_id=%s code=%s", instance_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("wait_for_stopped: unexpected error instance_id=%s", instance_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def describe_instance(self, instance_id: str) -> CommandResult:
         """Describe an EC2 instance.
@@ -377,6 +385,7 @@ class AWSExecutor:
             response = client.describe_instances(InstanceIds=[instance_id])
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -386,156 +395,16 @@ class AWSExecutor:
             logger.warning("describe_instance: failed instance_id=%s code=%s", instance_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("describe_instance: unexpected error instance_id=%s", instance_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     # =========================================================================
-    # GWLB Operations
-    # =========================================================================
-
-    def register_target(self, target_group_arn: str, target_id: str) -> CommandResult:
-        """Register a target with a GWLB target group.
-
-        Args:
-            target_group_arn: The ARN of the target group.
-            target_id: The target ID (ENI ID for GWLB).
-
-        Returns:
-            CommandResult with success status.
-        """
-        logger.debug("register_target: target_group_arn=%s target_id=%s", target_group_arn, target_id)
-        try:
-            client = self.get_client("elbv2")
-            response = client.register_targets(
-                TargetGroupArn=target_group_arn,
-                Targets=[{"Id": target_id}],
-            )
-            logger.info("register_target: registered target_id=%s", target_id)
-            return CommandResult(
-                success=True,
-                stdout=json.dumps(response, default=str),
-                stderr="",
-            )
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("register_target: failed target_id=%s code=%s", target_id, error_code)
-            return CommandResult(
-                success=False,
-                stdout="",
-                stderr=f"{error_code}: {error_message}",
-            )
-        except Exception as e:
-            logger.exception("register_target: unexpected error target_id=%s", target_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
-
-    def deregister_target(self, target_group_arn: str, target_id: str) -> CommandResult:
-        """Deregister a target from a GWLB target group.
-
-        Args:
-            target_group_arn: The ARN of the target group.
-            target_id: The target ID (ENI ID for GWLB).
-
-        Returns:
-            CommandResult with success status.
-        """
-        logger.debug("deregister_target: target_group_arn=%s target_id=%s", target_group_arn, target_id)
-        try:
-            client = self.get_client("elbv2")
-            response = client.deregister_targets(
-                TargetGroupArn=target_group_arn,
-                Targets=[{"Id": target_id}],
-            )
-            logger.info("deregister_target: deregistered target_id=%s", target_id)
-            return CommandResult(
-                success=True,
-                stdout=json.dumps(response, default=str),
-                stderr="",
-            )
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("deregister_target: failed target_id=%s code=%s", target_id, error_code)
-            return CommandResult(
-                success=False,
-                stdout="",
-                stderr=f"{error_code}: {error_message}",
-            )
-        except Exception as e:
-            logger.exception("deregister_target: unexpected error target_id=%s", target_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
-
-    def wait_for_target_healthy(
-        self,
-        target_group_arn: str,
-        target_id: str,
-        timeout: int = 300,
-    ) -> CommandResult:
-        """Wait for a target to become healthy in a target group.
-
-        Args:
-            target_group_arn: The ARN of the target group.
-            target_id: The target ID (ENI ID for GWLB).
-            timeout: Maximum time to wait in seconds (default 300).
-
-        Returns:
-            CommandResult with success status.
-        """
-        logger.debug("wait_for_target_healthy: target_id=%s timeout=%d", target_id, timeout)
-        try:
-            client = self.get_client("elbv2")
-            start_time = time.time()
-            poll_interval = 10  # seconds
-
-            while time.time() - start_time < timeout:
-                response = client.describe_target_health(
-                    TargetGroupArn=target_group_arn,
-                    Targets=[{"Id": target_id}],
-                )
-                health_descriptions = response.get("TargetHealthDescriptions", [])
-                if health_descriptions:
-                    state = health_descriptions[0].get("TargetHealth", {}).get("State", "")
-                    if state == "healthy":
-                        logger.info("wait_for_target_healthy: target_id=%s is healthy", target_id)
-                        return CommandResult(
-                            success=True,
-                            stdout=f"Target {target_id} is now healthy",
-                            stderr="",
-                        )
-                    elif state in ("draining", "unavailable"):
-                        logger.warning("wait_for_target_healthy: target_id=%s terminal state=%s", target_id, state)
-                        return CommandResult(
-                            success=False,
-                            stdout="",
-                            stderr=f"Target reached terminal state: {state}",
-                        )
-                time.sleep(poll_interval)
-
-            logger.warning("wait_for_target_healthy: timeout target_id=%s", target_id)
-            return CommandResult(
-                success=False,
-                stdout="",
-                stderr=f"Timeout waiting for target {target_id} to become healthy",
-            )
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.warning("wait_for_target_healthy: failed target_id=%s code=%s", target_id, error_code)
-            return CommandResult(
-                success=False,
-                stdout="",
-                stderr=f"{error_code}: {error_message}",
-            )
-        except Exception as e:
-            logger.exception("wait_for_target_healthy: unexpected error target_id=%s", target_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
-
-    # =========================================================================
-    # VPC Endpoint Operations
+    # VPC Endpoint Operations (for cleanup of legacy GWLB endpoints)
     # =========================================================================
 
     def create_endpoint(
@@ -544,11 +413,11 @@ class AWSExecutor:
         service_name: str,
         subnet_ids: list[str],
     ) -> CommandResult:
-        """Create a VPC endpoint for GWLB.
+        """Create a VPC endpoint.
 
         Args:
             vpc_id: The VPC ID where the endpoint will be created.
-            service_name: The GWLB endpoint service name.
+            service_name: The endpoint service name.
             subnet_ids: List of subnet IDs for the endpoint.
 
         Returns:
@@ -567,6 +436,7 @@ class AWSExecutor:
             logger.info("create_endpoint: created endpoint_id=%s", endpoint_id)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -576,12 +446,13 @@ class AWSExecutor:
             logger.warning("create_endpoint: failed vpc_id=%s code=%s", vpc_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("create_endpoint: unexpected error vpc_id=%s", vpc_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def delete_endpoint(self, endpoint_id: str) -> CommandResult:
         """Delete a VPC endpoint.
@@ -602,12 +473,14 @@ class AWSExecutor:
                 logger.warning("delete_endpoint: failed endpoint_id=%s", endpoint_id)
                 return CommandResult(
                     success=False,
+                    exit_code=-1,
                     stdout="",
                     stderr=f"Failed to delete endpoint: {unsuccessful}",
                 )
             logger.info("delete_endpoint: deleted endpoint_id=%s", endpoint_id)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -617,12 +490,13 @@ class AWSExecutor:
             logger.warning("delete_endpoint: failed endpoint_id=%s code=%s", endpoint_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("delete_endpoint: unexpected error endpoint_id=%s", endpoint_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def describe_endpoint(self, endpoint_id: str) -> CommandResult:
         """Describe a VPC endpoint.
@@ -639,6 +513,7 @@ class AWSExecutor:
             response = client.describe_vpc_endpoints(VpcEndpointIds=[endpoint_id])
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -648,12 +523,13 @@ class AWSExecutor:
             logger.warning("describe_endpoint: failed endpoint_id=%s code=%s", endpoint_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("describe_endpoint: unexpected error endpoint_id=%s", endpoint_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def wait_for_endpoint_available(
         self,
@@ -684,6 +560,7 @@ class AWSExecutor:
                         logger.info("wait_for_endpoint_available: endpoint_id=%s is available", endpoint_id)
                         return CommandResult(
                             success=True,
+                            exit_code=0,
                             stdout=f"Endpoint {endpoint_id} is now available",
                             stderr="",
                         )
@@ -695,6 +572,7 @@ class AWSExecutor:
                         )
                         return CommandResult(
                             success=False,
+                            exit_code=-1,
                             stdout="",
                             stderr=f"Endpoint reached terminal state: {state}",
                         )
@@ -703,6 +581,7 @@ class AWSExecutor:
             logger.warning("wait_for_endpoint_available: timeout endpoint_id=%s", endpoint_id)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"Timeout waiting for endpoint {endpoint_id} to become available",
             )
@@ -712,12 +591,13 @@ class AWSExecutor:
             logger.warning("wait_for_endpoint_available: failed endpoint_id=%s code=%s", endpoint_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("wait_for_endpoint_available: unexpected error endpoint_id=%s", endpoint_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     # =========================================================================
     # Route Table Operations
@@ -755,6 +635,7 @@ class AWSExecutor:
             logger.info("create_route: created route destination=%s", destination)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -764,12 +645,13 @@ class AWSExecutor:
             logger.warning("create_route: failed route_table_id=%s code=%s", route_table_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("create_route: unexpected error route_table_id=%s", route_table_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def delete_route(self, route_table_id: str, destination: str) -> CommandResult:
         """Delete a route from a route table.
@@ -791,6 +673,7 @@ class AWSExecutor:
             logger.info("delete_route: deleted route destination=%s", destination)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -800,12 +683,13 @@ class AWSExecutor:
             logger.warning("delete_route: failed route_table_id=%s code=%s", route_table_id, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("delete_route: unexpected error route_table_id=%s", route_table_id)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def describe_instances(self, instance_ids: list[str]) -> CommandResult:
         """Describe multiple EC2 instances.
@@ -820,6 +704,7 @@ class AWSExecutor:
         if not instance_ids:
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps({"Reservations": []}),
                 stderr="",
             )
@@ -829,6 +714,7 @@ class AWSExecutor:
             response = client.describe_instances(InstanceIds=instance_ids)
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -838,12 +724,13 @@ class AWSExecutor:
             logger.warning("describe_instances: failed code=%s", error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("describe_instances: unexpected error")
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))
 
     def describe_endpoints(self, service_name: str) -> CommandResult:
         """Describe VPC endpoints filtered by service name.
@@ -860,6 +747,7 @@ class AWSExecutor:
             response = client.describe_vpc_endpoints(Filters=[{"Name": "service-name", "Values": [service_name]}])
             return CommandResult(
                 success=True,
+                exit_code=0,
                 stdout=json.dumps(response, default=str),
                 stderr="",
             )
@@ -869,9 +757,10 @@ class AWSExecutor:
             logger.warning("describe_endpoints: failed service_name=%s code=%s", service_name, error_code)
             return CommandResult(
                 success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"{error_code}: {error_message}",
             )
         except Exception as e:
             logger.exception("describe_endpoints: unexpected error service_name=%s", service_name)
-            return CommandResult(success=False, stdout="", stderr=str(e))
+            return CommandResult(success=False, exit_code=-1, stdout="", stderr=str(e))

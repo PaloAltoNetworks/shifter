@@ -45,6 +45,7 @@ build {
       "scripts/ubuntu/base.sh",
       "scripts/ubuntu/services.sh",
       "scripts/ubuntu/tools.sh",
+      "scripts/ubuntu/desktop.sh",
       "scripts/ubuntu/claude-code.sh",
       "scripts/common/cleanup.sh"
     ]

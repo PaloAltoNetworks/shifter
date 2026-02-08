@@ -144,11 +144,8 @@ else:
             "PASSWORD": os.environ.get("DB_PASSWORD"),
             "HOST": os.environ.get("DB_HOST", "localhost"),
             "PORT": os.environ.get("DB_PORT", "5432"),
-            # PgBouncer compatibility: let pgbouncer handle connection pooling
-            # CONN_MAX_AGE=0 closes Django connection after each request
-            # DISABLE_SERVER_SIDE_CURSORS required for transaction pooling mode
+            # Connection settings (can tune CONN_MAX_AGE for connection reuse)
             "CONN_MAX_AGE": 0,
-            "DISABLE_SERVER_SIDE_CURSORS": True,
             "OPTIONS": {
                 "connect_timeout": 10,
             },
@@ -300,12 +297,20 @@ PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
 AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
 AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
+AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
+
+# SNS Topic for publishing events (provisioner -> workers)
+SNS_RANGE_EVENTS_ARN = os.environ.get("SNS_RANGE_EVENTS_ARN", "")
 
 # Shifter Engine (ECS Fargate)
 PULUMI_ECS_CLUSTER_ARN = os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
 PULUMI_TASK_DEFINITION_ARN = os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
 PULUMI_ECS_SECURITY_GROUP_ID = os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
 PULUMI_PRIVATE_SUBNET_IDS = os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
+
+# Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
+LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
+PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
 
 # Agent upload limits
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file

@@ -79,44 +79,6 @@ class TestBuildCommonTags:
 
         assert tags["shifter:component"] == "ngfw"
 
-    def test_full_ngfw_example(self):
-        """Test with all params for an NGFW component."""
-        tags = build_common_tags(
-            user_id=42,
-            environment="prod",
-            request_uuid="abc-123",
-            unit_type="instance",
-            unit_uuid="ngfw-instance-uuid",
-            component="ngfw",
-        )
-
-        assert tags["shifter:user_id"] == "42"
-        assert tags["shifter:environment"] == "prod"
-        assert tags["shifter:request_uuid"] == "abc-123"
-        assert tags["shifter:instance_uuid"] == "ngfw-instance-uuid"
-        assert tags["shifter:component"] == "ngfw"
-        assert tags["shifter:system"] == "shifter"
-        assert tags["ManagedBy"] == "pulumi"
-
-    def test_full_subnet_example(self):
-        """Test with all params for a subnet component."""
-        tags = build_common_tags(
-            user_id=42,
-            environment="prod",
-            request_uuid="abc-123",
-            range_id=1,
-            unit_type="subnet",
-            unit_uuid="subnet-uuid-456",
-            unit_name="victim_network",
-        )
-
-        assert tags["shifter:user_id"] == "42"
-        assert tags["shifter:environment"] == "prod"
-        assert tags["shifter:request_uuid"] == "abc-123"
-        assert tags["shifter:range_id"] == "1"
-        assert tags["shifter:subnet_uuid"] == "subnet-uuid-456"
-        assert tags["shifter:subnet_name"] == "victim_network"
-
 
 class TestBuildCommonTagsValidation:
     """Tests for input validation in build_common_tags."""

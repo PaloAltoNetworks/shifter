@@ -74,7 +74,7 @@ user_storage_bucket = "shifter-user-storage-7a3f9c2e"
 # See shifter/packer/ for AMI build configuration
 
 victim_instance_type = "t3.large"
-kali_instance_type   = "t3.medium"
+kali_instance_type   = "t3.large"
 
 # ------------------------------------------------------------------------------
 # Autoscaling
@@ -127,18 +127,7 @@ pulumi_container_tag = "latest"
 
 dc_domain_name = "internal.shifter"
 # nosec B105 - Ephemeral isolated range, not a production credential
-dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
-
-# ------------------------------------------------------------------------------
-# PgBouncer (Connection Pooling)
-# ------------------------------------------------------------------------------
-
-pgbouncer_cpu               = 256
-pgbouncer_memory            = 512
-pgbouncer_desired_count     = 2
-pgbouncer_pool_mode         = "transaction"
-pgbouncer_max_client_conn   = 1000
-pgbouncer_default_pool_size = 20
+dc_domain_password = "Sh1fterDC2026" # pragma: allowlist secret
 
 # ------------------------------------------------------------------------------
 # Guacamole

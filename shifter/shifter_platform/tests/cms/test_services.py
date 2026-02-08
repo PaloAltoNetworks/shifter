@@ -254,3 +254,94 @@ class TestGetActiveRange:
         ):
             mock_active.filter.return_value = mock_queryset
             get_active_range(user)
+
+    # ---------------------------------------------------------------------
+    # Instance extraction from range_spec
+    # ---------------------------------------------------------------------
+
+    def test_extracts_instances_from_nested_subnets_format(self):
+        """Extracts instances from range_spec with nested subnets format."""
+        from django.contrib.auth import get_user_model
+
+        from cms.models import RangeInstance, Request
+        from cms.services import get_active_range
+
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser_nested", password="testpass")
+
+        # Create request for the FK
+        request = Request.objects.create(
+            request_id="11111111-1111-1111-1111-111111111111",
+            request_type="range",
+            user=user,
+        )
+
+        # New nested format: instances under subnets
+        range_spec = {
+            "subnets": [
+                {
+                    "name": "core",
+                    "instances": [
+                        {"uuid": "att-uuid", "role": "attacker", "os_type": "kali", "join_domain": False},
+                        {"uuid": "vic-uuid", "role": "victim", "os_type": "windows", "join_domain": False},
+                    ],
+                }
+            ]
+        }
+
+        RangeInstance.objects.create(
+            request=request,
+            range_id=100,
+            scenario_id="basic",
+            user_id=user.id,
+            status="ready",
+            range_spec=range_spec,
+        )
+
+        result = get_active_range(user)
+
+        assert result is not None
+        assert len(result.instances) == 2
+        assert result.instances[0].uuid == "att-uuid"
+        assert result.instances[0].role == "attacker"
+        assert result.instances[1].uuid == "vic-uuid"
+        assert result.instances[1].role == "victim"
+
+    def test_extracts_instances_from_legacy_flat_format(self):
+        """Extracts instances from range_spec with legacy flat format."""
+        from django.contrib.auth import get_user_model
+
+        from cms.models import RangeInstance, Request
+        from cms.services import get_active_range
+
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser_legacy", password="testpass")
+
+        request = Request.objects.create(
+            request_id="22222222-2222-2222-2222-222222222222",
+            request_type="range",
+            user=user,
+        )
+
+        # Legacy flat format: instances directly at top level
+        range_spec = {
+            "instances": [
+                {"uuid": "leg-att", "role": "attacker", "os_type": "kali", "join_domain": False},
+            ]
+        }
+
+        RangeInstance.objects.create(
+            request=request,
+            range_id=101,
+            scenario_id="basic",
+            user_id=user.id,
+            status="ready",
+            range_spec=range_spec,
+        )
+
+        result = get_active_range(user)
+
+        assert result is not None
+        assert len(result.instances) == 1
+        assert result.instances[0].uuid == "leg-att"
+        assert result.instances[0].role == "attacker"

@@ -78,7 +78,7 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
         name="ubuntu-22.04-victim",
         role="victim",
         _instance_type_getter=_get_victim_instance_type,
-        user_data_template="victim_linux.sh.j2",
+        user_data_template="ubuntu.sh.j2",
         description="Ubuntu 22.04 LTS victim with XDR agent",
         ami_lookup={
             "name": "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*",
@@ -91,7 +91,7 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
         name="ubuntu-24.04-victim",
         role="victim",
         _instance_type_getter=_get_victim_instance_type,
-        user_data_template="victim_linux.sh.j2",
+        user_data_template="ubuntu.sh.j2",
         description="Ubuntu 24.04 LTS victim with XDR agent",
         ami_lookup={
             "name": "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",

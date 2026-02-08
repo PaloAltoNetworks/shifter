@@ -103,8 +103,8 @@ variable "pulumi_ecs_cluster_arn" {
   type        = string
 }
 
-variable "pulumi_task_definition_arn" {
-  description = "ARN of ECS task definition for Pulumi provisioner"
+variable "pulumi_task_definition_family" {
+  description = "ECS task definition family name for Pulumi provisioner"
   type        = string
 }
 
@@ -144,7 +144,7 @@ variable "redis_endpoint" {
 }
 
 variable "db_host_override" {
-  description = "Override database host (e.g., PgBouncer endpoint). If empty, uses RDS host from secret."
+  description = "Override database host. If empty, uses RDS host from secret."
   type        = string
   default     = ""
 }

@@ -1,4 +1,20 @@
 services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sns,sqs,s3
+      DEBUG: 0
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"sns\": \"running\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     ports:
@@ -27,27 +43,6 @@ services:
       timeout: 5s
       retries: 5
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    environment:
-      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: 1000
-      DEFAULT_POOL_SIZE: 20
-      MIN_POOL_SIZE: 5
-      RESERVE_POOL_SIZE: 5
-      AUTH_TYPE: scram-sha-256
-    ports:
-      - "6432:5432"
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   web:
     build: .
     ports:
@@ -55,16 +50,24 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: pgbouncer
+      DB_HOST: db
+      DB_PORT: 5432
       REDIS_HOST: redis
+      PROVISIONER_PATH: /engine/provisioner
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
     depends_on:
-      pgbouncer:
+      db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      localstack:
         condition: service_healthy
     volumes:
       - .:/app
       - /app/.venv
+      - ../engine/provisioner:/engine/provisioner
 
   # ------------------------------------------------------------------------------
   # SQS Workers
@@ -78,12 +81,18 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: pgbouncer
+      DB_HOST: db
+      DB_PORT: 5432
       AWS_REGION: ${AWS_REGION:-us-east-2}
-      SQS_CMS_URL: ${SQS_CMS_URL}
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+      SQS_CMS_URL: http://sqs.us-east-2.localhost.localstack.cloud:4566/000000000000/shifter-cms
     restart: always
     depends_on:
-      pgbouncer:
+      db:
+        condition: service_healthy
+      localstack:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "find /tmp/worker-cms-heartbeat -mmin -1 | grep -q ."]
@@ -98,12 +107,18 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: pgbouncer
+      DB_HOST: db
+      DB_PORT: 5432
       AWS_REGION: ${AWS_REGION:-us-east-2}
-      SQS_ENGINE_URL: ${SQS_ENGINE_URL}
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+      SQS_ENGINE_URL: http://sqs.us-east-2.localhost.localstack.cloud:4566/000000000000/shifter-engine
     restart: always
     depends_on:
-      pgbouncer:
+      db:
+        condition: service_healthy
+      localstack:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "find /tmp/worker-engine-heartbeat -mmin -1 | grep -q ."]
@@ -118,13 +133,19 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: pgbouncer
+      DB_HOST: db
+      DB_PORT: 5432
       AWS_REGION: ${AWS_REGION:-us-east-2}
-      SQS_MC_URL: ${SQS_MC_URL}
-      REDIS_HOST: ${REDIS_HOST}
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+      SQS_MC_URL: http://sqs.us-east-2.localhost.localstack.cloud:4566/000000000000/shifter-mc
+      REDIS_HOST: redis
     restart: always
     depends_on:
-      pgbouncer:
+      db:
+        condition: service_healthy
+      localstack:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "find /tmp/worker-mc-heartbeat -mmin -1 | grep -q ."]

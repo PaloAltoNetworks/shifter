@@ -1,0 +1,111 @@
+{% extends "scenario_editor/base.html" %}
+
+{% block title %}Import from YAML{% endblock %}
+
+{% block extra_css %}
+<style>
+    .yaml-editor {
+        width: 100%; min-height: 500px; padding: 16px;
+        background: var(--xdr-surface); border: 1px solid var(--xdr-border);
+        border-radius: 4px; color: var(--xdr-text); font-family: monospace;
+        font-size: 14px; line-height: 1.6; resize: vertical; tab-size: 2;
+    }
+    .yaml-editor:focus { outline: none; border-color: #5588cc; }
+    .error-list {
+        background: rgba(200,50,50,0.15); border: 1px solid rgba(200,50,50,0.3);
+        border-radius: 4px; padding: 12px 16px; margin-bottom: 16px;
+    }
+    .error-list li { color: #cc8888; font-size: 14px; margin-bottom: 4px; }
+    .validation-result {
+        padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; display: none;
+    }
+    .validation-valid {
+        background: rgba(100,200,100,0.15); border: 1px solid rgba(100,200,100,0.3); color: #88cc88;
+    }
+    .validation-invalid {
+        background: rgba(200,50,50,0.15); border: 1px solid rgba(200,50,50,0.3); color: #cc8888;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Create from YAML</h1>
+        <p class="page-subtitle">Write or paste a YAML scenario definition</p>
+    </div>
+    <div class="flex-row gap-sm">
+        <button type="button" class="btn btn-secondary" onclick="validateYAML()">Validate</button>
+        <a href="{% url 'scenario_editor:create' %}" class="btn btn-secondary">Form Editor</a>
+    </div>
+</div>
+
+{% if errors %}
+<ul class="error-list">
+    {% for error in errors %}
+    <li>{{ error }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+<div id="validationResult" class="validation-result"></div>
+
+<form method="post">
+    {% csrf_token %}
+
+    <div class="card" style="margin-bottom: 16px; padding: 0;">
+        <textarea name="yaml_content" id="yamlEditor" class="yaml-editor"
+                  spellcheck="false">{{ yaml_content }}</textarea>
+    </div>
+
+    <div class="flex-row gap-sm">
+        <button type="submit" class="btn btn-primary">Create Scenario</button>
+        <a href="{% url 'scenario_editor:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('yamlEditor').addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+        this.selectionStart = this.selectionEnd = start + 2;
+    }
+});
+
+function validateYAML() {
+    const yaml_content = document.getElementById('yamlEditor').value;
+    const resultDiv = document.getElementById('validationResult');
+
+    fetch('{% url "scenario_editor:api_validate_yaml" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+        },
+        body: JSON.stringify({ yaml_content: yaml_content }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        resultDiv.style.display = 'block';
+        if (data.valid) {
+            resultDiv.className = 'validation-result validation-valid';
+            resultDiv.textContent = 'Valid scenario definition.';
+        } else {
+            resultDiv.className = 'validation-result validation-invalid';
+            resultDiv.innerHTML = '<strong>Validation errors:</strong><ul style="margin: 4px 0 0 16px;">' +
+                data.errors.map(e => `<li>${e}</li>`).join('') + '</ul>';
+        }
+    })
+    .catch(err => {
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'validation-result validation-invalid';
+        resultDiv.textContent = 'Error validating: ' + err.message;
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,286 @@
+{% extends "scenario_editor/base.html" %}
+{% load static %}
+
+{% block title %}{% if mode == 'create' %}Create Scenario{% else %}Edit {{ scenario.name }}{% endif %}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--xdr-text); }
+    .form-group .help-text { font-size: 12px; color: var(--xdr-text-secondary); margin-top: 2px; }
+    .form-input, .form-textarea, .form-select {
+        width: 100%; padding: 8px 12px; background: var(--xdr-surface); border: 1px solid var(--xdr-border);
+        border-radius: 4px; color: var(--xdr-text); font-size: 14px; font-family: 'Lato', sans-serif;
+    }
+    .form-input:focus, .form-textarea:focus, .form-select:focus {
+        outline: none; border-color: #5588cc;
+    }
+    .form-textarea { resize: vertical; min-height: 80px; }
+    .form-checkbox { display: flex; align-items: center; gap: 8px; }
+    .form-checkbox input { width: 16px; height: 16px; }
+    .error-list { background: rgba(200,50,50,0.15); border: 1px solid rgba(200,50,50,0.3); border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; }
+    .error-list li { color: #cc8888; font-size: 14px; margin-bottom: 4px; }
+    .instance-card { background: var(--xdr-surface); border: 1px solid var(--xdr-border); border-radius: 4px; padding: 12px; margin-bottom: 8px; }
+    .subnet-card { background: var(--xdr-surface); border: 1px solid var(--xdr-border); border-radius: 4px; padding: 12px; margin-bottom: 8px; }
+    .inline-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .btn-danger { background: rgba(200,50,50,0.2); color: #cc6666; border: 1px solid rgba(200,50,50,0.3); }
+    .btn-add { background: rgba(100,200,100,0.15); color: #88cc88; border: 1px solid rgba(100,200,100,0.25); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{% if mode == 'create' %}Create Scenario{% else %}Edit: {{ scenario.name }}{% endif %}</h1>
+        <p class="page-subtitle">{% if mode == 'create' %}Define a new scenario template{% else %}Modify scenario definition{% endif %}</p>
+    </div>
+</div>
+
+{% if errors %}
+<ul class="error-list">
+    {% for error in errors %}
+    <li>{{ error }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+<form method="post" id="scenarioForm">
+    {% csrf_token %}
+
+    <!-- Basic Information -->
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="card-title">Basic Information</div>
+
+        {% if mode == 'create' %}
+        <div class="form-group">
+            <label for="scenario_id">Scenario ID</label>
+            <input type="text" id="scenario_id" name="scenario_id" class="form-input"
+                   value="{{ scenario.id|default:'' }}" required
+                   pattern="[a-z0-9_-]+" title="Lowercase letters, numbers, hyphens, and underscores only"
+                   placeholder="my-custom-scenario">
+            <div class="help-text">URL-safe identifier. Lowercase letters, numbers, hyphens, underscores.</div>
+        </div>
+        {% endif %}
+
+        <div class="form-group">
+            <label for="name">Name</label>
+            <input type="text" id="name" name="name" class="form-input"
+                   value="{{ scenario.name|default:'' }}" required maxlength="200"
+                   placeholder="My Custom Scenario">
+        </div>
+
+        <div class="form-group">
+            <label for="description">Description</label>
+            <textarea id="description" name="description" class="form-textarea"
+                      required placeholder="Describe what this scenario does...">{{ scenario.description|default:'' }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <div class="form-checkbox">
+                <input type="checkbox" id="ngfw" name="ngfw" {% if scenario.ngfw %}checked{% endif %}>
+                <label for="ngfw" style="margin-bottom: 0;">Requires NGFW (Next-Gen Firewall)</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instances -->
+    <div class="card" style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div class="card-title" style="margin-bottom: 0;">Instances</div>
+            <button type="button" class="btn btn-add" onclick="addInstance()" style="font-size: 12px; height: 28px;">+ Add Instance</button>
+        </div>
+        <div id="instances-container">
+            <!-- Instances rendered by JS -->
+        </div>
+    </div>
+
+    <!-- Subnets -->
+    <div class="card" style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div class="card-title" style="margin-bottom: 0;">Subnets</div>
+            <button type="button" class="btn btn-add" onclick="addSubnet()" style="font-size: 12px; height: 28px;">+ Add Subnet</button>
+        </div>
+        <div class="help-text" style="margin-bottom: 12px;">
+            Define network segments. If no subnets are defined, all instances are placed in a single default subnet.
+        </div>
+        <div id="subnets-container">
+            <!-- Subnets rendered by JS -->
+        </div>
+    </div>
+
+    <!-- Hidden fields for JSON data -->
+    <input type="hidden" name="instances_json" id="instances_json">
+    <input type="hidden" name="subnets_json" id="subnets_json">
+
+    <!-- Actions -->
+    <div class="flex-row gap-sm">
+        <button type="submit" class="btn btn-primary">{% if mode == 'create' %}Create Scenario{% else %}Save Changes{% endif %}</button>
+        <a href="{% if mode == 'edit' %}{% url 'scenario_editor:detail' scenario_id=scenario.id %}{% else %}{% url 'scenario_editor:list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Instance and subnet data
+let instances = {{ scenario.instances|safe|default:"[]" }};
+let subnets = {{ scenario.subnets|safe|default:"[]" }};
+
+const ROLES = ['attacker', 'victim', 'dc', 'ngfw'];
+const OS_TYPES = ['kali', 'ubuntu', 'windows', 'from_agent', 'panos'];
+
+function renderInstances() {
+    const container = document.getElementById('instances-container');
+    container.innerHTML = '';
+
+    instances.forEach((inst, idx) => {
+        const card = document.createElement('div');
+        card.className = 'instance-card';
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <strong style="font-size: 14px;">Instance ${idx + 1}</strong>
+                <button type="button" class="btn btn-danger" onclick="removeInstance(${idx})" style="font-size: 11px; height: 22px; padding: 0 8px; border-radius: 11px; min-width: auto;">Remove</button>
+            </div>
+            <div class="inline-fields">
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label>Name</label>
+                    <input type="text" class="form-input" value="${inst.name || ''}" onchange="instances[${idx}].name = this.value" placeholder="Instance name" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label>Role</label>
+                    <select class="form-select" onchange="instances[${idx}].role = this.value">
+                        ${ROLES.map(r => `<option value="${r}" ${inst.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label>OS Type</label>
+                    <select class="form-select" onchange="instances[${idx}].os_type = this.value">
+                        ${OS_TYPES.map(o => `<option value="${o}" ${inst.os_type === o ? 'selected' : ''}>${o}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            <div class="inline-fields" style="margin-top: 4px;">
+                <div class="form-checkbox">
+                    <input type="checkbox" ${inst.xdr_agent ? 'checked' : ''} onchange="instances[${idx}].xdr_agent = this.checked">
+                    <label style="margin-bottom: 0; font-size: 13px;">XDR Agent</label>
+                </div>
+                <div class="form-checkbox">
+                    <input type="checkbox" ${inst.domain_controller ? 'checked' : ''} onchange="handleDCChange(${idx}, this.checked)">
+                    <label style="margin-bottom: 0; font-size: 13px;">Domain Controller</label>
+                </div>
+                <div class="form-checkbox">
+                    <input type="checkbox" ${inst.join_domain ? 'checked' : ''} onchange="instances[${idx}].join_domain = this.checked">
+                    <label style="margin-bottom: 0; font-size: 13px;">Join Domain</label>
+                </div>
+            </div>
+            ${inst.domain_controller ? `
+            <div style="margin-top: 8px; padding: 8px; background: rgba(100,100,255,0.05); border-radius: 4px;">
+                <div class="inline-fields">
+                    <div class="form-group" style="margin-bottom: 4px;">
+                        <label>Domain Name</label>
+                        <input type="text" class="form-input" value="${inst.dc_config?.domain_name || 'internal.shifter'}" onchange="updateDCConfig(${idx}, 'domain_name', this.value)" placeholder="internal.shifter">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 4px;">
+                        <label>NetBIOS Name</label>
+                        <input type="text" class="form-input" value="${inst.dc_config?.netbios_name || 'INTSHIFTER'}" onchange="updateDCConfig(${idx}, 'netbios_name', this.value)" placeholder="INTSHIFTER">
+                    </div>
+                </div>
+            </div>
+            ` : ''}
+        `;
+        container.appendChild(card);
+    });
+}
+
+function renderSubnets() {
+    const container = document.getElementById('subnets-container');
+    container.innerHTML = '';
+
+    const instanceNames = instances.map(i => i.name).filter(Boolean);
+
+    subnets.forEach((subnet, idx) => {
+        const card = document.createElement('div');
+        card.className = 'subnet-card';
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <strong style="font-size: 14px;">Subnet ${idx + 1}</strong>
+                <button type="button" class="btn btn-danger" onclick="removeSubnet(${idx})" style="font-size: 11px; height: 22px; padding: 0 8px; border-radius: 11px; min-width: auto;">Remove</button>
+            </div>
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label>Subnet Name</label>
+                <input type="text" class="form-input" value="${subnet.name || ''}" onchange="subnets[${idx}].name = this.value" placeholder="core" required>
+            </div>
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label>Instances (comma-separated names)</label>
+                <input type="text" class="form-input" value="${(subnet.instances || []).join(', ')}" onchange="subnets[${idx}].instances = this.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="${instanceNames.join(', ')}">
+                <div class="help-text">Available: ${instanceNames.join(', ') || '(define instances first)'}</div>
+            </div>
+            <div class="form-group" style="margin-bottom: 4px;">
+                <label>Connected To (comma-separated subnet names)</label>
+                <input type="text" class="form-input" value="${(subnet.connected_to || []).join(', ')}" onchange="subnets[${idx}].connected_to = this.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="other_subnet">
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+function addInstance() {
+    instances.push({
+        name: '',
+        role: 'victim',
+        os_type: 'windows',
+        xdr_agent: false,
+        domain_controller: false,
+        join_domain: false,
+        dc_config: null,
+    });
+    renderInstances();
+}
+
+function removeInstance(idx) {
+    instances.splice(idx, 1);
+    renderInstances();
+}
+
+function addSubnet() {
+    subnets.push({
+        name: '',
+        instances: [],
+        connected_to: [],
+    });
+    renderSubnets();
+}
+
+function removeSubnet(idx) {
+    subnets.splice(idx, 1);
+    renderSubnets();
+}
+
+function handleDCChange(idx, checked) {
+    instances[idx].domain_controller = checked;
+    if (checked && !instances[idx].dc_config) {
+        instances[idx].dc_config = { domain_name: 'internal.shifter', netbios_name: 'INTSHIFTER' };
+    } else if (!checked) {
+        instances[idx].dc_config = null;
+    }
+    renderInstances();
+}
+
+function updateDCConfig(idx, field, value) {
+    if (!instances[idx].dc_config) {
+        instances[idx].dc_config = { domain_name: '', netbios_name: '' };
+    }
+    instances[idx].dc_config[field] = value;
+}
+
+// Serialize data before form submission
+document.getElementById('scenarioForm').addEventListener('submit', function() {
+    document.getElementById('instances_json').value = JSON.stringify(instances);
+    document.getElementById('subnets_json').value = JSON.stringify(subnets);
+});
+
+// Initial render
+renderInstances();
+renderSubnets();
+</script>
+{% endblock %}

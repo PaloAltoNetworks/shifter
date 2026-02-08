@@ -2105,8 +2105,15 @@ def pause_range(user: User, range_id: int) -> None:
             )
             raise CMSError("Range has no associated request")
 
-        # Call engine - it will update DB status and trigger ECS task
+        # Update CMS status to PAUSING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.PAUSING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
         if not engine_pause_range(request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.READY.value
+            instance.save(update_fields=["status"])
             logger.warning(
                 "pause_range: engine returned False for range_id=%s",
                 range_id,
@@ -2188,8 +2195,15 @@ def pause_range_by_request_id(user: User, request_id: str) -> None:
         raise CMSError("Range has no associated request")
 
     try:
-        # Call engine - it will update DB status and trigger ECS task
+        # Update CMS status to PAUSING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.PAUSING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
         if not engine_pause_range(instance.request.request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.READY.value
+            instance.save(update_fields=["status"])
             logger.warning(
                 "pause_range_by_request_id: engine returned False for request_id=%s",
                 request_id,
@@ -2308,8 +2322,15 @@ def resume_range(user: User, range_id: int) -> None:
             )
             raise CMSError("Range has no associated request")
 
-        # Call engine - it will update DB status and trigger ECS task
+        # Update CMS status to RESUMING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.RESUMING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
         if not engine_resume_range(request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.PAUSED.value
+            instance.save(update_fields=["status"])
             logger.warning(
                 "resume_range: engine returned False for range_id=%s",
                 range_id,
@@ -2391,8 +2412,15 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
         raise CMSError("Range has no associated request")
 
     try:
-        # Call engine - it will update DB status and trigger ECS task
+        # Update CMS status to RESUMING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.RESUMING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
         if not engine_resume_range(instance.request.request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.PAUSED.value
+            instance.save(update_fields=["status"])
             logger.warning(
                 "resume_range_by_request_id: engine returned False for request_id=%s",
                 request_id,

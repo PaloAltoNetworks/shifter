@@ -192,6 +192,7 @@ class Range(models.Model):
         PENDING = "pending", "Pending"
         PROVISIONING = "provisioning", "Provisioning"
         READY = "ready", "Ready"
+        PAUSING = "pausing", "Pausing"
         PAUSED = "paused", "Paused"
         RESUMING = "resuming", "Resuming"
         DESTROYING = "destroying", "Destroying"
@@ -327,8 +328,8 @@ class Range(models.Model):
         return f"Range {self.id} ({scenario}) - {self.status}"
 
     @property
-    def is_active(self):
-        """Return True if range is in an active/usable state."""
+    def is_usable(self):
+        """Return True if range is in a usable state (operational and connectable)."""
         return self.status in (self.Status.READY, self.Status.PAUSED)
 
     @property

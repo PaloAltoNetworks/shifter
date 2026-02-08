@@ -15,9 +15,7 @@ class InstanceConfigSerializer(serializers.Serializer):
 
     name = serializers.CharField(max_length=100)
     role = serializers.ChoiceField(choices=["attacker", "victim", "dc", "ngfw"])
-    os_type = serializers.ChoiceField(
-        choices=["kali", "ubuntu", "windows", "from_agent", "panos"]
-    )
+    os_type = serializers.ChoiceField(choices=["kali", "ubuntu", "windows", "from_agent", "panos"])
     xdr_agent = serializers.BooleanField(default=False)
     domain_controller = serializers.BooleanField(default=False)
     join_domain = serializers.BooleanField(default=False)
@@ -82,9 +80,7 @@ class ScenarioMetadataSerializer(serializers.Serializer):
 
     def validate(self, data):
         if not data:
-            raise serializers.ValidationError(
-                "At least one of 'enabled' or 'staff_only' must be provided"
-            )
+            raise serializers.ValidationError("At least one of 'enabled' or 'staff_only' must be provided")
         return data
 
 
@@ -128,9 +124,7 @@ class ScenarioValidateSerializer(serializers.Serializer):
 class ScenarioYAMLSerializer(serializers.Serializer):
     """Serializer for YAML-based scenario operations."""
 
-    yaml_content = serializers.CharField(
-        help_text="Raw YAML content defining the scenario"
-    )
+    yaml_content = serializers.CharField(help_text="Raw YAML content defining the scenario")
 
 
 class ScenarioMetadataResponseSerializer(serializers.Serializer):

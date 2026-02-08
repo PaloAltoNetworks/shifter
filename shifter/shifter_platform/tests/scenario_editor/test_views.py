@@ -114,25 +114,31 @@ class TestScenarioCreateFormView:
         assert response.status_code == 200
 
     def test_post_creates_scenario(self, staff_client, valid_definition):
-        response = staff_client.post(f"{VIEW_BASE}create/", {
-            "scenario_id": "form-created",
-            "name": "Form Created",
-            "description": "Created via form",
-            "instances_json": json.dumps(valid_definition["instances"]),
-            "subnets_json": json.dumps(valid_definition["subnets"]),
-        })
+        response = staff_client.post(
+            f"{VIEW_BASE}create/",
+            {
+                "scenario_id": "form-created",
+                "name": "Form Created",
+                "description": "Created via form",
+                "instances_json": json.dumps(valid_definition["instances"]),
+                "subnets_json": json.dumps(valid_definition["subnets"]),
+            },
+        )
         # Should redirect to detail page
         assert response.status_code == 302
         assert Scenario.objects.filter(scenario_id="form-created").exists()
 
     def test_post_with_errors(self, staff_client):
-        response = staff_client.post(f"{VIEW_BASE}create/", {
-            "scenario_id": "",
-            "name": "",
-            "description": "",
-            "instances_json": "[]",
-            "subnets_json": "[]",
-        })
+        response = staff_client.post(
+            f"{VIEW_BASE}create/",
+            {
+                "scenario_id": "",
+                "name": "",
+                "description": "",
+                "instances_json": "[]",
+                "subnets_json": "[]",
+            },
+        )
         assert response.status_code == 200  # Re-renders form with errors
 
 
@@ -146,12 +152,15 @@ class TestScenarioEditFormView:
         assert response.status_code == 200  # Renders error page
 
     def test_post_updates(self, staff_client, custom_scenario, valid_definition):
-        response = staff_client.post(f"{VIEW_BASE}view-test/edit/", {
-            "name": "Updated Via Form",
-            "description": "Updated description",
-            "instances_json": json.dumps(valid_definition["instances"]),
-            "subnets_json": json.dumps(valid_definition["subnets"]),
-        })
+        response = staff_client.post(
+            f"{VIEW_BASE}view-test/edit/",
+            {
+                "name": "Updated Via Form",
+                "description": "Updated description",
+                "instances_json": json.dumps(valid_definition["instances"]),
+                "subnets_json": json.dumps(valid_definition["subnets"]),
+            },
+        )
         assert response.status_code == 302
         custom_scenario.refresh_from_db()
         assert custom_scenario.name == "Updated Via Form"
@@ -182,9 +191,12 @@ instances:
     role: attacker
     os_type: kali
 """
-        response = staff_client.post(f"{VIEW_BASE}create/yaml/", {
-            "yaml_content": yaml_content,
-        })
+        response = staff_client.post(
+            f"{VIEW_BASE}create/yaml/",
+            {
+                "yaml_content": yaml_content,
+            },
+        )
         assert response.status_code == 302
         assert Scenario.objects.filter(scenario_id="yaml-created").exists()
 
@@ -195,10 +207,13 @@ class TestCloneView:
         assert response.status_code == 200
 
     def test_post_clones(self, staff_client):
-        response = staff_client.post(f"{VIEW_BASE}basic/clone/", {
-            "new_scenario_id": "basic-cloned",
-            "new_name": "Cloned Basic",
-        })
+        response = staff_client.post(
+            f"{VIEW_BASE}basic/clone/",
+            {
+                "new_scenario_id": "basic-cloned",
+                "new_name": "Cloned Basic",
+            },
+        )
         assert response.status_code == 302
         assert Scenario.objects.filter(scenario_id="basic-cloned").exists()
 

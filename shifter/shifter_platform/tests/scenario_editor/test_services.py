@@ -2,7 +2,6 @@
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 from cms.models import Scenario, ScenarioMetadata
 from scenario_editor.services import (
@@ -56,14 +55,16 @@ def custom_scenario(staff_user, valid_definition):
 
 class TestValidateDefinition:
     def test_valid_definition(self):
-        errors = validate_definition({
-            "id": "test",
-            "name": "Test",
-            "description": "A test",
-            "instances": [
-                {"name": "A", "role": "attacker", "os_type": "kali"},
-            ],
-        })
+        errors = validate_definition(
+            {
+                "id": "test",
+                "name": "Test",
+                "description": "A test",
+                "instances": [
+                    {"name": "A", "role": "attacker", "os_type": "kali"},
+                ],
+            }
+        )
         assert errors == []
 
     def test_missing_required_fields(self):
@@ -72,12 +73,14 @@ class TestValidateDefinition:
         assert any("id" in e for e in errors)
 
     def test_empty_instances(self):
-        errors = validate_definition({
-            "id": "test",
-            "name": "Test",
-            "description": "A test",
-            "instances": [],
-        })
+        errors = validate_definition(
+            {
+                "id": "test",
+                "name": "Test",
+                "description": "A test",
+                "instances": [],
+            }
+        )
         assert len(errors) > 0
 
     def test_non_dict_input(self):
@@ -85,17 +88,19 @@ class TestValidateDefinition:
         assert errors == ["Definition must be a JSON object"]
 
     def test_invalid_subnet_references(self):
-        errors = validate_definition({
-            "id": "test",
-            "name": "Test",
-            "description": "A test",
-            "instances": [
-                {"name": "A", "role": "attacker", "os_type": "kali"},
-            ],
-            "subnets": [
-                {"name": "core", "instances": ["A", "NonExistent"]},
-            ],
-        })
+        errors = validate_definition(
+            {
+                "id": "test",
+                "name": "Test",
+                "description": "A test",
+                "instances": [
+                    {"name": "A", "role": "attacker", "os_type": "kali"},
+                ],
+                "subnets": [
+                    {"name": "core", "instances": ["A", "NonExistent"]},
+                ],
+            }
+        )
         assert len(errors) > 0
         assert any("NonExistent" in e for e in errors)
 

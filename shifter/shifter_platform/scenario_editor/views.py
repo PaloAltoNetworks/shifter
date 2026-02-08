@@ -9,9 +9,8 @@ from __future__ import annotations
 import json
 import logging
 
-import yaml
 from django.contrib.auth.decorators import login_required, user_passes_test
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
@@ -28,7 +27,6 @@ from scenario_editor.services import (
     export_scenario_yaml,
     update_metadata,
     update_scenario,
-    validate_definition,
     validate_yaml,
 )
 
@@ -51,9 +49,13 @@ def staff_required(user):
 def scenario_list(request):
     """List all scenarios with metadata."""
     scenarios = list_all_scenarios(user=None)  # Staff sees all
-    return render(request, "scenario_editor/list.html", {
-        "scenarios": scenarios,
-    })
+    return render(
+        request,
+        "scenario_editor/list.html",
+        {
+            "scenarios": scenarios,
+        },
+    )
 
 
 # =============================================================================
@@ -69,16 +71,25 @@ def scenario_detail_view(request, scenario_id):
     try:
         scenario = get_scenario_detail(scenario_id)
     except ValueError:
-        return render(request, "scenario_editor/not_found.html", {
-            "scenario_id": scenario_id,
-        }, status=404)
+        return render(
+            request,
+            "scenario_editor/not_found.html",
+            {
+                "scenario_id": scenario_id,
+            },
+            status=404,
+        )
 
     yaml_content = export_scenario_yaml(scenario_id)
-    return render(request, "scenario_editor/detail.html", {
-        "scenario": scenario,
-        "yaml_content": yaml_content,
-        "is_default": scenario.get("is_default", False),
-    })
+    return render(
+        request,
+        "scenario_editor/detail.html",
+        {
+            "scenario": scenario,
+            "yaml_content": yaml_content,
+            "is_default": scenario.get("is_default", False),
+        },
+    )
 
 
 # =============================================================================
@@ -92,11 +103,15 @@ def scenario_detail_view(request, scenario_id):
 def scenario_create_form(request):
     """Form-based scenario creation."""
     if request.method == "GET":
-        return render(request, "scenario_editor/form.html", {
-            "mode": "create",
-            "scenario": None,
-            "errors": [],
-        })
+        return render(
+            request,
+            "scenario_editor/form.html",
+            {
+                "mode": "create",
+                "scenario": None,
+                "errors": [],
+            },
+        )
 
     # POST - handle form submission
     scenario_id = request.POST.get("scenario_id", "").strip()
@@ -130,18 +145,22 @@ def scenario_create_form(request):
         errors.append("At least one instance is required")
 
     if errors:
-        return render(request, "scenario_editor/form.html", {
-            "mode": "create",
-            "scenario": {
-                "id": scenario_id,
-                "name": name,
-                "description": description,
-                "ngfw": ngfw,
-                "instances": instances,
-                "subnets": subnets,
+        return render(
+            request,
+            "scenario_editor/form.html",
+            {
+                "mode": "create",
+                "scenario": {
+                    "id": scenario_id,
+                    "name": name,
+                    "description": description,
+                    "ngfw": ngfw,
+                    "instances": instances,
+                    "subnets": subnets,
+                },
+                "errors": errors,
             },
-            "errors": errors,
-        })
+        )
 
     definition = {
         "instances": instances,
@@ -158,18 +177,22 @@ def scenario_create_form(request):
             definition=definition,
         )
     except ScenarioEditorError as e:
-        return render(request, "scenario_editor/form.html", {
-            "mode": "create",
-            "scenario": {
-                "id": scenario_id,
-                "name": name,
-                "description": description,
-                "ngfw": ngfw,
-                "instances": instances,
-                "subnets": subnets,
+        return render(
+            request,
+            "scenario_editor/form.html",
+            {
+                "mode": "create",
+                "scenario": {
+                    "id": scenario_id,
+                    "name": name,
+                    "description": description,
+                    "ngfw": ngfw,
+                    "instances": instances,
+                    "subnets": subnets,
+                },
+                "errors": [str(e)],
             },
-            "errors": [str(e)],
-        })
+        )
 
     return redirect("scenario_editor:detail", scenario_id=scenario_id)
 
@@ -180,23 +203,36 @@ def scenario_create_form(request):
 def scenario_edit_form(request, scenario_id):
     """Form-based scenario editing (custom scenarios only)."""
     if is_default_scenario(scenario_id):
-        return render(request, "scenario_editor/error.html", {
-            "message": "Default scenarios cannot be edited. Clone it to create an editable copy.",
-        })
+        return render(
+            request,
+            "scenario_editor/error.html",
+            {
+                "message": "Default scenarios cannot be edited. Clone it to create an editable copy.",
+            },
+        )
 
     try:
         scenario = get_scenario_detail(scenario_id)
     except ValueError:
-        return render(request, "scenario_editor/not_found.html", {
-            "scenario_id": scenario_id,
-        }, status=404)
+        return render(
+            request,
+            "scenario_editor/not_found.html",
+            {
+                "scenario_id": scenario_id,
+            },
+            status=404,
+        )
 
     if request.method == "GET":
-        return render(request, "scenario_editor/form.html", {
-            "mode": "edit",
-            "scenario": scenario,
-            "errors": [],
-        })
+        return render(
+            request,
+            "scenario_editor/form.html",
+            {
+                "mode": "edit",
+                "scenario": scenario,
+                "errors": [],
+            },
+        )
 
     # POST - handle form submission
     name = request.POST.get("name", "").strip()
@@ -227,18 +263,24 @@ def scenario_edit_form(request, scenario_id):
         errors.append("At least one instance is required")
 
     if errors:
-        scenario.update({
-            "name": name,
-            "description": description,
-            "ngfw": ngfw,
-            "instances": instances,
-            "subnets": subnets,
-        })
-        return render(request, "scenario_editor/form.html", {
-            "mode": "edit",
-            "scenario": scenario,
-            "errors": errors,
-        })
+        scenario.update(
+            {
+                "name": name,
+                "description": description,
+                "ngfw": ngfw,
+                "instances": instances,
+                "subnets": subnets,
+            }
+        )
+        return render(
+            request,
+            "scenario_editor/form.html",
+            {
+                "mode": "edit",
+                "scenario": scenario,
+                "errors": errors,
+            },
+        )
 
     definition = {
         "instances": instances,
@@ -255,18 +297,24 @@ def scenario_edit_form(request, scenario_id):
             definition=definition,
         )
     except ScenarioEditorError as e:
-        scenario.update({
-            "name": name,
-            "description": description,
-            "ngfw": ngfw,
-            "instances": instances,
-            "subnets": subnets,
-        })
-        return render(request, "scenario_editor/form.html", {
-            "mode": "edit",
-            "scenario": scenario,
-            "errors": [str(e)],
-        })
+        scenario.update(
+            {
+                "name": name,
+                "description": description,
+                "ngfw": ngfw,
+                "instances": instances,
+                "subnets": subnets,
+            }
+        )
+        return render(
+            request,
+            "scenario_editor/form.html",
+            {
+                "mode": "edit",
+                "scenario": scenario,
+                "errors": [str(e)],
+            },
+        )
 
     return redirect("scenario_editor:detail", scenario_id=scenario_id)
 
@@ -286,36 +334,53 @@ def scenario_yaml_editor(request, scenario_id):
     POST: Validates and saves the YAML content.
     """
     if is_default_scenario(scenario_id):
-        return render(request, "scenario_editor/error.html", {
-            "message": "Default scenarios cannot be edited via YAML. Clone it first.",
-        })
+        return render(
+            request,
+            "scenario_editor/error.html",
+            {
+                "message": "Default scenarios cannot be edited via YAML. Clone it first.",
+            },
+        )
 
     try:
         scenario = get_scenario_detail(scenario_id)
     except ValueError:
-        return render(request, "scenario_editor/not_found.html", {
-            "scenario_id": scenario_id,
-        }, status=404)
+        return render(
+            request,
+            "scenario_editor/not_found.html",
+            {
+                "scenario_id": scenario_id,
+            },
+            status=404,
+        )
 
     yaml_content = export_scenario_yaml(scenario_id)
 
     if request.method == "GET":
-        return render(request, "scenario_editor/yaml_editor.html", {
-            "scenario": scenario,
-            "yaml_content": yaml_content,
-            "errors": [],
-        })
+        return render(
+            request,
+            "scenario_editor/yaml_editor.html",
+            {
+                "scenario": scenario,
+                "yaml_content": yaml_content,
+                "errors": [],
+            },
+        )
 
     # POST - validate and save
     submitted_yaml = request.POST.get("yaml_content", "")
     parsed, errors = validate_yaml(submitted_yaml)
 
     if errors:
-        return render(request, "scenario_editor/yaml_editor.html", {
-            "scenario": scenario,
-            "yaml_content": submitted_yaml,
-            "errors": errors,
-        })
+        return render(
+            request,
+            "scenario_editor/yaml_editor.html",
+            {
+                "scenario": scenario,
+                "yaml_content": submitted_yaml,
+                "errors": errors,
+            },
+        )
 
     # Extract fields from parsed YAML
     name = parsed.get("name", scenario["name"])
@@ -335,11 +400,15 @@ def scenario_yaml_editor(request, scenario_id):
             definition=definition,
         )
     except ScenarioEditorError as e:
-        return render(request, "scenario_editor/yaml_editor.html", {
-            "scenario": scenario,
-            "yaml_content": submitted_yaml,
-            "errors": [str(e)],
-        })
+        return render(
+            request,
+            "scenario_editor/yaml_editor.html",
+            {
+                "scenario": scenario,
+                "yaml_content": submitted_yaml,
+                "errors": [str(e)],
+            },
+        )
 
     return redirect("scenario_editor:detail", scenario_id=scenario_id)
 
@@ -378,20 +447,28 @@ def scenario_yaml_create(request):
             "  - name: core\n"
             "    instances: [Attacker, Workstation]\n"
         )
-        return render(request, "scenario_editor/yaml_create.html", {
-            "yaml_content": template_yaml,
-            "errors": [],
-        })
+        return render(
+            request,
+            "scenario_editor/yaml_create.html",
+            {
+                "yaml_content": template_yaml,
+                "errors": [],
+            },
+        )
 
     # POST
     submitted_yaml = request.POST.get("yaml_content", "")
     parsed, errors = validate_yaml(submitted_yaml)
 
     if errors:
-        return render(request, "scenario_editor/yaml_create.html", {
-            "yaml_content": submitted_yaml,
-            "errors": errors,
-        })
+        return render(
+            request,
+            "scenario_editor/yaml_create.html",
+            {
+                "yaml_content": submitted_yaml,
+                "errors": errors,
+            },
+        )
 
     scenario_id = parsed.get("id", "")
     name = parsed.get("name", "")
@@ -411,10 +488,14 @@ def scenario_yaml_create(request):
             definition=definition,
         )
     except ScenarioEditorError as e:
-        return render(request, "scenario_editor/yaml_create.html", {
-            "yaml_content": submitted_yaml,
-            "errors": [str(e)],
-        })
+        return render(
+            request,
+            "scenario_editor/yaml_create.html",
+            {
+                "yaml_content": submitted_yaml,
+                "errors": [str(e)],
+            },
+        )
 
     return redirect("scenario_editor:detail", scenario_id=scenario_id)
 
@@ -432,9 +513,13 @@ def scenario_delete_view(request, scenario_id):
     try:
         delete_scenario(request.user, scenario_id)
     except ScenarioEditorError as e:
-        return render(request, "scenario_editor/error.html", {
-            "message": str(e),
-        })
+        return render(
+            request,
+            "scenario_editor/error.html",
+            {
+                "message": str(e),
+            },
+        )
 
     return redirect("scenario_editor:list")
 
@@ -447,18 +532,27 @@ def scenario_toggle_enabled(request, scenario_id):
     try:
         current = get_scenario_detail(scenario_id)
     except ValueError:
-        return render(request, "scenario_editor/not_found.html", {
-            "scenario_id": scenario_id,
-        }, status=404)
+        return render(
+            request,
+            "scenario_editor/not_found.html",
+            {
+                "scenario_id": scenario_id,
+            },
+            status=404,
+        )
 
     new_enabled = not current.get("enabled", True)
 
     try:
         update_metadata(request.user, scenario_id, enabled=new_enabled)
     except ScenarioEditorError as e:
-        return render(request, "scenario_editor/error.html", {
-            "message": str(e),
-        })
+        return render(
+            request,
+            "scenario_editor/error.html",
+            {
+                "message": str(e),
+            },
+        )
 
     return redirect("scenario_editor:list")
 
@@ -471,18 +565,27 @@ def scenario_toggle_staff_only(request, scenario_id):
     try:
         current = get_scenario_detail(scenario_id)
     except ValueError:
-        return render(request, "scenario_editor/not_found.html", {
-            "scenario_id": scenario_id,
-        }, status=404)
+        return render(
+            request,
+            "scenario_editor/not_found.html",
+            {
+                "scenario_id": scenario_id,
+            },
+            status=404,
+        )
 
     new_staff_only = not current.get("staff_only", False)
 
     try:
         update_metadata(request.user, scenario_id, staff_only=new_staff_only)
     except ScenarioEditorError as e:
-        return render(request, "scenario_editor/error.html", {
-            "message": str(e),
-        })
+        return render(
+            request,
+            "scenario_editor/error.html",
+            {
+                "message": str(e),
+            },
+        )
 
     return redirect("scenario_editor:list")
 
@@ -495,23 +598,36 @@ def scenario_clone_view(request, scenario_id):
     try:
         source = get_scenario_detail(scenario_id)
     except ValueError:
-        return render(request, "scenario_editor/not_found.html", {
-            "scenario_id": scenario_id,
-        }, status=404)
+        return render(
+            request,
+            "scenario_editor/not_found.html",
+            {
+                "scenario_id": scenario_id,
+            },
+            status=404,
+        )
 
     if request.method == "GET":
-        return render(request, "scenario_editor/clone.html", {
-            "source": source,
-        })
+        return render(
+            request,
+            "scenario_editor/clone.html",
+            {
+                "source": source,
+            },
+        )
 
     new_scenario_id = request.POST.get("new_scenario_id", "").strip()
     new_name = request.POST.get("new_name", "").strip() or None
 
     if not new_scenario_id:
-        return render(request, "scenario_editor/clone.html", {
-            "source": source,
-            "errors": ["New scenario ID is required"],
-        })
+        return render(
+            request,
+            "scenario_editor/clone.html",
+            {
+                "source": source,
+                "errors": ["New scenario ID is required"],
+            },
+        )
 
     try:
         scenario = clone_scenario(
@@ -521,10 +637,14 @@ def scenario_clone_view(request, scenario_id):
             new_name=new_name,
         )
     except ScenarioEditorError as e:
-        return render(request, "scenario_editor/clone.html", {
-            "source": source,
-            "errors": [str(e)],
-        })
+        return render(
+            request,
+            "scenario_editor/clone.html",
+            {
+                "source": source,
+                "errors": [str(e)],
+            },
+        )
 
     return redirect("scenario_editor:detail", scenario_id=scenario.scenario_id)
 
@@ -537,9 +657,13 @@ def scenario_export_view(request, scenario_id):
     try:
         yaml_content = export_scenario_yaml(scenario_id)
     except ScenarioEditorError as e:
-        return render(request, "scenario_editor/error.html", {
-            "message": str(e),
-        })
+        return render(
+            request,
+            "scenario_editor/error.html",
+            {
+                "message": str(e),
+            },
+        )
 
     response = HttpResponse(yaml_content, content_type="text/yaml")
     response["Content-Disposition"] = f'attachment; filename="{scenario_id}.yaml"'

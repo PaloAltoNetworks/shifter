@@ -7,7 +7,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
 
-from cms.models import Scenario, ScenarioMetadata
+from cms.models import Scenario
 
 User = get_user_model()
 
@@ -102,12 +102,14 @@ class TestScenarioCreateAPI:
     def test_create_success(self, staff_client, valid_definition):
         response = staff_client.post(
             f"{API_BASE}create/",
-            data=json.dumps({
-                "scenario_id": "api-created",
-                "name": "API Created",
-                "description": "Created via API",
-                "definition": valid_definition,
-            }),
+            data=json.dumps(
+                {
+                    "scenario_id": "api-created",
+                    "name": "API Created",
+                    "description": "Created via API",
+                    "definition": valid_definition,
+                }
+            ),
             content_type="application/json",
         )
         assert response.status_code == 201
@@ -117,12 +119,14 @@ class TestScenarioCreateAPI:
     def test_create_invalid_definition(self, staff_client):
         response = staff_client.post(
             f"{API_BASE}create/",
-            data=json.dumps({
-                "scenario_id": "bad",
-                "name": "Bad",
-                "description": "Bad definition",
-                "definition": {"instances": [], "ngfw": False},
-            }),
+            data=json.dumps(
+                {
+                    "scenario_id": "bad",
+                    "name": "Bad",
+                    "description": "Bad definition",
+                    "definition": {"instances": [], "ngfw": False},
+                }
+            ),
             content_type="application/json",
         )
         assert response.status_code == 400
@@ -130,12 +134,14 @@ class TestScenarioCreateAPI:
     def test_non_staff_forbidden(self, regular_client, valid_definition):
         response = regular_client.post(
             f"{API_BASE}create/",
-            data=json.dumps({
-                "scenario_id": "blocked",
-                "name": "Blocked",
-                "description": "Should fail",
-                "definition": valid_definition,
-            }),
+            data=json.dumps(
+                {
+                    "scenario_id": "blocked",
+                    "name": "Blocked",
+                    "description": "Should fail",
+                    "definition": valid_definition,
+                }
+            ),
             content_type="application/json",
         )
         assert response.status_code == 403
@@ -195,16 +201,18 @@ class TestScenarioValidateAPI:
     def test_valid_definition(self, staff_client):
         response = staff_client.post(
             f"{API_BASE}validate/",
-            data=json.dumps({
-                "definition": {
-                    "id": "test",
-                    "name": "Test",
-                    "description": "A test",
-                    "instances": [
-                        {"name": "A", "role": "attacker", "os_type": "kali"},
-                    ],
+            data=json.dumps(
+                {
+                    "definition": {
+                        "id": "test",
+                        "name": "Test",
+                        "description": "A test",
+                        "instances": [
+                            {"name": "A", "role": "attacker", "os_type": "kali"},
+                        ],
+                    }
                 }
-            }),
+            ),
             content_type="application/json",
         )
         assert response.status_code == 200
@@ -247,10 +255,12 @@ class TestScenarioCloneAPI:
     def test_clone_default(self, staff_client):
         response = staff_client.post(
             f"{API_BASE}basic/clone/",
-            data=json.dumps({
-                "new_scenario_id": "basic-api-clone",
-                "new_name": "API Clone",
-            }),
+            data=json.dumps(
+                {
+                    "new_scenario_id": "basic-api-clone",
+                    "new_name": "API Clone",
+                }
+            ),
             content_type="application/json",
         )
         assert response.status_code == 201

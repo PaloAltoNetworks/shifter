@@ -12,7 +12,7 @@ import re
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
@@ -855,3 +855,30 @@ def scenario_export_view(request, scenario_id):
             {"message": "An unexpected error occurred. Please try again."},
             status=500,
         )
+
+
+# =============================================================================
+# YAML Validation (JSON endpoint for client-side validate button)
+# =============================================================================
+
+
+@login_required
+@user_passes_test(staff_required)
+@require_POST
+def validate_yaml_view(request):
+    """Validate YAML scenario content without saving.
+
+    Called by the client-side Validate button in yaml_editor.html and yaml_create.html.
+    Accepts JSON body with yaml_content, returns JSON response.
+    """
+    try:
+        body = json.loads(request.body)
+        yaml_content = body.get("yaml_content", "")
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({"valid": False, "errors": ["Invalid request body"]}, status=400)
+
+    parsed, errors = validate_yaml(yaml_content)
+
+    if errors:
+        return JsonResponse({"valid": False, "errors": errors, "definition": None})
+    return JsonResponse({"valid": True, "errors": [], "definition": parsed})

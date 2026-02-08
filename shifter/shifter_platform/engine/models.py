@@ -382,10 +382,10 @@ class Range(models.Model):
         ).first()
 
     # Subnet index allocation constants
-    # Range VPC uses 10.1.0.0/16, each range gets 10.1.{index}.0/24
-    # Reserve index 0 (network) and 255 (broadcast), use 1-254
+    # Range VPC uses 10.1.0.0/16 with /28 subnets (16 IPs each)
+    # Capacity: 253 third octets (2-254) x 16 /28 blocks = 4048 subnets
     SUBNET_INDEX_MIN = 1
-    SUBNET_INDEX_MAX = 254
+    SUBNET_INDEX_MAX = 4048
 
     @classmethod
     def allocate_subnet_index(cls) -> int:
@@ -396,10 +396,10 @@ class Range(models.Model):
         ranges are being created concurrently.
 
         Returns:
-            int: The allocated subnet index (1-254)
+            int: The allocated subnet index (1-4048)
 
         Raises:
-            ValueError: If no subnet indices are available (254 active ranges)
+            ValueError: If no subnet indices are available (4048 active ranges)
         """
         with transaction.atomic():
             # Lock rows to prevent race conditions

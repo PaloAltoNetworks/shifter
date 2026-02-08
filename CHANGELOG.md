@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-02-07
+
+### Changed
+- Increased number of possible user subnets by decreasing subnet size
+
 ## [1.1.0] - 2026-02-06
 
 ### Changed

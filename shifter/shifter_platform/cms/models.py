@@ -771,6 +771,12 @@ class Scenario(models.Model):
     def __str__(self):
         return f"{self.name} ({self.scenario_id})"
 
+    def save(self, *args, **kwargs):
+        """Save with definition validation."""
+        if not self.is_deleted:
+            self.validate_definition()
+        super().save(*args, **kwargs)
+
     @property
     def is_deleted(self):
         """Return True if this scenario has been soft-deleted."""
@@ -801,12 +807,6 @@ class Scenario(models.Model):
             pydantic.ValidationError: If definition is invalid.
         """
         self.to_template()
-
-    def save(self, *args, **kwargs):
-        """Save with definition validation."""
-        if not self.is_deleted:
-            self.validate_definition()
-        super().save(*args, **kwargs)
 
 
 class ScenarioMetadata(models.Model):

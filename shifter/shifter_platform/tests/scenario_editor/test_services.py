@@ -4,7 +4,7 @@ import pytest
 from django.contrib.auth import get_user_model
 
 from cms.models import Scenario, ScenarioMetadata
-from scenario_editor.services import (
+from cms.scenario_editor.services import (
     ScenarioEditorError,
     clone_scenario,
     create_scenario,
@@ -19,26 +19,7 @@ from scenario_editor.services import (
 User = get_user_model()
 
 
-@pytest.fixture
-def staff_user(db):
-    return User.objects.create_user(
-        username="staff@example.com",
-        email="staff@example.com",
-        password="testpass",
-        is_staff=True,
-    )
-
-
-@pytest.fixture
-def valid_definition():
-    return {
-        "instances": [
-            {"name": "Attacker", "role": "attacker", "os_type": "kali", "xdr_agent": False},
-            {"name": "Target", "role": "victim", "os_type": "windows", "xdr_agent": True},
-        ],
-        "subnets": [{"name": "core", "instances": ["Attacker", "Target"]}],
-        "ngfw": False,
-    }
+# staff_user, valid_definition from conftest.py
 
 
 @pytest.fixture
@@ -304,3 +285,117 @@ class TestExportScenarioYaml:
     def test_export_not_found(self, db):
         with pytest.raises(ScenarioEditorError, match="not found"):
             export_scenario_yaml("nonexistent")
+
+    def test_export_does_not_include_enabled(self, db):
+        yaml_str = export_scenario_yaml("basic")
+        assert "enabled:" not in yaml_str
+
+
+class TestUserValidation:
+    """Tests for _validate_user enforcement on all service functions."""
+
+    def test_create_none_user(self, valid_definition):
+        with pytest.raises(TypeError, match="cannot be None"):
+            create_scenario(
+                None,
+                scenario_id="test",
+                name="Test",
+                description="Test",
+                definition=valid_definition,
+            )
+
+    def test_create_unsaved_user(self, valid_definition, db):
+        unsaved = User(username="unsaved@example.com", email="unsaved@example.com")
+        with pytest.raises(ValueError, match="must be saved"):
+            create_scenario(
+                unsaved,
+                scenario_id="test",
+                name="Test",
+                description="Test",
+                definition=valid_definition,
+            )
+
+    def test_create_non_user_object(self, valid_definition):
+        with pytest.raises(TypeError, match="must be a User instance"):
+            create_scenario(
+                "not-a-user",
+                scenario_id="test",
+                name="Test",
+                description="Test",
+                definition=valid_definition,
+            )
+
+    def test_update_none_user(self):
+        with pytest.raises(TypeError, match="cannot be None"):
+            update_scenario(None, "some-id", name="Fail")
+
+    def test_delete_none_user(self):
+        with pytest.raises(TypeError, match="cannot be None"):
+            delete_scenario(None, "some-id")
+
+    def test_clone_none_user(self):
+        with pytest.raises(TypeError, match="cannot be None"):
+            clone_scenario(None, "some-id", new_scenario_id="clone")
+
+    def test_metadata_none_user(self):
+        with pytest.raises(TypeError, match="cannot be None"):
+            update_metadata(None, "some-id", enabled=False)
+
+
+class TestScenarioIdValidation:
+    """Tests for scenario ID format validation."""
+
+    def test_reject_uppercase(self, staff_user, valid_definition):
+        with pytest.raises(ScenarioEditorError, match="Invalid scenario ID"):
+            create_scenario(
+                staff_user,
+                scenario_id="Has-Uppercase",
+                name="Test",
+                description="Test",
+                definition=valid_definition,
+            )
+
+    def test_reject_spaces(self, staff_user, valid_definition):
+        with pytest.raises(ScenarioEditorError, match="Invalid scenario ID"):
+            create_scenario(
+                staff_user,
+                scenario_id="has spaces",
+                name="Test",
+                description="Test",
+                definition=valid_definition,
+            )
+
+    def test_reject_special_chars(self, staff_user, valid_definition):
+        with pytest.raises(ScenarioEditorError, match="Invalid scenario ID"):
+            create_scenario(
+                staff_user,
+                scenario_id="bad!id",
+                name="Test",
+                description="Test",
+                definition=valid_definition,
+            )
+
+    def test_accept_hyphens_and_underscores(self, staff_user, valid_definition):
+        scenario = create_scenario(
+            staff_user,
+            scenario_id="my-valid_id-123",
+            name="Valid",
+            description="Valid scenario",
+            definition=valid_definition,
+        )
+        assert scenario.scenario_id == "my-valid_id-123"
+
+
+class TestDuplicateIdRaceCondition:
+    """Tests for race condition handling in create_scenario."""
+
+    def test_duplicate_id_blocked(self, staff_user, custom_scenario, valid_definition):
+        """Creating with an existing ID should fail within the transaction."""
+        with pytest.raises(ScenarioEditorError, match="already exists"):
+            create_scenario(
+                staff_user,
+                scenario_id="custom-test",
+                name="Duplicate",
+                description="Should fail",
+                definition=valid_definition,
+            )

@@ -287,3 +287,43 @@ class TestJsonScriptContext:
         content = response.content.decode()
         # json_script renders a <script> tag with the given id
         assert 'id="instances-data"' in content
+
+
+class TestValidateYamlView:
+    """Tests for the YAML validation JSON endpoint used by the UI."""
+
+    def test_valid_yaml(self, staff_client):
+        response = staff_client.post(
+            f"{VIEW_BASE}validate-yaml/",
+            data=json.dumps(
+                {
+                    "yaml_content": (
+                        "id: test\nname: Test\ndescription: A test\n"
+                        "instances:\n  - name: A\n    role: attacker\n    os_type: kali\n"
+                    )
+                }
+            ),
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid"] is True
+
+    def test_invalid_yaml(self, staff_client):
+        response = staff_client.post(
+            f"{VIEW_BASE}validate-yaml/",
+            data=json.dumps({"yaml_content": "invalid: [yaml: {broken"}),
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid"] is False
+        assert len(data["errors"]) > 0
+
+    def test_bad_request_body(self, staff_client):
+        response = staff_client.post(
+            f"{VIEW_BASE}validate-yaml/",
+            data="not json",
+            content_type="application/json",
+        )
+        assert response.status_code == 400

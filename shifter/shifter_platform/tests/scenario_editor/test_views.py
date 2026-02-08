@@ -35,7 +35,7 @@ class TestScenarioListView:
 
     def test_non_staff_redirected(self, regular_client):
         response = regular_client.get(VIEW_BASE)
-        # user_passes_test redirects non-staff
+        # staff_member_required redirects non-staff
         assert response.status_code == 302
 
     def test_unauthenticated_redirected(self):

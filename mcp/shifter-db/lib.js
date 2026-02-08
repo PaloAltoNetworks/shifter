@@ -39,3 +39,53 @@ export function getProfile(profiles, env) {
 
 export const FORBIDDEN_PATTERN =
   /\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|VACUUM|REINDEX)\b/i;
+
+// --- Risk Register Constants ---
+
+export const RISK_TABLES = {
+  risk: "risk_register_risk",
+  comment: "risk_register_comment",
+  apikey: "risk_register_apikey",
+  audit_log: "risk_register_auditlog",
+};
+
+export const SEVERITY_VALUES = ["critical", "high", "medium", "low"];
+export const STATUS_VALUES = [
+  "open",
+  "acknowledged",
+  "mitigating",
+  "resolved",
+  "closed",
+];
+export const STRIDE_CODES = ["S", "T", "R", "I", "D", "E"];
+export const STRIDE_LABELS = {
+  S: "Spoofing",
+  T: "Tampering",
+  R: "Repudiation",
+  I: "Information Disclosure",
+  D: "Denial of Service",
+  E: "Elevation of Privilege",
+};
+
+/**
+ * Build a parameterized UPDATE SET clause from field:value pairs.
+ * Skips entries where value is undefined.
+ * @param {Object} fields - { column_name: value } pairs
+ * @param {number} startParam - Starting $N parameter index
+ * @returns {{ setClause: string, values: any[], nextParam: number }}
+ */
+export function buildUpdateSet(fields, startParam = 1) {
+  const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
+  if (entries.length === 0) {
+    throw new Error("No fields to update");
+  }
+  const setParts = [];
+  const values = [];
+  let paramIdx = startParam;
+  for (const [field, value] of entries) {
+    setParts.push(`${field} = $${paramIdx}`);
+    values.push(value);
+    paramIdx++;
+  }
+  return { setClause: setParts.join(", "), values, nextParam: paramIdx };
+}

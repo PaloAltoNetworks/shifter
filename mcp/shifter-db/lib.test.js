@@ -7,6 +7,12 @@ import {
   SERVICE_LAYERS,
   LEGACY_TABLE_MAP,
   LOCAL_PORTS,
+  RISK_TABLES,
+  SEVERITY_VALUES,
+  STATUS_VALUES,
+  STRIDE_CODES,
+  STRIDE_LABELS,
+  buildUpdateSet,
 } from "./lib.js";
 
 describe("getServiceLayer", () => {
@@ -157,5 +163,108 @@ describe("LOCAL_PORTS", () => {
 
   it("has prod on 15433", () => {
     assert.equal(LOCAL_PORTS.prod, 15433);
+  });
+});
+
+// --- Risk Register Constants ---
+
+describe("RISK_TABLES", () => {
+  it("maps all four risk register models", () => {
+    assert.equal(RISK_TABLES.risk, "risk_register_risk");
+    assert.equal(RISK_TABLES.comment, "risk_register_comment");
+    assert.equal(RISK_TABLES.apikey, "risk_register_apikey");
+    assert.equal(RISK_TABLES.audit_log, "risk_register_auditlog");
+  });
+});
+
+describe("SEVERITY_VALUES", () => {
+  it("contains all four severity levels", () => {
+    assert.deepEqual(SEVERITY_VALUES, ["critical", "high", "medium", "low"]);
+  });
+});
+
+describe("STATUS_VALUES", () => {
+  it("contains all five status values", () => {
+    assert.deepEqual(STATUS_VALUES, [
+      "open",
+      "acknowledged",
+      "mitigating",
+      "resolved",
+      "closed",
+    ]);
+  });
+});
+
+describe("STRIDE_CODES", () => {
+  it("contains all six STRIDE codes", () => {
+    assert.deepEqual(STRIDE_CODES, ["S", "T", "R", "I", "D", "E"]);
+  });
+});
+
+describe("STRIDE_LABELS", () => {
+  it("maps each code to its full name", () => {
+    assert.equal(STRIDE_LABELS.S, "Spoofing");
+    assert.equal(STRIDE_LABELS.T, "Tampering");
+    assert.equal(STRIDE_LABELS.R, "Repudiation");
+    assert.equal(STRIDE_LABELS.I, "Information Disclosure");
+    assert.equal(STRIDE_LABELS.D, "Denial of Service");
+    assert.equal(STRIDE_LABELS.E, "Elevation of Privilege");
+  });
+
+  it("has a label for every STRIDE code", () => {
+    for (const code of STRIDE_CODES) {
+      assert.ok(STRIDE_LABELS[code], `Missing label for ${code}`);
+    }
+  });
+});
+
+describe("buildUpdateSet", () => {
+  it("builds SET clause from single field", () => {
+    const result = buildUpdateSet({ title: "New Title" });
+    assert.equal(result.setClause, "title = $1");
+    assert.deepEqual(result.values, ["New Title"]);
+    assert.equal(result.nextParam, 2);
+  });
+
+  it("builds SET clause from multiple fields", () => {
+    const result = buildUpdateSet({ title: "T", severity: "high" });
+    assert.equal(result.setClause, "title = $1, severity = $2");
+    assert.deepEqual(result.values, ["T", "high"]);
+    assert.equal(result.nextParam, 3);
+  });
+
+  it("skips undefined values", () => {
+    const result = buildUpdateSet({
+      title: "T",
+      severity: undefined,
+      status: "open",
+    });
+    assert.equal(result.setClause, "title = $1, status = $2");
+    assert.deepEqual(result.values, ["T", "open"]);
+    assert.equal(result.nextParam, 3);
+  });
+
+  it("includes null values (explicit null is not undefined)", () => {
+    const result = buildUpdateSet({ likelihood_score: null });
+    assert.equal(result.setClause, "likelihood_score = $1");
+    assert.deepEqual(result.values, [null]);
+  });
+
+  it("respects startParam offset", () => {
+    const result = buildUpdateSet({ title: "T" }, 3);
+    assert.equal(result.setClause, "title = $3");
+    assert.deepEqual(result.values, ["T"]);
+    assert.equal(result.nextParam, 4);
+  });
+
+  it("throws when all values are undefined", () => {
+    assert.throws(
+      () => buildUpdateSet({ a: undefined, b: undefined }),
+      /No fields to update/
+    );
+  });
+
+  it("throws when fields object is empty", () => {
+    assert.throws(() => buildUpdateSet({}), /No fields to update/);
   });
 });

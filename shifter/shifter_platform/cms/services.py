@@ -3217,10 +3217,29 @@ def create_ngfw(
         ValueError: If required fields missing or invalid values
         CMSError: If credential validation fails
     """
-    from cms.models import Credential
+    from cms.models import App, Credential
+    from shared.enums import ResourceStatus
     from shared.schemas.app import NGFWAppRef
 
     _validate_ngfw_user(user)
+
+    # Check user doesn't already have an active NGFW
+    existing_ngfw = (
+        App.objects.filter(
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
+        )
+        .exclude(status=ResourceStatus.DESTROYING.value)
+        .first()
+    )
+    if existing_ngfw:
+        logger.warning(
+            "create_ngfw: user_id=%s already has active NGFW app_id=%s",
+            user.id,
+            existing_ngfw.id,
+        )
+        raise CMSError("You already have an active NGFW. Please destroy it before creating a new one.")
 
     # Validate name
     if not name or not name.strip():
@@ -3274,10 +3293,10 @@ def create_ngfw(
 
     from uuid import uuid4
 
-    from cms.models import App, AppType, Instance, InstanceType, Request
+    from cms.models import AppType, Instance, InstanceType, Request
     from cms.scenarios.hydrator import hydrate_ngfw
     from engine import create_ngfw as engine_create_ngfw
-    from shared.enums import RequestType, ResourceStatus
+    from shared.enums import RequestType
     from shared.schemas import RequestSpec
 
     # Create Request record first

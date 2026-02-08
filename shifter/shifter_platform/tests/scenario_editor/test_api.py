@@ -1,7 +1,6 @@
 """Tests for scenario editor API views."""
 
 import json
-import time
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -14,56 +13,7 @@ User = get_user_model()
 API_BASE = "/scenario-editor/api/"
 
 
-@pytest.fixture
-def staff_user(db):
-    return User.objects.create_user(
-        username="staff@example.com",
-        email="staff@example.com",
-        password="testpass",
-        is_staff=True,
-    )
-
-
-@pytest.fixture
-def regular_user(db):
-    return User.objects.create_user(
-        username="regular@example.com",
-        email="regular@example.com",
-        password="testpass",
-        is_staff=False,
-    )
-
-
-@pytest.fixture
-def staff_client(staff_user):
-    client = Client()
-    client.force_login(staff_user)
-    session = client.session
-    session["oidc_id_token_expiration"] = time.time() + 3600
-    session.save()
-    return client
-
-
-@pytest.fixture
-def regular_client(regular_user):
-    client = Client()
-    client.force_login(regular_user)
-    session = client.session
-    session["oidc_id_token_expiration"] = time.time() + 3600
-    session.save()
-    return client
-
-
-@pytest.fixture
-def valid_definition():
-    return {
-        "instances": [
-            {"name": "Attacker", "role": "attacker", "os_type": "kali", "xdr_agent": False},
-            {"name": "Target", "role": "victim", "os_type": "windows", "xdr_agent": True},
-        ],
-        "subnets": [{"name": "core", "instances": ["Attacker", "Target"]}],
-        "ngfw": False,
-    }
+# staff_user, regular_user, staff_client, regular_client, valid_definition from conftest.py
 
 
 @pytest.fixture
@@ -275,3 +225,80 @@ class TestScenarioExportAPI:
         data = response.json()
         assert "yaml" in data
         assert "id: basic" in data["yaml"]
+
+    def test_export_not_found(self, staff_client):
+        response = staff_client.get(f"{API_BASE}nonexistent/export-yaml/")
+        assert response.status_code == 404
+
+
+class TestScenarioValidateYamlAPI:
+    def test_valid_yaml(self, staff_client):
+        yaml_content = (
+            "id: test\n"
+            "name: Test\n"
+            "description: A test\n"
+            "instances:\n"
+            "  - name: A\n"
+            "    role: attacker\n"
+            "    os_type: kali\n"
+        )
+        response = staff_client.post(
+            f"{API_BASE}validate-yaml/",
+            data=json.dumps({"yaml_content": yaml_content}),
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid"] is True
+        assert data["definition"] is not None
+
+    def test_invalid_yaml(self, staff_client):
+        response = staff_client.post(
+            f"{API_BASE}validate-yaml/",
+            data=json.dumps({"yaml_content": "invalid: [yaml: {broken"}),
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid"] is False
+        assert len(data["errors"]) > 0
+
+
+class TestScenarioImportYamlAPI:
+    def test_import_success(self, staff_client):
+        yaml_content = (
+            "id: imported-via-api\n"
+            "name: Imported\n"
+            "description: Imported via API\n"
+            "instances:\n"
+            "  - name: A\n"
+            "    role: attacker\n"
+            "    os_type: kali\n"
+        )
+        response = staff_client.post(
+            f"{API_BASE}import-yaml/",
+            data=json.dumps({"yaml_content": yaml_content}),
+            content_type="application/json",
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["id"] == "imported-via-api"
+
+    def test_import_missing_id(self, staff_client):
+        yaml_content = (
+            "name: No ID\ndescription: Missing\ninstances:\n  - name: A\n    role: attacker\n    os_type: kali\n"
+        )
+        response = staff_client.post(
+            f"{API_BASE}import-yaml/",
+            data=json.dumps({"yaml_content": yaml_content}),
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+
+    def test_import_invalid_yaml(self, staff_client):
+        response = staff_client.post(
+            f"{API_BASE}import-yaml/",
+            data=json.dumps({"yaml_content": "not: valid: yaml: ["}),
+            content_type="application/json",
+        )
+        assert response.status_code == 400

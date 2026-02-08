@@ -14,8 +14,8 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from scenario_editor.permissions import IsStaffUser
-from scenario_editor.serializers import (
+from cms.scenario_editor.permissions import IsStaffUser
+from cms.scenario_editor.serializers import (
     ScenarioCloneSerializer,
     ScenarioCreateSerializer,
     ScenarioDetailSerializer,
@@ -26,7 +26,7 @@ from scenario_editor.serializers import (
     ScenarioValidateSerializer,
     ScenarioYAMLSerializer,
 )
-from scenario_editor.services import (
+from cms.scenario_editor.services import (
     ScenarioEditorError,
     clone_scenario,
     create_scenario,
@@ -39,6 +39,13 @@ from scenario_editor.services import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _error_status_for_scenario_error(e):
+    """Return 404 for not-found errors, 400 for everything else."""
+    if "not found" in str(e).lower():
+        return status.HTTP_404_NOT_FOUND
+    return status.HTTP_400_BAD_REQUEST
 
 
 @api_view(["GET"])
@@ -87,12 +94,19 @@ def scenario_create(request):
             {"error": "scenario_error", "message": str(e)},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    except Exception:
+        logger.exception("scenario_create: unexpected error for user_id=%s", request.user.id)
+        return Response(
+            {"error": "internal_error", "message": "An unexpected error occurred"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     # Return the full scenario detail
     from cms.scenarios.registry import get_scenario_detail
 
     detail = get_scenario_detail(scenario.scenario_id)
     output = ScenarioDetailSerializer(detail)
+    logger.info("scenario_create: created scenario_id=%s by user_id=%s", scenario.scenario_id, request.user.id)
     return Response(output.data, status=status.HTTP_201_CREATED)
 
 
@@ -105,6 +119,7 @@ def scenario_detail(request, scenario_id):
     try:
         detail = get_scenario_detail(scenario_id)
     except ValueError:
+        logger.warning("scenario_detail: scenario not found scenario_id=%s", scenario_id)
         return Response(
             {"error": "not_found", "message": f"Scenario '{scenario_id}' not found"},
             status=status.HTTP_404_NOT_FOUND,
@@ -135,15 +150,29 @@ def scenario_update(request, scenario_id):
             definition=serializer.validated_data.get("definition"),
         )
     except ScenarioEditorError as e:
+        error_status = _error_status_for_scenario_error(e)
+        if error_status == status.HTTP_404_NOT_FOUND:
+            logger.warning("scenario_update: scenario not found scenario_id=%s", scenario_id)
         return Response(
             {"error": "scenario_error", "message": str(e)},
-            status=status.HTTP_400_BAD_REQUEST,
+            status=error_status,
+        )
+    except Exception:
+        logger.exception(
+            "scenario_update: unexpected error for user_id=%s, scenario_id=%s",
+            request.user.id,
+            scenario_id,
+        )
+        return Response(
+            {"error": "internal_error", "message": "An unexpected error occurred"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
     from cms.scenarios.registry import get_scenario_detail
 
     detail = get_scenario_detail(scenario.scenario_id)
     output = ScenarioDetailSerializer(detail)
+    logger.info("scenario_update: updated scenario_id=%s by user_id=%s", scenario_id, request.user.id)
     return Response(output.data)
 
 
@@ -157,11 +186,25 @@ def scenario_delete(request, scenario_id):
     try:
         delete_scenario(request.user, scenario_id)
     except ScenarioEditorError as e:
+        error_status = _error_status_for_scenario_error(e)
+        if error_status == status.HTTP_404_NOT_FOUND:
+            logger.warning("scenario_delete: scenario not found scenario_id=%s", scenario_id)
         return Response(
             {"error": "scenario_error", "message": str(e)},
-            status=status.HTTP_400_BAD_REQUEST,
+            status=error_status,
+        )
+    except Exception:
+        logger.exception(
+            "scenario_delete: unexpected error for user_id=%s, scenario_id=%s",
+            request.user.id,
+            scenario_id,
+        )
+        return Response(
+            {"error": "internal_error", "message": "An unexpected error occurred"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
+    logger.info("scenario_delete: deleted scenario_id=%s by user_id=%s", scenario_id, request.user.id)
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -230,9 +273,22 @@ def scenario_metadata(request, scenario_id):
             staff_only=serializer.validated_data.get("staff_only"),
         )
     except ScenarioEditorError as e:
+        error_status = _error_status_for_scenario_error(e)
+        if error_status == status.HTTP_404_NOT_FOUND:
+            logger.warning("scenario_metadata: scenario not found scenario_id=%s", scenario_id)
         return Response(
             {"error": "scenario_error", "message": str(e)},
-            status=status.HTTP_400_BAD_REQUEST,
+            status=error_status,
+        )
+    except Exception:
+        logger.exception(
+            "scenario_metadata: unexpected error for user_id=%s, scenario_id=%s",
+            request.user.id,
+            scenario_id,
+        )
+        return Response(
+            {"error": "internal_error", "message": "An unexpected error occurred"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
     output = ScenarioMetadataResponseSerializer(
@@ -243,6 +299,7 @@ def scenario_metadata(request, scenario_id):
             "updated_at": metadata.updated_at,
         }
     )
+    logger.info("scenario_metadata: updated metadata for scenario_id=%s by user_id=%s", scenario_id, request.user.id)
     return Response(output.data)
 
 
@@ -270,11 +327,27 @@ def scenario_clone(request, scenario_id):
             {"error": "scenario_error", "message": str(e)},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    except Exception:
+        logger.exception(
+            "scenario_clone: unexpected error for user_id=%s, scenario_id=%s",
+            request.user.id,
+            scenario_id,
+        )
+        return Response(
+            {"error": "internal_error", "message": "An unexpected error occurred"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     from cms.scenarios.registry import get_scenario_detail
 
     detail = get_scenario_detail(scenario.scenario_id)
     output = ScenarioDetailSerializer(detail)
+    logger.info(
+        "scenario_clone: cloned scenario_id=%s to new_scenario_id=%s by user_id=%s",
+        scenario_id,
+        scenario.scenario_id,
+        request.user.id,
+    )
     return Response(output.data, status=status.HTTP_201_CREATED)
 
 
@@ -288,9 +361,20 @@ def scenario_export_yaml(request, scenario_id):
     try:
         yaml_content = export_scenario_yaml(scenario_id)
     except ScenarioEditorError as e:
+        logger.warning("scenario_export_yaml: scenario not found scenario_id=%s", scenario_id)
         return Response(
             {"error": "scenario_error", "message": str(e)},
-            status=status.HTTP_400_BAD_REQUEST,
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    except Exception:
+        logger.exception(
+            "scenario_export_yaml: unexpected error for user_id=%s, scenario_id=%s",
+            request.user.id,
+            scenario_id,
+        )
+        return Response(
+            {"error": "internal_error", "message": "An unexpected error occurred"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
     return Response(
@@ -323,6 +407,21 @@ def scenario_import_yaml(request):
     scenario_id = parsed.get("id", "")
     name = parsed.get("name", "")
     description = parsed.get("description", "")
+
+    # Validate required fields from YAML
+    yaml_errors = []
+    if not scenario_id:
+        yaml_errors.append("YAML must include an 'id' field")
+    if not name:
+        yaml_errors.append("YAML must include a 'name' field")
+    if not description:
+        yaml_errors.append("YAML must include a 'description' field")
+    if yaml_errors:
+        return Response(
+            {"error": "validation_error", "errors": yaml_errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     definition = {
         "instances": parsed.get("instances", []),
         "subnets": parsed.get("subnets", []),
@@ -342,9 +441,16 @@ def scenario_import_yaml(request):
             {"error": "scenario_error", "message": str(e)},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    except Exception:
+        logger.exception("scenario_import_yaml: unexpected error for user_id=%s", request.user.id)
+        return Response(
+            {"error": "internal_error", "message": "An unexpected error occurred"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     from cms.scenarios.registry import get_scenario_detail
 
     detail = get_scenario_detail(scenario.scenario_id)
     output = ScenarioDetailSerializer(detail)
+    logger.info("scenario_import_yaml: created scenario_id=%s by user_id=%s", scenario_id, request.user.id)
     return Response(output.data, status=status.HTTP_201_CREATED)

@@ -1,7 +1,6 @@
 """Tests for scenario editor template-based views."""
 
 import json
-import time
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -14,56 +13,7 @@ User = get_user_model()
 VIEW_BASE = "/scenario-editor/"
 
 
-@pytest.fixture
-def staff_user(db):
-    return User.objects.create_user(
-        username="staff@example.com",
-        email="staff@example.com",
-        password="testpass",
-        is_staff=True,
-    )
-
-
-@pytest.fixture
-def regular_user(db):
-    return User.objects.create_user(
-        username="regular@example.com",
-        email="regular@example.com",
-        password="testpass",
-        is_staff=False,
-    )
-
-
-@pytest.fixture
-def staff_client(staff_user):
-    client = Client()
-    client.force_login(staff_user)
-    session = client.session
-    session["oidc_id_token_expiration"] = time.time() + 3600
-    session.save()
-    return client
-
-
-@pytest.fixture
-def regular_client(regular_user):
-    client = Client()
-    client.force_login(regular_user)
-    session = client.session
-    session["oidc_id_token_expiration"] = time.time() + 3600
-    session.save()
-    return client
-
-
-@pytest.fixture
-def valid_definition():
-    return {
-        "instances": [
-            {"name": "Attacker", "role": "attacker", "os_type": "kali", "xdr_agent": False},
-            {"name": "Target", "role": "victim", "os_type": "windows", "xdr_agent": True},
-        ],
-        "subnets": [{"name": "core", "instances": ["Attacker", "Target"]}],
-        "ngfw": False,
-    }
+# staff_user, regular_user, staff_client, regular_client, valid_definition from conftest.py
 
 
 @pytest.fixture
@@ -149,7 +99,7 @@ class TestScenarioEditFormView:
 
     def test_cannot_edit_default(self, staff_client):
         response = staff_client.get(f"{VIEW_BASE}basic/edit/")
-        assert response.status_code == 200  # Renders error page
+        assert response.status_code == 403  # Forbidden for default scenarios
 
     def test_post_updates(self, staff_client, custom_scenario, valid_definition):
         response = staff_client.post(
@@ -173,7 +123,7 @@ class TestYAMLEditorView:
 
     def test_cannot_edit_default(self, staff_client):
         response = staff_client.get(f"{VIEW_BASE}basic/editor/")
-        assert response.status_code == 200  # Renders error page
+        assert response.status_code == 403  # Forbidden for default scenarios
 
 
 class TestYAMLCreateView:
@@ -242,3 +192,98 @@ class TestExportView:
         assert response.status_code == 200
         assert response["Content-Type"] == "text/yaml"
         assert b"id: basic" in response.content
+
+    def test_export_not_found(self, staff_client):
+        response = staff_client.get(f"{VIEW_BASE}nonexistent/export/")
+        assert response.status_code == 404
+
+
+class TestSlugValidation:
+    """Tests for slug format validation on create form."""
+
+    def test_reject_uppercase_slug(self, staff_client, valid_definition):
+        response = staff_client.post(
+            f"{VIEW_BASE}create/",
+            {
+                "scenario_id": "Has-Uppercase",
+                "name": "Test",
+                "description": "Test",
+                "instances_json": json.dumps(valid_definition["instances"]),
+                "subnets_json": json.dumps(valid_definition["subnets"]),
+            },
+        )
+        assert response.status_code == 200  # Re-renders form with errors
+
+    def test_reject_spaces_in_slug(self, staff_client, valid_definition):
+        response = staff_client.post(
+            f"{VIEW_BASE}create/",
+            {
+                "scenario_id": "has spaces",
+                "name": "Test",
+                "description": "Test",
+                "instances_json": json.dumps(valid_definition["instances"]),
+                "subnets_json": json.dumps(valid_definition["subnets"]),
+            },
+        )
+        assert response.status_code == 200  # Re-renders form with errors
+
+
+class TestEmptyFieldValidation:
+    """Tests for empty field validation in YAML create."""
+
+    def test_yaml_missing_required_fields(self, staff_client):
+        yaml_content = "instances:\n  - name: A\n    role: attacker\n    os_type: kali\n"
+        response = staff_client.post(
+            f"{VIEW_BASE}create/yaml/",
+            {"yaml_content": yaml_content},
+        )
+        assert response.status_code == 200  # Re-renders form with errors
+
+
+class TestSuccessMessages:
+    """Tests that mutation views set Django messages on success."""
+
+    def test_create_sets_message(self, staff_client, valid_definition):
+        response = staff_client.post(
+            f"{VIEW_BASE}create/",
+            {
+                "scenario_id": "msg-test",
+                "name": "Message Test",
+                "description": "Testing messages",
+                "instances_json": json.dumps(valid_definition["instances"]),
+                "subnets_json": json.dumps(valid_definition["subnets"]),
+            },
+            follow=True,
+        )
+        assert response.status_code == 200
+        messages = list(response.context["messages"])
+        assert any("created" in str(m).lower() for m in messages)
+
+    def test_delete_sets_message(self, staff_client, custom_scenario):
+        response = staff_client.post(
+            f"{VIEW_BASE}view-test/delete/",
+            follow=True,
+        )
+        assert response.status_code == 200
+        messages = list(response.context["messages"])
+        assert any("deleted" in str(m).lower() for m in messages)
+
+    def test_toggle_enabled_sets_message(self, staff_client):
+        response = staff_client.post(
+            f"{VIEW_BASE}basic/toggle-enabled/",
+            follow=True,
+        )
+        assert response.status_code == 200
+        messages = list(response.context["messages"])
+        assert len(messages) > 0
+
+
+class TestJsonScriptContext:
+    """Tests that the form editor provides safe JSON context for instances/subnets."""
+
+    def test_edit_form_has_json_script_data(self, staff_client, custom_scenario):
+        response = staff_client.get(f"{VIEW_BASE}view-test/edit/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # json_script renders a <script> tag with the given id
+        assert 'id="instances-data"' in content

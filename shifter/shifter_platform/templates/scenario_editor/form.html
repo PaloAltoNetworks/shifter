@@ -3,31 +3,6 @@
 
 {% block title %}{% if mode == 'create' %}Create Scenario{% else %}Edit {{ scenario.name }}{% endif %}{% endblock %}
 
-{% block extra_css %}
-<style>
-    .form-group { margin-bottom: 16px; }
-    .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--xdr-text); }
-    .form-group .help-text { font-size: 12px; color: var(--xdr-text-secondary); margin-top: 2px; }
-    .form-input, .form-textarea, .form-select {
-        width: 100%; padding: 8px 12px; background: var(--xdr-surface); border: 1px solid var(--xdr-border);
-        border-radius: 4px; color: var(--xdr-text); font-size: 14px; font-family: 'Lato', sans-serif;
-    }
-    .form-input:focus, .form-textarea:focus, .form-select:focus {
-        outline: none; border-color: #5588cc;
-    }
-    .form-textarea { resize: vertical; min-height: 80px; }
-    .form-checkbox { display: flex; align-items: center; gap: 8px; }
-    .form-checkbox input { width: 16px; height: 16px; }
-    .error-list { background: rgba(200,50,50,0.15); border: 1px solid rgba(200,50,50,0.3); border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; }
-    .error-list li { color: #cc8888; font-size: 14px; margin-bottom: 4px; }
-    .instance-card { background: var(--xdr-surface); border: 1px solid var(--xdr-border); border-radius: 4px; padding: 12px; margin-bottom: 8px; }
-    .subnet-card { background: var(--xdr-surface); border: 1px solid var(--xdr-border); border-radius: 4px; padding: 12px; margin-bottom: 8px; }
-    .inline-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-    .btn-danger { background: rgba(200,50,50,0.2); color: #cc6666; border: 1px solid rgba(200,50,50,0.3); }
-    .btn-add { background: rgba(100,200,100,0.15); color: #88cc88; border: 1px solid rgba(100,200,100,0.25); }
-</style>
-{% endblock %}
-
 {% block content %}
 <div class="page-header">
     <div>
@@ -118,23 +93,40 @@
         <a href="{% if mode == 'edit' %}{% url 'scenario_editor:detail' scenario_id=scenario.id %}{% else %}{% url 'scenario_editor:list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
+
+{% if scenario and scenario.instances %}
+  {{ scenario.instances|json_script:"instances-data" }}
+{% endif %}
+{% if scenario and scenario.subnets %}
+  {{ scenario.subnets|json_script:"subnets-data" }}
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// Instance and subnet data
-let instances = {{ scenario.instances|safe|default:"[]" }};
-let subnets = {{ scenario.subnets|safe|default:"[]" }};
+// Safe data loading via json_script tags
+var instances = [];
+var subnets = [];
+var instancesEl = document.getElementById('instances-data');
+var subnetsEl = document.getElementById('subnets-data');
+if (instancesEl) instances = JSON.parse(instancesEl.textContent);
+if (subnetsEl) subnets = JSON.parse(subnetsEl.textContent);
 
-const ROLES = ['attacker', 'victim', 'dc', 'ngfw'];
-const OS_TYPES = ['kali', 'ubuntu', 'windows', 'from_agent', 'panos'];
+var ROLES = ['attacker', 'victim', 'dc', 'ngfw'];
+var OS_TYPES = ['kali', 'ubuntu', 'windows', 'from_agent', 'panos'];
+
+function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
 
 function renderInstances() {
-    const container = document.getElementById('instances-container');
+    var container = document.getElementById('instances-container');
     container.innerHTML = '';
 
-    instances.forEach((inst, idx) => {
-        const card = document.createElement('div');
+    instances.forEach(function(inst, idx) {
+        var card = document.createElement('div');
         card.className = 'instance-card';
         card.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -144,18 +136,18 @@ function renderInstances() {
             <div class="inline-fields">
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label>Name</label>
-                    <input type="text" class="form-input" value="${inst.name || ''}" onchange="instances[${idx}].name = this.value" placeholder="Instance name" required>
+                    <input type="text" class="form-input" value="${escapeHtml(inst.name || '')}" onchange="instances[${idx}].name = this.value" placeholder="Instance name" required>
                 </div>
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label>Role</label>
                     <select class="form-select" onchange="instances[${idx}].role = this.value">
-                        ${ROLES.map(r => `<option value="${r}" ${inst.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+                        ${ROLES.map(function(r) { return '<option value="' + escapeHtml(r) + '" ' + (inst.role === r ? 'selected' : '') + '>' + escapeHtml(r) + '</option>'; }).join('')}
                     </select>
                 </div>
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label>OS Type</label>
                     <select class="form-select" onchange="instances[${idx}].os_type = this.value">
-                        ${OS_TYPES.map(o => `<option value="${o}" ${inst.os_type === o ? 'selected' : ''}>${o}</option>`).join('')}
+                        ${OS_TYPES.map(function(o) { return '<option value="' + escapeHtml(o) + '" ' + (inst.os_type === o ? 'selected' : '') + '>' + escapeHtml(o) + '</option>'; }).join('')}
                     </select>
                 </div>
             </div>
@@ -178,11 +170,11 @@ function renderInstances() {
                 <div class="inline-fields">
                     <div class="form-group" style="margin-bottom: 4px;">
                         <label>Domain Name</label>
-                        <input type="text" class="form-input" value="${inst.dc_config?.domain_name || 'internal.shifter'}" onchange="updateDCConfig(${idx}, 'domain_name', this.value)" placeholder="internal.shifter">
+                        <input type="text" class="form-input" value="${escapeHtml(inst.dc_config?.domain_name || 'internal.shifter')}" onchange="updateDCConfig(${idx}, 'domain_name', this.value)" placeholder="internal.shifter">
                     </div>
                     <div class="form-group" style="margin-bottom: 4px;">
                         <label>NetBIOS Name</label>
-                        <input type="text" class="form-input" value="${inst.dc_config?.netbios_name || 'INTSHIFTER'}" onchange="updateDCConfig(${idx}, 'netbios_name', this.value)" placeholder="INTSHIFTER">
+                        <input type="text" class="form-input" value="${escapeHtml(inst.dc_config?.netbios_name || 'INTSHIFTER')}" onchange="updateDCConfig(${idx}, 'netbios_name', this.value)" placeholder="INTSHIFTER">
                     </div>
                 </div>
             </div>
@@ -193,13 +185,13 @@ function renderInstances() {
 }
 
 function renderSubnets() {
-    const container = document.getElementById('subnets-container');
+    var container = document.getElementById('subnets-container');
     container.innerHTML = '';
 
-    const instanceNames = instances.map(i => i.name).filter(Boolean);
+    var instanceNames = instances.map(function(i) { return i.name; }).filter(Boolean);
 
-    subnets.forEach((subnet, idx) => {
-        const card = document.createElement('div');
+    subnets.forEach(function(subnet, idx) {
+        var card = document.createElement('div');
         card.className = 'subnet-card';
         card.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -208,16 +200,16 @@ function renderSubnets() {
             </div>
             <div class="form-group" style="margin-bottom: 8px;">
                 <label>Subnet Name</label>
-                <input type="text" class="form-input" value="${subnet.name || ''}" onchange="subnets[${idx}].name = this.value" placeholder="core" required>
+                <input type="text" class="form-input" value="${escapeHtml(subnet.name || '')}" onchange="subnets[${idx}].name = this.value" placeholder="core" required>
             </div>
             <div class="form-group" style="margin-bottom: 8px;">
                 <label>Instances (comma-separated names)</label>
-                <input type="text" class="form-input" value="${(subnet.instances || []).join(', ')}" onchange="subnets[${idx}].instances = this.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="${instanceNames.join(', ')}">
-                <div class="help-text">Available: ${instanceNames.join(', ') || '(define instances first)'}</div>
+                <input type="text" class="form-input" value="${escapeHtml((subnet.instances || []).join(', '))}" onchange="subnets[${idx}].instances = this.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean)" placeholder="${escapeHtml(instanceNames.join(', '))}">
+                <div class="help-text">Available: ${escapeHtml(instanceNames.join(', ') || '(define instances first)')}</div>
             </div>
             <div class="form-group" style="margin-bottom: 4px;">
                 <label>Connected To (comma-separated subnet names)</label>
-                <input type="text" class="form-input" value="${(subnet.connected_to || []).join(', ')}" onchange="subnets[${idx}].connected_to = this.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="other_subnet">
+                <input type="text" class="form-input" value="${escapeHtml((subnet.connected_to || []).join(', '))}" onchange="subnets[${idx}].connected_to = this.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean)" placeholder="other_subnet">
             </div>
         `;
         container.appendChild(card);
@@ -274,9 +266,14 @@ function updateDCConfig(idx, field, value) {
 }
 
 // Serialize data before form submission
-document.getElementById('scenarioForm').addEventListener('submit', function() {
-    document.getElementById('instances_json').value = JSON.stringify(instances);
-    document.getElementById('subnets_json').value = JSON.stringify(subnets);
+document.getElementById('scenarioForm').addEventListener('submit', function(e) {
+    try {
+        document.getElementById('instances_json').value = JSON.stringify(instances);
+        document.getElementById('subnets_json').value = JSON.stringify(subnets);
+    } catch (err) {
+        e.preventDefault();
+        alert('Error preparing form data: ' + err.message);
+    }
 });
 
 // Initial render

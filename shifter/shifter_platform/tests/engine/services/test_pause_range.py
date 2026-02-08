@@ -25,8 +25,29 @@ class TestPauseRange:
     # Outputs - returns bool indicating success
     # -------------------------------------------------------------------------
 
-    def test_returns_true_for_pausable_range(self):
-        """Service returns True when range exists and can be paused."""
+    def test_returns_true_when_ecs_task_started(self):
+        """Service returns True when range exists, can be paused, and ECS task starts."""
+        from engine.models import Range
+        from engine.services import pause_range
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
+        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
+
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+            patch("engine.ecs.start_range_operation", return_value=task_arn),
+        ):
+            result = pause_range(request_id)
+            assert result is True
+
+    def test_returns_false_when_ecs_returns_none(self):
+        """Service returns False when ECS task fails to start (returns None)."""
         from engine.models import Range
         from engine.services import pause_range
 
@@ -34,11 +55,16 @@ class TestPauseRange:
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
 
         with (
-            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
             patch("engine.ecs.start_range_operation", return_value=None),
         ):
             result = pause_range(request_id)
-            assert result is True
+            assert result is False
 
     def test_returns_true_when_already_paused(self):
         """Service returns True (idempotent) when range is already paused."""
@@ -48,7 +74,14 @@ class TestPauseRange:
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
 
-        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+        ):
             result = pause_range(request_id)
             assert result is True
 
@@ -60,7 +93,14 @@ class TestPauseRange:
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSING.value)
 
-        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+        ):
             result = pause_range(request_id)
             assert result is True
 
@@ -71,7 +111,14 @@ class TestPauseRange:
 
         request_id = uuid4()
 
-        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=None))):
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=None)))),
+            ),
+            patch("django.db.transaction.atomic"),
+        ):
             result = pause_range(request_id)
             assert result is False
 
@@ -83,7 +130,14 @@ class TestPauseRange:
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PROVISIONING.value)
 
-        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+        ):
             result = pause_range(request_id)
             assert result is False
 
@@ -98,15 +152,22 @@ class TestPauseRange:
 
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
+        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
 
         with (
-            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation", return_value=None),
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+            patch("engine.ecs.start_range_operation", return_value=task_arn),
         ):
             pause_range(request_id)
 
+            # After the atomic block sets PAUSING and ECS succeeds, status stays PAUSING
             assert mock_range.status == ResourceStatus.PAUSING.value
-            mock_range.save.assert_called_once()
+            mock_range.save.assert_called()
 
     def test_calls_start_range_operation_with_pause(self):
         """Service calls start_range_operation with 'pause' operation."""
@@ -115,10 +176,16 @@ class TestPauseRange:
 
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
+        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
 
         with (
-            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation", return_value=None) as mock_operation,
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+            patch("engine.ecs.start_range_operation", return_value=task_arn) as mock_operation,
         ):
             pause_range(request_id)
 
@@ -132,7 +199,14 @@ class TestPauseRange:
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
 
-        with patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))):
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+        ):
             pause_range(request_id)
 
             mock_range.save.assert_not_called()
@@ -146,12 +220,93 @@ class TestPauseRange:
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
 
         with (
-            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
             patch("engine.ecs.start_range_operation") as mock_operation,
         ):
             pause_range(request_id)
 
             mock_operation.assert_not_called()
+
+    # -------------------------------------------------------------------------
+    # ECS failure recovery (Fix 3)
+    # -------------------------------------------------------------------------
+
+    def test_reverts_status_when_ecs_returns_none(self):
+        """Service reverts status to READY when ECS returns None."""
+        from engine.models import Range
+        from engine.services import pause_range
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
+
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+            patch("engine.ecs.start_range_operation", return_value=None),
+        ):
+            pause_range(request_id)
+
+            assert mock_range.status == ResourceStatus.READY.value
+
+    def test_reverts_status_on_client_error(self):
+        """Service reverts status to READY when ECS raises ClientError."""
+        from botocore.exceptions import ClientError
+
+        from engine.models import Range
+        from engine.services import pause_range
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
+
+        error_response = {"Error": {"Code": "ClusterNotFoundException", "Message": "not found"}}
+        client_error = ClientError(error_response, "RunTask")
+
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+            patch("engine.ecs.start_range_operation", side_effect=client_error),
+        ):
+            pause_range(request_id)
+
+            assert mock_range.status == ResourceStatus.READY.value
+
+    def test_returns_false_on_client_error(self):
+        """Service returns False when ECS raises ClientError."""
+        from botocore.exceptions import ClientError
+
+        from engine.models import Range
+        from engine.services import pause_range
+
+        request_id = uuid4()
+        mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
+
+        error_response = {"Error": {"Code": "ClusterNotFoundException", "Message": "not found"}}
+        client_error = ClientError(error_response, "RunTask")
+
+        with (
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+            patch("engine.ecs.start_range_operation", side_effect=client_error),
+        ):
+            result = pause_range(request_id)
+            assert result is False
 
     # -------------------------------------------------------------------------
     # Logging
@@ -164,10 +319,16 @@ class TestPauseRange:
 
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
+        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
 
         with (
-            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation", return_value=None),
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
+            patch("engine.ecs.start_range_operation", return_value=task_arn),
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             pause_range(request_id)
@@ -182,7 +343,12 @@ class TestPauseRange:
         request_id = uuid4()
 
         with (
-            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=None))),
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=None)))),
+            ),
+            patch("django.db.transaction.atomic"),
             caplog.at_level(logging.WARNING, logger="engine"),
         ):
             pause_range(request_id)
@@ -198,7 +364,12 @@ class TestPauseRange:
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PROVISIONING.value)
 
         with (
-            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
             caplog.at_level(logging.WARNING, logger="engine"),
         ):
             pause_range(request_id)
@@ -215,7 +386,12 @@ class TestPauseRange:
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
 
         with (
-            patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
+            patch.object(
+                Range.objects,
+                "select_for_update",
+                return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
+            ),
+            patch("django.db.transaction.atomic"),
             patch("engine.ecs.start_range_operation", return_value=task_arn),
             caplog.at_level(logging.INFO, logger="engine"),
         ):

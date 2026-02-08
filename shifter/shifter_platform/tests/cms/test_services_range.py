@@ -1217,6 +1217,44 @@ class TestPauseRange:
         ):
             services.pause_range(user, 42)
 
+    def test_sets_status_to_pausing_before_engine_call(self, user):
+        """Service sets CMS status to PAUSING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        statuses_at_engine_call = []
+
+        def capture_status(request_id):
+            statuses_at_engine_call.append(mock_range.status)
+            return True
+
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_pause_range", side_effect=capture_status),
+        ):
+            services.pause_range(user, 42)
+
+        assert statuses_at_engine_call == [ResourceStatus.PAUSING.value]
+
+    def test_reverts_status_to_ready_when_engine_returns_false(self, user):
+        """Service reverts CMS status to READY when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_pause_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be paused"),
+        ):
+            services.pause_range(user, 42)
+
+        assert mock_range.status == ResourceStatus.READY.value
+
 
 @pytest.mark.django_db
 class TestResumeRange:
@@ -1298,3 +1336,195 @@ class TestResumeRange:
             pytest.raises(CMSError, match="not found"),
         ):
             services.resume_range(user, 42)
+
+    def test_sets_status_to_resuming_before_engine_call(self, user):
+        """Service sets CMS status to RESUMING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        statuses_at_engine_call = []
+
+        def capture_status(request_id):
+            statuses_at_engine_call.append(mock_range.status)
+            return True
+
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_resume_range", side_effect=capture_status),
+        ):
+            services.resume_range(user, 42)
+
+        assert statuses_at_engine_call == [ResourceStatus.RESUMING.value]
+
+    def test_reverts_status_to_paused_when_engine_returns_false(self, user):
+        """Service reverts CMS status to PAUSED when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_resume_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be resumed"),
+        ):
+            services.resume_range(user, 42)
+
+        assert mock_range.status == ResourceStatus.PAUSED.value
+
+
+@pytest.mark.django_db
+class TestPauseRangeByRequestId:
+    """Tests for pause_range_by_request_id() service function."""
+
+    def test_calls_engine_with_request_id(self, user):
+        """Service passes request_id to engine.pause_range."""
+        from cms.models import RangeInstance
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_pause_range", return_value=True) as mock_pause,
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.pause_range_by_request_id(user, str(request_id))
+
+            mock_pause.assert_called_once_with(request_id)
+
+    def test_sets_status_to_pausing_before_engine_call(self, user):
+        """Service sets CMS status to PAUSING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        statuses_at_engine_call = []
+
+        def capture_status(req_id):
+            statuses_at_engine_call.append(mock_range.status)
+            return True
+
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_pause_range", side_effect=capture_status),
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.pause_range_by_request_id(user, str(request_id))
+
+        assert statuses_at_engine_call == [ResourceStatus.PAUSING.value]
+
+    def test_reverts_status_to_ready_when_engine_returns_false(self, user):
+        """Service reverts CMS status to READY when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_pause_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be paused"),
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.pause_range_by_request_id(user, str(request_id))
+
+        assert mock_range.status == ResourceStatus.READY.value
+
+    def test_raises_cms_error_when_not_found(self, user):
+        """Service raises CMSError when range not found."""
+        from cms.exceptions import CMSError
+
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            pytest.raises(CMSError, match="not found"),
+        ):
+            mock_filter.return_value.first.return_value = None
+            services.pause_range_by_request_id(user, str(uuid4()))
+
+
+@pytest.mark.django_db
+class TestResumeRangeByRequestId:
+    """Tests for resume_range_by_request_id() service function."""
+
+    def test_calls_engine_with_request_id(self, user):
+        """Service passes request_id to engine.resume_range."""
+        from cms.models import RangeInstance
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_resume_range", return_value=True) as mock_resume,
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.resume_range_by_request_id(user, str(request_id))
+
+            mock_resume.assert_called_once_with(request_id)
+
+    def test_sets_status_to_resuming_before_engine_call(self, user):
+        """Service sets CMS status to RESUMING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        statuses_at_engine_call = []
+
+        def capture_status(req_id):
+            statuses_at_engine_call.append(mock_range.status)
+            return True
+
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_resume_range", side_effect=capture_status),
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.resume_range_by_request_id(user, str(request_id))
+
+        assert statuses_at_engine_call == [ResourceStatus.RESUMING.value]
+
+    def test_reverts_status_to_paused_when_engine_returns_false(self, user):
+        """Service reverts CMS status to PAUSED when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_resume_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be resumed"),
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.resume_range_by_request_id(user, str(request_id))
+
+        assert mock_range.status == ResourceStatus.PAUSED.value
+
+    def test_raises_cms_error_when_not_found(self, user):
+        """Service raises CMSError when range not found."""
+        from cms.exceptions import CMSError
+
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            pytest.raises(CMSError, match="not found"),
+        ):
+            mock_filter.return_value.first.return_value = None
+            services.resume_range_by_request_id(user, str(uuid4()))

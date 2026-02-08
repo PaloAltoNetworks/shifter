@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-06
+
+### Changed
+- Range pause/resume flow and UI updates
+
+### Fixed
+- Guacamole ECS service not deploying correctly
+
+## [1.0.9] - 2026-02-02
+
+### Fixed
+- Claude errors due to using wrong small model
+- Handle NGFW "starting" state correctly
+
+## [1.0.8] - 2026-02-02
+
+### Fixed
+- Fix logic error handling non-NGFW scenarios
+
+## [1.0.7] - 2026-02-01
+
+### Fixed
+- Refine Internet egress domains and CIDR to Palo Alto Networks published IPs instead of overbroad GCP IPs
+
 ## [1.0.6] - 2026-01-28
 
 ### Added
@@ -35,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.2] - 2026-01-25
 
 ### Added
-- Range pause/resume flow and UI
+- Range pause/resume flow and UI updates
 
 ## [1.0.1] - 2026-01-25
 

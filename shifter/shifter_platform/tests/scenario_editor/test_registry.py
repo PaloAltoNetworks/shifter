@@ -152,9 +152,7 @@ class TestListAllScenarios:
         """Soft-deleted custom scenarios should not appear."""
         from django.utils import timezone
 
-        Scenario.objects.filter(pk=custom_scenario.pk).update(
-            deleted_at=timezone.now()
-        )
+        Scenario.objects.filter(pk=custom_scenario.pk).update(deleted_at=timezone.now())
         result = list_all_scenarios()
         ids = [s["id"] for s in result]
         assert "custom-test" not in ids

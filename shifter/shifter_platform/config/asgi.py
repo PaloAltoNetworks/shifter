@@ -28,10 +28,15 @@ django_asgi_app = get_asgi_application()
 
 # Import routing after Django setup
 from mission_control.routing import websocket_urlpatterns  # noqa: E402
+from experiments.routing import websocket_urlpatterns as experiment_ws_urlpatterns  # noqa: E402
 
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
-        "websocket": AllowedHostsOriginValidator(AuthMiddlewareStack(URLRouter(websocket_urlpatterns))),
+        "websocket": AllowedHostsOriginValidator(
+            AuthMiddlewareStack(
+                URLRouter(websocket_urlpatterns + experiment_ws_urlpatterns)
+            )
+        ),
     }
 )

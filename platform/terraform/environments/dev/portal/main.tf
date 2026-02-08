@@ -483,8 +483,8 @@ module "pulumi_provisioner" {
   victim_instance_type = var.victim_instance_type
 
   # S3
-  agent_s3_bucket      = module.s3.bucket_name
-  agent_s3_bucket_arn  = module.s3.bucket_arn
+  agent_s3_bucket           = module.s3.bucket_name
+  agent_s3_bucket_arn       = module.s3.bucket_arn
   s3_endpoint_id            = data.terraform_remote_state.range.outputs.s3_endpoint_id
   firewall_endpoint_id      = data.terraform_remote_state.range.outputs.firewall_endpoint_id != null ? data.terraform_remote_state.range.outputs.firewall_endpoint_id : ""
   ssm_endpoints_subnet_cidr = data.terraform_remote_state.range.outputs.ssm_endpoints_subnet_cidr

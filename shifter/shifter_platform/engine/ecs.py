@@ -2,11 +2,20 @@
 
 This module triggers ECS tasks to provision and teardown range infrastructure.
 The Shifter Engine writes directly to RDS, so no callback endpoint is needed.
+
+Local Development:
+    Set LOCAL_PROVISIONER=subprocess in settings to run the provisioner locally
+    instead of triggering ECS. This requires:
+    - Pulumi CLI installed locally
+    - AWS credentials configured
+    - PROVISIONER_PATH setting pointing to the provisioner directory
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import subprocess  # nosec B404 - used for local dev provisioner only
 from typing import TYPE_CHECKING
 
 import boto3
@@ -19,6 +28,95 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+
+def _run_local_provisioner(command: list[str]) -> str | None:
+    """Run the provisioner locally as a subprocess.
+
+    Args:
+        command: Command arguments
+            (e.g., ["range", "provision", "--request-id", "..."])
+
+    Returns:
+        "local-{pid}" if started successfully, None if not configured
+
+    Raises:
+        RuntimeError: If provisioner fails to start
+    """
+    provisioner_path = getattr(settings, "PROVISIONER_PATH", None)
+    if not provisioner_path:
+        # Default to relative path from Django app
+        base = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        provisioner_path = os.path.join(base, "engine", "provisioner")
+
+    main_py = os.path.join(provisioner_path, "main.py")
+    if not os.path.exists(main_py):
+        logger.error(f"Provisioner not found at {main_py}")
+        return None
+
+    # Build environment for provisioner
+    env = os.environ.copy()
+
+    # Ensure required env vars are set (from Django settings or environment)
+    env.setdefault("ENVIRONMENT", getattr(settings, "ENVIRONMENT", "dev"))
+    env.setdefault("AWS_REGION", getattr(settings, "AWS_REGION", "us-east-2"))
+
+    # For local dev, use standard DB connection (not IAM auth)
+    # The provisioner will need DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
+    if hasattr(settings, "DATABASES"):
+        db_config = settings.DATABASES.get("default", {})
+        env.setdefault("DB_HOST", str(db_config.get("HOST", "localhost")))
+        env.setdefault("DB_PORT", str(db_config.get("PORT", 5432)))
+        env.setdefault("DB_USER", str(db_config.get("USER", "postgres")))
+        env.setdefault("DB_PASSWORD", str(db_config.get("PASSWORD", "")))
+        env.setdefault("DB_NAME", str(db_config.get("NAME", "shifter")))
+
+    # Pulumi config
+    pulumi_backend = getattr(settings, "PULUMI_BACKEND_URL", "")
+    pulumi_secrets = getattr(settings, "PULUMI_SECRETS_PROVIDER", "")
+    env.setdefault("PULUMI_BACKEND_URL", pulumi_backend)
+    env.setdefault("PULUMI_SECRETS_PROVIDER", pulumi_secrets)
+
+    # SNS config (for event publishing - LocalStack support)
+    sns_arn = getattr(settings, "SNS_RANGE_EVENTS_ARN", "")
+    aws_endpoint = getattr(settings, "AWS_ENDPOINT_URL", "")
+    if sns_arn:
+        env.setdefault("SNS_RANGE_EVENTS_ARN", sns_arn)
+    if aws_endpoint:
+        env.setdefault("AWS_ENDPOINT_URL", aws_endpoint)
+
+    # Put mock-pulumi first in PATH to intercept real pulumi
+    # This prevents any actual infrastructure from being created
+    mock_pulumi_dir = provisioner_path
+    current_path = env.get("PATH", "")
+    env["PATH"] = f"{mock_pulumi_dir}:{current_path}"
+    logger.info("Using mock pulumi - NO INFRA WILL BE CREATED")
+
+    full_command = ["python", main_py, *command]
+    logger.info(f"Starting local provisioner: {' '.join(full_command)}")
+
+    try:
+        # Run in background (non-blocking)
+        # Security: command is hardcoded path to our provisioner, not user input
+        process = subprocess.Popen(  # noqa: S603  # nosec B603
+            full_command,
+            cwd=provisioner_path,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        logger.info(f"Local provisioner started with PID {process.pid}")
+        return f"local-{process.pid}"
+
+    except Exception as e:
+        logger.error(f"Failed to start local provisioner: {e}")
+        raise RuntimeError(f"Local provisioner failed: {e}") from e
+
+
+def _is_local_provisioner_enabled() -> bool:
+    """Check if local provisioner mode is enabled."""
+    mode = getattr(settings, "LOCAL_PROVISIONER", None)
+    return mode in ("subprocess", "docker")
 
 
 def _get_ecs_client():
@@ -209,8 +307,15 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         raise TypeError("request_id cannot be None")
     if not isinstance(request_id, UUIDType):
         raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
-    if command not in ("provision", "destroy"):
-        raise ValueError(f"Invalid command: {command}. Must be 'provision' or 'destroy'.")
+    valid_commands = ("provision", "destroy", "pause", "resume")
+    if command not in valid_commands:
+        raise ValueError(f"Invalid command: {command}. Must be one of {valid_commands}.")
+
+    # Check for local provisioner mode first
+    if _is_local_provisioner_enabled():
+        logger.info(f"Using local provisioner for Range request_id={request_id} command={command}")
+        command_list = ["range", command, "--request-id", str(request_id)]
+        return _run_local_provisioner(command_list)
 
     cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
     task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
@@ -310,6 +415,33 @@ def start_range_teardown(request_id: UUID) -> str | None:
     return _start_range_ecs_task(request_id, "destroy")
 
 
+def start_range_operation(request_id: UUID, operation: str) -> str | None:
+    """Start a range runtime operation (pause/resume) via ECS Fargate.
+
+    Args:
+        request_id: UUID of the Request containing the Range.
+        operation: Operation to perform ('pause' or 'resume').
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured.
+
+    Raises:
+        TypeError: If request_id is None or not a UUID
+        ValueError: If operation is not 'pause' or 'resume'
+        ClientError: If ECS task fails to start
+    """
+    from uuid import UUID as UUIDType
+
+    if request_id is None:
+        raise TypeError("request_id cannot be None")
+    if not isinstance(request_id, UUIDType):
+        raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
+    if operation not in ("pause", "resume"):
+        raise ValueError(f"Invalid operation: {operation}. Must be 'pause' or 'resume'.")
+
+    return _start_range_ecs_task(request_id, operation)
+
+
 def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
     """Start an ECS Fargate task for NGFW operations.
 
@@ -335,6 +467,11 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
         raise TypeError("command must be a list")
     if not command:
         raise ValueError("command must be a non-empty list")
+
+    # Check for local provisioner mode first
+    if _is_local_provisioner_enabled():
+        logger.info(f"Using local provisioner for NGFW request_id={request_id} command={command}")
+        return _run_local_provisioner(command)
 
     cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
     task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)

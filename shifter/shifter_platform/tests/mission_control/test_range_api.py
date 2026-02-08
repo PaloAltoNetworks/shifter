@@ -230,11 +230,13 @@ class TestLaunchRange:
             from django.conf import settings
 
             # Set ECS config
+            orig_local_provisioner = getattr(settings, "LOCAL_PROVISIONER", None)
             orig_cluster = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
             orig_task_def = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", "")
             orig_sg = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
             orig_subnets = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
 
+            settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
             settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
             settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
             settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
@@ -258,6 +260,7 @@ class TestLaunchRange:
                 range_obj = Range.objects.get(request__request_id=request_id)
                 assert range_obj.step_function_execution_arn == task_arn
             finally:
+                settings.LOCAL_PROVISIONER = orig_local_provisioner
                 settings.PULUMI_ECS_CLUSTER_ARN = orig_cluster
                 settings.PULUMI_TASK_DEFINITION_ARN = orig_task_def
                 settings.PULUMI_ECS_SECURITY_GROUP_ID = orig_sg
@@ -293,12 +296,15 @@ class TestLaunchRange:
         assert response.status_code == 400
         assert "already have an active range" in response.json()["error"]
 
-    def test_ad_scenario_accepts_linux_agent(self, client, test_agent, linux_os, settings):
-        """AD scenario accepts Linux agent (from_agent allows any OS for victim)."""
+    def test_ad_scenario_requires_windows_agent_for_dc(self, client, test_agent, linux_os, settings):
+        """AD scenario requires Windows agent for DC (xdr_agent=true on DC).
+
+        Linux-only agent is insufficient because DC needs Windows agent.
+        """
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
-        # Create a Linux agent (valid for AD scenario with from_agent)
+        # Create only a Linux agent - insufficient for AD scenario
         linux_agent = AgentConfig.objects.create(
             user=test_agent.user,
             os=linux_os,
@@ -318,8 +324,8 @@ class TestLaunchRange:
             content_type="application/json",
         )
 
-        # from_agent scenarios accept any OS
-        assert response.status_code == 200
+        # Fails because DC requires Windows agent (xdr_agent=true, os_type=windows)
+        assert response.status_code == 400
 
     def test_ad_scenario_success_with_windows_agent(self, client, test_agent, settings):
         """AD scenario succeeds with Windows agent (used for both DC and victim)."""

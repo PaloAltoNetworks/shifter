@@ -54,7 +54,7 @@ class TestCreateRange:
     # -------------------------------------------------------------------------
 
     def test_returns_request_id_as_uuid(self):
-        """Service returns UUID request_id for valid request."""
+        """Service returns UUID request_id from the RequestSpec."""
         from engine import create_range
         from engine.models import Range
 
@@ -71,35 +71,11 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
+            patch("engine.models.Subnet"),
         ):
             result = create_range(request_spec)
 
             assert isinstance(result, UUID)
-            assert result == request_spec.request_id
-
-    def test_returns_request_id_from_spec(self):
-        """Service returns the request_id from the RequestSpec."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=99)
-        mock_user = Mock(id=99)
-        mock_range = Mock(spec=Range, id=1337)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=10),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            result = create_range(request_spec)
-
             assert result == request_spec.request_id
 
     # -------------------------------------------------------------------------
@@ -162,34 +138,8 @@ class TestCreateRange:
     # Side effects - Range creation
     # -------------------------------------------------------------------------
 
-    def test_creates_range_with_user_from_lookup(self):
-        """Service creates Range with User object from lookup."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            mock_create.assert_called_once()
-            call_kwargs = mock_create.call_args[1]
-            assert call_kwargs["user"] == mock_user
-
-    def test_creates_range_with_cms_user_id(self):
-        """Service creates Range with cms_user_id from RangeSpec."""
+    def test_creates_range_with_correct_kwargs(self):
+        """Service creates Range with correct user, cms_user_id, status, subnet_index, and request."""
         from engine import create_range
         from engine.models import Range
 
@@ -203,89 +153,19 @@ class TestCreateRange:
         with (
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            call_kwargs = mock_create.call_args[1]
-            assert call_kwargs["cms_user_id"] == 123
-
-    def test_creates_range_with_provisioning_status(self):
-        """Service creates Range with status set to PROVISIONING."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            call_kwargs = mock_create.call_args[1]
-            assert call_kwargs["status"] == Range.Status.PROVISIONING
-
-    def test_creates_range_with_allocated_subnet_index(self):
-        """Service creates Range with subnet_index from allocation."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=87),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
+            patch("engine.models.Subnet"),
         ):
             create_range(request_spec)
 
+            mock_create.assert_called_once()
             call_kwargs = mock_create.call_args[1]
+            assert call_kwargs["user"] == mock_user
+            assert call_kwargs["cms_user_id"] == 123
+            assert call_kwargs["status"] == Range.Status.PROVISIONING
             assert call_kwargs["subnet_index"] == 87
-
-    def test_creates_range_with_request_fk(self):
-        """Service creates Range with request FK from interpret."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            call_kwargs = mock_create.call_args[1]
             assert call_kwargs["request"] == mock_request
 
     # -------------------------------------------------------------------------
@@ -372,31 +252,16 @@ class TestCreateRange:
     # Input validation - request_spec parameter
     # -------------------------------------------------------------------------
 
-    def test_raises_on_none_request(self):
-        """Service raises TypeError when request_spec is None."""
+    def test_validates_request_spec_type(self):
+        """Service raises TypeError for invalid request_spec types."""
         from engine import create_range
 
-        with pytest.raises(TypeError, match="request_spec must be RequestSpec"):
-            create_range(None)
+        # None, dict, string
+        for invalid in [None, {"scenario_id": "test", "user_id": 1}, "not-a-request"]:
+            with pytest.raises(TypeError, match="request_spec must be RequestSpec"):
+                create_range(invalid)
 
-    def test_raises_on_invalid_request_type(self):
-        """Service raises TypeError when request_spec is not a RequestSpec."""
-        from engine import create_range
-
-        with pytest.raises(TypeError, match="request_spec must be RequestSpec"):
-            create_range({"scenario_id": "test", "user_id": 1})
-
-    def test_raises_on_string_request(self):
-        """Service raises TypeError when request_spec is a string."""
-        from engine import create_range
-
-        with pytest.raises(TypeError, match="request_spec must be RequestSpec"):
-            create_range("not-a-request")
-
-    def test_raises_on_range_spec_directly(self):
-        """Service raises TypeError when passed RangeSpec directly (old API)."""
-        from engine import create_range
-
+        # RangeSpec directly (old API)
         range_spec = RangeSpec(
             scenario_id="basic-attack",
             user_id=1,
@@ -408,7 +273,6 @@ class TestCreateRange:
                 )
             ],
         )
-
         with pytest.raises(TypeError, match="request_spec must be RequestSpec"):
             create_range(range_spec)
 
@@ -494,39 +358,14 @@ class TestCreateRange:
     # Logging - DEBUG on entry
     # -------------------------------------------------------------------------
 
-    def test_logs_debug_on_entry_with_scenario(self, caplog):
-        """Service logs debug on entry with scenario_id."""
+    def test_logs_debug_on_entry(self, caplog):
+        """Service logs debug on entry with scenario_id and user_id."""
         from engine import create_range
         from engine.models import Range
 
         User = get_user_model()
 
-        request_spec = make_request_spec(scenario_id="advanced-persistent-threat", user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-            caplog.at_level(logging.DEBUG, logger="engine"),
-        ):
-            create_range(request_spec)
-
-        assert "advanced-persistent-threat" in caplog.text
-
-    def test_logs_debug_on_entry_with_user_id(self, caplog):
-        """Service logs debug on entry with user_id."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=777)
+        request_spec = make_request_spec(scenario_id="advanced-persistent-threat", user_id=777)
         mock_user = Mock(id=777)
         mock_range = Mock(spec=Range, id=1)
         mock_request = Mock(request_id=request_spec.request_id)
@@ -537,82 +376,20 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
+            patch("engine.models.Subnet"),
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             create_range(request_spec)
 
+        assert "advanced-persistent-threat" in caplog.text
         assert "777" in caplog.text
-
-    def test_logs_debug_on_entry_with_instance_count(self, caplog):
-        """Service logs debug on entry with count of instances."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        # Create a subnet with 3 instances
-        subnets = [
-            SubnetSpec(
-                name="test_net",
-                uuid=str(uuid4()),
-                instances=[
-                    InstanceSpec(role="attacker", os_type="kali", uuid=str(uuid4())),
-                    InstanceSpec(role="victim", os_type="windows", uuid=str(uuid4())),
-                    InstanceSpec(role="dc", os_type="windows", uuid=str(uuid4())),
-                ],
-            )
-        ]
-        request_spec = make_request_spec(user_id=1, subnets=subnets)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-            caplog.at_level(logging.DEBUG, logger="engine"),
-        ):
-            create_range(request_spec)
-
-        # Check for "3" in the context of instances
-        assert "3" in caplog.text
 
     # -------------------------------------------------------------------------
     # Logging - INFO on range creation
     # -------------------------------------------------------------------------
 
     def test_logs_info_when_range_created(self, caplog):
-        """Service logs info when Range is created."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=42)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-            caplog.at_level(logging.INFO, logger="engine"),
-        ):
-            create_range(request_spec)
-
-        assert "created" in caplog.text.lower() or "42" in caplog.text
-
-    def test_logs_info_with_range_id(self, caplog):
-        """Service logs info with created range_id."""
+        """Service logs info with range_id and subnet_index when Range is created."""
         from engine import create_range
         from engine.models import Range
 
@@ -626,39 +403,15 @@ class TestCreateRange:
         with (
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
+            patch.object(Range, "allocate_subnet_index", return_value=123),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
+            patch("engine.models.Subnet"),
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(request_spec)
 
         assert "999" in caplog.text
-
-    def test_logs_info_with_subnet_index(self, caplog):
-        """Service logs info with allocated subnet_index."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=123),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-            caplog.at_level(logging.INFO, logger="engine"),
-        ):
-            create_range(request_spec)
-
         assert "123" in caplog.text
 
     # -------------------------------------------------------------------------
@@ -684,36 +437,9 @@ class TestCreateRange:
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch("engine.ecs.start_range_provisioning", return_value=task_arn),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
+            patch("engine.models.Subnet"),
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(request_spec)
 
         assert task_arn in caplog.text or "task" in caplog.text.lower()
-
-    def test_does_not_log_ecs_info_when_no_task_arn(self, caplog):
-        """Service does not log ECS task info when start_provisioning returns None."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-            caplog.at_level(logging.INFO, logger="engine"),
-        ):
-            create_range(request_spec)
-
-        # Should still have the "created range" log, but not the "started ECS task" log
-        # This is hard to assert negatively, so we just verify the creation log exists
-        assert "created" in caplog.text.lower() or "1" in caplog.text

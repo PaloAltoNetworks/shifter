@@ -17,6 +17,7 @@ dependencies = [
     "gunicorn",
     "markdown",
     "mozilla-django-oidc",
+    "paramiko",
     "psycopg[binary]",
     "pycurl>=7.45.7",
     "pydantic>=2.12.5",
@@ -44,6 +45,7 @@ dev = [
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
+pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
 addopts = "--cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov-report=term-missing --cov-report=xml:coverage.xml"
 env = ["TESTING=1"]
 
@@ -109,6 +111,7 @@ skips = ["B101"]  # assert OK in production code for this project
 # Mypy - static type checking
 [tool.mypy]
 python_version = "3.12"
+mypy_path = ".."  # Add shifter/ to path so cyberscript is importable
 plugins = ["mypy_django_plugin.main"]
 exclude = [
     "migrations/",

@@ -158,6 +158,7 @@ def process_ngfw_event(message: str | dict) -> None:
     app_id = event.get("app_id")
     status = event.get("status")
     state = event.get("state") or {}
+    serial_number = event.get("serial_number")
     event_id = event.get("event_id", "unknown")
 
     if not app_id or not isinstance(app_id, str):
@@ -174,6 +175,7 @@ def process_ngfw_event(message: str | dict) -> None:
             "app_id": app_id,
             "status": status,
             "state": state,
+            "serial_number": serial_number,
         },
     )
 

@@ -1,72 +1,12 @@
-"""Tests for engine service imports.
+"""Tests for engine service functions.
 
-These tests verify that services are importable from the engine package
-after migration from mission_control.
+Tests verify service layer behavior with mocked model layer.
 """
 
 import logging
 from unittest.mock import Mock, patch
 
 import pytest
-
-
-class TestECSService:
-    """Tests for ECS service import from engine.ecs."""
-
-    def test_start_provisioning_importable(self):
-        """start_provisioning is importable from engine.ecs."""
-        from engine.ecs import start_provisioning
-
-        assert callable(start_provisioning)
-
-    def test_start_teardown_importable(self):
-        """start_teardown is importable from engine.ecs."""
-        from engine.ecs import start_teardown
-
-        assert callable(start_teardown)
-
-    def test_get_task_status_importable(self):
-        """get_task_status is importable from engine.ecs."""
-        from engine.ecs import get_task_status
-
-        assert callable(get_task_status)
-
-
-class TestSSHService:
-    """Tests for SSH service import from engine.ssh."""
-
-    def test_ssh_connection_importable(self):
-        """SSHConnection is importable from engine.ssh."""
-        from engine.ssh import SSHConnection
-
-        assert SSHConnection is not None
-
-    def test_ssh_connection_error_importable(self):
-        """SSHConnectionError is importable from engine.ssh."""
-        from engine.ssh import SSHConnectionError
-
-        assert issubclass(SSHConnectionError, Exception)
-
-
-class TestSecretsService:
-    """Tests for Secrets service import from engine.secrets."""
-
-    def test_get_ssh_key_importable(self):
-        """get_ssh_key is importable from engine.secrets."""
-        from engine.secrets import get_ssh_key
-
-        assert callable(get_ssh_key)
-
-    def test_secrets_error_importable(self):
-        """SecretsError is importable from engine.secrets."""
-        from engine.secrets import SecretsError
-
-        assert issubclass(SecretsError, Exception)
-
-
-# =============================================================================
-# Phase 3: Engine Service Interface Tests
-# =============================================================================
 
 
 @pytest.mark.django_db

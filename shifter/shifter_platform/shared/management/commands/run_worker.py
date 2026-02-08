@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import logging
+import os
 import signal
 import sys
 import tempfile
@@ -98,7 +99,9 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
-        self.sqs = boto3.client("sqs", region_name=settings.AWS_REGION)
+        # Support LocalStack via AWS_ENDPOINT_URL
+        endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+        self.sqs = boto3.client("sqs", region_name=settings.AWS_REGION, endpoint_url=endpoint_url)
 
         # Log startup with structured fields for CloudWatch filtering
         logger.info(

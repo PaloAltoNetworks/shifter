@@ -161,6 +161,25 @@
     .danger-zone .card-title {
         color: #ff4d4f;
     }
+
+    /* Refresh button styling */
+    .ngfw-refresh-btn {
+        background: transparent !important;
+        border: none !important;
+        cursor: pointer;
+        color: var(--xdr-text-secondary);
+        transition: color 0.2s ease;
+    }
+
+    .ngfw-refresh-btn:hover {
+        color: var(--xdr-text);
+    }
+
+    .ngfw-refresh-btn svg {
+        display: block;
+        fill: currentColor;
+        stroke: currentColor;
+    }
 </style>
 {% endblock %}
 
@@ -178,6 +197,20 @@
                 <span>{{ ngfw.get_status_display }}</span>
             </div>
         </div>
+    </div>
+    <div class="page-header-actions">
+        <button class="xdr-button default-hover no-content has-icon tertiary-clear ngfw-refresh-btn"
+                data-ngfw-id="{{ ngfw.app_id }}"
+                aria-label="Refresh NGFW Status"
+                style="padding: 8px;">
+            <svg viewBox="0 0 20 22" xmlns="http://www.w3.org/2000/svg" width="20" height="22" style="display: block;">
+                <g fill="currentColor" fill-rule="evenodd">
+                    <path d="M7.22 18.973a.186.186 0 0 1-.057-.01 8.903 8.903 0 0 1-.54-.194.188.188 0 0 1 .138-.35c.169.068.343.131.518.188a.188.188 0 0 1-.058.366M1.57 13.192a.188.188 0 0 1-.179-.134 8.882 8.882 0 0 1-.207-.837.188.188 0 1 1 .368-.072c.053.269.12.538.198.801a.188.188 0 0 1-.18.242m.64 1.559a.187.187 0 0 1-.167-.1 8.897 8.897 0 0 1-.365-.78.188.188 0 0 1 .347-.143c.104.254.222.505.35.748a.188.188 0 0 1-.166.275m.928 1.407a.187.187 0 0 1-.146-.07 8.943 8.943 0 0 1-.509-.695.188.188 0 0 1 .313-.207c.151.23.315.453.488.667a.188.188 0 0 1-.146.305m1.18 1.203a.187.187 0 0 1-.12-.044 8.985 8.985 0 0 1-.633-.585.188.188 0 0 1 .268-.263c.192.196.396.385.606.56a.188.188 0 0 1-.12.332m1.388.955a.187.187 0 0 1-.09-.024 8.893 8.893 0 0 1-.734-.453.188.188 0 0 1 .213-.31c.226.156.462.302.702.435a.188.188 0 0 1-.09.352M14.704 3.416a.186.186 0 0 1-.104-.031 8.47 8.47 0 0 0-.468-.289.188.188 0 0 1 .186-.326c.165.095.33.196.49.302a.188.188 0 0 1-.104.344M16.146 4.612a.187.187 0 0 1-.134-.057 8.588 8.588 0 0 0-.604-.564.188.188 0 0 1 .243-.286c.218.185.43.383.63.588a.188.188 0 0 1-.135.319M17.2 5.928a.187.187 0 0 1-.157-.085 8.622 8.622 0 0 0-.485-.669.188.188 0 0 1 .293-.235c.178.224.349.458.505.698a.188.188 0 0 1-.156.29m.78 1.495a.188.188 0 0 1-.174-.117 8.541 8.541 0 0 0-.346-.75.188.188 0 0 1 .332-.174c.133.254.254.518.362.783a.188.188 0 0 1-.174.258m.43 1.397a.188.188 0 0 1-.182-.148 8.594 8.594 0 0 0-.15-.587.188.188 0 1 1 .359-.106c.06.201.112.407.157.613a.188.188 0 0 1-.183.228M9.94 6.315a4.217 4.217 0 0 0-4.211 4.215 4.217 4.217 0 0 0 4.21 4.214c2.322 0 4.211-1.89 4.211-4.214a4.217 4.217 0 0 0-4.21-4.215M4.595 10.53A5.352 5.352 0 0 1 9.939 5.18c2.947 0 5.344 2.4 5.344 5.349a5.352 5.352 0 0 1-5.344 5.347 5.352 5.352 0 0 1-5.343-5.347z"></path>
+                    <path stroke="currentColor" stroke-width=".5" d="M9.361 19.646a.281.281 0 0 1-.045-.559l.623-.097c4.644 0 8.422-3.782 8.422-8.43a.281.281 0 1 1 .563 0c0 4.951-4.018 8.98-8.962 8.993l-.556.09a.286.286 0 0 1-.045.003M1.001 9.642A8.97 8.97 0 0 1 3.9 3.905a8.959 8.959 0 0 1 6.04-2.336l1.127.031a.281.281 0 0 1-.005.563l-1.126-.031a8.395 8.395 0 0 0-5.658 2.19A8.409 8.409 0 0 0 1.56 9.699a.281.281 0 0 1-.28.253c-.183-.017-.295-.156-.28-.31z"></path>
+                    <path stroke="currentColor" stroke-width=".5" d="M10.345 20.885L8.81 19.349l1.535-1.535a.171.171 0 1 1 .242.242l-1.292 1.293 1.292 1.294a.172.172 0 0 1-.242.242zM10.093.33l1.535 1.536-1.535 1.536a.171.171 0 1 1-.243-.243l1.293-1.293L9.85.573a.171.171 0 0 1 .243-.243z"></path>
+                </g>
+            </svg>
+        </button>
     </div>
 </div>
 
@@ -207,6 +240,22 @@
         </div>
     </div>
 </div>
+
+{% if ngfw.status == 'ready' or ngfw.status == 'stopped' %}
+<!-- Data Source Instruction - shown when NGFW is ready -->
+<div class="card" style="border-color: #00d26a;">
+    <h2 class="section-title" style="color: #00d26a;">Next Step</h2>
+    <p style="color: var(--xdr-text-secondary); margin: 0 0 12px; font-size: 13px;">
+        Add this NGFW as a data source in your XDR/XSIAM tenant.
+    </p>
+    <p style="color: var(--xdr-text-secondary); margin: 0; font-size: 13px;">
+        Go to <strong>XDR/XSIAM &rarr; Settings &rarr; Data Sources &rarr; Add Data Source</strong> and select this firewall.
+        {% if ngfw.serial_number %}
+        <br>Serial Number: <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px;">{{ ngfw.serial_number }}</code>
+        {% endif %}
+    </p>
+</div>
+{% endif %}
 
 <!-- Linked Ranges -->
 <div class="card">
@@ -255,4 +304,37 @@
         Deprovision NGFW
     </a>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Refresh button handler
+    const refreshBtn = document.querySelector('.ngfw-refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', async function() {
+            const icon = this.querySelector('svg');
+
+            // Spin animation
+            icon.style.transition = 'transform 0.5s ease';
+            icon.style.transform = 'rotate(360deg)';
+            this.disabled = true;
+
+            try {
+                await fetch('{% url "mission_control:api_ngfw_list" %}');
+                // Reload page to show updated status
+                window.location.reload();
+            } catch (err) {
+                console.error('Refresh failed:', err);
+            } finally {
+                setTimeout(() => {
+                    icon.style.transform = 'rotate(0deg)';
+                    this.disabled = false;
+                }, 500);
+            }
+        });
+    }
+
+});
+</script>
 {% endblock %}

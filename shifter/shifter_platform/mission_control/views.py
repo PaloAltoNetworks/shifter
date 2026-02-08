@@ -54,10 +54,10 @@ def _get_user(request: HttpRequest) -> User:
 @login_required
 @require_GET
 def dashboard(request: HttpRequest) -> HttpResponse:
-    """Main dashboard - launch and manage ranges."""
+    """Ranges page - launch and manage cyber ranges."""
     context = {
-        "page_title": "Dashboard",
-        "active_nav": "dashboard",
+        "page_title": "Ranges",
+        "active_nav": "ranges",
         "provisioning_timeout_ms": django_settings.PROVISIONING_TIMEOUT_MS,
     }
     return render(request, "mission_control/dashboard.html", context)
@@ -144,7 +144,7 @@ def guacamole_rdp_url(request):
     Security:
         - User must have an active range in READY status
         - URL is signed with HMAC-SHA256 and expires in 5 minutes
-        - Only works for instances with GUI (kali, windows)
+        - Only works for instances with GUI (kali, ubuntu, windows)
     """
     from engine.services import get_rdp_connection_info
     from mission_control.guacamole import create_guacamole_rdp_url
@@ -174,7 +174,28 @@ def guacamole_rdp_url(request):
     guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
     guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
+    # Log whether SFTP key is available (do not log key contents)
+    logger.info(
+        "Guac RDP request: user=%s instance_uuid=%s os=%s sftp_key=%s",
+        request.user.email,
+        instance_uuid,
+        conn_info.get("os_type"),
+        "yes" if conn_info.get("ssh_key") else "no",
+    )
+
     # Generate signed URL
+    # Set SFTP root directory based on OS type for file transfers
+    # Note: SFTP paths use forward slashes even on Windows
+    os_type = conn_info.get("os_type")
+    if os_type == "kali":
+        sftp_root_directory = "/home/kali"
+    elif os_type == "ubuntu":
+        sftp_root_directory = "/home/ubuntu"
+    elif os_type == "windows":
+        sftp_root_directory = "/C:/Users/Administrator/Downloads"
+    else:
+        sftp_root_directory = None
+
     try:
         url = create_guacamole_rdp_url(
             base_url=guacamole_base_url,
@@ -186,6 +207,8 @@ def guacamole_rdp_url(request):
             rdp_username=conn_info.get("rdp_username"),
             rdp_password=conn_info.get("rdp_password"),
             api_base_url=guacamole_api_url,
+            sftp_root_directory=sftp_root_directory,
+            sftp_private_key=conn_info.get("ssh_key"),
         )
     except ValueError as e:
         logger.error(f"Failed to generate Guacamole URL: {e}")
@@ -547,6 +570,88 @@ def destroy_range(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
+@require_POST
+def pause_range(request: HttpRequest) -> JsonResponse:
+    """
+    Pause an active range.
+
+    Request body (JSON):
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to pause (legacy, deprecated)
+
+    Sets status to PAUSING and triggers async instance stop.
+    """
+    from cms import pause_range as cms_pause_range_by_id
+    from cms.services import pause_range_by_request_id as cms_pause_range_by_request
+
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
+    range_id = data.get("range_id")
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
+
+    try:
+        if request_id:
+            cms_pause_range_by_request(user, request_id)
+            logger.info("Range paused: user=%s request_id=%s", user.email, request_id)
+        else:
+            cms_pause_range_by_id(user, range_id)
+            logger.info("Range paused: user=%s range_id=%s", user.email, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
+@require_POST
+def resume_range(request: HttpRequest) -> JsonResponse:
+    """
+    Resume a paused range.
+
+    Request body (JSON):
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to resume (legacy, deprecated)
+
+    Sets status to RESUMING and triggers async instance start.
+    """
+    from cms import resume_range as cms_resume_range_by_id
+    from cms.services import resume_range_by_request_id as cms_resume_range_by_request
+
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
+    range_id = data.get("range_id")
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
+
+    try:
+        if request_id:
+            cms_resume_range_by_request(user, request_id)
+            logger.info("Range resumed: user=%s request_id=%s", user.email, request_id)
+        else:
+            cms_resume_range_by_id(user, range_id)
+            logger.info("Range resumed: user=%s range_id=%s", user.email, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
 @require_GET
 def list_agents(request: HttpRequest) -> JsonResponse:
     """
@@ -601,7 +706,10 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
     try:
         ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
+        # NGFW not found (may have failed and been cleaned up)
+        # Redirect to list page instead of showing 404
+        messages.warning(request, "NGFW not found. It may have failed during provisioning.")
+        return redirect("mission_control:ngfw_list")
 
     context = {
         "page_title": ngfw.name,
@@ -638,7 +746,9 @@ def ngfw_deprovision(request: HttpRequest, app_id: str) -> HttpResponse:
     try:
         ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
+        # NGFW not found - redirect to list page
+        messages.warning(request, "NGFW not found.")
+        return redirect("mission_control:ngfw_list")
 
     context = {
         "page_title": f"Deprovision {ngfw.name}",

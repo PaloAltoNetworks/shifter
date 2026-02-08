@@ -14,12 +14,6 @@ from pydantic import ValidationError
 class TestDCConfig:
     """Tests for DCConfig Pydantic model."""
 
-    def test_import_dc_config(self):
-        """DCConfig can be imported from cms.scenarios.schema."""
-        from cms.scenarios.schema import DCConfig
-
-        assert DCConfig is not None
-
     def test_create_with_domain_name_and_netbios(self):
         """DCConfig can be created with domain_name and netbios_name."""
         from cms.scenarios.schema import DCConfig
@@ -45,12 +39,6 @@ class TestDCConfig:
 
 class TestInstanceConfig:
     """Tests for InstanceConfig Pydantic model."""
-
-    def test_import_instance_config(self):
-        """InstanceConfig can be imported from cms.scenarios.schema."""
-        from cms.scenarios.schema import InstanceConfig
-
-        assert InstanceConfig is not None
 
     def test_create_attacker_instance(self):
         """InstanceConfig can be created for attacker role."""
@@ -152,12 +140,6 @@ class TestInstanceConfig:
 class TestSubnetConfig:
     """Tests for SubnetConfig Pydantic model."""
 
-    def test_import_subnet_config(self):
-        """SubnetConfig can be imported from cms.scenarios.schema."""
-        from cms.scenarios.schema import SubnetConfig
-
-        assert SubnetConfig is not None
-
     def test_create_basic_subnet(self):
         """SubnetConfig can be created with name and instances."""
         from cms.scenarios.schema import SubnetConfig
@@ -188,12 +170,6 @@ class TestSubnetConfig:
 
 class TestScenarioTemplate:
     """Tests for ScenarioTemplate Pydantic model."""
-
-    def test_import_scenario_template(self):
-        """ScenarioTemplate can be imported from cms.scenarios.schema."""
-        from cms.scenarios.schema import ScenarioTemplate
-
-        assert ScenarioTemplate is not None
 
     def test_create_basic_scenario(self):
         """ScenarioTemplate can be created with basic fields."""

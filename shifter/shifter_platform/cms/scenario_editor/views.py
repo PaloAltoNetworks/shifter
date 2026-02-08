@@ -11,7 +11,7 @@ import logging
 import re
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
@@ -37,18 +37,12 @@ logger = logging.getLogger(__name__)
 SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 
 
-def staff_required(user):
-    """Check if user is staff or superuser."""
-    return user.is_staff or user.is_superuser
-
-
 # =============================================================================
 # List View
 # =============================================================================
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_GET
 def scenario_list(request):
     """List all scenarios with metadata."""
@@ -67,8 +61,7 @@ def scenario_list(request):
 # =============================================================================
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_GET
 def scenario_detail_view(request, scenario_id):
     """View scenario details."""
@@ -115,8 +108,7 @@ def scenario_detail_view(request, scenario_id):
 # =============================================================================
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_http_methods(["GET", "POST"])
 def scenario_create_form(request):
     """Form-based scenario creation."""
@@ -228,8 +220,7 @@ def scenario_create_form(request):
         )
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_http_methods(["GET", "POST"])
 def scenario_edit_form(request, scenario_id):
     """Form-based scenario editing (custom scenarios only)."""
@@ -372,8 +363,7 @@ def scenario_edit_form(request, scenario_id):
 # =============================================================================
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_http_methods(["GET", "POST"])
 def scenario_yaml_editor(request, scenario_id):
     """Free-form YAML editor for a scenario.
@@ -483,8 +473,7 @@ def scenario_yaml_editor(request, scenario_id):
 # =============================================================================
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_http_methods(["GET", "POST"])
 def scenario_yaml_create(request):
     """Create a new scenario from YAML content."""
@@ -599,8 +588,7 @@ def scenario_yaml_create(request):
 # =============================================================================
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_POST
 def scenario_delete_view(request, scenario_id):
     """Delete a custom scenario."""
@@ -633,8 +621,7 @@ def scenario_delete_view(request, scenario_id):
         )
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_POST
 def scenario_toggle_enabled(request, scenario_id):
     """Toggle enabled state for a scenario."""
@@ -687,8 +674,7 @@ def scenario_toggle_enabled(request, scenario_id):
         )
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_POST
 def scenario_toggle_staff_only(request, scenario_id):
     """Toggle staff_only state for a scenario."""
@@ -741,8 +727,7 @@ def scenario_toggle_staff_only(request, scenario_id):
         )
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_http_methods(["GET", "POST"])
 def scenario_clone_view(request, scenario_id):
     """Clone a scenario."""
@@ -821,8 +806,7 @@ def scenario_clone_view(request, scenario_id):
         )
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_GET
 def scenario_export_view(request, scenario_id):
     """Download scenario as YAML file."""
@@ -862,8 +846,7 @@ def scenario_export_view(request, scenario_id):
 # =============================================================================
 
 
-@login_required
-@user_passes_test(staff_required)
+@staff_member_required
 @require_POST
 def validate_yaml_view(request):
     """Validate YAML scenario content without saving.

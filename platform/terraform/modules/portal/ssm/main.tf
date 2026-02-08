@@ -134,9 +134,9 @@ resource "aws_ssm_parameter" "pulumi_ecs_cluster_arn" {
 
 resource "aws_ssm_parameter" "pulumi_task_definition_arn" {
   name        = "${local.ps_prefix}/pulumi-task-definition-arn"
-  description = "ECS task definition ARN for Pulumi provisioner"
+  description = "ECS task definition family for Pulumi provisioner"
   type        = "String"
-  value       = var.pulumi_task_definition_arn
+  value       = var.pulumi_task_definition_family
 
   tags = local.common_tags
 }

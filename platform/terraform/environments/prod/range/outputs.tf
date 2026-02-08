@@ -161,3 +161,8 @@ output "ngfw_capacity_sns_topic_arn" {
   description = "ARN of the SNS topic for NGFW capacity alerts (null if NGFW infrastructure disabled)"
   value       = module.vpc.ngfw_capacity_sns_topic_arn
 }
+
+output "ssm_endpoints_subnet_cidr" {
+  description = "CIDR block of the SSM/Bedrock endpoints subnet (for NGFW routing)"
+  value       = module.vpc.ssm_endpoints_subnet_cidr
+}

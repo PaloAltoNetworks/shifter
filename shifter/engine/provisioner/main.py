@@ -583,7 +583,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
             JOIN engine_request r ON i.request_id = r.id
             WHERE r.user_id = %s
               AND i.role = 'ngfw'
-              AND i.status IN ('ready', 'active', 'stopped', 'stopping')
+              AND i.status IN ('ready', 'active', 'stopped', 'stopping', 'starting')
             ORDER BY i.created_at DESC
             LIMIT 1
             """,
@@ -822,8 +822,8 @@ def get_range_data_by_request_id(request_id: str) -> dict:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status = 'active'
-                  AND ei.state->>'service_name' IS NOT NULL
+                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping')
+                  AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,
@@ -2337,14 +2337,35 @@ def run_range_terraform(operation: str, request_id: str) -> None:
         if ngfw_data and ngfw_data.get("management_ip"):
             logger.info("NGFW enabled for range %s", range_id)
             ngfw_status = ngfw_data.get("status")
-            if ngfw_status in ("stopped", "stopping"):
-                ec2_instance_id = ngfw_data.get("ec2_instance_id")
+            ec2_instance_id = ngfw_data.get("ec2_instance_id")
+            if ngfw_status in ("stopped", "stopping", "starting"):
                 if ngfw_status == "stopping" and ec2_instance_id:
                     logger.info("NGFW is stopping, waiting for stop to complete...")
                     aws_executor = AWSExecutor()
                     aws_executor.wait_for_stopped(ec2_instance_id)
-                logger.info("Starting stopped NGFW for range provisioning...")
-                run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+                elif ngfw_status == "starting" and ec2_instance_id:
+                    # Status stuck in 'starting' - check actual EC2 state
+                    aws_executor = AWSExecutor()
+                    result = aws_executor.describe_instance(ec2_instance_id)
+                    ec2_state = None
+                    if result.success:
+                        data = json.loads(result.stdout)
+                        reservations = data.get("Reservations", [])
+                        if reservations and reservations[0].get("Instances"):
+                            ec2_state = reservations[0]["Instances"][0].get("State", {}).get("Name")
+                    if ec2_state == "stopped":
+                        logger.info("NGFW stuck in 'starting' but EC2 is stopped, restarting...")
+                        run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+                    elif ec2_state == "running":
+                        logger.info("NGFW starting, EC2 already running")
+                        # Already running, continue to provision
+                    elif ec2_state == "pending":
+                        logger.info("NGFW starting, waiting for EC2 to be running...")
+                        aws_executor.wait_for_running(ec2_instance_id)
+                        # Now running, continue to provision
+                else:
+                    logger.info("Starting stopped NGFW for range provisioning...")
+                    run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
 
     try:
         if operation == "up":
@@ -2454,29 +2475,30 @@ def _run_terraform_provision(
             ngfw_data["data_eni_id"],
         )
 
-    # Configure NGFW with routes for range subnets
-    ngfw_data = get_user_ngfw_data(user_id)
-    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
-    if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
-        logger.info("Configuring NGFW with subnet routes...")
-        subnets_for_ngfw = []
-        for spec_subnet in spec_subnets:
-            subnet_name = spec_subnet.get("name", "")
-            subnet_output = subnets_output.get(subnet_name, {})
-            subnets_for_ngfw.append(
-                {
-                    "name": subnet_name,
-                    "cidr": subnet_output.get("subnet_cidr", ""),
-                    "connected_to": spec_subnet.get("connected_to", []),
-                }
+    # Configure NGFW with routes for range subnets (only if range requires NGFW)
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
+        if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
+            logger.info("Configuring NGFW with subnet routes...")
+            subnets_for_ngfw = []
+            for spec_subnet in spec_subnets:
+                subnet_name = spec_subnet.get("name", "")
+                subnet_output = subnets_output.get(subnet_name, {})
+                subnets_for_ngfw.append(
+                    {
+                        "name": subnet_name,
+                        "cidr": subnet_output.get("subnet_cidr", ""),
+                        "connected_to": spec_subnet.get("connected_to", []),
+                    }
+                )
+            configure_ngfw_subnets(
+                subnets=subnets_for_ngfw,
+                range_id=range_id,
+                management_ip=ngfw_data["management_ip"],
+                ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
+                ngfw_subnet_cidr=ngfw_subnet_cidr,
             )
-        configure_ngfw_subnets(
-            subnets=subnets_for_ngfw,
-            range_id=range_id,
-            management_ip=ngfw_data["management_ip"],
-            ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
-            ngfw_subnet_cidr=ngfw_subnet_cidr,
-        )
 
     # Run instance setup (DC first, then others in parallel)
     logger.info("Running instance setup...")

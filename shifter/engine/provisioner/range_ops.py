@@ -370,6 +370,15 @@ def ensure_ngfw_running(request_id: str) -> None:
         # For now, proceed with the start operation which will wait
         # The AWSExecutor.wait_for_running will handle this
 
+    # If stopping, wait for EC2 to reach stopped before starting
+    if status == "stopping":
+        logger.info("ensure_ngfw_running: NGFW is stopping, waiting for stopped...")
+        executor = AWSExecutor()
+        wait_result = executor.wait_for_stopped(ngfw_info["ec2_instance_id"])
+        if not wait_result.success:
+            raise RuntimeError(f"NGFW failed to reach stopped state: {wait_result.stderr}")
+        logger.info("ensure_ngfw_running: NGFW is now stopped, proceeding to start")
+
     # Stopped or stopping - need to start
     if status in ("stopped", "stopping", "starting"):
         # Update status to starting
@@ -585,7 +594,18 @@ def run_range_pause(request_id: str) -> None:
     # Update instance statuses in database
     _update_instance_statuses(request_id, "paused")
 
-    # Update range status to paused
+    # Cascade: pause NGFW if no other ranges need it (before reporting paused)
+    try:
+        pause_ngfw_for_range(request_id, range_data)
+    except Exception as e:
+        # Non-fatal: log and continue - range instances are already stopped
+        logger.warning(
+            "run_range_pause: NGFW pause failed (non-fatal): %s request_id=%s",
+            str(e),
+            request_id,
+        )
+
+    # Update range status to paused (after NGFW is stopped)
     update_range_status(range_id, "paused", paused_at="NOW()")
     publish_status_update(
         request_id=request_id,
@@ -593,17 +613,6 @@ def run_range_pause(request_id: str) -> None:
         user_id=user_id,
         new_status="paused",
     )
-
-    # Cascade: pause NGFW if no other ranges need it
-    try:
-        pause_ngfw_for_range(request_id, range_data)
-    except Exception as e:
-        # Non-fatal: log and continue - range is already paused
-        logger.warning(
-            "run_range_pause: NGFW pause failed (non-fatal): %s request_id=%s",
-            str(e),
-            request_id,
-        )
 
     logger.info(
         "run_range_pause: completed request_id=%s, paused %d instances",

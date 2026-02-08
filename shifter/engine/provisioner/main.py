@@ -822,8 +822,8 @@ def get_range_data_by_request_id(request_id: str) -> dict:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status = 'active'
-                  AND ei.state->>'service_name' IS NOT NULL
+                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping')
+                  AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,

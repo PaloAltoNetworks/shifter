@@ -31,10 +31,7 @@ def _get_metadata_map() -> dict[str, dict[str, Any]]:
     """
     from cms.models import ScenarioMetadata
 
-    return {
-        m.scenario_id: {"enabled": m.enabled, "staff_only": m.staff_only}
-        for m in ScenarioMetadata.objects.all()
-    }
+    return {m.scenario_id: {"enabled": m.enabled, "staff_only": m.staff_only} for m in ScenarioMetadata.objects.all()}
 
 
 def _get_db_scenarios() -> list[ScenarioTemplate]:
@@ -141,10 +138,7 @@ def list_all_scenarios(user: User | None = None) -> list[dict[str, Any]]:
 
     # Access filtering
     if user is not None and not (user.is_staff or user.is_superuser):
-        result = [
-            s for s in result
-            if s["enabled"] and not s["staff_only"]
-        ]
+        result = [s for s in result if s["enabled"] and not s["staff_only"]]
 
     # Sort by name
     result.sort(key=lambda s: s["name"])
@@ -185,8 +179,8 @@ def get_scenario_detail(scenario_id: str) -> dict[str, Any]:
     try:
         template = load_yaml_scenario(scenario_id)
         return _scenario_to_dict(template, is_default=True, metadata=meta)
-    except ValueError:
-        raise ValueError(f"Scenario '{scenario_id}' not found")
+    except ValueError as e:
+        raise ValueError(f"Scenario '{scenario_id}' not found") from e
 
 
 def load_scenario_template(scenario_id: str) -> ScenarioTemplate:

@@ -235,12 +235,14 @@ def scenario_metadata(request, scenario_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    output = ScenarioMetadataResponseSerializer({
-        "scenario_id": metadata.scenario_id,
-        "enabled": metadata.enabled,
-        "staff_only": metadata.staff_only,
-        "updated_at": metadata.updated_at,
-    })
+    output = ScenarioMetadataResponseSerializer(
+        {
+            "scenario_id": metadata.scenario_id,
+            "enabled": metadata.enabled,
+            "staff_only": metadata.staff_only,
+            "updated_at": metadata.updated_at,
+        }
+    )
     return Response(output.data)
 
 

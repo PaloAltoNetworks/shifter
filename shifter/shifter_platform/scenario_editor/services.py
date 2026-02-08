@@ -7,7 +7,7 @@ scenario templates. Uses CMS models directly.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import yaml
 from django.utils import timezone
@@ -110,18 +110,14 @@ def create_scenario(
     """
     # Check collision with YAML defaults
     if is_default_scenario(scenario_id):
-        raise ScenarioEditorError(
-            f"Scenario ID '{scenario_id}' conflicts with a built-in default scenario"
-        )
+        raise ScenarioEditorError(f"Scenario ID '{scenario_id}' conflicts with a built-in default scenario")
 
     # Check collision with existing DB scenarios
     if Scenario.objects.filter(
         scenario_id=scenario_id,
         deleted_at__isnull=True,
     ).exists():
-        raise ScenarioEditorError(
-            f"A scenario with ID '{scenario_id}' already exists"
-        )
+        raise ScenarioEditorError(f"A scenario with ID '{scenario_id}' already exists")
 
     # Build full definition for validation
     full_def = {
@@ -132,9 +128,7 @@ def create_scenario(
     }
     errors = validate_definition(full_def)
     if errors:
-        raise ScenarioEditorError(
-            f"Invalid scenario definition: {'; '.join(errors)}"
-        )
+        raise ScenarioEditorError(f"Invalid scenario definition: {'; '.join(errors)}")
 
     scenario = Scenario(
         scenario_id=scenario_id,
@@ -181,8 +175,7 @@ def update_scenario(
     """
     if is_default_scenario(scenario_id):
         raise ScenarioEditorError(
-            f"Cannot edit default scenario '{scenario_id}'. "
-            "Default scenarios are managed in code."
+            f"Cannot edit default scenario '{scenario_id}'. Default scenarios are managed in code."
         )
 
     try:
@@ -190,8 +183,8 @@ def update_scenario(
             scenario_id=scenario_id,
             deleted_at__isnull=True,
         )
-    except Scenario.DoesNotExist:
-        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found")
+    except Scenario.DoesNotExist as e:
+        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 
     if name is not None:
         scenario.name = name
@@ -209,9 +202,7 @@ def update_scenario(
     }
     errors = validate_definition(full_def)
     if errors:
-        raise ScenarioEditorError(
-            f"Invalid scenario definition: {'; '.join(errors)}"
-        )
+        raise ScenarioEditorError(f"Invalid scenario definition: {'; '.join(errors)}")
 
     scenario.updated_by = user
     scenario.save()
@@ -238,8 +229,7 @@ def delete_scenario(user: User, scenario_id: str) -> None:
     """
     if is_default_scenario(scenario_id):
         raise ScenarioEditorError(
-            f"Cannot delete default scenario '{scenario_id}'. "
-            "Default scenarios are managed in code."
+            f"Cannot delete default scenario '{scenario_id}'. Default scenarios are managed in code."
         )
 
     try:
@@ -247,8 +237,8 @@ def delete_scenario(user: User, scenario_id: str) -> None:
             scenario_id=scenario_id,
             deleted_at__isnull=True,
         )
-    except Scenario.DoesNotExist:
-        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found")
+    except Scenario.DoesNotExist as e:
+        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 
     scenario.deleted_at = timezone.now()
     scenario.updated_by = user
@@ -293,8 +283,8 @@ def update_metadata(
 
     try:
         get_scenario_detail(scenario_id)
-    except ValueError:
-        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found")
+    except ValueError as e:
+        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 
     metadata, created = ScenarioMetadata.objects.get_or_create(
         scenario_id=scenario_id,
@@ -348,10 +338,8 @@ def clone_scenario(
 
     try:
         source = get_scenario_detail(source_scenario_id)
-    except ValueError:
-        raise ScenarioEditorError(
-            f"Source scenario '{source_scenario_id}' not found"
-        )
+    except ValueError as e:
+        raise ScenarioEditorError(f"Source scenario '{source_scenario_id}' not found") from e
 
     clone_name = new_name or f"Copy of {source['name']}"
 
@@ -387,8 +375,8 @@ def export_scenario_yaml(scenario_id: str) -> str:
 
     try:
         data = get_scenario_detail(scenario_id)
-    except ValueError:
-        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found")
+    except ValueError as e:
+        raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 
     # Build a clean YAML-friendly dict (exclude metadata fields)
     export = {

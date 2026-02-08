@@ -1,0 +1,202 @@
+{% extends "experiments/base.html" %}
+{% load static %}
+
+{% block title %}Upload Script{% endblock %}
+
+{% block extra_css %}
+<style>
+    .form-container { max-width: 560px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--xdr-text);
+        margin-bottom: 4px;
+    }
+    .form-group input {
+        width: 100%;
+        padding: 8px 12px;
+        background: transparent;
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+        color: var(--xdr-text);
+        font-size: 14px;
+    }
+    .form-group input:focus {
+        outline: none;
+        border-color: #00d26a;
+    }
+    .form-hint {
+        font-size: 12px;
+        color: var(--xdr-text-secondary);
+        margin-top: 4px;
+    }
+    .form-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 24px;
+    }
+    .required { color: #ff4d4f; }
+    .back-link {
+        display: inline-block;
+        color: var(--xdr-text-secondary);
+        font-size: 13px;
+        text-decoration: none;
+        margin-bottom: 16px;
+    }
+    .back-link:hover { color: var(--xdr-text); }
+    .upload-progress {
+        display: none;
+        margin-top: 16px;
+    }
+    .progress-bar {
+        height: 4px;
+        background: var(--xdr-border);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+    .progress-fill {
+        height: 100%;
+        background: #00d26a;
+        width: 0%;
+        transition: width 0.3s;
+    }
+    .upload-status {
+        font-size: 12px;
+        color: var(--xdr-text-secondary);
+        margin-top: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{% url 'experiments:script_list' %}" class="back-link">&larr; Back to Scripts</a>
+
+<div class="form-container">
+    <h1 class="page-title">Upload Script</h1>
+    <p class="page-subtitle mb-lg">Upload a Python script file to use in experiments</p>
+
+    {% if messages %}
+    <div class="mb-lg">
+        {% for message in messages %}
+        <div class="message message-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <div class="form-group">
+            <label for="name">Script Name <span class="required">*</span></label>
+            <input type="text" id="name" name="name" required maxlength="255" placeholder="e.g., Ransomware Simulation">
+        </div>
+        <div class="form-group">
+            <label for="file">Python File <span class="required">*</span></label>
+            <input type="file" id="file" accept=".py">
+            <div class="form-hint">Only .py files up to 1MB</div>
+        </div>
+
+        <div class="upload-progress" id="upload-progress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="upload-status" id="upload-status">Uploading...</div>
+        </div>
+
+        <div class="form-actions">
+            <button type="button" id="upload-btn" class="btn btn-primary" disabled>Upload</button>
+            <a href="{% url 'experiments:script_list' %}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const nameInput = document.getElementById('name');
+    const fileInput = document.getElementById('file');
+    const uploadBtn = document.getElementById('upload-btn');
+    const progressDiv = document.getElementById('upload-progress');
+    const progressFill = document.getElementById('progress-fill');
+    const uploadStatus = document.getElementById('upload-status');
+
+    function checkReady() {
+        uploadBtn.disabled = !(nameInput.value.trim() && fileInput.files.length);
+    }
+
+    nameInput.addEventListener('input', checkReady);
+    fileInput.addEventListener('change', checkReady);
+
+    uploadBtn.addEventListener('click', async function() {
+        const name = nameInput.value.trim();
+        const file = fileInput.files[0];
+        if (!name || !file) return;
+
+        uploadBtn.disabled = true;
+        progressDiv.style.display = 'block';
+        uploadStatus.textContent = 'Requesting upload URL...';
+        progressFill.style.width = '10%';
+
+        try {
+            // Step 1: Get presigned URL
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('filename', file.name);
+            formData.append('file_size', file.size);
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            const initResp = await fetch('{% url "experiments:script_upload" %}', {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!initResp.ok) {
+                const err = await initResp.json();
+                throw new Error(err.error || 'Failed to initiate upload');
+            }
+
+            const initData = await initResp.json();
+            progressFill.style.width = '30%';
+            uploadStatus.textContent = 'Uploading to S3...';
+
+            // Step 2: Upload file to S3
+            const s3Resp = await fetch(initData.presigned_url, {
+                method: 'PUT',
+                body: file,
+                headers: { 'Content-Type': 'application/octet-stream' },
+            });
+
+            if (!s3Resp.ok) throw new Error('S3 upload failed');
+
+            progressFill.style.width = '70%';
+            uploadStatus.textContent = 'Confirming upload...';
+
+            // Step 3: Complete upload
+            const completeData = new FormData();
+            completeData.append('upload_token', initData.upload_token);
+            completeData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            const completeResp = await fetch('{% url "experiments:script_upload" %}', {
+                method: 'POST',
+                body: completeData,
+            });
+
+            progressFill.style.width = '100%';
+
+            // Redirect on success (server redirects via 302)
+            if (completeResp.redirected) {
+                window.location.href = completeResp.url;
+            } else {
+                window.location.href = '{% url "experiments:script_list" %}';
+            }
+
+        } catch (err) {
+            uploadStatus.textContent = 'Error: ' + err.message;
+            uploadStatus.style.color = '#ff4d4f';
+            uploadBtn.disabled = false;
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "cms.apps.CMSConfig",
     "management.apps.ManagementConfig",
     "shared.apps.SharedConfig",
+    "experiments.apps.ExperimentsConfig",
 ]
 
 MIDDLEWARE = [
@@ -317,6 +318,14 @@ AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
 AGENT_USER_STORAGE_QUOTA_MB = 5120  # 5GB max per user
 AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 
+# Experiment script upload limits
+SCRIPT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024  # 1MB max per script
+SCRIPT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
+
+# Experiment execution limits
+EXPERIMENT_MAX_TOTAL_RUNS = 10
+EXPERIMENT_MAX_PARALLEL_RUNS = 5
+
 # Guacamole RDP Integration
 # ------------------------------------------------------------------------------
 # JSON auth secret key for signing RDP session URLs
@@ -346,6 +355,10 @@ SQS_QUEUE_CONFIG = {
     "mc": {
         "url": os.environ.get("SQS_MC_URL", ""),
         "handler": "mission_control.handlers.process_event",
+    },
+    "experiments": {
+        "url": os.environ.get("SQS_EXPERIMENTS_URL", ""),
+        "handler": "experiments.handlers.process_event",
     },
 }
 
@@ -431,6 +444,11 @@ LOGGING = {
             "propagate": False,
         },
         "cms": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "experiments": {
             "handlers": ["console"],
             "level": LOG_LEVEL,
             "propagate": False,

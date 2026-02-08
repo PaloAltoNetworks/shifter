@@ -57,7 +57,6 @@ INSTALLED_APPS = [
     "documentation.apps.DocumentationConfig",
     "engine.apps.EngineConfig",
     "cms.apps.CMSConfig",
-    "scenario_editor.apps.ScenarioEditorConfig",
     "management.apps.ManagementConfig",
     "shared.apps.SharedConfig",
 ]

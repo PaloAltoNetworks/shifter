@@ -6,7 +6,7 @@ All URLs are under the scenario_editor namespace.
 
 from django.urls import path
 
-from scenario_editor import api_views, views
+from cms.scenario_editor import api_views, views
 
 app_name = "scenario_editor"
 

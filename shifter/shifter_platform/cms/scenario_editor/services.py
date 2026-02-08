@@ -7,15 +7,19 @@ scenario templates. Uses CMS models directly.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 import yaml
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from pydantic import ValidationError as PydanticValidationError
 
 from cms.models import Scenario, ScenarioMetadata
 from cms.scenarios.registry import is_default_scenario
 from cms.scenarios.schema import ScenarioTemplate
+from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
+from shared.exceptions import CMSError
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -23,8 +27,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ScenarioEditorError(Exception):
+class ScenarioEditorError(CMSError):
     """Error raised by scenario editor operations."""
+
+
+def _validate_user(user: User, func_name: str) -> None:
+    """Validate user parameter — matches cms/services.py pattern."""
+    if user is None:
+        logger.error("%s called with None user", func_name)
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error(
+            "%s called with invalid user type: %s",
+            func_name,
+            type(user).__name__,
+        )
+        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
+    if user.id is None:
+        logger.error("%s called with unsaved user (id=None)", func_name)
+        raise ValueError(USER_MUST_BE_SAVED)
+
+
+# Regex for valid scenario IDs: lowercase alphanumeric, hyphens, underscores.
+# Must start and end with a letter or digit.
+_SCENARIO_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 
 
 def validate_definition(definition: dict) -> list[str]:
@@ -52,6 +78,7 @@ def validate_definition(definition: dict) -> list[str]:
             errors.append(f"Missing required field: {field}")
 
     if errors:
+        logger.warning("validate_definition: missing required fields: %s", errors)
         return errors
 
     try:
@@ -60,6 +87,7 @@ def validate_definition(definition: dict) -> list[str]:
         for error in e.errors():
             loc = " -> ".join(str(x) for x in error["loc"])
             errors.append(f"{loc}: {error['msg']}")
+        logger.warning("validate_definition: schema validation failed: %s", errors)
 
     return errors
 
@@ -76,9 +104,11 @@ def validate_yaml(yaml_content: str) -> tuple[dict | None, list[str]]:
     try:
         data = yaml.safe_load(yaml_content)
     except yaml.YAMLError as e:
+        logger.warning("validate_yaml: YAML parse error: %s", e)
         return None, [f"Invalid YAML: {e}"]
 
     if not isinstance(data, dict):
+        logger.warning("validate_yaml: YAML is not a mapping")
         return None, ["YAML must define a mapping (object), not a scalar or list"]
 
     errors = validate_definition(data)
@@ -107,17 +137,35 @@ def create_scenario(
 
     Raises:
         ScenarioEditorError: If scenario_id conflicts or definition is invalid.
+        TypeError: If user is None or invalid type.
+        ValueError: If user has no ID (unsaved).
     """
+    _validate_user(user, "create_scenario")
+    logger.debug(
+        "create_scenario called for user_id=%s, scenario_id=%s",
+        user.id,
+        scenario_id,
+    )
+
+    # Validate scenario_id format
+    if not _SCENARIO_ID_RE.match(scenario_id):
+        logger.error(
+            "create_scenario: invalid scenario_id format: %s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
+        raise ScenarioEditorError(
+            f"Invalid scenario ID '{scenario_id}': must be lowercase letters, numbers, hyphens, and underscores"
+        )
+
     # Check collision with YAML defaults
     if is_default_scenario(scenario_id):
+        logger.error(
+            "create_scenario: conflicts with default scenario, scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(f"Scenario ID '{scenario_id}' conflicts with a built-in default scenario")
-
-    # Check collision with existing DB scenarios
-    if Scenario.objects.filter(
-        scenario_id=scenario_id,
-        deleted_at__isnull=True,
-    ).exists():
-        raise ScenarioEditorError(f"A scenario with ID '{scenario_id}' already exists")
 
     # Build full definition for validation
     full_def = {
@@ -128,17 +176,54 @@ def create_scenario(
     }
     errors = validate_definition(full_def)
     if errors:
+        logger.error(
+            "create_scenario: invalid definition, scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(f"Invalid scenario definition: {'; '.join(errors)}")
 
-    scenario = Scenario(
-        scenario_id=scenario_id,
-        name=name,
-        description=description,
-        definition=definition,
-        created_by=user,
-        updated_by=user,
-    )
-    scenario.save()
+    try:
+        with transaction.atomic():
+            if Scenario.objects.filter(
+                scenario_id=scenario_id,
+                deleted_at__isnull=True,
+            ).exists():
+                logger.error(
+                    "create_scenario: duplicate scenario_id=%s, user_id=%s",
+                    scenario_id,
+                    user.id,
+                )
+                raise ScenarioEditorError(f"A scenario with ID '{scenario_id}' already exists")
+
+            scenario = Scenario(
+                scenario_id=scenario_id,
+                name=name,
+                description=description,
+                definition=definition,
+                created_by=user,
+                updated_by=user,
+            )
+            try:
+                scenario.save()
+            except PydanticValidationError as e:
+                raise ScenarioEditorError(f"Invalid scenario definition: {e}") from e
+    except IntegrityError:
+        logger.error(
+            "create_scenario: integrity error (race), scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
+        raise ScenarioEditorError(f"A scenario with ID '{scenario_id}' already exists") from None
+    except (TypeError, ValueError, ScenarioEditorError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in create_scenario for user_id=%s, scenario_id=%s",
+            user.id,
+            scenario_id,
+        )
+        raise
 
     logger.info(
         "Scenario created: scenario_id=%s by user_id=%s",
@@ -172,8 +257,22 @@ def update_scenario(
 
     Raises:
         ScenarioEditorError: If scenario not found, is a default, or definition is invalid.
+        TypeError: If user is None or invalid type.
+        ValueError: If user has no ID (unsaved).
     """
+    _validate_user(user, "update_scenario")
+    logger.debug(
+        "update_scenario called for user_id=%s, scenario_id=%s",
+        user.id,
+        scenario_id,
+    )
+
     if is_default_scenario(scenario_id):
+        logger.error(
+            "update_scenario: cannot edit default scenario, scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(
             f"Cannot edit default scenario '{scenario_id}'. Default scenarios are managed in code."
         )
@@ -184,14 +283,23 @@ def update_scenario(
             deleted_at__isnull=True,
         )
     except Scenario.DoesNotExist as e:
+        logger.error(
+            "update_scenario: scenario not found, scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 
+    update_fields = ["updated_by", "updated_at"]
     if name is not None:
         scenario.name = name
+        update_fields.append("name")
     if description is not None:
         scenario.description = description
+        update_fields.append("description")
     if definition is not None:
         scenario.definition = definition
+        update_fields.append("definition")
 
     # Validate the full definition
     full_def = {
@@ -202,10 +310,27 @@ def update_scenario(
     }
     errors = validate_definition(full_def)
     if errors:
+        logger.error(
+            "update_scenario: invalid definition, scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(f"Invalid scenario definition: {'; '.join(errors)}")
 
     scenario.updated_by = user
-    scenario.save()
+    try:
+        scenario.save(update_fields=update_fields)
+    except PydanticValidationError as e:
+        raise ScenarioEditorError(f"Invalid scenario definition: {e}") from e
+    except (TypeError, ScenarioEditorError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in update_scenario for user_id=%s, scenario_id=%s",
+            user.id,
+            scenario_id,
+        )
+        raise
 
     logger.info(
         "Scenario updated: scenario_id=%s by user_id=%s",
@@ -226,8 +351,22 @@ def delete_scenario(user: User, scenario_id: str) -> None:
 
     Raises:
         ScenarioEditorError: If scenario not found or is a default.
+        TypeError: If user is None or invalid type.
+        ValueError: If user has no ID (unsaved).
     """
+    _validate_user(user, "delete_scenario")
+    logger.debug(
+        "delete_scenario called for user_id=%s, scenario_id=%s",
+        user.id,
+        scenario_id,
+    )
+
     if is_default_scenario(scenario_id):
+        logger.error(
+            "delete_scenario: cannot delete default scenario, scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(
             f"Cannot delete default scenario '{scenario_id}'. Default scenarios are managed in code."
         )
@@ -238,14 +377,29 @@ def delete_scenario(user: User, scenario_id: str) -> None:
             deleted_at__isnull=True,
         )
     except Scenario.DoesNotExist as e:
+        logger.error(
+            "delete_scenario: scenario not found, scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 
-    scenario.deleted_at = timezone.now()
-    scenario.updated_by = user
-    scenario.save(update_fields=["deleted_at", "updated_by", "updated_at"])
+    try:
+        scenario.deleted_at = timezone.now()
+        scenario.updated_by = user
+        scenario.save(update_fields=["deleted_at", "updated_by", "updated_at"])
 
-    # Clean up metadata if it exists
-    ScenarioMetadata.objects.filter(scenario_id=scenario_id).delete()
+        # Clean up metadata if it exists
+        ScenarioMetadata.objects.filter(scenario_id=scenario_id).delete()
+    except (TypeError, ScenarioEditorError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in delete_scenario for user_id=%s, scenario_id=%s",
+            user.id,
+            scenario_id,
+        )
+        raise
 
     logger.info(
         "Scenario deleted: scenario_id=%s by user_id=%s",
@@ -277,31 +431,58 @@ def update_metadata(
 
     Raises:
         ScenarioEditorError: If scenario doesn't exist in either source.
+        TypeError: If user is None or invalid type.
+        ValueError: If user has no ID (unsaved).
     """
+    _validate_user(user, "update_metadata")
+    logger.debug(
+        "update_metadata called for user_id=%s, scenario_id=%s",
+        user.id,
+        scenario_id,
+    )
+
     # Verify the scenario exists
     from cms.scenarios.registry import get_scenario_detail
 
     try:
         get_scenario_detail(scenario_id)
     except ValueError as e:
+        logger.error(
+            "update_metadata: scenario not found, scenario_id=%s, user_id=%s",
+            scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 
-    metadata, created = ScenarioMetadata.objects.get_or_create(
-        scenario_id=scenario_id,
-        defaults={
-            "enabled": enabled if enabled is not None else True,
-            "staff_only": staff_only if staff_only is not None else False,
-            "updated_by": user,
-        },
-    )
+    try:
+        metadata, created = ScenarioMetadata.objects.get_or_create(
+            scenario_id=scenario_id,
+            defaults={
+                "enabled": enabled if enabled is not None else True,
+                "staff_only": staff_only if staff_only is not None else False,
+                "updated_by": user,
+            },
+        )
 
-    if not created:
-        if enabled is not None:
-            metadata.enabled = enabled
-        if staff_only is not None:
-            metadata.staff_only = staff_only
-        metadata.updated_by = user
-        metadata.save()
+        if not created:
+            update_fields = ["updated_by", "updated_at"]
+            if enabled is not None:
+                metadata.enabled = enabled
+                update_fields.append("enabled")
+            if staff_only is not None:
+                metadata.staff_only = staff_only
+                update_fields.append("staff_only")
+            metadata.updated_by = user
+            metadata.save(update_fields=update_fields)
+    except (TypeError, ScenarioEditorError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in update_metadata for user_id=%s, scenario_id=%s",
+            user.id,
+            scenario_id,
+        )
+        raise
 
     logger.info(
         "Scenario metadata updated: scenario_id=%s, enabled=%s, staff_only=%s by user_id=%s",
@@ -333,12 +514,27 @@ def clone_scenario(
 
     Raises:
         ScenarioEditorError: If source not found or new_scenario_id conflicts.
+        TypeError: If user is None or invalid type.
+        ValueError: If user has no ID (unsaved).
     """
+    _validate_user(user, "clone_scenario")
+    logger.debug(
+        "clone_scenario called for user_id=%s, source=%s, new_id=%s",
+        user.id,
+        source_scenario_id,
+        new_scenario_id,
+    )
+
     from cms.scenarios.registry import get_scenario_detail
 
     try:
         source = get_scenario_detail(source_scenario_id)
     except ValueError as e:
+        logger.error(
+            "clone_scenario: source not found, source_scenario_id=%s, user_id=%s",
+            source_scenario_id,
+            user.id,
+        )
         raise ScenarioEditorError(f"Source scenario '{source_scenario_id}' not found") from e
 
     clone_name = new_name or f"Copy of {source['name']}"
@@ -371,11 +567,17 @@ def export_scenario_yaml(scenario_id: str) -> str:
     Raises:
         ScenarioEditorError: If scenario not found.
     """
+    logger.debug("export_scenario_yaml called for scenario_id=%s", scenario_id)
+
     from cms.scenarios.registry import get_scenario_detail
 
     try:
         data = get_scenario_detail(scenario_id)
     except ValueError as e:
+        logger.error(
+            "export_scenario_yaml: scenario not found, scenario_id=%s",
+            scenario_id,
+        )
         raise ScenarioEditorError(f"Scenario '{scenario_id}' not found") from e
 
     # Build a clean YAML-friendly dict (exclude metadata fields)
@@ -383,7 +585,6 @@ def export_scenario_yaml(scenario_id: str) -> str:
         "id": data["id"],
         "name": data["name"],
         "description": data["description"],
-        "enabled": data.get("enabled", True),
         "ngfw": data.get("ngfw", False),
         "instances": data.get("instances", []),
     }

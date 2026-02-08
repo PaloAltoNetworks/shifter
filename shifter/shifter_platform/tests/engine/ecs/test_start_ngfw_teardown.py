@@ -30,6 +30,7 @@ class TestStartNgfwTeardown:
         """Function returns ECS task ARN when teardown starts."""
         from engine.ecs import start_ngfw_teardown
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -93,6 +94,7 @@ class TestStartNgfwTeardown:
         """Function returns None when ECS is not configured."""
         from engine.ecs import start_ngfw_teardown
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
@@ -105,6 +107,7 @@ class TestStartNgfwTeardown:
         """Function returns None when task definition is missing."""
         from engine.ecs import start_ngfw_teardown
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         if hasattr(settings, "PULUMI_TASK_DEFINITION_ARN"):
@@ -118,6 +121,7 @@ class TestStartNgfwTeardown:
         """Function returns None when subnet IDs are empty."""
         from engine.ecs import start_ngfw_teardown
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -161,6 +165,7 @@ class TestStartNgfwTeardown:
         """Function propagates ClientError from _start_ngfw_ecs_task."""
         from engine.ecs import start_ngfw_teardown
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -193,6 +198,7 @@ class TestStartNgfwTeardown:
         """Function logs INFO when teardown starts."""
         from engine.ecs import start_ngfw_teardown
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
         settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
@@ -218,6 +224,7 @@ class TestStartNgfwTeardown:
         """Function logs WARNING when ECS configuration is incomplete."""
         from engine.ecs import start_ngfw_teardown
 
+        settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
         if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
             delattr(settings, "PULUMI_ECS_CLUSTER_ARN")

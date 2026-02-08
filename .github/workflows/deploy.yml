@@ -26,6 +26,7 @@ jobs:
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
       skip_quality: ${{ steps.skip.outputs.skip_quality }}
+      skip_tests: ${{ steps.skip.outputs.skip_tests }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,7 +64,8 @@ jobs:
         id: env
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
-            ENV="${{ github.base_ref == 'dev' && 'dev' || 'prod' }}"
+            # Only PRs to main use prod; all others (dev, feature branches) use dev
+            ENV="${{ github.base_ref == 'main' && 'prod' || 'dev' }}"
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # Manual runs always target dev for safety
             ENV="dev"
@@ -75,28 +77,43 @@ jobs:
           echo "environment=$ENV" >> $GITHUB_OUTPUT
           echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> $GITHUB_OUTPUT
 
-      - name: Check for skip quality
+      - name: Check for skip flags
         id: skip
         run: |
-          # Check for [skip quality] in commit message (PRs to dev only)
-          SKIP="false"
+          # Check for [skip quality] or [skip tests] in commit message
+          SKIP_QUALITY="false"
+          SKIP_TESTS="false"
 
-          # Only allow skip on PRs targeting dev
-          if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]; then
-            # Get the actual PR head commit message (not the merge commit)
-            COMMIT_MSG=$(git log ${{ github.event.pull_request.head.sha }} -1 --pretty=%B)
+          # Only allow skip on dev (PRs to dev or pushes to dev)
+          if ([ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]) || \
+             ([ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/dev" ]); then
 
-            echo "Checking commit: ${{ github.event.pull_request.head.sha }}"
+            # Get commit message
+            if [ "${{ github.event_name }}" == "pull_request" ]; then
+              COMMIT_MSG=$(git log ${{ github.event.pull_request.head.sha }} -1 --pretty=%B)
+              echo "Checking PR commit: ${{ github.event.pull_request.head.sha }}"
+            else
+              COMMIT_MSG=$(git log HEAD -1 --pretty=%B)
+              echo "Checking push commit: $(git rev-parse HEAD)"
+            fi
+
             echo "Commit message: $COMMIT_MSG"
 
             # Check commit message for [skip quality]
             if echo "$COMMIT_MSG" | grep -qi "\[skip quality\]"; then
-              SKIP="true"
+              SKIP_QUALITY="true"
               echo "::warning::Skipping quality checks (commit message contains [skip quality])"
+            fi
+
+            # Check commit message for [skip tests]
+            if echo "$COMMIT_MSG" | grep -qi "\[skip tests\]"; then
+              SKIP_TESTS="true"
+              echo "::warning::Skipping tests (commit message contains [skip tests])"
             fi
           fi
 
-          echo "skip_quality=$SKIP" >> $GITHUB_OUTPUT
+          echo "skip_quality=$SKIP_QUALITY" >> $GITHUB_OUTPUT
+          echo "skip_tests=$SKIP_TESTS" >> $GITHUB_OUTPUT
 
   # ============================================================================
   # DEPENDENCY CHAIN: Core -> Range -> Platform
@@ -114,6 +131,8 @@ jobs:
        needs.changes.outputs.shifter_platform == 'true' ||
        github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/_quality.yml
+    with:
+      skip_tests: ${{ needs.changes.outputs.skip_tests == 'true' }}
 
   core:
     name: Core

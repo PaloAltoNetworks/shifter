@@ -48,8 +48,15 @@ variable "victim_allowed_domains" {
   default = [
     ".paloaltonetworks.com",
     ".storage.googleapis.com",
-    ".pkg.dev"
+    ".pkg.dev",
+    "data.pendo.io",
   ]
+}
+
+variable "victim_allowed_cidrs" {
+  description = "IP CIDR allowlist for Victim egress (PANW-published IPs for Cortex XSIAM/XDR)"
+  type        = list(string)
+  default     = []
 }
 
 # ------------------------------------------------------------------------------
@@ -85,16 +92,6 @@ variable "vm_series_instance_type" {
   description = "EC2 instance type for VM-Series NGFW"
   type        = string
   default     = "m5.xlarge"
-}
-
-# ------------------------------------------------------------------------------
-# Domain Controller Security Group
-# ------------------------------------------------------------------------------
-
-variable "enable_dc_security_group" {
-  description = "Enable security group for Domain Controller instances"
-  type        = bool
-  default     = true
 }
 
 # ------------------------------------------------------------------------------

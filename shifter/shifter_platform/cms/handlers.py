@@ -86,13 +86,14 @@ def process_range_event(message: str | dict) -> None:
         logger.debug("Ignoring event_type=%s", event_type)
         return
 
+    request_id = event.get("request_id")
     range_id = event.get("range_id")
     user_id = event.get("user_id")
     new_status = event.get("new_status")
     event_id = event.get("event_id", "unknown")
 
-    if range_id is None or new_status is None:
-        logger.warning("Missing range_id or new_status in event")
+    if new_status is None:
+        logger.warning("Missing new_status in event")
         return
 
     try:
@@ -101,10 +102,22 @@ def process_range_event(message: str | dict) -> None:
         logger.error("Invalid status value: %s (range_id=%s)", new_status, range_id)
         return
 
+    # Look up RangeInstance - prefer request_id (new pattern), fall back to range_id (legacy)
+    instance = None
     try:
-        instance = RangeInstance.objects.get(range_id=range_id)
+        if request_id:
+            instance = RangeInstance.objects.get(request__request_id=request_id)
+        elif range_id is not None:
+            instance = RangeInstance.objects.get(range_id=range_id)
+        else:
+            logger.warning("Missing both request_id and range_id in event")
+            return
     except RangeInstance.DoesNotExist:
-        logger.warning("RangeInstance not found: range_id=%s", range_id)
+        logger.warning(
+            "RangeInstance not found: request_id=%s range_id=%s",
+            request_id,
+            range_id,
+        )
         return
 
     if instance.user_id != user_id:
@@ -126,7 +139,8 @@ def process_range_event(message: str | dict) -> None:
         return
 
     logger.info(
-        "CMS updated RangeInstance: range_id=%s status=%s->%s event_id=%s",
+        "CMS updated RangeInstance: request_id=%s range_id=%s status=%s->%s event_id=%s",
+        request_id,
         range_id,
         previous_status,
         new_status,

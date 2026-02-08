@@ -97,8 +97,6 @@ resource "aws_ssm_parameter" "cognito_secret_arn" {
 }
 
 resource "aws_ssm_parameter" "guacamole_secret_arn" {
-  count = var.guacamole_secret_arn != "" ? 1 : 0
-
   name        = "${local.ps_prefix}/guacamole-secret-arn"
   description = "Guacamole JSON auth secret ARN for RDP integration"
   type        = "String"
@@ -108,8 +106,6 @@ resource "aws_ssm_parameter" "guacamole_secret_arn" {
 }
 
 resource "aws_ssm_parameter" "guacamole_base_url" {
-  count = var.guacamole_base_url != "" ? 1 : 0
-
   name        = "${local.ps_prefix}/guacamole-base-url"
   description = "Guacamole public URL for browser (e.g., https://domain.com/guacamole)"
   type        = "String"
@@ -119,8 +115,6 @@ resource "aws_ssm_parameter" "guacamole_base_url" {
 }
 
 resource "aws_ssm_parameter" "guacamole_api_base_url" {
-  count = var.guacamole_api_base_url != "" ? 1 : 0
-
   name        = "${local.ps_prefix}/guacamole-api-base-url"
   description = "Guacamole internal URL for API calls (e.g., http://guacamole-client.internal:8080/guacamole)"
   type        = "String"
@@ -140,9 +134,9 @@ resource "aws_ssm_parameter" "pulumi_ecs_cluster_arn" {
 
 resource "aws_ssm_parameter" "pulumi_task_definition_arn" {
   name        = "${local.ps_prefix}/pulumi-task-definition-arn"
-  description = "ECS task definition ARN for Pulumi provisioner"
+  description = "ECS task definition family for Pulumi provisioner"
   type        = "String"
-  value       = var.pulumi_task_definition_arn
+  value       = var.pulumi_task_definition_family
 
   tags = local.common_tags
 }
@@ -205,7 +199,7 @@ resource "aws_ssm_parameter" "db_host_override" {
   count = var.db_host_override != "" ? 1 : 0
 
   name        = "${local.ps_prefix}/db-host-override"
-  description = "Database host override (e.g., PgBouncer endpoint)"
+  description = "Database host override"
   type        = "String"
   value       = var.db_host_override
 

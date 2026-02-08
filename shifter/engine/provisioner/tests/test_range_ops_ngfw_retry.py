@@ -123,3 +123,41 @@ class TestEnsureNgfwRunningRetries:
             app_id="ngfw-app-uuid",
             status="failed",
         )
+
+    def test_stopping_waits_for_stopped_then_starts(self, _mock_ngfw_deps):
+        """When NGFW is stopping, wait_for_stopped is called before starting."""
+        mocks = _mock_ngfw_deps
+        stopping_info = dict(SAMPLE_NGFW_INFO, status="stopping")
+        mocks["get_info"].return_value = stopping_info
+
+        # wait_for_stopped succeeds
+        mock_executor = MagicMock()
+        mock_executor.wait_for_stopped.return_value = MagicMock(success=True)
+        mocks["executor_cls"].side_effect = [mock_executor, MagicMock()]
+
+        # Start plan succeeds
+        mocks["orch"].orchestrate.return_value = MagicMock(success=True)
+
+        ensure_ngfw_running("req-uuid-123")
+
+        # wait_for_stopped was called with the EC2 instance ID
+        mock_executor.wait_for_stopped.assert_called_once_with("i-ngfw123")
+        # Status ends up active
+        mocks["update_status"].assert_any_call(1, "active")
+
+    def test_stopping_wait_fails_raises_error(self, _mock_ngfw_deps):
+        """When NGFW is stopping and wait_for_stopped fails, RuntimeError is raised."""
+        mocks = _mock_ngfw_deps
+        stopping_info = dict(SAMPLE_NGFW_INFO, status="stopping")
+        mocks["get_info"].return_value = stopping_info
+
+        # wait_for_stopped fails
+        mock_executor = MagicMock()
+        mock_executor.wait_for_stopped.return_value = MagicMock(success=False, stderr="timeout waiting for stopped")
+        mocks["executor_cls"].return_value = mock_executor
+
+        with pytest.raises(RuntimeError, match="NGFW failed to reach stopped state"):
+            ensure_ngfw_running("req-uuid-123")
+
+        # Start plan should not have been attempted
+        mocks["orch"].orchestrate.assert_not_called()

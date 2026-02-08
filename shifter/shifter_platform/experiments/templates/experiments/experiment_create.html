@@ -1,0 +1,294 @@
+{% extends "experiments/base.html" %}
+{% load static %}
+
+{% block title %}Create Experiment{% endblock %}
+
+{% block extra_css %}
+<style>
+    .form-container { max-width: 720px; }
+    .form-section { margin-bottom: 24px; }
+    .form-section-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+        margin-bottom: 12px;
+    }
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--xdr-text);
+        margin-bottom: 4px;
+    }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        padding: 8px 12px;
+        background: transparent;
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+        color: var(--xdr-text);
+        font-size: 14px;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: #00d26a;
+    }
+    .form-group select option {
+        background: var(--xdr-surface);
+    }
+    .form-hint {
+        font-size: 12px;
+        color: var(--xdr-text-secondary);
+        margin-top: 4px;
+    }
+    .form-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 24px;
+    }
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+    .required { color: #ff4d4f; }
+    .back-link {
+        display: inline-block;
+        color: var(--xdr-text-secondary);
+        font-size: 13px;
+        text-decoration: none;
+        margin-bottom: 16px;
+    }
+    .back-link:hover { color: var(--xdr-text); }
+    #script-assignments { margin-top: 16px; }
+    .script-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 2fr auto;
+        gap: 8px;
+        align-items: end;
+        margin-bottom: 8px;
+        padding: 8px;
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+    }
+    .script-row select,
+    .script-row input {
+        padding: 6px 8px;
+        background: transparent;
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+        color: var(--xdr-text);
+        font-size: 13px;
+    }
+    .remove-script-btn {
+        background: none;
+        border: none;
+        color: #ff4d4f;
+        cursor: pointer;
+        font-size: 16px;
+        padding: 4px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{% url 'experiments:experiment_list' %}" class="back-link">&larr; Back to Experiments</a>
+
+<div class="form-container">
+    <div class="page-header-row">
+        <div class="page-header-content">
+            <h1 class="page-title">Create Experiment</h1>
+            <p class="page-subtitle">Configure a new experiment with scenario, runs, and scripts</p>
+        </div>
+    </div>
+
+    {% if messages %}
+    <div class="mb-lg">
+        {% for message in messages %}
+        <div class="message message-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" id="experiment-form">
+        {% csrf_token %}
+
+        <div class="card">
+            <div class="form-section">
+                <div class="form-section-title">Basic Information</div>
+                <div class="form-group">
+                    <label for="name">Name <span class="required">*</span></label>
+                    <input type="text" id="name" name="name" required maxlength="255" placeholder="e.g., XDR Detection Test">
+                </div>
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <textarea id="description" name="description" rows="3" maxlength="2000" placeholder="Optional description"></textarea>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <div class="form-section-title">Scenario & Execution</div>
+                <div class="form-group">
+                    <label for="scenario_id">Scenario <span class="required">*</span></label>
+                    <select id="scenario_id" name="scenario_id" required>
+                        <option value="">-- Select scenario --</option>
+                        {% for scenario in scenarios %}
+                        <option value="{{ scenario.id }}">{{ scenario.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-hint">Select the infrastructure scenario template</div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="total_runs">Total Runs <span class="required">*</span></label>
+                        <input type="number" id="total_runs" name="total_runs" value="1" min="1" max="10">
+                        <div class="form-hint">1-10 runs per experiment</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="max_parallel_runs">Max Parallel <span class="required">*</span></label>
+                        <input type="number" id="max_parallel_runs" name="max_parallel_runs" value="1" min="1" max="5">
+                        <div class="form-hint">1-5 concurrent runs</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <div class="form-section-title">Script Assignments</div>
+                <div class="form-hint mb-sm">Assign scripts to scenario instances (loaded when you select a scenario)</div>
+                <div id="script-assignments"></div>
+                <button type="button" id="add-script-btn" class="btn btn-secondary btn-small" style="margin-top: 8px;" disabled>
+                    + Add Script
+                </button>
+            </div>
+        </div>
+
+        <input type="hidden" name="scripts_json" id="scripts_json" value="[]">
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Create Experiment</button>
+            <a href="{% url 'experiments:experiment_list' %}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const scenarioSelect = document.getElementById('scenario_id');
+    const scriptAssignments = document.getElementById('script-assignments');
+    const addScriptBtn = document.getElementById('add-script-btn');
+    const scriptsJsonInput = document.getElementById('scripts_json');
+    const form = document.getElementById('experiment-form');
+
+    let instances = [];
+    const scripts = {{ scripts|safe }};
+
+    // Load instances when scenario changes
+    scenarioSelect.addEventListener('change', function() {
+        const scenarioId = this.value;
+        scriptAssignments.innerHTML = '';
+
+        if (!scenarioId) {
+            addScriptBtn.disabled = true;
+            instances = [];
+            return;
+        }
+
+        fetch('{% url "experiments:scenario_instances" scenario_id="__SCENARIO__" %}'.replace('__SCENARIO__', scenarioId))
+            .then(r => r.json())
+            .then(data => {
+                if (data.instances) {
+                    instances = data.instances;
+                    addScriptBtn.disabled = false;
+                }
+            })
+            .catch(() => {
+                addScriptBtn.disabled = true;
+            });
+    });
+
+    addScriptBtn.addEventListener('click', function() {
+        const row = document.createElement('div');
+        row.className = 'script-row';
+
+        let instanceOpts = '<option value="">-- Instance --</option>';
+        instances.forEach(i => {
+            instanceOpts += '<option value="' + i.name + '">' + i.name + ' (' + i.role + ')</option>';
+        });
+
+        row.innerHTML = `
+            <div>
+                <label class="text-small text-muted">Instance</label>
+                <select class="script-instance">${instanceOpts}</select>
+            </div>
+            <div>
+                <label class="text-small text-muted">Type</label>
+                <select class="script-type-select">
+                    <option value="python">Python</option>
+                    <option value="claude_code">Claude Code</option>
+                </select>
+            </div>
+            <div class="script-config">
+                <label class="text-small text-muted">Script / Prompt</label>
+                <select class="script-id-select">
+                    <option value="">-- Select script --</option>
+                </select>
+            </div>
+            <button type="button" class="remove-script-btn">&times;</button>
+        `;
+
+        scriptAssignments.appendChild(row);
+
+        row.querySelector('.remove-script-btn').addEventListener('click', function() {
+            row.remove();
+        });
+
+        row.querySelector('.script-type-select').addEventListener('change', function() {
+            const configDiv = row.querySelector('.script-config');
+            if (this.value === 'claude_code') {
+                configDiv.innerHTML = '<label class="text-small text-muted">Prompt</label><input type="text" class="claude-prompt" placeholder="Attack {{Workstation.ip}}">';
+            } else {
+                let opts = '<option value="">-- Select script --</option>';
+                configDiv.innerHTML = '<label class="text-small text-muted">Script</label><select class="script-id-select">' + opts + '</select>';
+            }
+        });
+    });
+
+    // Serialize script data before submit
+    form.addEventListener('submit', function() {
+        const rows = scriptAssignments.querySelectorAll('.script-row');
+        const data = [];
+        rows.forEach(function(row, idx) {
+            const instanceName = row.querySelector('.script-instance').value;
+            const scriptType = row.querySelector('.script-type-select').value;
+
+            if (!instanceName) return;
+
+            const entry = {
+                instance_name: instanceName,
+                script_type: scriptType,
+                execution_order: idx * 10,
+            };
+
+            if (scriptType === 'python') {
+                const sel = row.querySelector('.script-id-select');
+                if (sel && sel.value) entry.script_id = parseInt(sel.value);
+            } else {
+                const prompt = row.querySelector('.claude-prompt');
+                if (prompt) entry.claude_prompt = prompt.value;
+                entry.execution_order = 100 + idx;
+            }
+            data.push(entry);
+        });
+        scriptsJsonInput.value = JSON.stringify(data);
+    });
+})();
+</script>
+{% endblock %}

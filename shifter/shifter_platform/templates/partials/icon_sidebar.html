@@ -138,6 +138,21 @@
             </div>
             {% endif %}
 
+            {# Experiments - Staff only #}
+            {% if user.is_staff %}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'experiments' %}active-top-item{% endif %}">
+                <a href="{% url 'experiments:experiment_list' %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'experiments' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M13 2V5H11V2H13ZM15 7V14.07C16.77 14.57 18 16.13 18 18C18 20.21 16.21 22 14 22H10C7.79 22 6 20.21 6 18C6 16.13 7.23 14.57 9 14.07V7H15ZM11 9V15.17L10.17 15.58C9.18 16.08 8 16.92 8 18C8 19.1 8.9 20 10 20H14C15.1 20 16 19.1 16 18C16 16.92 14.82 16.08 13.83 15.58L13 15.17V9H11Z"/>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Experiments</span>
+                </a>
+            </div>
+            {% endif %}
+
             {# Documentation #}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'docs' %}active-top-item{% endif %}">
                 <a href="{% url 'documentation:index' %}"

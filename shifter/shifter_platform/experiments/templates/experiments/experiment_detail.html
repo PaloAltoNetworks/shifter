@@ -1,0 +1,366 @@
+{% extends "experiments/base.html" %}
+{% load static %}
+
+{% block title %}{{ experiment.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        padding: 2px 8px;
+        border-radius: 3px;
+    }
+    .status-badge-draft { background: rgba(112, 112, 112, 0.15); color: #707070; }
+    .status-badge-queued { background: rgba(250, 173, 20, 0.15); color: #faad14; }
+    .status-badge-running { background: rgba(64, 169, 255, 0.15); color: #40a9ff; }
+    .status-badge-completed { background: rgba(0, 210, 106, 0.15); color: #00d26a; }
+    .status-badge-cancelled { background: rgba(112, 112, 112, 0.15); color: #b8b8b8; }
+    .status-badge-failed { background: rgba(255, 77, 79, 0.15); color: #ff4d4f; }
+    .status-badge-pending { background: rgba(112, 112, 112, 0.15); color: #707070; }
+    .status-badge-provisioning { background: rgba(250, 173, 20, 0.15); color: #faad14; }
+    .status-badge-executing_victims { background: rgba(64, 169, 255, 0.15); color: #40a9ff; }
+    .status-badge-executing_attacker { background: rgba(250, 173, 20, 0.15); color: #faad14; }
+    .status-badge-collecting { background: rgba(64, 169, 255, 0.15); color: #40a9ff; }
+
+    .details-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+    .detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .detail-label {
+        font-size: 11px;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+    .detail-value {
+        font-size: 14px;
+        color: var(--xdr-text);
+    }
+    .runs-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .runs-table th,
+    .runs-table td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--xdr-border);
+    }
+    .runs-table th {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+    .run-error {
+        font-size: 12px;
+        color: #ff4d4f;
+        margin-top: 4px;
+    }
+    .scripts-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .scripts-list li {
+        padding: 8px 0;
+        border-bottom: 1px solid var(--xdr-border);
+        font-size: 13px;
+    }
+    .scripts-list li:last-child {
+        border-bottom: none;
+    }
+    .script-type {
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        padding: 1px 6px;
+        border-radius: 3px;
+    }
+    .script-type-python { background: rgba(64, 169, 255, 0.15); color: #40a9ff; }
+    .script-type-claude_code { background: rgba(250, 173, 20, 0.15); color: #faad14; }
+    .action-buttons {
+        display: flex;
+        gap: 8px;
+    }
+    .back-link {
+        display: inline-block;
+        color: var(--xdr-text-secondary);
+        font-size: 13px;
+        text-decoration: none;
+        margin-bottom: 16px;
+    }
+    .back-link:hover {
+        color: var(--xdr-text);
+    }
+    .ws-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        color: var(--xdr-text-secondary);
+    }
+    .ws-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #707070;
+    }
+    .ws-dot.connected {
+        background: #00d26a;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{% url 'experiments:experiment_list' %}" class="back-link">&larr; Back to Experiments</a>
+
+<div class="page-header-row">
+    <div class="page-header-content">
+        <h1 class="page-title">{{ experiment.name }}</h1>
+        <div class="page-subtitle">
+            <span class="status-badge status-badge-{{ experiment.status }}" id="experiment-status">{{ experiment.status }}</span>
+            <span class="ws-indicator" id="ws-indicator">
+                <span class="ws-dot" id="ws-dot"></span>
+                <span id="ws-label">connecting...</span>
+            </span>
+        </div>
+    </div>
+    <div class="action-buttons">
+        {% if experiment.status == "draft" %}
+        <form method="post" action="{% url 'experiments:experiment_start' experiment.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">Start Experiment</button>
+        </form>
+        {% endif %}
+        {% if experiment.status == "queued" or experiment.status == "running" %}
+        <form method="post" action="{% url 'experiments:experiment_cancel' experiment.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">Cancel</button>
+        </form>
+        {% endif %}
+        {% if experiment.status == "completed" %}
+        <a href="{% url 'experiments:experiment_download' experiment.pk %}" class="btn btn-primary">Download Bundle</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if messages %}
+<div class="mb-lg">
+    {% for message in messages %}
+    <div class="message message-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+    <h2 class="section-title">Overview</h2>
+    <div class="details-grid">
+        <div class="detail-item">
+            <span class="detail-label">Scenario</span>
+            <span class="detail-value">{{ experiment.scenario_id }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Total Runs</span>
+            <span class="detail-value">{{ experiment.total_runs }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Max Parallel</span>
+            <span class="detail-value">{{ experiment.max_parallel_runs }}</span>
+        </div>
+        <div class="detail-item">
+            <span class="detail-label">Created</span>
+            <span class="detail-value">{{ experiment.created_at|date:"M d, Y H:i" }}</span>
+        </div>
+        {% if experiment.started_at %}
+        <div class="detail-item">
+            <span class="detail-label">Started</span>
+            <span class="detail-value">{{ experiment.started_at|date:"M d, Y H:i" }}</span>
+        </div>
+        {% endif %}
+        {% if experiment.completed_at %}
+        <div class="detail-item">
+            <span class="detail-label">Completed</span>
+            <span class="detail-value">{{ experiment.completed_at|date:"M d, Y H:i" }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% if experiment.description %}
+    <div class="mt-lg">
+        <span class="detail-label">Description</span>
+        <p class="detail-value">{{ experiment.description }}</p>
+    </div>
+    {% endif %}
+</div>
+
+{% with scripts=experiment.scripts.all %}
+{% if scripts %}
+<div class="card">
+    <h2 class="section-title">Script Assignments</h2>
+    <ul class="scripts-list">
+        {% for script in scripts %}
+        <li>
+            <span class="script-type script-type-{{ script.script_type }}">{{ script.script_type }}</span>
+            <strong>{{ script.instance_name }}</strong>
+            {% if script.script %}
+            &mdash; {{ script.script.name }}
+            {% elif script.claude_prompt %}
+            &mdash; <span class="text-muted text-small">{{ script.claude_prompt|truncatechars:80 }}</span>
+            {% endif %}
+            <span class="text-muted text-small">(order: {{ script.execution_order }})</span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+{% endwith %}
+
+{% with runs=experiment.runs.all %}
+{% if runs %}
+<div class="card">
+    <h2 class="section-title">Runs</h2>
+    <table class="runs-table" id="runs-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Status</th>
+                <th>Error</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in runs %}
+            <tr id="run-{{ run.pk }}" data-run-id="{{ run.pk }}">
+                <td>{{ run.run_number }}</td>
+                <td>
+                    <span class="status-badge status-badge-{{ run.status }}" data-field="status">{{ run.status }}</span>
+                </td>
+                <td>
+                    <span class="run-error" data-field="error">{{ run.error_message|default:"" }}</span>
+                </td>
+                <td>
+                    {% if run.status == "completed" %}
+                    {% for artifact in run.artifacts.all %}
+                    <a href="{% url 'experiments:artifact_download' experiment.pk run.run_number artifact.pk %}" class="btn btn-secondary btn-small">
+                        {{ artifact.get_artifact_type_display }}
+                    </a>
+                    {% endfor %}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endwith %}
+
+{% if experiment.error_message %}
+<div class="card danger-zone">
+    <h2 class="section-title">Error</h2>
+    <p style="color: #ff4d4f;">{{ experiment.error_message }}</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const experimentId = {{ experiment.pk }};
+    const experimentStatus = '{{ experiment.status }}';
+    const wsIndicator = document.getElementById('ws-indicator');
+    const wsDot = document.getElementById('ws-dot');
+    const wsLabel = document.getElementById('ws-label');
+    const experimentStatusEl = document.getElementById('experiment-status');
+
+    // Only connect WebSocket for active experiments
+    if (['queued', 'running'].indexOf(experimentStatus) === -1) {
+        wsIndicator.style.display = 'none';
+        return;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = protocol + '//' + window.location.host + '/ws/experiment-status/' + experimentId + '/';
+    let ws = null;
+    let reconnectAttempts = 0;
+    const maxReconnect = 5;
+
+    function connect() {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = function() {
+            wsDot.classList.add('connected');
+            wsLabel.textContent = 'live';
+            reconnectAttempts = 0;
+        };
+
+        ws.onclose = function() {
+            wsDot.classList.remove('connected');
+            wsLabel.textContent = 'disconnected';
+            if (reconnectAttempts < maxReconnect) {
+                reconnectAttempts++;
+                setTimeout(connect, 2000 * reconnectAttempts);
+            }
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'run_status') {
+                updateRunStatus(data);
+            } else if (data.type === 'experiment_status') {
+                updateExperimentStatus(data);
+            } else if (data.type === 'hydrate') {
+                // Initial state hydration
+                if (data.runs) {
+                    data.runs.forEach(updateRunStatus);
+                }
+            }
+        };
+    }
+
+    function updateRunStatus(data) {
+        const row = document.querySelector('[data-run-id="' + data.run_id + '"]');
+        if (!row) return;
+
+        const statusEl = row.querySelector('[data-field="status"]');
+        if (statusEl) {
+            statusEl.className = 'status-badge status-badge-' + data.status;
+            statusEl.textContent = data.status;
+        }
+
+        const errorEl = row.querySelector('[data-field="error"]');
+        if (errorEl) {
+            errorEl.textContent = data.error_message || '';
+        }
+    }
+
+    function updateExperimentStatus(data) {
+        if (experimentStatusEl) {
+            experimentStatusEl.className = 'status-badge status-badge-' + data.status;
+            experimentStatusEl.textContent = data.status;
+        }
+
+        // If terminal, stop reconnecting
+        if (['completed', 'failed', 'cancelled'].indexOf(data.status) !== -1) {
+            maxReconnect = 0;
+            wsLabel.textContent = 'done';
+            if (ws) ws.close();
+            // Reload to show final state (download buttons, etc.)
+            setTimeout(function() { window.location.reload(); }, 2000);
+        }
+    }
+
+    connect();
+})();
+</script>
+{% endblock %}

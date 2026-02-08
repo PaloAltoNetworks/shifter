@@ -399,3 +399,110 @@ class TestProcessRangeEvent:
 
         instance = RangeInstance.objects.get(range_id=8)
         assert instance.status == ResourceStatus.PROVISIONING.value
+
+    # ---------------------------------------------------------------------
+    # request_id lookup (new pattern - range_id=None)
+    # ---------------------------------------------------------------------
+
+    def test_lookup_by_request_id_when_range_id_is_none(self):
+        """Handler finds RangeInstance via request_id when range_id is None.
+
+        This is the new pattern where RangeInstance.range_id is None and
+        correlation happens via Request.request_id (UUID).
+        """
+        from uuid import uuid4
+
+        from django.contrib.auth import get_user_model
+
+        from cms.handlers import process_range_event
+        from cms.models import RangeInstance, Request
+        from shared.enums import RequestType
+
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser42", password="testpass")
+
+        # Create Request with UUID
+        request_uuid = uuid4()
+        cms_request = Request.objects.create(
+            request_id=request_uuid,
+            request_type=RequestType.RANGE.value,
+            user=user,
+        )
+
+        # Create RangeInstance with range_id=None, linked via request FK
+        RangeInstance.objects.create(
+            range_id=None,  # New pattern: no legacy range_id
+            request=cms_request,
+            scenario_id="basic",
+            user_id=user.id,
+            status=ResourceStatus.PENDING.value,
+        )
+
+        # Event with request_id (UUID) - the way Engine publishes events
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "request_id": str(request_uuid),
+                    "range_id": 57,  # Engine Range.id (not used for lookup in new pattern)
+                    "new_status": ResourceStatus.FAILED.value,
+                    "user_id": user.id,
+                }
+            )
+        }
+
+        process_range_event(message)
+
+        # Verify status updated via request_id lookup
+        instance = RangeInstance.objects.get(request__request_id=request_uuid)
+        assert instance.status == ResourceStatus.FAILED.value
+
+    def test_request_id_lookup_preferred_over_range_id(self):
+        """Handler prefers request_id lookup over range_id when both present.
+
+        Ensures events with both identifiers use request_id for lookup,
+        maintaining proper service layer boundaries.
+        """
+        from uuid import uuid4
+
+        from django.contrib.auth import get_user_model
+
+        from cms.handlers import process_range_event
+        from cms.models import RangeInstance, Request
+        from shared.enums import RequestType
+
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser100", password="testpass")
+
+        request_uuid = uuid4()
+        cms_request = Request.objects.create(
+            request_id=request_uuid,
+            request_type=RequestType.RANGE.value,
+            user=user,
+        )
+
+        # RangeInstance with BOTH range_id and request FK
+        RangeInstance.objects.create(
+            range_id=100,
+            request=cms_request,
+            scenario_id="basic",
+            user_id=user.id,
+            status=ResourceStatus.PENDING.value,
+        )
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "request_id": str(request_uuid),
+                    "range_id": 100,
+                    "new_status": ResourceStatus.READY.value,
+                    "user_id": user.id,
+                }
+            )
+        }
+
+        process_range_event(message)
+
+        instance = RangeInstance.objects.get(request__request_id=request_uuid)
+        assert instance.status == ResourceStatus.READY.value

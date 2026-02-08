@@ -7,10 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-06
+
+### Changed
+- Range pause/resume flow and UI updates
+
+### Fixed
+- Guacamole ECS service not deploying correctly
+
+## [1.0.9] - 2026-02-02
+
+### Fixed
+- Claude errors due to using wrong small model
+- Handle NGFW "starting" state correctly
+
+## [1.0.8] - 2026-02-02
+
+### Fixed
+- Fix logic error handling non-NGFW scenarios
+
+## [1.0.7] - 2026-02-01
+
+### Fixed
+- Refine Internet egress domains and CIDR to Palo Alto Networks published IPs instead of overbroad GCP IPs
+
+## [1.0.6] - 2026-01-28
+
+### Added
+- MCP servers for Shifter DB, NGFW, and AWS ops
+### Fixed
+- NGFW destroy flow does not remove EC2 instances
+- NGFW commands not piped to SSH as required
+- Provisioner missing permission for deleting NGFW resources
+
+## [1.0.5] - 2026-01-28
+
+### Changed
+- Updated SSH connection validation to handle difference between SSH being up and management plane being fully up
+
+## [1.0.4] - 2026-01-28
+
+### Fixed
+- Hydrator no longer rejects empty folder fields for SCM creds
+
+## [1.0.3] - 2026-01-27
+
+### Fixed
+- Some range boxes have unexpected Internet access
+
+
+## [1.0.2] - 2026-01-25
+
+### Added
+- Range pause/resume flow and UI updates
+
+## [1.0.1] - 2026-01-25
+
+### Changed
+- Migrated range and NGFW provisioning to Terraform
+
+## [1.0.0] - 2026-01-21
+
+### Added
+- Cortex BYOT scenario (automation except for CIE and XDR collector)
+- Cortex Deployment Experience scenario
+
+### Changed
+- Dashboard renamed to Ranges
+- Ranges view uses multiple tiles for launch and active ranges
+- NGFW flow handles prompting user to associate NGFW to SCM and XDR
+- Removed legacy Terraform-based range provisioning
+- Ubuntu box supports RDP/desktop access
+- Users can set MFA to remember devices
+
+### Fixed
+- Django build does not include cyberscript shared library
+- Extend and streamline NGFW stand up plan
+- Dynamic subnet creation for ranges misses Shifter Platform creation
+- Missing VPC route for kali
+- VPC Internet egress not enforcing drop rule
+- Kali RDP not working due to permissions on logs
+- XDR not deployed on BYOT scenario DC
+- Race condition in DC readiness and target attempt to join domain
+
+## [0.10.7] - 2026-01-12
+
+### Changed
+- Extract all Cyberscript related code to shared library for reuse in Provisioner and Engine
+-
+## [0.10.6] - 2026-01-13
+
+### Fixed
+- Type conflict causes NGFW provisioning to fail
+- CMS parses legacy and new range_spec formats for consumers
+
+## [0.10.5] - 2026-01-12
+
+### Fixed
+- Provisioner ID mismatch causes range create status update to fail
+- Range subnets have no route to s3 for agent downloads
+
+## [1.0.4] - 2026-01-12
+
+### Changed
+- Extracted ssh key generation to shared library
+
 ## [1.0.3] - 2026-01-12
 
 ### Added
-- pgBouncer for RDS connection pooling
+- Additional local dev support
+
+### Fixed
+- Provisioner ID mismatch causes range create status update to fail
 
 ## [1.0.0] - 2026-01-10
 
@@ -27,6 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Draft Cortex BYOT scenario template
 - venv enforcer hook for Claude Code
 - Guacamole RDP for Range instances
+- User (not just technical) docs in Shifter
 
 ### Changed
 - NGFW models and services refactored to use schemas
@@ -37,6 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AaC gate (service layer boundary violations at code or model level) fails will now block PRs
 - AWS assets tagged to requests for cost tracking and cleanup
 - Patched vulnerable urllib3, now on 2.6.3
+- Update technical docs
 
 ### Fixed
 - Dashboard range status updates and styling
@@ -45,6 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tmux now used for Terminal UI sessions
 - RDP copy/paste not working
 - Packer does not clean up EC2 instance after build
+- tmux Terminal UI sessions not allowing mouse scrolling
 
 ## [0.10.6] - 2025-01-09
 

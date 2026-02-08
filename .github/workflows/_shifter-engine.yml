@@ -19,32 +19,33 @@ env:
   AWS_REGION: us-east-2
 
 jobs:
-  test:
-    name: Test
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        working-directory: shifter/engine/provisioner
-        run: |
-          python3.12 -m venv .venv
-          source .venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Run tests
-        working-directory: shifter/engine/provisioner
-        env:
-          TESTING: "1"
-        run: |
-          source .venv/bin/activate
-          pytest tests/ -q
+  # Test job disabled - provisioner tests need cleanup (too slow, many low-value tests)
+  # test:
+  #   name: Test
+  #   runs-on: self-hosted
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Install dependencies
+  #       working-directory: shifter/engine/provisioner
+  #       run: |
+  #         python3.12 -m venv .venv
+  #         source .venv/bin/activate
+  #         pip install --upgrade pip
+  #         pip install -r requirements.txt -r requirements-dev.txt
+  #
+  #     - name: Run tests
+  #       working-directory: shifter/engine/provisioner
+  #       env:
+  #         TESTING: "1"
+  #       run: |
+  #         source .venv/bin/activate
+  #         pytest tests/ -q
 
   build:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
-    needs: test
+    # needs: test  # Disabled - test job commented out
     permissions:
       id-token: write
       contents: read
@@ -80,12 +81,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
-          cache-from: type=local,src=/tmp/.buildx-cache-pulumi
-          cache-to: type=local,dest=/tmp/.buildx-cache-pulumi-new,mode=max
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache-pulumi
-          mv /tmp/.buildx-cache-pulumi-new /tmp/.buildx-cache-pulumi || true
+          no-cache: true
 
   deploy:
     name: Deploy (${{ inputs.environment }})

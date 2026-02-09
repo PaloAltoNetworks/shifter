@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from cms.assets.s3 import S3Error
@@ -403,18 +403,27 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
     """
     _validate_user(user, "start_experiment")
     try:
-        try:
-            experiment = Experiment.objects.get(pk=experiment_id, user=user)
-        except Experiment.DoesNotExist:
-            raise ExperimentError("Experiment not found") from None
-
-        if experiment.status != ExperimentStatus.DRAFT.value:
-            raise ExperimentStateError(f"Experiment must be in draft state to start (currently {experiment.status})")
-
         with transaction.atomic():
+            try:
+                experiment = Experiment.objects.select_for_update().get(pk=experiment_id, user=user)
+            except Experiment.DoesNotExist:
+                raise ExperimentError("Experiment not found") from None
+
+            if experiment.status != ExperimentStatus.DRAFT.value:
+                raise ExperimentStateError(
+                    f"Experiment must be in draft state to start (currently {experiment.status})"
+                )
+
             # Create run records
             runs = [ExperimentRun(experiment=experiment, run_number=i) for i in range(1, experiment.total_runs + 1)]
-            ExperimentRun.objects.bulk_create(runs)
+            try:
+                ExperimentRun.objects.bulk_create(runs)
+            except IntegrityError:
+                logger.warning(
+                    "start_experiment: duplicate run numbers for experiment_id=%s (concurrent start?)",
+                    experiment_id,
+                )
+                raise ExperimentStateError("Experiment is already being started") from None
 
             # Transition to queued
             experiment.transition_to(ExperimentStatus.QUEUED)

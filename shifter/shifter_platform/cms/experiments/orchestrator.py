@@ -98,64 +98,74 @@ class ExperimentOrchestrator:
     def schedule_runs(self) -> int:
         """Schedule pending runs up to max_parallel limit.
 
+        Uses select_for_update() to prevent concurrent SQS handlers from
+        over-scheduling runs beyond max_parallel_runs.
+
         Returns:
             Number of runs scheduled for provisioning.
         """
-        experiment = self.experiment
+        from django.db import transaction
 
-        if experiment.status == ExperimentStatus.QUEUED.value:
-            experiment.transition_to(ExperimentStatus.RUNNING)
-            self.refresh()
+        with transaction.atomic():
+            experiment = Experiment.objects.select_for_update().get(pk=self.experiment_id)
+            self._experiment = experiment
 
-        if experiment.status != ExperimentStatus.RUNNING.value:
-            logger.info(
-                "schedule_runs: experiment %s not running (status=%s), skipping",
-                self.experiment_id,
-                experiment.status,
-            )
-            return 0
+            if experiment.status == ExperimentStatus.QUEUED.value:
+                experiment.transition_to(ExperimentStatus.RUNNING)
+                experiment = Experiment.objects.select_for_update().get(pk=self.experiment_id)
+                self._experiment = experiment
 
-        active_runs = ExperimentRun.objects.filter(
-            experiment=experiment,
-            status__in=[
-                RunStatus.PROVISIONING.value,
-                RunStatus.EXECUTING_VICTIMS.value,
-                RunStatus.EXECUTING_ATTACKER.value,
-                RunStatus.COLLECTING.value,
-            ],
-        ).count()
-
-        slots_available = experiment.max_parallel_runs - active_runs
-        if slots_available <= 0:
-            logger.debug(
-                "schedule_runs: no slots (active=%d, max=%d)",
-                active_runs,
-                experiment.max_parallel_runs,
-            )
-            return 0
-
-        pending_runs = list(
-            ExperimentRun.objects.filter(
-                experiment=experiment,
-                status=RunStatus.PENDING.value,
-            ).order_by("run_number")[:slots_available]
-        )
-
-        scheduled = 0
-        for run in pending_runs:
-            try:
-                run.transition_to(RunStatus.PROVISIONING)
-                self._request_range_provisioning(run)
-                scheduled += 1
-            except Exception:
-                logger.exception(
-                    "schedule_runs: failed to schedule run %s (experiment=%s)",
-                    run.pk,
+            if experiment.status != ExperimentStatus.RUNNING.value:
+                logger.info(
+                    "schedule_runs: experiment %s not running (status=%s), skipping",
                     self.experiment_id,
+                    experiment.status,
                 )
-                run.error_message = "Failed to schedule provisioning"
-                run.save(update_fields=["error_message"])
-                run.transition_to(RunStatus.FAILED)
+                return 0
+
+            active_runs = ExperimentRun.objects.filter(
+                experiment=experiment,
+                status__in=[
+                    RunStatus.PROVISIONING.value,
+                    RunStatus.EXECUTING_VICTIMS.value,
+                    RunStatus.EXECUTING_ATTACKER.value,
+                    RunStatus.COLLECTING.value,
+                ],
+            ).count()
+
+            slots_available = experiment.max_parallel_runs - active_runs
+            if slots_available <= 0:
+                logger.debug(
+                    "schedule_runs: no slots (active=%d, max=%d)",
+                    active_runs,
+                    experiment.max_parallel_runs,
+                )
+                return 0
+
+            pending_runs = list(
+                ExperimentRun.objects.select_for_update()
+                .filter(
+                    experiment=experiment,
+                    status=RunStatus.PENDING.value,
+                )
+                .order_by("run_number")[:slots_available]
+            )
+
+            scheduled = 0
+            for run in pending_runs:
+                try:
+                    run.transition_to(RunStatus.PROVISIONING)
+                    self._request_range_provisioning(run)
+                    scheduled += 1
+                except Exception:
+                    logger.exception(
+                        "schedule_runs: failed to schedule run %s (experiment=%s)",
+                        run.pk,
+                        self.experiment_id,
+                    )
+                    run.error_message = "Failed to schedule provisioning"
+                    run.save(update_fields=["error_message"])
+                    run.transition_to(RunStatus.FAILED)
 
         logger.info(
             "schedule_runs: scheduled %d runs for experiment %s",

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
+from django.core.paginator import Paginator
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
@@ -139,13 +140,15 @@ def experiment_list(request: HttpRequest) -> HttpResponse:
     """List user's experiments."""
     logger.info("experiment_list: user_id=%s", request.user.id)
     try:
-        experiments = services.list_experiments(cast("User", request.user))
+        experiments_qs = services.list_experiments(cast("User", request.user))
+        paginator = Paginator(experiments_qs, 25)
+        page = paginator.get_page(request.GET.get("page"))
         return render(
             request,
             "experiments/experiment_list.html",
             {
                 "active_nav": "experiments",
-                "experiments": experiments,
+                "experiments": page,
             },
         )
     except Exception:

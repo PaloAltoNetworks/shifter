@@ -188,6 +188,31 @@
     const form = document.getElementById('experiment-form');
 
     let instances = [];
+    const allowedProperties = ['ip', 'name', 'instance_id'];
+
+    function validatePrompt(input) {
+        const val = input.value;
+        const pattern = /\{\{(\w+)\.(\w+)\}\}/g;
+        let match;
+        const errors = [];
+        while ((match = pattern.exec(val)) !== null) {
+            const instName = match[1];
+            const prop = match[2];
+            if (instances.length && !instances.some(function(i) { return i.name === instName; })) {
+                errors.push("Unknown instance '" + instName + "'");
+            }
+            if (allowedProperties.indexOf(prop) === -1) {
+                errors.push("Unknown property '" + prop + "' (allowed: " + allowedProperties.join(', ') + ")");
+            }
+        }
+        if (errors.length > 0) {
+            input.style.borderColor = '#ff4d4f';
+            input.title = errors.join('; ');
+        } else {
+            input.style.borderColor = '';
+            input.title = '';
+        }
+    }
 
     // Load instances when scenario changes
     scenarioSelect.addEventListener('change', function() {
@@ -253,6 +278,9 @@
             const configDiv = row.querySelector('.script-config');
             if (this.value === 'claude_code') {
                 configDiv.innerHTML = '<label class="text-small text-muted">Prompt</label><input type="text" class="claude-prompt" placeholder="Attack {{Workstation.ip}}">';
+                configDiv.querySelector('.claude-prompt').addEventListener('blur', function() {
+                    validatePrompt(this);
+                });
             } else {
                 let opts = '<option value="">-- Select script --</option>';
                 configDiv.innerHTML = '<label class="text-small text-muted">Script</label><select class="script-id-select">' + opts + '</select>';

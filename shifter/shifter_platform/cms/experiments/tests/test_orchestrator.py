@@ -4,8 +4,10 @@ Tests the orchestration logic — scheduling, state transitions, completion chec
 No mocking of infrastructure (S3, SSM, ECS).
 """
 
+import threading
+
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from cms.experiments.models import Experiment, ExperimentRun
 from cms.experiments.orchestrator import ExperimentOrchestrator
@@ -230,3 +232,51 @@ class HandleRunFailedTest(TestCase):
 
         run.refresh_from_db()
         assert run.status == RunStatus.COMPLETED.value  # Unchanged
+
+
+class ConcurrentScheduleRunsTest(TransactionTestCase):
+    """Verify that concurrent schedule_runs() calls don't over-schedule beyond max_parallel."""
+
+    def test_concurrent_schedule_respects_max_parallel(self):
+        user = User.objects.create_user(username="conc_orch_user", password=TEST_PASSWORD, is_staff=True)
+        exp = Experiment.objects.create(
+            user=user,
+            name="Concurrent Schedule",
+            scenario_id="basic",
+            total_runs=4,
+            max_parallel_runs=1,
+        )
+        exp.transition_to(ExperimentStatus.QUEUED)
+        for i in range(1, 5):
+            ExperimentRun.objects.create(experiment=exp, run_number=i)
+
+        barrier = threading.Barrier(2, timeout=5)
+        results: list[int] = [0, 0]
+
+        def attempt_schedule(index: int) -> None:
+            try:
+                orch = ExperimentOrchestrator(exp.pk)
+                barrier.wait()
+                results[index] = orch.schedule_runs()
+            except Exception:
+                results[index] = -1
+
+        t1 = threading.Thread(target=attempt_schedule, args=(0,))
+        t2 = threading.Thread(target=attempt_schedule, args=(1,))
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        total_scheduled = results[0] + results[1]
+        # With max_parallel=1, at most 1 run should be in PROVISIONING
+        provisioning_count = ExperimentRun.objects.filter(
+            experiment=exp,
+            status=RunStatus.PROVISIONING.value,
+        ).count()
+        assert provisioning_count <= exp.max_parallel_runs, (
+            f"Expected at most {exp.max_parallel_runs} provisioning, got {provisioning_count}"
+        )
+        assert total_scheduled <= exp.max_parallel_runs, (
+            f"Expected at most {exp.max_parallel_runs} scheduled total, got {total_scheduled}"
+        )

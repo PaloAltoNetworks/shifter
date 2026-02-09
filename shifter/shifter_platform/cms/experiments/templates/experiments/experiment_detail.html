@@ -145,7 +145,7 @@
         {% if experiment.status == "queued" or experiment.status == "running" %}
         <form method="post" action="{% url 'experiments:experiment_cancel' experiment.pk %}">
             {% csrf_token %}
-            <button type="submit" class="btn btn-danger">Cancel</button>
+            <button type="submit" class="btn btn-danger" onclick="return confirm('Cancel this experiment? This cannot be undone.')">Cancel</button>
         </form>
         {% endif %}
         {% if experiment.status == "completed" %}
@@ -260,6 +260,11 @@
             {% endfor %}
         </tbody>
     </table>
+</div>
+{% elif experiment.status == "draft" %}
+<div class="card">
+    <h2 class="section-title">Runs</h2>
+    <p style="color: var(--xdr-text-secondary, #b8b8b8);">Runs will be created when the experiment is started.</p>
 </div>
 {% endif %}
 {% endwith %}

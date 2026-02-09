@@ -225,7 +225,7 @@ def delete_script(user: User, script_id: int) -> None:
             script = ScriptAsset.objects.get(pk=script_id, user=user, deleted_at__isnull=True)
         except ScriptAsset.DoesNotExist:
             logger.warning("delete_script: not found script_id=%s user_id=%s", script_id, user.pk)
-            raise ScriptUploadError("Script not found") from None
+            raise ScriptUploadError("Script not found or you don't have access") from None
 
         script.deleted_at = timezone.now()
         script.save(update_fields=["deleted_at"])
@@ -293,7 +293,7 @@ def get_experiment(user: User, experiment_id: int) -> Experiment:
             )
         except Experiment.DoesNotExist:
             logger.warning("get_experiment: not found experiment_id=%s user_id=%s", experiment_id, user.pk)
-            raise ExperimentError("Experiment not found") from None
+            raise ExperimentError("Experiment not found or you don't have access") from None
     except (TypeError, ValueError, ExperimentError):
         raise
     except Exception:
@@ -426,7 +426,7 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
             try:
                 experiment = Experiment.objects.select_for_update().get(pk=experiment_id, user=user)
             except Experiment.DoesNotExist:
-                raise ExperimentError("Experiment not found") from None
+                raise ExperimentError("Experiment not found or you don't have access") from None
 
             if experiment.status != ExperimentStatus.DRAFT.value:
                 raise ExperimentStateError(
@@ -481,7 +481,7 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
         try:
             experiment = Experiment.objects.get(pk=experiment_id, user=user)
         except Experiment.DoesNotExist:
-            raise ExperimentError("Experiment not found") from None
+            raise ExperimentError("Experiment not found or you don't have access") from None
 
         if experiment.status not in {ExperimentStatus.QUEUED.value, ExperimentStatus.RUNNING.value}:
             raise ExperimentStateError(f"Cannot cancel experiment in {experiment.status} state")
@@ -530,7 +530,7 @@ def get_artifact_download_url(user: User, experiment_id: int, artifact_id: int) 
                 run__experiment__user=user,
             )
         except RunArtifact.DoesNotExist:
-            raise ArtifactError("Artifact not found") from None
+            raise ArtifactError("Artifact not found or you don't have access") from None
 
         try:
             url = generate_presigned_download_url(artifact.s3_key)
@@ -571,7 +571,7 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
                 experiment__user=user,
             )
         except ExperimentArtifact.DoesNotExist:
-            raise ArtifactError("Experiment bundle not found") from None
+            raise ArtifactError("Experiment bundle not found or you don't have access") from None
 
         try:
             url = generate_presigned_download_url(bundle.s3_key)

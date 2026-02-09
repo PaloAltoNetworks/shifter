@@ -1,7 +1,7 @@
 {% load static user_extras %}
 {# Cortex XDR Left Navigation - Direct port from Cortex XDR #}
 
-<nav class="left-nav minimized" id="leftNav" data-active-submenu="{% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' %}assets{% endif %}">
+<nav class="left-nav minimized" id="leftNav" data-active-submenu="{% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}assets{% endif %}">
     <div class="left-nav-body">
         {# Lock button - positioned at top of sidebar, outside header for proper z-index #}
         <button class="reset-button lock-button"
@@ -89,9 +89,9 @@
             </div>
 
             {# Assets - opens submenu panel #}
-            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' %}active-top-item{% endif %}">
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-top-item{% endif %}">
                 <button type="button"
-                        class="nav-menu-item nav-menu-item-level-0 nav-submenu-trigger {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' %}active-link{% endif %}"
+                        class="nav-menu-item nav-menu-item-level-0 nav-submenu-trigger {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-link{% endif %}"
                         data-submenu="assets"
                         data-submenu-title="Assets">
                     <span class="nav-icon">
@@ -235,6 +235,10 @@
         <a href="{% url 'mission_control:credentials_list' %}"
            class="nav-menu-item nav-menu-item-level-1 {% if active_nav == 'credentials' %}active-link{% endif %}">
             Credentials
+        </a>
+        <a href="{% url 'mission_control:files' %}"
+           class="nav-menu-item nav-menu-item-level-1 {% if active_nav == 'files' %}active-link{% endif %}">
+            Files
         </a>
     </template>
 </nav>

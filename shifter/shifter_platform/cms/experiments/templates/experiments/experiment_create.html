@@ -188,7 +188,32 @@
     const form = document.getElementById('experiment-form');
 
     let instances = [];
+    let cachedScripts = null;
     const allowedProperties = ['ip', 'name', 'instance_id'];
+
+    function fetchScripts() {
+        if (cachedScripts !== null) return Promise.resolve(cachedScripts);
+        return fetch('{% url "mission_control:api_list_scripts" %}')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                cachedScripts = data.scripts || [];
+                return cachedScripts;
+            })
+            .catch(function() {
+                cachedScripts = [];
+                return cachedScripts;
+            });
+    }
+
+    function populateScriptSelect(selectEl) {
+        fetchScripts().then(function(scripts) {
+            var html = '<option value="">-- Select script --</option>';
+            scripts.forEach(function(s) {
+                html += '<option value="' + s.id + '">' + s.name + ' (' + s.filename + ')</option>';
+            });
+            selectEl.innerHTML = html;
+        });
+    }
 
     function validatePrompt(input) {
         const val = input.value;
@@ -270,6 +295,12 @@
 
         scriptAssignments.appendChild(row);
 
+        // Populate script dropdown for initial "python" type
+        var initialSelect = row.querySelector('.script-id-select');
+        if (initialSelect) {
+            populateScriptSelect(initialSelect);
+        }
+
         row.querySelector('.remove-script-btn').addEventListener('click', function() {
             row.remove();
         });
@@ -282,8 +313,8 @@
                     validatePrompt(this);
                 });
             } else {
-                let opts = '<option value="">-- Select script --</option>';
-                configDiv.innerHTML = '<label class="text-small text-muted">Script</label><select class="script-id-select">' + opts + '</select>';
+                configDiv.innerHTML = '<label class="text-small text-muted">Script</label><select class="script-id-select"><option value="">-- Select script --</option></select>';
+                populateScriptSelect(configDiv.querySelector('.script-id-select'));
             }
         });
     });

@@ -52,7 +52,7 @@ def _broadcast_run_status(
             status,
         )
     except Exception:
-        logger.debug("_broadcast_run_status: channel layer unavailable", exc_info=True)
+        logger.warning("_broadcast_run_status: channel layer unavailable", exc_info=True)
 
 
 def _broadcast_experiment_status(experiment_id: int, status: str) -> None:
@@ -82,7 +82,7 @@ def _broadcast_experiment_status(experiment_id: int, status: str) -> None:
             status,
         )
     except Exception:
-        logger.debug("_broadcast_experiment_status: channel layer unavailable", exc_info=True)
+        logger.warning("_broadcast_experiment_status: channel layer unavailable", exc_info=True)
 
 
 def process_event(message: str | dict) -> None:
@@ -122,144 +122,153 @@ def _parse_message(message: str | dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Event ID validation helper
+# ---------------------------------------------------------------------------
+
+
+def _validate_event_ids(event: dict, handler_name: str, *fields: str) -> dict | None:
+    """Extract and validate required integer fields from event dict.
+
+    Returns dict of field->value if valid, or None if validation fails.
+    """
+    result = {}
+    for fld in fields:
+        value = event.get(fld)
+        if not value:
+            logger.warning("%s: missing %s", handler_name, fld)
+            return None
+        if not isinstance(value, int):
+            logger.warning("%s: %s is not int: %s", handler_name, fld, type(value).__name__)
+            return None
+        result[fld] = value
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Event handlers
 # ---------------------------------------------------------------------------
 
 
 def _handle_experiment_start(event: dict) -> None:
     """Handle experiment.start — begin scheduling runs."""
-    experiment_id = event.get("experiment_id")
-    if not experiment_id:
-        logger.warning("experiment.start: missing experiment_id")
+    ids = _validate_event_ids(event, "experiment.start", "experiment_id")
+    if ids is None:
         return
 
-    orchestrator = ExperimentOrchestrator(experiment_id)
+    orchestrator = ExperimentOrchestrator(ids["experiment_id"])
     orchestrator.schedule_runs()
 
     # Broadcast that experiment is now running
-    _broadcast_experiment_status(experiment_id, "running")
+    _broadcast_experiment_status(ids["experiment_id"], "running")
 
 
 def _handle_range_provisioned(event: dict) -> None:
     """Handle experiment.run.range_provisioned — range is ready, start scripts."""
-    experiment_id = event.get("experiment_id")
-    run_id = event.get("run_id")
-    provisioned_instances = event.get("provisioned_instances", {})
-
-    if not experiment_id or not run_id:
-        logger.warning("range_provisioned: missing experiment_id or run_id")
+    ids = _validate_event_ids(event, "range_provisioned", "experiment_id", "run_id")
+    if ids is None:
         return
 
-    orchestrator = ExperimentOrchestrator(experiment_id)
-    orchestrator.handle_range_provisioned(run_id, provisioned_instances)
+    provisioned_instances = event.get("provisioned_instances", {})
+
+    orchestrator = ExperimentOrchestrator(ids["experiment_id"])
+    orchestrator.handle_range_provisioned(ids["run_id"], provisioned_instances)
 
     # Broadcast updated run status
     from cms.experiments.models import ExperimentRun
 
     try:
-        run = ExperimentRun.objects.get(pk=run_id)
-        _broadcast_run_status(experiment_id, run_id, run.run_number, run.status)
+        run = ExperimentRun.objects.get(pk=ids["run_id"])
+        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status)
     except ExperimentRun.DoesNotExist:
         pass
 
 
 def _handle_victim_scripts_completed(event: dict) -> None:
     """Handle experiment.run.victims_completed — victims done, start attacker."""
-    experiment_id = event.get("experiment_id")
-    run_id = event.get("run_id")
-
-    if not experiment_id or not run_id:
-        logger.warning("victims_completed: missing experiment_id or run_id")
+    ids = _validate_event_ids(event, "victims_completed", "experiment_id", "run_id")
+    if ids is None:
         return
 
-    orchestrator = ExperimentOrchestrator(experiment_id)
-    orchestrator.handle_victim_scripts_completed(run_id)
+    orchestrator = ExperimentOrchestrator(ids["experiment_id"])
+    orchestrator.handle_victim_scripts_completed(ids["run_id"])
 
     from cms.experiments.models import ExperimentRun
 
     try:
-        run = ExperimentRun.objects.get(pk=run_id)
-        _broadcast_run_status(experiment_id, run_id, run.run_number, run.status)
+        run = ExperimentRun.objects.get(pk=ids["run_id"])
+        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status)
     except ExperimentRun.DoesNotExist:
         pass
 
 
 def _handle_attacker_scripts_completed(event: dict) -> None:
     """Handle experiment.run.attacker_completed — attacker done, collect artifacts."""
-    experiment_id = event.get("experiment_id")
-    run_id = event.get("run_id")
-
-    if not experiment_id or not run_id:
-        logger.warning("attacker_completed: missing experiment_id or run_id")
+    ids = _validate_event_ids(event, "attacker_completed", "experiment_id", "run_id")
+    if ids is None:
         return
 
-    orchestrator = ExperimentOrchestrator(experiment_id)
-    orchestrator.handle_attacker_scripts_completed(run_id)
+    orchestrator = ExperimentOrchestrator(ids["experiment_id"])
+    orchestrator.handle_attacker_scripts_completed(ids["run_id"])
 
     from cms.experiments.models import ExperimentRun
 
     try:
-        run = ExperimentRun.objects.get(pk=run_id)
-        _broadcast_run_status(experiment_id, run_id, run.run_number, run.status)
+        run = ExperimentRun.objects.get(pk=ids["run_id"])
+        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status)
     except ExperimentRun.DoesNotExist:
         pass
 
 
 def _handle_artifacts_collected(event: dict) -> None:
     """Handle experiment.run.artifacts_collected — mark run complete."""
-    experiment_id = event.get("experiment_id")
-    run_id = event.get("run_id")
-
-    if not experiment_id or not run_id:
-        logger.warning("artifacts_collected: missing experiment_id or run_id")
+    ids = _validate_event_ids(event, "artifacts_collected", "experiment_id", "run_id")
+    if ids is None:
         return
 
-    orchestrator = ExperimentOrchestrator(experiment_id)
-    orchestrator.handle_artifacts_collected(run_id)
+    orchestrator = ExperimentOrchestrator(ids["experiment_id"])
+    orchestrator.handle_artifacts_collected(ids["run_id"])
 
     from cms.experiments.models import Experiment, ExperimentRun
 
     try:
-        run = ExperimentRun.objects.get(pk=run_id)
-        _broadcast_run_status(experiment_id, run_id, run.run_number, run.status)
+        run = ExperimentRun.objects.get(pk=ids["run_id"])
+        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status)
     except ExperimentRun.DoesNotExist:
         pass
 
     # Check if experiment completed and broadcast
     try:
-        exp = Experiment.objects.get(pk=experiment_id)
+        exp = Experiment.objects.get(pk=ids["experiment_id"])
         if exp.status in ("completed", "failed"):
-            _broadcast_experiment_status(experiment_id, exp.status)
+            _broadcast_experiment_status(ids["experiment_id"], exp.status)
     except Experiment.DoesNotExist:
         pass
 
 
 def _handle_run_failed(event: dict) -> None:
     """Handle experiment.run.failed — record failure, schedule next."""
-    experiment_id = event.get("experiment_id")
-    run_id = event.get("run_id")
-    error_message = event.get("error_message", "Unknown error")
-
-    if not experiment_id or not run_id:
-        logger.warning("run_failed: missing experiment_id or run_id")
+    ids = _validate_event_ids(event, "run_failed", "experiment_id", "run_id")
+    if ids is None:
         return
 
-    orchestrator = ExperimentOrchestrator(experiment_id)
-    orchestrator.handle_run_failed(run_id, error_message)
+    error_message = event.get("error_message", "Unknown error")
+
+    orchestrator = ExperimentOrchestrator(ids["experiment_id"])
+    orchestrator.handle_run_failed(ids["run_id"], error_message)
 
     from cms.experiments.models import Experiment, ExperimentRun
 
     try:
-        run = ExperimentRun.objects.get(pk=run_id)
-        _broadcast_run_status(experiment_id, run_id, run.run_number, run.status, error_message)
+        run = ExperimentRun.objects.get(pk=ids["run_id"])
+        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status, error_message)
     except ExperimentRun.DoesNotExist:
         pass
 
     # Check if experiment completed and broadcast
     try:
-        exp = Experiment.objects.get(pk=experiment_id)
+        exp = Experiment.objects.get(pk=ids["experiment_id"])
         if exp.status in ("completed", "failed"):
-            _broadcast_experiment_status(experiment_id, exp.status)
+            _broadcast_experiment_status(ids["experiment_id"], exp.status)
     except Experiment.DoesNotExist:
         pass
 

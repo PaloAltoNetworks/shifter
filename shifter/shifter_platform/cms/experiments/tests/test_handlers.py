@@ -91,3 +91,30 @@ class ProcessEventTest(TestCase):
         run.refresh_from_db()
         assert run.status == RunStatus.FAILED.value
         assert run.error_message == "SSM timeout"
+
+    def test_string_experiment_id_ignored(self):
+        """String experiment_id should be silently ignored (not crash)."""
+        process_event(
+            {
+                "event_type": "experiment.start",
+                "experiment_id": "not-an-int",
+            }
+        )
+        # No exception raised — event was silently dropped
+
+    def test_string_run_id_ignored(self):
+        """String run_id should be silently ignored (not crash)."""
+        exp = Experiment.objects.create(
+            user=self.user,
+            name="Type Check",
+            scenario_id="basic",
+            status=ExperimentStatus.RUNNING.value,
+        )
+        process_event(
+            {
+                "event_type": "experiment.run.failed",
+                "experiment_id": exp.pk,
+                "run_id": "not-an-int",
+            }
+        )
+        # No exception raised — event was silently dropped

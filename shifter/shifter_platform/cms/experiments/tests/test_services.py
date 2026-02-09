@@ -166,6 +166,55 @@ class CreateExperimentTest(TestCase):
         with pytest.raises(ExperimentValidationError, match="not found in scenario"):
             services.create_experiment(self.user, data)
 
+    def test_invalid_template_variable_rejected(self):
+        data = ExperimentCreateInput(
+            name="Bad Template Var",
+            scenario_id="basic",
+            scripts=[
+                {
+                    "instance_name": "Attacker",
+                    "script_type": "claude_code",
+                    "claude_prompt": "Attack {{NonExistent.ip}}",
+                    "execution_order": 100,
+                },
+            ],
+        )
+        with pytest.raises(ExperimentValidationError, match="Unknown instance"):
+            services.create_experiment(self.user, data)
+
+    def test_invalid_template_property_rejected(self):
+        data = ExperimentCreateInput(
+            name="Bad Template Prop",
+            scenario_id="basic",
+            scripts=[
+                {
+                    "instance_name": "Attacker",
+                    "script_type": "claude_code",
+                    "claude_prompt": "Attack {{Workstation.password}}",
+                    "execution_order": 100,
+                },
+            ],
+        )
+        with pytest.raises(ExperimentValidationError, match="Unknown property"):
+            services.create_experiment(self.user, data)
+
+    def test_valid_template_variable_accepted(self):
+        data = ExperimentCreateInput(
+            name="Good Template",
+            scenario_id="basic",
+            scripts=[
+                {
+                    "instance_name": "Attacker",
+                    "script_type": "claude_code",
+                    "claude_prompt": "Attack {{Workstation.ip}} named {{Workstation.name}}",
+                    "execution_order": 100,
+                },
+            ],
+        )
+        exp = services.create_experiment(self.user, data)
+        assert exp.pk is not None
+        assert exp.scripts.count() == 1
+
 
 class StartExperimentTest(TestCase):
     @classmethod

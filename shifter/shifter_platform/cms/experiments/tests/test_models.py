@@ -35,7 +35,7 @@ class ScriptAssetModelTest(TestCase):
             file_size_bytes=512,
         )
         assert script.pk is not None
-        assert str(script) == "Attack Script (attack.py)"
+        assert str(script) == f"ScriptAsset(id={script.pk}, name=Attack Script, file=attack.py)"
 
     def test_soft_delete(self):
         script = ScriptAsset.objects.create(
@@ -154,7 +154,7 @@ class ExperimentModelTest(TestCase):
 
     def test_str(self):
         exp = Experiment(name="My Exp", status=ExperimentStatus.DRAFT.value)
-        assert str(exp) == "My Exp (draft)"
+        assert str(exp) == f"Experiment(id={exp.pk}, name=My Exp, status=draft)"
 
 
 class ExperimentScriptModelTest(TestCase):

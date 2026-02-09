@@ -52,7 +52,7 @@ class ScriptAsset(FileAsset):
         verbose_name_plural = "Script Assets"
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.original_filename})"
+        return f"ScriptAsset(id={self.pk}, name={self.name}, file={self.original_filename})"
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ class Experiment(models.Model):
         verbose_name_plural = "Experiments"
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.status})"
+        return f"Experiment(id={self.pk}, name={self.name}, status={self.status})"
 
     def transition_to(self, new_status: ExperimentStatus) -> None:
         """Transition experiment to a new status with validation.
@@ -122,7 +122,7 @@ class Experiment(models.Model):
         allowed = EXPERIMENT_TRANSITIONS.get(current, set())
         if new_status not in allowed:
             msg = f"Cannot transition experiment from {current.value} to {new_status.value}"
-            logger.warning("Experiment %s: %s", self.pk, msg)
+            logger.error("Experiment %s: %s", self.pk, msg)
             raise ValueError(msg)
 
         old_status = self.status
@@ -249,7 +249,7 @@ class ExperimentRun(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"Run {self.run_number} ({self.status})"
+        return f"Run(id={self.pk}, experiment={self.experiment_id}, num={self.run_number}, status={self.status})"
 
     def transition_to(self, new_status: RunStatus) -> None:
         """Transition run to a new status with validation.
@@ -264,7 +264,7 @@ class ExperimentRun(models.Model):
         allowed = RUN_TRANSITIONS.get(current, set())
         if new_status not in allowed:
             msg = f"Cannot transition run from {current.value} to {new_status.value}"
-            logger.warning(
+            logger.error(
                 "ExperimentRun %s (experiment=%s): %s",
                 self.pk,
                 self.experiment_id,

@@ -83,6 +83,7 @@ def list_scripts(user: User) -> QuerySet[ScriptAsset]:
         QuerySet of active ScriptAsset objects.
     """
     _validate_user(user, "list_scripts")
+    logger.debug("list_scripts called for user_id=%s", user.id)
     try:
         return ScriptAsset.objects.filter(user=user, deleted_at__isnull=True).order_by("-created_at")
     except (TypeError, ValueError, ExperimentError):
@@ -108,6 +109,7 @@ def initiate_script_upload(user: User, name: str, filename: str, file_size: int)
         ScriptUploadError: If validation or URL generation fails.
     """
     _validate_user(user, "initiate_script_upload")
+    logger.debug("initiate_script_upload called for user_id=%s filename=%s", user.id, filename)
     try:
         try:
             validated = ScriptUploadInput(name=name, filename=filename, file_size=file_size)
@@ -156,6 +158,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
         ScriptUploadError: If verification fails.
     """
     _validate_user(user, "complete_script_upload")
+    logger.debug("complete_script_upload called for user_id=%s", user.id)
     try:
         try:
             payload = verify_upload_token(upload_token, user.pk)
@@ -216,6 +219,7 @@ def delete_script(user: User, script_id: int) -> None:
         ScriptUploadError: If script not found or not owned by user.
     """
     _validate_user(user, "delete_script")
+    logger.debug("delete_script called for user_id=%s script_id=%s", user.id, script_id)
     try:
         try:
             script = ScriptAsset.objects.get(pk=script_id, user=user, deleted_at__isnull=True)
@@ -248,6 +252,7 @@ def list_experiments(user: User) -> QuerySet[Experiment]:
         QuerySet of Experiment objects with run counts annotated.
     """
     _validate_user(user, "list_experiments")
+    logger.debug("list_experiments called for user_id=%s", user.id)
     try:
         from django.db.models import Count, Q
 
@@ -280,6 +285,7 @@ def get_experiment(user: User, experiment_id: int) -> Experiment:
         ExperimentError: If not found.
     """
     _validate_user(user, "get_experiment")
+    logger.debug("get_experiment called for user_id=%s experiment_id=%s", user.id, experiment_id)
     try:
         try:
             return Experiment.objects.prefetch_related("runs__artifacts", "scripts__script").get(
@@ -309,6 +315,7 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
         ExperimentValidationError: If scenario or scripts are invalid.
     """
     _validate_user(user, "create_experiment")
+    logger.debug("create_experiment called for user_id=%s scenario=%s", user.id, data.scenario_id)
     try:
         # Validate scenario exists
         try:
@@ -324,6 +331,17 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
                 raise ExperimentValidationError(
                     f"Instance '{script_input.instance_name}' not found in scenario '{data.scenario_id}'"
                 )
+
+        # Validate Claude prompt template variables reference valid instances/properties
+        for script_input in data.scripts:
+            if script_input.claude_prompt:
+                from cms.experiments.template_vars import validate_template
+
+                template_errors = validate_template(script_input.claude_prompt, instance_names)
+                if template_errors:
+                    raise ExperimentValidationError(
+                        f"Invalid template in '{script_input.instance_name}': {'; '.join(template_errors)}"
+                    )
 
         # Validate referenced script assets exist and belong to user
         script_ids = [s.script_id for s in data.scripts if s.script_id]
@@ -402,6 +420,7 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
         ExperimentStateError: If not in DRAFT state.
     """
     _validate_user(user, "start_experiment")
+    logger.debug("start_experiment called for user_id=%s experiment_id=%s", user.id, experiment_id)
     try:
         with transaction.atomic():
             try:
@@ -457,6 +476,7 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
         ExperimentStateError: If not in a cancellable state.
     """
     _validate_user(user, "cancel_experiment")
+    logger.debug("cancel_experiment called for user_id=%s experiment_id=%s", user.id, experiment_id)
     try:
         try:
             experiment = Experiment.objects.get(pk=experiment_id, user=user)
@@ -496,6 +516,12 @@ def get_artifact_download_url(user: User, experiment_id: int, artifact_id: int) 
         ArtifactError: If artifact not found or access denied.
     """
     _validate_user(user, "get_artifact_download_url")
+    logger.debug(
+        "get_artifact_download_url called for user_id=%s experiment_id=%s artifact_id=%s",
+        user.id,
+        experiment_id,
+        artifact_id,
+    )
     try:
         try:
             artifact = RunArtifact.objects.select_related("run__experiment").get(
@@ -535,6 +561,7 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
         ArtifactError: If bundle not found.
     """
     _validate_user(user, "get_bundle_download_url")
+    logger.debug("get_bundle_download_url called for user_id=%s experiment_id=%s", user.id, experiment_id)
     try:
         from cms.experiments.models import ExperimentArtifact
 
@@ -578,6 +605,7 @@ def get_scenario_instances(scenario_id: str) -> list[dict]:
     Raises:
         ExperimentValidationError: If scenario not found.
     """
+    logger.debug("get_scenario_instances called for scenario_id=%s", scenario_id)
     try:
         try:
             scenario = load_scenario(scenario_id)

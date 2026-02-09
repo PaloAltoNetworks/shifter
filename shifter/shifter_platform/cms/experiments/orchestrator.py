@@ -181,6 +181,14 @@ class ExperimentOrchestrator:
             run_id: ID of the ExperimentRun.
             provisioned_instances: Dict of instance names to their details.
         """
+        if not isinstance(provisioned_instances, dict):
+            logger.error(
+                "handle_range_provisioned: provisioned_instances is not a dict (type=%s) for run %s",
+                type(provisioned_instances).__name__,
+                run_id,
+            )
+            provisioned_instances = {}
+
         try:
             run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
         except ExperimentRun.DoesNotExist:

@@ -13,22 +13,21 @@ from django.db import transaction
 from django.utils import timezone
 
 from cms.assets.s3 import S3Error
-from cms.scenarios.loader import load_scenario
-from experiments.exceptions import (
+from cms.experiments.exceptions import (
     ArtifactError,
     ExperimentError,
     ExperimentStateError,
     ExperimentValidationError,
     ScriptUploadError,
 )
-from experiments.models import (
+from cms.experiments.models import (
     Experiment,
     ExperimentRun,
     ExperimentScript,
     RunArtifact,
     ScriptAsset,
 )
-from experiments.s3 import (
+from cms.experiments.s3 import (
     delete_s3_object,
     generate_presigned_download_url,
     generate_script_upload_url,
@@ -36,13 +35,13 @@ from experiments.s3 import (
     verify_s3_object,
     verify_upload_token,
 )
-from experiments.schemas import (
+from cms.experiments.schemas import (
     ExperimentCreateInput,
     ExperimentStatus,
     RunStatus,
-    ScriptType,
     ScriptUploadInput,
 )
+from cms.scenarios.loader import load_scenario
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -142,7 +141,9 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
     if actual_size > max_size:
         logger.warning(
             "complete_script_upload: file too large s3_key=%s size=%d max=%d",
-            s3_key, actual_size, max_size,
+            s3_key,
+            actual_size,
+            max_size,
         )
         delete_s3_object(s3_key)
         raise ScriptUploadError(f"File size {actual_size} exceeds maximum {max_size} bytes")
@@ -158,7 +159,9 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
 
     logger.info(
         "complete_script_upload: created script_id=%s user_id=%s s3_key=%s",
-        script.pk, user.pk, s3_key,
+        script.pk,
+        user.pk,
+        s3_key,
     )
     return script
 
@@ -177,7 +180,7 @@ def delete_script(user: User, script_id: int) -> None:
         script = ScriptAsset.objects.get(pk=script_id, user=user, deleted_at__isnull=True)
     except ScriptAsset.DoesNotExist:
         logger.warning("delete_script: not found script_id=%s user_id=%s", script_id, user.pk)
-        raise ScriptUploadError("Script not found")
+        raise ScriptUploadError("Script not found") from None
 
     script.deleted_at = timezone.now()
     script.save(update_fields=["deleted_at"])
@@ -224,13 +227,12 @@ def get_experiment(user: User, experiment_id: int) -> Experiment:
         ExperimentError: If not found.
     """
     try:
-        return (
-            Experiment.objects.prefetch_related("runs__artifacts", "scripts__script")
-            .get(pk=experiment_id, user=user)
+        return Experiment.objects.prefetch_related("runs__artifacts", "scripts__script").get(
+            pk=experiment_id, user=user
         )
     except Experiment.DoesNotExist:
         logger.warning("get_experiment: not found experiment_id=%s user_id=%s", experiment_id, user.pk)
-        raise ExperimentError("Experiment not found")
+        raise ExperimentError("Experiment not found") from None
 
 
 def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
@@ -266,7 +268,9 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
     if script_ids:
         existing_scripts = set(
             ScriptAsset.objects.filter(
-                pk__in=script_ids, user=user, deleted_at__isnull=True,
+                pk__in=script_ids,
+                user=user,
+                deleted_at__isnull=True,
             ).values_list("pk", flat=True)
         )
         missing = set(script_ids) - existing_scripts
@@ -277,10 +281,11 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
     agent = None
     if data.agent_id:
         from cms.models import AgentConfig
+
         try:
             agent = AgentConfig.objects.get(pk=data.agent_id, user=user, deleted_at__isnull=True)
         except AgentConfig.DoesNotExist:
-            raise ExperimentValidationError(f"Agent not found: {data.agent_id}")
+            raise ExperimentValidationError(f"Agent not found: {data.agent_id}") from None
 
     with transaction.atomic():
         experiment = Experiment.objects.create(
@@ -305,7 +310,10 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
 
     logger.info(
         "create_experiment: created experiment_id=%s user_id=%s scenario=%s runs=%d",
-        experiment.pk, user.pk, data.scenario_id, data.total_runs,
+        experiment.pk,
+        user.pk,
+        data.scenario_id,
+        data.total_runs,
     )
     return experiment
 
@@ -329,19 +337,14 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
     try:
         experiment = Experiment.objects.get(pk=experiment_id, user=user)
     except Experiment.DoesNotExist:
-        raise ExperimentError("Experiment not found")
+        raise ExperimentError("Experiment not found") from None
 
     if experiment.status != ExperimentStatus.DRAFT.value:
-        raise ExperimentStateError(
-            f"Experiment must be in draft state to start (currently {experiment.status})"
-        )
+        raise ExperimentStateError(f"Experiment must be in draft state to start (currently {experiment.status})")
 
     with transaction.atomic():
         # Create run records
-        runs = [
-            ExperimentRun(experiment=experiment, run_number=i)
-            for i in range(1, experiment.total_runs + 1)
-        ]
+        runs = [ExperimentRun(experiment=experiment, run_number=i) for i in range(1, experiment.total_runs + 1)]
         ExperimentRun.objects.bulk_create(runs)
 
         # Transition to queued
@@ -349,7 +352,9 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
 
     logger.info(
         "start_experiment: queued experiment_id=%s user_id=%s total_runs=%d",
-        experiment_id, user.pk, experiment.total_runs,
+        experiment_id,
+        user.pk,
+        experiment.total_runs,
     )
     return experiment
 
@@ -371,12 +376,10 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
     try:
         experiment = Experiment.objects.get(pk=experiment_id, user=user)
     except Experiment.DoesNotExist:
-        raise ExperimentError("Experiment not found")
+        raise ExperimentError("Experiment not found") from None
 
     if experiment.status not in {ExperimentStatus.QUEUED.value, ExperimentStatus.RUNNING.value}:
-        raise ExperimentStateError(
-            f"Cannot cancel experiment in {experiment.status} state"
-        )
+        raise ExperimentStateError(f"Cannot cancel experiment in {experiment.status} state")
 
     experiment.transition_to(ExperimentStatus.CANCELLED)
     logger.info("cancel_experiment: cancelled experiment_id=%s user_id=%s", experiment_id, user.pk)
@@ -409,7 +412,7 @@ def get_artifact_download_url(user: User, experiment_id: int, artifact_id: int) 
             run__experiment__user=user,
         )
     except RunArtifact.DoesNotExist:
-        raise ArtifactError("Artifact not found")
+        raise ArtifactError("Artifact not found") from None
 
     try:
         url = generate_presigned_download_url(artifact.s3_key)
@@ -434,7 +437,7 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
     Raises:
         ArtifactError: If bundle not found.
     """
-    from experiments.models import ExperimentArtifact
+    from cms.experiments.models import ExperimentArtifact
 
     try:
         bundle = ExperimentArtifact.objects.select_related("experiment").get(
@@ -442,7 +445,7 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
             experiment__user=user,
         )
     except ExperimentArtifact.DoesNotExist:
-        raise ArtifactError("Experiment bundle not found")
+        raise ArtifactError("Experiment bundle not found") from None
 
     try:
         url = generate_presigned_download_url(bundle.s3_key)
@@ -476,7 +479,4 @@ def get_scenario_instances(scenario_id: str) -> list[dict]:
     except ValueError as e:
         raise ExperimentValidationError(f"Invalid scenario: {e}") from e
 
-    return [
-        {"name": inst.name, "role": inst.role, "os_type": inst.os_type}
-        for inst in scenario.instances
-    ]
+    return [{"name": inst.name, "role": inst.role, "os_type": inst.os_type} for inst in scenario.instances]

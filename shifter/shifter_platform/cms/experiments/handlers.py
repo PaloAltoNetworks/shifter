@@ -11,7 +11,7 @@ import json
 import logging
 from collections.abc import Callable
 
-from experiments.orchestrator import ExperimentOrchestrator
+from cms.experiments.orchestrator import ExperimentOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def _broadcast_run_status(
         from asgiref.sync import async_to_sync
         from channels.layers import get_channel_layer
 
-        from experiments.consumers import experiment_event_group
+        from cms.experiments.consumers import experiment_event_group
 
         channel_layer = get_channel_layer()
         if channel_layer is None:
@@ -61,7 +61,7 @@ def _broadcast_experiment_status(experiment_id: int, status: str) -> None:
         from asgiref.sync import async_to_sync
         from channels.layers import get_channel_layer
 
-        from experiments.consumers import experiment_event_group
+        from cms.experiments.consumers import experiment_event_group
 
         channel_layer = get_channel_layer()
         if channel_layer is None:
@@ -154,7 +154,7 @@ def _handle_range_provisioned(event: dict) -> None:
     orchestrator.handle_range_provisioned(run_id, provisioned_instances)
 
     # Broadcast updated run status
-    from experiments.models import ExperimentRun
+    from cms.experiments.models import ExperimentRun
 
     try:
         run = ExperimentRun.objects.get(pk=run_id)
@@ -175,7 +175,7 @@ def _handle_victim_scripts_completed(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(experiment_id)
     orchestrator.handle_victim_scripts_completed(run_id)
 
-    from experiments.models import ExperimentRun
+    from cms.experiments.models import ExperimentRun
 
     try:
         run = ExperimentRun.objects.get(pk=run_id)
@@ -196,7 +196,7 @@ def _handle_attacker_scripts_completed(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(experiment_id)
     orchestrator.handle_attacker_scripts_completed(run_id)
 
-    from experiments.models import ExperimentRun
+    from cms.experiments.models import ExperimentRun
 
     try:
         run = ExperimentRun.objects.get(pk=run_id)
@@ -217,7 +217,7 @@ def _handle_artifacts_collected(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(experiment_id)
     orchestrator.handle_artifacts_collected(run_id)
 
-    from experiments.models import Experiment, ExperimentRun
+    from cms.experiments.models import Experiment, ExperimentRun
 
     try:
         run = ExperimentRun.objects.get(pk=run_id)
@@ -247,7 +247,7 @@ def _handle_run_failed(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(experiment_id)
     orchestrator.handle_run_failed(run_id, error_message)
 
-    from experiments.models import Experiment, ExperimentRun
+    from cms.experiments.models import Experiment, ExperimentRun
 
     try:
         run = ExperimentRun.objects.get(pk=run_id)

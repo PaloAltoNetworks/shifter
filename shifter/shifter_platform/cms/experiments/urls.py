@@ -2,7 +2,7 @@
 
 from django.urls import path
 
-from experiments import views
+from cms.experiments import views
 
 app_name = "experiments"
 

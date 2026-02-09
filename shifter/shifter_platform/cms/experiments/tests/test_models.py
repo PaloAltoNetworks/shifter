@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.test import TestCase
 
-from experiments.models import (
+from cms.experiments.models import (
     Experiment,
     ExperimentArtifact,
     ExperimentRun,
@@ -13,7 +13,10 @@ from experiments.models import (
     RunArtifact,
     ScriptAsset,
 )
-from experiments.schemas import ExperimentStatus, RunStatus, ScriptType
+from cms.experiments.schemas import ExperimentStatus, RunStatus, ScriptType
+
+# Test password constant for all test users
+TEST_PASSWORD = "testpass"  # nosec B105
 
 
 class ScriptAssetModelTest(TestCase):
@@ -21,7 +24,7 @@ class ScriptAssetModelTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="testuser", password="testpass", is_staff=True)
+        cls.user = User.objects.create_user(username="testuser", password=TEST_PASSWORD, is_staff=True)
 
     def test_create_script(self):
         script = ScriptAsset.objects.create(
@@ -36,24 +39,36 @@ class ScriptAssetModelTest(TestCase):
 
     def test_soft_delete(self):
         script = ScriptAsset.objects.create(
-            name="Temp", user=self.user, s3_key="scripts/1/x_temp.py",
-            original_filename="temp.py", file_size_bytes=100,
+            name="Temp",
+            user=self.user,
+            s3_key="scripts/1/x_temp.py",
+            original_filename="temp.py",
+            file_size_bytes=100,
         )
         assert not script.is_deleted
         from django.utils import timezone
+
         script.deleted_at = timezone.now()
         script.save()
         assert script.is_deleted
 
     def test_active_for_user(self):
         ScriptAsset.objects.create(
-            name="Active", user=self.user, s3_key="scripts/1/a_active.py",
-            original_filename="active.py", file_size_bytes=100,
+            name="Active",
+            user=self.user,
+            s3_key="scripts/1/a_active.py",
+            original_filename="active.py",
+            file_size_bytes=100,
         )
         from django.utils import timezone
+
         ScriptAsset.objects.create(
-            name="Deleted", user=self.user, s3_key="scripts/1/b_deleted.py",
-            original_filename="deleted.py", file_size_bytes=100, deleted_at=timezone.now(),
+            name="Deleted",
+            user=self.user,
+            s3_key="scripts/1/b_deleted.py",
+            original_filename="deleted.py",
+            file_size_bytes=100,
+            deleted_at=timezone.now(),
         )
         active = ScriptAsset.active_for_user(self.user)
         assert active.count() == 1
@@ -69,19 +84,24 @@ class ExperimentModelTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="expuser", password="testpass", is_staff=True)
+        cls.user = User.objects.create_user(username="expuser", password=TEST_PASSWORD, is_staff=True)
 
     def test_create_experiment(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Test Exp", scenario_id="basic",
-            total_runs=5, max_parallel_runs=3,
+            user=self.user,
+            name="Test Exp",
+            scenario_id="basic",
+            total_runs=5,
+            max_parallel_runs=3,
         )
         assert exp.uuid is not None
         assert exp.status == ExperimentStatus.DRAFT.value
 
     def test_transition_draft_to_queued(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Trans Test", scenario_id="basic",
+            user=self.user,
+            name="Trans Test",
+            scenario_id="basic",
         )
         exp.transition_to(ExperimentStatus.QUEUED)
         exp.refresh_from_db()
@@ -89,7 +109,9 @@ class ExperimentModelTest(TestCase):
 
     def test_transition_running_sets_started_at(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Start Test", scenario_id="basic",
+            user=self.user,
+            name="Start Test",
+            scenario_id="basic",
         )
         exp.transition_to(ExperimentStatus.QUEUED)
         exp.transition_to(ExperimentStatus.RUNNING)
@@ -98,7 +120,9 @@ class ExperimentModelTest(TestCase):
 
     def test_transition_completed_sets_completed_at(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Complete Test", scenario_id="basic",
+            user=self.user,
+            name="Complete Test",
+            scenario_id="basic",
         )
         exp.transition_to(ExperimentStatus.QUEUED)
         exp.transition_to(ExperimentStatus.RUNNING)
@@ -108,16 +132,22 @@ class ExperimentModelTest(TestCase):
 
     def test_invalid_transition_raises(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Bad Trans", scenario_id="basic",
+            user=self.user,
+            name="Bad Trans",
+            scenario_id="basic",
         )
         with pytest.raises(ValueError, match="Cannot transition"):
             exp.transition_to(ExperimentStatus.COMPLETED)
 
     def test_clean_validates_parallel_vs_total(self):
         from django.core.exceptions import ValidationError
+
         exp = Experiment(
-            user=self.user, name="Bad Params", scenario_id="basic",
-            total_runs=2, max_parallel_runs=5,
+            user=self.user,
+            name="Bad Params",
+            scenario_id="basic",
+            total_runs=2,
+            max_parallel_runs=5,
         )
         with pytest.raises(ValidationError):
             exp.clean()
@@ -132,25 +162,33 @@ class ExperimentScriptModelTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="scriptuser", password="testpass", is_staff=True)
+        cls.user = User.objects.create_user(username="scriptuser", password=TEST_PASSWORD, is_staff=True)
         cls.experiment = Experiment.objects.create(
-            user=cls.user, name="Script Test", scenario_id="basic",
+            user=cls.user,
+            name="Script Test",
+            scenario_id="basic",
         )
         cls.script = ScriptAsset.objects.create(
-            name="Victim Script", user=cls.user, s3_key="scripts/1/x_victim.py",
-            original_filename="victim.py", file_size_bytes=100,
+            name="Victim Script",
+            user=cls.user,
+            s3_key="scripts/1/x_victim.py",
+            original_filename="victim.py",
+            file_size_bytes=100,
         )
 
     def test_create_python_script(self):
         es = ExperimentScript.objects.create(
-            experiment=self.experiment, instance_name="Workstation",
-            script_type=ScriptType.PYTHON.value, script=self.script,
+            experiment=self.experiment,
+            instance_name="Workstation",
+            script_type=ScriptType.PYTHON.value,
+            script=self.script,
         )
         assert es.pk is not None
 
     def test_create_claude_script(self):
         es = ExperimentScript.objects.create(
-            experiment=self.experiment, instance_name="Attacker",
+            experiment=self.experiment,
+            instance_name="Attacker",
             script_type=ScriptType.CLAUDE_CODE.value,
             claude_prompt="Attack {{Workstation.ip}}",
             execution_order=100,
@@ -159,19 +197,25 @@ class ExperimentScriptModelTest(TestCase):
 
     def test_unique_constraint(self):
         ExperimentScript.objects.create(
-            experiment=self.experiment, instance_name="UniqueTest",
-            script_type=ScriptType.PYTHON.value, script=self.script,
+            experiment=self.experiment,
+            instance_name="UniqueTest",
+            script_type=ScriptType.PYTHON.value,
+            script=self.script,
         )
         with pytest.raises(IntegrityError):
             ExperimentScript.objects.create(
-                experiment=self.experiment, instance_name="UniqueTest",
-                script_type=ScriptType.PYTHON.value, script=self.script,
+                experiment=self.experiment,
+                instance_name="UniqueTest",
+                script_type=ScriptType.PYTHON.value,
+                script=self.script,
             )
 
     def test_clean_python_requires_script(self):
         from django.core.exceptions import ValidationError
+
         es = ExperimentScript(
-            experiment=self.experiment, instance_name="Bad",
+            experiment=self.experiment,
+            instance_name="Bad",
             script_type=ScriptType.PYTHON.value,
         )
         with pytest.raises(ValidationError):
@@ -179,8 +223,10 @@ class ExperimentScriptModelTest(TestCase):
 
     def test_clean_claude_requires_prompt(self):
         from django.core.exceptions import ValidationError
+
         es = ExperimentScript(
-            experiment=self.experiment, instance_name="Bad",
+            experiment=self.experiment,
+            instance_name="Bad",
             script_type=ScriptType.CLAUDE_CODE.value,
         )
         with pytest.raises(ValidationError):
@@ -192,21 +238,25 @@ class ExperimentRunModelTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="runuser", password="testpass", is_staff=True)
+        cls.user = User.objects.create_user(username="runuser", password=TEST_PASSWORD, is_staff=True)
         cls.experiment = Experiment.objects.create(
-            user=cls.user, name="Run Test", scenario_id="basic",
+            user=cls.user,
+            name="Run Test",
+            scenario_id="basic",
         )
 
     def test_create_run(self):
         run = ExperimentRun.objects.create(
-            experiment=self.experiment, run_number=1,
+            experiment=self.experiment,
+            run_number=1,
         )
         assert run.uuid is not None
         assert run.status == RunStatus.PENDING.value
 
     def test_transition_happy_path(self):
         run = ExperimentRun.objects.create(
-            experiment=self.experiment, run_number=1,
+            experiment=self.experiment,
+            run_number=1,
         )
         run.transition_to(RunStatus.PROVISIONING)
         assert run.started_at is not None
@@ -219,7 +269,8 @@ class ExperimentRunModelTest(TestCase):
 
     def test_transition_to_failed(self):
         run = ExperimentRun.objects.create(
-            experiment=self.experiment, run_number=2,
+            experiment=self.experiment,
+            run_number=2,
         )
         run.transition_to(RunStatus.PROVISIONING)
         run.transition_to(RunStatus.FAILED)
@@ -228,7 +279,8 @@ class ExperimentRunModelTest(TestCase):
 
     def test_invalid_transition_raises(self):
         run = ExperimentRun.objects.create(
-            experiment=self.experiment, run_number=3,
+            experiment=self.experiment,
+            run_number=3,
         )
         with pytest.raises(ValueError, match="Cannot transition"):
             run.transition_to(RunStatus.EXECUTING_VICTIMS)
@@ -240,7 +292,8 @@ class ExperimentRunModelTest(TestCase):
 
     def test_metadata_json(self):
         run = ExperimentRun.objects.create(
-            experiment=self.experiment, run_number=4,
+            experiment=self.experiment,
+            run_number=4,
             metadata={"instance_ips": {"Attacker": "10.1.1.5"}},
         )
         run.refresh_from_db()
@@ -252,15 +305,18 @@ class ArtifactModelTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="artuser", password="testpass", is_staff=True)
+        cls.user = User.objects.create_user(username="artuser", password=TEST_PASSWORD, is_staff=True)
         cls.experiment = Experiment.objects.create(
-            user=cls.user, name="Art Test", scenario_id="basic",
+            user=cls.user,
+            name="Art Test",
+            scenario_id="basic",
         )
         cls.exp_run = ExperimentRun.objects.create(experiment=cls.experiment, run_number=1)
 
     def test_create_run_artifact(self):
         artifact = RunArtifact.objects.create(
-            run=self.exp_run, instance_name="Attacker",
+            run=self.exp_run,
+            instance_name="Attacker",
             artifact_type="claude_transcript",
             s3_key="experiments/1/runs/1/Attacker/claude_transcript.tar.gz",
             file_size_bytes=2048,
@@ -290,7 +346,8 @@ class ArtifactModelTest(TestCase):
         run = ExperimentRun.objects.create(experiment=self.experiment, run_number=99)
         run_pk = run.pk
         RunArtifact.objects.create(
-            run=run, instance_name="Workstation",
+            run=run,
+            instance_name="Workstation",
             artifact_type="script_output",
             s3_key="experiments/1/runs/99/Workstation/script_output.tar.gz",
         )

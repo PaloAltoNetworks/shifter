@@ -7,34 +7,48 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import TestCase
 
-from experiments import services
-from experiments.exceptions import (
+from cms.experiments import services
+from cms.experiments.exceptions import (
     ExperimentError,
     ExperimentStateError,
     ExperimentValidationError,
     ScriptUploadError,
 )
-from experiments.models import Experiment, ExperimentRun, ExperimentScript, ScriptAsset
-from experiments.schemas import ExperimentCreateInput, ExperimentStatus, RunStatus, ScriptType
+from cms.experiments.models import Experiment, ExperimentRun, ScriptAsset
+from cms.experiments.schemas import ExperimentCreateInput, ExperimentStatus, RunStatus
+
+# Test password constant for all test users
+TEST_PASSWORD = "test"  # nosec B105
 
 
 class ListScriptsTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="svc_user", password="test", is_staff=True)
-        cls.other_user = User.objects.create_user(username="other_user", password="test", is_staff=True)
+        cls.user = User.objects.create_user(username="svc_user", password=TEST_PASSWORD, is_staff=True)
+        cls.other_user = User.objects.create_user(username="other_user", password=TEST_PASSWORD, is_staff=True)
         ScriptAsset.objects.create(
-            user=cls.user, name="Active", s3_key="scripts/1/a.py",
-            original_filename="a.py", file_size_bytes=100,
+            user=cls.user,
+            name="Active",
+            s3_key="scripts/1/a.py",
+            original_filename="a.py",
+            file_size_bytes=100,
         )
         from django.utils import timezone
+
         ScriptAsset.objects.create(
-            user=cls.user, name="Deleted", s3_key="scripts/1/b.py",
-            original_filename="b.py", file_size_bytes=100, deleted_at=timezone.now(),
+            user=cls.user,
+            name="Deleted",
+            s3_key="scripts/1/b.py",
+            original_filename="b.py",
+            file_size_bytes=100,
+            deleted_at=timezone.now(),
         )
         ScriptAsset.objects.create(
-            user=cls.other_user, name="Other", s3_key="scripts/2/c.py",
-            original_filename="c.py", file_size_bytes=100,
+            user=cls.other_user,
+            name="Other",
+            s3_key="scripts/2/c.py",
+            original_filename="c.py",
+            file_size_bytes=100,
         )
 
     def test_returns_only_active_for_user(self):
@@ -51,13 +65,16 @@ class ListScriptsTest(TestCase):
 class DeleteScriptTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="del_user", password="test", is_staff=True)
-        cls.other_user = User.objects.create_user(username="del_other", password="test", is_staff=True)
+        cls.user = User.objects.create_user(username="del_user", password=TEST_PASSWORD, is_staff=True)
+        cls.other_user = User.objects.create_user(username="del_other", password=TEST_PASSWORD, is_staff=True)
 
     def test_soft_deletes_own_script(self):
         script = ScriptAsset.objects.create(
-            user=self.user, name="ToDelete", s3_key="scripts/1/d.py",
-            original_filename="d.py", file_size_bytes=100,
+            user=self.user,
+            name="ToDelete",
+            s3_key="scripts/1/d.py",
+            original_filename="d.py",
+            file_size_bytes=100,
         )
         services.delete_script(self.user, script.pk)
         script.refresh_from_db()
@@ -65,8 +82,11 @@ class DeleteScriptTest(TestCase):
 
     def test_cannot_delete_other_users_script(self):
         script = ScriptAsset.objects.create(
-            user=self.other_user, name="NotMine", s3_key="scripts/2/e.py",
-            original_filename="e.py", file_size_bytes=100,
+            user=self.other_user,
+            name="NotMine",
+            s3_key="scripts/2/e.py",
+            original_filename="e.py",
+            file_size_bytes=100,
         )
         with pytest.raises(ScriptUploadError, match="not found"):
             services.delete_script(self.user, script.pk)
@@ -75,10 +95,13 @@ class DeleteScriptTest(TestCase):
 class CreateExperimentTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="create_user", password="test", is_staff=True)
+        cls.user = User.objects.create_user(username="create_user", password=TEST_PASSWORD, is_staff=True)
         cls.script = ScriptAsset.objects.create(
-            user=cls.user, name="Victim Script", s3_key="scripts/1/f.py",
-            original_filename="f.py", file_size_bytes=100,
+            user=cls.user,
+            name="Victim Script",
+            s3_key="scripts/1/f.py",
+            original_filename="f.py",
+            file_size_bytes=100,
         )
 
     def test_create_basic_experiment(self):
@@ -118,7 +141,8 @@ class CreateExperimentTest(TestCase):
 
     def test_invalid_scenario_raises(self):
         data = ExperimentCreateInput(
-            name="Bad Scenario", scenario_id="nonexistent",
+            name="Bad Scenario",
+            scenario_id="nonexistent",
         )
         with pytest.raises(ExperimentValidationError, match="Invalid scenario"):
             services.create_experiment(self.user, data)
@@ -127,11 +151,13 @@ class CreateExperimentTest(TestCase):
         data = ExperimentCreateInput(
             name="Bad Instance",
             scenario_id="basic",
-            scripts=[{
-                "instance_name": "NonExistentBox",
-                "script_type": "python",
-                "script_id": self.script.pk,
-            }],
+            scripts=[
+                {
+                    "instance_name": "NonExistentBox",
+                    "script_type": "python",
+                    "script_id": self.script.pk,
+                }
+            ],
         )
         with pytest.raises(ExperimentValidationError, match="not found in scenario"):
             services.create_experiment(self.user, data)
@@ -140,11 +166,14 @@ class CreateExperimentTest(TestCase):
 class StartExperimentTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="start_user", password="test", is_staff=True)
+        cls.user = User.objects.create_user(username="start_user", password=TEST_PASSWORD, is_staff=True)
 
     def test_start_creates_runs_and_queues(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Start Test", scenario_id="basic", total_runs=3,
+            user=self.user,
+            name="Start Test",
+            scenario_id="basic",
+            total_runs=3,
         )
         result = services.start_experiment(self.user, exp.pk)
         assert result.status == ExperimentStatus.QUEUED.value
@@ -152,7 +181,9 @@ class StartExperimentTest(TestCase):
 
     def test_start_non_draft_raises(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Already Running", scenario_id="basic",
+            user=self.user,
+            name="Already Running",
+            scenario_id="basic",
             status=ExperimentStatus.QUEUED.value,
         )
         with pytest.raises(ExperimentStateError, match="draft state"):
@@ -166,11 +197,13 @@ class StartExperimentTest(TestCase):
 class CancelExperimentTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="cancel_user", password="test", is_staff=True)
+        cls.user = User.objects.create_user(username="cancel_user", password=TEST_PASSWORD, is_staff=True)
 
     def test_cancel_queued(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Cancel Test", scenario_id="basic",
+            user=self.user,
+            name="Cancel Test",
+            scenario_id="basic",
         )
         exp.transition_to(ExperimentStatus.QUEUED)
         result = services.cancel_experiment(self.user, exp.pk)
@@ -178,7 +211,9 @@ class CancelExperimentTest(TestCase):
 
     def test_cancel_draft_raises(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Draft Cancel", scenario_id="basic",
+            user=self.user,
+            name="Draft Cancel",
+            scenario_id="basic",
         )
         with pytest.raises(ExperimentStateError, match="Cannot cancel"):
             services.cancel_experiment(self.user, exp.pk)
@@ -187,19 +222,23 @@ class CancelExperimentTest(TestCase):
 class GetExperimentTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="get_user", password="test", is_staff=True)
-        cls.other_user = User.objects.create_user(username="get_other", password="test", is_staff=True)
+        cls.user = User.objects.create_user(username="get_user", password=TEST_PASSWORD, is_staff=True)
+        cls.other_user = User.objects.create_user(username="get_other", password=TEST_PASSWORD, is_staff=True)
 
     def test_get_own_experiment(self):
         exp = Experiment.objects.create(
-            user=self.user, name="Get Test", scenario_id="basic",
+            user=self.user,
+            name="Get Test",
+            scenario_id="basic",
         )
         result = services.get_experiment(self.user, exp.pk)
         assert result.pk == exp.pk
 
     def test_get_other_users_experiment_raises(self):
         exp = Experiment.objects.create(
-            user=self.other_user, name="Other Exp", scenario_id="basic",
+            user=self.other_user,
+            name="Other Exp",
+            scenario_id="basic",
         )
         with pytest.raises(ExperimentError, match="not found"):
             services.get_experiment(self.user, exp.pk)
@@ -208,9 +247,12 @@ class GetExperimentTest(TestCase):
 class ListExperimentsTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="list_user", password="test", is_staff=True)
+        cls.user = User.objects.create_user(username="list_user", password=TEST_PASSWORD, is_staff=True)
         cls.exp = Experiment.objects.create(
-            user=cls.user, name="List Test", scenario_id="basic", total_runs=3,
+            user=cls.user,
+            name="List Test",
+            scenario_id="basic",
+            total_runs=3,
         )
 
     def test_list_returns_experiments(self):
@@ -221,9 +263,7 @@ class ListExperimentsTest(TestCase):
         # Create runs
         for i in range(1, 4):
             ExperimentRun.objects.create(experiment=self.exp, run_number=i)
-        ExperimentRun.objects.filter(
-            experiment=self.exp, run_number=1
-        ).update(status=RunStatus.COMPLETED.value)
+        ExperimentRun.objects.filter(experiment=self.exp, run_number=1).update(status=RunStatus.COMPLETED.value)
 
         exps = services.list_experiments(self.user)
         exp = exps.first()

@@ -16,18 +16,18 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from experiments.models import (
+from cms.experiments.models import (
     Experiment,
     ExperimentRun,
     ExperimentScript,
 )
-from experiments.schemas import (
+from cms.experiments.schemas import (
+    TERMINAL_RUN_STATUSES,
     ExperimentStatus,
     RunStatus,
     ScriptType,
-    TERMINAL_RUN_STATUSES,
 )
-from experiments.template_vars import build_instance_data, resolve_template
+from cms.experiments.template_vars import build_instance_data, resolve_template
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +84,7 @@ class ExperimentOrchestrator:
     @property
     def experiment(self) -> Experiment:
         if self._experiment is None:
-            self._experiment = Experiment.objects.prefetch_related(
-                "scripts__script", "runs"
-            ).get(pk=self.experiment_id)
+            self._experiment = Experiment.objects.prefetch_related("scripts__script", "runs").get(pk=self.experiment_id)
         return self._experiment
 
     def refresh(self) -> None:
@@ -112,7 +110,8 @@ class ExperimentOrchestrator:
         if experiment.status != ExperimentStatus.RUNNING.value:
             logger.info(
                 "schedule_runs: experiment %s not running (status=%s), skipping",
-                self.experiment_id, experiment.status,
+                self.experiment_id,
+                experiment.status,
             )
             return 0
 
@@ -130,7 +129,8 @@ class ExperimentOrchestrator:
         if slots_available <= 0:
             logger.debug(
                 "schedule_runs: no slots (active=%d, max=%d)",
-                active_runs, experiment.max_parallel_runs,
+                active_runs,
+                experiment.max_parallel_runs,
             )
             return 0
 
@@ -150,7 +150,8 @@ class ExperimentOrchestrator:
             except Exception:
                 logger.exception(
                     "schedule_runs: failed to schedule run %s (experiment=%s)",
-                    run.pk, self.experiment_id,
+                    run.pk,
+                    self.experiment_id,
                 )
                 run.error_message = "Failed to schedule provisioning"
                 run.save(update_fields=["error_message"])
@@ -158,7 +159,8 @@ class ExperimentOrchestrator:
 
         logger.info(
             "schedule_runs: scheduled %d runs for experiment %s",
-            scheduled, self.experiment_id,
+            scheduled,
+            self.experiment_id,
         )
         return scheduled
 
@@ -285,9 +287,13 @@ class ExperimentOrchestrator:
     ) -> RunExecutionPlan:
         """Build an execution plan from experiment scripts and provisioned data."""
         instance_data = build_instance_data(provisioned_instances)
-        scripts = ExperimentScript.objects.filter(
-            experiment_id=self.experiment_id,
-        ).select_related("script").order_by("execution_order")
+        scripts = (
+            ExperimentScript.objects.filter(
+                experiment_id=self.experiment_id,
+            )
+            .select_related("script")
+            .order_by("execution_order")
+        )
 
         plan = RunExecutionPlan(run_id=run.pk)
 
@@ -299,7 +305,8 @@ class ExperimentOrchestrator:
             if not instance_id:
                 logger.warning(
                     "_build_execution_plan: no instance_id for %s in run %s",
-                    instance_name, run.pk,
+                    instance_name,
+                    run.pk,
                 )
                 continue
 
@@ -357,14 +364,16 @@ class ExperimentOrchestrator:
         """
         logger.info(
             "_request_range_provisioning: requesting range for run %s (experiment=%s)",
-            run.pk, self.experiment_id,
+            run.pk,
+            self.experiment_id,
         )
 
     def _dispatch_commands(self, run: ExperimentRun, commands: list[ScriptCommand]) -> None:
         """Dispatch script commands for execution via ECS task."""
         logger.info(
             "_dispatch_commands: dispatching %d commands for run %s",
-            len(commands), run.pk,
+            len(commands),
+            run.pk,
         )
 
     def _collect_artifacts(self, run: ExperimentRun) -> None:
@@ -384,9 +393,7 @@ class ExperimentOrchestrator:
         if total == 0:
             return
 
-        terminal_count = all_runs.filter(
-            status__in=[s.value for s in TERMINAL_RUN_STATUSES]
-        ).count()
+        terminal_count = all_runs.filter(status__in=[s.value for s in TERMINAL_RUN_STATUSES]).count()
 
         if terminal_count < total:
             return
@@ -403,5 +410,7 @@ class ExperimentOrchestrator:
 
         logger.info(
             "_check_experiment_completion: experiment %s finished (%d/%d succeeded)",
-            self.experiment_id, completed_count, total,
+            self.experiment_id,
+            completed_count,
+            total,
         )

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 
 from experiments.orchestrator import ExperimentOrchestrator
 
@@ -46,7 +47,9 @@ def _broadcast_run_status(
         )
         logger.debug(
             "broadcast run_status: experiment=%s run=%s status=%s",
-            experiment_id, run_id, status,
+            experiment_id,
+            run_id,
+            status,
         )
     except Exception:
         logger.debug("_broadcast_run_status: channel layer unavailable", exc_info=True)
@@ -75,7 +78,8 @@ def _broadcast_experiment_status(experiment_id: int, status: str) -> None:
         )
         logger.debug(
             "broadcast experiment_status: experiment=%s status=%s",
-            experiment_id, status,
+            experiment_id,
+            status,
         )
     except Exception:
         logger.debug("_broadcast_experiment_status: channel layer unavailable", exc_info=True)
@@ -104,7 +108,8 @@ def process_event(message: str | dict) -> None:
     except Exception:
         logger.exception(
             "Error processing event_type=%s event_id=%s",
-            event_type, event_id,
+            event_type,
+            event_id,
         )
 
 
@@ -150,6 +155,7 @@ def _handle_range_provisioned(event: dict) -> None:
 
     # Broadcast updated run status
     from experiments.models import ExperimentRun
+
     try:
         run = ExperimentRun.objects.get(pk=run_id)
         _broadcast_run_status(experiment_id, run_id, run.run_number, run.status)
@@ -170,6 +176,7 @@ def _handle_victim_scripts_completed(event: dict) -> None:
     orchestrator.handle_victim_scripts_completed(run_id)
 
     from experiments.models import ExperimentRun
+
     try:
         run = ExperimentRun.objects.get(pk=run_id)
         _broadcast_run_status(experiment_id, run_id, run.run_number, run.status)
@@ -190,6 +197,7 @@ def _handle_attacker_scripts_completed(event: dict) -> None:
     orchestrator.handle_attacker_scripts_completed(run_id)
 
     from experiments.models import ExperimentRun
+
     try:
         run = ExperimentRun.objects.get(pk=run_id)
         _broadcast_run_status(experiment_id, run_id, run.run_number, run.status)
@@ -209,7 +217,8 @@ def _handle_artifacts_collected(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(experiment_id)
     orchestrator.handle_artifacts_collected(run_id)
 
-    from experiments.models import ExperimentRun, Experiment
+    from experiments.models import Experiment, ExperimentRun
+
     try:
         run = ExperimentRun.objects.get(pk=run_id)
         _broadcast_run_status(experiment_id, run_id, run.run_number, run.status)
@@ -238,7 +247,8 @@ def _handle_run_failed(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(experiment_id)
     orchestrator.handle_run_failed(run_id, error_message)
 
-    from experiments.models import ExperimentRun, Experiment
+    from experiments.models import Experiment, ExperimentRun
+
     try:
         run = ExperimentRun.objects.get(pk=run_id)
         _broadcast_run_status(experiment_id, run_id, run.run_number, run.status, error_message)
@@ -258,7 +268,7 @@ def _handle_run_failed(event: dict) -> None:
 # Event type -> handler mapping
 # ---------------------------------------------------------------------------
 
-_HANDLERS: dict[str, callable] = {
+_HANDLERS: dict[str, Callable] = {
     "experiment.start": _handle_experiment_start,
     "experiment.run.range_provisioned": _handle_range_provisioned,
     "experiment.run.victims_completed": _handle_victim_scripts_completed,

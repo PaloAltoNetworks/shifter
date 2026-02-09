@@ -44,6 +44,25 @@
         font-size: 12px;
         color: var(--xdr-text-secondary);
     }
+    .pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 16px 0;
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+    }
+    .pagination a {
+        color: #40a9ff;
+        text-decoration: none;
+        padding: 4px 12px;
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+    }
+    .pagination a:hover {
+        background: var(--xdr-hover);
+    }
 </style>
 {% endblock %}
 
@@ -89,6 +108,17 @@
         </tbody>
     </table>
 </div>
+{% if experiments.has_other_pages %}
+<div class="pagination">
+    {% if experiments.has_previous %}
+    <a href="?page={{ experiments.previous_page_number }}">&larr; Previous</a>
+    {% endif %}
+    <span>Page {{ experiments.number }} of {{ experiments.paginator.num_pages }}</span>
+    {% if experiments.has_next %}
+    <a href="?page={{ experiments.next_page_number }}">Next &rarr;</a>
+    {% endif %}
+</div>
+{% endif %}
 {% else %}
 <div class="card">
     <div class="empty-state">

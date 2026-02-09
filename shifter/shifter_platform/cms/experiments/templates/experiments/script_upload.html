@@ -160,14 +160,25 @@
             progressFill.style.width = '30%';
             uploadStatus.textContent = 'Uploading to S3...';
 
-            // Step 2: Upload file to S3
-            const s3Resp = await fetch(initData.presigned_url, {
-                method: 'PUT',
-                body: file,
-                headers: { 'Content-Type': 'application/octet-stream' },
+            // Step 2: Upload file to S3 with progress tracking
+            await new Promise(function(resolve, reject) {
+                const xhr = new XMLHttpRequest();
+                xhr.upload.addEventListener('progress', function(e) {
+                    if (e.lengthComputable) {
+                        const pct = 30 + Math.round((e.loaded / e.total) * 40);
+                        progressFill.style.width = pct + '%';
+                        uploadStatus.textContent = 'Uploading... ' + Math.round(e.loaded / e.total * 100) + '%';
+                    }
+                });
+                xhr.onload = function() {
+                    if (xhr.status >= 200 && xhr.status < 300) resolve();
+                    else reject(new Error('S3 upload failed (HTTP ' + xhr.status + ')'));
+                };
+                xhr.onerror = function() { reject(new Error('Network error during upload')); };
+                xhr.open('PUT', initData.presigned_url);
+                xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+                xhr.send(file);
             });
-
-            if (!s3Resp.ok) throw new Error('S3 upload failed');
 
             progressFill.style.width = '70%';
             uploadStatus.textContent = 'Confirming upload...';

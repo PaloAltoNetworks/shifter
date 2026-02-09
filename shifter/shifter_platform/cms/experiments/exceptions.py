@@ -1,7 +1,9 @@
 """Experiment manager exceptions."""
 
+from shared.exceptions import CMSError
 
-class ExperimentError(Exception):
+
+class ExperimentError(CMSError):
     """Base exception for experiment operations."""
 
 

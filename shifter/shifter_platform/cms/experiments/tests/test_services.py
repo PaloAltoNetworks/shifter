@@ -3,6 +3,8 @@
 Tests the business logic without calling real S3/infrastructure.
 """
 
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth.models import User
 from django.test import TestCase
@@ -16,6 +18,7 @@ from cms.experiments.exceptions import (
 )
 from cms.experiments.models import Experiment, ExperimentRun, ScriptAsset
 from cms.experiments.schemas import ExperimentCreateInput, ExperimentStatus, RunStatus
+from shared.constants import USER_CANNOT_BE_NONE
 
 # Test password constant for all test users
 TEST_PASSWORD = "test"  # nosec B105
@@ -282,3 +285,48 @@ class ScenarioInstancesTest(TestCase):
     def test_invalid_scenario_raises(self):
         with pytest.raises(ExperimentValidationError, match="Invalid scenario"):
             services.get_scenario_instances("nonexistent_scenario_123")
+
+
+class UserValidationTest(TestCase):
+    """Verify service functions reject None/invalid users."""
+
+    def test_list_scripts_none_user(self):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
+            services.list_scripts(None)
+
+    def test_create_experiment_none_user(self):
+        data = ExperimentCreateInput(name="Test", scenario_id="basic")
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
+            services.create_experiment(None, data)
+
+    def test_start_experiment_none_user(self):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
+            services.start_experiment(None, 1)
+
+    def test_get_experiment_none_user(self):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
+            services.get_experiment(None, 1)
+
+    def test_list_experiments_none_user(self):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
+            services.list_experiments(None)
+
+    def test_delete_script_none_user(self):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
+            services.delete_script(None, 1)
+
+    def test_cancel_experiment_none_user(self):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
+            services.cancel_experiment(None, 1)
+
+
+class CatchAllExceptionTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="catchall_user", password=TEST_PASSWORD, is_staff=True)
+
+    @patch("cms.experiments.services.Experiment.objects")
+    def test_get_experiment_logs_unexpected_error(self, mock_objects):
+        mock_objects.prefetch_related.return_value.get.side_effect = RuntimeError("DB gone")
+        with pytest.raises(RuntimeError, match="DB gone"):
+            services.get_experiment(self.user, 1)

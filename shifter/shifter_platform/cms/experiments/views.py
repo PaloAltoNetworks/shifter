@@ -175,14 +175,12 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
                 scenarios.append({"id": s.id, "name": s.name, "description": s.description})
             except ValueError:
                 continue
-        scripts = services.list_scripts(cast("User", request.user))
         return render(
             request,
             "experiments/experiment_create.html",
             {
                 "active_nav": "experiments",
                 "scenarios": scenarios,
-                "scripts": scripts,
             },
         )
 
@@ -202,8 +200,17 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
                     max_parallel_runs=int(request.POST.get("max_parallel_runs", 1)),
                     scripts=scripts_data,
                 )
-            except (ValueError, json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, KeyError) as e:
                 messages.error(request, f"Invalid input: {e}")
+                return redirect("experiments:experiment_create")
+            except ValueError as e:
+                from pydantic import ValidationError as PydanticValidationError
+
+                if isinstance(e, PydanticValidationError):
+                    field_errors = "; ".join(f"{err['loc'][-1]}: {err['msg']}" for err in e.errors() if err.get("loc"))
+                    messages.error(request, f"Validation error: {field_errors or e}")
+                else:
+                    messages.error(request, f"Invalid input: {e}")
                 return redirect("experiments:experiment_create")
 
             try:

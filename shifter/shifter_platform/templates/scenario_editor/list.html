@@ -78,6 +78,12 @@
                         <a href="{% url 'scenario_editor:edit' scenario_id=scenario.id %}" class="btn btn-secondary" style="font-size: 12px; height: 24px; padding: 0 10px; border-radius: 12px; min-width: auto;">Edit</a>
                         {% endif %}
                         <a href="{% url 'scenario_editor:export' scenario_id=scenario.id %}" class="btn btn-secondary" style="font-size: 12px; height: 24px; padding: 0 10px; border-radius: 12px; min-width: auto;">YAML</a>
+                        {% if not scenario.is_default %}
+                        <form method="post" action="{% url 'scenario_editor:delete' scenario_id=scenario.id %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn" onclick="return confirm('Delete scenario \'{{ scenario.name }}\'? This cannot be undone.')" style="font-size: 12px; height: 24px; padding: 0 10px; border-radius: 12px; min-width: auto; background: rgba(200,50,50,0.2); color: #cc6666; border: 1px solid rgba(200,50,50,0.3);">Delete</button>
+                        </form>
+                        {% endif %}
                     </div>
                 </td>
             </tr>

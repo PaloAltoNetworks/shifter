@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from experiments.schemas import (
+from cms.experiments.schemas import (
     EXPERIMENT_TRANSITIONS,
     RUN_TRANSITIONS,
     ExperimentCreateInput,
@@ -22,7 +22,7 @@ class TestScriptUploadInput:
         assert data.filename == "attack.py"
 
     def test_rejects_non_python(self):
-        with pytest.raises(ValidationError, match="Only .py files"):
+        with pytest.raises(ValidationError, match=r"Only \.py files"):
             ScriptUploadInput(name="Bad", filename="attack.sh", file_size=100)
 
     def test_rejects_oversized(self):

@@ -14,8 +14,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from cms.models import FileAsset
-from experiments.schemas import (
+from cms.experiments.schemas import (
     EXPERIMENT_TRANSITIONS,
     RUN_TRANSITIONS,
     ArtifactType,
@@ -23,6 +22,7 @@ from experiments.schemas import (
     RunStatus,
     ScriptType,
 )
+from cms.models import FileAsset
 
 logger = logging.getLogger(__name__)
 

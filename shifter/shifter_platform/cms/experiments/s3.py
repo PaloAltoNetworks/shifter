@@ -119,7 +119,7 @@ def delete_s3_object(s3_key: str) -> None:
         client.delete_object(Bucket=settings.AWS_S3_BUCKET_NAME, Key=s3_key)
     except ClientError as e:
         logger.error("delete_s3_object: failed s3_key=%s error=%s", s3_key, e)
-        raise S3Error(f"Failed to delete from S3: {e}") from e
+        raise S3Error(f"Failed to delete from S3: {e}") from e  # nosec B608
 
     logger.info("delete_s3_object: success s3_key=%s", s3_key)
 
@@ -256,7 +256,8 @@ def verify_upload_token(token: str, user_id: int) -> dict:
     if payload.get("user_id") != user_id:
         logger.warning(
             "verify_upload_token: user mismatch token_user=%s request_user=%s",
-            payload.get("user_id"), user_id,
+            payload.get("user_id"),
+            user_id,
         )
         raise ValueError("Token user mismatch")
 

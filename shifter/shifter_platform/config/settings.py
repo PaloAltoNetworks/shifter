@@ -59,7 +59,7 @@ INSTALLED_APPS = [
     "cms.apps.CMSConfig",
     "management.apps.ManagementConfig",
     "shared.apps.SharedConfig",
-    "experiments.apps.ExperimentsConfig",
+    "cms.experiments.apps.ExperimentsConfig",
 ]
 
 MIDDLEWARE = [
@@ -358,7 +358,7 @@ SQS_QUEUE_CONFIG = {
     },
     "experiments": {
         "url": os.environ.get("SQS_EXPERIMENTS_URL", ""),
-        "handler": "experiments.handlers.process_event",
+        "handler": "cms.experiments.handlers.process_event",
     },
 }
 
@@ -448,7 +448,7 @@ LOGGING = {
             "level": LOG_LEVEL,
             "propagate": False,
         },
-        "experiments": {
+        "cms.experiments": {
             "handlers": ["console"],
             "level": LOG_LEVEL,
             "propagate": False,

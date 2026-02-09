@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from experiments.models import (
+from cms.experiments.models import (
     Experiment,
     ExperimentArtifact,
     ExperimentRun,

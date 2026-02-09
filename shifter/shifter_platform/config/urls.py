@@ -8,7 +8,7 @@ urlpatterns = [
     path("", home, name="home"),
     path("mission-control/", include("mission_control.urls")),
     path("risk-register/", include("risk_register.urls")),
-    path("mission-control/experiments/", include("experiments.urls")),
+    path("mission-control/experiments/", include("cms.experiments.urls")),
     path("scenario-editor/", include("cms.scenario_editor.urls")),
     path("docs/", include("documentation.urls")),
     path("api/v1/", include("risk_register.api.urls")),

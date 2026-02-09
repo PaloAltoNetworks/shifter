@@ -2,7 +2,7 @@
 
 import pytest
 
-from experiments.template_vars import (
+from cms.experiments.template_vars import (
     build_instance_data,
     extract_variables,
     resolve_template,

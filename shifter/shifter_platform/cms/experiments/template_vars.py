@@ -73,6 +73,7 @@ def resolve_template(template: str, instance_data: dict[str, dict[str, Any]]) ->
     Raises:
         ValueError: If a variable cannot be resolved.
     """
+
     def replacer(match: re.Match) -> str:
         instance_name = match.group(1)
         prop = match.group(2)

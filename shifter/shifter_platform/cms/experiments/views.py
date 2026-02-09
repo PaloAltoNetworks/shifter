@@ -40,15 +40,23 @@ logger = logging.getLogger(__name__)
 @staff_member_required
 def script_list(request: HttpRequest) -> HttpResponse:
     """List user's script assets."""
-    scripts = services.list_scripts(cast("User", request.user))
-    return render(
-        request,
-        "experiments/script_list.html",
-        {
-            "active_nav": "experiments",
-            "scripts": scripts,
-        },
-    )
+    try:
+        scripts = services.list_scripts(cast("User", request.user))
+        return render(
+            request,
+            "experiments/script_list.html",
+            {
+                "active_nav": "experiments",
+                "scripts": scripts,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "script_list: unexpected error for user_id=%s",
+            request.user.id,
+        )
+        messages.error(request, "An unexpected error occurred. Please try again.")
+        return redirect("experiments:experiment_list")
 
 
 @staff_member_required
@@ -62,32 +70,40 @@ def script_upload(request: HttpRequest) -> HttpResponse:
         return render(request, "experiments/script_upload.html", {"active_nav": "experiments"})
 
     if request.method == "POST":
-        # Check if this is a completion request (client uploaded to S3, now confirming)
-        upload_token = request.POST.get("upload_token")
-        if upload_token:
+        try:
+            # Check if this is a completion request (client uploaded to S3, now confirming)
+            upload_token = request.POST.get("upload_token")
+            if upload_token:
+                try:
+                    script = services.complete_script_upload(cast("User", request.user), upload_token)
+                    messages.success(request, f"Script '{script.name}' uploaded successfully.")
+                    return redirect("experiments:script_list")
+                except ScriptUploadError as e:
+                    messages.error(request, str(e))
+                    return redirect("experiments:script_upload")
+
+            # Otherwise, initiate upload
+            name = request.POST.get("name", "").strip()
+            filename = request.POST.get("filename", "").strip()
+            file_size = request.POST.get("file_size", "0")
+
             try:
-                script = services.complete_script_upload(cast("User", request.user), upload_token)
-                messages.success(request, f"Script '{script.name}' uploaded successfully.")
-                return redirect("experiments:script_list")
+                file_size_int = int(file_size)
+            except (TypeError, ValueError):
+                return JsonResponse({"error": "Invalid file_size"}, status=400)
+
+            try:
+                result = services.initiate_script_upload(cast("User", request.user), name, filename, file_size_int)
+                return JsonResponse(result)
             except ScriptUploadError as e:
-                messages.error(request, str(e))
-                return redirect("experiments:script_upload")
-
-        # Otherwise, initiate upload
-        name = request.POST.get("name", "").strip()
-        filename = request.POST.get("filename", "").strip()
-        file_size = request.POST.get("file_size", "0")
-
-        try:
-            file_size_int = int(file_size)
-        except (TypeError, ValueError):
-            return JsonResponse({"error": "Invalid file_size"}, status=400)
-
-        try:
-            result = services.initiate_script_upload(cast("User", request.user), name, filename, file_size_int)
-            return JsonResponse(result)
-        except ScriptUploadError as e:
-            return JsonResponse({"error": str(e)}, status=400)
+                return JsonResponse({"error": str(e)}, status=400)
+        except Exception:
+            logger.exception(
+                "script_upload: unexpected error for user_id=%s",
+                request.user.id,
+            )
+            messages.error(request, "An unexpected error occurred. Please try again.")
+            return redirect("experiments:experiment_list")
 
     return HttpResponse(status=405)
 
@@ -101,6 +117,12 @@ def script_delete(request: HttpRequest, script_id: int) -> HttpResponse:
         messages.success(request, "Script deleted.")
     except ScriptUploadError as e:
         messages.error(request, str(e))
+    except Exception:
+        logger.exception(
+            "script_delete: unexpected error for user_id=%s",
+            request.user.id,
+        )
+        messages.error(request, "An unexpected error occurred. Please try again.")
     return redirect("experiments:script_list")
 
 
@@ -112,15 +134,23 @@ def script_delete(request: HttpRequest, script_id: int) -> HttpResponse:
 @staff_member_required
 def experiment_list(request: HttpRequest) -> HttpResponse:
     """List user's experiments."""
-    experiments = services.list_experiments(cast("User", request.user))
-    return render(
-        request,
-        "experiments/experiment_list.html",
-        {
-            "active_nav": "experiments",
-            "experiments": experiments,
-        },
-    )
+    try:
+        experiments = services.list_experiments(cast("User", request.user))
+        return render(
+            request,
+            "experiments/experiment_list.html",
+            {
+                "active_nav": "experiments",
+                "experiments": experiments,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "experiment_list: unexpected error for user_id=%s",
+            request.user.id,
+        )
+        messages.error(request, "An unexpected error occurred. Please try again.")
+        return redirect("experiments:experiment_list")
 
 
 @staff_member_required
@@ -153,30 +183,38 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         try:
-            # Parse script assignments from form
-            scripts_json = request.POST.get("scripts_json", "[]")
-            scripts_data = json.loads(scripts_json) if scripts_json else []
+            try:
+                # Parse script assignments from form
+                scripts_json = request.POST.get("scripts_json", "[]")
+                scripts_data = json.loads(scripts_json) if scripts_json else []
 
-            data = ExperimentCreateInput(
-                name=request.POST.get("name", ""),
-                description=request.POST.get("description", ""),
-                scenario_id=request.POST.get("scenario_id", ""),
-                agent_id=int(request.POST["agent_id"]) if request.POST.get("agent_id") else None,
-                total_runs=int(request.POST.get("total_runs", 1)),
-                max_parallel_runs=int(request.POST.get("max_parallel_runs", 1)),
-                scripts=scripts_data,
+                data = ExperimentCreateInput(
+                    name=request.POST.get("name", ""),
+                    description=request.POST.get("description", ""),
+                    scenario_id=request.POST.get("scenario_id", ""),
+                    agent_id=int(request.POST["agent_id"]) if request.POST.get("agent_id") else None,
+                    total_runs=int(request.POST.get("total_runs", 1)),
+                    max_parallel_runs=int(request.POST.get("max_parallel_runs", 1)),
+                    scripts=scripts_data,
+                )
+            except (ValueError, json.JSONDecodeError, KeyError) as e:
+                messages.error(request, f"Invalid input: {e}")
+                return redirect("experiments:experiment_create")
+
+            try:
+                experiment = services.create_experiment(cast("User", request.user), data)
+                messages.success(request, f"Experiment '{experiment.name}' created.")
+                return redirect("experiments:experiment_detail", experiment_id=experiment.pk)
+            except ExperimentValidationError as e:
+                messages.error(request, str(e))
+                return redirect("experiments:experiment_create")
+        except Exception:
+            logger.exception(
+                "experiment_create: unexpected error for user_id=%s",
+                request.user.id,
             )
-        except (ValueError, json.JSONDecodeError, KeyError) as e:
-            messages.error(request, f"Invalid input: {e}")
-            return redirect("experiments:experiment_create")
-
-        try:
-            experiment = services.create_experiment(cast("User", request.user), data)
-            messages.success(request, f"Experiment '{experiment.name}' created.")
-            return redirect("experiments:experiment_detail", experiment_id=experiment.pk)
-        except ExperimentValidationError as e:
-            messages.error(request, str(e))
-            return redirect("experiments:experiment_create")
+            messages.error(request, "An unexpected error occurred. Please try again.")
+            return redirect("experiments:experiment_list")
 
     return HttpResponse(status=405)
 
@@ -188,6 +226,13 @@ def experiment_detail(request: HttpRequest, experiment_id: int) -> HttpResponse:
         experiment = services.get_experiment(cast("User", request.user), experiment_id)
     except ExperimentError:
         messages.error(request, "Experiment not found.")
+        return redirect("experiments:experiment_list")
+    except Exception:
+        logger.exception(
+            "experiment_detail: unexpected error for user_id=%s",
+            request.user.id,
+        )
+        messages.error(request, "An unexpected error occurred. Please try again.")
         return redirect("experiments:experiment_list")
 
     return render(
@@ -211,6 +256,12 @@ def experiment_start(request: HttpRequest, experiment_id: int) -> HttpResponse:
         messages.error(request, str(e))
     except ExperimentStateError as e:
         messages.error(request, str(e))
+    except Exception:
+        logger.exception(
+            "experiment_start: unexpected error for user_id=%s",
+            request.user.id,
+        )
+        messages.error(request, "An unexpected error occurred. Please try again.")
     return redirect("experiments:experiment_detail", experiment_id=experiment_id)
 
 
@@ -223,6 +274,12 @@ def experiment_cancel(request: HttpRequest, experiment_id: int) -> HttpResponse:
         messages.success(request, "Experiment cancelled.")
     except (ExperimentError, ExperimentStateError) as e:
         messages.error(request, str(e))
+    except Exception:
+        logger.exception(
+            "experiment_cancel: unexpected error for user_id=%s",
+            request.user.id,
+        )
+        messages.error(request, "An unexpected error occurred. Please try again.")
     return redirect("experiments:experiment_detail", experiment_id=experiment_id)
 
 
@@ -240,6 +297,13 @@ def experiment_download(request: HttpRequest, experiment_id: int) -> HttpRespons
     except ArtifactError as e:
         messages.error(request, str(e))
         return redirect("experiments:experiment_detail", experiment_id=experiment_id)
+    except Exception:
+        logger.exception(
+            "experiment_download: unexpected error for user_id=%s",
+            request.user.id,
+        )
+        messages.error(request, "An unexpected error occurred. Please try again.")
+        return redirect("experiments:experiment_list")
 
 
 @staff_member_required
@@ -256,6 +320,13 @@ def artifact_download(
     except ArtifactError as e:
         messages.error(request, str(e))
         return redirect("experiments:experiment_detail", experiment_id=experiment_id)
+    except Exception:
+        logger.exception(
+            "artifact_download: unexpected error for user_id=%s",
+            request.user.id,
+        )
+        messages.error(request, "An unexpected error occurred. Please try again.")
+        return redirect("experiments:experiment_list")
 
 
 # =============================================================================
@@ -271,3 +342,6 @@ def scenario_instances(request: HttpRequest, scenario_id: str) -> JsonResponse:
         return JsonResponse({"instances": instances})
     except ExperimentValidationError as e:
         return JsonResponse({"error": str(e)}, status=400)
+    except Exception:
+        logger.exception("scenario_instances: unexpected error")
+        return JsonResponse({"error": "An unexpected error occurred."}, status=500)

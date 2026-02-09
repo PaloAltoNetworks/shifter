@@ -4,6 +4,8 @@ Tests HTTP access control, template rendering, and view logic.
 No real S3 or infrastructure calls.
 """
 
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
@@ -216,3 +218,16 @@ class ScenarioInstancesViewTest(TestCase):
         self.client.login(username="scenario_view_user", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:scenario_instances", args=["nonexistent_xyz"]))
         assert resp.status_code == 400
+
+
+class UnexpectedErrorViewTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="error_view_user", password=TEST_PASSWORD, is_staff=True)
+
+    @patch("cms.experiments.views.services.list_experiments")
+    def test_experiment_list_handles_unexpected_error(self, mock_list):
+        mock_list.side_effect = RuntimeError("Unexpected")
+        self.client.login(username="error_view_user", password=TEST_PASSWORD)
+        resp = self.client.get(reverse("experiments:experiment_list"))
+        assert resp.status_code == 302  # Graceful redirect

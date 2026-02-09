@@ -220,6 +220,58 @@ class ScenarioInstancesViewTest(TestCase):
         assert resp.status_code == 400
 
 
+class MalformedInputViewTest(TestCase):
+    """5.8: Test malformed JSON in scripts_json POST field."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="malform_user", password=TEST_PASSWORD, is_staff=True)
+
+    def test_malformed_scripts_json_shows_error(self):
+        self.client.login(username="malform_user", password=TEST_PASSWORD)
+        resp = self.client.post(
+            reverse("experiments:experiment_create"),
+            {
+                "name": "Malformed Test",
+                "scenario_id": "basic",
+                "total_runs": "1",
+                "max_parallel_runs": "1",
+                "scripts_json": "{not valid json",
+            },
+        )
+        # Should redirect back to create form with error, not 500
+        assert resp.status_code == 302
+
+    def test_empty_name_shows_validation_error(self):
+        self.client.login(username="malform_user", password=TEST_PASSWORD)
+        resp = self.client.post(
+            reverse("experiments:experiment_create"),
+            {
+                "name": "",
+                "scenario_id": "basic",
+                "total_runs": "1",
+                "max_parallel_runs": "1",
+                "scripts_json": "[]",
+            },
+        )
+        # Pydantic validation error, should redirect with error message
+        assert resp.status_code == 302
+
+    def test_parallel_exceeds_total_shows_error(self):
+        self.client.login(username="malform_user", password=TEST_PASSWORD)
+        resp = self.client.post(
+            reverse("experiments:experiment_create"),
+            {
+                "name": "Bad Parallel",
+                "scenario_id": "basic",
+                "total_runs": "1",
+                "max_parallel_runs": "5",
+                "scripts_json": "[]",
+            },
+        )
+        assert resp.status_code == 302
+
+
 class UnexpectedErrorViewTest(TestCase):
     @classmethod
     def setUpTestData(cls):

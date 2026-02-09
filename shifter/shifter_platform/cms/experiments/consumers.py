@@ -13,7 +13,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import AnonymousUser
 
-from experiments.models import Experiment, ExperimentRun
+from cms.experiments.models import Experiment, ExperimentRun
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +60,16 @@ class ExperimentStatusConsumer(AsyncWebsocketConsumer):
 
         # Hydrate client with current state
         runs = await self._get_runs(self.experiment_id)
-        await self.send(text_data=json.dumps({
-            "type": "hydrate",
-            "experiment_id": self.experiment_id,
-            "experiment_status": experiment.status,
-            "runs": runs,
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "hydrate",
+                    "experiment_id": self.experiment_id,
+                    "experiment_status": experiment.status,
+                    "runs": runs,
+                }
+            )
+        )
 
     async def disconnect(self, close_code):
         """Leave channel group on disconnect."""
@@ -74,21 +78,29 @@ class ExperimentStatusConsumer(AsyncWebsocketConsumer):
 
     async def experiment_run_status(self, event):
         """Handle run status update broadcast."""
-        await self.send(text_data=json.dumps({
-            "type": "run_status",
-            "run_id": event.get("run_id"),
-            "run_number": event.get("run_number"),
-            "status": event.get("status"),
-            "error_message": event.get("error_message", ""),
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "run_status",
+                    "run_id": event.get("run_id"),
+                    "run_number": event.get("run_number"),
+                    "status": event.get("status"),
+                    "error_message": event.get("error_message", ""),
+                }
+            )
+        )
 
     async def experiment_status(self, event):
         """Handle experiment-level status update broadcast."""
-        await self.send(text_data=json.dumps({
-            "type": "experiment_status",
-            "experiment_id": event.get("experiment_id"),
-            "status": event.get("status"),
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "experiment_status",
+                    "experiment_id": event.get("experiment_id"),
+                    "status": event.get("status"),
+                }
+            )
+        )
 
     @database_sync_to_async
     def _get_experiment(self, user, experiment_id: int) -> Experiment | None:
@@ -101,10 +113,17 @@ class ExperimentStatusConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _get_runs(self, experiment_id: int) -> list[dict]:
         """Get current run statuses for hydration."""
-        runs = ExperimentRun.objects.filter(
-            experiment_id=experiment_id,
-        ).order_by("run_number").values(
-            "pk", "run_number", "status", "error_message",
+        runs = (
+            ExperimentRun.objects.filter(
+                experiment_id=experiment_id,
+            )
+            .order_by("run_number")
+            .values(
+                "pk",
+                "run_number",
+                "status",
+                "error_message",
+            )
         )
         return [
             {

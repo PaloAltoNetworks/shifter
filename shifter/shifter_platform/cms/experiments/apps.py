@@ -7,5 +7,6 @@ class ExperimentsConfig(AppConfig):
     """Configuration for the experiments app."""
 
     default_auto_field = "django.db.models.BigAutoField"
-    name = "experiments"
+    name = "cms.experiments"
+    label = "experiments"
     verbose_name = "Experiments"

@@ -15,15 +15,15 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from experiments import services
-from experiments.exceptions import (
+from cms.experiments import services
+from cms.experiments.exceptions import (
     ArtifactError,
     ExperimentError,
     ExperimentStateError,
     ExperimentValidationError,
     ScriptUploadError,
 )
-from experiments.schemas import ExperimentCreateInput
+from cms.experiments.schemas import ExperimentCreateInput
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User

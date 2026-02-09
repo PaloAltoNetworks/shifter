@@ -3,11 +3,12 @@
 Tests the business logic without calling real S3/infrastructure.
 """
 
+import threading
 from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from cms.experiments import services
 from cms.experiments.exceptions import (
@@ -330,3 +331,45 @@ class CatchAllExceptionTest(TestCase):
         mock_objects.prefetch_related.return_value.get.side_effect = RuntimeError("DB gone")
         with pytest.raises(RuntimeError, match="DB gone"):
             services.get_experiment(self.user, 1)
+
+
+class ConcurrentStartTest(TransactionTestCase):
+    """Verify that concurrent start_experiment() calls are serialized by select_for_update()."""
+
+    def test_only_one_concurrent_start_succeeds(self):
+        user = User.objects.create_user(username="concurrent_user", password=TEST_PASSWORD, is_staff=True)
+        exp = Experiment.objects.create(
+            user=user,
+            name="Concurrent Start",
+            scenario_id="basic",
+            total_runs=3,
+        )
+
+        barrier = threading.Barrier(2, timeout=5)
+        results: list[dict] = [{}, {}]
+
+        def attempt_start(index: int) -> None:
+            try:
+                barrier.wait()
+                services.start_experiment(user, exp.pk)
+                results[index] = {"success": True}
+            except ExperimentStateError as e:
+                results[index] = {"success": False, "error": str(e)}
+            except Exception as e:
+                results[index] = {"success": False, "error": str(e)}
+
+        t1 = threading.Thread(target=attempt_start, args=(0,))
+        t2 = threading.Thread(target=attempt_start, args=(1,))
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        successes = [r for r in results if r.get("success")]
+        failures = [r for r in results if not r.get("success")]
+        assert len(successes) == 1, f"Expected exactly 1 success, got {results}"
+        assert len(failures) == 1, f"Expected exactly 1 failure, got {results}"
+
+        # Verify runs were not doubled
+        run_count = ExperimentRun.objects.filter(experiment=exp).count()
+        assert run_count == exp.total_runs, f"Expected {exp.total_runs} runs, got {run_count}"

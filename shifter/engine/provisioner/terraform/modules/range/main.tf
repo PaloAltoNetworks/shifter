@@ -112,18 +112,26 @@ resource "aws_security_group" "subnet" {
 }
 
 # Dynamic ingress rules for connected subnets (NGFW does actual filtering)
+# Uses connected_pairs (bidirectional) so both subnets get ingress rules
+# even if only one side declares connected_to.
 resource "aws_security_group_rule" "connected_subnet" {
   for_each = {
-    for pair in flatten([
-      for subnet in var.subnets : [
-        for connected_name in subnet.connected_to : {
-          key             = "${subnet.name}-from-${connected_name}"
-          security_group  = subnet.name
-          connected_cidr  = local.subnet_map[connected_name].cidr
-          connected_name  = connected_name
-        } if contains(keys(local.subnet_map), connected_name)
+    for rule in flatten([
+      for pair in local.connected_pairs : [
+        {
+          key            = "${pair.a}-from-${pair.b}"
+          security_group = pair.a
+          connected_cidr = local.subnet_map[pair.b].cidr
+          connected_name = pair.b
+        },
+        {
+          key            = "${pair.b}-from-${pair.a}"
+          security_group = pair.b
+          connected_cidr = local.subnet_map[pair.a].cidr
+          connected_name = pair.a
+        },
       ]
-    ]) : pair.key => pair
+    ]) : rule.key => rule
   }
 
   type              = "ingress"

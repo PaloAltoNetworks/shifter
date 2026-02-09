@@ -92,9 +92,26 @@ class TestBuildInstanceData:
         result = build_instance_data(provisioned)
         assert result["Workstation"]["ip"] == "10.1.1.5"
         assert result["Workstation"]["name"] == "Workstation"
+        assert result["Workstation"]["instance_id"] == "i-abc123"
         assert result["Attacker"]["ip"] == "10.1.1.10"
+        assert result["Attacker"]["instance_id"] == "i-def456"
 
     def test_handles_missing_ip(self):
         result = build_instance_data({"Box": {}})
         assert result["Box"]["ip"] == ""
         assert result["Box"]["name"] == "Box"
+        assert result["Box"]["instance_id"] == ""
+
+    def test_instance_id_property_valid(self):
+        errors = validate_template(
+            "Instance {{Workstation.instance_id}}",
+            {"Workstation"},
+        )
+        assert errors == []
+
+    def test_resolves_instance_id(self):
+        result = resolve_template(
+            "SSH to {{Workstation.instance_id}}",
+            {"Workstation": {"ip": "10.1.1.5", "name": "Workstation", "instance_id": "i-abc123"}},
+        )
+        assert result == "SSH to i-abc123"

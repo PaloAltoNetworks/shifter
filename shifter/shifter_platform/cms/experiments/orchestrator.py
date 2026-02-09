@@ -366,7 +366,14 @@ class ExperimentOrchestrator:
         )
 
     def _build_claude_command(self, resolved_prompt: str) -> str:
-        """Build Claude Code invocation command."""
+        """Build Claude Code invocation command.
+
+        Security note: The resolved prompt may contain shell metacharacters
+        (backticks, $(), |, etc.) from user-provided Claude prompt text.
+        Only single quotes are escaped. This is intentional — only staff users
+        can create experiments, and commands execute in isolated ECS tasks
+        within the user's own range. Users need flexibility for complex prompts.
+        """
         escaped_prompt = resolved_prompt.replace("'", "'\\''")
         return (
             f"claude --dangerously-skip-permissions "

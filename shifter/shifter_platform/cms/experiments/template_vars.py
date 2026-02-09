@@ -5,6 +5,7 @@ Template variables use double-brace syntax: {{InstanceName.property}}
 Supported properties:
   - ip: Private IP address of the instance
   - name: Display name of the instance
+  - instance_id: EC2 instance ID of the provisioned instance
 
 Example:
   "Attack the workstation at {{Workstation.ip}} using credentials from {{DC.ip}}"
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 TEMPLATE_VAR_PATTERN = re.compile(r"\{\{(\w+)\.(\w+)\}\}")
 
 # Allowed properties for template variables
-ALLOWED_PROPERTIES = {"ip", "name"}
+ALLOWED_PROPERTIES = {"ip", "name", "instance_id"}
 
 
 def extract_variables(template: str) -> list[tuple[str, str]]:
@@ -118,6 +119,7 @@ def build_instance_data(provisioned_instances: dict[str, Any]) -> dict[str, dict
             result[name] = {
                 "ip": details.get("private_ip", ""),
                 "name": name,
+                "instance_id": details.get("instance_id", ""),
             }
         else:
             logger.warning("build_instance_data: unexpected format for instance %s", name)

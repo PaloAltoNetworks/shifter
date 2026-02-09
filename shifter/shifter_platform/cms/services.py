@@ -1419,7 +1419,7 @@ def create_range(
     from cms.exceptions import CMSError
     from cms.models import RangeInstance
     from cms.scenarios.hydrator import hydrate_scenario
-    from cms.scenarios.loader import load_scenario
+    from cms.scenarios.registry import load_scenario_template as load_scenario
 
     # Input validation - user
     if user is None:

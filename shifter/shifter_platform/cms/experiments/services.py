@@ -9,6 +9,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -22,6 +23,7 @@ from cms.experiments.exceptions import (
 )
 from cms.experiments.models import (
     Experiment,
+    ExperimentArtifact,
     ExperimentRun,
     ExperimentScript,
     RunArtifact,
@@ -66,6 +68,18 @@ def _validate_user(user: User, func_name: str) -> None:
     if user.id is None:
         logger.error("%s called with unsaved user (id=None)", func_name)
         raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _check_result_type(result: object, expected_type: type, func_name: str) -> None:
+    """Validate ORM return type — defensive check matching cms/services.py pattern."""
+    if not isinstance(result, expected_type):
+        logger.error(
+            "%s: expected %s, got %s",
+            func_name,
+            expected_type.__name__,
+            type(result).__name__,
+        )
+        raise TypeError(f"{func_name}: expected {expected_type.__name__}, got {type(result).__name__}")
 
 
 # =============================================================================
@@ -185,7 +199,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             delete_s3_object(s3_key)
             raise ScriptUploadError(f"File size {actual_size} exceeds maximum {max_size} bytes")
 
-        script = ScriptAsset.objects.create(
+        script = ScriptAsset(
             user=user,
             name=payload["name"],
             s3_key=s3_key,
@@ -193,6 +207,11 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             file_size_bytes=actual_size,
             sha256_hash=etag,
         )
+        try:
+            script.full_clean()
+        except DjangoValidationError as e:
+            raise ScriptUploadError(f"Validation failed: {e}") from e
+        script.save()
 
         logger.info(
             "complete_script_upload: created script_id=%s user_id=%s s3_key=%s",
@@ -226,6 +245,7 @@ def delete_script(user: User, script_id: int) -> None:
         except ScriptAsset.DoesNotExist:
             logger.warning("delete_script: not found script_id=%s user_id=%s", script_id, user.pk)
             raise ScriptUploadError("Script not found or you don't have access") from None
+        _check_result_type(script, ScriptAsset, "delete_script")
 
         script.deleted_at = timezone.now()
         script.save(update_fields=["deleted_at"])
@@ -288,12 +308,14 @@ def get_experiment(user: User, experiment_id: int) -> Experiment:
     logger.debug("get_experiment called for user_id=%s experiment_id=%s", user.id, experiment_id)
     try:
         try:
-            return Experiment.objects.prefetch_related("runs__artifacts", "scripts__script").get(
+            experiment = Experiment.objects.prefetch_related("runs__artifacts", "scripts__script").get(
                 pk=experiment_id, user=user
             )
         except Experiment.DoesNotExist:
             logger.warning("get_experiment: not found experiment_id=%s user_id=%s", experiment_id, user.pk)
             raise ExperimentError("Experiment not found or you don't have access") from None
+        _check_result_type(experiment, Experiment, "get_experiment")
+        return experiment
     except (TypeError, ValueError, ExperimentError):
         raise
     except Exception:
@@ -366,9 +388,10 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
                 agent = AgentConfig.objects.get(pk=data.agent_id, user=user, deleted_at__isnull=True)
             except AgentConfig.DoesNotExist:
                 raise ExperimentValidationError(f"Agent not found: {data.agent_id}") from None
+            _check_result_type(agent, AgentConfig, "create_experiment")
 
         with transaction.atomic():
-            experiment = Experiment.objects.create(
+            experiment = Experiment(
                 user=user,
                 name=data.name,
                 description=data.description,
@@ -377,9 +400,14 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
                 total_runs=data.total_runs,
                 max_parallel_runs=data.max_parallel_runs,
             )
+            try:
+                experiment.full_clean()
+            except DjangoValidationError as e:
+                raise ExperimentValidationError(f"Model validation failed: {e}") from e
+            experiment.save()
 
             for script_input in data.scripts:
-                ExperimentScript.objects.create(
+                es = ExperimentScript(
                     experiment=experiment,
                     instance_name=script_input.instance_name,
                     script_type=script_input.script_type.value,
@@ -387,6 +415,11 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
                     claude_prompt=script_input.claude_prompt or "",
                     execution_order=script_input.execution_order,
                 )
+                try:
+                    es.full_clean()
+                except DjangoValidationError as e:
+                    raise ExperimentValidationError(f"Script validation failed: {e}") from e
+                es.save()
 
         logger.info(
             "create_experiment: created experiment_id=%s user_id=%s scenario=%s runs=%d",
@@ -427,6 +460,7 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
                 experiment = Experiment.objects.select_for_update().get(pk=experiment_id, user=user)
             except Experiment.DoesNotExist:
                 raise ExperimentError("Experiment not found or you don't have access") from None
+            _check_result_type(experiment, Experiment, "start_experiment")
 
             if experiment.status != ExperimentStatus.DRAFT.value:
                 raise ExperimentStateError(
@@ -482,6 +516,7 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
             experiment = Experiment.objects.get(pk=experiment_id, user=user)
         except Experiment.DoesNotExist:
             raise ExperimentError("Experiment not found or you don't have access") from None
+        _check_result_type(experiment, Experiment, "cancel_experiment")
 
         if experiment.status not in {ExperimentStatus.QUEUED.value, ExperimentStatus.RUNNING.value}:
             raise ExperimentStateError(f"Cannot cancel experiment in {experiment.status} state")
@@ -531,6 +566,7 @@ def get_artifact_download_url(user: User, experiment_id: int, artifact_id: int) 
             )
         except RunArtifact.DoesNotExist:
             raise ArtifactError("Artifact not found or you don't have access") from None
+        _check_result_type(artifact, RunArtifact, "get_artifact_download_url")
 
         try:
             url = generate_presigned_download_url(artifact.s3_key)
@@ -563,8 +599,6 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
     _validate_user(user, "get_bundle_download_url")
     logger.debug("get_bundle_download_url called for user_id=%s experiment_id=%s", user.id, experiment_id)
     try:
-        from cms.experiments.models import ExperimentArtifact
-
         try:
             bundle = ExperimentArtifact.objects.select_related("experiment").get(
                 experiment_id=experiment_id,
@@ -572,6 +606,7 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
             )
         except ExperimentArtifact.DoesNotExist:
             raise ArtifactError("Experiment bundle not found or you don't have access") from None
+        _check_result_type(bundle, ExperimentArtifact, "get_bundle_download_url")
 
         try:
             url = generate_presigned_download_url(bundle.s3_key)

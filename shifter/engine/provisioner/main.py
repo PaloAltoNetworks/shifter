@@ -583,7 +583,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
             JOIN engine_request r ON i.request_id = r.id
             WHERE r.user_id = %s
               AND i.role = 'ngfw'
-              AND i.status IN ('ready', 'active', 'stopped', 'stopping')
+              AND i.status IN ('ready', 'active', 'stopped', 'stopping', 'starting')
             ORDER BY i.created_at DESC
             LIMIT 1
             """,
@@ -667,7 +667,8 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
-    steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id)
+    has_endpoints = bool(os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR"))
+    steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id, has_endpoints)
     plan = DynamicPlan(name="ngfw_remove_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
@@ -822,8 +823,8 @@ def get_range_data_by_request_id(request_id: str) -> dict:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status = 'active'
-                  AND ei.state->>'service_name' IS NOT NULL
+                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping')
+                  AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,
@@ -1387,11 +1388,14 @@ def configure_ngfw_subnets(
     management_ip: str,
     ssh_key_secret_arn: str,
     ngfw_subnet_cidr: str,
+    ssm_endpoints_subnet_cidr: str = "",
 ) -> None:
     """Configure NGFW with routes for range subnets.
 
     This runs AFTER pulumi up (subnets exist) and BEFORE instance setup.
     Configures static routes on the NGFW so traffic can flow between subnets.
+    When ssm_endpoints_subnet_cidr is provided, also configures routing for
+    Bedrock/SSM endpoint traffic through the NGFW.
 
     Args:
         subnets: List of dicts with 'name', 'cidr', 'connected_to'.
@@ -1399,6 +1403,7 @@ def configure_ngfw_subnets(
         management_ip: NGFW management IP for SSH.
         ssh_key_secret_arn: Secrets Manager ARN for SSH private key.
         ngfw_subnet_cidr: NGFW subnet CIDR for computing gateway IP.
+        ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR for NGFW routing.
     """
     # Compute VPC gateway IP (first IP + 1 in the subnet)
     network = ipaddress.ip_network(ngfw_subnet_cidr, strict=False)
@@ -1460,7 +1465,9 @@ def configure_ngfw_subnets(
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
-    steps = NGFWConfigureSubnetsPlan().get_steps(subnets, range_id, vpc_gateway_ip, stale_routes)
+    steps = NGFWConfigureSubnetsPlan().get_steps(
+        subnets, range_id, vpc_gateway_ip, stale_routes, ssm_endpoints_subnet_cidr
+    )
     plan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
@@ -2013,6 +2020,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
         "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
         "firewallEndpointId": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
+        "ssmEndpointsSubnetCidr": os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
         "portalVpcCidr": os.environ.get("PORTAL_VPC_CIDR", ""),
         "portalVpcPeeringId": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
     }
@@ -2174,6 +2182,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
             management_ip=ngfw_data["management_ip"],
             ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
             ngfw_subnet_cidr=ngfw_subnet_cidr,
+            ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
         )
     else:
         logger.warning(
@@ -2337,14 +2346,35 @@ def run_range_terraform(operation: str, request_id: str) -> None:
         if ngfw_data and ngfw_data.get("management_ip"):
             logger.info("NGFW enabled for range %s", range_id)
             ngfw_status = ngfw_data.get("status")
-            if ngfw_status in ("stopped", "stopping"):
-                ec2_instance_id = ngfw_data.get("ec2_instance_id")
+            ec2_instance_id = ngfw_data.get("ec2_instance_id")
+            if ngfw_status in ("stopped", "stopping", "starting"):
                 if ngfw_status == "stopping" and ec2_instance_id:
                     logger.info("NGFW is stopping, waiting for stop to complete...")
                     aws_executor = AWSExecutor()
                     aws_executor.wait_for_stopped(ec2_instance_id)
-                logger.info("Starting stopped NGFW for range provisioning...")
-                run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+                elif ngfw_status == "starting" and ec2_instance_id:
+                    # Status stuck in 'starting' - check actual EC2 state
+                    aws_executor = AWSExecutor()
+                    result = aws_executor.describe_instance(ec2_instance_id)
+                    ec2_state = None
+                    if result.success:
+                        data = json.loads(result.stdout)
+                        reservations = data.get("Reservations", [])
+                        if reservations and reservations[0].get("Instances"):
+                            ec2_state = reservations[0]["Instances"][0].get("State", {}).get("Name")
+                    if ec2_state == "stopped":
+                        logger.info("NGFW stuck in 'starting' but EC2 is stopped, restarting...")
+                        run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+                    elif ec2_state == "running":
+                        logger.info("NGFW starting, EC2 already running")
+                        # Already running, continue to provision
+                    elif ec2_state == "pending":
+                        logger.info("NGFW starting, waiting for EC2 to be running...")
+                        aws_executor.wait_for_running(ec2_instance_id)
+                        # Now running, continue to provision
+                else:
+                    logger.info("Starting stopped NGFW for range provisioning...")
+                    run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
 
     try:
         if operation == "up":
@@ -2454,29 +2484,31 @@ def _run_terraform_provision(
             ngfw_data["data_eni_id"],
         )
 
-    # Configure NGFW with routes for range subnets
-    ngfw_data = get_user_ngfw_data(user_id)
-    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
-    if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
-        logger.info("Configuring NGFW with subnet routes...")
-        subnets_for_ngfw = []
-        for spec_subnet in spec_subnets:
-            subnet_name = spec_subnet.get("name", "")
-            subnet_output = subnets_output.get(subnet_name, {})
-            subnets_for_ngfw.append(
-                {
-                    "name": subnet_name,
-                    "cidr": subnet_output.get("subnet_cidr", ""),
-                    "connected_to": spec_subnet.get("connected_to", []),
-                }
+    # Configure NGFW with routes for range subnets (only if range requires NGFW)
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
+        if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
+            logger.info("Configuring NGFW with subnet routes...")
+            subnets_for_ngfw = []
+            for spec_subnet in spec_subnets:
+                subnet_name = spec_subnet.get("name", "")
+                subnet_output = subnets_output.get(subnet_name, {})
+                subnets_for_ngfw.append(
+                    {
+                        "name": subnet_name,
+                        "cidr": subnet_output.get("subnet_cidr", ""),
+                        "connected_to": spec_subnet.get("connected_to", []),
+                    }
+                )
+            configure_ngfw_subnets(
+                subnets=subnets_for_ngfw,
+                range_id=range_id,
+                management_ip=ngfw_data["management_ip"],
+                ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
+                ngfw_subnet_cidr=ngfw_subnet_cidr,
+                ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
             )
-        configure_ngfw_subnets(
-            subnets=subnets_for_ngfw,
-            range_id=range_id,
-            management_ip=ngfw_data["management_ip"],
-            ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
-            ngfw_subnet_cidr=ngfw_subnet_cidr,
-        )
 
     # Run instance setup (DC first, then others in parallel)
     logger.info("Running instance setup...")

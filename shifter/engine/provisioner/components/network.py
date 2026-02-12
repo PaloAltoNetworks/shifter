@@ -11,6 +11,9 @@ each subnet to connected subnet CIDRs via the NGFW data ENI. This overrides
 AWS's implicit local VPC route for those specific CIDRs, forcing inter-subnet
 traffic through the NGFW. Internet traffic (0.0.0.0/0) uses the NAT gateway
 via AWS Network Firewall, not the NGFW.
+
+When an NGFW is in place, a route for the SSM/Bedrock endpoints subnet is also
+added via the NGFW, forcing Bedrock API traffic through the NGFW for inspection.
 """
 
 import hashlib

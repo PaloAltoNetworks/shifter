@@ -182,6 +182,8 @@ class RangeConfig:
     s3_endpoint_id: str = ""
     # AWS Network Firewall endpoint ID for internet egress from range subnets
     firewall_endpoint_id: str = ""
+    # SSM/Bedrock endpoints subnet CIDR for NGFW routing
+    ssm_endpoints_subnet_cidr: str = ""
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -580,4 +582,6 @@ def load_config() -> RangeConfig:
         s3_endpoint_id=config.get("s3EndpointId") or "",
         # AWS Network Firewall endpoint for internet egress
         firewall_endpoint_id=config.get("firewallEndpointId") or "",
+        # SSM/Bedrock endpoints subnet for NGFW routing
+        ssm_endpoints_subnet_cidr=config.get("ssmEndpointsSubnetCidr") or "",
     )

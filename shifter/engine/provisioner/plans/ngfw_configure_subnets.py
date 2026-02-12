@@ -55,6 +55,7 @@ def build_configure_input(
     range_id: int,
     vpc_gateway_ip: str,
     stale_routes_to_delete: list[str] | None = None,
+    ssm_endpoints_subnet_cidr: str = "",
 ) -> str:
     """Build PAN-OS configure commands for routes, addresses and security rules.
 
@@ -64,6 +65,8 @@ def build_configure_input(
         vpc_gateway_ip: VPC gateway IP address for static route next-hop.
         stale_routes_to_delete: Optional list of existing route names to delete first.
             Used to clean up stale routes from destroyed ranges that reused CIDRs.
+        ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR. When set,
+            adds a route and allow-all rule so Bedrock traffic passes through NGFW.
 
     Returns:
         Multi-line string with configure commands and single commit.
@@ -89,11 +92,24 @@ def build_configure_input(
             f"nexthop ip-address {vpc_gateway_ip}"
         )
 
+    # Add static route for SSM/Bedrock endpoints subnet so NGFW can forward traffic
+    if ssm_endpoints_subnet_cidr:
+        endpoints_route = f"range-{range_id}-endpoints"
+        lines.append(
+            f"set network virtual-router default routing-table ip static-route "
+            f"{endpoints_route} destination {ssm_endpoints_subnet_cidr} interface ethernet1/1 "
+            f"nexthop ip-address {vpc_gateway_ip}"
+        )
+
     # Add address objects for each subnet
     for subnet in subnets:
         addr_name = f"range-{range_id}-{subnet['name']}"
         cidr = subnet["cidr"]
         lines.append(f"set address {addr_name} ip-netmask {cidr}")
+
+    # Add address object for endpoints subnet
+    if ssm_endpoints_subnet_cidr:
+        lines.append(f"set address range-{range_id}-endpoints ip-netmask {ssm_endpoints_subnet_cidr}")
 
     # Add bidirectional security rules for each connected pair
     # Rules use 'ranges' zone (created during NGFW provisioning)
@@ -120,12 +136,37 @@ def build_configure_input(
             f"log-end yes log-setting XDR-Forward profile-setting group {ALERT_PROFILE_GROUP}"
         )
 
+    # Add allow-all rules from each range subnet to/from endpoints subnet
+    # This ensures Bedrock/SSM/STS traffic passes through NGFW with logging
+    if ssm_endpoints_subnet_cidr:
+        endpoints_addr = f"range-{range_id}-endpoints"
+        for subnet in subnets:
+            addr_name = f"range-{range_id}-{subnet['name']}"
+
+            # Subnet → Endpoints
+            rule_to = f"range-{range_id}-{subnet['name']}-to-endpoints"
+            lines.append(
+                f"set rulebase security rules {rule_to} "
+                f"from ranges to ranges source {addr_name} destination {endpoints_addr} "
+                "application any service any action allow "
+                f"log-end yes log-setting XDR-Forward profile-setting group {ALERT_PROFILE_GROUP}"
+            )
+
+            # Endpoints → Subnet (return traffic)
+            rule_from = f"range-{range_id}-endpoints-to-{subnet['name']}"
+            lines.append(
+                f"set rulebase security rules {rule_from} "
+                f"from ranges to ranges source {endpoints_addr} destination {addr_name} "
+                "application any service any action allow "
+                f"log-end yes log-setting XDR-Forward profile-setting group {ALERT_PROFILE_GROUP}"
+            )
+
     lines.append("commit")
     lines.append("exit")
     return "\n".join(lines)
 
 
-def build_remove_input(subnets: list[dict], range_id: int) -> str:
+def build_remove_input(subnets: list[dict], range_id: int, has_endpoints: bool = False) -> str:
     """Build PAN-OS configure commands to remove routes, addresses and rules.
 
     Deletion order: rules first (reference addresses), then addresses, then routes.
@@ -133,6 +174,7 @@ def build_remove_input(subnets: list[dict], range_id: int) -> str:
     Args:
         subnets: List of subnet dicts with 'name' and 'connected_to'.
         range_id: Range ID for naming.
+        has_endpoints: Whether endpoints subnet config was added (route, address, rules).
 
     Returns:
         Multi-line string with delete commands and single commit.
@@ -146,14 +188,30 @@ def build_remove_input(subnets: list[dict], range_id: int) -> str:
         lines.append(f"delete rulebase security rules {rule_ab}")
         lines.append(f"delete rulebase security rules {rule_ba}")
 
+    # Delete endpoints security rules
+    if has_endpoints:
+        for subnet in subnets:
+            rule_to = f"range-{range_id}-{subnet['name']}-to-endpoints"
+            rule_from = f"range-{range_id}-endpoints-to-{subnet['name']}"
+            lines.append(f"delete rulebase security rules {rule_to}")
+            lines.append(f"delete rulebase security rules {rule_from}")
+
     # Delete address objects
     for subnet in subnets:
         lines.append(f"delete address range-{range_id}-{subnet['name']}")
+
+    # Delete endpoints address object
+    if has_endpoints:
+        lines.append(f"delete address range-{range_id}-endpoints")
 
     # Delete static routes
     for subnet in subnets:
         route_name = f"range-{range_id}-{subnet['name']}"
         lines.append(f"delete network virtual-router default routing-table ip static-route {route_name}")
+
+    # Delete endpoints static route
+    if has_endpoints:
+        lines.append(f"delete network virtual-router default routing-table ip static-route range-{range_id}-endpoints")
 
     lines.append("commit")
     lines.append("exit")
@@ -187,6 +245,7 @@ class NGFWConfigureSubnetsPlan:
         range_id: int,
         vpc_gateway_ip: str,
         stale_routes_to_delete: list[str] | None = None,
+        ssm_endpoints_subnet_cidr: str = "",
     ) -> list[SetupStep]:
         """Build steps with dynamic stdin_input for the given subnets.
 
@@ -195,11 +254,14 @@ class NGFWConfigureSubnetsPlan:
             range_id: Range ID for unique naming.
             vpc_gateway_ip: VPC gateway IP address for static route next-hop.
             stale_routes_to_delete: Optional list of stale route names to delete first.
+            ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR for NGFW routing.
 
         Returns:
             List with single SetupStep containing all configure commands.
         """
-        stdin_input = build_configure_input(subnets, range_id, vpc_gateway_ip, stale_routes_to_delete)
+        stdin_input = build_configure_input(
+            subnets, range_id, vpc_gateway_ip, stale_routes_to_delete, ssm_endpoints_subnet_cidr
+        )
         return [
             SetupStep(
                 name="configure_subnets",
@@ -222,17 +284,18 @@ class NGFWRemoveSubnetsPlan:
 
     steps: ClassVar[list[SetupStep]] = []
 
-    def get_steps(self, subnets: list[dict], range_id: int) -> list[SetupStep]:
+    def get_steps(self, subnets: list[dict], range_id: int, has_endpoints: bool = False) -> list[SetupStep]:
         """Build steps with dynamic stdin_input for removing subnets.
 
         Args:
             subnets: List of subnet dicts with 'name' and 'connected_to'.
             range_id: Range ID for naming.
+            has_endpoints: Whether endpoints subnet config was added.
 
         Returns:
             List with single SetupStep containing all delete commands.
         """
-        stdin_input = build_remove_input(subnets, range_id)
+        stdin_input = build_remove_input(subnets, range_id, has_endpoints)
         return [
             SetupStep(
                 name="remove_subnets",

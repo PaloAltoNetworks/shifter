@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Subnet `connected_to` semantics corrected: Terraform now creates security group rules on target subnet allowing traffic from source (was reversed)
+- Range provisioning now reads NGFW data ENI ID from database instead of non-existent environment variable
+
+### Changed
+- Updated `connected_to` documentation to clarify unidirectional semantics (both subnets must list each other for bidirectional traffic)
+- Updated basic_ngfw scenario template to have bidirectional subnet connectivity
+
 ## [1.0.6] - 2026-01-28
 
 ### Added

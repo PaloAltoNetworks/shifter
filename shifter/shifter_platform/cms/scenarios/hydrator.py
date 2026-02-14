@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Literal
 from cms.exceptions import CMSError
 from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec, SubnetSpec
 
-from .loader import load_scenario
+from .registry import load_scenario_template as load_scenario
 
 if TYPE_CHECKING:
     from cms.models import AgentConfig, App, Credential, Instance, Request

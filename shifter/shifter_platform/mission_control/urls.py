@@ -44,4 +44,9 @@ urlpatterns = [
     # Credential API
     path("api/credentials/", views.api_credential_create, name="api_credential_create"),
     path("api/credentials/<int:credential_id>/delete/", views.api_credential_delete, name="api_credential_delete"),
+    # Files (scripts)
+    path("files/", views.files, name="files"),
+    path("files/upload/", views.file_upload, name="file_upload"),
+    path("files/<int:script_id>/delete/", views.file_delete, name="file_delete"),
+    path("api/scripts/", views.api_list_scripts, name="api_list_scripts"),
 ]

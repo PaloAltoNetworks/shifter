@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-02-14
+
+### Fixed
+- Restrictive Egress rules in Network Firewall loosened to match XSIAM docs recommendations
+
+## [2.1.1] - 2026-02-10
 ### Fixed
 - Subnet `connected_to` semantics corrected: Terraform now creates security group rules on target subnet allowing traffic from source (was reversed)
 - Range provisioning now reads NGFW data ENI ID from database instead of non-existent environment variable

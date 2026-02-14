@@ -57,7 +57,7 @@ instances:
 subnets:
   - name: string              # Subnet name
     instances: [string]       # Instance names in subnet
-    connected_to: [string]    # Connected subnets (for NGFW routing)
+    connected_to: [string]    # Subnets this subnet needs to reach (unidirectional)
 ```
 
 ### Available Scenarios

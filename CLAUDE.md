@@ -97,3 +97,10 @@ Use the django-testing skill for testing Django code.
 Use the doc-writing skill for writing documentation.
 
 Use the tdd-plan skill for planning work.
+
+## Active Technologies
+- Python 3.11+ (Django 5.x) + Django, Django Channels (WebSocket), boto3 (S3/SSM/ECS/SNS), Pydantic (validation) (experiment-manager)
+- PostgreSQL (models), Redis (channels), S3 (scripts and artifacts) (experiment-manager)
+
+## Recent Changes
+- experiment-manager: Added Python 3.11+ (Django 5.x) + Django, Django Channels (WebSocket), boto3 (S3/SSM/ECS/SNS), Pydantic (validation)

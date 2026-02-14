@@ -202,7 +202,7 @@ repos:
 
       - id: check-model-fks
         name: architecture (model FKs)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python manage.py check_model_fks -q'
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python manage.py check_model_fks -q'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
@@ -291,7 +291,7 @@ repos:
     hooks:
       - id: pytest-shifter
         name: pytest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false

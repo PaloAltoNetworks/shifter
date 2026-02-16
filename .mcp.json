@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "shifter-db": {
+    "shifter-ops": {
       "command": "node",
-      "args": ["mcp/shifter-db/index.js"],
+      "args": ["mcp/ops/index.js"],
       "env": {
         "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
         "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"
@@ -11,14 +11,6 @@
     "shifter-ngfw": {
       "command": "node",
       "args": ["mcp/ngfw/index.js"],
-      "env": {
-        "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
-        "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"
-      }
-    },
-    "shifter-aws": {
-      "command": "node",
-      "args": ["mcp/aws/index.js"],
       "env": {
         "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
         "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"

@@ -744,7 +744,7 @@ class TestSubnetIndexAllocation:
         request_id = UUID(response.json()["range"]["request_id"])
         range_obj = Range.objects.get(request__request_id=request_id)
         assert range_obj.subnet_index is not None
-        assert 1 <= range_obj.subnet_index <= 254
+        assert 1 <= range_obj.subnet_index <= Range.SUBNET_INDEX_MAX
 
     def test_first_allocation_returns_one(self, test_agent):
         """First allocation should return index 1."""
@@ -832,16 +832,17 @@ class TestSubnetIndexAllocation:
 
     def test_raises_when_exhausted(self, test_agent):
         """Should raise ValueError when all indices are used."""
-        # Create ranges for all 254 indices
-        for i in range(1, 255):
-            Range.objects.create(
-                user=test_agent.user,
-                status=Range.Status.READY,
-                subnet_index=i,
-            )
+        # Mock a small max to avoid creating thousands of ranges
+        with patch.object(Range, "SUBNET_INDEX_MAX", 5):
+            for i in range(1, 6):
+                Range.objects.create(
+                    user=test_agent.user,
+                    status=Range.Status.READY,
+                    subnet_index=i,
+                )
 
-        with pytest.raises(ValueError, match="No subnet indices available"):
-            Range.allocate_subnet_index()
+            with pytest.raises(ValueError, match="No subnet indices available"):
+                Range.allocate_subnet_index()
 
     def test_capacity_error_raises_value_error(self, client, test_agent, settings, django_user_model):
         """API raises ValueError when subnet allocation fails (no capacity).
@@ -854,25 +855,27 @@ class TestSubnetIndexAllocation:
         settings.PULUMI_ECS_CLUSTER_ARN = ""
         client.force_login(test_agent.user)
 
-        # Create a different user to hold the 254 ranges (so test_agent.user has no active range)
+        # Create a different user to hold the ranges (so test_agent.user has no active range)
         other_user = django_user_model.objects.create_user(
             username="capacitytest",
             email="capacitytest@example.com",
             password="testpass",
         )
 
-        # Create ranges for all 254 indices (owned by other_user, all READY so they block)
-        for i in range(1, 255):
-            Range.objects.create(
-                user=other_user,
-                status=Range.Status.READY,
-                subnet_index=i,
-            )
+        # Mock a small max to avoid creating thousands of ranges
+        with patch.object(Range, "SUBNET_INDEX_MAX", 5):
+            # Create ranges for all 5 indices (owned by other_user, all READY so they block)
+            for i in range(1, 6):
+                Range.objects.create(
+                    user=other_user,
+                    status=Range.Status.READY,
+                    subnet_index=i,
+                )
 
-        # Django test client propagates uncaught exceptions
-        with pytest.raises(ValueError, match="No subnet indices available"):
-            client.post(
-                reverse("mission_control:launch_range"),
-                data={"agent_id": test_agent.id},
-                content_type="application/json",
-            )
+            # Django test client propagates uncaught exceptions
+            with pytest.raises(ValueError, match="No subnet indices available"):
+                client.post(
+                    reverse("mission_control:launch_range"),
+                    data={"agent_id": test_agent.id},
+                    content_type="application/json",
+                )

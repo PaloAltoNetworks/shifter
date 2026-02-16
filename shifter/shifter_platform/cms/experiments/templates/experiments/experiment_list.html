@@ -1,0 +1,133 @@
+{% extends "experiments/base.html" %}
+{% load static %}
+
+{% block title %}Experiments{% endblock %}
+
+{% block extra_css %}
+<style>
+    .experiment-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .experiment-table th,
+    .experiment-table td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--xdr-border);
+    }
+    .experiment-table th {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--xdr-text-secondary);
+        text-transform: uppercase;
+    }
+    .experiment-table tbody tr:hover {
+        background: var(--xdr-hover);
+        cursor: pointer;
+    }
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        padding: 2px 8px;
+        border-radius: 3px;
+    }
+    .status-badge-draft { background: rgba(112, 112, 112, 0.15); color: #707070; }
+    .status-badge-queued { background: rgba(250, 173, 20, 0.15); color: #faad14; }
+    .status-badge-running { background: rgba(64, 169, 255, 0.15); color: #40a9ff; }
+    .status-badge-completed { background: rgba(0, 210, 106, 0.15); color: #00d26a; }
+    .status-badge-cancelled { background: rgba(112, 112, 112, 0.15); color: #b8b8b8; }
+    .status-badge-failed { background: rgba(255, 77, 79, 0.15); color: #ff4d4f; }
+    .run-progress {
+        font-size: 12px;
+        color: var(--xdr-text-secondary);
+    }
+    .pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 16px 0;
+        font-size: 13px;
+        color: var(--xdr-text-secondary);
+    }
+    .pagination a {
+        color: #40a9ff;
+        text-decoration: none;
+        padding: 4px 12px;
+        border: 1px solid var(--xdr-border);
+        border-radius: 4px;
+    }
+    .pagination a:hover {
+        background: var(--xdr-hover);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header-row">
+    <div class="page-header-content">
+        <h1 class="page-title">Experiments</h1>
+        <p class="page-subtitle">Manage and monitor your experiment runs</p>
+    </div>
+    <a href="{% url 'experiments:experiment_create' %}" class="btn btn-primary">New Experiment</a>
+</div>
+
+{% if messages %}
+<div class="mb-lg">
+    {% for message in messages %}
+    <div class="message message-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if experiments %}
+<div class="card">
+    <table class="experiment-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Scenario</th>
+                <th>Status</th>
+                <th>Runs</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for exp in experiments %}
+            <tr onclick="window.location='{% url 'experiments:experiment_detail' exp.pk %}'">
+                <td>{{ exp.name }}</td>
+                <td>{{ exp.scenario_id }}</td>
+                <td><span class="status-badge status-badge-{{ exp.status }}">{{ exp.status }}</span></td>
+                <td class="run-progress">{{ exp.completed_runs|default:0 }} / {{ exp.total_run_count|default:exp.total_runs }}</td>
+                <td class="text-muted text-small">{{ exp.created_at|date:"M d, Y H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% if experiments.has_other_pages %}
+<div class="pagination">
+    {% if experiments.has_previous %}
+    <a href="?page={{ experiments.previous_page_number }}">&larr; Previous</a>
+    {% endif %}
+    <span>Page {{ experiments.number }} of {{ experiments.paginator.num_pages }}</span>
+    {% if experiments.has_next %}
+    <a href="?page={{ experiments.next_page_number }}">Next &rarr;</a>
+    {% endif %}
+</div>
+{% endif %}
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <h3>No experiments yet</h3>
+        <p>Create your first experiment to get started</p>
+        <div style="margin-top: 16px;">
+            <a href="{% url 'experiments:experiment_create' %}" class="btn btn-primary">New Experiment</a>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

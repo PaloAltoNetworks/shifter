@@ -16,7 +16,7 @@ import {
   FORBIDDEN_PATTERN,
 } from "./lib.js";
 
-const { Client } = pg;
+const { Pool } = pg;
 
 const PROFILES = {
   dev: process.env.PANW_SHIFTER_DEV_PROFILE,
@@ -148,29 +148,57 @@ async function ensureTunnel(env) {
   throw new Error("Tunnel failed to start within 30 seconds");
 }
 
-async function getDbClient(env, { readOnly = true } = {}) {
+const pools = {}; // env -> pg.Pool
+
+async function getPool(env) {
   await ensureTunnel(env);
   const creds = await fetchCredentials(env);
 
-  const client = new Client({
-    host: "localhost",
-    port: LOCAL_PORTS[env],
-    user: creds.username,
-    password: creds.password,
-    database: creds.dbname,
-    ssl: { rejectUnauthorized: false },
-  });
-
-  await client.connect();
-  if (readOnly) {
-    await client.query("SET default_transaction_read_only = ON");
+  if (!pools[env]) {
+    pools[env] = new Pool({
+      host: "localhost",
+      port: LOCAL_PORTS[env],
+      user: creds.username,
+      password: creds.password,
+      database: creds.dbname,
+      ssl: { rejectUnauthorized: false },
+      max: 3,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+    });
+    pools[env].on("error", () => {
+      // Discard pool on background connection errors (e.g. tunnel drop)
+      pools[env]?.end().catch(() => {});
+      delete pools[env];
+    });
   }
-  return client;
+
+  return pools[env];
+}
+
+async function withClient(env, { readOnly = true } = {}, fn) {
+  const pool = await getPool(env);
+  const client = await pool.connect();
+  try {
+    if (readOnly) {
+      await client.query("SET default_transaction_read_only = ON");
+    }
+    return await fn(client);
+  } finally {
+    if (readOnly) {
+      await client.query("SET default_transaction_read_only = OFF").catch(() => {});
+    }
+    client.release();
+  }
 }
 
 // --- Cleanup ---
 
 function cleanup() {
+  for (const env of Object.keys(pools)) {
+    pools[env]?.end().catch(() => {});
+    delete pools[env];
+  }
   for (const env of Object.keys(tunnels)) {
     if (tunnels[env]?.process) {
       tunnels[env].process.kill();
@@ -206,8 +234,7 @@ server.tool(
   "List all database tables with their service layer and row counts",
   { env: EnvSchema },
   async ({ env }) => {
-    const client = await getDbClient(env);
-    try {
+    return withClient(env, { readOnly: true }, async (client) => {
       const result = await client.query(`
         SELECT t.tablename,
                pg_stat_get_live_tuples(c.oid) AS row_count
@@ -231,9 +258,7 @@ server.tool(
           },
         ],
       };
-    } finally {
-      await client.end();
-    }
+    });
   }
 );
 
@@ -246,8 +271,7 @@ server.tool(
     env: EnvSchema,
   },
   async ({ table_name, env }) => {
-    const client = await getDbClient(env);
-    try {
+    return withClient(env, { readOnly: true }, async (client) => {
       // Columns
       const cols = await client.query(
         `SELECT column_name, data_type, is_nullable, column_default
@@ -304,9 +328,7 @@ server.tool(
       return {
         content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
       };
-    } finally {
-      await client.end();
-    }
+    });
   }
 );
 
@@ -331,25 +353,24 @@ server.tool(
       };
     }
 
-    const client = await getDbClient(env);
     try {
-      const result = await client.query(sql);
-      const output = {
-        rows: result.rows,
-        rowCount: result.rowCount,
-        fields: result.fields?.map((f) => f.name),
-      };
+      return await withClient(env, { readOnly: true }, async (client) => {
+        const result = await client.query(sql);
+        const output = {
+          rows: result.rows,
+          rowCount: result.rowCount,
+          fields: result.fields?.map((f) => f.name),
+        };
 
-      return {
-        content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
-      };
+        return {
+          content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+        };
+      });
     } catch (err) {
       return {
         content: [{ type: "text", text: `Query error: ${err.message}` }],
         isError: true,
       };
-    } finally {
-      await client.end();
     }
   }
 );
@@ -363,28 +384,27 @@ server.tool(
     env: EnvSchema,
   },
   async ({ sql, env }) => {
-    const client = await getDbClient(env, { readOnly: false });
     try {
-      const result = await client.query(sql);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              { rowCount: result.rowCount, command: result.command },
-              null,
-              2
-            ),
-          },
-        ],
-      };
+      return await withClient(env, { readOnly: false }, async (client) => {
+        const result = await client.query(sql);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                { rowCount: result.rowCount, command: result.command },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      });
     } catch (err) {
       return {
         content: [{ type: "text", text: `Execute error: ${err.message}` }],
         isError: true,
       };
-    } finally {
-      await client.end();
     }
   }
 );

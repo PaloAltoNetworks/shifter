@@ -37,7 +37,32 @@ Remote Desktop for graphical access to Windows and Kali machines.
 | Kali (Attacker) | Yes |
 | Windows Workstation | Yes |
 | Windows Server/DC | Yes |
-| Ubuntu/Linux | No (SSH only) |
+| Ubuntu | Yes |
+
+## File Transfers
+
+Transfer files to and from instances via SFTP in RDP sessions.
+
+### Upload Files
+
+1. Open an RDP session
+2. Press **Ctrl+Shift+Alt** to open the Guacamole menu
+3. Select **Devices** in the sidebar
+4. Drag files into the file browser or use the upload button
+
+### Download Files
+
+1. Open the Guacamole menu (**Ctrl+Shift+Alt**)
+2. Navigate to the file in **Devices**
+3. Click the file to download
+
+### File Locations
+
+| Instance | Upload Directory |
+|----------|------------------|
+| Kali | `/home/kali` |
+| Ubuntu | `/home/ubuntu` |
+| Windows | `C:\Users\Administrator\Downloads` |
 
 ## Instance Types
 

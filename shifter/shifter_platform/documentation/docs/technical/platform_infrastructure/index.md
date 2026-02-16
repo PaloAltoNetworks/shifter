@@ -60,6 +60,7 @@ ElastiCache Redis:
 
 ## Related Docs
 
+- [AMI Management](ami-management) - Packer builds and SSM parameter management
 - [Manual Deployment](manual-deployment) - Infrastructure elements deployed without CI/CD
 - [CI/CD](cicd) - Deployment pipelines
 - [Networking](networking) - VPC architecture and peering

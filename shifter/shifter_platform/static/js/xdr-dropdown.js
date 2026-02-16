@@ -131,7 +131,7 @@ class XdrDropdown {
         this.items.forEach(item => item.classList.remove('highlighted'));
         if (index >= 0 && index < this.getVisibleItems().length) {
             const visibleItems = this.getVisibleItems();
-            visibleItems[index].classList.add('highlighted');
+            visibleItems[index].classList.add('highlighted'); // eslint-disable-line security/detect-object-injection
             this.highlightedIndex = index;
         }
     }
@@ -143,7 +143,7 @@ class XdrDropdown {
     scrollToItem(index) {
         const visibleItems = this.getVisibleItems();
         if (index >= 0 && index < visibleItems.length) {
-            visibleItems[index].scrollIntoView({ block: 'nearest' });
+            visibleItems[index].scrollIntoView({ block: 'nearest' }); // eslint-disable-line security/detect-object-injection
         }
     }
 

@@ -33,19 +33,20 @@ class TestDomainJoinPlan:
         plan = DomainJoinPlan()
         dc_config = {
             "dc_ip": "10.1.100.10",
-            "domain_name": "internal.shifter",
+            "domain_name": "range42.lab",
             "domain_admin_password": "TestPassword123!",
         }
         context = plan.get_context(dc_config)
 
         assert context["dc_ip"] == "10.1.100.10"
-        assert context["domain_name"] == "internal.shifter"
+        assert context["domain_name"] == "range42.lab"
         assert context["domain_admin_password"] == "TestPassword123!"
         assert context["domain_admin_user"] == "Administrator"
 
-    def test_dns_polling_has_7_max_attempts(self):
-        """DNS polling should have 7 max attempts (~70s total)."""
-        assert "$maxAttempts = 7" in JOIN_DOMAIN_SCRIPT
+    def test_dns_polling_has_generous_retry_config(self):
+        """DNS polling should have generous retries (~10 mins total)."""
+        assert "$maxAttempts = 30" in JOIN_DOMAIN_SCRIPT
+        assert "$retryDelaySeconds = 20" in JOIN_DOMAIN_SCRIPT
 
 
 class TestDomainJoinErrorHandling:
@@ -64,7 +65,7 @@ class TestDomainJoinErrorHandling:
         context = plan.get_context(
             {
                 "dc_ip": "10.1.100.10",
-                "domain_name": "internal.shifter",
+                "domain_name": "range42.lab",
                 "domain_admin_password": "TestPassword123!",
             }
         )

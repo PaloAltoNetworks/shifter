@@ -29,6 +29,13 @@ from cms import list_agents as cms_list_agents
 from cms import list_credentials as cms_list_credentials
 from cms import list_ngfws as cms_list_ngfws
 from cms import list_scenarios as cms_list_scenarios
+from cms.experiments.exceptions import ScriptUploadError
+from cms.experiments.services import (
+    complete_script_upload,
+    delete_script,
+    initiate_script_upload,
+    list_scripts,
+)
 from cms.services import create_ngfw as cms_create_ngfw
 from cms.services import destroy_ngfw as cms_destroy_ngfw
 from cms.services import get_ngfw as cms_get_ngfw
@@ -144,7 +151,7 @@ def guacamole_rdp_url(request):
     Security:
         - User must have an active range in READY status
         - URL is signed with HMAC-SHA256 and expires in 5 minutes
-        - Only works for instances with GUI (kali, windows)
+        - Only works for instances with GUI (kali, ubuntu, windows)
     """
     from engine.services import get_rdp_connection_info
     from mission_control.guacamole import create_guacamole_rdp_url
@@ -174,14 +181,25 @@ def guacamole_rdp_url(request):
     guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
     guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
+    # Log whether SFTP key is available (do not log key contents)
+    logger.info(
+        "Guac RDP request: user=%s instance_uuid=%s os=%s sftp_key=%s",
+        request.user.email,
+        instance_uuid,
+        conn_info.get("os_type"),
+        "yes" if conn_info.get("ssh_key") else "no",
+    )
+
     # Generate signed URL
     # Set SFTP root directory based on OS type for file transfers
     # Note: SFTP paths use forward slashes even on Windows
     os_type = conn_info.get("os_type")
     if os_type == "kali":
         sftp_root_directory = "/home/kali"
+    elif os_type == "ubuntu":
+        sftp_root_directory = "/home/ubuntu"
     elif os_type == "windows":
-        sftp_root_directory = "/C:/Users/Administrator"
+        sftp_root_directory = "/C:/Users/Administrator/Downloads"
     else:
         sftp_root_directory = None
 
@@ -559,6 +577,88 @@ def destroy_range(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
+@require_POST
+def pause_range(request: HttpRequest) -> JsonResponse:
+    """
+    Pause an active range.
+
+    Request body (JSON):
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to pause (legacy, deprecated)
+
+    Sets status to PAUSING and triggers async instance stop.
+    """
+    from cms import pause_range as cms_pause_range_by_id
+    from cms.services import pause_range_by_request_id as cms_pause_range_by_request
+
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
+    range_id = data.get("range_id")
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
+
+    try:
+        if request_id:
+            cms_pause_range_by_request(user, request_id)
+            logger.info("Range paused: user=%s request_id=%s", user.email, request_id)
+        else:
+            cms_pause_range_by_id(user, range_id)
+            logger.info("Range paused: user=%s range_id=%s", user.email, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
+@require_POST
+def resume_range(request: HttpRequest) -> JsonResponse:
+    """
+    Resume a paused range.
+
+    Request body (JSON):
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to resume (legacy, deprecated)
+
+    Sets status to RESUMING and triggers async instance start.
+    """
+    from cms import resume_range as cms_resume_range_by_id
+    from cms.services import resume_range_by_request_id as cms_resume_range_by_request
+
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
+    range_id = data.get("range_id")
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
+
+    try:
+        if request_id:
+            cms_resume_range_by_request(user, request_id)
+            logger.info("Range resumed: user=%s request_id=%s", user.email, request_id)
+        else:
+            cms_resume_range_by_id(user, range_id)
+            logger.info("Range resumed: user=%s range_id=%s", user.email, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
 @require_GET
 def list_agents(request: HttpRequest) -> JsonResponse:
     """
@@ -766,39 +866,6 @@ def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
     return JsonResponse({"status": "deprovisioning"})
 
 
-@login_required
-@require_POST
-def api_ngfw_complete_setup(request: HttpRequest, app_id: str) -> JsonResponse:
-    """Complete NGFW setup after user associates device in SCM/XDR.
-
-    After provisioning ends with awaiting_association status, the user must:
-    1. Associate the device in Strata Cloud Manager (Device Associations)
-    2. Connect the firewall to XDR/XSIAM
-
-    This endpoint triggers the final setup which fetches the license,
-    waits for CSP certificate sync, and marks the NGFW as ready.
-    """
-    from cms.services import complete_ngfw_setup as cms_complete_ngfw_setup
-
-    user = _get_user(request)
-
-    try:
-        result = cms_complete_ngfw_setup(user, app_id)
-    except CMSError as e:
-        if "not found" in str(e).lower():
-            raise Http404(_NGFW_NOT_FOUND) from None
-        return JsonResponse({"error": str(e)}, status=400)
-
-    logger.info("NGFW complete-setup triggered: user=%s app_id=%s", user.email, app_id)
-    return JsonResponse(
-        {
-            "status": "configuring",
-            "app_id": str(result.app_id),
-            "instance_id": str(result.instance_id),
-        }
-    )
-
-
 # -----------------------------------------------------------------------------
 # Credential Views
 # -----------------------------------------------------------------------------
@@ -949,3 +1016,121 @@ def api_credential_delete(request: HttpRequest, credential_id: int) -> JsonRespo
     )
 
     return JsonResponse({"success": True})
+
+
+# -----------------------------------------------------------------------------
+# Files (Scripts) Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def files(request: HttpRequest) -> HttpResponse:
+    """File management - upload and manage script files."""
+    scripts = list_scripts(_get_user(request))
+    context = {
+        "page_title": "Files",
+        "active_nav": "files",
+        "scripts": scripts,
+    }
+    return render(request, "mission_control/files.html", context)
+
+
+@login_required
+@require_POST
+def file_upload(request: HttpRequest) -> JsonResponse:
+    """Script file upload — two-step presigned URL flow (JSON API).
+
+    Step 1: POST with {name, filename, file_size} → returns {presigned_url, upload_token}
+    Step 2: POST with {upload_token} → returns {success, script_id}
+    """
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    upload_token = data.get("upload_token")
+
+    if upload_token:
+        # Step 2: Complete upload
+        try:
+            script = complete_script_upload(user, upload_token)
+        except ScriptUploadError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+        logger.info("Script upload completed: user=%s script_id=%s", user.email, script.pk)
+        return JsonResponse(
+            {
+                "success": True,
+                "script_id": script.pk,
+                "message": f"Script '{script.name}' uploaded successfully.",
+            }
+        )
+
+    # Step 1: Initiate upload
+    name = data.get("name", "").strip()
+    filename = data.get("filename", "").strip()
+    file_size = data.get("file_size", 0)
+
+    if not name:
+        return JsonResponse({"error": "Script name is required"}, status=400)
+    if not filename:
+        return JsonResponse({"error": "Filename is required"}, status=400)
+    if not isinstance(file_size, int) or file_size <= 0:
+        return JsonResponse({"error": "Valid file size is required"}, status=400)
+
+    filename = os.path.basename(filename)
+
+    try:
+        result = initiate_script_upload(user, name, filename, file_size)
+    except ScriptUploadError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    logger.info(
+        "Script upload initiated: user=%s filename=%s size=%d",
+        user.email,
+        filename,
+        file_size,
+    )
+    return JsonResponse(result)
+
+
+@login_required
+@require_POST
+def file_delete(request: HttpRequest, script_id: int) -> HttpResponse:
+    """Delete a script file (soft delete)."""
+    user = _get_user(request)
+    try:
+        delete_script(user, script_id)
+        messages.success(request, "Script deleted.")
+        logger.info("Script deleted: user=%s script_id=%s", user.email, script_id)
+    except ScriptUploadError as e:
+        messages.error(request, str(e))
+        logger.error(
+            "Script delete error: user=%s script_id=%s error=%s",
+            user.email,
+            script_id,
+            str(e),
+        )
+
+    return redirect("mission_control:files")
+
+
+@login_required
+@require_GET
+def api_list_scripts(request: HttpRequest) -> JsonResponse:
+    """JSON endpoint for listing scripts (used by experiment create form)."""
+    scripts = list_scripts(_get_user(request))
+    return JsonResponse(
+        {
+            "scripts": [
+                {
+                    "id": s.pk,
+                    "name": s.name,
+                    "filename": s.original_filename,
+                }
+                for s in scripts
+            ]
+        }
+    )

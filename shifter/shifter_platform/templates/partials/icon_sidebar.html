@@ -209,14 +209,24 @@
                 </a>
             </div>
 
-            {# User profile #}
-            <div class="nav-profile">
-                <div class="nav-profile-avatar">
-                    {{ user.email|initials }}
-                </div>
-                <div class="nav-profile-info hide-when-minimized hide-when-submenu">
-                    <div class="nav-profile-name">{{ user.get_full_name|default:user.username }}</div>
-                    <div class="nav-profile-email">{{ user.email }}</div>
+            {# User profile with dropdown menu #}
+            <div class="nav-profile-container">
+                <button type="button" class="nav-profile" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
+                    <div class="nav-profile-avatar">
+                        {{ user.email|initials }}
+                    </div>
+                    <div class="nav-profile-info hide-when-minimized hide-when-submenu">
+                        <div class="nav-profile-name">{{ user.get_full_name|default:user.username }}</div>
+                        <div class="nav-profile-email">{{ user.email }}</div>
+                    </div>
+                </button>
+                <div class="nav-user-menu" id="userMenu">
+                    <a href="{% url 'oidc_logout' %}" class="nav-user-menu-item">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M17 7L15.59 8.41L18.17 11H8V13H18.17L15.59 15.58L17 17L22 12L17 7ZM4 5H12V3H4C2.9 3 2 3.9 2 5V19C2 20.1 2.9 21 4 21H12V19H4V5Z"/>
+                        </svg>
+                        <span>Sign out</span>
+                    </a>
                 </div>
             </div>
         </div>

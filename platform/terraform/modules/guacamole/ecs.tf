@@ -98,11 +98,12 @@ resource "aws_ecs_task_definition" "guacd" {
 # ------------------------------------------------------------------------------
 
 resource "aws_ecs_service" "guacd" {
-  name            = "${var.name_prefix}-guacd"
-  cluster         = aws_ecs_cluster.guacamole.id
-  task_definition = aws_ecs_task_definition.guacd.arn
-  desired_count   = var.guacd_desired_count
-  launch_type     = "FARGATE"
+  name                 = "${var.name_prefix}-guacd"
+  cluster              = aws_ecs_cluster.guacamole.id
+  task_definition      = aws_ecs_task_definition.guacd.arn
+  desired_count        = var.guacd_desired_count
+  launch_type          = "FARGATE"
+  force_new_deployment = true
 
   network_configuration {
     subnets          = var.private_subnet_ids
@@ -198,11 +199,12 @@ resource "aws_ecs_task_definition" "guacamole_client" {
 # ------------------------------------------------------------------------------
 
 resource "aws_ecs_service" "guacamole_client" {
-  name            = "${var.name_prefix}-guacamole-client"
-  cluster         = aws_ecs_cluster.guacamole.id
-  task_definition = aws_ecs_task_definition.guacamole_client.arn
-  desired_count   = var.guacamole_client_desired_count
-  launch_type     = "FARGATE"
+  name                 = "${var.name_prefix}-guacamole-client"
+  cluster              = aws_ecs_cluster.guacamole.id
+  task_definition      = aws_ecs_task_definition.guacamole_client.arn
+  desired_count        = var.guacamole_client_desired_count
+  launch_type          = "FARGATE"
+  force_new_deployment = true
 
   network_configuration {
     subnets          = var.private_subnet_ids

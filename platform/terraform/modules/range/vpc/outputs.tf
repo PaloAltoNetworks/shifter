@@ -145,3 +145,12 @@ output "ngfw_capacity_sns_topic_arn" {
   description = "ARN of the SNS topic for NGFW capacity alerts (null if NGFW infrastructure disabled)"
   value       = var.enable_ngfw_infrastructure ? aws_sns_topic.ngfw_capacity[0].arn : null
 }
+
+# ------------------------------------------------------------------------------
+# SSM/Bedrock Endpoints
+# ------------------------------------------------------------------------------
+
+output "ssm_endpoints_subnet_cidr" {
+  description = "CIDR block of the SSM/Bedrock endpoints subnet (for NGFW routing)"
+  value       = aws_subnet.ssm_endpoints.cidr_block
+}

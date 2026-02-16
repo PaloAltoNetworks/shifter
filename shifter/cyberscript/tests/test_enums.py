@@ -26,6 +26,12 @@ class TestResourceStatus:
 
         assert ResourceStatus.READY == "ready"
 
+    def test_has_pausing_status(self):
+        """ResourceStatus has PAUSING value."""
+        from shared.enums import ResourceStatus
+
+        assert ResourceStatus.PAUSING == "pausing"
+
     def test_has_paused_status(self):
         """ResourceStatus has PAUSED value."""
         from cyberscript.enums import ResourceStatus
@@ -87,6 +93,7 @@ class TestResourceStatus:
             ResourceStatus.PENDING,
             ResourceStatus.PROVISIONING,
             ResourceStatus.READY,
+            ResourceStatus.PAUSING,
             ResourceStatus.PAUSED,
             ResourceStatus.RESUMING,
             ResourceStatus.DESTROYING,

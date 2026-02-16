@@ -16,11 +16,18 @@ instances:
     role: dc
     os_type: windows
     domain_controller: true
-    xdr_agent: false
+    xdr_agent: true
     ai_agent: true
     dc_config:
-      domain_name: cortexbyot.lab
-      netbios_name: CORTEXBYOT
+      domain_name: internal.shifter
+      netbios_name: INTSHIFTER
+
+  - name: Cortex Host
+    role: victim
+    os_type: ubuntu
+    xdr_agent: true
+    join_domain: true
+    ai_agent: true
 
   - name: Workstation 1
     role: victim
@@ -45,15 +52,17 @@ instances:
 
 subnets:
   - name: dc_network
-    instances: [Domain Controller]
-    connected_to: [workstation_network, server_network]
+    instances: [Domain Controller, Cortex Host]
+    connected_to: [workstation_network, server_network, attacker_network]
 
   - name: workstation_network
     instances: [Workstation 1, Workstation 2]
-    connected_to: [attacker_network]
+    connected_to: [dc_network, server_network, attacker_network]
 
   - name: server_network
     instances: [Server]
+    connected_to: [dc_network, workstation_network, attacker_network]
 
   - name: attacker_network
     instances: [Attacker]
+    connected_to: [dc_network, workstation_network, server_network]

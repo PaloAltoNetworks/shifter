@@ -625,8 +625,16 @@ class Subnet(EntityBase):
 # -----------------------------------------------------------------------------
 
 
+class AgentType(models.TextChoices):
+    """Types of agents that can be uploaded."""
+
+    XDR = "xdr", "XDR/XSIAM Agent"
+    XDR_COLLECTOR = "xdr_collector", "XDR Collector"
+    CLOUD_IDENTITY_ENGINE = "cloud_identity_engine", "Cloud Identity Engine"
+
+
 class AgentConfig(FileAsset):
-    """XDR/XSIAM agent installer uploaded by a user.
+    """Agent installer uploaded by a user.
 
     Inherits from FileAsset:
     - name, created_at, deleted_at, is_deleted from Asset
@@ -635,6 +643,7 @@ class AgentConfig(FileAsset):
     AgentConfig-specific:
     - user: Owner of this agent (with related_name="cms_agents")
     - os: Operating system this agent is for
+    - agent_type: Type of agent (xdr, xdr_collector, cloud_identity_engine)
     """
 
     user = models.ForeignKey(
@@ -646,6 +655,12 @@ class AgentConfig(FileAsset):
         OperatingSystem,
         on_delete=models.PROTECT,
         related_name="cms_agents",
+    )
+    agent_type = models.CharField(
+        max_length=30,
+        choices=AgentType.choices,
+        default=AgentType.XDR,
+        help_text="Type of agent (XDR, XDR Collector, Cloud Identity Engine)",
     )
 
     class Meta:

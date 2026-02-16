@@ -558,7 +558,7 @@ def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> C
 
         # Apply defaults for SCM credentials
         if credential_type_slug == "scm" and not kwargs.get("scm_folder_name"):
-            kwargs["scm_folder_name"] = "All Firewalls"
+            kwargs["scm_folder_name"] = ""
 
         # Remaining kwargs go into the data JSON field
         data = kwargs
@@ -1419,7 +1419,7 @@ def create_range(
     from cms.exceptions import CMSError
     from cms.models import RangeInstance
     from cms.scenarios.hydrator import hydrate_scenario
-    from cms.scenarios.loader import load_scenario
+    from cms.scenarios.registry import load_scenario_template as load_scenario
 
     # Input validation - user
     if user is None:
@@ -2105,8 +2105,15 @@ def pause_range(user: User, range_id: int) -> None:
             )
             raise CMSError("Range has no associated request")
 
-        # Call engine - it will update DB status and trigger ECS task
+        # Update CMS status to PAUSING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.PAUSING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
         if not engine_pause_range(request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.READY.value
+            instance.save(update_fields=["status"])
             logger.warning(
                 "pause_range: engine returned False for range_id=%s",
                 range_id,
@@ -2188,8 +2195,15 @@ def pause_range_by_request_id(user: User, request_id: str) -> None:
         raise CMSError("Range has no associated request")
 
     try:
-        # Call engine - it will update DB status and trigger ECS task
+        # Update CMS status to PAUSING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.PAUSING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
         if not engine_pause_range(instance.request.request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.READY.value
+            instance.save(update_fields=["status"])
             logger.warning(
                 "pause_range_by_request_id: engine returned False for request_id=%s",
                 request_id,
@@ -2308,8 +2322,15 @@ def resume_range(user: User, range_id: int) -> None:
             )
             raise CMSError("Range has no associated request")
 
-        # Call engine - it will update DB status and trigger ECS task
+        # Update CMS status to RESUMING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.RESUMING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
         if not engine_resume_range(request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.PAUSED.value
+            instance.save(update_fields=["status"])
             logger.warning(
                 "resume_range: engine returned False for range_id=%s",
                 range_id,
@@ -2391,8 +2412,15 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
         raise CMSError("Range has no associated request")
 
     try:
-        # Call engine - it will update DB status and trigger ECS task
+        # Update CMS status to RESUMING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.RESUMING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
         if not engine_resume_range(instance.request.request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.PAUSED.value
+            instance.save(update_fields=["status"])
             logger.warning(
                 "resume_range_by_request_id: engine returned False for request_id=%s",
                 request_id,
@@ -2900,18 +2928,21 @@ def get_storage_used(user: User) -> int:
 def list_scenarios(user: User) -> list[dict[str, Any]]:
     """Get available scenarios with metadata.
 
+    Uses the scenario registry to combine YAML defaults and DB customs,
+    applying metadata overlays and access filtering.
+
     Args:
         user: User requesting scenarios
 
     Returns:
         List of scenario dictionaries with id, name, description,
-        requirements, and instances fields.
+        requirements, instances, is_default, enabled, staff_only fields.
 
     Raises:
         TypeError: If user is None or invalid type
         ValueError: If user is unsaved
     """
-    from cms.scenarios.loader import get_all_scenarios
+    from cms.scenarios.registry import list_all_scenarios
 
     # Input validation - user
     if user is None:
@@ -2933,15 +2964,7 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
     logger.debug("list_scenarios called for user_id=%s", user.id)
 
     try:
-        scenarios = get_all_scenarios()
-
-        # Filter to enabled scenarios and convert to dicts with agent requirements
-        result = []
-        for scenario in scenarios:
-            if scenario.enabled:
-                data = scenario.model_dump()
-                data["agent_requirements"] = scenario.get_agent_requirements()
-                result.append(data)
+        result = list_all_scenarios(user=user)
 
         logger.debug(
             "list_scenarios returning %d scenarios for user_id=%s",
@@ -2961,23 +2984,25 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
 def get_scenario(scenario_id: str) -> dict[str, Any]:
     """Get a single scenario template by ID.
 
+    Uses the scenario registry to check DB first, then YAML.
+
     Args:
         scenario_id: Unique scenario identifier
 
     Returns:
-        Scenario dictionary with id, name, description, requirements, instances
+        Scenario dictionary with id, name, description, requirements,
+        instances, is_default, enabled, staff_only fields.
 
     Raises:
         CMSError: If scenario not found
     """
     from cms.exceptions import CMSError
-    from cms.scenarios.loader import load_scenario
+    from cms.scenarios.registry import get_scenario_detail
 
     logger.debug("get_scenario called for scenario_id=%s", scenario_id)
 
     try:
-        scenario = load_scenario(scenario_id)
-        return scenario.model_dump()
+        return get_scenario_detail(scenario_id)
 
     except ValueError as e:
         logger.error("get_scenario: scenario '%s' not found", scenario_id)
@@ -3004,7 +3029,7 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
         CMSError: If validation fails (agent missing, wrong OS, etc.)
     """
     from cms.exceptions import CMSError
-    from cms.scenarios.loader import load_scenario
+    from cms.scenarios.registry import load_scenario_template
 
     logger.debug(
         "validate_scenario_requirements called for scenario_id=%s",
@@ -3012,7 +3037,7 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
     )
 
     try:
-        scenario = load_scenario(scenario_id)
+        scenario = load_scenario_template(scenario_id)
     except ValueError as e:
         logger.error(
             "validate_scenario_requirements: scenario '%s' not found",
@@ -3192,10 +3217,29 @@ def create_ngfw(
         ValueError: If required fields missing or invalid values
         CMSError: If credential validation fails
     """
-    from cms.models import Credential
+    from cms.models import App, Credential
+    from shared.enums import ResourceStatus
     from shared.schemas.app import NGFWAppRef
 
     _validate_ngfw_user(user)
+
+    # Check user doesn't already have an active NGFW
+    existing_ngfw = (
+        App.objects.filter(
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
+        )
+        .exclude(status=ResourceStatus.DESTROYING.value)
+        .first()
+    )
+    if existing_ngfw:
+        logger.warning(
+            "create_ngfw: user_id=%s already has active NGFW app_id=%s",
+            user.id,
+            existing_ngfw.id,
+        )
+        raise CMSError("You already have an active NGFW. Please destroy it before creating a new one.")
 
     # Validate name
     if not name or not name.strip():
@@ -3249,10 +3293,10 @@ def create_ngfw(
 
     from uuid import uuid4
 
-    from cms.models import App, AppType, Instance, InstanceType, Request
+    from cms.models import AppType, Instance, InstanceType, Request
     from cms.scenarios.hydrator import hydrate_ngfw
     from engine import create_ngfw as engine_create_ngfw
-    from shared.enums import RequestType, ResourceStatus
+    from shared.enums import RequestType
     from shared.schemas import RequestSpec
 
     # Create Request record first
@@ -3409,115 +3453,4 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
         app_id=app.id,
         instance_id=instance.id,
         is_deleted=True,
-    )
-
-
-def complete_ngfw_setup(user: User, app_id: UUID | str) -> NGFWAppRef:
-    """Complete NGFW setup after user associates device in SCM/XDR.
-
-    After provisioning completes with awaiting_association status, the user must:
-    1. Associate the device in Strata Cloud Manager (Device Associations)
-    2. Connect the firewall to XDR/XSIAM
-
-    Once those steps are done, this function triggers the final setup which:
-    - Fetches the license (retrieves Logging Service license from CDL)
-    - Waits for CSP certificate sync
-    - Polls for valid device certificate
-    - Marks NGFW as ready
-
-    Args:
-        user: User requesting setup completion
-        app_id: UUID of the NGFW App
-
-    Returns:
-        NGFWAppRef with configuring status
-
-    Raises:
-        TypeError: If user is None or parameter types are invalid
-        ValueError: If parameters invalid
-        CMSError: If NGFW not found, not owned by user, or invalid state
-    """
-    from cms.models import App
-    from engine import services as engine_services
-    from shared.schemas.app import NGFWAppRef
-
-    _validate_ngfw_user(user)
-    validated_app_id = _validate_app_id(app_id)
-    logger.debug("complete_ngfw_setup called for user_id=%s, app_id=%s", user.id, validated_app_id)
-
-    try:
-        app = App.objects.select_related("instance", "instance__request").get(
-            id=validated_app_id,
-            instance__request__user=user,
-            app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
-        )
-    except App.DoesNotExist:
-        logger.error("complete_ngfw_setup: App id=%s not found for user_id=%s", app_id, user.id)
-        raise CMSError("NGFW not found") from None
-
-    instance = app.instance
-    assert instance is not None, "App must have an instance"
-
-    # Validate status allows setup completion
-    valid_statuses = [
-        ResourceStatus.AWAITING_ASSOCIATION.value,
-        "stopped",  # After auto-stop following provisioning
-    ]
-    if instance.status not in valid_statuses:
-        logger.warning(
-            "complete_ngfw_setup: invalid status=%s for App id=%s",
-            instance.status,
-            app_id,
-        )
-        raise CMSError(
-            f"Cannot complete setup: NGFW is in '{instance.status}' status. "
-            "Please wait for provisioning to complete first."
-        )
-
-    request_id = instance.request.request_id
-
-    # Update status to configuring immediately (before ECS task starts)
-    instance.status = ResourceStatus.CONFIGURING.value
-    instance.save(update_fields=["status"])
-
-    # Broadcast status change to WebSocket clients
-    from asgiref.sync import async_to_sync
-    from channels.layers import get_channel_layer
-
-    from shared.channels.groups import ngfw_event_group
-
-    channel_layer = get_channel_layer()
-    group_name = ngfw_event_group(str(app.id))
-    async_to_sync(channel_layer.group_send)(
-        group_name,
-        {
-            "type": "ngfw.status",
-            "app_id": str(app.id),
-            "status": ResourceStatus.CONFIGURING.value,
-            "state": {},
-            "serial_number": app.data.get("serial_number"),
-        },
-    )
-    logger.debug("Broadcast configuring status to group %s", group_name)
-
-    # Call engine to trigger complete-setup ECS task
-    try:
-        success = engine_services.complete_ngfw_setup(request_id)
-    except engine_services.EngineError as e:
-        raise CMSError(str(e)) from e
-
-    if not success:
-        raise CMSError("Failed to trigger setup completion")
-
-    logger.info(
-        "complete_ngfw_setup: triggered for App id=%s, request_id=%s",
-        app_id,
-        request_id,
-    )
-
-    return NGFWAppRef(
-        app_id=app.id,
-        instance_id=instance.id,
-        is_deleted=False,
     )

@@ -127,7 +127,7 @@ class SubnetConfig:
         name: Subnet name (e.g., 'attack', 'dc_network').
         uuid: Unique identifier for tagging and correlation.
         instances: List of instances in this subnet.
-        connected_to: List of subnet names this subnet can reach (bidirectional).
+        connected_to: List of subnet names this subnet needs to reach.
     """
 
     name: str
@@ -182,6 +182,8 @@ class RangeConfig:
     s3_endpoint_id: str = ""
     # AWS Network Firewall endpoint ID for internet egress from range subnets
     firewall_endpoint_id: str = ""
+    # SSM/Bedrock endpoints subnet CIDR for NGFW routing
+    ssm_endpoints_subnet_cidr: str = ""
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -308,7 +310,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping', 'awaiting_association')
+                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping')
                   AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
@@ -580,4 +582,6 @@ def load_config() -> RangeConfig:
         s3_endpoint_id=config.get("s3EndpointId") or "",
         # AWS Network Firewall endpoint for internet egress
         firewall_endpoint_id=config.get("firewallEndpointId") or "",
+        # SSM/Bedrock endpoints subnet for NGFW routing
+        ssm_endpoints_subnet_cidr=config.get("ssmEndpointsSubnetCidr") or "",
     )

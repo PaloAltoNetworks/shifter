@@ -1,0 +1,28 @@
+{% load static user_extras %}
+<!DOCTYPE html>
+<html lang="en" class="xdr-dark-theme">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Experiments{% endblock %} - Cortex Shifter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/xdr-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/xdr-sidebar.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="xdr-dark-theme">
+    {% include "partials/icon_sidebar.html" %}
+
+    <div class="layout">
+        <main class="main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="{% static 'js/sidebar.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -29,6 +29,13 @@ from cms import list_agents as cms_list_agents
 from cms import list_credentials as cms_list_credentials
 from cms import list_ngfws as cms_list_ngfws
 from cms import list_scenarios as cms_list_scenarios
+from cms.experiments.exceptions import ScriptUploadError
+from cms.experiments.services import (
+    complete_script_upload,
+    delete_script,
+    initiate_script_upload,
+    list_scripts,
+)
 from cms.services import create_ngfw as cms_create_ngfw
 from cms.services import destroy_ngfw as cms_destroy_ngfw
 from cms.services import get_ngfw as cms_get_ngfw
@@ -859,39 +866,6 @@ def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
     return JsonResponse({"status": "deprovisioning"})
 
 
-@login_required
-@require_POST
-def api_ngfw_complete_setup(request: HttpRequest, app_id: str) -> JsonResponse:
-    """Complete NGFW setup after user associates device in SCM/XDR.
-
-    After provisioning ends with awaiting_association status, the user must:
-    1. Associate the device in Strata Cloud Manager (Device Associations)
-    2. Connect the firewall to XDR/XSIAM
-
-    This endpoint triggers the final setup which fetches the license,
-    waits for CSP certificate sync, and marks the NGFW as ready.
-    """
-    from cms.services import complete_ngfw_setup as cms_complete_ngfw_setup
-
-    user = _get_user(request)
-
-    try:
-        result = cms_complete_ngfw_setup(user, app_id)
-    except CMSError as e:
-        if "not found" in str(e).lower():
-            raise Http404(_NGFW_NOT_FOUND) from None
-        return JsonResponse({"error": str(e)}, status=400)
-
-    logger.info("NGFW complete-setup triggered: user=%s app_id=%s", user.email, app_id)
-    return JsonResponse(
-        {
-            "status": "configuring",
-            "app_id": str(result.app_id),
-            "instance_id": str(result.instance_id),
-        }
-    )
-
-
 # -----------------------------------------------------------------------------
 # Credential Views
 # -----------------------------------------------------------------------------
@@ -1042,3 +1016,121 @@ def api_credential_delete(request: HttpRequest, credential_id: int) -> JsonRespo
     )
 
     return JsonResponse({"success": True})
+
+
+# -----------------------------------------------------------------------------
+# Files (Scripts) Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def files(request: HttpRequest) -> HttpResponse:
+    """File management - upload and manage script files."""
+    scripts = list_scripts(_get_user(request))
+    context = {
+        "page_title": "Files",
+        "active_nav": "files",
+        "scripts": scripts,
+    }
+    return render(request, "mission_control/files.html", context)
+
+
+@login_required
+@require_POST
+def file_upload(request: HttpRequest) -> JsonResponse:
+    """Script file upload — two-step presigned URL flow (JSON API).
+
+    Step 1: POST with {name, filename, file_size} → returns {presigned_url, upload_token}
+    Step 2: POST with {upload_token} → returns {success, script_id}
+    """
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    upload_token = data.get("upload_token")
+
+    if upload_token:
+        # Step 2: Complete upload
+        try:
+            script = complete_script_upload(user, upload_token)
+        except ScriptUploadError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+        logger.info("Script upload completed: user=%s script_id=%s", user.email, script.pk)
+        return JsonResponse(
+            {
+                "success": True,
+                "script_id": script.pk,
+                "message": f"Script '{script.name}' uploaded successfully.",
+            }
+        )
+
+    # Step 1: Initiate upload
+    name = data.get("name", "").strip()
+    filename = data.get("filename", "").strip()
+    file_size = data.get("file_size", 0)
+
+    if not name:
+        return JsonResponse({"error": "Script name is required"}, status=400)
+    if not filename:
+        return JsonResponse({"error": "Filename is required"}, status=400)
+    if not isinstance(file_size, int) or file_size <= 0:
+        return JsonResponse({"error": "Valid file size is required"}, status=400)
+
+    filename = os.path.basename(filename)
+
+    try:
+        result = initiate_script_upload(user, name, filename, file_size)
+    except ScriptUploadError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    logger.info(
+        "Script upload initiated: user=%s filename=%s size=%d",
+        user.email,
+        filename,
+        file_size,
+    )
+    return JsonResponse(result)
+
+
+@login_required
+@require_POST
+def file_delete(request: HttpRequest, script_id: int) -> HttpResponse:
+    """Delete a script file (soft delete)."""
+    user = _get_user(request)
+    try:
+        delete_script(user, script_id)
+        messages.success(request, "Script deleted.")
+        logger.info("Script deleted: user=%s script_id=%s", user.email, script_id)
+    except ScriptUploadError as e:
+        messages.error(request, str(e))
+        logger.error(
+            "Script delete error: user=%s script_id=%s error=%s",
+            user.email,
+            script_id,
+            str(e),
+        )
+
+    return redirect("mission_control:files")
+
+
+@login_required
+@require_GET
+def api_list_scripts(request: HttpRequest) -> JsonResponse:
+    """JSON endpoint for listing scripts (used by experiment create form)."""
+    scripts = list_scripts(_get_user(request))
+    return JsonResponse(
+        {
+            "scripts": [
+                {
+                    "id": s.pk,
+                    "name": s.name,
+                    "filename": s.original_filename,
+                }
+                for s in scripts
+            ]
+        }
+    )

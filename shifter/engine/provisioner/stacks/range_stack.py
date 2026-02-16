@@ -28,7 +28,7 @@ import pulumi
 from components.instance import InstanceComponent
 from components.network import NetworkComponent, allocate_subnets
 from config import InstanceConfig, RangeConfig
-from executors.ssh_executor import SSHExecutor
+from executors.ngfw_executor import NGFWExecutor
 from main import poll_for_serial_number
 from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
 
@@ -247,8 +247,8 @@ class RangeStack(pulumi.ComponentResource):
         secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
         private_key = secret_response["SecretString"]
 
-        # Create SSH executor
-        ssh_executor = SSHExecutor(private_key=private_key)
+        # Create NGFW executor
+        ssh_executor = NGFWExecutor(private_key=private_key)
 
         # Wait for SSH to be available
         logger.info("Waiting for SSH on NGFW at %s...", management_ip)
@@ -799,8 +799,30 @@ class RangeStack(pulumi.ComponentResource):
                 )
                 route_count += 1
 
+        # Route traffic to SSM/Bedrock endpoints subnet through NGFW
+        # This overrides the implicit local VPC route for the endpoints subnet CIDR,
+        # forcing Bedrock (and SSM/STS) traffic through NGFW for inspection/logging
+        if config.ssm_endpoints_subnet_cidr:
+            for subnet_name in subnet_names:
+                network = self.networks[subnet_name]
+                route_name = f"{name}-{subnet_name}-to-endpoints-ngfw"
+                network.add_route_to_ngfw(
+                    route_name,
+                    pulumi.Output.from_input(config.ssm_endpoints_subnet_cidr),
+                    config.ngfw_data_eni_id,
+                    opts=pulumi.ResourceOptions(
+                        parent=self,
+                        depends_on=[network.route_table],
+                    ),
+                )
+                route_count += 1
+            logger.info(
+                "Added %d endpoint subnet routes through NGFW",
+                len(subnet_names),
+            )
+
         logger.info(
-            "Added %d inter-subnet routes through NGFW for %d subnets",
+            "Added %d total routes through NGFW for %d subnets",
             route_count,
             len(subnet_names),
         )

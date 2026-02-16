@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4] - 2026-02-15
+
+### Fixed
+- Shifter DB MCP no longer leaks connections to RDS
+
 ## [2.1.3] - 2026-02-15
 
 ### Fixed

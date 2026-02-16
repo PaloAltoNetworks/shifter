@@ -1,0 +1,15 @@
+{% extends "mission_control/base.html" %}
+{% comment %}
+CTF base template.
+
+Extends the mission control base template but can be customized
+for CTF-specific styling and navigation.
+{% endcomment %}
+
+{% block title %}{% block ctf_title %}CTF{% endblock %} - Shifter{% endblock %}
+
+{% block content %}
+<div class="ctf-container">
+    {% block ctf_content %}{% endblock %}
+</div>
+{% endblock %}

@@ -1,0 +1,225 @@
+"""CTF-specific enums and constants.
+
+Defines status values, categories, and other constants for CTF operations.
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+
+
+class EventStatus(str, Enum):
+    """CTF event lifecycle status.
+
+    Events progress through these states:
+        draft -> scheduled -> active -> completed
+                    |
+                    v
+                cancelled
+    """
+
+    DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        return [(status.value, status.name.replace("_", " ").title()) for status in cls]
+
+
+class ParticipantStatus(str, Enum):
+    """CTF participant lifecycle status.
+
+    Participants progress through these states:
+        invited -> registered -> active -> completed
+                       |
+                       v
+                 disqualified
+    """
+
+    INVITED = "invited"
+    REGISTERED = "registered"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    DISQUALIFIED = "disqualified"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        return [(status.value, status.name.replace("_", " ").title()) for status in cls]
+
+
+class ChallengeDifficulty(str, Enum):
+    """Challenge difficulty levels."""
+
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
+    EXPERT = "expert"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        return [(diff.value, diff.name.title()) for diff in cls]
+
+
+class ChallengeCategory(str, Enum):
+    """Fixed challenge categories.
+
+    Standard CTF challenge categories as used in major CTF competitions.
+    """
+
+    WEB = "web"
+    FORENSICS = "forensics"
+    CRYPTO = "crypto"
+    REVERSE = "reverse"
+    PWN = "pwn"
+    MISC = "misc"
+    OSINT = "osint"
+    HARDWARE = "hardware"
+    NETWORK = "network"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        labels = {
+            "web": "Web Exploitation",
+            "forensics": "Forensics",
+            "crypto": "Cryptography",
+            "reverse": "Reverse Engineering",
+            "pwn": "Binary Exploitation",
+            "misc": "Miscellaneous",
+            "osint": "OSINT",
+            "hardware": "Hardware",
+            "network": "Network",
+        }
+        return [(cat.value, labels.get(cat.value, cat.name.title())) for cat in cls]
+
+
+class NotificationType(str, Enum):
+    """Types of CTF notifications."""
+
+    INVITE = "invite"
+    CREDENTIALS = "credentials"
+    REMINDER = "reminder"
+    ANNOUNCEMENT = "announcement"
+    EVENT_START = "event_start"
+    EVENT_END = "event_end"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        return [(t.value, t.name.replace("_", " ").title()) for t in cls]
+
+
+class NotificationStatus(str, Enum):
+    """Status of a notification."""
+
+    DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    SENDING = "sending"
+    SENT = "sent"
+    FAILED = "failed"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        return [(s.value, s.name.title()) for s in cls]
+
+
+class ScheduledTaskType(str, Enum):
+    """Types of scheduled tasks."""
+
+    SPIN_UP_RANGES = "spin_up_ranges"
+    CLEANUP_RANGES = "cleanup_ranges"
+    SEND_REMINDER = "send_reminder"
+    EVENT_START = "event_start"
+    EVENT_END = "event_end"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        return [(t.value, t.name.replace("_", " ").title()) for t in cls]
+
+
+class ScheduledTaskStatus(str, Enum):
+    """Status of a scheduled task."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        return [(s.value, s.name.title()) for s in cls]
+
+
+class UserType(str, Enum):
+    """User types for the platform."""
+
+    STANDARD = "standard"
+    CTF_ORGANIZER = "ctf_organizer"
+    CTF_PARTICIPANT = "ctf_participant"
+
+    def __str__(self) -> str:
+        """Return the string value for database storage."""
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Return choices for Django model field."""
+        labels = {
+            "standard": "Standard User",
+            "ctf_organizer": "CTF Organizer",
+            "ctf_participant": "CTF Participant",
+        }
+        return [(t.value, labels.get(t.value, t.name)) for t in cls]
+
+
+# Terminal statuses that indicate completion
+EVENT_TERMINAL_STATUSES = frozenset({EventStatus.COMPLETED, EventStatus.CANCELLED})
+
+PARTICIPANT_TERMINAL_STATUSES = frozenset(
+    {ParticipantStatus.COMPLETED, ParticipantStatus.DISQUALIFIED}
+)
+
+# Statuses that allow modifications
+EVENT_MODIFIABLE_STATUSES = frozenset({EventStatus.DRAFT, EventStatus.SCHEDULED})

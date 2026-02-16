@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "cms.apps.CMSConfig",
     "management.apps.ManagementConfig",
     "shared.apps.SharedConfig",
+    "ctf.apps.CtfConfig",
 ]
 
 MIDDLEWARE = [

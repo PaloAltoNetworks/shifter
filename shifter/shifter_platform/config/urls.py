@@ -10,6 +10,7 @@ urlpatterns = [
     path("risk-register/", include("risk_register.urls")),
     path("docs/", include("documentation.urls")),
     path("api/v1/", include("risk_register.api.urls")),
+    path("ctf/", include("ctf.urls")),
     path("admin/", admin.site.urls),
     path("health/", include("health_check.urls")),
     path("oidc/", include("mozilla_django_oidc.urls")),

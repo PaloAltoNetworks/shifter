@@ -1,0 +1,19 @@
+{% extends "ctf/base.html" %}
+{% comment %}
+CTF Login page.
+
+Provides a CTF-specific login page that can handle event context
+and invite tokens for participant registration.
+{% endcomment %}
+
+{% block ctf_title %}Login{% endblock %}
+
+{% block ctf_content %}
+<div class="ctf-login">
+    <h1>CTF Login</h1>
+    <p>This page is under construction.</p>
+    {% if placeholder %}
+    <p class="text-muted">Placeholder view - implementation pending.</p>
+    {% endif %}
+</div>
+{% endblock %}

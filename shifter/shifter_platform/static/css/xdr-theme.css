@@ -102,9 +102,9 @@ body.xdr-dark-theme {
 }
 
 .btn-secondary {
-    background: transparent;
-    color: var(--xdr-text);
-    border: 1px solid var(--xdr-border);
+    background: #fff;
+    color: #000;
+    border: 1px solid #fff;
 }
 
 .btn-secondary:disabled {

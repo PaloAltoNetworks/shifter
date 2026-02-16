@@ -293,7 +293,8 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
     # Validate agent_type
     valid_agent_types = {"xdr", "xdr_collector", "cloud_identity_engine"}
     if agent_type not in valid_agent_types:
-        return JsonResponse({"error": f"Invalid agent type. Must be one of: {', '.join(valid_agent_types)}"}, status=400)
+        err_msg = f"Invalid agent type. Must be one of: {', '.join(valid_agent_types)}"
+        return JsonResponse({"error": err_msg}, status=400)
 
     # Sanitize filename
     filename = os.path.basename(filename)

@@ -44,57 +44,68 @@ $adminUser = "{{ domain_admin_user }}"
 $adminPass = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential("$domain\\$adminUser", $adminPass)
 
-# Wait for DC DNS to be ready (up to ~70s - prebaked DC should be fast)
+# Wait for DC DNS to be ready (up to 10 mins - give it time to actually work)
 Write-Host "Waiting for domain controller DNS to be ready..."
-$maxAttempts = 7
+$maxAttempts = 30
+$retryDelaySeconds = 20
 $attempt = 0
 $dnsReady = $false
 
+Write-Host "Will attempt DNS resolution up to $maxAttempts times with ${retryDelaySeconds}s delay (~10 mins total)"
+
 while ($attempt -lt $maxAttempts -and -not $dnsReady) {
     $attempt++
-    Write-Host "DNS check attempt $attempt of $maxAttempts..."
+    Write-Host "DNS check attempt $attempt of $maxAttempts ($(Get-Date -Format 'HH:mm:ss'))..."
 
     try {
         # Try to resolve the domain
         $resolved = Resolve-DnsName -Name $domain -ErrorAction Stop
         if ($resolved) {
-            Write-Host "Domain DNS resolved successfully"
+            Write-Host "Domain DNS resolved successfully after $attempt attempts"
+            Write-Host "Resolved: $($resolved | Out-String)"
             $dnsReady = $true
         }
     } catch {
         Write-Host "DNS not ready yet: $_"
         if ($attempt -lt $maxAttempts) {
-            Write-Host "Waiting 10 seconds before retry..."
-            Start-Sleep -Seconds 10
+            Write-Host "Waiting $retryDelaySeconds seconds before retry..."
+            Start-Sleep -Seconds $retryDelaySeconds
         }
     }
 }
 
 if (-not $dnsReady) {
-    Write-Host "ERROR: Domain DNS not resolvable after $maxAttempts attempts"
+    Write-Host "ERROR: Domain DNS not resolvable after $maxAttempts attempts (~10 mins)"
     exit 1
 }
 
-# Now attempt domain join with retries
-$joinAttempts = 3
+# Now attempt domain join with retries (generous - 20 attempts, 30s each = 10 mins)
+$joinAttempts = 20
+$joinRetryDelay = 30
 $joinAttempt = 0
 $joined = $false
 
+Write-Host "Will attempt domain join up to $joinAttempts times with ${joinRetryDelay}s delay"
+
 while ($joinAttempt -lt $joinAttempts -and -not $joined) {
     $joinAttempt++
-    Write-Host "Domain join attempt $joinAttempt of $joinAttempts..."
+    Write-Host "Domain join attempt $joinAttempt of $joinAttempts ($(Get-Date -Format 'HH:mm:ss'))..."
 
     try {
         Write-Host "Attempting to join domain: $domain"
         Add-Computer -DomainName $domain -Credential $cred -Force -ErrorAction Stop
-        Write-Host "Domain join initiated successfully"
+        Write-Host "Domain join initiated successfully after $joinAttempt attempts"
         Write-Host "Machine will restart to complete domain join"
         $joined = $true
     } catch {
         Write-Host "Join attempt failed: $_"
+        Write-Host "Exception type: $($_.Exception.GetType().FullName)"
+        if ($_.Exception.InnerException) {
+            Write-Host "Inner exception: $($_.Exception.InnerException.Message)"
+        }
         if ($joinAttempt -lt $joinAttempts) {
-            Write-Host "Waiting 15 seconds before retry..."
-            Start-Sleep -Seconds 15
+            Write-Host "Waiting $joinRetryDelay seconds before retry..."
+            Start-Sleep -Seconds $joinRetryDelay
         }
     }
 }
@@ -102,7 +113,7 @@ while ($joinAttempt -lt $joinAttempts -and -not $joined) {
 if ($joined) {
     exit 0
 } else {
-    Write-Host "ERROR: Domain join failed after $joinAttempts attempts"
+    Write-Host "ERROR: Domain join failed after $joinAttempts attempts (~10 mins)"
     exit 1
 }
 """
@@ -115,14 +126,16 @@ $ErrorActionPreference = "Stop"
 Write-Host "Verifying domain membership..."
 
 $expectedDomain = "{{ domain_name }}"
-$maxAttempts = 12
-$retryDelaySeconds = 10
+$maxAttempts = 30
+$retryDelaySeconds = 20
 $attempt = 0
 $verified = $false
 
+Write-Host "Will verify domain membership up to $maxAttempts times with ${retryDelaySeconds}s delay (~10 mins)"
+
 while ($attempt -lt $maxAttempts -and -not $verified) {
     $attempt++
-    Write-Host "Verification attempt $attempt of $maxAttempts..."
+    Write-Host "Verification attempt $attempt of $maxAttempts ($(Get-Date -Format 'HH:mm:ss'))..."
 
     try {
         # WMI may not be ready immediately after domain join reboot
@@ -185,7 +198,7 @@ class DomainJoinPlan:
         SetupStep(
             name="join_domain",
             script=JOIN_DOMAIN_SCRIPT,
-            timeout_seconds=300,  # 5 min: DNS wait (1 min) + join retries (up to 1 min) + buffer
+            timeout_seconds=1500,  # 25 min: DNS wait (10 min) + join retries (10 min) + buffer
             requires_reboot=True,
         ),
     ]
@@ -193,7 +206,7 @@ class DomainJoinPlan:
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_domain_joined",
         script=VERIFY_DOMAIN_JOINED_SCRIPT,
-        timeout_seconds=180,  # 3 min: up to 12 retries with 10s delays
+        timeout_seconds=900,  # 15 min: up to 30 retries with 20s delays + buffer
         is_verification=True,
     )
 

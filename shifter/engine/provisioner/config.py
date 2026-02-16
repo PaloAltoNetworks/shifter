@@ -93,6 +93,7 @@ class InstanceConfig:
 
     Attributes:
         uuid: Unique identifier from the spec (for tagging and DB correlation).
+        name: Display name for UI (e.g., "target-ubuntu", "attacker-kali").
         role: Instance role ("attacker", "victim", or "dc").
         os_type: Operating system type ("kali", "ubuntu", "windows").
         instance_type: AWS instance type (e.g., "t3.medium").
@@ -104,6 +105,7 @@ class InstanceConfig:
     """
 
     uuid: str  # Required: correlation key for tagging and DB updates
+    name: str  # Display name like "target-ubuntu" or "attacker-kali"
     role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
@@ -125,7 +127,7 @@ class SubnetConfig:
         name: Subnet name (e.g., 'attack', 'dc_network').
         uuid: Unique identifier for tagging and correlation.
         instances: List of instances in this subnet.
-        connected_to: List of subnet names this subnet can reach (bidirectional).
+        connected_to: List of subnet names this subnet needs to reach.
     """
 
     name: str
@@ -172,56 +174,16 @@ class RangeConfig:
     ngfw_enabled: bool = False
     ngfw_ami_id: str = ""
     ngfw_instance_type: str = "m5.xlarge"
+    # NGFW connection info for subnet configuration (set when ngfw_enabled=True)
+    ngfw_management_ip: str = ""  # NGFW management IP for SSH
+    ngfw_ssh_key_secret_arn: str = ""  # Secrets Manager ARN for SSH private key
+    ngfw_subnet_cidr: str = ""  # NGFW subnet CIDR for computing gateway IP
     # S3 VPC endpoint for agent downloads (Gateway endpoint ID)
     s3_endpoint_id: str = ""
     # AWS Network Firewall endpoint ID for internet egress from range subnets
     firewall_endpoint_id: str = ""
-
-
-@dataclass
-class NGFWConfig:
-    """Configuration for NGFW (UserNGFWStack) provisioning.
-
-    Infrastructure config comes from Pulumi config (set from environment).
-    Credential config comes from Pulumi config (set from app_spec in DB).
-
-    Attributes:
-        request_id: UUID of the provisioning request (for tagging/correlation).
-        instance_uuid: UUID of the NGFW instance (for tagging/DB correlation).
-        user_id: Django User ID who owns this NGFW.
-        environment: Deployment environment (dev, staging, prod).
-        vpc_id: AWS VPC ID for NGFW deployment.
-        subnet_id: Subnet ID for NGFW ENIs.
-        mgmt_security_group_id: Security group for management ENI.
-        data_security_group_id: Security group for data ENI.
-        ami_id: VM-Series AMI ID.
-        bootstrap_bucket: S3 bucket for bootstrap configuration.
-        instance_type: EC2 instance type.
-        instance_profile_name: IAM instance profile name.
-        scm_pin_id: SCM auto-registration PIN ID.
-        scm_pin_value: SCM auto-registration PIN value.
-        scm_folder_name: SCM folder name (dgname).
-        authcode: VM-Series authcode for licensing.
-    """
-
-    request_id: str
-    instance_uuid: str  # Required: for tagging and DB correlation
-    user_id: int
-    environment: str
-    # Infrastructure
-    vpc_id: str
-    subnet_id: str
-    mgmt_security_group_id: str
-    data_security_group_id: str
-    ami_id: str
-    bootstrap_bucket: str
-    instance_type: str
-    instance_profile_name: str
-    # Credentials (from app_spec)
-    scm_pin_id: str
-    scm_pin_value: str
-    scm_folder_name: str
-    authcode: str
+    # SSM/Bedrock endpoints subnet CIDR for NGFW routing
+    ssm_endpoints_subnet_cidr: str = ""
 
 
 def get_db_connection() -> psycopg.Connection:
@@ -336,7 +298,8 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
         ngfw_enabled = range_config.get("ngfw", False)
 
         # Look up data_eni_id and ngfw_instance_id from user's NGFW
-        # NGFW can be in any provisioned state - the ENI exists regardless of running state
+        # NGFW can be in any provisioned state - the ENI exists regardless of running state.
+        # Include 'stopping' because range provisioner will wait for stop then start the NGFW.
         ngfw_data_eni_id = ""
         ngfw_instance_id = None
         if ngfw_enabled:
@@ -347,7 +310,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status IN ('active', 'ready', 'stopped', 'awaiting_association')
+                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping')
                   AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
@@ -413,6 +376,12 @@ def _build_instance_config(
     role = inst.get("role", "victim")
     os_type = inst.get("os_type", "ubuntu")
 
+    # Build display name: use "target" instead of "victim" for user-facing labels
+    display_role = "target" if role == "victim" else role
+    instance_name = inst.get("name") or f"{display_role}-{os_type}"
+    # Ensure any existing "victim" in name is replaced with "target"
+    instance_name = instance_name.replace("victim", "target")
+
     # Get instance_type from catalog defaults based on role/os
     if role == "attacker":
         instance_type = _get_kali_instance_type()
@@ -438,6 +407,7 @@ def _build_instance_config(
 
     return InstanceConfig(
         uuid=instance_uuid,
+        name=instance_name,
         role=role,
         os_type=os_type,
         instance_type=instance_type,
@@ -604,53 +574,14 @@ def load_config() -> RangeConfig:
         ngfw_enabled=ngfw_enabled,
         ngfw_ami_id=os.environ.get("NGFW_AMI_ID", ""),
         ngfw_instance_type=os.environ.get("NGFW_INSTANCE_TYPE", "m5.xlarge"),
+        # NGFW connection info for subnet configuration (set by main.py)
+        ngfw_management_ip=os.environ.get("NGFW_MANAGEMENT_IP", ""),
+        ngfw_ssh_key_secret_arn=os.environ.get("NGFW_SSH_KEY_SECRET_ARN", ""),
+        ngfw_subnet_cidr=os.environ.get("NGFW_SUBNET_CIDR", ""),
         # S3 VPC endpoint for agent downloads
         s3_endpoint_id=config.get("s3EndpointId") or "",
         # AWS Network Firewall endpoint for internet egress
         firewall_endpoint_id=config.get("firewallEndpointId") or "",
-    )
-
-
-def load_ngfw_config() -> NGFWConfig:
-    """Load NGFW configuration from Pulumi config.
-
-    All values are set by _set_ngfw_stack_config() in main.py before pulumi up.
-    Infrastructure values come from environment, credentials from app_spec.
-
-    Returns:
-        NGFWConfig: Complete configuration for NGFW provisioning.
-    """
-    logger.info("Loading NGFW configuration")
-    config = pulumi.Config()
-
-    request_id = config.require("requestId")
-    instance_uuid = config.require("instanceUuid")
-    user_id = config.require_int("userId")
-
-    logger.debug(
-        "load_ngfw_config: request_id=%s instance_uuid=%s user_id=%s",
-        request_id,
-        instance_uuid,
-        user_id,
-    )
-
-    return NGFWConfig(
-        request_id=request_id,
-        instance_uuid=instance_uuid,
-        user_id=user_id,
-        environment=config.require("environment"),
-        # Infrastructure
-        vpc_id=config.require("ngfwVpcId"),
-        subnet_id=config.require("ngfwSubnetId"),
-        mgmt_security_group_id=config.require("ngfwMgmtSecurityGroupId"),
-        data_security_group_id=config.require("ngfwDataSecurityGroupId"),
-        ami_id=config.require("ngfwAmiId"),
-        bootstrap_bucket=config.require("bootstrapBucket"),
-        instance_type=config.get("ngfwInstanceType") or "m5.xlarge",
-        instance_profile_name=config.get("ngfwInstanceProfileName") or "",
-        # Credentials (secrets - use require_secret for sensitive values)
-        scm_pin_id=config.require("scmPinId"),
-        scm_pin_value=config.require("scmPinValue"),
-        scm_folder_name=config.require("scmFolderName"),
-        authcode=config.require("authcode"),
+        # SSM/Bedrock endpoints subnet for NGFW routing
+        ssm_endpoints_subnet_cidr=config.get("ssmEndpointsSubnetCidr") or "",
     )

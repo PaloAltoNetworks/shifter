@@ -309,6 +309,15 @@ resource "aws_wafv2_web_acl" "this" {
       managed_rule_group_statement {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
+
+        # Override SizeRestrictions_BODY to allow Guacamole SFTP file uploads
+        # Default 8KB limit blocks file transfers; COUNT logs but doesn't block
+        rule_action_override {
+          action_to_use {
+            count {}
+          }
+          name = "SizeRestrictions_BODY"
+        }
       }
     }
 

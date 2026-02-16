@@ -109,6 +109,7 @@ def hydrate_scenario(
         user_id=user_id,
         subnets=subnets,
         ngfw=template.ngfw,
+        caldera=template.caldera,
     )
 
 

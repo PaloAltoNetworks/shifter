@@ -46,6 +46,11 @@ from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.base import SetupStep
 from plans.bootstrap import BootstrapPlan
+from plans.caldera_agent_deploy import (
+    CalderaLinuxAgentDeployPlan,
+    CalderaWindowsAgentDeployPlan,
+)
+from plans.caldera_server_setup import CalderaServerSetupPlan
 from plans.dc_setup import DCSetupPlan
 from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
@@ -1500,6 +1505,9 @@ def _run_single_instance_setup(
     xdr_required: bool = False,
     instance_name: str = "",
     range_id: int = 0,
+    caldera_enabled: bool = False,
+    caldera_server_url: str = "",
+    caldera_port: int = 8888,
 ) -> bool:
     """Run setup for a single non-DC instance.
 
@@ -1515,6 +1523,9 @@ def _run_single_instance_setup(
         xdr_required: If True, fail hard when XDR agent URL is missing.
         instance_name: Friendly display name for hostname (e.g., "target-ubuntu").
         range_id: Range ID for hostname generation.
+        caldera_enabled: Whether Caldera is enabled for this range.
+        caldera_server_url: URL of the Caldera server (for agent deployment).
+        caldera_port: Port Caldera server listens on (default 8888).
 
     Returns:
         True on success.
@@ -1565,6 +1576,26 @@ def _run_single_instance_setup(
             raise SetupError(f"Kali setup failed: {result.error}")
         logger.info("Kali setup complete for %s", instance_id)
 
+        # Start Caldera server on attacker (if enabled)
+        if caldera_enabled:
+            logger.info("Starting Caldera server on attacker %s...", instance_id)
+
+            class CalderaServerContext:
+                def __init__(self, port: int, host: str) -> None:
+                    self.caldera_port = port
+                    self.caldera_host = host
+
+            caldera_plan = CalderaServerSetupPlan()
+            caldera_ctx = caldera_plan.get_context(
+                CalderaServerContext(port=caldera_port, host="0.0.0.0")
+            )
+            result = orchestrator.orchestrate(
+                instance_id, caldera_plan, caldera_ctx, document_name=document_name
+            )
+            if not result.success:
+                raise SetupError(f"Caldera server setup failed: {result.error}")
+            logger.info("Caldera server started on %s (port %d)", instance_id, caldera_port)
+
     elif role == "victim":
         if os_type in ("kali", "ubuntu", "amazon-linux"):
             # Linux victim: Bootstrap + XDR
@@ -1587,6 +1618,33 @@ def _run_single_instance_setup(
                 raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
             else:
                 logger.info("No XDR agent URL provided for %s (not required)", instance_id)
+
+            # Deploy Caldera agent (if enabled and server URL available)
+            if caldera_enabled and caldera_server_url:
+                logger.info("Deploying Caldera agent to Linux victim %s...", instance_id)
+
+                class CalderaAgentContext:
+                    def __init__(self, server: str, group: str, name: str, dir_path: str) -> None:
+                        self.caldera_server = server
+                        self.caldera_group = group
+                        self.agent_name = name
+                        self.agent_dir = dir_path
+
+                agent_plan = CalderaLinuxAgentDeployPlan()
+                agent_ctx = agent_plan.get_context(
+                    CalderaAgentContext(
+                        server=caldera_server_url,
+                        group="red",
+                        name="sandcat",
+                        dir_path="/tmp/.caldera",
+                    )
+                )
+                result = orchestrator.orchestrate(
+                    instance_id, agent_plan, agent_ctx, document_name=document_name
+                )
+                if not result.success:
+                    raise SetupError(f"Caldera agent deployment failed: {result.error}")
+                logger.info("Caldera agent deployed to %s", instance_id)
 
         else:
             # Windows victim: Bootstrap + XDR + Domain join
@@ -1637,6 +1695,33 @@ def _run_single_instance_setup(
             elif join_domain:
                 # join_domain=True means domain join is required
                 raise SetupError(f"Domain join required but dc_ip or domain_name not provided for {instance_id}")
+
+            # Deploy Caldera agent (if enabled and server URL available)
+            if caldera_enabled and caldera_server_url:
+                logger.info("Deploying Caldera agent to Windows victim %s...", instance_id)
+
+                class CalderaAgentContext:
+                    def __init__(self, server: str, group: str, name: str, dir_path: str) -> None:
+                        self.caldera_server = server
+                        self.caldera_group = group
+                        self.agent_name = name
+                        self.agent_dir = dir_path
+
+                agent_plan = CalderaWindowsAgentDeployPlan()
+                agent_ctx = agent_plan.get_context(
+                    CalderaAgentContext(
+                        server=caldera_server_url,
+                        group="red",
+                        name="sandcat",
+                        dir_path="C:\\ProgramData\\Caldera",
+                    )
+                )
+                result = orchestrator.orchestrate(
+                    instance_id, agent_plan, agent_ctx, document_name=document_name
+                )
+                if not result.success:
+                    raise SetupError(f"Caldera agent deployment failed: {result.error}")
+                logger.info("Caldera agent deployed to %s", instance_id)
 
     return True
 
@@ -1767,7 +1852,8 @@ def run_instance_setup(
 ) -> None:
     """Run setup for all instances after infrastructure is ready.
 
-    Runs DC setup first (blocking), then all other instances in parallel.
+    Runs DC setup first (blocking), then attacker (if Caldera enabled),
+    then all other instances in parallel.
 
     Args:
         instances_output: List of instance dicts from Pulumi outputs.
@@ -1776,20 +1862,32 @@ def run_instance_setup(
         domain_name: Domain FQDN for domain join.
         range_id: Range ID for hostname generation.
     """
+    # Extract Caldera configuration from range spec
+    caldera_enabled = bool(range_spec.get("caldera", False))
+    caldera_port = int(range_spec.get("caldera_port", 8888))
+    caldera_server_url = ""
+
+    if caldera_enabled:
+        logger.info("Caldera is enabled for this range (port %d)", caldera_port)
+
     # Build lookup from instance UUID to config
     uuid_to_config: dict[str, dict] = {}
     for subnet in range_spec.get("subnets", []):
         for inst in subnet.get("instances", []):
             uuid_to_config[inst.get("uuid", "")] = inst
 
-    # Separate DCs from other instances
-    dc_instances = []
-    other_instances = []
+    # Separate instances by role
+    dc_instances: list[dict] = []
+    attacker_instances: list[dict] = []
+    victim_instances: list[dict] = []
     for inst in instances_output:
-        if inst.get("role") == "dc":
+        role = inst.get("role")
+        if role == "dc":
             dc_instances.append(inst)
+        elif role == "attacker":
+            attacker_instances.append(inst)
         else:
-            other_instances.append(inst)
+            victim_instances.append(inst)
 
     # Run DC setup FIRST (blocking) - must complete before domain joins
     for dc_inst in dc_instances:
@@ -1817,6 +1915,46 @@ def run_instance_setup(
         dc_config = uuid_to_config.get(dc_uuid, {}).get("dc_config", {})
         actual_domain = dc_config.get("domain_name")
 
+    # If Caldera is enabled, run attacker setup FIRST (blocking)
+    # to start Caldera server before deploying agents to victims
+    if caldera_enabled and attacker_instances:
+        logger.info("Running attacker setup first (Caldera server)...")
+        for attacker_inst in attacker_instances:
+            inst_id = attacker_inst["instance_id"]
+            inst_uuid = attacker_inst.get("uuid", "")
+            inst_config = uuid_to_config.get(inst_uuid, {})
+            _run_single_instance_setup(
+                instance_id=inst_id,
+                role="attacker",
+                os_type=attacker_inst.get("os", "kali"),
+                public_key=attacker_inst.get("public_key", ""),
+                agent_presigned_url=get_agent_presigned_url(inst_config) or "",
+                join_domain=False,
+                dc_ip=actual_dc_ip,
+                domain_name=actual_domain,
+                xdr_required=False,
+                instance_name=attacker_inst.get("name", ""),
+                range_id=range_id,
+                caldera_enabled=True,
+                caldera_server_url="",  # Not needed for server setup
+                caldera_port=caldera_port,
+            )
+            # Construct Caldera server URL from attacker's private IP
+            attacker_ip = attacker_inst.get("private_ip")
+            if attacker_ip:
+                caldera_server_url = f"http://{attacker_ip}:{caldera_port}"
+                logger.info("Caldera server URL: %s", caldera_server_url)
+            else:
+                logger.warning("Attacker %s has no private_ip, cannot construct Caldera URL", inst_id)
+
+    # Determine which instances to run in parallel
+    if caldera_enabled:
+        # Attackers already ran, only victims left
+        other_instances = victim_instances
+    else:
+        # All non-DC instances run in parallel
+        other_instances = attacker_instances + victim_instances
+
     # Run other instances in parallel
     if other_instances:
         logger.info("Running setup for %d non-DC instances in parallel...", len(other_instances))
@@ -1839,6 +1977,9 @@ def run_instance_setup(
                     xdr_required=bool(inst_config.get("agent")),  # XDR required if agent data present
                     instance_name=inst.get("name", ""),
                     range_id=range_id,
+                    caldera_enabled=caldera_enabled,
+                    caldera_server_url=caldera_server_url,
+                    caldera_port=caldera_port,
                 )
                 return (inst_id, True, None)
             except Exception as e:

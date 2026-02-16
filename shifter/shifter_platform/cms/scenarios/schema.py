@@ -74,6 +74,7 @@ class ScenarioTemplate(BaseModel):
         description: User-facing description of the scenario.
         enabled: Whether scenario is visible in the UI (default True).
         ngfw: Whether scenario requires NGFW provisioning.
+        caldera: Whether to enable Caldera adversary emulation platform.
         instances: List of instance configurations.
         subnets: List of subnet configurations (optional).
     """
@@ -83,6 +84,7 @@ class ScenarioTemplate(BaseModel):
     description: str
     enabled: bool = True
     ngfw: bool = False
+    caldera: bool = False
     instances: list[InstanceConfig]
     subnets: list[SubnetConfig] = []
 

@@ -3,6 +3,7 @@ name: Cortex BYOT
 description: The classic Cortex XDR BYOT range with a ngfw, domain controller, two workstations, a server, and an attacker.
 enabled: true
 ngfw: true
+caldera: true
 
 instances:
   - name: Attacker

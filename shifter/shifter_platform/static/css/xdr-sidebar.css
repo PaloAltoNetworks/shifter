@@ -533,3 +533,65 @@ body.nav-lock .left-nav .left-nav-body,
   width: 100%;
   text-align: left;
 }
+
+/* =============================================================================
+   USER MENU DROPDOWN
+   ============================================================================= */
+
+/* Container for user profile and dropdown */
+.nav-profile-container {
+  position: relative;
+}
+
+/* Make profile a proper button */
+button.nav-profile {
+  background: none;
+  border: none;
+  font: inherit;
+  width: 100%;
+  text-align: left;
+}
+
+/* User menu dropdown */
+.nav-user-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 4px;
+  background-color: var(--nav-dialog-bg);
+  border: 1px solid var(--nav-dialog-border);
+  border-radius: 4px;
+  padding: 4px;
+  display: none;
+  z-index: 100;
+  min-width: 150px;
+}
+
+/* Show menu when open */
+.nav-profile-container.open .nav-user-menu {
+  display: block;
+}
+
+/* User menu item */
+.nav-user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  color: var(--nav-item-text-color);
+  text-decoration: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.nav-user-menu-item:hover {
+  background-color: var(--nav-item-hover-bg-color);
+  text-decoration: none;
+  color: var(--nav-item-text-color);
+}
+
+.nav-user-menu-item svg {
+  flex-shrink: 0;
+}

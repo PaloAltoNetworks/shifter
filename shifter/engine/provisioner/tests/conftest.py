@@ -295,6 +295,7 @@ def sample_instance_config_attacker():
     """Sample InstanceConfig for an attacker (Kali) instance."""
     return InstanceConfig(
         uuid="inst-uuid-attacker",
+        name="attacker-kali",
         role="attacker",
         os_type="kali",
         instance_type="t3.small",
@@ -306,10 +307,10 @@ def sample_instance_config_victim():
     """Sample InstanceConfig for a Linux victim instance."""
     return InstanceConfig(
         uuid="inst-uuid-victim",
+        name="target-ubuntu",
         role="victim",
         os_type="ubuntu",
         instance_type="t3.micro",
-        agent_id=1,
         agent_s3_key="agents/xdr-agent.tar.gz",
         agent_presigned_url="https://s3.example.com/agents/xdr-agent.tar.gz?signed",
     )
@@ -320,10 +321,10 @@ def sample_instance_config_windows():
     """Sample InstanceConfig for a Windows victim instance."""
     return InstanceConfig(
         uuid="inst-uuid-windows",
+        name="target-windows",
         role="victim",
         os_type="windows",
         instance_type="t3.medium",
-        agent_id=2,
         agent_s3_key="agents/xdr-agent.msi",
         agent_presigned_url="https://s3.example.com/agents/xdr-agent.msi?signed",
     )
@@ -389,6 +390,7 @@ def sample_range_config_multi_subnet():
                 instances=[
                     InstanceConfig(
                         uuid="inst-uuid-001",
+                        name="attacker-kali",
                         role="attacker",
                         os_type="kali",
                         instance_type="t3.small",
@@ -402,6 +404,7 @@ def sample_range_config_multi_subnet():
                 instances=[
                     InstanceConfig(
                         uuid="inst-uuid-002",
+                        name="target-ubuntu",
                         role="victim",
                         os_type="ubuntu",
                         instance_type="t3.micro",
@@ -417,6 +420,7 @@ def sample_range_config_multi_subnet():
                 instances=[
                     InstanceConfig(
                         uuid="inst-uuid-003",
+                        name="target-windows",
                         role="victim",
                         os_type="windows",
                         instance_type="t3.medium",
@@ -432,6 +436,7 @@ def sample_range_config_multi_subnet():
                 instances=[
                     InstanceConfig(
                         uuid="inst-uuid-004",
+                        name="dc-windows",
                         role="dc",
                         os_type="windows",
                         instance_type="t3.large",

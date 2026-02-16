@@ -10,6 +10,10 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from executors.base import CommandResult
+from executors.ngfw_executor import (
+    NGFWConnectionError,
+    NGFWTimeoutError,
+)
 from executors.ssh_executor import (
     ConnectionError as SSHConnectionError,
 )
@@ -145,6 +149,17 @@ class SetupOrchestrator:
                 result = self._execute_step(instance_id, step, context, document_name)
                 step_results.append(result)
 
+                # Check if step failed (returned success=False after retries)
+                if not result.success:
+                    logger.error(
+                        "orchestrate: step '%s' failed after retries",
+                        step.name,
+                    )
+                    raise SetupError(
+                        f"Step '{step.name}' failed after all retry attempts",
+                        step_name=step.name,
+                    )
+
                 # Handle reboot if required
                 if step.requires_reboot:
                     reboot_timeout = max(step.timeout_seconds, self.DEFAULT_REBOOT_TIMEOUT)
@@ -252,24 +267,35 @@ class SetupOrchestrator:
                     step_name=step.name,
                     cause=e,
                 ) from e
-            last_result = result
-
-            # Check for PAN-OS commit success if commit was attempted
-            if not self._check_commit_success(result.stdout):
+            except TimeoutError as e:
                 logger.warning(
-                    "_execute_step: PAN-OS commit failed in step=%s, output=%s",
+                    "_execute_step: timeout step=%s attempt=%d/%d: %s",
                     step.name,
-                    result.stdout[:500] if result.stdout else "(no output)",
+                    attempt + 1,
+                    max_retries + 1,
+                    e,
                 )
                 if attempt < max_retries:
                     continue  # Retry
-                else:
-                    raise SetupError(
-                        f"Step '{step.name}' failed: PAN-OS commit did not succeed",
-                        step_name=step.name,
-                    )
+                raise SetupError(
+                    f"Step '{step.name}' failed: timeout after {max_retries + 1} attempts: {e}",
+                    step_name=step.name,
+                    cause=e,
+                ) from e
+            last_result = result
 
             if result.success:
+                if result.stdout and "commit" in result.stdout.lower():
+                    output_lower = result.stdout.lower()
+                    if "configuration committed successfully" in output_lower:
+                        logger.info("_execute_step: step=%s commit=immediate_success", step.name)
+                    elif "there are no changes to commit" in output_lower:
+                        logger.info("_execute_step: step=%s commit=no_changes", step.name)
+                    elif "jobid" in output_lower:
+                        logger.info("_execute_step: step=%s commit=job_enqueued", step.name)
+                    else:
+                        logger.info("_execute_step: step=%s commit=unknown_output", step.name)
+
                 # If poll_for_job is enabled, parse job ID and poll until complete
                 if getattr(step, "poll_for_job", False):
                     job_id = self._parse_panos_job_id(result.stdout)
@@ -295,13 +321,46 @@ class SetupOrchestrator:
                     else:
                         logger.warning("_execute_step: poll_for_job enabled but no job ID found in output")
 
-                # Log success with output summary
-                stdout_preview = result.stdout[:500] if result.stdout else "(no output)"
+                # Check for PAN-OS commit failures (SSH sessions return success even when commit fails)
+                if not self._check_commit_success(result.stdout):
+                    logger.warning(
+                        "_execute_step: PAN-OS commit failed step=%s attempt=%d/%d",
+                        step.name,
+                        attempt + 1,
+                        max_retries + 1,
+                    )
+                    if result.stdout:
+                        logger.warning(
+                            "_execute_step: step=%s COMMIT FAILED STDOUT:\n%s",
+                            step.name,
+                            result.stdout,
+                        )
+                    if attempt < max_retries:
+                        continue  # Retry
+                    raise SetupError(
+                        f"Step '{step.name}' failed: PAN-OS commit failed after {max_retries + 1} attempts",
+                        step_name=step.name,
+                    )
+
+                # Log success with full output for visibility
                 logger.info(
-                    "_execute_step: completed step=%s output=%s",
+                    "_execute_step: completed step=%s exit_code=%d",
                     step.name,
-                    stdout_preview,
+                    result.exit_code,
                 )
+                if result.stdout:
+                    # Log full output - critical for debugging setup issues
+                    logger.info(
+                        "_execute_step: step=%s STDOUT:\n%s",
+                        step.name,
+                        result.stdout,
+                    )
+                if result.stderr:
+                    logger.info(
+                        "_execute_step: step=%s STDERR:\n%s",
+                        step.name,
+                        result.stderr,
+                    )
                 return StepResult(
                     step_name=step.name,
                     success=True,
@@ -310,11 +369,24 @@ class SetupOrchestrator:
                 )
             else:
                 logger.warning(
-                    "_execute_step: failed step=%s attempt=%d stderr=%s",
+                    "_execute_step: FAILED step=%s attempt=%d/%d exit_code=%d",
                     step.name,
                     attempt + 1,
-                    result.stderr[:200] if result.stderr else "",
+                    max_retries + 1,
+                    result.exit_code,
                 )
+                if result.stdout:
+                    logger.warning(
+                        "_execute_step: step=%s FAILED STDOUT:\n%s",
+                        step.name,
+                        result.stdout,
+                    )
+                if result.stderr:
+                    logger.warning(
+                        "_execute_step: step=%s FAILED STDERR:\n%s",
+                        step.name,
+                        result.stderr,
+                    )
                 if attempt < max_retries:
                     continue  # Retry
 
@@ -349,7 +421,11 @@ class SetupOrchestrator:
         # If commit was attempted, check for success messages
         if "Configuration committed successfully" in output:
             return True
-        return "There are no changes to commit" in output
+        if "There are no changes to commit" in output:
+            return True
+        # If we polled a commit job, the stdout may include job status output
+        output_lower = output.lower()
+        return ("fin" in output_lower) and ("ok" in output_lower)
 
     def _render_script(
         self,
@@ -455,7 +531,7 @@ class SetupOrchestrator:
                     document_name=document_name,
                     stdin_input=f"show jobs id {job_id}\n",
                 )
-            except (SSHConnectionError, SSHTimeoutError) as e:
+            except (SSHConnectionError, SSHTimeoutError, NGFWConnectionError, NGFWTimeoutError) as e:
                 logger.warning("_poll_panos_job: SSH error, retrying: %s", e)
                 time.sleep(poll_interval)
                 continue

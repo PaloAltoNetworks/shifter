@@ -9,16 +9,28 @@ before domain member instances that depend on them.
 
 Inter-subnet traffic (for connected subnets) is routed through the NGFW
 data ENI for inspection. Non-connected subnets have blackhole routes.
+
+NGFW configuration (routes, addresses, security rules) is done after subnet
+creation but before instance setup, ensuring traffic can flow before instances
+try to communicate (e.g., domain join).
 """
 
+import asyncio
+import ipaddress
 import logging
-from typing import Any
+import time
+from collections.abc import Awaitable
+from typing import Any, cast
 
+import boto3
 import pulumi
 
 from components.instance import InstanceComponent
 from components.network import NetworkComponent, allocate_subnets
 from config import InstanceConfig, RangeConfig
+from executors.ngfw_executor import NGFWExecutor
+from main import poll_for_serial_number
+from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +82,7 @@ class RangeStack(pulumi.ComponentResource):
 
         self._validate_config(config)
         self._create_networks(name, config)
-        dc_components = self._create_all_instances(name, config)
-        self._run_all_setup(dc_components, config)
+        self._create_all_instances(name, config)
         self._register_outputs()
 
         logger.info(
@@ -94,12 +105,15 @@ class RangeStack(pulumi.ComponentResource):
         """
         return {
             "uuid": instance.uuid,
+            "name": instance.display_name,
             "role": instance.role,
             "os": instance.os_type,
             "subnet_name": subnet_name,
             "instance_id": instance.instance_id,
             "private_ip": instance.private_ip,
             "ssh_key_secret_arn": instance.ssh_key_secret_arn,
+            "public_key": instance.public_key or "",
+            "agent_presigned_url": instance.agent_presigned_url or "",
         }
 
     def _register_outputs(self) -> None:
@@ -127,13 +141,199 @@ class RangeStack(pulumi.ComponentResource):
 
         self.register_outputs(outputs)
 
+    def _configure_ngfw(self, config: RangeConfig) -> None:
+        """Configure NGFW with routes, addresses, and security rules.
+
+        Runs AFTER subnets are created but BEFORE instances are created.
+        This ensures NGFW routing is in place when instances try to
+        communicate (e.g., domain join).
+
+        Uses asyncio.to_thread to run blocking SSH operations without
+        blocking Pulumi's event loop.
+
+        Args:
+            config: Range configuration with NGFW connection info.
+        """
+        if not config.ngfw_management_ip:
+            logger.debug("No NGFW configured, skipping NGFW configuration")
+            return
+
+        if not config.ngfw_ssh_key_secret_arn:
+            logger.warning("NGFW missing SSH key ARN, skipping configuration")
+            return
+
+        if not config.ngfw_subnet_cidr:
+            raise ValueError("ngfw_subnet_cidr required when ngfw_management_ip is set")
+
+        # Build subnet info for NGFW configuration
+        subnets_for_ngfw = []
+        for subnet_name, network in self.networks.items():
+            # Find the subnet config to get connected_to
+            subnet_config = next((s for s in config.subnets if s.name == subnet_name), None)
+            connected_to = subnet_config.connected_to if subnet_config else []
+
+            # subnet_cidr is a Pulumi Output - we need to resolve it
+            # We use apply() to schedule the NGFW config after CIDRs are known
+            subnets_for_ngfw.append(
+                {
+                    "name": subnet_name,
+                    "cidr_output": network.subnet_cidr,
+                    "connected_to": connected_to,
+                }
+            )
+
+        # Schedule NGFW configuration after all subnet CIDRs are resolved
+        cidr_outputs = [s["cidr_output"] for s in subnets_for_ngfw]
+
+        def do_ngfw_config(cidrs: list[str]) -> bool:
+            """Execute NGFW configuration (blocking, runs in thread)."""
+            # Build final subnet list with resolved CIDRs
+            subnets = []
+            for i, subnet_info in enumerate(subnets_for_ngfw):
+                subnets.append(
+                    {
+                        "name": subnet_info["name"],
+                        "cidr": cidrs[i],
+                        "connected_to": subnet_info["connected_to"],
+                    }
+                )
+
+            self._execute_ngfw_config(
+                subnets=subnets,
+                range_id=config.range_id,
+                management_ip=config.ngfw_management_ip,
+                ssh_key_secret_arn=config.ngfw_ssh_key_secret_arn,
+                ngfw_subnet_cidr=config.ngfw_subnet_cidr,
+            )
+            return True
+
+        def schedule_ngfw_config(cidrs: list[str]) -> Awaitable[bool]:
+            """Schedule blocking NGFW config on a thread."""
+            return asyncio.to_thread(do_ngfw_config, cidrs)
+
+        # Store result to ensure Pulumi waits for completion
+        self.ngfw_config_result: pulumi.Output[bool] = pulumi.Output.all(*cidr_outputs).apply(schedule_ngfw_config)
+
+    def _execute_ngfw_config(
+        self,
+        subnets: list[dict],
+        range_id: int,
+        management_ip: str,
+        ssh_key_secret_arn: str,
+        ngfw_subnet_cidr: str,
+    ) -> None:
+        """Execute NGFW configuration via SSH (blocking).
+
+        This is the actual SSH work - runs on a separate thread.
+
+        Args:
+            subnets: List of dicts with 'name', 'cidr', 'connected_to'.
+            range_id: Range ID for unique naming.
+            management_ip: NGFW management IP for SSH.
+            ssh_key_secret_arn: Secrets Manager ARN for SSH private key.
+            ngfw_subnet_cidr: NGFW subnet CIDR for computing gateway IP.
+        """
+        # Compute VPC gateway IP (first IP + 1 in the subnet)
+        network = ipaddress.ip_network(ngfw_subnet_cidr, strict=False)
+        vpc_gateway_ip = str(network.network_address + 1)
+        logger.info(
+            "Configuring NGFW: %d subnets, gateway=%s",
+            len(subnets),
+            vpc_gateway_ip,
+        )
+
+        # Get SSH private key from Secrets Manager
+        secrets_client = boto3.client("secretsmanager")
+        secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
+        private_key = secret_response["SecretString"]
+
+        # Create NGFW executor
+        ssh_executor = NGFWExecutor(private_key=private_key)
+
+        # Wait for SSH to be available
+        logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+        ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
+
+        # Wait for management plane to be ready (especially important after NGFW start)
+        logger.info("Verifying NGFW management plane is ready...")
+        poll_for_serial_number(
+            ssh_executor=ssh_executor,
+            host=management_ip,
+            timeout_seconds=300,
+            poll_interval=15,
+        )
+
+        # Build and execute the configure plan
+        plan = NGFWConfigureSubnetsPlan()
+        steps = plan.get_steps(subnets, range_id, vpc_gateway_ip)
+
+        # Execute steps with retry logic
+        for step in steps:
+            logger.info("Executing NGFW config step: %s", step.name)
+            result = None
+            for attempt in range(5):
+                if attempt > 0:
+                    logger.info("Retry %d/4 for step %s", attempt, step.name)
+                    time.sleep(15)
+                result = ssh_executor.run_command(
+                    instance_id=management_ip,
+                    script=step.script,
+                    stdin_input=step.stdin_input,
+                    timeout_seconds=step.timeout_seconds,
+                )
+                if result.success and self._check_commit_success(result.stdout):
+                    break
+                if result.success and not self._check_commit_success(result.stdout):
+                    logger.warning(
+                        "NGFW step '%s' SSH OK but commit failed: %s",
+                        step.name,
+                        result.stdout[:500] if result.stdout else "(empty)",
+                    )
+            if not result or not result.success:
+                stderr = result.stderr if result else "no result"
+                raise RuntimeError(f"NGFW config step '{step.name}' failed: {stderr}")
+            if not self._check_commit_success(result.stdout):
+                raise RuntimeError(
+                    f"NGFW step '{step.name}' commit failed after retries: "
+                    f"{result.stdout[:500] if result.stdout else '(empty)'}"
+                )
+            logger.info("NGFW config step '%s' completed", step.name)
+
+        logger.info(
+            "NGFW configuration complete for range %s (%d subnets)",
+            range_id,
+            len(subnets),
+        )
+
+    def _check_commit_success(self, output: str) -> bool:
+        """Check if PAN-OS commit succeeded.
+
+        Args:
+            output: Command output to check.
+
+        Returns:
+            True if no commit was attempted or commit succeeded.
+        """
+        if not output:
+            return True
+        if "commit" not in output.lower():
+            return True
+        return "Configuration committed successfully" in output
+
     def _run_all_setup(self, dc_components: list[InstanceComponent], config: RangeConfig) -> None:
-        """Run setup for all instances (non-DC first, then DCs).
+        """Run setup for all instances (DCs first, then others in parallel).
+
+        DC setup must complete before domain-joining victims attempt to join.
+        Domain-joining instances run their setups in parallel using threading.
 
         Args:
             dc_components: List of DC instance components.
             config: Range configuration.
         """
+        # Run DC setup FIRST - must complete before victims can domain join
+        for dc_instance in dc_components:
+            dc_instance.run_dc_setup()
+
         # Build a flat list of (instance_config, instance_component) pairs for non-DCs
         # by iterating through subnets
         non_dc_pairs: list[tuple[InstanceConfig, InstanceComponent]] = []
@@ -147,21 +347,54 @@ class RangeStack(pulumi.ComponentResource):
                     non_dc_pairs.append((inst_config, instance))
                     instance_idx += 1
 
-        # Run setup for non-DC instances
+        # Separate domain-joining and non-domain-joining instances
+        domain_join_instances: list[InstanceComponent] = []
+        non_domain_join_instances: list[InstanceComponent] = []
+
         for inst_config, instance in non_dc_pairs:
-            # Domain-joining instances get DC's private_ip for domain join
             if inst_config.join_domain and dc_components:
-
-                def setup_with_dc_ip(ip: str, inst: InstanceComponent = instance) -> None:
-                    inst.run_setup(dc_ip=ip)
-
-                dc_components[0].private_ip.apply(setup_with_dc_ip)
+                domain_join_instances.append(instance)
             else:
-                instance.run_setup()
+                non_domain_join_instances.append(instance)
 
-        # Run DC setup
-        for dc_instance in dc_components:
-            dc_instance.run_dc_setup()
+        # Run non-domain-joining instances immediately (they don't need DC)
+        for instance in non_domain_join_instances:
+            instance.run_setup()
+
+        # Run domain-joining instances in parallel after DC is ready
+        # All run_setup() calls are kicked off in the same apply callback.
+        # Since run_setup() returns a Pulumi Output (non-blocking), Pulumi
+        # executes the underlying Commands in parallel.
+        if domain_join_instances and dc_components:
+            dc_domain = cast(str, dc_components[0].domain_name)
+            dc_setup_result = dc_components[0].setup_result
+
+            if dc_setup_result is not None:
+
+                def run_all_domain_joins(
+                    args: list[Any],
+                    instances: list[InstanceComponent] = domain_join_instances,
+                    domain: str = dc_domain,
+                ) -> None:
+                    """Kick off all domain join setups (Pulumi runs them in parallel)."""
+                    _dc_ready, dc_ip = args[0], args[1]
+                    for inst in instances:
+                        inst.run_setup(dc_ip=dc_ip, domain_name=domain)
+
+                # Wait for both DC setup and DC IP, then run all domain joins
+                pulumi.Output.all(dc_setup_result, dc_components[0].private_ip).apply(run_all_domain_joins)
+            else:
+                # DC setup not triggered yet - fall back to IP-only dependency
+                def run_all_domain_joins_with_ip(
+                    dc_ip: str,
+                    instances: list[InstanceComponent] = domain_join_instances,
+                    domain: str = dc_domain,
+                ) -> None:
+                    """Kick off all domain join setups (Pulumi runs them in parallel)."""
+                    for inst in instances:
+                        inst.run_setup(dc_ip=dc_ip, domain_name=domain)
+
+                dc_components[0].private_ip.apply(run_all_domain_joins_with_ip)
 
     def _create_all_instances(self, name: str, config: RangeConfig) -> list[InstanceComponent]:
         """Create all instances (DCs first, then others).
@@ -265,6 +498,7 @@ class RangeStack(pulumi.ComponentResource):
             "request_uuid": config.request_uuid,
             "instance_uuid": inst_config.uuid,
             "instance_profile_name": config.instance_profile_name,
+            "display_name": inst_config.name,
             "agent_s3_bucket": config.agent_s3_bucket,
             "agent_s3_key": inst_config.agent_s3_key or "",
             "agent_presigned_url": inst_config.agent_presigned_url or "",
@@ -565,8 +799,30 @@ class RangeStack(pulumi.ComponentResource):
                 )
                 route_count += 1
 
+        # Route traffic to SSM/Bedrock endpoints subnet through NGFW
+        # This overrides the implicit local VPC route for the endpoints subnet CIDR,
+        # forcing Bedrock (and SSM/STS) traffic through NGFW for inspection/logging
+        if config.ssm_endpoints_subnet_cidr:
+            for subnet_name in subnet_names:
+                network = self.networks[subnet_name]
+                route_name = f"{name}-{subnet_name}-to-endpoints-ngfw"
+                network.add_route_to_ngfw(
+                    route_name,
+                    pulumi.Output.from_input(config.ssm_endpoints_subnet_cidr),
+                    config.ngfw_data_eni_id,
+                    opts=pulumi.ResourceOptions(
+                        parent=self,
+                        depends_on=[network.route_table],
+                    ),
+                )
+                route_count += 1
+            logger.info(
+                "Added %d endpoint subnet routes through NGFW",
+                len(subnet_names),
+            )
+
         logger.info(
-            "Added %d inter-subnet routes through NGFW for %d subnets",
+            "Added %d total routes through NGFW for %d subnets",
             route_count,
             len(subnet_names),
         )

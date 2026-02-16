@@ -1,8 +1,16 @@
 FROM python:3.12-slim-trixie
 
-# Install Pulumi CLI (pinned version)
+# Install Terraform and Pulumi CLI (pinned versions)
+ARG TERRAFORM_VERSION=1.14.3
 ARG PULUMI_VERSION=3.142.0
-RUN apt-get update && apt-get install -y curl && \
+
+RUN apt-get update && apt-get install -y curl openssh-client unzip && \
+    # Install Terraform
+    curl -fsSL -o terraform.zip \
+      "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" && \
+    unzip terraform.zip -d /usr/local/bin && \
+    rm terraform.zip && \
+    # Install Pulumi (keeping for backward compatibility)
     curl -fsSL -o pulumi.tar.gz \
       "https://github.com/pulumi/pulumi/releases/download/v${PULUMI_VERSION}/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" && \
     tar -xzf pulumi.tar.gz -C /usr/local/bin --strip-components=1 && \

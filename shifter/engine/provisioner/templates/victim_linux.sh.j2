@@ -5,9 +5,38 @@ set -euo pipefail
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Victim Linux instance booting..."
 
-# All setup (hostname, SSH, XDR) is handled by SSM plans:
-#   - LinuxBootstrapPlan: hostname + SSH configuration
-#   - LinuxXDRAgentInstallPlan: XDR agent installation
-# This keeps user_data minimal and testable.
+# SSH access for browser terminal (SSM can be flaky).
+ssh_user="{{ ssh_user }}"
+public_key="{{ public_key }}"
 
+echo "Configuring SSH access for $ssh_user..."
+user_home=$(eval echo ~$ssh_user)
+mkdir -p "$user_home/.ssh"
+chmod 700 "$user_home/.ssh"
+
+if [ -n "$public_key" ]; then
+    echo "$public_key" >> "$user_home/.ssh/authorized_keys"
+    chmod 600 "$user_home/.ssh/authorized_keys"
+    chown -R "$ssh_user:$ssh_user" "$user_home/.ssh"
+    echo "SSH key configured for $ssh_user"
+else
+    echo "No public key provided, skipping key auth setup"
+fi
+
+# Ensure SSH service is running (Ubuntu uses ssh, Amazon Linux uses sshd)
+if systemctl list-unit-files | grep -q "^ssh.service"; then
+    systemctl enable --now ssh || true
+elif systemctl list-unit-files | grep -q "^sshd.service"; then
+    systemctl enable --now sshd || true
+fi
+
+# Ensure xrdp is running for RDP access via Guacamole (Ubuntu AMI has xrdp installed)
+if systemctl list-unit-files | grep -q "^xrdp.service"; then
+    echo "Starting xrdp service..."
+    systemctl start xrdp
+    systemctl status xrdp --no-pager || true
+    echo "xrdp service started"
+fi
+
+# All other setup (hostname, XDR) stays in SSM plans.
 echo "user_data complete. SSM will handle remaining setup."

@@ -28,4 +28,7 @@ cat > /etc/tmux.conf << 'EOF'
 set -g mouse on
 EOF
 
+echo "=== Installing Certipy for AD Certificate Services testing ==="
+pip3 install --break-system-packages certipy-ad
+
 echo "=== Tools setup complete ==="

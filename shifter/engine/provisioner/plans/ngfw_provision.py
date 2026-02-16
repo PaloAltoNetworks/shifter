@@ -37,10 +37,10 @@ ALERT_PROFILE_GROUP = "Alert-Group"
 
 # PAN-OS configure mode commands for data interface setup
 # Configures ethernet1/1 as Layer 3 DHCP with virtual router for ENI routing
-# Virtual router must be configured BEFORE the interface DHCP client
+# Interface must be configured as layer3 BEFORE adding to virtual-router
 CONFIGURE_DATA_INTERFACE_INPUT = """configure
-set network virtual-router default interface ethernet1/1
 set network interface ethernet ethernet1/1 layer3 dhcp-client create-default-route no
+set network virtual-router default interface ethernet1/1
 commit
 exit
 """
@@ -251,7 +251,7 @@ class NGFWProvisionPlan:
                 name="download_threat_content",
                 script="",
                 stdin_input=DOWNLOAD_CONTENT_INPUT,
-                timeout_seconds=600,  # 10 min - download can take a while
+                timeout_seconds=2700,  # 45 min - threat content download is large
                 poll_for_job=True,
             ),
             # Install threat content (async - polls for job completion)

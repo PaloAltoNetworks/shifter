@@ -37,6 +37,16 @@ $publicKey = "{{ public_key }}"
 Write-Host "Configuring OpenSSH Server..."
 
 try {
+    # Check if OpenSSH Server is installed
+    $sshCapability = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
+    if ($sshCapability.State -ne 'Installed') {
+        Write-Host "Installing OpenSSH Server..."
+        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+        Write-Host "OpenSSH Server installed"
+    } else {
+        Write-Host "OpenSSH Server already installed"
+    }
+
     # Ensure SSH server is running
     Start-Service sshd -ErrorAction Stop
     Set-Service -Name sshd -StartupType Automatic

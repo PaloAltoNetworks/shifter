@@ -139,18 +139,18 @@ class TestRangeModel:
     # Model property tests
     # -------------------------------------------------------------------------
 
-    def test_is_active_property(self, user):
-        """is_active returns True for READY and PAUSED ranges."""
+    def test_is_usable_property(self, user):
+        """is_usable returns True for READY and PAUSED ranges."""
         from engine.models import Range
 
         ready_range = Range.objects.create(user=user, status=Range.Status.READY)
-        assert ready_range.is_active is True
+        assert ready_range.is_usable is True
 
         paused_range = Range.objects.create(user=user, status=Range.Status.PAUSED)
-        assert paused_range.is_active is True
+        assert paused_range.is_usable is True
 
         failed_range = Range.objects.create(user=user, status=Range.Status.FAILED)
-        assert failed_range.is_active is False
+        assert failed_range.is_usable is False
 
     def test_is_terminal_property(self, user):
         """is_terminal returns True for DESTROYED and FAILED ranges."""

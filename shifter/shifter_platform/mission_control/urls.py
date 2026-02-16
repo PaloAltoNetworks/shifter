@@ -37,7 +37,6 @@ urlpatterns = [
     path("api/ngfw/", views.api_ngfw_create, name="api_ngfw_create"),
     path("api/ngfw/list/", views.api_ngfw_list, name="api_ngfw_list"),
     path("api/ngfw/<uuid:app_id>/destroy/", views.api_ngfw_destroy, name="api_ngfw_destroy"),
-    path("api/ngfw/<uuid:app_id>/complete-setup/", views.api_ngfw_complete_setup, name="api_ngfw_complete_setup"),
     # Credential views
     path("credentials/", views.credentials_list, name="credentials_list"),
     path("credentials/add/", views.credential_add, name="credential_add"),
@@ -45,4 +44,9 @@ urlpatterns = [
     # Credential API
     path("api/credentials/", views.api_credential_create, name="api_credential_create"),
     path("api/credentials/<int:credential_id>/delete/", views.api_credential_delete, name="api_credential_delete"),
+    # Files (scripts)
+    path("files/", views.files, name="files"),
+    path("files/upload/", views.file_upload, name="file_upload"),
+    path("files/<int:script_id>/delete/", views.file_delete, name="file_delete"),
+    path("api/scripts/", views.api_list_scripts, name="api_list_scripts"),
 ]

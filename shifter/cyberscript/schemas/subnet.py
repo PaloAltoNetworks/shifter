@@ -28,18 +28,18 @@ class SubnetSpec(SpecBase):
     Instances in the same subnet can communicate freely.
     Inter-subnet communication requires explicit connection declarations.
 
-    Connections are bidirectional by default. If subnet A lists subnet B
-    in connected_to, both A->B and B->A traffic is allowed. The connection
-    only needs to be declared on one side.
+    Connections are unidirectional. If subnet A lists subnet B in connected_to,
+    instances in A can initiate connections TO B. For bidirectional communication,
+    both subnets must list each other in their connected_to lists.
 
     When NGFW is present, connections become firewall rules.
-    Without NGFW, connections define logical reachability.
+    Without NGFW, connections define logical reachability via security groups.
 
     Attributes:
         name: Subnet name (e.g., 'dc_network', 'server_network').
         uuid: Unique identifier (inherited from SpecBase, assigned during hydration).
         instances: List of InstanceSpecs belonging to this subnet.
-        connected_to: List of subnet names this subnet can reach (bidirectional).
+        connected_to: List of subnet names this subnet needs to reach.
     """
 
     name: str  # Required for subnets (overrides optional in SpecBase)

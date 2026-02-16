@@ -213,7 +213,7 @@ class DashboardManager {
      * Shows/hides agent sections based on scenario requirements.
      */
     _onScenarioChange(scenario) {
-        const req = this.scenarioRequirements[scenario] || {};
+        const req = this.scenarioRequirements[scenario] || {}; // eslint-disable-line security/detect-object-injection
 
         // Update scenario info panel
         this._updateScenarioInfoPanel(scenario);
@@ -258,7 +258,7 @@ class DashboardManager {
      * Update the scenario info panel with the selected scenario's details.
      */
     _updateScenarioInfoPanel(scenarioId) {
-        const scenario = this.scenarioData[scenarioId];
+        const scenario = this.scenarioData[scenarioId]; // eslint-disable-line security/detect-object-injection
 
         if (!this.scenarioInfoPanel) return;
 
@@ -277,7 +277,7 @@ class DashboardManager {
 
     /**
      * Handle OS selection change.
-     * Filters agent dropdown by selected OS.
+     * Filters agent dropdown by selected OS and agent type (XDR only).
      */
     _onOsChange(osType) {
         if (!osType) return;
@@ -287,8 +287,12 @@ class DashboardManager {
             this.agentSection.style.display = 'block';
         }
 
-        // Filter agents by OS
+        // Filter agents by OS and agent_type (only XDR agents for range creation)
         const filteredAgents = this.agents.filter(agent => {
+            // Only show XDR agents in range creation dropdowns
+            if (agent.agent_type !== 'xdr') {
+                return false;
+            }
             if (osType === 'windows') {
                 return agent.os_slug === 'windows';
             }
@@ -304,7 +308,7 @@ class DashboardManager {
         if (this.agentSelect) {
             this.agentSelect.value = '';
         }
-        this._resetDropdownDisplay(this.agentDropdown, '-- Select an agent --');
+        this._resetDropdownDisplay(this.agentDropdown, '-- Select an XDR agent --');
 
         this._updateLaunchButtonState();
     }
@@ -447,7 +451,7 @@ class DashboardManager {
         if (!this.launchBtn) return;
 
         const scenario = this.scenarioSelect?.value || 'basic';
-        const req = this.scenarioRequirements[scenario] || {};
+        const req = this.scenarioRequirements[scenario] || {}; // eslint-disable-line security/detect-object-injection
 
         let canLaunch = true;
 
@@ -540,15 +544,21 @@ class DashboardManager {
                 this._renderPausedTile(tile);
                 break;
 
-            case 'pausing':
-                this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Pausing Range', 'Stopping instances...');
+            case 'pausing': {
+                this._renderProvisioningTile(tile, 'Pausing Range', 'Stopping instances...');
+                // Hide cancel button - pause cannot be cancelled
+                const pauseCancelBtn = tile.querySelector('.cancel-range-btn');
+                if (pauseCancelBtn) pauseCancelBtn.style.display = 'none';
                 break;
+            }
 
-            case 'resuming':
-                this.provisioningState.style.display = 'block';
-                this._updateProvisioningState('Resuming Range', 'Starting instances...');
+            case 'resuming': {
+                this._renderProvisioningTile(tile, 'Resuming Range', 'Starting instances...');
+                // Hide cancel button - resume cannot be cancelled
+                const resumeCancelBtn = tile.querySelector('.cancel-range-btn');
+                if (resumeCancelBtn) resumeCancelBtn.style.display = 'none';
                 break;
+            }
 
             case 'failed':
                 this._renderFailedTile(tile);
@@ -692,7 +702,7 @@ class DashboardManager {
 
     async launchRange() {
         const scenario = this.scenarioSelect?.value || 'basic';
-        const req = this.scenarioRequirements[scenario] || {};
+        const req = this.scenarioRequirements[scenario] || {}; // eslint-disable-line security/detect-object-injection
 
         // Build agents dict based on scenario requirements
         const agents = {};
@@ -700,7 +710,7 @@ class DashboardManager {
         // Check for OS-picked agent (from_agent scenarios)
         if (this.osSelect?.value && this.agentSelect?.value) {
             const osType = this.osSelect.value;
-            agents[osType] = Number.parseInt(this.agentSelect.value, 10);
+            agents[osType] = Number.parseInt(this.agentSelect.value, 10); // eslint-disable-line security/detect-object-injection
         }
 
         // Check for fixed Windows agent requirement
@@ -823,6 +833,13 @@ class DashboardManager {
             return;
         }
 
+        // Disable button to prevent double-clicks during request
+        const pauseBtn = document.querySelector('#pause-btn');
+        if (pauseBtn) {
+            pauseBtn.disabled = true;
+            pauseBtn.textContent = 'Pausing...';
+        }
+
         try {
             const response = await fetch(this.pauseUrl, {
                 method: 'POST',
@@ -846,12 +863,24 @@ class DashboardManager {
 
         } catch (error) {
             alert(error.message);
+            // Re-enable button on failure
+            if (pauseBtn) {
+                pauseBtn.disabled = false;
+                pauseBtn.textContent = 'Pause';
+            }
         }
     }
 
     async resumeRange() {
         if (!confirm('Are you sure you want to resume this range?')) {
             return;
+        }
+
+        // Disable button to prevent double-clicks during request
+        const resumeBtn = document.querySelector('#resume-btn');
+        if (resumeBtn) {
+            resumeBtn.disabled = true;
+            resumeBtn.textContent = 'Resuming...';
         }
 
         try {
@@ -877,6 +906,11 @@ class DashboardManager {
 
         } catch (error) {
             alert(error.message);
+            // Re-enable button on failure
+            if (resumeBtn) {
+                resumeBtn.disabled = false;
+                resumeBtn.textContent = 'Resume';
+            }
         }
     }
 
@@ -1106,9 +1140,13 @@ class DashboardManager {
             return;
         }
 
-        const windowsAgents = agents.filter(agent => agent.os_slug === 'windows');
+        // Filter to only XDR agents (not XDR Collector or Cloud Identity Engine)
+        // and Windows OS
+        const windowsAgents = agents.filter(agent =>
+            agent.os_slug === 'windows' && agent.agent_type === 'xdr'
+        );
         if (windowsAgents.length === 0) {
-            this._renderEmptyDropdown(this.windowsAgentItems, 'No Windows agents');
+            this._renderEmptyDropdown(this.windowsAgentItems, 'No Windows XDR agents');
         } else {
             this._renderAgentItems(this.windowsAgentItems, windowsAgents);
         }
@@ -1121,9 +1159,13 @@ class DashboardManager {
             return;
         }
 
-        const linuxAgents = agents.filter(agent => agent.os_slug !== 'windows');
+        // Filter to only XDR agents (not XDR Collector or Cloud Identity Engine)
+        // and Linux OS
+        const linuxAgents = agents.filter(agent =>
+            agent.os_slug !== 'windows' && agent.agent_type === 'xdr'
+        );
         if (linuxAgents.length === 0) {
-            this._renderEmptyDropdown(this.linuxAgentItems, 'No Linux agents');
+            this._renderEmptyDropdown(this.linuxAgentItems, 'No Linux XDR agents');
         } else {
             this._renderAgentItems(this.linuxAgentItems, linuxAgents);
         }

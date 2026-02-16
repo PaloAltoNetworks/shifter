@@ -65,7 +65,6 @@ EVENT_TYPE_NGFW = "ngfw.event"
 # Resource status constants (matching shared.enums.ResourceStatus)
 STATUS_PENDING = "pending"
 STATUS_PROVISIONING = "provisioning"
-STATUS_AWAITING_ASSOCIATION = "awaiting_association"
 STATUS_READY = "ready"
 STATUS_FAILED = "failed"
 STATUS_DESTROYING = "destroying"

@@ -277,7 +277,7 @@ class DashboardManager {
 
     /**
      * Handle OS selection change.
-     * Filters agent dropdown by selected OS.
+     * Filters agent dropdown by selected OS and agent type (XDR only).
      */
     _onOsChange(osType) {
         if (!osType) return;
@@ -287,8 +287,12 @@ class DashboardManager {
             this.agentSection.style.display = 'block';
         }
 
-        // Filter agents by OS
+        // Filter agents by OS and agent_type (only XDR agents for range creation)
         const filteredAgents = this.agents.filter(agent => {
+            // Only show XDR agents in range creation dropdowns
+            if (agent.agent_type !== 'xdr') {
+                return false;
+            }
             if (osType === 'windows') {
                 return agent.os_slug === 'windows';
             }
@@ -304,7 +308,7 @@ class DashboardManager {
         if (this.agentSelect) {
             this.agentSelect.value = '';
         }
-        this._resetDropdownDisplay(this.agentDropdown, '-- Select an agent --');
+        this._resetDropdownDisplay(this.agentDropdown, '-- Select an XDR agent --');
 
         this._updateLaunchButtonState();
     }
@@ -1136,9 +1140,13 @@ class DashboardManager {
             return;
         }
 
-        const windowsAgents = agents.filter(agent => agent.os_slug === 'windows');
+        // Filter to only XDR agents (not XDR Collector or Cloud Identity Engine)
+        // and Windows OS
+        const windowsAgents = agents.filter(agent =>
+            agent.os_slug === 'windows' && agent.agent_type === 'xdr'
+        );
         if (windowsAgents.length === 0) {
-            this._renderEmptyDropdown(this.windowsAgentItems, 'No Windows agents');
+            this._renderEmptyDropdown(this.windowsAgentItems, 'No Windows XDR agents');
         } else {
             this._renderAgentItems(this.windowsAgentItems, windowsAgents);
         }
@@ -1151,9 +1159,13 @@ class DashboardManager {
             return;
         }
 
-        const linuxAgents = agents.filter(agent => agent.os_slug !== 'windows');
+        // Filter to only XDR agents (not XDR Collector or Cloud Identity Engine)
+        // and Linux OS
+        const linuxAgents = agents.filter(agent =>
+            agent.os_slug !== 'windows' && agent.agent_type === 'xdr'
+        );
         if (linuxAgents.length === 0) {
-            this._renderEmptyDropdown(this.linuxAgentItems, 'No Linux agents');
+            this._renderEmptyDropdown(this.linuxAgentItems, 'No Linux XDR agents');
         } else {
             this._renderAgentItems(this.linuxAgentItems, linuxAgents);
         }

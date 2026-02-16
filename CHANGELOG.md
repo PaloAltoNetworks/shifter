@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.7] - 2026-02-16
+
+### Added
+- Cortex Broken Bank AMI
+
+## [2.1.6] - 2026-02-16
+
+### Added
+- Add XDR Collector and Cloud Identity Engine agents to CMS
+- 
+## [2.1.5] - 2026-02-15
+
+### Changed
+- Merged MCP-Shifter and MCP-NGFW into MCP-Ops
+- MCP-Ops has range reconciliation tool to find and destroy orphaned instances
+- Add better parsing for AWS to SonarQube
+
+## [2.1.4] - 2026-02-15
+
+### Fixed
+- Shifter DB MCP no longer leaks connections to RDS
+
+## [2.1.3] - 2026-02-15
+
+### Fixed
+- Failed ranges do not always get destroyed
+
+## [2.1.2] - 2026-02-14
+
+### Fixed
+- Restrictive Egress rules in Network Firewall loosened to match XSIAM docs recommendations
+
+## [2.1.1] - 2026-02-10
+
+### Fixed
+- Subnet `connected_to` semantics corrected: Terraform now creates security group rules on target subnet allowing traffic from source (was reversed)
+- Range provisioning now reads NGFW data ENI ID from database instead of non-existent environment variable
+
+### Changed
+- Updated `connected_to` documentation to clarify unidirectional semantics (both subnets must list each other for bidirectional traffic)
+- Updated basic_ngfw scenario template to have bidirectional subnet connectivity
+
+## [2.1.0] - 2026-02-08
+
+### Added
+- Experiment Manager for creating and managing experiments
+
 ## [2.0.0] - 2026-02-07
 
 ### Added
@@ -16,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Certipy to Kali AMI
+
+## [1.1.2] - 2026-02-07
+
+### Added
+- Credentials details page
 
 ## [1.1.1] - 2026-02-07
 

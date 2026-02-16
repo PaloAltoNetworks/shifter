@@ -55,8 +55,9 @@ class DirectUploader {
      * Start upload process
      * @param {File} file - File object to upload
      * @param {string} agentName - User-provided name for the agent
+     * @param {string} agentType - Type of agent (xdr, xdr_collector, cloud_identity_engine)
      */
-    async upload(file, agentName) {
+    async upload(file, agentName, agentType = 'xdr') {
         this.cancelled = false;
         this._registerBeforeUnload();
 
@@ -70,7 +71,7 @@ class DirectUploader {
         try {
             // Step 1: Get presigned URL
             this.onProgress(0, 'Preparing upload...');
-            const initResponse = await this._initiateUpload(file, agentName);
+            const initResponse = await this._initiateUpload(file, agentName, agentType);
 
             if (this.cancelled) return;
 
@@ -115,7 +116,7 @@ class DirectUploader {
         this.onCancel();
     }
 
-    async _initiateUpload(file, agentName) {
+    async _initiateUpload(file, agentName, agentType = 'xdr') {
         const response = await fetch(this.initiateUrl, {
             method: 'POST',
             headers: {
@@ -126,6 +127,7 @@ class DirectUploader {
                 name: agentName,
                 filename: file.name,
                 file_size: file.size,
+                agent_type: agentType,
             }),
         });
 

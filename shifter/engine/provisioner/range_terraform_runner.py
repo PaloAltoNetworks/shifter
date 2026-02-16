@@ -266,12 +266,19 @@ def apply_range(
     return outputs
 
 
-def destroy_range(request_uuid: str, working_dir: Path) -> None:
+def destroy_range(
+    request_uuid: str,
+    working_dir: Path,
+    variables: dict[str, Any] | None = None,
+) -> None:
     """Run terraform destroy for Range.
 
     Args:
         request_uuid: UUID of the provisioning request
         working_dir: Directory containing Terraform files
+        variables: Optional Terraform variables dict. Required when the
+            module has variables with no defaults (e.g. during auto-cleanup
+            after a failed provision).
 
     Raises:
         RuntimeError: If destroy fails
@@ -281,15 +288,25 @@ def destroy_range(request_uuid: str, working_dir: Path) -> None:
 
     logger.info("Running terraform destroy for Range...")
 
-    result = _run_terraform(
-        [
-            "destroy",
-            "-auto-approve",
-            "-input=false",
-            "-no-color",
-        ],
-        working_dir,
-    )
+    destroy_args = [
+        "destroy",
+        "-auto-approve",
+        "-input=false",
+        "-no-color",
+    ]
+
+    # Write tfvars if variables provided (needed for modules with required variables)
+    tfvars_path = working_dir / "terraform.tfvars.json"
+    if variables:
+        with open(tfvars_path, "w") as f:
+            json.dump(variables, f, indent=2)
+        destroy_args.append(f"-var-file={tfvars_path}")
+
+    try:
+        result = _run_terraform(destroy_args, working_dir)
+    finally:
+        if variables:
+            tfvars_path.unlink(missing_ok=True)
 
     logger.info("Terraform destroy stdout:\n%s", result.stdout)
     logger.info("Range Terraform destroy completed successfully")

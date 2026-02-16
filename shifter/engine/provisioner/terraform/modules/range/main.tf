@@ -112,15 +112,16 @@ resource "aws_security_group" "subnet" {
 }
 
 # Dynamic ingress rules for connected subnets (NGFW does actual filtering)
+# If subnet A has connected_to: ["B"], this creates an ingress rule on B's SG allowing traffic from A
 resource "aws_security_group_rule" "connected_subnet" {
   for_each = {
     for pair in flatten([
       for subnet in var.subnets : [
         for connected_name in subnet.connected_to : {
-          key             = "${subnet.name}-from-${connected_name}"
-          security_group  = subnet.name
-          connected_cidr  = local.subnet_map[connected_name].cidr
-          connected_name  = connected_name
+          key             = "${connected_name}-from-${subnet.name}"
+          security_group  = connected_name
+          source_cidr     = subnet.cidr
+          source_name     = subnet.name
         } if contains(keys(local.subnet_map), connected_name)
       ]
     ]) : pair.key => pair
@@ -131,8 +132,8 @@ resource "aws_security_group_rule" "connected_subnet" {
   protocol          = "-1"
   from_port         = 0
   to_port           = 0
-  cidr_blocks       = [each.value.connected_cidr]
-  description       = "Allow from connected subnet ${each.value.connected_name} (filtered by NGFW)"
+  cidr_blocks       = [each.value.source_cidr]
+  description       = "Allow from subnet ${each.value.source_name} (filtered by NGFW)"
 }
 
 # SSH ingress from portal VPC

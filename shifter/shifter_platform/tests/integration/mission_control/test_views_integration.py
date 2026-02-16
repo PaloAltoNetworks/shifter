@@ -211,7 +211,6 @@ class TestCredentialsListViewIntegration:
 class TestCredentialDetailViewIntegration:
     """Integration tests for credential_detail view."""
 
-    @pytest.mark.skip(reason="Template mission_control/credentials/detail.html does not exist")
     def test_returns_200_for_own_credential(self, authenticated_client, scm_credential):
         """credential_detail returns 200 for user's own credential."""
         response = authenticated_client.get(f"/mission-control/credentials/{scm_credential.id}/")
@@ -467,7 +466,6 @@ class TestApiCredentialDeleteIntegration:
 class TestCredentialLifecycleIntegration:
     """End-to-end integration tests for credential lifecycle."""
 
-    @pytest.mark.skip(reason="Template mission_control/credentials/detail.html does not exist")
     def test_create_view_delete_lifecycle(self, authenticated_client, scm_credential_type):
         """Test full lifecycle: create → view in list → view detail → delete."""
         # Step 1: Create credential via API

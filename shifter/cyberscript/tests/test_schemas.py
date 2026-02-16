@@ -11,7 +11,7 @@ class TestRangeContextValidation:
     def test_rejects_empty_scenario_id(self):
         """RangeContext rejects empty scenario_id."""
         from cyberscript.enums import ResourceStatus
-        from cyberscript.schemas import InstanceContext, RangeContext
+        from cyberscript.schemas import RangeContext
 
         with pytest.raises(ValueError, match="scenario_id cannot be empty"):
             RangeContext(

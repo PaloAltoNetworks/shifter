@@ -667,7 +667,8 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
-    steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id)
+    has_endpoints = bool(os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR"))
+    steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id, has_endpoints)
     plan = DynamicPlan(name="ngfw_remove_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
@@ -1387,11 +1388,14 @@ def configure_ngfw_subnets(
     management_ip: str,
     ssh_key_secret_arn: str,
     ngfw_subnet_cidr: str,
+    ssm_endpoints_subnet_cidr: str = "",
 ) -> None:
     """Configure NGFW with routes for range subnets.
 
     This runs AFTER pulumi up (subnets exist) and BEFORE instance setup.
     Configures static routes on the NGFW so traffic can flow between subnets.
+    When ssm_endpoints_subnet_cidr is provided, also configures routing for
+    Bedrock/SSM endpoint traffic through the NGFW.
 
     Args:
         subnets: List of dicts with 'name', 'cidr', 'connected_to'.
@@ -1399,6 +1403,7 @@ def configure_ngfw_subnets(
         management_ip: NGFW management IP for SSH.
         ssh_key_secret_arn: Secrets Manager ARN for SSH private key.
         ngfw_subnet_cidr: NGFW subnet CIDR for computing gateway IP.
+        ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR for NGFW routing.
     """
     # Compute VPC gateway IP (first IP + 1 in the subnet)
     network = ipaddress.ip_network(ngfw_subnet_cidr, strict=False)
@@ -1460,7 +1465,9 @@ def configure_ngfw_subnets(
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
-    steps = NGFWConfigureSubnetsPlan().get_steps(subnets, range_id, vpc_gateway_ip, stale_routes)
+    steps = NGFWConfigureSubnetsPlan().get_steps(
+        subnets, range_id, vpc_gateway_ip, stale_routes, ssm_endpoints_subnet_cidr
+    )
     plan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
@@ -2013,6 +2020,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
         "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
         "firewallEndpointId": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
+        "ssmEndpointsSubnetCidr": os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
         "portalVpcCidr": os.environ.get("PORTAL_VPC_CIDR", ""),
         "portalVpcPeeringId": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
     }
@@ -2174,6 +2182,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
             management_ip=ngfw_data["management_ip"],
             ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
             ngfw_subnet_cidr=ngfw_subnet_cidr,
+            ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
         )
     else:
         logger.warning(
@@ -2380,12 +2389,33 @@ def run_range_terraform(operation: str, request_id: str) -> None:
         logger.error("Range Terraform operation failed: %s", error_msg)
 
         if operation == "up":
-            logger.info("Provision failed - attempting Terraform cleanup...")
+            logger.error(
+                "Provision failed for range_id=%s request_id=%s - attempting Terraform cleanup...",
+                range_id,
+                request_id,
+            )
             try:
-                range_terraform_runner.destroy_range(request_id, range_terraform_runner.RANGE_MODULE_PATH)
+                tf_variables = _build_range_terraform_variables(
+                    request_id,
+                    range_id,
+                    user_id,
+                    range_spec,
+                )
+                range_terraform_runner.destroy_range(
+                    request_id,
+                    range_terraform_runner.RANGE_MODULE_PATH,
+                    variables=tf_variables,
+                )
                 range_terraform_runner.cleanup_range_state(request_id)
+                logger.info("Auto-cleanup succeeded for range_id=%s", range_id)
             except Exception as cleanup_error:
-                logger.warning("Auto-cleanup failed: %s", cleanup_error)
+                logger.error(
+                    "Auto-cleanup FAILED for range_id=%s request_id=%s: %s. "
+                    "Orphaned AWS resources may exist and require manual cleanup.",
+                    range_id,
+                    request_id,
+                    cleanup_error,
+                )
 
         publish_failed(
             request_id=request_id,
@@ -2498,6 +2528,7 @@ def _run_terraform_provision(
                 management_ip=ngfw_data["management_ip"],
                 ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
                 ngfw_subnet_cidr=ngfw_subnet_cidr,
+                ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
             )
 
     # Run instance setup (DC first, then others in parallel)
@@ -2534,8 +2565,8 @@ def _run_terraform_destroy(
         return
 
     current_status = range_data.get("status")
-    if current_status in ("destroyed", "failed"):
-        logger.info("Range %d already in terminal state '%s', skipping", range_id, current_status)
+    if current_status == "destroyed":
+        logger.info("Range %d already destroyed, skipping", range_id)
         return
 
     # Remove NGFW subnet config

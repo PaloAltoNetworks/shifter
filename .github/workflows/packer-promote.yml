@@ -12,6 +12,7 @@ on:
           - ubuntu
           - windows
           - dc
+          - brokenbk
 
 permissions:
   id-token: write

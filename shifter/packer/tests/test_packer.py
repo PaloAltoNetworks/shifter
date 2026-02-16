@@ -30,6 +30,10 @@ class TestScriptStructure:
     def common_scripts(self):
         return list((SCRIPTS_DIR / "common").glob("*.sh"))
 
+    @pytest.fixture
+    def brokenbk_scripts(self):
+        return list((SCRIPTS_DIR / "brokenbk").glob("*.sh"))
+
     def test_kali_scripts_exist(self, kali_scripts):
         """Kali directory should have scripts."""
         assert len(kali_scripts) >= 3, "Expected at least 3 kali scripts"
@@ -56,6 +60,17 @@ class TestScriptStructure:
             path = SCRIPTS_DIR / "ubuntu" / script
             assert path.exists(), f"Missing required Ubuntu script: {script}"
 
+    def test_brokenbk_scripts_exist(self, brokenbk_scripts):
+        """Brokenbk directory should have scripts."""
+        assert len(brokenbk_scripts) >= 2, "Expected at least 2 brokenbk scripts"
+
+    def test_required_brokenbk_scripts(self):
+        """Check all required Broken Bank scripts exist (referenced by brokenbk.pkr.hcl)."""
+        required = ["base.sh", "app.sh"]
+        for script in required:
+            path = SCRIPTS_DIR / "brokenbk" / script
+            assert path.exists(), f"Missing required brokenbk script: {script}"
+
     def test_cleanup_script_exists(self):
         """Cleanup script should exist."""
         assert (SCRIPTS_DIR / "common" / "cleanup.sh").exists()
@@ -67,7 +82,7 @@ class TestScriptContent:
     @pytest.fixture
     def all_scripts(self):
         scripts = []
-        for pattern in ["kali/*.sh", "ubuntu/*.sh", "common/*.sh"]:
+        for pattern in ["kali/*.sh", "ubuntu/*.sh", "brokenbk/*.sh", "common/*.sh"]:
             scripts.extend(SCRIPTS_DIR.glob(pattern))
         return scripts
 
@@ -135,6 +150,10 @@ class TestPackerTemplates:
     def test_ubuntu_template_exists(self):
         """Ubuntu template should exist."""
         assert (PACKER_DIR / "ubuntu.pkr.hcl").exists()
+
+    def test_brokenbk_template_exists(self):
+        """Broken Bank template should exist."""
+        assert (PACKER_DIR / "brokenbk.pkr.hcl").exists()
 
     def test_variables_file_exists(self):
         """Variables file should exist."""

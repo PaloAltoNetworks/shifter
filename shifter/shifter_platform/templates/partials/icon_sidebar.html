@@ -1,7 +1,7 @@
 {% load static user_extras %}
 {# Cortex XDR Left Navigation - Direct port from Cortex XDR #}
 
-<nav class="left-nav minimized" id="leftNav" data-active-submenu="{% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' %}assets{% endif %}">
+<nav class="left-nav minimized" id="leftNav" data-active-submenu="{% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}assets{% endif %}">
     <div class="left-nav-body">
         {# Lock button - positioned at top of sidebar, outside header for proper z-index #}
         <button class="reset-button lock-button"
@@ -89,9 +89,9 @@
             </div>
 
             {# Assets - opens submenu panel #}
-            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' %}active-top-item{% endif %}">
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-top-item{% endif %}">
                 <button type="button"
-                        class="nav-menu-item nav-menu-item-level-0 nav-submenu-trigger {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' %}active-link{% endif %}"
+                        class="nav-menu-item nav-menu-item-level-0 nav-submenu-trigger {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-link{% endif %}"
                         data-submenu="assets"
                         data-submenu-title="Assets">
                     <span class="nav-icon">
@@ -134,6 +134,34 @@
                         </svg>
                     </span>
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Risk Register</span>
+                </a>
+            </div>
+
+            {# Scenario Editor - Staff only #}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'scenarios' %}active-top-item{% endif %}">
+                <a href="{% url 'scenario_editor:list' %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'scenarios' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M14.06 9.02L14.98 9.94L5.92 19H5V18.08L14.06 9.02ZM17.66 3C17.41 3 17.15 3.1 16.96 3.29L15.13 5.12L18.88 8.87L20.71 7.04C21.1 6.65 21.1 6.02 20.71 5.63L18.37 3.29C18.17 3.09 17.92 3 17.66 3ZM14.06 6.19L3 17.25V21H6.75L17.81 9.94L14.06 6.19Z"/>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Scenarios</span>
+                </a>
+            </div>
+            {% endif %}
+
+            {# Experiments - Staff only #}
+            {% if user.is_staff %}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'experiments' %}active-top-item{% endif %}">
+                <a href="{% url 'experiments:experiment_list' %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'experiments' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M13 2V5H11V2H13ZM15 7V14.07C16.77 14.57 18 16.13 18 18C18 20.21 16.21 22 14 22H10C7.79 22 6 20.21 6 18C6 16.13 7.23 14.57 9 14.07V7H15ZM11 9V15.17L10.17 15.58C9.18 16.08 8 16.92 8 18C8 19.1 8.9 20 10 20H14C15.1 20 16 19.1 16 18C16 16.92 14.82 16.08 13.83 15.58L13 15.17V9H11Z"/>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Experiments</span>
                 </a>
             </div>
             {% endif %}
@@ -217,6 +245,10 @@
         <a href="{% url 'mission_control:credentials_list' %}"
            class="nav-menu-item nav-menu-item-level-1 {% if active_nav == 'credentials' %}active-link{% endif %}">
             Credentials
+        </a>
+        <a href="{% url 'mission_control:files' %}"
+           class="nav-menu-item nav-menu-item-level-1 {% if active_nav == 'files' %}active-link{% endif %}">
+            Files
         </a>
     </template>
 </nav>

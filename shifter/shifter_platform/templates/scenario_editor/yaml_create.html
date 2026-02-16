@@ -1,0 +1,95 @@
+{% extends "scenario_editor/base.html" %}
+
+{% block title %}Import from YAML{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Create from YAML</h1>
+        <p class="page-subtitle">Write or paste a YAML scenario definition</p>
+    </div>
+    <div class="flex-row gap-sm">
+        <button type="button" class="btn btn-secondary" onclick="validateYAML()">Validate</button>
+        <a href="{% url 'scenario_editor:create' %}" class="btn btn-secondary">Form Editor</a>
+    </div>
+</div>
+
+{% if errors %}
+<ul class="error-list">
+    {% for error in errors %}
+    <li>{{ error }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+<div id="validationResult" class="validation-result"></div>
+
+<form method="post">
+    {% csrf_token %}
+
+    <div class="card" style="margin-bottom: 16px; padding: 0;">
+        <textarea name="yaml_content" id="yamlEditor" class="yaml-editor"
+                  spellcheck="false">{{ yaml_content }}</textarea>
+    </div>
+
+    <div class="flex-row gap-sm">
+        <button type="submit" class="btn btn-primary">Create Scenario</button>
+        <a href="{% url 'scenario_editor:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('yamlEditor').addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        var start = this.selectionStart;
+        var end = this.selectionEnd;
+        this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+        this.selectionStart = this.selectionEnd = start + 2;
+    }
+});
+
+function validateYAML() {
+    var yaml_content = document.getElementById('yamlEditor').value;
+    var resultDiv = document.getElementById('validationResult');
+
+    fetch('{% url "scenario_editor:api_validate_yaml" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+        },
+        body: JSON.stringify({ yaml_content: yaml_content }),
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        resultDiv.style.display = 'block';
+        if (data.valid) {
+            resultDiv.className = 'validation-result validation-valid';
+            resultDiv.textContent = 'Valid scenario definition.';
+        } else {
+            resultDiv.className = 'validation-result validation-invalid';
+            resultDiv.textContent = '';
+            var strong = document.createElement('strong');
+            strong.textContent = 'Validation errors:';
+            resultDiv.appendChild(strong);
+            var ul = document.createElement('ul');
+            ul.style.cssText = 'margin: 4px 0 0 16px;';
+            data.errors.forEach(function(e) {
+                var li = document.createElement('li');
+                li.textContent = e;
+                ul.appendChild(li);
+            });
+            resultDiv.appendChild(ul);
+        }
+    })
+    .catch(function(err) {
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'validation-result validation-invalid';
+        resultDiv.textContent = 'Error validating: ' + err.message;
+    });
+}
+</script>
+{% endblock %}

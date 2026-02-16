@@ -992,6 +992,7 @@ describe('DirectUploader', () => {
                 name: 'My Agent',
                 filename: 'agent.exe',
                 file_size: 2048,
+                agent_type: 'xdr',
             });
         });
 

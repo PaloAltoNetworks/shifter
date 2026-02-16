@@ -314,7 +314,15 @@ class SSHExecutor:
             time.sleep(self._poll_interval)
 
     def _check_ssh_available(self, host: str) -> bool:
-        """Check if SSH port is accepting connections and auth works."""
+        """Check if SSH is available and PAN-OS CLI is ready.
+
+        Not only checks if SSH accepts connections, but also verifies
+        the management plane can process CLI commands by running a simple
+        test command.
+
+        Uses invoke_shell() instead of exec_command() because PAN-OS
+        does not support the SSH exec channel.
+        """
         try:
             client = paramiko.SSHClient()
             # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
@@ -330,9 +338,41 @@ class SSHExecutor:
                 allow_agent=False,
                 look_for_keys=False,
             )
+            logger.info(f"SSH readiness check: connected to {host}")
+
+            # Use interactive shell - PAN-OS does not support SSH exec channel
+            channel = client.invoke_shell()
+            time.sleep(2)
+            channel.send("show system info\n")  # nosec B601
+            time.sleep(3)
+
+            output = ""
+            while channel.recv_ready():
+                output += channel.recv(65535).decode("utf-8", errors="replace")
+
+            channel.send("exit\n")
+            channel.close()
             client.close()
-            return True
-        except Exception:
+
+            # Verify command succeeded with valid system info output
+            # Check for key fields that will always be present in valid output
+            has_hostname = "hostname" in output
+            has_ip = "ip-address" in output
+            has_netmask = "netmask" in output
+            is_ready = has_hostname and has_ip and has_netmask
+
+            if is_ready:
+                logger.info(f"SSH readiness check passed for {host}")
+            else:
+                logger.info(
+                    f"SSH readiness check failed for {host}: "
+                    f"hostname={has_hostname} ip-address={has_ip} netmask={has_netmask} "
+                    f"output_length={len(output)} output={output!r:.500}"
+                )
+
+            return is_ready
+        except Exception as exc:
+            logger.info(f"SSH readiness check exception for {host}: {exc}")
             return False
 
     def reboot_and_wait(

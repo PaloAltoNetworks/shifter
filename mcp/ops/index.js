@@ -249,6 +249,27 @@ const EnvSchema = z
   .default("dev")
   .describe("Environment (dev or prod). Defaults to dev.");
 
+// Input validation patterns — prevent shell injection in execSync calls
+const Ec2Id = z
+  .string()
+  .regex(/^i-[0-9a-f]{8,17}$/, "Must be a valid EC2 instance ID");
+const SsmCommandId = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,
+    "Must be a valid SSM command ID (UUID)"
+  );
+const SafePath = z
+  .string()
+  .regex(/^[\w\/.:\-\[\]#, ]+$/, "Contains invalid characters");
+const SafeName = z.string().regex(/^[\w.*?-]+$/, "Contains invalid characters");
+const SecretIdSchema = z
+  .string()
+  .regex(/^[\w/+=.@-]+$/, "Contains invalid characters");
+const ArnSchema = z
+  .string()
+  .regex(/^arn:aws[\w:*\/.-]+$/, "Must be a valid ARN");
+
 // ==========================================================================
 // CloudWatch Logs
 // ==========================================================================
@@ -258,11 +279,9 @@ server.tool(
   "List recent log streams for a component or log group. Use component shorthand (portal, provisioner, guacamole-client, guacd, network-firewall, rds) or a full log group path.",
   {
     env: EnvSchema,
-    component: z
-      .string()
-      .describe(
-        "Component shorthand (portal, provisioner, guacamole-client, guacd, network-firewall, rds) or full log group path"
-      ),
+    component: SafePath.describe(
+      "Component shorthand (portal, provisioner, guacamole-client, guacd, network-firewall, rds) or full log group path"
+    ),
     limit: z
       .number()
       .int()
@@ -297,10 +316,8 @@ server.tool(
   "Get log events from a specific log stream",
   {
     env: EnvSchema,
-    component: z
-      .string()
-      .describe("Component shorthand or full log group path"),
-    stream_name: z.string().describe("Log stream name"),
+    component: SafePath.describe("Component shorthand or full log group path"),
+    stream_name: SafePath.describe("Log stream name"),
     limit: z
       .number()
       .int()
@@ -332,9 +349,7 @@ server.tool(
   "Search log events across streams using a CloudWatch filter pattern",
   {
     env: EnvSchema,
-    component: z
-      .string()
-      .describe("Component shorthand or full log group path"),
+    component: SafePath.describe("Component shorthand or full log group path"),
     filter_pattern: z
       .string()
       .describe(
@@ -374,9 +389,7 @@ server.tool(
   "Tail recent logs for a component (shortcut for describe_streams + get_log_events on the latest stream)",
   {
     env: EnvSchema,
-    component: z
-      .string()
-      .describe("Component shorthand or full log group path"),
+    component: SafePath.describe("Component shorthand or full log group path"),
     limit: z
       .number()
       .int()
@@ -422,10 +435,9 @@ server.tool(
   "List EC2 instances, optionally filtered by Name tag pattern",
   {
     env: EnvSchema,
-    name_filter: z
-      .string()
-      .optional()
-      .describe("Name tag glob filter (e.g. '*portal*', '*ngfw*')"),
+    name_filter: SafeName.optional().describe(
+      "Name tag glob filter (e.g. '*portal*', '*ngfw*')"
+    ),
     include_terminated: z
       .boolean()
       .default(false)
@@ -452,7 +464,7 @@ server.tool(
   "Start a stopped EC2 instance",
   {
     env: EnvSchema,
-    instance_id: z.string().describe("EC2 instance ID"),
+    instance_id: Ec2Id.describe("EC2 instance ID"),
   },
   async ({ env, instance_id }) => {
     try {
@@ -474,7 +486,7 @@ server.tool(
   "Stop a running EC2 instance",
   {
     env: EnvSchema,
-    instance_id: z.string().describe("EC2 instance ID"),
+    instance_id: Ec2Id.describe("EC2 instance ID"),
   },
   async ({ env, instance_id }) => {
     try {
@@ -496,7 +508,7 @@ server.tool(
   "Terminate an EC2 instance (irreversible)",
   {
     env: EnvSchema,
-    instance_id: z.string().describe("EC2 instance ID"),
+    instance_id: Ec2Id.describe("EC2 instance ID"),
   },
   async ({ env, instance_id }) => {
     try {
@@ -523,10 +535,9 @@ server.tool(
   "List running ECS tasks in a cluster",
   {
     env: EnvSchema,
-    cluster: z
-      .string()
-      .optional()
-      .describe("ECS cluster name (defaults to {env}-portal)"),
+    cluster: SafeName.optional().describe(
+      "ECS cluster name (defaults to {env}-portal)"
+    ),
   },
   async ({ env, cluster }) => {
     try {
@@ -585,7 +596,7 @@ server.tool(
   "Get a secret value from Secrets Manager",
   {
     env: EnvSchema,
-    secret_id: z.string().describe("Secret name or ARN"),
+    secret_id: SecretIdSchema.describe("Secret name or ARN"),
   },
   async ({ env, secret_id }) => {
     try {
@@ -610,7 +621,7 @@ server.tool(
   "Run a shell command on an EC2 instance via SSM",
   {
     env: EnvSchema,
-    instance_id: z.string().describe("EC2 instance ID"),
+    instance_id: Ec2Id.describe("EC2 instance ID"),
     command: z.string().describe("Shell command to execute"),
   },
   async ({ env, instance_id, command }) => {
@@ -636,10 +647,8 @@ server.tool(
   "Get the output of a previously sent SSM command",
   {
     env: EnvSchema,
-    command_id: z.string().describe("SSM command ID"),
-    instance_id: z
-      .string()
-      .describe("EC2 instance ID the command was sent to"),
+    command_id: SsmCommandId.describe("SSM command ID"),
+    instance_id: Ec2Id.describe("EC2 instance ID the command was sent to"),
   },
   async ({ env, command_id, instance_id }) => {
     try {
@@ -666,10 +675,9 @@ server.tool(
   "Show Auto Scaling Group status and instance refreshes",
   {
     env: EnvSchema,
-    asg_name: z
-      .string()
-      .optional()
-      .describe("ASG name (defaults to {env}-portal-asg)"),
+    asg_name: SafeName.optional().describe(
+      "ASG name (defaults to {env}-portal-asg)"
+    ),
   },
   async ({ env, asg_name }) => {
     try {
@@ -704,7 +712,7 @@ server.tool(
   "Show health status of targets in a target group",
   {
     env: EnvSchema,
-    target_group_arn: z.string().describe("Target group ARN"),
+    target_group_arn: ArnSchema.describe("Target group ARN"),
   },
   async ({ env, target_group_arn }) => {
     try {
@@ -767,7 +775,10 @@ server.tool(
   "describe_table",
   "Show columns, types, nullability, and constraints for a table",
   {
-    table_name: z.string().describe("Name of the table to describe"),
+    table_name: z
+      .string()
+      .regex(/^[a-z_][a-z0-9_]*$/, "Must be a valid table name")
+      .describe("Name of the table to describe"),
     env: EnvSchema,
   },
   async ({ table_name, env }) => {

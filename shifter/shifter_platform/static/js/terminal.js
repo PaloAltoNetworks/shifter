@@ -525,7 +525,7 @@ class TerminalManager {
                 'connected': 'Connected',
                 'disconnected': 'Not connected',
             };
-            text.textContent = statusText[status] || 'Not connected';
+            text.textContent = statusText[status] || 'Not connected'; // eslint-disable-line security/detect-object-injection
         }
     }
 

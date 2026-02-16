@@ -73,6 +73,27 @@ repos:
         files: ^shifter/shifter_platform/static/js/.*\.js$
         types: [javascript]
 
+      - id: eslint-mcp-shifter-db
+        name: eslint (mcp/shifter-db)
+        entry: bash -c 'cd mcp/shifter-db && npx eslint .'
+        language: system
+        files: ^mcp/shifter-db/.*\.js$
+        types: [javascript]
+
+      - id: eslint-mcp-ngfw
+        name: eslint (mcp/ngfw)
+        entry: bash -c 'cd mcp/ngfw && npx eslint .'
+        language: system
+        files: ^mcp/ngfw/.*\.js$
+        types: [javascript]
+
+      - id: eslint-mcp-aws
+        name: eslint (mcp/aws)
+        entry: bash -c 'cd mcp/aws && npx eslint .'
+        language: system
+        files: ^mcp/aws/.*\.js$
+        types: [javascript]
+
       - id: stylelint-shifter-platform
         name: stylelint (shifter_platform)
         entry: bash -c 'cd shifter/shifter_platform && npx stylelint --fix static/css/'
@@ -181,7 +202,7 @@ repos:
 
       - id: check-model-fks
         name: architecture (model FKs)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python manage.py check_model_fks -q'
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python manage.py check_model_fks -q'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
@@ -241,12 +262,36 @@ repos:
         files: ^shifter/shifter_platform/static/js/.*\.js$
         pass_filenames: false
 
+  # MCP tests (Node.js)
+  - repo: local
+    hooks:
+      - id: test-mcp-shifter-db
+        name: test (mcp/shifter-db)
+        entry: bash -c 'cd mcp/shifter-db && npm test'
+        language: system
+        files: ^mcp/shifter-db/
+        pass_filenames: false
+
+      - id: test-mcp-ngfw
+        name: test (mcp/ngfw)
+        entry: bash -c 'cd mcp/ngfw && npm test'
+        language: system
+        files: ^mcp/ngfw/
+        pass_filenames: false
+
+      - id: test-mcp-aws
+        name: test (mcp/aws)
+        entry: bash -c 'cd mcp/aws && npm test'
+        language: system
+        files: ^mcp/aws/
+        pass_filenames: false
+
   # Shifter Platform tests (largest test suite - run last)
   - repo: local
     hooks:
       - id: pytest-shifter
         name: pytest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false

@@ -386,3 +386,6 @@ platform/terraform/global/github-runner/*.zip
 
 # Central test coverage directory
 coverage/
+
+# Serena Claude Code code understanding plugin
+.serena/

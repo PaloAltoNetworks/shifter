@@ -12,6 +12,7 @@ on:
           - ubuntu
           - windows
           - dc
+          - brokenbk
       ref:
         description: 'Branch to build from'
         required: false

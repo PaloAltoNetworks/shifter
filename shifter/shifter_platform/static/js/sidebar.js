@@ -173,4 +173,37 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // User menu dropdown
+    const userMenuBtn = document.getElementById('userMenuBtn');
+    const userMenuContainer = userMenuBtn?.closest('.nav-profile-container');
+
+    if (userMenuBtn && userMenuContainer) {
+        // Toggle menu on click
+        userMenuBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const isOpen = userMenuContainer.classList.contains('open');
+            userMenuContainer.classList.toggle('open');
+            userMenuBtn.setAttribute('aria-expanded', !isOpen);
+        });
+
+        // Close menu when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!userMenuContainer.contains(e.target)) {
+                userMenuContainer.classList.remove('open');
+                userMenuBtn.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        // Close menu on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && userMenuContainer.classList.contains('open')) {
+                userMenuContainer.classList.remove('open');
+                userMenuBtn.setAttribute('aria-expanded', 'false');
+                userMenuBtn.focus();
+            }
+        });
+    }
 });

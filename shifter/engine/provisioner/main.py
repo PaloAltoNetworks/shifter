@@ -2389,12 +2389,33 @@ def run_range_terraform(operation: str, request_id: str) -> None:
         logger.error("Range Terraform operation failed: %s", error_msg)
 
         if operation == "up":
-            logger.info("Provision failed - attempting Terraform cleanup...")
+            logger.error(
+                "Provision failed for range_id=%s request_id=%s - attempting Terraform cleanup...",
+                range_id,
+                request_id,
+            )
             try:
-                range_terraform_runner.destroy_range(request_id, range_terraform_runner.RANGE_MODULE_PATH)
+                tf_variables = _build_range_terraform_variables(
+                    request_id,
+                    range_id,
+                    user_id,
+                    range_spec,
+                )
+                range_terraform_runner.destroy_range(
+                    request_id,
+                    range_terraform_runner.RANGE_MODULE_PATH,
+                    variables=tf_variables,
+                )
                 range_terraform_runner.cleanup_range_state(request_id)
+                logger.info("Auto-cleanup succeeded for range_id=%s", range_id)
             except Exception as cleanup_error:
-                logger.warning("Auto-cleanup failed: %s", cleanup_error)
+                logger.error(
+                    "Auto-cleanup FAILED for range_id=%s request_id=%s: %s. "
+                    "Orphaned AWS resources may exist and require manual cleanup.",
+                    range_id,
+                    request_id,
+                    cleanup_error,
+                )
 
         publish_failed(
             request_id=request_id,
@@ -2544,8 +2565,8 @@ def _run_terraform_destroy(
         return
 
     current_status = range_data.get("status")
-    if current_status in ("destroyed", "failed"):
-        logger.info("Range %d already in terminal state '%s', skipping", range_id, current_status)
+    if current_status == "destroyed":
+        logger.info("Range %d already destroyed, skipping", range_id)
         return
 
     # Remove NGFW subnet config

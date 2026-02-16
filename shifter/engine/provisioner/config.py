@@ -127,7 +127,7 @@ class SubnetConfig:
         name: Subnet name (e.g., 'attack', 'dc_network').
         uuid: Unique identifier for tagging and correlation.
         instances: List of instances in this subnet.
-        connected_to: List of subnet names this subnet can reach (bidirectional).
+        connected_to: List of subnet names this subnet needs to reach.
     """
 
     name: str

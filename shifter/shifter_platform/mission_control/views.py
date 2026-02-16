@@ -29,6 +29,13 @@ from cms import list_agents as cms_list_agents
 from cms import list_credentials as cms_list_credentials
 from cms import list_ngfws as cms_list_ngfws
 from cms import list_scenarios as cms_list_scenarios
+from cms.experiments.exceptions import ScriptUploadError
+from cms.experiments.services import (
+    complete_script_upload,
+    delete_script,
+    initiate_script_upload,
+    list_scripts,
+)
 from cms.services import create_ngfw as cms_create_ngfw
 from cms.services import destroy_ngfw as cms_destroy_ngfw
 from cms.services import get_ngfw as cms_get_ngfw
@@ -250,6 +257,8 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
         - name: Agent name (required)
         - filename: Original filename (required)
         - file_size: File size in bytes (required)
+        - agent_type: Type of agent (optional, defaults to 'xdr')
+            Valid values: 'xdr', 'xdr_collector', 'cloud_identity_engine'
 
     Response (JSON):
         - presigned_url: URL for PUT request to S3
@@ -271,6 +280,7 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
     name = data.get("name", "").strip()
     filename = data.get("filename", "").strip()
     file_size = data.get("file_size", 0)
+    agent_type = data.get("agent_type", "xdr").strip()
 
     # Basic input validation
     if not name:
@@ -280,12 +290,18 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
     if not isinstance(file_size, int) or file_size <= 0:
         return JsonResponse({"error": "Valid file size is required"}, status=400)
 
+    # Validate agent_type
+    valid_agent_types = {"xdr", "xdr_collector", "cloud_identity_engine"}
+    if agent_type not in valid_agent_types:
+        err_msg = f"Invalid agent type. Must be one of: {', '.join(valid_agent_types)}"
+        return JsonResponse({"error": err_msg}, status=400)
+
     # Sanitize filename
     filename = os.path.basename(filename)
 
     user = _get_user(request)
     try:
-        result = cms_initiate_upload(user, name, filename, file_size)
+        result = cms_initiate_upload(user, name, filename, file_size, agent_type)
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -1009,3 +1025,121 @@ def api_credential_delete(request: HttpRequest, credential_id: int) -> JsonRespo
     )
 
     return JsonResponse({"success": True})
+
+
+# -----------------------------------------------------------------------------
+# Files (Scripts) Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def files(request: HttpRequest) -> HttpResponse:
+    """File management - upload and manage script files."""
+    scripts = list_scripts(_get_user(request))
+    context = {
+        "page_title": "Files",
+        "active_nav": "files",
+        "scripts": scripts,
+    }
+    return render(request, "mission_control/files.html", context)
+
+
+@login_required
+@require_POST
+def file_upload(request: HttpRequest) -> JsonResponse:
+    """Script file upload — two-step presigned URL flow (JSON API).
+
+    Step 1: POST with {name, filename, file_size} → returns {presigned_url, upload_token}
+    Step 2: POST with {upload_token} → returns {success, script_id}
+    """
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    upload_token = data.get("upload_token")
+
+    if upload_token:
+        # Step 2: Complete upload
+        try:
+            script = complete_script_upload(user, upload_token)
+        except ScriptUploadError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+        logger.info("Script upload completed: user=%s script_id=%s", user.email, script.pk)
+        return JsonResponse(
+            {
+                "success": True,
+                "script_id": script.pk,
+                "message": f"Script '{script.name}' uploaded successfully.",
+            }
+        )
+
+    # Step 1: Initiate upload
+    name = data.get("name", "").strip()
+    filename = data.get("filename", "").strip()
+    file_size = data.get("file_size", 0)
+
+    if not name:
+        return JsonResponse({"error": "Script name is required"}, status=400)
+    if not filename:
+        return JsonResponse({"error": "Filename is required"}, status=400)
+    if not isinstance(file_size, int) or file_size <= 0:
+        return JsonResponse({"error": "Valid file size is required"}, status=400)
+
+    filename = os.path.basename(filename)
+
+    try:
+        result = initiate_script_upload(user, name, filename, file_size)
+    except ScriptUploadError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    logger.info(
+        "Script upload initiated: user=%s filename=%s size=%d",
+        user.email,
+        filename,
+        file_size,
+    )
+    return JsonResponse(result)
+
+
+@login_required
+@require_POST
+def file_delete(request: HttpRequest, script_id: int) -> HttpResponse:
+    """Delete a script file (soft delete)."""
+    user = _get_user(request)
+    try:
+        delete_script(user, script_id)
+        messages.success(request, "Script deleted.")
+        logger.info("Script deleted: user=%s script_id=%s", user.email, script_id)
+    except ScriptUploadError as e:
+        messages.error(request, str(e))
+        logger.error(
+            "Script delete error: user=%s script_id=%s error=%s",
+            user.email,
+            script_id,
+            str(e),
+        )
+
+    return redirect("mission_control:files")
+
+
+@login_required
+@require_GET
+def api_list_scripts(request: HttpRequest) -> JsonResponse:
+    """JSON endpoint for listing scripts (used by experiment create form)."""
+    scripts = list_scripts(_get_user(request))
+    return JsonResponse(
+        {
+            "scripts": [
+                {
+                    "id": s.pk,
+                    "name": s.name,
+                    "filename": s.original_filename,
+                }
+                for s in scripts
+            ]
+        }
+    )

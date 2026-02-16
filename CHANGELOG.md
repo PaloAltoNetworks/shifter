@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Merged MCP-Shifter and MCP-NGFW into MCP-Ops
 - MCP-Ops has range reconciliation tool to find and destroy orphaned instances
+- Add better parsing for AWS to SonarQube
 
 ## [2.1.4] - 2026-02-15
 

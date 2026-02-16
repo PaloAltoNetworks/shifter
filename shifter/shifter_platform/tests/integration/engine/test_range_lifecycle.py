@@ -528,8 +528,8 @@ class TestGetRdpConnectionInfoIntegration:
                 instance_uuid="any-uuid",
             )
 
-    def test_raises_for_ubuntu_instance(self, user, request_obj):
-        """get_rdp_connection_info raises for Ubuntu (no GUI)."""
+    def test_returns_ubuntu_rdp_credentials(self, user, request_obj):
+        """get_rdp_connection_info returns credentials for Ubuntu (has GUI via xrdp)."""
         Range.objects.create(
             uuid=uuid.uuid4(),
             user=user,
@@ -546,8 +546,12 @@ class TestGetRdpConnectionInfoIntegration:
             ],
         )
 
-        with pytest.raises(ValueError, match="no GUI"):
-            get_rdp_connection_info(user=user, instance_uuid="ubuntu-uuid")
+        result = get_rdp_connection_info(user=user, instance_uuid="ubuntu-uuid")
+
+        assert result["os_type"] == "ubuntu"
+        assert result["rdp_username"] == "ubuntu"
+        assert result["rdp_password"] == "ubuntu"
+        assert result["private_ip"] == "10.1.1.30"
 
     def test_raises_for_none_user(self, range_ready):
         """get_rdp_connection_info raises for None user."""

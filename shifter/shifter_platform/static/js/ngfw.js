@@ -50,10 +50,6 @@ class NGFWWizardManager {
             otpFolderInput: document.getElementById('otp-folder'),
             provisioningProgress: document.getElementById('provisioning-progress'),
             successState: document.getElementById('success-state'),
-            awaitingAssociationState: document.getElementById('awaiting-association-state'),
-            configuringState: document.getElementById('configuring-state'),
-            completeSetupBtn: document.getElementById('complete-setup-btn'),
-            ngfwSerial: document.getElementById('ngfw-serial'),
             viewNgfwBtn: document.getElementById('view-ngfw-btn'),
             step1NextBtn: document.getElementById('step1-next'),
         };
@@ -316,13 +312,6 @@ class NGFWWizardManager {
                 if (data.status === 'ready' || data.status === 'active') {
                     this.showSuccess();
                     this.ws.close();
-                } else if (data.status === 'awaiting_association') {
-                    // Show user action required state
-                    this.showAwaitingAssociation(data.serial_number);
-                    // Keep WebSocket open for status updates when user clicks complete
-                } else if (data.status === 'configuring') {
-                    // Show configuring state (triggered by complete-setup)
-                    this.showConfiguring();
                 } else if (data.status === 'failed') {
                     alert('Provisioning failed: ' + (data.error || 'Unknown error'));
                     window.location.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
@@ -346,80 +335,9 @@ class NGFWWizardManager {
         if (this.elements.provisioningProgress) {
             this.elements.provisioningProgress.style.display = 'none';
         }
-        if (this.elements.awaitingAssociationState) {
-            this.elements.awaitingAssociationState.style.display = 'none';
-        }
-        if (this.elements.configuringState) {
-            this.elements.configuringState.style.display = 'none';
-        }
         if (this.elements.successState) {
             this.elements.successState.style.display = 'block';
         }
-    }
-
-    showAwaitingAssociation(serialNumber) {
-        if (this.elements.provisioningProgress) {
-            this.elements.provisioningProgress.style.display = 'none';
-        }
-        if (this.elements.awaitingAssociationState) {
-            this.elements.awaitingAssociationState.style.display = 'block';
-        }
-        if (this.elements.ngfwSerial && serialNumber) {
-            this.elements.ngfwSerial.textContent = serialNumber;
-        }
-        // Bind complete setup button if not already bound
-        this.bindCompleteSetupButton();
-    }
-
-    showConfiguring() {
-        if (this.elements.provisioningProgress) {
-            this.elements.provisioningProgress.style.display = 'none';
-        }
-        if (this.elements.awaitingAssociationState) {
-            this.elements.awaitingAssociationState.style.display = 'none';
-        }
-        if (this.elements.configuringState) {
-            this.elements.configuringState.style.display = 'block';
-        }
-    }
-
-    bindCompleteSetupButton() {
-        const btn = this.elements.completeSetupBtn;
-        if (!btn || btn.dataset.bound) return;
-        btn.dataset.bound = 'true';
-
-        btn.addEventListener('click', async () => {
-            btn.disabled = true;
-            btn.textContent = 'Completing Setup...';
-
-            try {
-                const response = await fetch(`/mission-control/api/ngfw/${this.ngfwId}/complete-setup/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': this.csrfToken
-                    }
-                });
-
-                const data = await response.json();
-
-                if (data.error) {
-                    alert('Error: ' + data.error);
-                    btn.disabled = false;
-                    btn.textContent = 'Complete Setup';
-                    return;
-                }
-
-                // Show configuring state - WebSocket will handle transition to success
-                this.showConfiguring();
-
-            } catch (err) {
-                console.error('Complete setup error:', err);
-                alert('An error occurred. Please try again.');
-                btn.disabled = false;
-                btn.textContent = 'Complete Setup';
-            }
-        });
     }
 
     // Debug helpers - call from console: wizard.debugShowSuccess() or wizard.debugGoToStep(4)

@@ -1,0 +1,275 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<style>
+    .upload-progress {
+        display: none;
+        margin-top: 1rem;
+    }
+
+    .upload-progress.active {
+        display: block;
+    }
+
+    .progress-bar-container {
+        background: var(--xdr-border);
+        border-radius: 4px;
+        height: 8px;
+        overflow: hidden;
+        margin-bottom: 0.5rem;
+    }
+
+    .progress-bar {
+        background: var(--xdr-primary);
+        height: 100%;
+        width: 0%;
+        transition: width 0.3s ease;
+    }
+
+    .progress-bar.error {
+        background: var(--xdr-error);
+    }
+
+    .progress-status {
+        font-size: 0.875rem;
+        color: var(--xdr-secondary-text);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .btn-cancel-upload {
+        background: transparent;
+        border: 1px solid var(--xdr-error);
+        color: var(--xdr-error);
+        padding: 0.25rem 0.75rem;
+        font-size: 0.75rem;
+        border-radius: 20px;
+        cursor: pointer;
+        font-family: inherit;
+    }
+
+    .btn-cancel-upload:hover {
+        background: rgba(255, 68, 68, 0.15);
+    }
+
+    .upload-error {
+        color: var(--xdr-error);
+        font-size: 0.875rem;
+        margin-top: 0.5rem;
+        display: none;
+    }
+
+    .upload-error.visible {
+        display: block;
+    }
+
+    .upload-form.uploading input,
+    .upload-form.uploading button[type="submit"] {
+        pointer-events: none;
+        opacity: 0.5;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Files</h1>
+    <p class="page-subtitle">Manage script files for experiments</p>
+</div>
+
+{% if messages %}
+<div class="mb-lg">
+    {% for message in messages %}
+    <div class="message message-{{ message.tags }}">
+        {{ message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Upload Card -->
+<div class="card">
+    <div class="card-title">Upload Script</div>
+    <form id="upload-form" class="upload-form">
+        {% csrf_token %}
+        <div class="form-group">
+            <label class="form-label" for="script-name">Script Name</label>
+            <input type="text" class="form-input" placeholder="e.g., Lateral Movement Script" id="script-name" name="name" required maxlength="100">
+        </div>
+        <div class="form-group">
+            <label class="form-label" for="script-file">Script File</label>
+            <input type="file" class="form-input" id="script-file" name="file" accept=".py" required>
+            <p class="text-small text-muted mt-sm">
+                Python scripts only (.py), max 1MB per file
+            </p>
+        </div>
+
+        <div id="upload-progress" class="upload-progress">
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div class="progress-status">
+                <span id="progress-text">Preparing...</span>
+                <button type="button" id="cancel-btn" class="btn-cancel-upload">Cancel</button>
+            </div>
+        </div>
+
+        <div id="upload-error" class="upload-error"></div>
+
+        <button type="submit" class="btn btn-primary" id="upload-btn">Upload Script</button>
+    </form>
+</div>
+
+<!-- Script List -->
+<div class="card">
+    <div class="card-title">Your Scripts</div>
+
+    {% if scripts %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>NAME</th>
+                <th>FILE</th>
+                <th>SIZE</th>
+                <th>UPLOADED</th>
+                <th class="text-right">ACTIONS</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for script in scripts %}
+            <tr>
+                <td>
+                    <span class="text-bold">{{ script.name }}</span>
+                </td>
+                <td>
+                    <span class="text-muted">{{ script.original_filename }}</span>
+                </td>
+                <td>
+                    <span class="text-muted">{{ script.file_size_bytes|filesizeformat }}</span>
+                </td>
+                <td>
+                    <span class="text-muted">{{ script.created_at|date:"M d, Y" }}</span>
+                    <br>
+                    <span class="text-small text-muted">{{ script.created_at|time:"H:i" }}</span>
+                </td>
+                <td class="text-right">
+                    <form method="post" action="{% url 'mission_control:file_delete' script.pk %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this script?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-secondary btn-small">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-graphic">
+            <div class="empty-state-graphic-arc"></div>
+            <div class="empty-state-graphic-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                </svg>
+            </div>
+        </div>
+        <h3>No scripts uploaded yet</h3>
+        <p>Upload a Python script to use in experiments</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/upload.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('upload-form');
+    const fileInput = document.getElementById('script-file');
+    const nameInput = document.getElementById('script-name');
+    const progressContainer = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const uploadBtn = document.getElementById('upload-btn');
+    const errorDiv = document.getElementById('upload-error');
+
+    let uploader = null;
+
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    const uploadUrl = '{% url "mission_control:file_upload" %}';
+
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const file = fileInput.files[0];
+        const scriptName = nameInput.value.trim();
+
+        if (!file || !scriptName) {
+            showError('Please provide both a name and file.');
+            return;
+        }
+
+        uploader = new DirectUploader({
+            initiateUrl: uploadUrl,
+            completeUrl: uploadUrl,
+            cancelUrl: uploadUrl,
+            csrfToken: csrfToken,
+            maxSizeMB: 1,
+
+            onProgress: function(percent, message) {
+                progressBar.style.width = percent + '%';
+                progressText.textContent = message;
+            },
+
+            onSuccess: function(result) {
+                window.location.reload();
+            },
+
+            onError: function(message) {
+                showError(message);
+                resetForm();
+            },
+
+            onCancel: function() {
+                resetForm();
+            }
+        });
+
+        form.classList.add('uploading');
+        progressContainer.classList.add('active');
+        errorDiv.classList.remove('visible');
+        progressBar.classList.remove('error');
+        uploadBtn.textContent = 'Uploading...';
+
+        uploader.upload(file, scriptName);
+    });
+
+    cancelBtn.addEventListener('click', function() {
+        if (uploader) {
+            uploader.cancel();
+        }
+    });
+
+    function showError(message) {
+        errorDiv.textContent = message;
+        errorDiv.classList.add('visible');
+        progressBar.classList.add('error');
+    }
+
+    function resetForm() {
+        form.classList.remove('uploading');
+        progressContainer.classList.remove('active');
+        progressBar.style.width = '0%';
+        progressBar.classList.remove('error');
+        uploadBtn.textContent = 'Upload Script';
+        uploader = null;
+    }
+});
+</script>
+{% endblock %}

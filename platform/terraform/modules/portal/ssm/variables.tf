@@ -103,8 +103,8 @@ variable "pulumi_ecs_cluster_arn" {
   type        = string
 }
 
-variable "pulumi_task_definition_arn" {
-  description = "ARN of ECS task definition for Pulumi provisioner"
+variable "pulumi_task_definition_family" {
+  description = "ECS task definition family name for Pulumi provisioner"
   type        = string
 }
 

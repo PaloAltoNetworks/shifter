@@ -128,9 +128,9 @@ class TerminalManager {
     /**
      * Check if an instance is RDP-only (no SSH access)
      */
-    isRdpOnly(instance) {
-        // Domain Controllers and certain Windows instances are RDP-only
-        return instance.osType === 'windows' && instance.role === 'dc';
+    isRdpOnly(_instance) {
+        // All instances support SSH - no RDP-only instances
+        return false;
     }
 
     /**
@@ -525,7 +525,7 @@ class TerminalManager {
                 'connected': 'Connected',
                 'disconnected': 'Not connected',
             };
-            text.textContent = statusText[status] || 'Not connected';
+            text.textContent = statusText[status] || 'Not connected'; // eslint-disable-line security/detect-object-injection
         }
     }
 

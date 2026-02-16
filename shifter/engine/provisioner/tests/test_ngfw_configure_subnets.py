@@ -142,6 +142,40 @@ class TestBuildConfigureInput:
         assert lines[-2] == "commit"
         assert lines[-1] == "exit"
 
+    def test_deletes_stale_routes_when_provided(self, sample_subnets):
+        """Stale routes should be deleted before adding new ones."""
+        stale_routes = ["range-50-attack", "range-50-target"]
+        result = build_configure_input(
+            sample_subnets,
+            range_id=97,
+            vpc_gateway_ip="10.1.4.1",
+            stale_routes_to_delete=stale_routes,
+        )
+
+        # Stale routes should be deleted
+        assert "delete network virtual-router default routing-table ip static-route range-50-attack" in result
+        assert "delete network virtual-router default routing-table ip static-route range-50-target" in result
+
+        # Deletions should come before additions
+        lines = result.split("\n")
+        delete_indices = [i for i, line in enumerate(lines) if "delete" in line]
+        set_indices = [i for i, line in enumerate(lines) if line.startswith("set ")]
+
+        if delete_indices and set_indices:
+            assert max(delete_indices) < min(set_indices), "Deletes should come before sets"
+
+    def test_no_deletes_when_no_stale_routes(self, sample_subnets):
+        """No delete commands when stale_routes_to_delete is None or empty."""
+        result = build_configure_input(
+            sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1", stale_routes_to_delete=None
+        )
+        assert "delete" not in result
+
+        result = build_configure_input(
+            sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1", stale_routes_to_delete=[]
+        )
+        assert "delete" not in result
+
 
 class TestBuildRemoveInput:
     """Tests for build_remove_input function."""

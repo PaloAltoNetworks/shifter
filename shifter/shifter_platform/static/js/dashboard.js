@@ -15,6 +15,8 @@ class DashboardManager {
         this.launchUrl = options.launchUrl;
         this.cancelUrl = options.cancelUrl;
         this.destroyUrl = options.destroyUrl;
+        this.pauseUrl = options.pauseUrl;
+        this.resumeUrl = options.resumeUrl;
         this.agentsUrl = options.agentsUrl;
         this.scenariosUrl = options.scenariosUrl;
         this.loginUrl = options.loginUrl || '/oidc/authenticate/';
@@ -177,8 +179,33 @@ class DashboardManager {
             this.launchBtn.addEventListener('click', () => this.launchRange());
         }
 
-        // Note: Cancel, Destroy, and Dismiss buttons are bound dynamically
-        // when range tiles are rendered (see _renderProvisioningTile, etc.)
+        // Cancel button (provisioning state)
+        if (this.cancelBtn) {
+            this.cancelBtn.addEventListener('click', () => this.cancelRange());
+        }
+
+        // Destroy buttons
+        if (this.destroyBtn) {
+            this.destroyBtn.addEventListener('click', () => this.destroyRange());
+        }
+        if (this.destroyPausedBtn) {
+            this.destroyPausedBtn.addEventListener('click', () => this.destroyRange());
+        }
+
+        // Pause button
+        if (this.pauseBtn) {
+            this.pauseBtn.addEventListener('click', () => this.pauseRange());
+        }
+
+        // Resume button
+        if (this.resumeBtn) {
+            this.resumeBtn.addEventListener('click', () => this.resumeRange());
+        }
+
+        // Dismiss error button
+        if (this.dismissErrorBtn) {
+            this.dismissErrorBtn.addEventListener('click', () => this.dismissError());
+        }
     }
 
     /**
@@ -186,7 +213,7 @@ class DashboardManager {
      * Shows/hides agent sections based on scenario requirements.
      */
     _onScenarioChange(scenario) {
-        const req = this.scenarioRequirements[scenario] || {};
+        const req = this.scenarioRequirements[scenario] || {}; // eslint-disable-line security/detect-object-injection
 
         // Update scenario info panel
         this._updateScenarioInfoPanel(scenario);
@@ -231,7 +258,7 @@ class DashboardManager {
      * Update the scenario info panel with the selected scenario's details.
      */
     _updateScenarioInfoPanel(scenarioId) {
-        const scenario = this.scenarioData[scenarioId];
+        const scenario = this.scenarioData[scenarioId]; // eslint-disable-line security/detect-object-injection
 
         if (!this.scenarioInfoPanel) return;
 
@@ -420,7 +447,7 @@ class DashboardManager {
         if (!this.launchBtn) return;
 
         const scenario = this.scenarioSelect?.value || 'basic';
-        const req = this.scenarioRequirements[scenario] || {};
+        const req = this.scenarioRequirements[scenario] || {}; // eslint-disable-line security/detect-object-injection
 
         let canLaunch = true;
 
@@ -483,7 +510,7 @@ class DashboardManager {
     }
 
     _isTransitionalState(status) {
-        return ['pending', 'provisioning', 'resuming'].includes(status);
+        return ['pending', 'provisioning', 'pausing', 'resuming'].includes(status);
     }
 
     _updateUI() {
@@ -513,9 +540,21 @@ class DashboardManager {
                 this._renderPausedTile(tile);
                 break;
 
-            case 'resuming':
-                this._renderProvisioningTile(tile, 'Resuming Range', 'Starting instances...');
+            case 'pausing': {
+                this._renderProvisioningTile(tile, 'Pausing Range', 'Stopping instances...');
+                // Hide cancel button - pause cannot be cancelled
+                const pauseCancelBtn = tile.querySelector('.cancel-range-btn');
+                if (pauseCancelBtn) pauseCancelBtn.style.display = 'none';
                 break;
+            }
+
+            case 'resuming': {
+                this._renderProvisioningTile(tile, 'Resuming Range', 'Starting instances...');
+                // Hide cancel button - resume cannot be cancelled
+                const resumeCancelBtn = tile.querySelector('.cancel-range-btn');
+                if (resumeCancelBtn) resumeCancelBtn.style.display = 'none';
+                break;
+            }
 
             case 'failed':
                 this._renderFailedTile(tile);
@@ -581,6 +620,12 @@ class DashboardManager {
         if (destroyBtn) {
             destroyBtn.addEventListener('click', () => this.destroyRange());
         }
+
+        // Bind pause button
+        const pauseBtn = tile.querySelector('#pause-btn');
+        if (pauseBtn) {
+            pauseBtn.addEventListener('click', () => this.pauseRange());
+        }
     }
 
     /**
@@ -608,6 +653,12 @@ class DashboardManager {
         const destroyBtn = tile.querySelector('.destroy-btn');
         if (destroyBtn) {
             destroyBtn.addEventListener('click', () => this.destroyRange());
+        }
+
+        // Bind resume button
+        const resumeBtn = tile.querySelector('#resume-btn');
+        if (resumeBtn) {
+            resumeBtn.addEventListener('click', () => this.resumeRange());
         }
     }
 
@@ -647,7 +698,7 @@ class DashboardManager {
 
     async launchRange() {
         const scenario = this.scenarioSelect?.value || 'basic';
-        const req = this.scenarioRequirements[scenario] || {};
+        const req = this.scenarioRequirements[scenario] || {}; // eslint-disable-line security/detect-object-injection
 
         // Build agents dict based on scenario requirements
         const agents = {};
@@ -655,7 +706,7 @@ class DashboardManager {
         // Check for OS-picked agent (from_agent scenarios)
         if (this.osSelect?.value && this.agentSelect?.value) {
             const osType = this.osSelect.value;
-            agents[osType] = Number.parseInt(this.agentSelect.value, 10);
+            agents[osType] = Number.parseInt(this.agentSelect.value, 10); // eslint-disable-line security/detect-object-injection
         }
 
         // Check for fixed Windows agent requirement
@@ -668,8 +719,9 @@ class DashboardManager {
             agents.linux = Number.parseInt(this.linuxAgentSelect.value, 10);
         }
 
-        // Validate we have at least one agent
-        if (Object.keys(agents).length === 0) {
+        // Validate we have required agents (scenarios without agent requirements can proceed)
+        const requiresAgents = req.has_from_agent || req.requires_windows || req.requires_linux;
+        if (requiresAgents && Object.keys(agents).length === 0) {
             return;
         }
 
@@ -769,6 +821,92 @@ class DashboardManager {
 
         } catch (error) {
             alert(error.message);
+        }
+    }
+
+    async pauseRange() {
+        if (!confirm('Are you sure you want to pause this range? Instances will be stopped.')) {
+            return;
+        }
+
+        // Disable button to prevent double-clicks during request
+        const pauseBtn = document.querySelector('#pause-btn');
+        if (pauseBtn) {
+            pauseBtn.disabled = true;
+            pauseBtn.textContent = 'Pausing...';
+        }
+
+        try {
+            const response = await fetch(this.pauseUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': this.csrfToken,
+                },
+                body: JSON.stringify({ request_id: this.currentRange.request_id }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to pause range');
+            }
+
+            // Update local state to pausing and connect WebSocket for updates
+            this.currentRange.status = 'pausing';
+            this._updateUI();
+            this._connectStatusSocket(this.currentRange.request_id);
+
+        } catch (error) {
+            alert(error.message);
+            // Re-enable button on failure
+            if (pauseBtn) {
+                pauseBtn.disabled = false;
+                pauseBtn.textContent = 'Pause';
+            }
+        }
+    }
+
+    async resumeRange() {
+        if (!confirm('Are you sure you want to resume this range?')) {
+            return;
+        }
+
+        // Disable button to prevent double-clicks during request
+        const resumeBtn = document.querySelector('#resume-btn');
+        if (resumeBtn) {
+            resumeBtn.disabled = true;
+            resumeBtn.textContent = 'Resuming...';
+        }
+
+        try {
+            const response = await fetch(this.resumeUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': this.csrfToken,
+                },
+                body: JSON.stringify({ request_id: this.currentRange.request_id }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to resume range');
+            }
+
+            // Update local state to resuming and connect WebSocket for updates
+            this.currentRange.status = 'resuming';
+            this._updateUI();
+            this._connectStatusSocket(this.currentRange.request_id);
+
+        } catch (error) {
+            alert(error.message);
+            // Re-enable button on failure
+            if (resumeBtn) {
+                resumeBtn.disabled = false;
+                resumeBtn.textContent = 'Resume';
+            }
         }
     }
 

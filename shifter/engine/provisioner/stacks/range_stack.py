@@ -281,6 +281,22 @@ class RangeStack(pulumi.ComponentResource):
                     stdin_input=step.stdin_input,
                     timeout_seconds=step.timeout_seconds,
                 )
+                # Debug logging for NGFW command output
+                logger.info(
+                    "NGFW step '%s' attempt %d: success=%s, exit_code=%s, "
+                    "stdout=%d bytes, stderr=%d bytes",
+                    step.name,
+                    attempt + 1,
+                    result.success,
+                    result.exit_code,
+                    len(result.stdout) if result.stdout else 0,
+                    len(result.stderr) if result.stderr else 0,
+                )
+                if result.stdout:
+                    logger.info("NGFW stdout (first 1000 chars):\n%s", result.stdout[:1000])
+                if result.stderr:
+                    logger.info("NGFW stderr (first 500 chars):\n%s", result.stderr[:500])
+
                 if result.success and self._check_commit_success(result.stdout):
                     break
                 if result.success and not self._check_commit_success(result.stdout):
@@ -308,17 +324,37 @@ class RangeStack(pulumi.ComponentResource):
     def _check_commit_success(self, output: str) -> bool:
         """Check if PAN-OS commit succeeded.
 
+        PAN-OS outputs "Configuration committed successfully" on successful commits.
+        If there are no changes to commit, PAN-OS outputs "There are no changes to commit"
+        which is also considered success (idempotent behavior).
+
         Args:
             output: Command output to check.
 
         Returns:
             True if no commit was attempted or commit succeeded.
         """
+        # Debug logging to diagnose commit output issues
+        logger.debug("Commit check - output length: %d bytes", len(output) if output else 0)
+        logger.debug("Commit check - raw output:\n%s", output[:2000] if output else "(empty)")
+
         if not output:
+            logger.debug("Commit check - no output, assuming success")
             return True
         if "commit" not in output.lower():
+            logger.debug("Commit check - no 'commit' in output, assuming success")
             return True
-        return "Configuration committed successfully" in output
+
+        # Check for success messages
+        if "Configuration committed successfully" in output:
+            logger.debug("Commit check - found 'Configuration committed successfully'")
+            return True
+        if "There are no changes to commit" in output:
+            logger.debug("Commit check - found 'There are no changes to commit' (idempotent)")
+            return True
+
+        logger.debug("Commit check - no success message found, commit failed")
+        return False
 
     def _run_all_setup(self, dc_components: list[InstanceComponent], config: RangeConfig) -> None:
         """Run setup for all instances (DCs first, then others in parallel).

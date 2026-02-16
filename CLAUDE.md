@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+The MOST helpful think you can do is stay on task. Answer questions you are asked or do what you are told to do. You get into trouble every time you run off and do something else without asking or jump ahead.
+
 ## Guiding Principles
 
 - Keep things very simple
@@ -95,3 +97,10 @@ Use the django-testing skill for testing Django code.
 Use the doc-writing skill for writing documentation.
 
 Use the tdd-plan skill for planning work.
+
+## Active Technologies
+- Python 3.11+ (Django 5.x) + Django, Django Channels (WebSocket), boto3 (S3/SSM/ECS/SNS), Pydantic (validation) (experiment-manager)
+- PostgreSQL (models), Redis (channels), S3 (scripts and artifacts) (experiment-manager)
+
+## Recent Changes
+- experiment-manager: Added Python 3.11+ (Django 5.x) + Django, Django Channels (WebSocket), boto3 (S3/SSM/ECS/SNS), Pydantic (validation)

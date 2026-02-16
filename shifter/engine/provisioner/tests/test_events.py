@@ -64,7 +64,8 @@ class TestGetSNSTopicARN:
 
         from events import _get_sns_topic_arn
 
-        assert _get_sns_topic_arn() == "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
+        expected = "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
+        assert _get_sns_topic_arn() == expected
 
     def test_raises_when_arn_not_set(self, monkeypatch):
         """Raises ValueError when SNS_RANGE_EVENTS_ARN not set."""
@@ -99,7 +100,8 @@ class TestPublishEvent:
             mock_sns.publish.assert_called_once()
             call_kwargs = mock_sns.publish.call_args.kwargs
 
-            assert call_kwargs["TopicArn"] == "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
+            expected_arn = "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
+            assert call_kwargs["TopicArn"] == expected_arn
             assert json.loads(call_kwargs["Message"]) == event
             # Message attributes for SNS filtering
             attrs = call_kwargs["MessageAttributes"]
@@ -138,7 +140,8 @@ class TestPublishStatusUpdate:
             event = mock_publish.call_args[0][0]
 
             assert event["event_type"] == "range.status.updated"
-            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+            req_id = "550e8400-e29b-41d4-a716-446655440000"
+            assert event["request_id"] == req_id
             assert event["range_id"] == 42
             assert event["user_id"] == 1
             assert event["new_status"] == "provisioning"
@@ -168,8 +171,8 @@ class TestPublishReady:
     is published.
     """
 
-    def test_publishes_status_update_and_provisioned_events(self, mock_sns_env):
-        """Publishes both status update (ready) and provisioned events."""
+    def test_publishes_ready_and_provisioned_events(self, mock_sns_env):
+        """Publishes status update (ready) and provisioned events."""
         from events import publish_ready
 
         with patch("events._publish_event") as mock_publish:
@@ -189,7 +192,7 @@ class TestPublishReady:
             assert "range.provisioned" in event_types
 
     def test_provisioned_event_is_notification_only(self, mock_sns_env):
-        """Provisioned event contains only identification fields, no state data."""
+        """Provisioned event has only identification fields, no state data."""
         from events import publish_ready
 
         with patch("events._publish_event") as mock_publish:
@@ -207,7 +210,8 @@ class TestPublishReady:
             event = provisioned_events[0]
 
             # Should have identification fields
-            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+            req_id = "550e8400-e29b-41d4-a716-446655440000"
+            assert event["request_id"] == req_id
             assert event["range_id"] == 42
             assert event["user_id"] == 1
             assert "event_id" in event
@@ -291,7 +295,8 @@ class TestPublishLifecycleEvents:
             event = mock_publish.call_args[0][0]
 
             assert event["event_type"] == "range.cancelled"
-            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+            req_id = "550e8400-e29b-41d4-a716-446655440000"
+            assert event["request_id"] == req_id
             assert event["range_id"] == 42
             assert event["user_id"] == 1
 
@@ -315,9 +320,12 @@ class TestPublishNgfwEvent:
             event = mock_publish.call_args[0][0]
 
             assert event["event_type"] == "ngfw.event"
-            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
-            assert event["instance_id"] == "660e8400-e29b-41d4-a716-446655440001"
-            assert event["app_id"] == "770e8400-e29b-41d4-a716-446655440002"
+            req_id = "550e8400-e29b-41d4-a716-446655440000"
+            assert event["request_id"] == req_id
+            inst_id = "660e8400-e29b-41d4-a716-446655440001"
+            assert event["instance_id"] == inst_id
+            app_id = "770e8400-e29b-41d4-a716-446655440002"
+            assert event["app_id"] == app_id
             assert event["status"] == "provisioning"
             assert "event_id" in event
             assert "timestamp" in event

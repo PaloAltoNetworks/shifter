@@ -128,10 +128,11 @@ class TestConfigBoundaryValues:
     def test_instance_config_optional_fields_default_none(self):
         """InstanceConfig optional fields default to None."""
         config = InstanceConfig(
+            uuid="inst-uuid-test",
+            name="target-ubuntu",
             role="victim",
             os_type="ubuntu",
             instance_type="t3.micro",
-            uuid="inst-uuid-test",
         )
         assert config.agent_s3_key is None
         assert config.agent_presigned_url is None

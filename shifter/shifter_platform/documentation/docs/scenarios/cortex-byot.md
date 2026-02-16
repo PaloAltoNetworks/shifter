@@ -37,7 +37,7 @@ graph TB
 | Instance | OS | Role | Agent | Domain |
 |----------|-----|------|-------|--------|
 | Attacker | Kali Linux | Attack machine | No | No |
-| Domain Controller | Windows Server | AD DC | No | `cortexbyot.lab` |
+| Domain Controller | Windows Server | AD DC | No | `internal.shifter` |
 | Workstation 1 | Windows | Victim | Yes | Joined |
 | Workstation 2 | Windows | Victim | Yes | Joined |
 | Server | Ubuntu | Victim | Yes | Joined |
@@ -53,8 +53,8 @@ Four segmented subnets with NGFW routing:
 
 ## Domain Configuration
 
-- **Domain**: `cortexbyot.lab`
-- **NetBIOS**: `CORTEXBYOT`
+- **Domain**: `internal.shifter`
+- **NetBIOS**: `INTSHIFTER`
 - All victims domain-joined
 
 ## Prerequisites

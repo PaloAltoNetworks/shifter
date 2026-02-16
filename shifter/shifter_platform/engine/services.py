@@ -439,14 +439,132 @@ def get_range_status(range_id: int) -> dict[str, Any] | None:
     }
 
 
-def pause_range(range_id: int) -> None:
-    """Pause range instances."""
-    raise NotImplementedError
+def pause_range(request_id: UUID) -> bool:
+    """Pause all instances in a range.
+
+    Stops all EC2 instances belonging to the range. Idempotent - returns
+    True if already paused. Uses select_for_update to prevent race conditions
+    from concurrent pause/resume calls.
+
+    Args:
+        request_id: UUID of the Request containing the Range.
+
+    Returns:
+        True if pause initiated or already paused.
+        False if range not found, not in pausable state, or ECS call failed.
+    """
+    from botocore.exceptions import ClientError
+
+    from engine.ecs import start_range_operation
+    from engine.models import Range
+
+    logger.debug("pause_range: request_id=%s", request_id)
+
+    with transaction.atomic():
+        range_obj = Range.objects.select_for_update().filter(request__request_id=request_id).first()
+        if not range_obj:
+            logger.warning("pause_range: no range for request_id=%s", request_id)
+            return False
+
+        # Idempotent: already paused or pausing
+        if range_obj.status in (ResourceStatus.PAUSED.value, ResourceStatus.PAUSING.value):
+            logger.info("pause_range: already paused/pausing request_id=%s", request_id)
+            return True
+
+        # Can only pause from READY state
+        if range_obj.status != ResourceStatus.READY.value:
+            logger.warning(
+                "pause_range: cannot pause range in status=%s request_id=%s",
+                range_obj.status,
+                request_id,
+            )
+            return False
+
+        # Update status to PAUSING
+        range_obj.status = ResourceStatus.PAUSING.value
+        range_obj.save(update_fields=["status", "updated_at"])
+
+    # Invoke ECS task outside the atomic block (don't hold DB lock during network call)
+    try:
+        task_arn = start_range_operation(request_id, "pause")
+    except ClientError:
+        logger.exception("pause_range: ECS ClientError request_id=%s", request_id)
+        range_obj.status = ResourceStatus.READY.value
+        range_obj.save(update_fields=["status", "updated_at"])
+        return False
+
+    if task_arn:
+        logger.info("pause_range: started ECS task=%s request_id=%s", task_arn, request_id)
+        return True
+    else:
+        logger.warning("pause_range: ECS returned None, reverting status request_id=%s", request_id)
+        range_obj.status = ResourceStatus.READY.value
+        range_obj.save(update_fields=["status", "updated_at"])
+        return False
 
 
-def resume_range(range_id: int) -> None:
-    """Resume range instances."""
-    raise NotImplementedError
+def resume_range(request_id: UUID) -> bool:
+    """Resume all instances in a range.
+
+    Starts all EC2 instances belonging to the range. Idempotent - returns
+    True if already ready. Uses select_for_update to prevent race conditions
+    from concurrent pause/resume calls.
+
+    Args:
+        request_id: UUID of the Request containing the Range.
+
+    Returns:
+        True if resume initiated or already ready.
+        False if range not found, not in resumable state, or ECS call failed.
+    """
+    from botocore.exceptions import ClientError
+
+    from engine.ecs import start_range_operation
+    from engine.models import Range
+
+    logger.debug("resume_range: request_id=%s", request_id)
+
+    with transaction.atomic():
+        range_obj = Range.objects.select_for_update().filter(request__request_id=request_id).first()
+        if not range_obj:
+            logger.warning("resume_range: no range for request_id=%s", request_id)
+            return False
+
+        # Idempotent: already ready or resuming
+        if range_obj.status in (ResourceStatus.READY.value, ResourceStatus.RESUMING.value):
+            logger.info("resume_range: already ready/resuming request_id=%s", request_id)
+            return True
+
+        # Can only resume from PAUSED state
+        if range_obj.status != ResourceStatus.PAUSED.value:
+            logger.warning(
+                "resume_range: cannot resume range in status=%s request_id=%s",
+                range_obj.status,
+                request_id,
+            )
+            return False
+
+        # Update status to RESUMING
+        range_obj.status = ResourceStatus.RESUMING.value
+        range_obj.save(update_fields=["status", "updated_at"])
+
+    # Invoke ECS task outside the atomic block (don't hold DB lock during network call)
+    try:
+        task_arn = start_range_operation(request_id, "resume")
+    except ClientError:
+        logger.exception("resume_range: ECS ClientError request_id=%s", request_id)
+        range_obj.status = ResourceStatus.PAUSED.value
+        range_obj.save(update_fields=["status", "updated_at"])
+        return False
+
+    if task_arn:
+        logger.info("resume_range: started ECS task=%s request_id=%s", task_arn, request_id)
+        return True
+    else:
+        logger.warning("resume_range: ECS returned None, reverting status request_id=%s", request_id)
+        range_obj.status = ResourceStatus.PAUSED.value
+        range_obj.save(update_fields=["status", "updated_at"])
+        return False
 
 
 def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
@@ -489,7 +607,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     # Check if instance has GUI
     os_type = instance.get("os_type", "")
-    if os_type not in ("kali", "windows"):
+    if os_type not in ("kali", "ubuntu", "windows"):
         raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
 
     # Get IP
@@ -497,24 +615,33 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     if not private_ip:
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
-    # Build connection name from role and range ID
+    # Build connection name from instance name (falls back to role-based name)
     role = instance.get("role", "instance")
-    connection_name = f"{role}-{range_obj.id}"
+    instance_name = instance.get("name")
+    if instance_name:
+        connection_name = instance_name
+    else:
+        # Fallback for older ranges without name field
+        display_role = "target" if role == "victim" else role
+        connection_name = f"{display_role}-{os_type}"
 
-    # Get RDP credentials based on OS type
+    # Get RDP credentials based on OS type and role
     # TODO: Move instance default passwords to CMS (#542)
     rdp_username = None
     rdp_password = None
     if os_type == "windows":
         rdp_username = "Administrator"
-        rdp_password = "CortexSavesTheDay!"  # nosec B105 - demo environment
+        # DC uses domain admin password (prebaked AMI), others use demo password
+        rdp_password = "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!"  # nosec B105
     elif os_type == "kali":
         rdp_username = "kali"
         rdp_password = "kali"  # nosec B105 - Kali OS default
+    elif os_type == "ubuntu":
+        rdp_username = "ubuntu"
+        rdp_password = "ubuntu"  # nosec B105 - demo environment
 
     # Get SSH key for SFTP file transfers
-    # Windows requires key-based auth; Kali uses password auth (Guacamole's
-    # libssh2 has issues with Ed25519 OpenSSH key format)
+    # Windows uses key-based auth; Linux uses password auth for simplicity
     from engine.secrets import get_ssh_key
 
     ssh_key = None
@@ -793,7 +920,10 @@ def start_ngfw(request_id: UUID) -> bool:
         return False
 
     # Only allow starting from paused or failed status
-    if ngfw_instance.status not in (ResourceStatus.PAUSED.value, ResourceStatus.FAILED.value):
+    if ngfw_instance.status not in (
+        ResourceStatus.PAUSED.value,
+        ResourceStatus.FAILED.value,
+    ):
         logger.warning(
             "start_ngfw: invalid status=%s for request_id=%s (must be stopped or failed)",
             ngfw_instance.status,
@@ -856,68 +986,6 @@ def stop_ngfw(request_id: UUID) -> bool:
     if task_arn:
         logger.info(
             "stop_ngfw: started ECS task=%s for request=%s",
-            task_arn,
-            request_id,
-        )
-
-    return task_arn is not None
-
-
-def complete_ngfw_setup(request_id: UUID) -> bool:
-    """Complete NGFW setup after user associates device in SCM/XDR.
-
-    Validates the Instance is in awaiting_association or stopped status,
-    then triggers ECS to run the complete-setup operation.
-
-    The complete-setup operation will:
-    1. Start the NGFW if stopped
-    2. Fetch license (to get Logging Service license from CDL)
-    3. Wait for CSP certificate sync
-    4. Poll for valid device certificate
-    5. Mark NGFW as ready and auto-stop
-
-    Args:
-        request_id: UUID of the request containing the NGFW.
-
-    Returns:
-        True if complete-setup initiated, False if request/instance not found.
-
-    Raises:
-        EngineError: If NGFW is not in a valid status for setup completion.
-    """
-    from engine.ecs import start_ngfw_operation
-    from engine.models import Instance, Request
-
-    logger.debug("complete_ngfw_setup: request_id=%s", request_id)
-
-    try:
-        request = Request.objects.get(request_id=request_id)
-    except Request.DoesNotExist:
-        logger.warning("complete_ngfw_setup: request not found request_id=%s", request_id)
-        return False
-
-    ngfw_instance = Instance.objects.filter(request=request, role="ngfw").first()
-    if not ngfw_instance:
-        logger.warning("complete_ngfw_setup: no NGFW instance found for request_id=%s", request_id)
-        return False
-
-    # Allow completion from awaiting_association or stopped (after auto-stop)
-    valid_statuses = [
-        ResourceStatus.AWAITING_ASSOCIATION.value,
-        ResourceStatus.PAUSED.value,  # PAUSED = "paused" which maps to "stopped" in UI
-        "stopped",  # Direct status value used in some places
-    ]
-    if ngfw_instance.status not in valid_statuses:
-        raise EngineError(
-            f"Cannot complete setup: NGFW is in '{ngfw_instance.status}' status. "
-            f"Expected one of: awaiting_association, stopped"
-        )
-
-    task_arn = start_ngfw_operation(request_id, "complete-setup")
-
-    if task_arn:
-        logger.info(
-            "complete_ngfw_setup: started ECS task=%s for request=%s",
             task_arn,
             request_id,
         )

@@ -122,3 +122,95 @@ resource "aws_elasticache_replication_group" "ha" {
     Module = "redis"
   })
 }
+
+# ------------------------------------------------------------------------------
+# CloudWatch Alarms
+# ------------------------------------------------------------------------------
+
+locals {
+  # Get the cache cluster ID for alarms - depends on mode
+  # For replication group, use the replication group ID
+  # For single node, use the cluster ID
+  cluster_id = var.enable_replication ? aws_elasticache_replication_group.ha[0].id : aws_elasticache_cluster.single_node[0].cluster_id
+}
+
+# CPU Utilization Alarm
+resource "aws_cloudwatch_metric_alarm" "cpu" {
+  count = var.enable_alarms ? 1 : 0
+
+  alarm_name          = "${var.name_prefix}-redis-cpu-utilization"
+  alarm_description   = "Redis CPU utilization is above ${var.alarm_cpu_threshold}%"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ElastiCache"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.alarm_cpu_threshold
+
+  dimensions = {
+    CacheClusterId = local.cluster_id
+  }
+
+  alarm_actions = var.alarm_actions
+  ok_actions    = var.alarm_actions
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-redis-cpu-alarm"
+    Module = "redis"
+  })
+}
+
+# Memory Utilization Alarm (DatabaseMemoryUsagePercentage)
+resource "aws_cloudwatch_metric_alarm" "memory" {
+  count = var.enable_alarms ? 1 : 0
+
+  alarm_name          = "${var.name_prefix}-redis-memory-utilization"
+  alarm_description   = "Redis memory utilization is above ${var.alarm_memory_threshold}%"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "DatabaseMemoryUsagePercentage"
+  namespace           = "AWS/ElastiCache"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.alarm_memory_threshold
+
+  dimensions = {
+    CacheClusterId = local.cluster_id
+  }
+
+  alarm_actions = var.alarm_actions
+  ok_actions    = var.alarm_actions
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-redis-memory-alarm"
+    Module = "redis"
+  })
+}
+
+# Current Connections Alarm
+resource "aws_cloudwatch_metric_alarm" "connections" {
+  count = var.enable_alarms ? 1 : 0
+
+  alarm_name          = "${var.name_prefix}-redis-connections"
+  alarm_description   = "Redis connections exceed ${var.alarm_connections_threshold}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CurrConnections"
+  namespace           = "AWS/ElastiCache"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.alarm_connections_threshold
+
+  dimensions = {
+    CacheClusterId = local.cluster_id
+  }
+
+  alarm_actions = var.alarm_actions
+  ok_actions    = var.alarm_actions
+
+  tags = merge(var.tags, {
+    Name   = "${var.name_prefix}-redis-connections-alarm"
+    Module = "redis"
+  })
+}

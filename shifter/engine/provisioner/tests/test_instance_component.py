@@ -1,7 +1,7 @@
 """Instance component tests for Shifter Engine.
 
 Unit tests for instance component utilities:
-- SSH keypair generation (Ed25519)
+- SSH keypair generation (RSA 4096)
 - S3 path validation for shell injection prevention
 """
 
@@ -26,17 +26,17 @@ class TestGenerateSshKeypair:
         assert isinstance(public_key, str)
 
     def test_private_key_is_pem_format(self):
-        """Private key should be in OpenSSH PEM format."""
+        """Private key should be in PEM format."""
         private_key, _ = generate_ssh_keypair()
 
-        assert private_key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
-        assert private_key.strip().endswith("-----END OPENSSH PRIVATE KEY-----")
+        assert private_key.startswith("-----BEGIN RSA PRIVATE KEY-----")
+        assert private_key.strip().endswith("-----END RSA PRIVATE KEY-----")
 
     def test_public_key_is_openssh_format(self):
-        """Public key should be in OpenSSH format (ssh-ed25519 ...)."""
+        """Public key should be in OpenSSH format (ssh-rsa ...)."""
         _, public_key = generate_ssh_keypair()
 
-        assert public_key.startswith("ssh-ed25519 ")
+        assert public_key.startswith("ssh-rsa ")
 
     def test_keys_are_unique_each_call(self):
         """Each call should generate a unique keypair."""
@@ -46,17 +46,17 @@ class TestGenerateSshKeypair:
         assert key1_private != key2_private
         assert key1_public != key2_public
 
-    def test_keypair_is_valid_ed25519(self):
-        """Generated keypair should be valid Ed25519."""
+    def test_keypair_is_valid_rsa(self):
+        """Generated keypair should be valid RSA."""
         from cryptography.hazmat.primitives.serialization import (
-            load_ssh_private_key,
+            load_pem_private_key,
             load_ssh_public_key,
         )
 
         private_key_pem, public_key_openssh = generate_ssh_keypair()
 
-        # Load and verify private key
-        private_key = load_ssh_private_key(private_key_pem.encode(), password=None)
+        # Load and verify private key (RSA uses PEM format, not SSH format)
+        private_key = load_pem_private_key(private_key_pem.encode(), password=None)
         assert private_key is not None
 
         # Verify public key can be loaded
@@ -65,12 +65,12 @@ class TestGenerateSshKeypair:
 
     def test_private_key_has_no_passphrase(self):
         """Private key should not be encrypted (no passphrase)."""
-        from cryptography.hazmat.primitives.serialization import load_ssh_private_key
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
         private_key_pem, _ = generate_ssh_keypair()
 
         # This should succeed without a password
-        private_key = load_ssh_private_key(private_key_pem.encode(), password=None)
+        private_key = load_pem_private_key(private_key_pem.encode(), password=None)
         assert private_key is not None
 
 

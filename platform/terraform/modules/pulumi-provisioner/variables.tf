@@ -247,6 +247,12 @@ variable "firewall_endpoint_id" {
   default     = ""
 }
 
+variable "ssm_endpoints_subnet_cidr" {
+  description = "CIDR block of the SSM/Bedrock endpoints subnet (for NGFW routing)"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # Portal VPC Configuration (for terminal SSH access)
 # ------------------------------------------------------------------------------

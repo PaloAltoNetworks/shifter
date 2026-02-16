@@ -10,6 +10,10 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from executors.base import CommandResult
+from executors.ngfw_executor import (
+    NGFWConnectionError,
+    NGFWTimeoutError,
+)
 from executors.ssh_executor import (
     ConnectionError as SSHConnectionError,
 )
@@ -527,7 +531,7 @@ class SetupOrchestrator:
                     document_name=document_name,
                     stdin_input=f"show jobs id {job_id}\n",
                 )
-            except (SSHConnectionError, SSHTimeoutError) as e:
+            except (SSHConnectionError, SSHTimeoutError, NGFWConnectionError, NGFWTimeoutError) as e:
                 logger.warning("_poll_panos_job: SSH error, retrying: %s", e)
                 time.sleep(poll_interval)
                 continue

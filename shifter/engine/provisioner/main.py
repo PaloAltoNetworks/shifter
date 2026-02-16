@@ -32,7 +32,6 @@ from config import generate_presigned_url
 from events import (
     STATUS_DESTROYED,
     STATUS_FAILED,
-    STATUS_READY,
     publish_destroyed,
     publish_failed,
     publish_ngfw_event,
@@ -40,7 +39,7 @@ from events import (
     publish_status_update,
 )
 from executors.aws_executor import AWSExecutor
-from executors.ssh_executor import SSHExecutor
+from executors.ngfw_executor import NGFWExecutor
 from executors.ssm_executor import SSMExecutor
 from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import OpsOrchestrator
@@ -154,7 +153,7 @@ def get_ami_id(ami_type: str) -> str:
 
 # Default timeout for waiting for NGFW SSH to become available (seconds)
 # PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
-NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 3600  # 60 minutes
+NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500  # 25 minutes
 
 
 def get_vpc_gateway_ip(cidr: str) -> str:
@@ -571,7 +570,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
 
     Returns:
         Dictionary with ec2_instance_id, management_ip, ssh_key_secret_arn,
-        and ngfw_request_id. Returns None if user has no NGFW.
+        data_eni_id, and ngfw_request_id. Returns None if user has no NGFW.
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -584,7 +583,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
             JOIN engine_request r ON i.request_id = r.id
             WHERE r.user_id = %s
               AND i.role = 'ngfw'
-              AND i.status IN ('ready', 'active', 'stopped', 'stopping')
+              AND i.status IN ('ready', 'active', 'stopped', 'stopping', 'starting')
             ORDER BY i.created_at DESC
             LIMIT 1
             """,
@@ -603,6 +602,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
             "ec2_instance_id": state.get("ec2_instance_id"),
             "management_ip": state.get("management_ip"),
             "ssh_key_secret_arn": state.get("ssh_key_secret_arn"),
+            "data_eni_id": state.get("data_eni_id"),
             "status": status,
         }
 
@@ -651,8 +651,8 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
     secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
     private_key = secret_response["SecretString"]
 
-    # Create SSH executor and wait for NGFW to be ready
-    ssh_executor = SSHExecutor(private_key=private_key)
+    # Create NGFW executor and wait for NGFW to be ready
+    ssh_executor = NGFWExecutor(private_key=private_key)
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
     ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=300)
 
@@ -667,7 +667,8 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
-    steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id)
+    has_endpoints = bool(os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR"))
+    steps = NGFWRemoveSubnetsPlan().get_steps(subnets, range_id, has_endpoints)
     plan = DynamicPlan(name="ngfw_remove_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
@@ -822,8 +823,8 @@ def get_range_data_by_request_id(request_id: str) -> dict:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status = 'active'
-                  AND ei.state->>'service_name' IS NOT NULL
+                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping')
+                  AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,
@@ -877,7 +878,7 @@ def parse_serial_number(system_info_output: str) -> str | None:
 
 
 def poll_for_serial_number(
-    ssh_executor: "SSHExecutor",
+    ssh_executor: NGFWExecutor,
     host: str,
     timeout_seconds: int = 600,
     poll_interval: int = 30,
@@ -888,7 +889,7 @@ def poll_for_serial_number(
     This function polls 'show system info' until a valid serial number appears.
 
     Args:
-        ssh_executor: SSHExecutor instance for running commands.
+        ssh_executor: NGFWExecutor instance for running commands.
         host: NGFW management IP address.
         timeout_seconds: Maximum time to wait for serial (default 10 min).
         poll_interval: Seconds between poll attempts (default 30s).
@@ -960,7 +961,7 @@ def parse_device_certificate_status(system_info_output: str) -> str | None:
 
 
 def poll_for_serial_and_cert(
-    ssh_executor: "SSHExecutor",
+    ssh_executor: NGFWExecutor,
     host: str,
     timeout_seconds: int = 1800,
     poll_interval: int = 30,
@@ -972,7 +973,7 @@ def poll_for_serial_and_cert(
     independently since they may appear at different times.
 
     Args:
-        ssh_executor: SSHExecutor instance for running commands.
+        ssh_executor: NGFWExecutor instance for running commands.
         host: NGFW management IP address.
         timeout_seconds: Maximum time to wait (default 30 min).
         poll_interval: Seconds between poll attempts (default 30s).
@@ -1057,7 +1058,7 @@ def poll_for_serial_and_cert(
 
 
 def wait_for_autocommit(
-    ssh_executor: "SSHExecutor",
+    ssh_executor: NGFWExecutor,
     host: str,
     timeout_seconds: int = 600,
     poll_interval: int = 15,
@@ -1069,7 +1070,7 @@ def wait_for_autocommit(
     until there are no active (ACT) commit jobs.
 
     Args:
-        ssh_executor: SSHExecutor instance for running commands.
+        ssh_executor: NGFWExecutor instance for running commands.
         host: NGFW management IP address.
         timeout_seconds: Maximum time to wait (default 10 min).
         poll_interval: Seconds between poll attempts (default 15s).
@@ -1225,7 +1226,7 @@ def update_instance_state(request_id: str, status: str, **state_updates) -> None
 
 
 def find_stale_routes_by_cidr(
-    ssh_executor: SSHExecutor,
+    ssh_executor: NGFWExecutor,
     management_ip: str,
     target_cidrs: set[str],
 ) -> list[str]:
@@ -1291,7 +1292,7 @@ def find_stale_routes_by_cidr(
 
 
 def find_stale_routes_by_db(
-    ssh_executor: SSHExecutor,
+    ssh_executor: NGFWExecutor,
     management_ip: str,
     current_range_id: int,
 ) -> list[str]:
@@ -1387,11 +1388,14 @@ def configure_ngfw_subnets(
     management_ip: str,
     ssh_key_secret_arn: str,
     ngfw_subnet_cidr: str,
+    ssm_endpoints_subnet_cidr: str = "",
 ) -> None:
     """Configure NGFW with routes for range subnets.
 
     This runs AFTER pulumi up (subnets exist) and BEFORE instance setup.
     Configures static routes on the NGFW so traffic can flow between subnets.
+    When ssm_endpoints_subnet_cidr is provided, also configures routing for
+    Bedrock/SSM endpoint traffic through the NGFW.
 
     Args:
         subnets: List of dicts with 'name', 'cidr', 'connected_to'.
@@ -1399,6 +1403,7 @@ def configure_ngfw_subnets(
         management_ip: NGFW management IP for SSH.
         ssh_key_secret_arn: Secrets Manager ARN for SSH private key.
         ngfw_subnet_cidr: NGFW subnet CIDR for computing gateway IP.
+        ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR for NGFW routing.
     """
     # Compute VPC gateway IP (first IP + 1 in the subnet)
     network = ipaddress.ip_network(ngfw_subnet_cidr, strict=False)
@@ -1414,8 +1419,8 @@ def configure_ngfw_subnets(
     secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
     private_key = secret_response["SecretString"]
 
-    # Create SSH executor
-    ssh_executor = SSHExecutor(private_key=private_key)
+    # Create NGFW executor
+    ssh_executor = NGFWExecutor(private_key=private_key)
 
     # Wait for SSH to be available
     logger.info("Waiting for SSH on NGFW at %s...", management_ip)
@@ -1460,7 +1465,9 @@ def configure_ngfw_subnets(
 
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
-    steps = NGFWConfigureSubnetsPlan().get_steps(subnets, range_id, vpc_gateway_ip, stale_routes)
+    steps = NGFWConfigureSubnetsPlan().get_steps(
+        subnets, range_id, vpc_gateway_ip, stale_routes, ssm_endpoints_subnet_cidr
+    )
     plan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
     orchestrator = SetupOrchestrator(ssh_executor)
@@ -2013,6 +2020,7 @@ def _set_stack_config(env: dict, range_id: int) -> None:
         "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
         "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
         "firewallEndpointId": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
+        "ssmEndpointsSubnetCidr": os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
         "portalVpcCidr": os.environ.get("PORTAL_VPC_CIDR", ""),
         "portalVpcPeeringId": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
     }
@@ -2174,6 +2182,7 @@ def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str
             management_ip=ngfw_data["management_ip"],
             ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
             ngfw_subnet_cidr=ngfw_subnet_cidr,
+            ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
         )
     else:
         logger.warning(
@@ -2337,14 +2346,35 @@ def run_range_terraform(operation: str, request_id: str) -> None:
         if ngfw_data and ngfw_data.get("management_ip"):
             logger.info("NGFW enabled for range %s", range_id)
             ngfw_status = ngfw_data.get("status")
-            if ngfw_status in ("stopped", "stopping"):
-                ec2_instance_id = ngfw_data.get("ec2_instance_id")
+            ec2_instance_id = ngfw_data.get("ec2_instance_id")
+            if ngfw_status in ("stopped", "stopping", "starting"):
                 if ngfw_status == "stopping" and ec2_instance_id:
                     logger.info("NGFW is stopping, waiting for stop to complete...")
                     aws_executor = AWSExecutor()
                     aws_executor.wait_for_stopped(ec2_instance_id)
-                logger.info("Starting stopped NGFW for range provisioning...")
-                run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+                elif ngfw_status == "starting" and ec2_instance_id:
+                    # Status stuck in 'starting' - check actual EC2 state
+                    aws_executor = AWSExecutor()
+                    result = aws_executor.describe_instance(ec2_instance_id)
+                    ec2_state = None
+                    if result.success:
+                        data = json.loads(result.stdout)
+                        reservations = data.get("Reservations", [])
+                        if reservations and reservations[0].get("Instances"):
+                            ec2_state = reservations[0]["Instances"][0].get("State", {}).get("Name")
+                    if ec2_state == "stopped":
+                        logger.info("NGFW stuck in 'starting' but EC2 is stopped, restarting...")
+                        run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+                    elif ec2_state == "running":
+                        logger.info("NGFW starting, EC2 already running")
+                        # Already running, continue to provision
+                    elif ec2_state == "pending":
+                        logger.info("NGFW starting, waiting for EC2 to be running...")
+                        aws_executor.wait_for_running(ec2_instance_id)
+                        # Now running, continue to provision
+                else:
+                    logger.info("Starting stopped NGFW for range provisioning...")
+                    run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
 
     try:
         if operation == "up":
@@ -2359,12 +2389,33 @@ def run_range_terraform(operation: str, request_id: str) -> None:
         logger.error("Range Terraform operation failed: %s", error_msg)
 
         if operation == "up":
-            logger.info("Provision failed - attempting Terraform cleanup...")
+            logger.error(
+                "Provision failed for range_id=%s request_id=%s - attempting Terraform cleanup...",
+                range_id,
+                request_id,
+            )
             try:
-                range_terraform_runner.destroy_range(request_id, range_terraform_runner.RANGE_MODULE_PATH)
+                tf_variables = _build_range_terraform_variables(
+                    request_id,
+                    range_id,
+                    user_id,
+                    range_spec,
+                )
+                range_terraform_runner.destroy_range(
+                    request_id,
+                    range_terraform_runner.RANGE_MODULE_PATH,
+                    variables=tf_variables,
+                )
                 range_terraform_runner.cleanup_range_state(request_id)
+                logger.info("Auto-cleanup succeeded for range_id=%s", range_id)
             except Exception as cleanup_error:
-                logger.warning("Auto-cleanup failed: %s", cleanup_error)
+                logger.error(
+                    "Auto-cleanup FAILED for range_id=%s request_id=%s: %s. "
+                    "Orphaned AWS resources may exist and require manual cleanup.",
+                    range_id,
+                    request_id,
+                    cleanup_error,
+                )
 
         publish_failed(
             request_id=request_id,
@@ -2441,29 +2492,44 @@ def _run_terraform_provision(
         expected_subnet_names=expected_subnet_names,
     )
 
-    # Configure NGFW with routes for range subnets
-    ngfw_data = get_user_ngfw_data(user_id)
-    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
-    if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
-        logger.info("Configuring NGFW with subnet routes...")
-        subnets_for_ngfw = []
-        for spec_subnet in spec_subnets:
-            subnet_name = spec_subnet.get("name", "")
-            subnet_output = subnets_output.get(subnet_name, {})
-            subnets_for_ngfw.append(
-                {
-                    "name": subnet_name,
-                    "cidr": subnet_output.get("subnet_cidr", ""),
-                    "connected_to": spec_subnet.get("connected_to", []),
-                }
+    # Validate NGFW routes were created if range requires NGFW
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        if not ngfw_data or not ngfw_data.get("data_eni_id"):
+            raise RuntimeError(
+                "NGFW routing validation failed: Range requires NGFW but data_eni_id is missing. "
+                "This should have been caught earlier - investigation required."
             )
-        configure_ngfw_subnets(
-            subnets=subnets_for_ngfw,
-            range_id=range_id,
-            management_ip=ngfw_data["management_ip"],
-            ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
-            ngfw_subnet_cidr=ngfw_subnet_cidr,
+        logger.info(
+            "NGFW-enabled range validated: inter-subnet routes created via data_eni_id=%s",
+            ngfw_data["data_eni_id"],
         )
+
+    # Configure NGFW with routes for range subnets (only if range requires NGFW)
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
+        if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
+            logger.info("Configuring NGFW with subnet routes...")
+            subnets_for_ngfw = []
+            for spec_subnet in spec_subnets:
+                subnet_name = spec_subnet.get("name", "")
+                subnet_output = subnets_output.get(subnet_name, {})
+                subnets_for_ngfw.append(
+                    {
+                        "name": subnet_name,
+                        "cidr": subnet_output.get("subnet_cidr", ""),
+                        "connected_to": spec_subnet.get("connected_to", []),
+                    }
+                )
+            configure_ngfw_subnets(
+                subnets=subnets_for_ngfw,
+                range_id=range_id,
+                management_ip=ngfw_data["management_ip"],
+                ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
+                ngfw_subnet_cidr=ngfw_subnet_cidr,
+                ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
+            )
 
     # Run instance setup (DC first, then others in parallel)
     logger.info("Running instance setup...")
@@ -2499,8 +2565,8 @@ def _run_terraform_destroy(
         return
 
     current_status = range_data.get("status")
-    if current_status in ("destroyed", "failed"):
-        logger.info("Range %d already in terminal state '%s', skipping", range_id, current_status)
+    if current_status == "destroyed":
+        logger.info("Range %d already destroyed, skipping", range_id)
         return
 
     # Remove NGFW subnet config
@@ -2621,6 +2687,24 @@ def _build_range_terraform_variables(
             }
         )
 
+    # Get NGFW data ENI ID from database for inter-subnet routing
+    ngfw_data_eni_id = ""
+    if range_spec.get("ngfw", False):
+        ngfw_data = get_user_ngfw_data(user_id)
+        if not ngfw_data:
+            raise ValueError(
+                f"Range requires NGFW (ngfw: true in spec) but user {user_id} has no provisioned NGFW. "
+                "User must provision an NGFW before creating NGFW-enabled ranges."
+            )
+        ngfw_data_eni_id = ngfw_data.get("data_eni_id", "")
+        if not ngfw_data_eni_id:
+            raise ValueError(
+                f"Range requires NGFW but user {user_id}'s NGFW is missing data_eni_id in state. "
+                "NGFW may have failed provisioning or is from an old version. "
+                f"NGFW request_id: {ngfw_data.get('ngfw_request_id')}"
+            )
+        logger.info("Using NGFW data_eni_id=%s for range %s inter-subnet routing", ngfw_data_eni_id, range_id)
+
     return {
         # Core identifiers
         "range_id": range_id,
@@ -2636,7 +2720,7 @@ def _build_range_terraform_variables(
         "firewall_endpoint_id": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
         "portal_vpc_cidr": os.environ.get("PORTAL_VPC_CIDR", ""),
         "portal_vpc_peering_id": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
-        "ngfw_data_eni_id": os.environ.get("NGFW_ENI_ID", ""),
+        "ngfw_data_eni_id": ngfw_data_eni_id,
         # AMI IDs
         "kali_ami_id": get_ami_id("kali"),
         "victim_ami_id": get_ami_id("victim"),
@@ -2650,14 +2734,14 @@ def _build_range_terraform_variables(
 
 
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
-    """Run NGFW runtime operation (start/stop/complete-setup).
+    """Run NGFW runtime operation (start/stop).
 
-    Retrieves EC2 instance ID from the Instance.state (populated during Pulumi
+    Retrieves EC2 instance ID from the Instance.state (populated during
     provisioning), executes the operation plan, and publishes events for status
     updates.
 
     Args:
-        operation: Operation name (start, stop, complete-setup).
+        operation: Operation name (start, stop).
         request_id: UUID string of the Request.
         **kwargs: Operation-specific parameters (overrides for context).
 
@@ -2668,13 +2752,6 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     logger.info("run_ngfw_operation: starting operation=%s request_id=%s", operation, request_id)
     if kwargs:
         logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
-
-    # Handle complete-setup as special case (requires AWS + SSH hybrid execution)
-    if operation == "complete-setup":
-        _run_complete_setup(request_id)
-        return
-
-    from events import publish_ngfw_event
 
     # Status transitions for each operation
     status_map = {
@@ -2772,180 +2849,6 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
         raise
 
 
-def _run_complete_setup(request_id: str) -> None:
-    """Complete NGFW setup after user associates device in SCM/XDR.
-
-    This hybrid operation combines AWS (start instance) and SSH (license fetch,
-    certificate verification) to finalize NGFW configuration after the user
-    has manually associated the device in Strata Cloud Manager and XDR.
-
-    Flow:
-    1. Start NGFW if stopped, wait if in transitional state (AWS)
-    2. Wait for SSH connectivity
-    3. Fetch license (SSH) - retrieves Logging Service license from CDL
-    4. Poll for valid device certificate (SSH)
-    5. Mark NGFW as ready and auto-stop
-
-    Args:
-        request_id: UUID string of the Request.
-
-    Raises:
-        RuntimeError: If any step fails.
-    """
-
-    logger.info("_run_complete_setup: starting request_id=%s", request_id)
-
-    # Get NGFW data from database
-    ngfw_data = get_ngfw_data_by_request_id(request_id)
-    instance_uuid: str = ngfw_data["instance_id"]
-    app_id: str | None = ngfw_data["app_id"]
-    state: dict = ngfw_data.get("state", {})
-    current_status: str = ngfw_data.get("status", "")
-
-    ec2_instance_id: str | None = state.get("ec2_instance_id")
-    management_ip: str | None = state.get("management_ip")
-    ssh_key_secret_arn: str | None = state.get("ssh_key_secret_arn")
-
-    if not ec2_instance_id:
-        raise RuntimeError(f"EC2 instance ID not found in state for request: {request_id}")
-    if not management_ip:
-        raise RuntimeError(f"Management IP not found in state for request: {request_id}")
-    if not ssh_key_secret_arn:
-        raise RuntimeError(f"SSH key secret ARN not found in state for request: {request_id}")
-
-    # Warn if already in configuring state (possible retry of failed attempt)
-    if current_status == "configuring":
-        logger.warning(
-            "_run_complete_setup: NGFW already in 'configuring' status, "
-            "possibly retrying after previous failure: request_id=%s",
-            request_id,
-        )
-
-    # Update status to configuring
-    update_instance_state(request_id, "configuring")
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_uuid,
-        app_id=app_id,
-        status="configuring",
-    )
-
-    try:
-        # 1. Start NGFW if stopped, wait if in transitional state
-        aws_executor = AWSExecutor()
-        result = aws_executor.describe_instance(ec2_instance_id)
-        if not result.success:
-            raise RuntimeError(f"Failed to describe instance: {result.stderr}")
-        instance_data = json.loads(result.stdout)
-        ec2_state: str = (
-            instance_data.get("Reservations", [{}])[0].get("Instances", [{}])[0].get("State", {}).get("Name", "unknown")
-        )
-        logger.info("_run_complete_setup: EC2 instance state=%s", ec2_state)
-
-        if ec2_state == "stopped":
-            logger.info("_run_complete_setup: Starting stopped NGFW instance")
-            aws_executor.start_instance(ec2_instance_id)
-            aws_executor.wait_for_running(ec2_instance_id)
-        elif ec2_state in ("pending", "stopping", "shutting-down"):
-            # Instance is in a transitional state - wait for it to stabilize
-            logger.info(
-                "_run_complete_setup: Instance in transitional state '%s', waiting for stable state",
-                ec2_state,
-            )
-            if ec2_state == "pending":
-                aws_executor.wait_for_running(ec2_instance_id)
-            elif ec2_state == "stopping":
-                aws_executor.wait_for_stopped(ec2_instance_id)
-                # Now start it
-                logger.info("_run_complete_setup: Starting NGFW after it finished stopping")
-                aws_executor.start_instance(ec2_instance_id)
-                aws_executor.wait_for_running(ec2_instance_id)
-            else:  # shutting-down
-                raise RuntimeError(f"NGFW instance is shutting down (terminating): {ec2_instance_id}")
-        elif ec2_state == "running":
-            logger.info("_run_complete_setup: NGFW instance already running")
-        elif ec2_state == "terminated":
-            raise RuntimeError(f"NGFW instance has been terminated: {ec2_instance_id}")
-        else:
-            raise RuntimeError(f"NGFW instance in unexpected state: {ec2_state}")
-
-        # 2. Wait for SSH connectivity
-        logger.info("_run_complete_setup: Waiting for SSH on %s", management_ip)
-        secrets_client = boto3.client("secretsmanager")
-        secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-        private_key: str = secret_response["SecretString"]
-
-        ssh_executor = SSHExecutor(private_key=private_key)
-        ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
-        ssh_executor.wait_for_agent(host=management_ip, timeout_seconds=ssh_timeout)
-
-        # 3. Fetch license (retrieves Logging Service license after SCM association)
-        logger.info("_run_complete_setup: Fetching license")
-        license_result = ssh_executor.run_command(
-            instance_id=management_ip,
-            script="request license fetch",
-            timeout_seconds=120,
-        )
-        if not license_result.success:
-            logger.warning("License fetch returned non-success: %s", license_result.stderr)
-            # Don't fail - license fetch may report errors even when successful
-
-        logger.info(
-            "License fetch output: %s",
-            license_result.stdout[:500] if license_result.stdout else "(empty)",
-        )
-
-        # 4. Poll for valid device certificate
-        # CSP certificate sync typically takes 10-30 minutes after license fetch.
-        # Rather than sleeping a fixed time, poll with appropriate timeout.
-        logger.info("_run_complete_setup: Polling for valid device certificate")
-        poll_timeout = int(os.environ.get("NGFW_CERT_POLL_TIMEOUT", 2400))  # 40 min default
-        serial_number = poll_for_serial_and_cert(
-            ssh_executor=ssh_executor,
-            host=management_ip,
-            timeout_seconds=poll_timeout,
-            poll_interval=30,
-        )
-
-        # 5. Update state and mark ready (only pass serial_number, not entire state)
-        update_instance_state(request_id, STATUS_READY, serial_number=serial_number)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=STATUS_READY,
-            serial_number=serial_number,
-        )
-
-        logger.info("_run_complete_setup: NGFW marked as ready, serial=%s", serial_number)
-
-        # 6. Auto-stop NGFW to save costs (soft failure - setup already succeeded)
-        logger.info("_run_complete_setup: Auto-stopping NGFW")
-        try:
-            run_ngfw_operation("stop", request_id)
-            logger.info("_run_complete_setup: Auto-stop completed successfully")
-        except Exception:
-            logger.exception(
-                "_run_complete_setup: Auto-stop failed (non-fatal) - NGFW remains running: request_id=%s",
-                request_id,
-            )
-            # Don't re-raise - setup succeeded, stop failure is non-fatal
-
-        logger.info("_run_complete_setup: Complete setup finished successfully")
-
-    except Exception:
-        logger.exception("_run_complete_setup failed: request_id=%s", request_id)
-        error_msg = "Complete setup failed - check logs for details"
-        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=STATUS_FAILED,
-        )
-        raise
-
-
 if __name__ == "__main__":
     from logging_config import configure_logging
 
@@ -2980,7 +2883,6 @@ if __name__ == "__main__":
             "deprovision",
             "start",
             "stop",
-            "complete-setup",
         ],
         help="NGFW operation to perform",
     )
@@ -3009,7 +2911,7 @@ if __name__ == "__main__":
             tf_op = "up" if args.operation == "provision" else "destroy"
             run_ngfw_terraform(tf_op, args.request_id)
         else:
-            # Runtime operations (start, stop, complete-setup)
+            # Runtime operations (start, stop)
             kwargs = {}
             if args.ec2_instance_id:
                 kwargs["ec2_instance_id"] = args.ec2_instance_id

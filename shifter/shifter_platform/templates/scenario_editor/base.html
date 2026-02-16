@@ -1,0 +1,66 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="xdr-dark-theme">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Scenario Editor{% endblock %} - Cortex Shifter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/xdr-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/xdr-sidebar.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <style>
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--xdr-text); }
+        .form-group .help-text { font-size: 12px; color: var(--xdr-text-secondary); margin-top: 2px; }
+        .form-input, .form-textarea, .form-select {
+            width: 100%; padding: 8px 12px; background: var(--xdr-surface); border: 1px solid var(--xdr-border);
+            border-radius: 4px; color: var(--xdr-text); font-size: 14px; font-family: 'Lato', sans-serif;
+        }
+        .form-input:focus, .form-textarea:focus, .form-select:focus { outline: none; border-color: #5588cc; }
+        .form-textarea { resize: vertical; min-height: 80px; }
+        .form-checkbox { display: flex; align-items: center; gap: 8px; }
+        .form-checkbox input { width: 16px; height: 16px; }
+        .error-list { background: rgba(200,50,50,0.15); border: 1px solid rgba(200,50,50,0.3); border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; list-style: none; }
+        .error-list li { color: #cc8888; font-size: 14px; margin-bottom: 4px; }
+        .yaml-editor {
+            width: 100%; min-height: 500px; padding: 16px;
+            background: var(--xdr-surface); border: 1px solid var(--xdr-border);
+            border-radius: 4px; color: var(--xdr-text); font-family: monospace;
+            font-size: 14px; line-height: 1.6; resize: vertical; tab-size: 2;
+        }
+        .yaml-editor:focus { outline: none; border-color: #5588cc; }
+        .validation-result { padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; display: none; }
+        .validation-valid { background: rgba(100,200,100,0.15); border: 1px solid rgba(100,200,100,0.3); color: #88cc88; }
+        .validation-invalid { background: rgba(200,50,50,0.15); border: 1px solid rgba(200,50,50,0.3); color: #cc8888; }
+        .instance-card, .subnet-card { background: var(--xdr-surface); border: 1px solid var(--xdr-border); border-radius: 4px; padding: 12px; margin-bottom: 8px; }
+        .inline-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        .btn-danger { background: rgba(200,50,50,0.2); color: #cc6666; border: 1px solid rgba(200,50,50,0.3); }
+        .btn-add { background: rgba(100,200,100,0.15); color: #88cc88; border: 1px solid rgba(100,200,100,0.25); }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="xdr-dark-theme">
+    {% include "partials/icon_sidebar.html" %}
+
+    <div class="layout">
+        <main class="main">
+            {% if messages %}
+            <div style="padding: 0 24px;">
+                {% for message in messages %}
+                <div class="{% if message.tags == 'success' %}validation-valid{% elif message.tags == 'error' %}validation-invalid{% else %}validation-result{% endif %}" style="display: block; margin-bottom: 8px;">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="{% static 'js/sidebar.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

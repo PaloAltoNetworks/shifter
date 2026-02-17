@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, Annotated
+
+from pydantic import AfterValidator, ValidationInfo, Field
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +116,10 @@ def build_instance_data(provisioned_instances: dict[str, Any]) -> dict[str, dict
     """
     result: dict[str, dict[str, Any]] = {}
 
+    if not isinstance(provisioned_instances, dict):
+        logger.error("build_instance_data: provisioned_instances is not a dict: %s", type(provisioned_instances).__name__)
+        return result
+
     for name, details in provisioned_instances.items():
         if isinstance(details, dict):
             result[name] = {
@@ -127,3 +133,35 @@ def build_instance_data(provisioned_instances: dict[str, Any]) -> dict[str, dict
 
     logger.debug("build_instance_data: built data for %d instances", len(result))
     return result
+
+
+def _pydantic_validate_template(v: str, info: ValidationInfo) -> str:
+    """Pydantic validator for template strings.
+
+    Uses Pydantic validation context to find 'instance_names'.
+    If context is missing or doesn't have 'instance_names', validation is skipped.
+    """
+    if not v:
+        return v
+
+    context = info.context
+    if not context:
+        return v
+
+    instance_names = context.get("instance_names")
+    if instance_names is None:
+        return v
+
+    if not isinstance(instance_names, (set, list, tuple)):
+        logger.warning("_pydantic_validate_template: instance_names in context is not a set/list")
+        return v
+
+    errors = validate_template(v, set(instance_names))
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    return v
+
+
+# Annotated type for centralized template string validation
+TemplateString = Annotated[str, AfterValidator(_pydantic_validate_template)]

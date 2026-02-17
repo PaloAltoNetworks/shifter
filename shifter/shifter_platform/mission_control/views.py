@@ -231,6 +231,96 @@ def guacamole_rdp_url(request):
 
 
 @login_required
+@require_POST
+def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
+    """Generate Guacamole SSH URL for NGFW CLI access.
+
+    POST /mc/ngfw/<app_id>/ssh-url/
+
+    Args:
+        request: HTTP request
+        app_id: NGFW UUID
+
+    Returns:
+        JsonResponse with {"url": "https://..."}
+
+    Error Responses:
+        400: NGFW not found, not accessible, or permission denied
+        500: Internal error
+
+    Security:
+        - User must own the NGFW (validated via Request chain)
+        - NGFW must be in ready status
+        - URL is signed with HMAC-SHA256 and expires in 5 minutes
+    """
+    from engine.services import connect_ngfw_terminal
+    from mission_control.guacamole import create_guacamole_ssh_url
+
+    user = _get_user(request)
+
+    # Get connection details from engine service
+    try:
+        ssh_conn = connect_ngfw_terminal(user, app_id)
+    except ValueError as e:
+        logger.error(
+            "NGFW SSH access denied (ValueError): user=%s ngfw_uuid=%s error=%s",
+            user.email,
+            app_id,
+            e,
+        )
+        return JsonResponse({"error": str(e)}, status=400)
+    except PermissionError as e:
+        logger.error("NGFW SSH access denied (PermissionError): user=%s ngfw_uuid=%s", user.email, app_id)
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception:
+        logger.exception(
+            "Unexpected error getting NGFW SSH connection: user=%s ngfw_uuid=%s",
+            user.email,
+            app_id,
+        )
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+    # Get Guacamole secret key from settings
+    secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
+    if not secret_key:
+        logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
+        return JsonResponse({"error": "SSH service not configured"}, status=503)
+
+    # Get Guacamole URLs from settings
+    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+    guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
+
+    # Generate Guacamole SSH URL
+    try:
+        url = create_guacamole_ssh_url(
+            base_url=guacamole_base_url,
+            secret_key=secret_key,
+            username=user.email,
+            connection_name=f"ngfw-{app_id}",
+            hostname=ssh_conn.host,
+            port=ssh_conn.port,
+            ssh_username=ssh_conn.username,
+            ssh_private_key=ssh_conn.private_key,
+            expires_minutes=5,
+            api_base_url=guacamole_api_url,
+        )
+    except ValueError as e:
+        logger.error("Failed to generate NGFW SSH URL: user=%s ngfw_uuid=%s error=%s", user.email, app_id, e)
+        return JsonResponse({"error": "Failed to generate SSH URL"}, status=500)
+    except Exception:
+        logger.exception("Unexpected error generating NGFW SSH URL: user=%s ngfw_uuid=%s", user.email, app_id)
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+    logger.info(
+        "Guacamole SSH URL generated for NGFW: user=%s ngfw_uuid=%s",
+        user.email,
+        app_id,
+    )
+
+    return JsonResponse({"url": url})
+
+
+@login_required
 @require_GET
 def help_page(request: HttpRequest) -> HttpResponse:
     """Help and documentation."""

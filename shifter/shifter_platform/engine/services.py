@@ -768,6 +768,115 @@ def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
     )
 
 
+def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
+    """Get SSH connection to NGFW management interface.
+
+    Validates user ownership via Instance → Request → User chain.
+    Supports NGFWs in 'ready' status.
+
+    Args:
+        user: Authenticated user requesting connection
+        ngfw_uuid: UUID of the NGFW instance to connect to
+
+    Returns:
+        SSHConnection configured for NGFW admin CLI
+
+    Raises:
+        ValueError: If user is None, ngfw_uuid invalid, NGFW not found,
+            status invalid, or required state fields missing
+        PermissionError: If user doesn't own the NGFW
+    """
+    # Lazy imports to avoid circular dependencies
+    from engine.models import Instance
+    from engine.secrets import get_ssh_key
+    from engine.ssh import SSHConnection
+
+    # Input validation
+    if user is None:
+        raise ValueError("user is required")
+    if not ngfw_uuid:
+        raise ValueError("ngfw_uuid is required")
+
+    logger.debug("connect_ngfw_terminal: user_id=%s ngfw_uuid=%s", user.id, ngfw_uuid)
+
+    # Find NGFW Instance by UUID with role=ngfw
+    try:
+        ngfw_instance = Instance.objects.select_related("request").get(
+            uuid=ngfw_uuid,
+            role=Instance.Role.NGFW,
+        )
+    except Instance.DoesNotExist:
+        logger.error(
+            "NGFW instance not found: user_id=%s ngfw_uuid=%s",
+            user.id,
+            ngfw_uuid,
+        )
+        raise ValueError(f"NGFW instance {ngfw_uuid} not found") from None
+
+    # Verify ownership via Request → User
+    if ngfw_instance.request is None:
+        logger.error(
+            "NGFW instance has no associated request: ngfw_uuid=%s",
+            ngfw_uuid,
+        )
+        raise ValueError(f"NGFW instance {ngfw_uuid} has no associated request")
+
+    if ngfw_instance.request.user != user:
+        logger.error(
+            "Permission denied: user_id=%s does not own ngfw_uuid=%s (owner=%s)",
+            user.id,
+            ngfw_uuid,
+            ngfw_instance.request.user.id,
+        )
+        raise PermissionError(f"You do not have permission to access NGFW {ngfw_uuid}")
+
+    # Verify status (ready only)
+    if ngfw_instance.status != ResourceStatus.READY.value:
+        logger.error(
+            "NGFW not accessible: ngfw_uuid=%s status=%s (expected ready)",
+            ngfw_uuid,
+            ngfw_instance.status,
+        )
+        raise ValueError(f"NGFW is not accessible (status: {ngfw_instance.status}). NGFW must be in ready state.")
+
+    # Extract state fields
+    if not ngfw_instance.state:
+        logger.error("NGFW has no state: ngfw_uuid=%s", ngfw_uuid)
+        raise ValueError(f"NGFW {ngfw_uuid} has no infrastructure state")
+
+    management_ip = ngfw_instance.state.get("management_ip")
+    if not management_ip:
+        logger.error("No management IP in NGFW state: ngfw_uuid=%s", ngfw_uuid)
+        raise ValueError(f"NGFW {ngfw_uuid} has no management IP configured")
+
+    ssh_key_arn = ngfw_instance.state.get("ssh_key_secret_arn")
+    if not ssh_key_arn:
+        logger.error("No SSH key ARN in NGFW state: ngfw_uuid=%s", ngfw_uuid)
+        raise ValueError(f"NGFW {ngfw_uuid} has no SSH key configured")
+
+    # Get SSH key from secrets
+    ssh_key = get_ssh_key(ssh_key_arn)
+
+    # Create SSH connection for PAN-OS CLI
+    # - Username: admin (PAN-OS default admin)
+    # - Port: 22 (SSH default)
+    # - No tmux: PAN-OS doesn't support it
+    logger.info(
+        "Creating SSH connection for NGFW: user_id=%s ngfw_uuid=%s management_ip=%s",
+        user.id,
+        ngfw_uuid,
+        management_ip,
+    )
+
+    return SSHConnection(
+        host=management_ip,
+        username="admin",
+        private_key=ssh_key,
+        port=22,
+        session_id=None,  # PAN-OS doesn't support tmux
+    )
+
+
 def create_ngfw(request_spec: RequestSpec) -> UUID:
     """Provision NGFW infrastructure.
 

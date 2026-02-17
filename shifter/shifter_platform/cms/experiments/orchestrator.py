@@ -16,6 +16,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from cyberscript.template_vars import build_instance_data, resolve_template
+
 from cms.experiments.models import (
     Experiment,
     ExperimentRun,
@@ -27,7 +29,6 @@ from cms.experiments.schemas import (
     RunStatus,
     ScriptType,
 )
-from cms.experiments.template_vars import build_instance_data, resolve_template
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,7 @@ class ExperimentOrchestrator:
             run_id: ID of the ExperimentRun.
             provisioned_instances: Dict of instance names to their details.
         """
+        logger.debug("handle_range_provisioned called for run %s", run_id)
         if not isinstance(provisioned_instances, dict):
             logger.error(
                 "handle_range_provisioned: provisioned_instances is not a dict (type=%s) for run %s",
@@ -192,7 +194,7 @@ class ExperimentOrchestrator:
         try:
             run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
         except ExperimentRun.DoesNotExist:
-            logger.error("handle_range_provisioned: run %s not found", run_id)
+            logger.warning("handle_range_provisioned: run %s not found", run_id)
             return
 
         run.metadata = {"provisioned_instances": provisioned_instances}
@@ -224,75 +226,94 @@ class ExperimentOrchestrator:
 
     def handle_victim_scripts_completed(self, run_id: int) -> None:
         """Handle victim script completion — start attacker scripts."""
+        logger.debug("handle_victim_scripts_completed called for run %s", run_id)
         try:
-            run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
-        except ExperimentRun.DoesNotExist:
-            logger.error("handle_victim_scripts_completed: run %s not found", run_id)
-            return
+            try:
+                run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
+            except ExperimentRun.DoesNotExist:
+                logger.warning("handle_victim_scripts_completed: run %s not found", run_id)
+                return
 
-        provisioned_instances = (run.metadata or {}).get("provisioned_instances", {})
+            provisioned_instances = (run.metadata or {}).get("provisioned_instances", {})
 
-        try:
-            plan = self._build_execution_plan(run, provisioned_instances)
+            try:
+                plan = self._build_execution_plan(run, provisioned_instances)
+            except Exception:
+                logger.exception("handle_victim_scripts_completed: plan failed for run %s", run_id)
+                run.error_message = "Failed to build attacker execution plan"
+                run.save(update_fields=["error_message"])
+                run.transition_to(RunStatus.FAILED)
+                self._check_experiment_completion()
+                return
+
+            if plan.attacker_commands:
+                run.transition_to(RunStatus.EXECUTING_ATTACKER)
+                self._dispatch_commands(run, plan.attacker_commands)
+            else:
+                run.transition_to(RunStatus.EXECUTING_ATTACKER)
+                run.transition_to(RunStatus.COLLECTING)
+                run.transition_to(RunStatus.COMPLETED)
+                self._check_experiment_completion()
         except Exception:
-            logger.exception("handle_victim_scripts_completed: plan failed for run %s", run_id)
-            run.error_message = "Failed to build attacker execution plan"
-            run.save(update_fields=["error_message"])
-            run.transition_to(RunStatus.FAILED)
-            self._check_experiment_completion()
-            return
-
-        if plan.attacker_commands:
-            run.transition_to(RunStatus.EXECUTING_ATTACKER)
-            self._dispatch_commands(run, plan.attacker_commands)
-        else:
-            run.transition_to(RunStatus.EXECUTING_ATTACKER)
-            run.transition_to(RunStatus.COLLECTING)
-            run.transition_to(RunStatus.COMPLETED)
-            self._check_experiment_completion()
+            logger.exception("handle_victim_scripts_completed: unexpected error for run %s", run_id)
+            self.handle_run_failed(run_id, "Unexpected orchestrator error during victim completion")
 
     def handle_attacker_scripts_completed(self, run_id: int) -> None:
         """Handle attacker script completion — collect artifacts."""
+        logger.debug("handle_attacker_scripts_completed called for run %s", run_id)
         try:
-            run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
-        except ExperimentRun.DoesNotExist:
-            logger.error("handle_attacker_scripts_completed: run %s not found", run_id)
-            return
+            try:
+                run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
+            except ExperimentRun.DoesNotExist:
+                logger.warning("handle_attacker_scripts_completed: run %s not found", run_id)
+                return
 
-        run.transition_to(RunStatus.COLLECTING)
-        self._collect_artifacts(run)
+            run.transition_to(RunStatus.COLLECTING)
+            self._collect_artifacts(run)
+        except Exception:
+            logger.exception("handle_attacker_scripts_completed: unexpected error for run %s", run_id)
+            self.handle_run_failed(run_id, "Unexpected orchestrator error during attacker completion")
 
     def handle_artifacts_collected(self, run_id: int) -> None:
         """Handle artifact collection completion — mark run complete."""
+        logger.debug("handle_artifacts_collected called for run %s", run_id)
         try:
-            run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
-        except ExperimentRun.DoesNotExist:
-            logger.error("handle_artifacts_collected: run %s not found", run_id)
-            return
+            try:
+                run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
+            except ExperimentRun.DoesNotExist:
+                logger.warning("handle_artifacts_collected: run %s not found", run_id)
+                return
 
-        run.transition_to(RunStatus.COMPLETED)
-        logger.info("handle_artifacts_collected: run %s completed", run_id)
-        self.schedule_runs()
-        self._check_experiment_completion()
+            run.transition_to(RunStatus.COMPLETED)
+            logger.info("handle_artifacts_collected: run %s completed", run_id)
+            self.schedule_runs()
+            self._check_experiment_completion()
+        except Exception:
+            logger.exception("handle_artifacts_collected: unexpected error for run %s", run_id)
+            self.handle_run_failed(run_id, "Unexpected orchestrator error during artifact collection")
 
     def handle_run_failed(self, run_id: int, error_message: str = "") -> None:
         """Handle run failure."""
+        logger.debug("handle_run_failed called for run %s error=%s", run_id, error_message)
         try:
-            run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
-        except ExperimentRun.DoesNotExist:
-            logger.error("handle_run_failed: run %s not found", run_id)
-            return
+            try:
+                run = ExperimentRun.objects.get(pk=run_id, experiment_id=self.experiment_id)
+            except ExperimentRun.DoesNotExist:
+                logger.warning("handle_run_failed: run %s not found", run_id)
+                return
 
-        if run.status in {s.value for s in TERMINAL_RUN_STATUSES}:
-            return
+            if run.status in {s.value for s in TERMINAL_RUN_STATUSES}:
+                return
 
-        run.error_message = error_message
-        run.save(update_fields=["error_message"])
-        run.transition_to(RunStatus.FAILED)
+            run.error_message = error_message
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
 
-        logger.warning("handle_run_failed: run %s failed: %s", run_id, error_message)
-        self.schedule_runs()
-        self._check_experiment_completion()
+            logger.warning("handle_run_failed: run %s failed: %s", run_id, error_message)
+            self.schedule_runs()
+            self._check_experiment_completion()
+        except Exception:
+            logger.exception("handle_run_failed: unexpected error for run %s", run_id)
 
     # -----------------------------------------------------------------
     # Private helpers
@@ -407,35 +428,38 @@ class ExperimentOrchestrator:
 
     def _check_experiment_completion(self) -> None:
         """Check if all runs are terminal and update experiment status."""
-        self.refresh()
-        experiment = self.experiment
+        try:
+            self.refresh()
+            experiment = self.experiment
 
-        if experiment.status != ExperimentStatus.RUNNING.value:
-            return
+            if experiment.status != ExperimentStatus.RUNNING.value:
+                return
 
-        all_runs = ExperimentRun.objects.filter(experiment=experiment)
-        total = all_runs.count()
-        if total == 0:
-            return
+            all_runs = ExperimentRun.objects.filter(experiment=experiment)
+            total = all_runs.count()
+            if total == 0:
+                return
 
-        terminal_count = all_runs.filter(status__in=[s.value for s in TERMINAL_RUN_STATUSES]).count()
+            terminal_count = all_runs.filter(status__in=[s.value for s in TERMINAL_RUN_STATUSES]).count()
 
-        if terminal_count < total:
-            return
+            if terminal_count < total:
+                return
 
-        completed_count = all_runs.filter(status=RunStatus.COMPLETED.value).count()
-        failed_count = all_runs.filter(status=RunStatus.FAILED.value).count()
+            completed_count = all_runs.filter(status=RunStatus.COMPLETED.value).count()
+            failed_count = all_runs.filter(status=RunStatus.FAILED.value).count()
 
-        if failed_count == total:
-            experiment.error_message = f"All {failed_count} runs failed"
-            experiment.save(update_fields=["error_message"])
-            experiment.transition_to(ExperimentStatus.FAILED)
-        else:
-            experiment.transition_to(ExperimentStatus.COMPLETED)
+            if failed_count == total:
+                experiment.error_message = f"All {failed_count} runs failed"
+                experiment.save(update_fields=["error_message"])
+                experiment.transition_to(ExperimentStatus.FAILED)
+            else:
+                experiment.transition_to(ExperimentStatus.COMPLETED)
 
-        logger.info(
-            "_check_experiment_completion: experiment %s finished (%d/%d succeeded)",
-            self.experiment_id,
-            completed_count,
-            total,
-        )
+            logger.info(
+                "_check_experiment_completion: experiment %s finished (%d/%d succeeded)",
+                self.experiment_id,
+                completed_count,
+                total,
+            )
+        except Exception:
+            logger.exception("_check_experiment_completion: unexpected error for experiment %s", self.experiment_id)

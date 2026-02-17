@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from enum import Enum
 
+from cyberscript.template_vars import TemplateString
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
@@ -124,7 +125,7 @@ class ScriptAssignmentInput(BaseModel):
     instance_name: str = Field(..., min_length=1, max_length=100)
     script_type: ScriptType
     script_id: int | None = None
-    claude_prompt: str | None = None
+    claude_prompt: TemplateString | None = None
     execution_order: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")

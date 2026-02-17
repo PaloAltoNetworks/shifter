@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.6] - 2026-02-17
+
+### Fixed
+- Deploy script SSM waiter timeout - increased max attempts from 20 to 60 (15 minutes)
+
 ## [2.1.5] - 2026-02-15
 
 ### Changed

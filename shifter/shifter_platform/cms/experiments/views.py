@@ -25,6 +25,7 @@ from cms.experiments.exceptions import (
     ScriptUploadError,
 )
 from cms.experiments.schemas import ExperimentCreateInput
+from shared.exceptions import CMSError
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -188,21 +189,34 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
         )
 
     if request.method == "POST":
+        from cms.scenarios.loader import load_scenario
+
         try:
             try:
                 # Parse script assignments from form
                 scripts_json = request.POST.get("scripts_json", "[]")
                 scripts_data = json.loads(scripts_json) if scripts_json else []
 
-                data = ExperimentCreateInput(
-                    name=request.POST.get("name", ""),
-                    description=request.POST.get("description", ""),
-                    scenario_id=request.POST.get("scenario_id", ""),
-                    agent_id=int(request.POST["agent_id"]) if request.POST.get("agent_id") else None,
-                    total_runs=int(request.POST.get("total_runs", 1)),
-                    max_parallel_runs=int(request.POST.get("max_parallel_runs", 1)),
-                    scripts=scripts_data,
-                )
+                # Load scenario to get instance names for Pydantic validation context
+                scenario_id = request.POST.get("scenario_id", "")
+                try:
+                    scenario = load_scenario(scenario_id)
+                    instance_names = {inst.name for inst in scenario.instances}
+                except (ValueError, CMSError):
+                    instance_names = set()
+
+                input_data = {
+                    "name": request.POST.get("name", ""),
+                    "description": request.POST.get("description", ""),
+                    "scenario_id": scenario_id,
+                    "agent_id": int(request.POST["agent_id"]) if request.POST.get("agent_id") else None,
+                    "total_runs": int(request.POST.get("total_runs", 1)),
+                    "max_parallel_runs": int(request.POST.get("max_parallel_runs", 1)),
+                    "scripts": scripts_data,
+                }
+
+                # Validate using Pydantic with context for template variables
+                data = ExperimentCreateInput.model_validate(input_data, context={"instance_names": instance_names})
             except (json.JSONDecodeError, KeyError) as e:
                 messages.error(request, f"Invalid input: {e}")
                 return redirect("experiments:experiment_create")

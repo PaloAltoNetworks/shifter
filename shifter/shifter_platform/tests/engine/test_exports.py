@@ -18,6 +18,7 @@ class TestEngineExports:
             "EngineError",
             "cancel_range",
             "cancel_range_by_request",
+            "connect_ngfw_terminal",
             "connect_terminal",
             "create_ngfw",
             "create_range",

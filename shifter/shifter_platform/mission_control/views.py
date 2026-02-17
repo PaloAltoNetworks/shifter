@@ -347,6 +347,8 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
         - name: Agent name (required)
         - filename: Original filename (required)
         - file_size: File size in bytes (required)
+        - agent_type: Type of agent (optional, defaults to 'xdr')
+            Valid values: 'xdr', 'xdr_collector', 'cloud_identity_engine'
 
     Response (JSON):
         - presigned_url: URL for PUT request to S3
@@ -368,6 +370,7 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
     name = data.get("name", "").strip()
     filename = data.get("filename", "").strip()
     file_size = data.get("file_size", 0)
+    agent_type = data.get("agent_type", "xdr").strip()
 
     # Basic input validation
     if not name:
@@ -377,12 +380,18 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
     if not isinstance(file_size, int) or file_size <= 0:
         return JsonResponse({"error": "Valid file size is required"}, status=400)
 
+    # Validate agent_type
+    valid_agent_types = {"xdr", "xdr_collector", "cloud_identity_engine"}
+    if agent_type not in valid_agent_types:
+        err_msg = f"Invalid agent type. Must be one of: {', '.join(valid_agent_types)}"
+        return JsonResponse({"error": err_msg}, status=400)
+
     # Sanitize filename
     filename = os.path.basename(filename)
 
     user = _get_user(request)
     try:
-        result = cms_initiate_upload(user, name, filename, file_size)
+        result = cms_initiate_upload(user, name, filename, file_size, agent_type)
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 

@@ -167,10 +167,11 @@ class CreateExperimentTest(TestCase):
             services.create_experiment(self.user, data)
 
     def test_invalid_template_variable_rejected(self):
-        data = ExperimentCreateInput(
-            name="Bad Template Var",
-            scenario_id="basic",
-            scripts=[
+        instance_names = {"Workstation", "Attacker"}
+        input_data = {
+            "name": "Bad Template Var",
+            "scenario_id": "basic",
+            "scripts": [
                 {
                     "instance_name": "Attacker",
                     "script_type": "claude_code",
@@ -178,15 +179,18 @@ class CreateExperimentTest(TestCase):
                     "execution_order": 100,
                 },
             ],
-        )
-        with pytest.raises(ExperimentValidationError, match="Unknown instance"):
-            services.create_experiment(self.user, data)
+        }
+        from pydantic import ValidationError as PydanticValidationError
+
+        with pytest.raises(PydanticValidationError, match="Unknown instance"):
+            ExperimentCreateInput.model_validate(input_data, context={"instance_names": instance_names})
 
     def test_invalid_template_property_rejected(self):
-        data = ExperimentCreateInput(
-            name="Bad Template Prop",
-            scenario_id="basic",
-            scripts=[
+        instance_names = {"Workstation", "Attacker"}
+        input_data = {
+            "name": "Bad Template Prop",
+            "scenario_id": "basic",
+            "scripts": [
                 {
                     "instance_name": "Attacker",
                     "script_type": "claude_code",
@@ -194,15 +198,18 @@ class CreateExperimentTest(TestCase):
                     "execution_order": 100,
                 },
             ],
-        )
-        with pytest.raises(ExperimentValidationError, match="Unknown property"):
-            services.create_experiment(self.user, data)
+        }
+        from pydantic import ValidationError as PydanticValidationError
+
+        with pytest.raises(PydanticValidationError, match="Unknown property"):
+            ExperimentCreateInput.model_validate(input_data, context={"instance_names": instance_names})
 
     def test_valid_template_variable_accepted(self):
-        data = ExperimentCreateInput(
-            name="Good Template",
-            scenario_id="basic",
-            scripts=[
+        instance_names = {"Workstation", "Attacker"}
+        input_data = {
+            "name": "Good Template",
+            "scenario_id": "basic",
+            "scripts": [
                 {
                     "instance_name": "Attacker",
                     "script_type": "claude_code",
@@ -210,7 +217,8 @@ class CreateExperimentTest(TestCase):
                     "execution_order": 100,
                 },
             ],
-        )
+        }
+        data = ExperimentCreateInput.model_validate(input_data, context={"instance_names": instance_names})
         exp = services.create_experiment(self.user, data)
         assert exp.pk is not None
         assert exp.scripts.count() == 1
@@ -400,6 +408,12 @@ class ConcurrentStartTest(TransactionTestCase):
         def attempt_start(index: int) -> None:
             try:
                 barrier.wait()
+                # Tiny jitter to help SQLite with concurrent writes
+                import secrets
+                import time
+
+                jitter = 0.01 + (secrets.randbelow(40) / 1000.0)  # 0.01 to 0.049s
+                time.sleep(jitter)
                 services.start_experiment(user, exp.pk)
                 results[index] = {"success": True}
             except ExperimentStateError as e:

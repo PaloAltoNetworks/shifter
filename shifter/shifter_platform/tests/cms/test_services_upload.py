@@ -117,6 +117,7 @@ class TestInitiateUpload:
                 filename="agent.msi",
                 os_slug="windows",
                 file_size=5000,
+                agent_type="xdr",
             )
 
     # --- Service returns correct dict ---
@@ -447,6 +448,7 @@ class TestCompleteUpload:
             "filename": "agent.msi",
             "os_slug": "windows",
             "file_size": 5000,
+            "agent_type": "xdr",
         }
         with (
             patch(
@@ -467,6 +469,7 @@ class TestCompleteUpload:
                 os_slug="windows",
                 file_size=5000,
                 upload_method="presigned",
+                agent_type="xdr",
             )
 
     # --- Service returns agent ---

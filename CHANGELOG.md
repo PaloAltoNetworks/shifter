@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Add
 - Direct NGFW access for users
 
+## [2.1.7] - 2026-02-16
+
+### Added
+- Cortex Broken Bank AMI
+
+## [2.1.6] - 2026-02-16
+
+### Added
+- Add XDR Collector and Cloud Identity Engine agents to CMS
+- 
 ## [2.1.5] - 2026-02-15
 
 ### Changed

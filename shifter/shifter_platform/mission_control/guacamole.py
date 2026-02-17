@@ -282,3 +282,105 @@ def create_guacamole_rdp_url(
     # Return public URL for browser
     base_url = base_url.rstrip("/")
     return f"{base_url}/#/client/{client_id}?token={auth_token}"
+
+
+def create_ssh_connection_params(
+    username: str,
+    hostname: str,
+    port: int = 22,
+    ssh_private_key: str | None = None,
+) -> dict[str, str]:
+    """Create SSH connection parameters for Guacamole.
+
+    Args:
+        username: SSH username for login
+        hostname: Target host IP or hostname
+        port: SSH port (default 22)
+        ssh_private_key: PEM-encoded private key for authentication
+
+    Returns:
+        Dictionary of SSH parameters for Guacamole
+    """
+    params: dict[str, str] = {
+        "hostname": hostname,
+        "port": str(port),
+        "username": username,
+        # Terminal settings
+        "color-scheme": "green-black",
+        "font-name": "monospace",
+        "font-size": "12",
+        # Clipboard support
+        "enable-clipboard": "true",
+    }
+
+    if ssh_private_key:
+        params["private-key"] = ssh_private_key
+
+    return params
+
+
+def create_guacamole_ssh_url(
+    base_url: str,
+    secret_key: str,
+    username: str,
+    connection_name: str,
+    hostname: str,
+    port: int = 22,
+    ssh_username: str = "admin",
+    ssh_private_key: str | None = None,
+    expires_minutes: int = 5,
+    api_base_url: str | None = None,
+) -> str:
+    """Create a signed Guacamole URL for SSH access.
+
+    This function:
+    1. Creates an encrypted JSON payload with connection details
+    2. POSTs to Guacamole's /api/tokens to get an auth token
+    3. Returns a URL that auto-connects to the SSH session
+
+    Args:
+        base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
+        secret_key: 32-character hex string (128-bit key)
+        username: User's email/username for Guacamole session
+        connection_name: Identifier for this connection
+        hostname: Target host IP for SSH
+        port: SSH port (default 22)
+        ssh_username: Username for SSH login (default 'admin')
+        ssh_private_key: PEM-encoded private key for authentication
+        expires_minutes: Minutes until URL expires (default 5)
+        api_base_url: Internal URL for server-to-server API calls (defaults to base_url)
+
+    Returns:
+        Full Guacamole URL with auth token that auto-connects to SSH
+
+    Raises:
+        ValueError: If secret key is invalid or token request fails
+    """
+    # Create connection definition
+    connections = {
+        connection_name: {
+            "protocol": "ssh",
+            "parameters": create_ssh_connection_params(
+                username=ssh_username,
+                hostname=hostname,
+                port=port,
+                ssh_private_key=ssh_private_key,
+            ),
+        }
+    }
+
+    # Create and sign payload
+    payload = create_guacamole_auth_payload(username, connections, expires_minutes)
+    encrypted_data = sign_and_encrypt_payload(payload, secret_key)
+
+    # Get auth token from Guacamole API (use internal URL if provided)
+    api_url = (api_base_url or base_url).rstrip("/")
+    auth_token = get_guacamole_auth_token(api_url, encrypted_data)
+
+    # Build client identifier: connection_name + NULL + "c" + NULL + "json"
+    # This tells Guacamole to auto-connect to the specified connection from JSON auth
+    client_id = base64.b64encode(f"{connection_name}\0c\0json".encode()).decode().rstrip("=")
+
+    # Return public URL for browser
+    base_url = base_url.rstrip("/")
+    return f"{base_url}/#/client/{client_id}?token={auth_token}"

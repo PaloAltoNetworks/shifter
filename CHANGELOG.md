@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-02-16
+
+### Changed
+- Centralized script variable sanitization in Pydantic contexts for consistent and secure variable handling.
+- Moved experiment template variable logic to shared `cyberscript` library to enable cross-layer reuse and validation.
+- Hardened `ExperimentOrchestrator` with comprehensive exception handling and debug logging to ensure unexpected failures mark runs as FAILED rather than hanging.
+- Standardized `ExperimentManager` services and views to match CMS defensive coding patterns, including uniform user validation and ORM result type checking.
+- Refactored experiment creation flow to enforce model-level validation within atomic transactions.
+
 ## [2.2.0] - 2026-02-16
 
 ### Add
@@ -21,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Add XDR Collector and Cloud Identity Engine agents to CMS
-- 
+-
 ## [2.1.5] - 2026-02-15
 
 ### Changed

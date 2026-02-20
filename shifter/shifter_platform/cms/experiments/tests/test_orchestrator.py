@@ -1,10 +1,11 @@
 """Tests for experiment orchestrator.
 
 Tests the orchestration logic — scheduling, state transitions, completion checks.
-No mocking of infrastructure (S3, SSM, ECS).
+Engine calls are mocked since scheduling tests focus on concurrency and state logic.
 """
 
 import threading
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase, TransactionTestCase
@@ -12,6 +13,7 @@ from django.test import TestCase, TransactionTestCase
 from cms.experiments.models import Experiment, ExperimentRun
 from cms.experiments.orchestrator import ExperimentOrchestrator
 from cms.experiments.schemas import ExperimentStatus, RunStatus
+from cms.models import AgentConfig, OperatingSystem
 
 # Test password constant for all test users
 TEST_PASSWORD = "test"  # nosec B105
@@ -21,6 +23,16 @@ class ScheduleRunsTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="orch_user", password=TEST_PASSWORD, is_staff=True)
+        cls.windows_os = OperatingSystem.objects.get(slug="windows")
+        cls.agent = AgentConfig.objects.create(
+            user=cls.user,
+            name="Schedule Test Agent",
+            os=cls.windows_os,
+            s3_key="agents/test/agent.msi",
+            original_filename="agent.msi",
+            file_size_bytes=5_000_000,
+            sha256_hash="abc123",
+        )
 
     def _create_queued_experiment(self, total_runs: int = 3, max_parallel: int = 2) -> Experiment:
         """Helper to create a queued experiment with pending runs."""
@@ -28,6 +40,7 @@ class ScheduleRunsTest(TestCase):
             user=self.user,
             name="Orch Test",
             scenario_id="basic",
+            agent=self.agent,
             total_runs=total_runs,
             max_parallel_runs=max_parallel,
         )
@@ -36,14 +49,16 @@ class ScheduleRunsTest(TestCase):
             ExperimentRun.objects.create(experiment=exp, run_number=i)
         return exp
 
-    def test_schedule_transitions_to_running(self):
+    @patch("cms.experiments.orchestrator.engine_create_range")
+    def test_schedule_transitions_to_running(self, mock_engine):
         exp = self._create_queued_experiment()
         orch = ExperimentOrchestrator(exp.pk)
         orch.schedule_runs()
         exp.refresh_from_db()
         assert exp.status == ExperimentStatus.RUNNING.value
 
-    def test_respects_max_parallel(self):
+    @patch("cms.experiments.orchestrator.engine_create_range")
+    def test_respects_max_parallel(self, mock_engine):
         exp = self._create_queued_experiment(total_runs=5, max_parallel=2)
         orch = ExperimentOrchestrator(exp.pk)
         scheduled = orch.schedule_runs()
@@ -59,7 +74,8 @@ class ScheduleRunsTest(TestCase):
         ).count()
         assert pending == 3
 
-    def test_schedules_nothing_when_full(self):
+    @patch("cms.experiments.orchestrator.engine_create_range")
+    def test_schedules_nothing_when_full(self, mock_engine):
         exp = self._create_queued_experiment(total_runs=2, max_parallel=1)
         orch = ExperimentOrchestrator(exp.pk)
         orch.schedule_runs()  # Schedules 1
@@ -237,12 +253,29 @@ class HandleRunFailedTest(TestCase):
 class ConcurrentScheduleRunsTest(TransactionTestCase):
     """Verify that concurrent schedule_runs() calls don't over-schedule beyond max_parallel."""
 
-    def test_concurrent_schedule_respects_max_parallel(self):
+    @patch("cms.experiments.orchestrator.engine_create_range")
+    def test_concurrent_schedule_respects_max_parallel(self, mock_engine):
         user = User.objects.create_user(username="conc_orch_user", password=TEST_PASSWORD, is_staff=True)
+        # TransactionTestCase truncates DB, so data migration fixtures are gone.
+        # Create OperatingSystem directly.
+        windows_os, _ = OperatingSystem.objects.get_or_create(
+            slug="windows",
+            defaults={"name": "Windows", "extensions": [".msi", ".exe"]},
+        )
+        agent = AgentConfig.objects.create(
+            user=user,
+            name="Conc Test Agent",
+            os=windows_os,
+            s3_key="agents/conc/agent.msi",
+            original_filename="agent.msi",
+            file_size_bytes=5_000_000,
+            sha256_hash="abc123",
+        )
         exp = Experiment.objects.create(
             user=user,
             name="Concurrent Schedule",
             scenario_id="basic",
+            agent=agent,
             total_runs=4,
             max_parallel_runs=1,
         )

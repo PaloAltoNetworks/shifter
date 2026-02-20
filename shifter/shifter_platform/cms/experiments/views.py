@@ -1,6 +1,7 @@
-"""Experiment manager views — staff-only.
+"""Experiment manager views.
 
 All business logic is in experiments.services. Views handle HTTP only.
+Views require staff or Threat Research group membership.
 """
 
 from __future__ import annotations
@@ -10,11 +11,12 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from django.contrib import messages
-from django.contrib.admin.views.decorators import staff_member_required
 from django.core.paginator import Paginator
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
+
+from shared.auth import threat_research_required
 
 from cms.experiments import services
 from cms.experiments.exceptions import (
@@ -39,7 +41,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-@staff_member_required
+@threat_research_required
 def script_list(request: HttpRequest) -> HttpResponse:
     """List user's script assets."""
     logger.info("script_list: user_id=%s", request.user.id)
@@ -62,7 +64,7 @@ def script_list(request: HttpRequest) -> HttpResponse:
         return redirect("experiments:experiment_list")
 
 
-@staff_member_required
+@threat_research_required
 def script_upload(request: HttpRequest) -> HttpResponse:
     """Upload a script file — two-step presigned URL flow.
 
@@ -112,7 +114,7 @@ def script_upload(request: HttpRequest) -> HttpResponse:
     return HttpResponse(status=405)
 
 
-@staff_member_required
+@threat_research_required
 @require_POST
 def script_delete(request: HttpRequest, script_id: int) -> HttpResponse:
     """Soft-delete a script."""
@@ -136,7 +138,7 @@ def script_delete(request: HttpRequest, script_id: int) -> HttpResponse:
 # =============================================================================
 
 
-@staff_member_required
+@threat_research_required
 def experiment_list(request: HttpRequest) -> HttpResponse:
     """List user's experiments."""
     logger.info("experiment_list: user_id=%s", request.user.id)
@@ -161,7 +163,7 @@ def experiment_list(request: HttpRequest) -> HttpResponse:
         return redirect("experiments:experiment_list")
 
 
-@staff_member_required
+@threat_research_required
 def experiment_create(request: HttpRequest) -> HttpResponse:
     """Create a new experiment.
 
@@ -248,7 +250,7 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
     return HttpResponse(status=405)
 
 
-@staff_member_required
+@threat_research_required
 def experiment_detail(request: HttpRequest, experiment_id: int) -> HttpResponse:
     """View experiment details and run status."""
     logger.info("experiment_detail: user_id=%s experiment_id=%s", request.user.id, experiment_id)
@@ -275,7 +277,7 @@ def experiment_detail(request: HttpRequest, experiment_id: int) -> HttpResponse:
     )
 
 
-@staff_member_required
+@threat_research_required
 @require_POST
 def experiment_start(request: HttpRequest, experiment_id: int) -> HttpResponse:
     """Start experiment execution."""
@@ -296,7 +298,7 @@ def experiment_start(request: HttpRequest, experiment_id: int) -> HttpResponse:
     return redirect("experiments:experiment_detail", experiment_id=experiment_id)
 
 
-@staff_member_required
+@threat_research_required
 @require_POST
 def experiment_cancel(request: HttpRequest, experiment_id: int) -> HttpResponse:
     """Cancel a running experiment."""
@@ -320,7 +322,7 @@ def experiment_cancel(request: HttpRequest, experiment_id: int) -> HttpResponse:
 # =============================================================================
 
 
-@staff_member_required
+@threat_research_required
 def experiment_download(request: HttpRequest, experiment_id: int) -> HttpResponse:
     """Redirect to presigned download URL for experiment bundle."""
     logger.info("experiment_download: user_id=%s experiment_id=%s", request.user.id, experiment_id)
@@ -339,7 +341,7 @@ def experiment_download(request: HttpRequest, experiment_id: int) -> HttpRespons
         return redirect("experiments:experiment_list")
 
 
-@staff_member_required
+@threat_research_required
 def artifact_download(
     request: HttpRequest,
     experiment_id: int,
@@ -373,7 +375,7 @@ def artifact_download(
 # =============================================================================
 
 
-@staff_member_required
+@threat_research_required
 def scenario_instances(request: HttpRequest, scenario_id: str) -> JsonResponse:
     """Return instance list for a scenario (AJAX)."""
     logger.info("scenario_instances: user_id=%s scenario_id=%s", request.user.id, scenario_id)

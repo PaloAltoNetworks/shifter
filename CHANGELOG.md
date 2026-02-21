@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.4] - 2026-02-21
+
+### Changed
+- Enable dev_login in deployed dev environment for programmatic testing via SSM tunnel
+
 ## [2.2.3] - 2026-02-21
 
 ### Fixed

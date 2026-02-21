@@ -2,10 +2,11 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 
-from config.views import home
+from config.views import dashboard_router, home
 
 urlpatterns = [
     path("", home, name="home"),
+    path("dashboard/", dashboard_router, name="dashboard_router"),
     path("mission-control/", include("mission_control.urls")),
     path("risk-register/", include("risk_register.urls")),
     path("docs/", include("documentation.urls")),

@@ -44,7 +44,7 @@
             font-size: 0.875rem;
             margin-bottom: 1.5rem;
         }
-        input {
+        input, select {
             width: 100%;
             padding: 0.75rem 0;
             margin-bottom: 1.5rem;
@@ -56,9 +56,15 @@
             font-size: 14px;
             box-sizing: border-box;
         }
-        input:focus {
+        input:focus, select:focus {
             outline: none;
             border-bottom-color: #eaebeb;
+        }
+        label {
+            display: block;
+            color: #b8b8b8;
+            font-size: 0.75rem;
+            margin-bottom: 0.25rem;
         }
         button {
             background: #fff;
@@ -84,6 +90,12 @@
         <form method="post">
             {% csrf_token %}
             <input type="email" name="email" value="dev@example.com" placeholder="Email">
+            <label for="user_type">User Type</label>
+            <select name="user_type" id="user_type">
+                <option value="standard">Standard User</option>
+                <option value="ctf_organizer">CTF Organizer</option>
+                <option value="ctf_participant">CTF Participant</option>
+            </select>
             <button type="submit">Login as Dev User</button>
         </form>
     </div>

@@ -1,19 +1,145 @@
-{% extends "ctf/base.html" %}
-{% comment %}
-CTF Login page.
+{% load static %}
+{# CTF Login page - standalone (no sidebar for unauthenticated users) #}
+<!DOCTYPE html>
+<html lang="en" class="xdr-dark-theme">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CTF Login - Shifter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/xdr-theme.css' %}">
+    <style>
+        body {
+            font-family: Lato, "Assistant", sans-serif;
+            background: #1f1f1f;
+            color: #eaebeb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: #151515;
+            padding: 2rem;
+            border: 1px solid #484848;
+            border-radius: 4px;
+            max-width: 440px;
+            width: 100%;
+        }
+        .ctf-badge {
+            background: #03833D;
+            color: #fff;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            display: inline-block;
+            margin-bottom: 1rem;
+        }
+        h1 {
+            margin-top: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        .event-info {
+            background: #1f1f1f;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
+        }
+        .event-name {
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+        .event-dates {
+            color: #b8b8b8;
+            font-size: 0.8rem;
+        }
+        .invite-status {
+            margin-bottom: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+        .invite-valid {
+            background: rgba(3, 131, 61, 0.2);
+            border: 1px solid #03833D;
+            color: #5BFFA5;
+        }
+        .invite-expired {
+            background: rgba(255, 82, 82, 0.2);
+            border: 1px solid #FF5252;
+            color: #FF5252;
+        }
+        p {
+            color: #b8b8b8;
+            font-size: 0.875rem;
+            margin-bottom: 1.5rem;
+        }
+        .login-btn {
+            background: #fff;
+            color: #000;
+            border: none;
+            padding: 0.5rem 1.5rem;
+            font-family: Lato, "Assistant", sans-serif;
+            font-weight: 600;
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 20px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .login-btn:hover {
+            background: #f4f5f5;
+        }
+        .help-link {
+            display: block;
+            margin-top: 1.5rem;
+            color: #5BFFA5;
+            font-size: 0.8rem;
+            text-decoration: none;
+        }
+        .help-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="ctf-badge">Capture The Flag</div>
+        <h1>CTF Login</h1>
 
-Provides a CTF-specific login page that can handle event context
-and invite tokens for participant registration.
-{% endcomment %}
+        {% if event %}
+        <div class="event-info">
+            <div class="event-name">{{ event.name }}</div>
+            <div class="event-dates">
+                {{ event.event_start|date:"M d, Y H:i" }} - {{ event.event_end|date:"M d, Y H:i" }}
+            </div>
+        </div>
+        {% endif %}
 
-{% block ctf_title %}Login{% endblock %}
+        {% if invite_participant %}
+            {% if invite_valid %}
+            <div class="invite-status invite-valid">
+                Welcome, {{ invite_participant.name }}! Your invitation is valid. Log in to continue.
+            </div>
+            {% else %}
+            <div class="invite-status invite-expired">
+                This invitation has expired. Please contact the event organizer.
+            </div>
+            {% endif %}
+        {% endif %}
 
-{% block ctf_content %}
-<div class="ctf-login">
-    <h1>CTF Login</h1>
-    <p>This page is under construction.</p>
-    {% if placeholder %}
-    <p class="text-muted">Placeholder view - implementation pending.</p>
-    {% endif %}
-</div>
-{% endblock %}
+        <p>Log in with your credentials to access the CTF event.</p>
+
+        <a href="{% url 'oidc_authentication_init' %}" class="login-btn">Log in with SSO</a>
+
+        <a href="{% url 'ctf:ctf_help' %}" class="help-link">Need help? View the CTF guide</a>
+    </div>
+</body>
+</html>

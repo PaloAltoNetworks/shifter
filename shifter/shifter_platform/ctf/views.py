@@ -11,6 +11,7 @@ All views require authentication unless otherwise noted.
 
 from __future__ import annotations
 
+import functools
 import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -19,6 +20,8 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
+
+from management.services import get_user_profile
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -35,10 +38,13 @@ def ctf_organizer_required(view_func):
     """Decorator that requires the user to be a CTF organizer.
 
     Returns 403 Forbidden if user is not an organizer.
+    Must be used after @login_required.
     """
 
+    @functools.wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs):
-        if not hasattr(request.user, "profile") or not request.user.profile.is_ctf_organizer:
+        profile = get_user_profile(request.user)
+        if not profile.is_ctf_organizer:
             logger.warning(
                 "CTF organizer access denied for user %s",
                 request.user.email if request.user.is_authenticated else "anonymous",
@@ -53,10 +59,13 @@ def ctf_participant_required(view_func):
     """Decorator that requires the user to be a CTF participant.
 
     Returns 403 Forbidden if user is not a participant.
+    Must be used after @login_required.
     """
 
+    @functools.wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs):
-        if not hasattr(request.user, "profile") or not request.user.profile.is_ctf_participant:
+        profile = get_user_profile(request.user)
+        if not profile.is_ctf_participant:
             logger.warning(
                 "CTF participant access denied for user %s",
                 request.user.email if request.user.is_authenticated else "anonymous",
@@ -76,12 +85,41 @@ def ctf_login(request: HttpRequest) -> HttpResponse:
     """CTF-specific login page.
 
     Handles login for CTF participants with optional event/invite token params.
+    Accepts query parameters:
+    - event: UUID of the event to show context for
+    - token: Invite token for participant registration
     """
-    # TODO: Implement CTF login with event context and invite token handling
-    return render(request, "ctf/login.html", {"placeholder": True})
+    context: dict = {}
+
+    event_id = request.GET.get("event")
+    invite_token = request.GET.get("token")
+
+    if event_id:
+        from ctf.models import CTFEvent
+
+        try:
+            event = CTFEvent.objects.get(pk=event_id)
+            context["event"] = event
+        except (CTFEvent.DoesNotExist, ValueError):
+            logger.warning("CTF login: invalid event_id %s", event_id)
+
+    if invite_token:
+        from ctf.models import CTFParticipant
+
+        participant = CTFParticipant.objects.filter(invite_token=invite_token).first()
+        if participant:
+            context["invite_participant"] = participant
+            context["invite_valid"] = participant.is_invite_valid
+            if not context.get("event"):
+                context["event"] = participant.event
+        else:
+            logger.warning("CTF login: invalid invite token")
+
+    return render(request, "ctf/login.html", context)
 
 
 @login_required
+@ctf_participant_required
 def participant_dashboard(request: HttpRequest) -> HttpResponse:
     """Participant main dashboard.
 
@@ -92,6 +130,7 @@ def participant_dashboard(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@ctf_participant_required
 def participant_event(request: HttpRequest) -> HttpResponse:
     """Participant event detail view.
 
@@ -102,6 +141,7 @@ def participant_event(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@ctf_participant_required
 def participant_challenges(request: HttpRequest) -> HttpResponse:
     """Participant challenges list.
 
@@ -112,6 +152,7 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@ctf_participant_required
 def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
     """Participant challenge detail with submission form.
 
@@ -127,6 +168,7 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
 
 
 @login_required
+@ctf_participant_required
 def participant_range(request: HttpRequest) -> HttpResponse:
     """Participant range status and access.
 
@@ -137,6 +179,7 @@ def participant_range(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@ctf_participant_required
 def scoreboard(request: HttpRequest) -> HttpResponse:
     """Public scoreboard view.
 
@@ -147,6 +190,7 @@ def scoreboard(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@ctf_participant_required
 def participant_team(request: HttpRequest) -> HttpResponse:
     """Participant team view.
 
@@ -157,6 +201,7 @@ def participant_team(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@ctf_participant_required
 def team_join(request: HttpRequest) -> HttpResponse:
     """Join a team using invite code.
 

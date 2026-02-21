@@ -95,6 +95,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "mission_control.context_processors.active_range",
+                "ctf.context_processors.ctf_navigation",
             ],
         },
     },
@@ -242,7 +243,8 @@ OIDC_RP_SIGN_ALGO = "RS256"
 OIDC_RP_SCOPES = "openid email profile"
 
 # Redirect after login/logout
-LOGIN_REDIRECT_URL = "/mission-control/"
+# Uses the dashboard router to redirect users based on their user type
+LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Login URL - dev bypass in DEBUG, OIDC in production
@@ -263,6 +265,8 @@ OIDC_EXEMPT_URLS = [
     "/",  # Landing page
     "/health",  # Health check
     "/health/",  # Health check with trailing slash
+    "/ctf/login/",  # CTF login page (with invite token)
+    "/ctf/help/",  # CTF help page
 ]
 
 # ------------------------------------------------------------------------------

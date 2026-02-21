@@ -9,7 +9,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("cms", "0021_backfill_rangeinstance_requests"),
+        ("cms", "0022_add_scenario_and_metadata_models"),
     ]
 
     operations = [

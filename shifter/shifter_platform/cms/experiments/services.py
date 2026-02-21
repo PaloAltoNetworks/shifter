@@ -354,17 +354,6 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
                     f"Instance '{script_input.instance_name}' not found in scenario '{data.scenario_id}'"
                 )
 
-        # Validate Claude prompt template variables reference valid instances/properties
-        for script_input in data.scripts:
-            if script_input.claude_prompt:
-                from cms.experiments.template_vars import validate_template
-
-                template_errors = validate_template(script_input.claude_prompt, instance_names)
-                if template_errors:
-                    raise ExperimentValidationError(
-                        f"Invalid template in '{script_input.instance_name}': {'; '.join(template_errors)}"
-                    )
-
         # Validate referenced script assets exist and belong to user
         script_ids = [s.script_id for s in data.scripts if s.script_id]
         if script_ids:

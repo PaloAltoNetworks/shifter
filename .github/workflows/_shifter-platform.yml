@@ -402,12 +402,21 @@ jobs:
 
           echo "SSM Command ID: $COMMAND_ID"
           echo "Waiting for deployment (timeout: 15 minutes)..."
-          aws ssm wait command-executed \
-            --command-id "$COMMAND_ID" \
-            --instance-id "$INSTANCE_ID" \
-            --max-attempts 60 \
-            --cli-read-timeout 900 \
-            --cli-connect-timeout 900 || true
+          SECONDS_WAITED=0
+          TIMEOUT=900
+          while true; do
+            aws ssm wait command-executed \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --cli-read-timeout 30 \
+              --cli-connect-timeout 30 && break
+            SECONDS_WAITED=$((SECONDS_WAITED + 100))
+            if [ $SECONDS_WAITED -ge $TIMEOUT ]; then
+              echo "Waiter timed out after ${TIMEOUT}s"
+              break
+            fi
+            echo "Still waiting... (~${SECONDS_WAITED}s elapsed)"
+          done
           STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
           if [ "$STATUS" != "Success" ]; then
             echo "Deployment failed!"

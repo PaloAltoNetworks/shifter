@@ -410,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btnText.textContent = 'Opening CLI...';
 
             try {
-                const response = await fetch(`/mc/api/ngfw/${appId}/ssh-url/`, {
+                const response = await fetch(`{% url 'mission_control:api_ngfw_ssh_url' ngfw.app_id %}`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCookie('csrftoken'),

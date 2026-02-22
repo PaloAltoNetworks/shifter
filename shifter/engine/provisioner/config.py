@@ -310,7 +310,7 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping')
+                  AND ei.status IN ('ready', 'paused', 'pausing', 'resuming')
                   AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1

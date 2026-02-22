@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.6] - 2026-02-21
+
+### Changed
+- Range pause/unpause uses Ready instead of Active status
+
 ## [2.2.5] - 2026-02-21
 
 ### Added

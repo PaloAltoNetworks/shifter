@@ -18,7 +18,7 @@ urlpatterns = [
 ]
 
 # Development-only auth bypass - routes don't exist in production
-if settings.DEBUG:
+if settings.DEBUG or getattr(settings, "ENVIRONMENT", "production") == "development":
     from config.dev_auth import dev_login, dev_logout
 
     urlpatterns += [

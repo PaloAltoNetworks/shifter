@@ -44,7 +44,9 @@ User = get_user_model()
 
 @pytest.fixture
 def organizer_user(db) -> User:
-    """Create a CTF organizer user."""
+    """Create a CTF organizer user with profile."""
+    from management.services import get_user_profile
+
     user = User.objects.create_user(
         username="organizer@test.com",
         email="organizer@test.com",
@@ -52,12 +54,17 @@ def organizer_user(db) -> User:
         first_name="Test",
         last_name="Organizer",
     )
+    profile = get_user_profile(user)
+    profile.user_type = "ctf_organizer"
+    profile.save(update_fields=["user_type"])
     return user
 
 
 @pytest.fixture
 def participant_user(db) -> User:
-    """Create a CTF participant user."""
+    """Create a CTF participant user with profile."""
+    from management.services import get_user_profile
+
     user = User.objects.create_user(
         username="participant@test.com",
         email="participant@test.com",
@@ -65,12 +72,17 @@ def participant_user(db) -> User:
         first_name="Test",
         last_name="Participant",
     )
+    profile = get_user_profile(user)
+    profile.user_type = "ctf_participant"
+    profile.save(update_fields=["user_type"])
     return user
 
 
 @pytest.fixture
 def second_participant_user(db) -> User:
-    """Create a second CTF participant user."""
+    """Create a second CTF participant user with profile."""
+    from management.services import get_user_profile
+
     user = User.objects.create_user(
         username="participant2@test.com",
         email="participant2@test.com",
@@ -78,6 +90,23 @@ def second_participant_user(db) -> User:
         first_name="Second",
         last_name="Participant",
     )
+    profile = get_user_profile(user)
+    profile.user_type = "ctf_participant"
+    profile.save(update_fields=["user_type"])
+    return user
+
+
+@pytest.fixture
+def standard_user(db) -> User:
+    """Create a standard (non-CTF) user."""
+    user = User.objects.create_user(
+        username="standard@test.com",
+        email="standard@test.com",
+        password="testpass123",
+        first_name="Standard",
+        last_name="User",
+    )
+    # Standard users get default profile via get_user_profile if accessed
     return user
 
 
@@ -324,6 +353,39 @@ def authenticated_admin_client(client: Client, admin_user) -> Client:
     """Client logged in as admin."""
     client.force_login(admin_user)
     return client
+
+
+@pytest.fixture
+def authenticated_standard_client(client: Client, standard_user) -> Client:
+    """Client logged in as standard user."""
+    client.force_login(standard_user)
+    return client
+
+
+@pytest.fixture
+def second_organizer_user(db) -> User:
+    """Create a second CTF organizer user with profile."""
+    from management.services import get_user_profile
+
+    user = User.objects.create_user(
+        username="organizer2@test.com",
+        email="organizer2@test.com",
+        password="testpass123",
+        first_name="Second",
+        last_name="Organizer",
+    )
+    profile = get_user_profile(user)
+    profile.user_type = "ctf_organizer"
+    profile.save(update_fields=["user_type"])
+    return user
+
+
+@pytest.fixture
+def request_factory():
+    """Provide Django RequestFactory."""
+    from django.test import RequestFactory
+
+    return RequestFactory()
 
 
 # -----------------------------------------------------------------------------

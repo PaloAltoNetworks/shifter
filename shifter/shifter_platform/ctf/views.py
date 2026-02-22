@@ -232,8 +232,30 @@ def admin_dashboard(request: HttpRequest) -> HttpResponse:
 
     Shows overview of all events and quick actions.
     """
-    # TODO: Implement admin dashboard
-    return render(request, "ctf/admin/dashboard.html", {"placeholder": True})
+    from ctf.services import get_organizer_events
+
+    # Get all events first for counting
+    all_events = get_organizer_events(request.user)
+
+    # Get stats for active/upcoming/draft events
+    from ctf.enums import EventStatus
+
+    active_count = all_events.filter(status=EventStatus.ACTIVE.value).count()
+    upcoming_count = all_events.filter(status=EventStatus.SCHEDULED.value).count()
+    draft_count = all_events.filter(status=EventStatus.DRAFT.value).count()
+
+    # Get recent 5 events for display
+    recent_events = list(all_events[:5])
+
+    context = {
+        "recent_events": recent_events,
+        "active_count": active_count,
+        "upcoming_count": upcoming_count,
+        "draft_count": draft_count,
+        "total_events": all_events.count(),
+    }
+
+    return render(request, "ctf/admin/dashboard.html", context)
 
 
 @login_required
@@ -241,10 +263,25 @@ def admin_dashboard(request: HttpRequest) -> HttpResponse:
 def admin_event_list(request: HttpRequest) -> HttpResponse:
     """Organizer event list.
 
-    Shows all events created by the organizer.
+    Shows all events created by the organizer with optional filtering.
     """
-    # TODO: Implement event list
-    return render(request, "ctf/admin/event_list.html", {"placeholder": True})
+    from ctf.services import get_organizer_events
+
+    status_filter = request.GET.get("status")
+    events = get_organizer_events(request.user, status=status_filter)
+
+    # Get status choices for filter dropdown
+    from ctf.enums import EventStatus
+
+    status_choices = EventStatus.choices()
+
+    context = {
+        "events": events,
+        "status_filter": status_filter,
+        "status_choices": status_choices,
+    }
+
+    return render(request, "ctf/admin/event_list.html", context)
 
 
 @login_required
@@ -256,24 +293,104 @@ def admin_event_create(request: HttpRequest) -> HttpResponse:
     GET: Show creation form.
     POST: Process creation.
     """
-    # TODO: Implement event creation
-    return render(request, "ctf/admin/event_form.html", {"placeholder": True})
+    from django.shortcuts import redirect
+
+    from ctf.forms import CTFEventForm
+
+    if request.method == "POST":
+        form = CTFEventForm(request.POST)
+        if form.is_valid():
+            event = form.save(commit=False)
+            event.created_by = request.user
+            event.save()
+            logger.info(
+                "User %s created event %s: %s",
+                request.user.email,
+                event.pk,
+                event.name,
+            )
+            return redirect("ctf:admin_event_detail", event_id=event.pk)
+    else:
+        form = CTFEventForm()
+
+    context = {
+        "form": form,
+        "is_edit": False,
+    }
+
+    return render(request, "ctf/admin/event_form.html", context)
 
 
 @login_required
 @ctf_organizer_required
+@require_http_methods(["GET", "POST"])
 def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
     """Event detail view for organizers.
+
+    Shows event information, statistics, and status change controls.
 
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement event detail
-    return render(
-        request,
-        "ctf/admin/event_detail.html",
-        {"placeholder": True, "event_id": event_id},
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.forms import EventStatusForm
+    from ctf.services import (
+        activate_event,
+        cancel_event,
+        complete_event,
+        get_event,
+        get_event_stats,
+        schedule_event,
     )
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found")
+
+    # Check permission - organizers can only access their own events
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    # Handle status change POST
+    if request.method == "POST":
+        status_form = EventStatusForm(request.POST, event=event)
+        if status_form.is_valid():
+            action = status_form.cleaned_data["action"]
+            success = False
+
+            if action == "schedule":
+                success = schedule_event(event)
+            elif action == "activate":
+                success = activate_event(event)
+            elif action == "complete":
+                success = complete_event(event)
+            elif action == "cancel":
+                success = cancel_event(event)
+
+            if success:
+                logger.info(
+                    "User %s changed event %s status via action: %s",
+                    request.user.email,
+                    event.pk,
+                    action,
+                )
+            return redirect("ctf:admin_event_detail", event_id=event.pk)
+    else:
+        status_form = EventStatusForm(event=event)
+
+    stats = get_event_stats(event)
+
+    context = {
+        "event": event,
+        "stats": stats,
+        "status_form": status_form,
+    }
+
+    return render(request, "ctf/admin/event_detail.html", context)
 
 
 @login_required
@@ -285,12 +402,52 @@ def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement event edit
-    return render(
-        request,
-        "ctf/admin/event_form.html",
-        {"placeholder": True, "event_id": event_id},
-    )
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.forms import CTFEventForm
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found")
+
+    # Check permission - organizers can only access their own events
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    # Check if event is modifiable
+    if not event.is_modifiable:
+        logger.warning(
+            "User %s attempted to edit non-modifiable event %s",
+            request.user.email,
+            event.pk,
+        )
+        return redirect("ctf:admin_event_detail", event_id=event.pk)
+
+    if request.method == "POST":
+        form = CTFEventForm(request.POST, instance=event)
+        if form.is_valid():
+            form.save()
+            logger.info(
+                "User %s updated event %s: %s",
+                request.user.email,
+                event.pk,
+                event.name,
+            )
+            return redirect("ctf:admin_event_detail", event_id=event.pk)
+    else:
+        form = CTFEventForm(instance=event)
+
+    context = {
+        "form": form,
+        "event": event,
+        "is_edit": True,
+    }
+
+    return render(request, "ctf/admin/event_form.html", context)
 
 
 @login_required

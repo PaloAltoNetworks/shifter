@@ -1,12 +1,112 @@
 {% extends "ctf/base.html" %}
-{% block ctf_title %}Organizer Dashboard{% endblock %}
+{% block ctf_title %}CTF Admin Dashboard{% endblock %}
 
 {% block ctf_content %}
-<div class="ctf-admin-dashboard">
-    <h1>CTF Organizer Dashboard</h1>
-    <p>This page is under construction.</p>
-    {% if placeholder %}
-    <p class="text-muted">Placeholder view - implementation pending.</p>
-    {% endif %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">CTF Admin Dashboard</h1>
+        <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> Create Event
+        </a>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3 mb-3">
+            <div class="card bg-success text-white h-100">
+                <div class="card-body">
+                    <h6 class="card-title">Active Events</h6>
+                    <h2 class="mb-0">{{ active_count }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card bg-info text-white h-100">
+                <div class="card-body">
+                    <h6 class="card-title">Upcoming Events</h6>
+                    <h2 class="mb-0">{{ upcoming_count }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card bg-warning h-100">
+                <div class="card-body">
+                    <h6 class="card-title">Draft Events</h6>
+                    <h2 class="mb-0">{{ draft_count }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card bg-secondary text-white h-100">
+                <div class="card-body">
+                    <h6 class="card-title">Total Events</h6>
+                    <h2 class="mb-0">{{ total_events }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Events -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Recent Events</h5>
+            <a href="{% url 'ctf:admin_event_list' %}" class="btn btn-sm btn-outline-primary">View All</a>
+        </div>
+        <div class="card-body p-0">
+            {% if recent_events %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Participants</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for event in recent_events %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">
+                                    {{ event.name }}
+                                </a>
+                            </td>
+                            <td>
+                                {% if event.status == 'draft' %}
+                                <span class="badge bg-warning">Draft</span>
+                                {% elif event.status == 'scheduled' %}
+                                <span class="badge bg-info">Scheduled</span>
+                                {% elif event.status == 'active' %}
+                                <span class="badge bg-success">Active</span>
+                                {% elif event.status == 'completed' %}
+                                <span class="badge bg-secondary">Completed</span>
+                                {% elif event.status == 'cancelled' %}
+                                <span class="badge bg-danger">Cancelled</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ event.event_start|date:"M d, Y H:i" }}</td>
+                            <td>{{ event.event_end|date:"M d, Y H:i" }}</td>
+                            <td>{{ event.participant_count }}</td>
+                            <td>
+                                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-sm btn-outline-primary">
+                                    View
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="p-4 text-center text-muted">
+                <p class="mb-3">No events yet.</p>
+                <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary">Create Your First Event</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
 </div>
 {% endblock %}

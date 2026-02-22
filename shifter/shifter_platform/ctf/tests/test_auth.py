@@ -129,7 +129,7 @@ class TestOIDCBackendCTFUserType:
         profile = UserProfile.objects.get(user=participant_user)
         assert profile.user_type == "ctf_participant"
 
-    def test_update_user_type_missing_claim_defaults_standard(self, organizer_user):
+    def test_update_user_type_missing_claim_defaults_standard(self, standard_user):
         """Missing custom:user_type claim should leave profile as standard."""
         from config.oidc import ShifterOIDCBackend
 
@@ -137,24 +137,24 @@ class TestOIDCBackendCTFUserType:
         claims = {"sub": "some-sub"}
 
         # Create profile first as standard
-        UserProfile.objects.get_or_create(user=organizer_user)
+        UserProfile.objects.get_or_create(user=standard_user)
 
-        backend._update_user_type(organizer_user, claims)
+        backend._update_user_type(standard_user, claims)
 
-        profile = UserProfile.objects.get(user=organizer_user)
+        profile = UserProfile.objects.get(user=standard_user)
         assert profile.user_type == "standard"
 
-    def test_update_user_type_invalid_type_ignored(self, organizer_user):
+    def test_update_user_type_invalid_type_ignored(self, standard_user):
         """Invalid user_type claim value should be ignored."""
         from config.oidc import ShifterOIDCBackend
 
         backend = ShifterOIDCBackend()
         claims = {"custom:user_type": "invalid_type"}
 
-        UserProfile.objects.get_or_create(user=organizer_user)
-        backend._update_user_type(organizer_user, claims)
+        UserProfile.objects.get_or_create(user=standard_user)
+        backend._update_user_type(standard_user, claims)
 
-        profile = UserProfile.objects.get(user=organizer_user)
+        profile = UserProfile.objects.get(user=standard_user)
         assert profile.user_type == "standard"
 
     def test_update_ctf_event_from_claims(self, participant_user):

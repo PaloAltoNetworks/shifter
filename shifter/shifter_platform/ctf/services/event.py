@@ -23,6 +23,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class EventNotModifiableError(Exception):
+    """Raised when attempting to modify an event that cannot be modified."""
+
+    pass
+
+
 def create_event(user: User, event_data: dict[str, Any]) -> CTFEvent:
     """Create a new CTF event.
 
@@ -256,22 +262,165 @@ def end_event(event_id: UUID) -> CTFEvent:
     return event
 
 
-def cancel_event(event_id: UUID) -> CTFEvent:
-    """Cancel a CTF event.
+def get_organizer_events(
+    user: User,
+    *,
+    status: str | None = None,
+) -> QuerySet[CTFEvent]:
+    """Get events created by an organizer with optional status filter.
 
     Args:
-        event_id: UUID of the event.
+        user: The organizer user.
+        status: Optional status filter.
 
     Returns:
-        The updated CTFEvent instance.
-
-    Raises:
-        CTFNotFoundError: If event doesn't exist.
-        CTFStateError: If event cannot be cancelled.
+        QuerySet of CTFEvent instances.
     """
-    logger.info("Cancelling CTF event %s", event_id)
+    queryset = CTFEvent.objects.filter(created_by=user)
 
-    event = get_event(event_id)
+    if status:
+        queryset = queryset.filter(status=status)
+
+    return queryset.order_by("-event_start")
+
+
+def schedule_event(event: CTFEvent) -> bool:
+    """Schedule a draft event (transition to scheduled).
+
+    Args:
+        event: The CTFEvent to schedule.
+
+    Returns:
+        True if transition succeeded, False otherwise.
+    """
+    logger.info("Scheduling CTF event %s", event.id)
+
+    if event.status != EventStatus.DRAFT.value:
+        logger.warning(
+            "Cannot schedule event %s: not in draft state (current: %s)",
+            event.id,
+            event.status,
+        )
+        return False
+
+    event.status = EventStatus.SCHEDULED.value
+    event.save(update_fields=["status", "updated_at"])
+
+    _schedule_event_tasks(event)
+
+    logger.info("Scheduled CTF event %s", event.id)
+    return True
+
+
+def activate_event(event: CTFEvent) -> bool:
+    """Activate a scheduled event (transition to active).
+
+    Args:
+        event: The CTFEvent to activate.
+
+    Returns:
+        True if transition succeeded, False otherwise.
+    """
+    logger.info("Activating CTF event %s", event.id)
+
+    if event.status != EventStatus.SCHEDULED.value:
+        logger.warning(
+            "Cannot activate event %s: not in scheduled state (current: %s)",
+            event.id,
+            event.status,
+        )
+        return False
+
+    event.status = EventStatus.ACTIVE.value
+    event.save(update_fields=["status", "updated_at"])
+
+    logger.info("Activated CTF event %s", event.id)
+    return True
+
+
+def complete_event(event: CTFEvent) -> bool:
+    """Complete an active event (transition to completed).
+
+    Args:
+        event: The CTFEvent to complete.
+
+    Returns:
+        True if transition succeeded, False otherwise.
+    """
+    logger.info("Completing CTF event %s", event.id)
+
+    if event.status != EventStatus.ACTIVE.value:
+        logger.warning(
+            "Cannot complete event %s: not in active state (current: %s)",
+            event.id,
+            event.status,
+        )
+        return False
+
+    event.status = EventStatus.COMPLETED.value
+    event.save(update_fields=["status", "updated_at"])
+
+    logger.info("Completed CTF event %s", event.id)
+    return True
+
+
+def get_event_stats(event: CTFEvent) -> dict:
+    """Get statistics for an event.
+
+    Args:
+        event: The event to get stats for.
+
+    Returns:
+        Dictionary with event statistics.
+    """
+    from django.db.models import Sum
+
+    from ctf.enums import ParticipantStatus
+    from ctf.models import CTFSubmission
+
+    stats = {
+        "participant_count": event.participants.count(),
+        "registered_count": event.participants.filter(
+            status__in=[
+                ParticipantStatus.REGISTERED.value,
+                ParticipantStatus.ACTIVE.value,
+                ParticipantStatus.COMPLETED.value,
+            ]
+        ).count(),
+        "invited_count": event.participants.filter(
+            status=ParticipantStatus.INVITED.value
+        ).count(),
+        "challenge_count": event.challenges.count(),
+        "team_count": event.teams.count() if event.team_mode else 0,
+        "total_submissions": CTFSubmission.objects.filter(
+            participant__event=event
+        ).count(),
+        "correct_submissions": CTFSubmission.objects.filter(
+            participant__event=event,
+            is_correct=True,
+        ).count(),
+    }
+
+    # Calculate total possible points
+    points_result = event.challenges.aggregate(total=Sum("points"))
+    stats["total_points"] = points_result["total"] or 0
+
+    return stats
+
+
+def cancel_event(event: CTFEvent) -> bool:
+    """Cancel a CTF event.
+
+    Accepts an event instance and returns bool for consistency with
+    other transition functions.
+
+    Args:
+        event: The CTFEvent to cancel.
+
+    Returns:
+        True if transition succeeded, False otherwise.
+    """
+    logger.info("Cancelling CTF event %s", event.id)
 
     try:
         status = EventStatus(event.status)
@@ -279,10 +428,12 @@ def cancel_event(event_id: UUID) -> CTFEvent:
         status = None
 
     if status in {EventStatus.COMPLETED, EventStatus.CANCELLED}:
-        raise CTFStateError(
-            f"Cannot cancel event in {event.status} state",
-            details={"event_id": str(event_id), "status": event.status},
+        logger.warning(
+            "Cannot cancel event %s: in terminal state %s",
+            event.id,
+            event.status,
         )
+        return False
 
     with transaction.atomic():
         event.status = EventStatus.CANCELLED.value
@@ -291,9 +442,9 @@ def cancel_event(event_id: UUID) -> CTFEvent:
         # Cancel scheduled tasks
         _cancel_event_tasks(event)
 
-        logger.info("Cancelled CTF event %s", event_id)
+        logger.info("Cancelled CTF event %s", event.id)
 
-    return event
+    return True
 
 
 # -----------------------------------------------------------------------------

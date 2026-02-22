@@ -302,14 +302,14 @@ class CTFEvent(CTFBaseModel):
         """Validate event data."""
         errors: dict[str, list[str]] = {}
 
-        # Validate event times
-        if self.event_end <= self.event_start:
+        # Validate event times (only if both are set)
+        if self.event_start and self.event_end and self.event_end <= self.event_start:
             errors.setdefault("event_end", []).append(
                 "Event end must be after event start."
             )
 
         # Validate registration deadline
-        if self.registration_deadline:
+        if self.registration_deadline and self.event_start:
             if self.registration_deadline > self.event_start:
                 errors.setdefault("registration_deadline", []).append(
                     "Registration deadline must be before event start."

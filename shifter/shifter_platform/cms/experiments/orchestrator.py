@@ -500,7 +500,7 @@ class ExperimentOrchestrator:
             engine_create_range(request_spec)
         except Exception as exc:
             msg = f"Engine create_range failed: {exc}"
-            logger.error(
+            logger.exception(
                 "_request_range_provisioning: %s (run=%d, request_id=%s)",
                 msg,
                 run.pk,
@@ -564,7 +564,7 @@ class ExperimentOrchestrator:
             )
         except Exception as exc:
             msg = f"Failed to start execution ECS task: {exc}"
-            logger.error(
+            logger.exception(
                 "_dispatch_commands: %s (run=%d)", msg, run.pk,
             )
             run.error_message = msg
@@ -620,7 +620,7 @@ class ExperimentOrchestrator:
             )
         except Exception as exc:
             msg = f"Failed to start collection ECS task: {exc}"
-            logger.error(
+            logger.exception(
                 "_collect_artifacts: %s (run=%d)", msg, run.pk,
             )
             run.error_message = msg

@@ -32,9 +32,7 @@ class DispatchCommandsTest(TestCase):
 
     @classmethod
     def setUpTestData(cls) -> None:
-        cls.user = User.objects.create_user(
-            username="dispatch_user", password=TEST_PASSWORD, is_staff=True
-        )
+        cls.user = User.objects.create_user(username="dispatch_user", password=TEST_PASSWORD, is_staff=True)
 
     def _create_executing_run(self) -> tuple[Experiment, ExperimentRun]:
         """Create experiment with a run in EXECUTING_VICTIMS state."""
@@ -169,9 +167,7 @@ class CollectArtifactsTest(TestCase):
 
     @classmethod
     def setUpTestData(cls) -> None:
-        cls.user = User.objects.create_user(
-            username="collect_user", password=TEST_PASSWORD, is_staff=True
-        )
+        cls.user = User.objects.create_user(username="collect_user", password=TEST_PASSWORD, is_staff=True)
 
     def _create_collecting_run(self) -> tuple[Experiment, ExperimentRun]:
         """Create experiment with a run in COLLECTING state."""

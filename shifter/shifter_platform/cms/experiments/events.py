@@ -46,29 +46,28 @@ def _get_sqs_client() -> Any:
     if not region:
         raise ValueError("AWS_REGION is required for SQS operations")
 
-    endpoint_url: str = getattr(settings, "AWS_ENDPOINT_URL", "") or None
+    endpoint_url: str | None = getattr(settings, "AWS_ENDPOINT_URL", "") or None
     return boto3.client("sqs", region_name=region, endpoint_url=endpoint_url)
 
 
-def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> bool:
+def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
     """Publish an event to the experiments SQS queue.
 
     Args:
         event_type: Event type string (e.g., "experiment.run.range_provisioned").
         payload: Event data dict. Must be JSON-serializable.
 
-    Returns:
-        True if the event was published successfully, False if SQS is
-        not configured or publication failed.
+    Raises:
+        ExperimentEventError: If SQS message publishing fails.
+        ValueError: If AWS_REGION is not configured (via _get_sqs_client).
     """
     queue_url = _get_experiments_queue_url()
     if queue_url is None:
         logger.warning(
-            "publish_experiment_event: SQS_EXPERIMENTS_URL not configured, "
-            "cannot publish event_type=%s",
+            "publish_experiment_event: SQS_EXPERIMENTS_URL not configured, cannot publish event_type=%s",
             event_type,
         )
-        return False
+        return
 
     message_body = {
         "event_type": event_type,
@@ -77,6 +76,8 @@ def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> bool:
 
     try:
         sqs = _get_sqs_client()
+        # Boto3 automatically retries transient failures (network errors, throttling)
+        # with exponential backoff (default: 5 attempts). No additional retry logic needed.
         sqs.send_message(
             QueueUrl=queue_url,
             MessageBody=json.dumps(message_body, default=str),
@@ -85,20 +86,19 @@ def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> bool:
             "publish_experiment_event: published event_type=%s to experiments queue",
             event_type,
         )
-        return True
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "publish_experiment_event: failed to publish event_type=%s",
             event_type,
         )
-        return False
+        raise ExperimentEventError(f"Failed to publish event {event_type} to SQS: {exc}") from exc
 
 
 def publish_range_provisioned_for_experiment(
     experiment_id: int,
     run_id: int,
     provisioned_instances: dict[str, Any],
-) -> bool:
+) -> None:
     """Publish a range_provisioned event for an experiment run.
 
     Called by the CMS range handler when a range associated with an
@@ -110,10 +110,11 @@ def publish_range_provisioned_for_experiment(
         provisioned_instances: Dict of instance name -> instance details
             from the range provisioning event.
 
-    Returns:
-        True if published successfully, False otherwise.
+    Raises:
+        ExperimentEventError: If SQS message publishing fails.
+        ValueError: If AWS_REGION is not configured.
     """
-    return publish_experiment_event(
+    publish_experiment_event(
         event_type="experiment.run.range_provisioned",
         payload={
             "experiment_id": experiment_id,

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.7] - 2026-02-21
+
+### Added
+- Scenario Editor UAT plans
+
+### Fixed
+- Role enum validation for ScenarioTemplate
+
 ## [2.2.6] - 2026-02-21
 
 ### Changed

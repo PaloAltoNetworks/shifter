@@ -258,64 +258,22 @@
 {% endif %}
 
 {% if ngfw.status == 'ready' %}
-<!-- Management Access -->
+<!-- CLI Access -->
 <div class="card">
-    <h2 class="section-title">Management Access</h2>
-
-    <!-- CLI Access -->
-    <div style="margin-bottom: 24px;">
-        <h3 style="font-size: 14px; font-weight: 600; color: var(--xdr-text); margin: 0 0 8px;">CLI Access</h3>
-        <p style="color: var(--xdr-text-secondary); margin: 0 0 12px; font-size: 13px;">
-            Open PAN-OS command line interface via SSH
-        </p>
-        <button
-            id="ngfw-cli-btn"
-            class="btn btn-primary btn-small"
-            data-app-id="{{ ngfw.app_id }}"
-            style="display: inline-flex; align-items: center; gap: 6px;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="4 17 10 11 4 5"></polyline>
-                <line x1="12" y1="19" x2="20" y2="19"></line>
-            </svg>
-            <span>Open CLI</span>
-        </button>
-    </div>
-
-    <!-- GUI Access Info -->
-    <div>
-        <h3 style="font-size: 14px; font-weight: 600; color: var(--xdr-text); margin: 0 0 8px;">Web Interface</h3>
-        <p style="color: var(--xdr-text-secondary); margin: 0 0 12px; font-size: 13px;">
-            Access PAN-OS web GUI
-        </p>
-
-        <div style="background: var(--xdr-bg-secondary); border: 1px solid var(--xdr-border); border-radius: 4px; padding: 16px;">
-            <p style="margin: 0 0 8px; font-size: 13px;">
-                <strong style="color: var(--xdr-text-secondary);">Management IP:</strong>
-                <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px; font-size: 12px;">{{ ngfw.management_ip }}</code>
-            </p>
-            <p style="margin: 0 0 8px; font-size: 13px;">
-                <strong style="color: var(--xdr-text-secondary);">Web URL:</strong>
-                <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px; font-size: 12px;">https://{{ ngfw.management_ip }}</code>
-            </p>
-            <p style="margin: 0 0 16px; font-size: 13px;">
-                <strong style="color: var(--xdr-text-secondary);">Username:</strong>
-                <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px; font-size: 12px;">admin</code>
-            </p>
-
-            <p style="margin: 0 0 8px; font-size: 13px; color: var(--xdr-text-secondary);">
-                <strong>Access Options:</strong>
-            </p>
-            <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: var(--xdr-text-secondary); line-height: 1.6;">
-                <li>VPN to VPC (if configured)</li>
-                <li>
-                    SSH tunnel via CLI Access above, then:
-                    <pre style="background: var(--xdr-bg-tertiary); padding: 8px; border-radius: 3px; margin: 8px 0 0; overflow-x: auto; font-size: 11px;"><code>ssh -L 8443:{{ ngfw.management_ip }}:443 -i &lt;key&gt; admin@{{ ngfw.management_ip }}
-# Then browse to https://localhost:8443</code></pre>
-                </li>
-                <li>Kali desktop browser (if you have an active range)</li>
-            </ul>
-        </div>
-    </div>
+    <h2 class="section-title">CLI Access</h2>
+    <p style="color: var(--xdr-text-secondary); margin: 0 0 12px; font-size: 13px;">
+        Open PAN-OS command line interface via SSH
+    </p>
+    <button
+        id="ngfw-cli-btn"
+        class="btn btn-primary btn-small"
+        style="display: inline-flex; align-items: center; gap: 6px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+        <span>Open CLI</span>
+    </button>
 </div>
 {% endif %}
 
@@ -401,7 +359,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const cliBtn = document.getElementById('ngfw-cli-btn');
     if (cliBtn) {
         cliBtn.addEventListener('click', async function() {
-            const appId = this.dataset.appId;
             const btnText = this.querySelector('span');
             const originalText = btnText.textContent;
 
@@ -410,7 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btnText.textContent = 'Opening CLI...';
 
             try {
-                const response = await fetch(`/mc/api/ngfw/${appId}/ssh-url/`, {
+                const response = await fetch(`{% url 'mission_control:api_ngfw_ssh_url' ngfw.instance_id %}`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCookie('csrftoken'),

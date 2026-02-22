@@ -177,13 +177,13 @@ def _run_provision(
             app_id=app_id,
             status=STATUS_READY,
         )
-        logger.info("LOCAL DEV MODE: Setting NGFW status to stopped")
-        update_instance_state(request_id, "stopped")
+        logger.info("LOCAL DEV MODE: Setting NGFW status to paused")
+        update_instance_state(request_id, "paused")
         publish_ngfw_event(
             request_id=request_id,
             instance_id=instance_id,
             app_id=app_id,
-            status="stopped",
+            status="paused",
         )
         return
 

@@ -1,6 +1,6 @@
 """Range pause/resume operations.
 
-Handles stopping and starting all EC2 instances in a range.
+Handles pausing and resuming all EC2 instances in a range.
 """
 
 from __future__ import annotations
@@ -104,7 +104,7 @@ def get_range_ngfw_info(request_id: str) -> dict | None:
         - ngfw_request_id: UUID string of the NGFW's Request
         - ec2_instance_id: AWS EC2 instance ID (e.g., "i-abc123")
         - instance_uuid: UUID of the NGFW Instance
-        - status: Current NGFW status (e.g., "active", "stopped")
+        - status: Current NGFW status (e.g., "ready", "paused")
         - app_id: UUID of the NGFW App (may be None)
         - range_id: DB ID of the Range
     """
@@ -213,7 +213,7 @@ def _update_ngfw_status(ngfw_instance_id: int, status: str) -> None:
 
     Args:
         ngfw_instance_id: DB ID of the NGFW Instance.
-        status: New status value (e.g., "stopping", "stopped", "starting").
+        status: New status value (e.g., "pausing", "paused", "resuming").
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         # Update instance status
@@ -250,7 +250,7 @@ def pause_ngfw_for_range(request_id: str, range_data: dict) -> None:
     Called after a range is paused. Checks if any other ranges are using
     the same NGFW - if not, stops the NGFW EC2 instance.
 
-    Idempotent: safe to call even if NGFW is already stopped.
+    Idempotent: safe to call even if NGFW is already paused.
 
     Args:
         request_id: UUID string of the Range's Request.
@@ -264,8 +264,8 @@ def pause_ngfw_for_range(request_id: str, range_data: dict) -> None:
         logger.info("pause_ngfw_for_range: no NGFW attached, skipping")
         return
 
-    # Idempotent: already stopped or stopping
-    if ngfw_info["status"] in ("stopped", "stopping"):
+    # Idempotent: already paused or pausing
+    if ngfw_info["status"] in ("paused", "pausing"):
         logger.info(
             "pause_ngfw_for_range: NGFW already %s, skipping",
             ngfw_info["status"],
@@ -277,15 +277,15 @@ def pause_ngfw_for_range(request_id: str, range_data: dict) -> None:
         logger.info("pause_ngfw_for_range: other ranges need NGFW, skipping")
         return
 
-    # Update status to stopping
-    _update_ngfw_status(ngfw_info["ngfw_instance_id"], "stopping")
+    # Update status to pausing
+    _update_ngfw_status(ngfw_info["ngfw_instance_id"], "pausing")
 
     # Publish event
     publish_ngfw_event(
         request_id=ngfw_info["ngfw_request_id"],
         instance_id=ngfw_info["instance_uuid"],
         app_id=ngfw_info["app_id"],
-        status="stopping",
+        status="pausing",
     )
 
     # Execute stop plan
@@ -313,19 +313,19 @@ def pause_ngfw_for_range(request_id: str, range_data: dict) -> None:
         )
         raise RuntimeError(error_msg)
 
-    # Update status to stopped
-    _update_ngfw_status(ngfw_info["ngfw_instance_id"], "stopped")
+    # Update status to paused
+    _update_ngfw_status(ngfw_info["ngfw_instance_id"], "paused")
 
     # Publish success event
     publish_ngfw_event(
         request_id=ngfw_info["ngfw_request_id"],
         instance_id=ngfw_info["instance_uuid"],
         app_id=ngfw_info["app_id"],
-        status="stopped",
+        status="paused",
     )
 
     logger.info(
-        "pause_ngfw_for_range: NGFW stopped ec2=%s request_id=%s",
+        "pause_ngfw_for_range: NGFW paused ec2=%s request_id=%s",
         ngfw_info["ec2_instance_id"],
         request_id,
     )
@@ -334,9 +334,9 @@ def pause_ngfw_for_range(request_id: str, range_data: dict) -> None:
 def ensure_ngfw_running(request_id: str) -> None:
     """Ensure NGFW is running before resuming range instances.
 
-    Checks if the range's attached NGFW is stopped and starts it if needed.
+    Checks if the range's attached NGFW is paused and resumes it if needed.
     Retries up to NGFW_START_MAX_RETRIES times on transient failures before
-    giving up. Blocks until the NGFW is in running state.
+    giving up. Blocks until the NGFW is in ready state.
 
     Args:
         request_id: UUID string of the Range's Request.
@@ -356,40 +356,40 @@ def ensure_ngfw_running(request_id: str) -> None:
     status = ngfw_info["status"]
 
     # Already running
-    if status == "active":
-        logger.info("ensure_ngfw_running: NGFW already active, skipping")
+    if status == "ready":
+        logger.info("ensure_ngfw_running: NGFW already ready, skipping")
         return
 
     # Failed state - cannot proceed
     if status == "failed":
         raise RuntimeError("NGFW is in failed state, cannot resume range")
 
-    # Starting - wait for it (another resume may have started it)
-    if status == "starting":
-        logger.info("ensure_ngfw_running: NGFW is starting, waiting...")
+    # Resuming - wait for it (another resume may have triggered it)
+    if status == "resuming":
+        logger.info("ensure_ngfw_running: NGFW is resuming, waiting...")
         # For now, proceed with the start operation which will wait
         # The AWSExecutor.wait_for_running will handle this
 
-    # If stopping, wait for EC2 to reach stopped before starting
-    if status == "stopping":
-        logger.info("ensure_ngfw_running: NGFW is stopping, waiting for stopped...")
+    # If pausing, wait for EC2 stop to complete before resuming
+    if status == "pausing":
+        logger.info("ensure_ngfw_running: NGFW is pausing, waiting for paused...")
         executor = AWSExecutor()
         wait_result = executor.wait_for_stopped(ngfw_info["ec2_instance_id"])
         if not wait_result.success:
-            raise RuntimeError(f"NGFW failed to reach stopped state: {wait_result.stderr}")
-        logger.info("ensure_ngfw_running: NGFW is now stopped, proceeding to start")
+            raise RuntimeError(f"NGFW failed to reach paused state: {wait_result.stderr}")
+        logger.info("ensure_ngfw_running: NGFW is now paused, proceeding to resume")
 
-    # Stopped or stopping - need to start
-    if status in ("stopped", "stopping", "starting"):
-        # Update status to starting
-        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "starting")
+    # Paused or pausing - need to resume
+    if status in ("paused", "pausing", "resuming"):
+        # Update status to resuming
+        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "resuming")
 
         # Publish event
         publish_ngfw_event(
             request_id=ngfw_info["ngfw_request_id"],
             instance_id=ngfw_info["instance_uuid"],
             app_id=ngfw_info["app_id"],
-            status="starting",
+            status="resuming",
         )
 
         # Execute start plan with retry
@@ -437,26 +437,26 @@ def ensure_ngfw_running(request_id: str) -> None:
 
             # Re-query NGFW status before retrying
             refreshed = get_range_ngfw_info(request_id)
-            if refreshed and refreshed["status"] == "active":
+            if refreshed and refreshed["status"] == "ready":
                 logger.info(
-                    "ensure_ngfw_running: NGFW became active during retry wait, request_id=%s",
+                    "ensure_ngfw_running: NGFW became ready during retry wait, request_id=%s",
                     request_id,
                 )
                 return
 
-        # Update status to active
-        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "active")
+        # Update status to ready
+        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "ready")
 
         # Publish success event
         publish_ngfw_event(
             request_id=ngfw_info["ngfw_request_id"],
             instance_id=ngfw_info["instance_uuid"],
             app_id=ngfw_info["app_id"],
-            status="active",
+            status="ready",
         )
 
         logger.info(
-            "ensure_ngfw_running: NGFW started ec2=%s request_id=%s",
+            "ensure_ngfw_running: NGFW resumed ec2=%s request_id=%s",
             ngfw_info["ec2_instance_id"],
             request_id,
         )
@@ -517,7 +517,7 @@ def run_range_pause(request_id: str) -> None:
     """Pause all instances in a range.
 
     Stops all EC2 instances belonging to the range in parallel,
-    waits for them to reach stopped state, then updates the range status.
+    waits for them to reach paused state, then updates the range status.
 
     Args:
         request_id: UUID string of the Request.
@@ -568,7 +568,7 @@ def run_range_pause(request_id: str) -> None:
                 results.append(result)
             except Exception as e:
                 logger.exception(
-                    "Unexpected error stopping instance %s",
+                    "Unexpected error pausing instance %s",
                     instance["aws_instance_id"],
                 )
                 results.append((instance["uuid"], False, str(e)))
@@ -598,14 +598,14 @@ def run_range_pause(request_id: str) -> None:
     try:
         pause_ngfw_for_range(request_id, range_data)
     except Exception as e:
-        # Non-fatal: log and continue - range instances are already stopped
+        # Non-fatal: log and continue - range instances are already paused
         logger.warning(
             "run_range_pause: NGFW pause failed (non-fatal): %s request_id=%s",
             str(e),
             request_id,
         )
 
-    # Update range status to paused (after NGFW is stopped)
+    # Update range status to paused (after NGFW is paused)
     update_range_status(range_id, "paused", paused_at="NOW()")
     publish_status_update(
         request_id=request_id,
@@ -693,7 +693,7 @@ def run_range_resume(request_id: str) -> None:
                 results.append(result)
             except Exception as e:
                 logger.exception(
-                    "Unexpected error starting instance %s",
+                    "Unexpected error resuming instance %s",
                     instance["aws_instance_id"],
                 )
                 results.append((instance["uuid"], False, str(e)))

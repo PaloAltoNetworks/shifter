@@ -16,7 +16,7 @@ usage() {
     echo "  -b <type>   Build AMI in dev (runs packer.yml)"
     echo "  -p <type>   Promote AMI to prod (runs packer-promote.yml)"
     echo ""
-    echo "AMI types: kali"
+    echo "AMI types: kali, ubuntu, windows, dc, brokenbk"
     echo ""
     echo "Current branch: $BRANCH"
     exit 1

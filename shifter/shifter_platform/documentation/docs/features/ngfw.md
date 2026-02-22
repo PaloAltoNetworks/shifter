@@ -43,6 +43,41 @@ Once the NGFW is ready:
 2. **Connect to XDR/XSIAM**: Configure log forwarding in SCM
 3. **Launch NGFW Range**: Use "Basic Range with NGFW" or "Cortex BYOT"
 
+## Accessing NGFW Management
+
+### CLI Access
+
+Access the PAN-OS command line interface directly from Shifter:
+
+1. Go to your NGFW detail page
+2. Click **Open CLI** in the Management Access section
+3. A new browser tab opens with SSH access to the NGFW
+4. Login username: `admin`
+
+Use the CLI for configuration changes, troubleshooting, and advanced operations.
+
+### GUI Access
+
+Access the PAN-OS web interface:
+
+**Option 1: SSH Tunnel (Recommended)**
+1. Click **Open CLI** to establish SSH connection
+2. From your local terminal, create an SSH tunnel:
+   ```bash
+   ssh -L 8443:<management_ip>:443 -i <key> admin@<management_ip>
+   ```
+3. Browse to `https://localhost:8443`
+
+**Option 2: VPN Access**
+If you have VPN access to the VPC, browse directly to `https://<management_ip>`
+
+**Option 3: Kali Desktop**
+If you have an active range with Kali, use the browser from within the Kali desktop
+
+**Login Credentials:**
+- Username: `admin`
+- Password: Set during initial bootstrap (check SCM or contact admin)
+
 ## Managing NGFWs
 
 From the NGFW page:

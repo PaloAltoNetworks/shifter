@@ -19,7 +19,7 @@ SAMPLE_NGFW_INFO = {
     "ngfw_request_id": "ngfw-req-uuid",
     "ec2_instance_id": "i-ngfw123",
     "instance_uuid": "ngfw-inst-uuid",
-    "status": "stopped",
+    "status": "paused",
     "app_id": "ngfw-app-uuid",
     "range_id": 42,
 }
@@ -41,7 +41,7 @@ def _mock_ngfw_deps():
         patch("range_ops.NGFWStartPlan") as mock_plan_cls,
         patch("range_ops.time") as mock_time,
     ):
-        # Default: return stopped NGFW info
+        # Default: return paused NGFW info
         mock_get_info.return_value = dict(SAMPLE_NGFW_INFO)
 
         # Plan.get_context returns a simple dict
@@ -80,7 +80,7 @@ class TestEnsureNgfwRunningRetries:
 
         mocks["orch"].orchestrate.side_effect = [fail, fail, success]
 
-        # On retry re-queries, return still-stopped so retry continues
+        # On retry re-queries, return still-paused so retry continues
         mocks["get_info"].side_effect = [
             dict(SAMPLE_NGFW_INFO),  # initial call
             dict(SAMPLE_NGFW_INFO),  # re-query after attempt 1
@@ -91,8 +91,8 @@ class TestEnsureNgfwRunningRetries:
 
         assert mocks["orch"].orchestrate.call_count == NGFW_START_MAX_RETRIES
         assert mocks["time"].sleep.call_count == 2
-        # Status should end up as active, not failed
-        mocks["update_status"].assert_any_call(1, "active")
+        # Status should end up as ready, not failed
+        mocks["update_status"].assert_any_call(1, "ready")
 
     def test_fails_after_max_retries(self, _mock_ngfw_deps):
         """RuntimeError is raised after all retry attempts are exhausted."""
@@ -101,7 +101,7 @@ class TestEnsureNgfwRunningRetries:
 
         mocks["orch"].orchestrate.side_effect = [fail, fail, fail]
 
-        # Re-query returns still-stopped on retry waits
+        # Re-query returns still-paused on retry waits
         mocks["get_info"].side_effect = [
             dict(SAMPLE_NGFW_INFO),  # initial call
             dict(SAMPLE_NGFW_INFO),  # re-query after attempt 1
@@ -124,10 +124,10 @@ class TestEnsureNgfwRunningRetries:
             status="failed",
         )
 
-    def test_stopping_waits_for_stopped_then_starts(self, _mock_ngfw_deps):
-        """When NGFW is stopping, wait_for_stopped is called before starting."""
+    def test_pausing_waits_for_paused_then_resumes(self, _mock_ngfw_deps):
+        """When NGFW is pausing, wait_for_stopped is called before resuming."""
         mocks = _mock_ngfw_deps
-        stopping_info = dict(SAMPLE_NGFW_INFO, status="stopping")
+        stopping_info = dict(SAMPLE_NGFW_INFO, status="pausing")
         mocks["get_info"].return_value = stopping_info
 
         # wait_for_stopped succeeds
@@ -142,21 +142,21 @@ class TestEnsureNgfwRunningRetries:
 
         # wait_for_stopped was called with the EC2 instance ID
         mock_executor.wait_for_stopped.assert_called_once_with("i-ngfw123")
-        # Status ends up active
-        mocks["update_status"].assert_any_call(1, "active")
+        # Status ends up ready
+        mocks["update_status"].assert_any_call(1, "ready")
 
-    def test_stopping_wait_fails_raises_error(self, _mock_ngfw_deps):
-        """When NGFW is stopping and wait_for_stopped fails, RuntimeError is raised."""
+    def test_pausing_wait_fails_raises_error(self, _mock_ngfw_deps):
+        """When NGFW is pausing and wait_for_stopped fails, RuntimeError is raised."""
         mocks = _mock_ngfw_deps
-        stopping_info = dict(SAMPLE_NGFW_INFO, status="stopping")
+        stopping_info = dict(SAMPLE_NGFW_INFO, status="pausing")
         mocks["get_info"].return_value = stopping_info
 
         # wait_for_stopped fails
         mock_executor = MagicMock()
-        mock_executor.wait_for_stopped.return_value = MagicMock(success=False, stderr="timeout waiting for stopped")
+        mock_executor.wait_for_stopped.return_value = MagicMock(success=False, stderr="timeout waiting for paused")
         mocks["executor_cls"].return_value = mock_executor
 
-        with pytest.raises(RuntimeError, match="NGFW failed to reach stopped state"):
+        with pytest.raises(RuntimeError, match="NGFW failed to reach paused state"):
             ensure_ngfw_running("req-uuid-123")
 
         # Start plan should not have been attempted

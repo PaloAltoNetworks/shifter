@@ -217,7 +217,7 @@ class TestNGFWAppContext:
             app_id=uuid4(),
             instance_id=uuid4(),
             name="VM-Series",
-            status="active",
+            status="ready",
             created_at=datetime.now(UTC),
         )
         assert ctx.app_type == "ngfw"
@@ -266,7 +266,7 @@ class TestNGFWAppContext:
             app_id=app_id,
             instance_id=uuid4(),
             name="VM-Series",
-            status="active",
+            status="ready",
             created_at=datetime.now(UTC),
         )
         assert isinstance(ctx.app_id, UUID)
@@ -330,7 +330,7 @@ class TestAppContext:
             "instance_id": str(uuid4()),
             "name": "VM-Series",
             "app_type": "ngfw",
-            "status": "active",
+            "status": "ready",
             "created_at": datetime.now(UTC).isoformat(),
         }
         result = adapter.validate_python(data)
@@ -461,11 +461,11 @@ class TestLinkedRangeContext:
 
         ctx = LinkedRangeContext(
             range_id=42,
-            status="active",
+            status="ready",
             created_at=datetime.now(UTC),
         )
         assert ctx.range_id == 42
-        assert ctx.status == "active"
+        assert ctx.status == "ready"
 
     def test_id_property_returns_range_id(self):
         """LinkedRangeContext.id returns range_id for template compatibility."""
@@ -475,7 +475,7 @@ class TestLinkedRangeContext:
 
         ctx = LinkedRangeContext(
             range_id=42,
-            status="active",
+            status="ready",
             created_at=datetime.now(UTC),
         )
         assert ctx.id == 42

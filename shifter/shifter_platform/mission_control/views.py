@@ -808,6 +808,8 @@ def ngfw_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
     """View NGFW details."""
+    from engine.models import Range
+
     user = _get_user(request)
     try:
         ngfw = cms_get_ngfw(user, app_id)
@@ -817,10 +819,18 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
         messages.warning(request, "NGFW not found. It may have failed during provisioning.")
         return redirect("mission_control:ngfw_list")
 
+    # Get ranges linked to this NGFW (via ngfw_instance_id)
+    linked_ranges = Range.objects.filter(
+        ngfw_instance_id=int(ngfw.instance_id),
+        user=user,
+        destroyed_at__isnull=True,
+    ).order_by("-created_at")
+
     context = {
         "page_title": ngfw.name,
         "active_nav": "ngfw",
         "ngfw": ngfw,
+        "linked_ranges": linked_ranges,
     }
     return render(request, "mission_control/ngfw/detail.html", context)
 

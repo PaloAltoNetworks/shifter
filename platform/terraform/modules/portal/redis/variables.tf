@@ -39,3 +39,37 @@ variable "enable_replication" {
   description = "Enable replication group with automatic failover (false for single-node)"
   type        = bool
 }
+
+# ------------------------------------------------------------------------------
+# Alarm Configuration
+# ------------------------------------------------------------------------------
+
+variable "enable_alarms" {
+  description = "Enable CloudWatch alarms for Redis metrics"
+  type        = bool
+  default     = false
+}
+
+variable "alarm_actions" {
+  description = "List of ARNs to notify when alarm triggers (e.g., SNS topic)"
+  type        = list(string)
+  default     = []
+}
+
+variable "alarm_cpu_threshold" {
+  description = "CPU utilization threshold for alarm (percent)"
+  type        = number
+  default     = 75
+}
+
+variable "alarm_memory_threshold" {
+  description = "Memory utilization threshold for alarm (percent)"
+  type        = number
+  default     = 80
+}
+
+variable "alarm_connections_threshold" {
+  description = "Current connections threshold for alarm"
+  type        = number
+  default     = 1000
+}

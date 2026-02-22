@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.5] - 2026-02-21
+
+### Added
+- MCP tools for SSM tunnel testing: start_portal_test_tunnel, stop_portal_test_tunnel
+- localhost to ALLOWED_HOSTS in dev for tunnel access
+
+## [2.2.4] - 2026-02-21
+
+### Changed
+- Enable dev_login in deployed dev environment for programmatic testing via SSM tunnel
+
+## [2.2.3] - 2026-02-21
+
+### Fixed
+- Broken migration chain causes Django crash loop
+
+## [2.2.2] - 2026-02-17
+
+### Fixed
+- Deploy script SSM waiter timeout - increased max attempts from 20 to 60 (15 minutes)
+
+## [2.2.1] - 2026-02-16
+
+### Changed
+- Centralized script variable sanitization in Pydantic contexts for consistent and secure variable handling.
+- Moved experiment template variable logic to shared `cyberscript` library to enable cross-layer reuse and validation.
+- Hardened `ExperimentOrchestrator` with comprehensive exception handling and debug logging to ensure unexpected failures mark runs as FAILED rather than hanging.
+- Standardized `ExperimentManager` services and views to match CMS defensive coding patterns, including uniform user validation and ORM result type checking.
+- Refactored experiment creation flow to enforce model-level validation within atomic transactions.
+
+## [2.2.0] - 2026-02-16
+
+### Add
+- Direct NGFW access for users
+
+## [2.1.7] - 2026-02-16
+
+### Added
+- Cortex Broken Bank AMI
+
+## [2.1.6] - 2026-02-16
+
+### Added
+- Add XDR Collector and Cloud Identity Engine agents to CMS
+-
 ## [2.1.5] - 2026-02-15
 
 ### Changed

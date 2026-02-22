@@ -33,9 +33,7 @@ class RangeToExperimentBridgeTest(TestCase):
 
     @classmethod
     def setUpTestData(cls) -> None:
-        cls.user = User.objects.create_user(
-            username="bridge_user", password=TEST_PASSWORD, is_staff=True
-        )
+        cls.user = User.objects.create_user(username="bridge_user", password=TEST_PASSWORD, is_staff=True)
         cls.windows_os = OperatingSystem.objects.get(slug="windows")
         cls.agent = AgentConfig.objects.create(
             user=cls.user,
@@ -80,9 +78,7 @@ class RangeToExperimentBridgeTest(TestCase):
         return exp, run, ri
 
     @patch("cms.handlers.publish_range_provisioned_for_experiment")
-    def test_publishes_event_when_range_ready_for_experiment(
-        self, mock_publish: object
-    ) -> None:
+    def test_publishes_event_when_range_ready_for_experiment(self, mock_publish: object) -> None:
         """When range status becomes READY and linked to experiment, publishes event."""
         mock_publish.return_value = True
         exp, run, ri = self._create_experiment_with_range()
@@ -99,9 +95,7 @@ class RangeToExperimentBridgeTest(TestCase):
         )
 
     @patch("cms.handlers.publish_range_provisioned_for_experiment")
-    def test_does_nothing_for_range_without_experiment(
-        self, mock_publish: object
-    ) -> None:
+    def test_does_nothing_for_range_without_experiment(self, mock_publish: object) -> None:
         """Range not linked to any experiment run → no event published."""
         request_id = uuid4()
         cms_request = Request.objects.create(
@@ -123,9 +117,7 @@ class RangeToExperimentBridgeTest(TestCase):
         mock_publish.assert_not_called()
 
     @patch("cms.handlers.publish_range_provisioned_for_experiment")
-    def test_handles_deleted_request_gracefully(
-        self, mock_publish: object
-    ) -> None:
+    def test_handles_deleted_request_gracefully(self, mock_publish: object) -> None:
         """If request has no linked experiment run, no crash."""
         request_id = uuid4()
         cms_request = Request.objects.create(
@@ -152,9 +144,7 @@ class CmsHandlerBridgeIntegrationTest(TestCase):
 
     @classmethod
     def setUpTestData(cls) -> None:
-        cls.user = User.objects.create_user(
-            username="handler_bridge_user", password=TEST_PASSWORD, is_staff=True
-        )
+        cls.user = User.objects.create_user(username="handler_bridge_user", password=TEST_PASSWORD, is_staff=True)
         cls.windows_os = OperatingSystem.objects.get(slug="windows")
         cls.agent = AgentConfig.objects.create(
             user=cls.user,
@@ -200,9 +190,7 @@ class CmsHandlerBridgeIntegrationTest(TestCase):
         return exp, run, ri
 
     @patch("cms.handlers.publish_range_provisioned_for_experiment")
-    def test_process_range_event_calls_bridge_on_ready(
-        self, mock_publish: object
-    ) -> None:
+    def test_process_range_event_calls_bridge_on_ready(self, mock_publish: object) -> None:
         """process_range_event calls bridge when status transitions to READY."""
         mock_publish.return_value = True
         exp, run, _ri = self._create_experiment_with_range()
@@ -226,9 +214,7 @@ class CmsHandlerBridgeIntegrationTest(TestCase):
         assert call_kwargs["run_id"] == run.pk
 
     @patch("cms.handlers.publish_range_provisioned_for_experiment")
-    def test_process_range_event_no_bridge_on_non_ready(
-        self, mock_publish: object
-    ) -> None:
+    def test_process_range_event_no_bridge_on_non_ready(self, mock_publish: object) -> None:
         """Bridge is NOT called for non-READY status transitions."""
         _exp, run, _ri = self._create_experiment_with_range()
 
@@ -245,3 +231,51 @@ class CmsHandlerBridgeIntegrationTest(TestCase):
         process_range_event(event)
 
         mock_publish.assert_not_called()
+
+    @patch("cms.handlers.publish_range_provisioned_for_experiment")
+    def test_bridge_marks_run_failed_on_sqs_error(self, mock_publish: object) -> None:
+        """When SQS publish fails, the experiment run is marked FAILED."""
+        from cms.experiments.events import ExperimentEventError
+
+        _exp, run, ri = self._create_experiment_with_range()
+
+        # Simulate SQS publish failure
+        mock_publish.side_effect = ExperimentEventError("SQS unavailable")
+
+        from cms.handlers import notify_experiment_on_range_ready
+
+        provisioned_instances = {"Workstation": {"instance_id": "i-abc123"}}
+        notify_experiment_on_range_ready(ri, provisioned_instances)
+
+        # Run should be marked FAILED with error message
+        run.refresh_from_db()
+        assert run.status == RunStatus.FAILED.value
+        assert "Failed to publish range provisioning notification" in run.error_message
+
+    @patch("cms.handlers.publish_range_provisioned_for_experiment")
+    def test_bridge_integration_with_sqs_failure(self, mock_publish: object) -> None:
+        """Full integration test: range becomes READY but SQS fails."""
+        from cms.experiments.events import ExperimentEventError
+
+        _exp, run, _ri = self._create_experiment_with_range()
+
+        # Simulate SQS failure
+        mock_publish.side_effect = ExperimentEventError("Queue not found")
+
+        event = {
+            "event_type": "range.status.updated",
+            "request_id": str(run.request_id),
+            "range_id": 1,
+            "user_id": self.user.pk,
+            "new_status": ResourceStatus.READY.value,
+            "instances": {"Workstation": {"instance_id": "i-abc123"}},
+        }
+
+        from cms.handlers import process_range_event
+
+        # Should not raise — handler catches exception and marks run FAILED
+        process_range_event(event)
+
+        run.refresh_from_db()
+        assert run.status == RunStatus.FAILED.value
+        assert "Failed to publish range provisioning notification" in run.error_message

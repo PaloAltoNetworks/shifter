@@ -193,18 +193,34 @@ def notify_experiment_on_range_ready(
         return
 
     logger.info(
-        "notify_experiment_on_range_ready: range for experiment=%d run=%d "
-        "is READY, publishing event (request_id=%s)",
+        "notify_experiment_on_range_ready: range for experiment=%d run=%d is READY, publishing event (request_id=%s)",
         run.experiment_id,
         run.pk,
         request_id,
     )
 
-    publish_range_provisioned_for_experiment(
-        experiment_id=run.experiment_id,
-        run_id=run.pk,
-        provisioned_instances=provisioned_instances,
-    )
+    try:
+        publish_range_provisioned_for_experiment(
+            experiment_id=run.experiment_id,
+            run_id=run.pk,
+            provisioned_instances=provisioned_instances,
+        )
+    except Exception:
+        # Experiments require deterministic outcomes. If we cannot notify the
+        # experiment that its range is ready, the run cannot proceed and must
+        # be marked as FAILED to avoid silent orphaning.
+        logger.exception(
+            "notify_experiment_on_range_ready: failed to publish event for "
+            "experiment=%d run=%d (request_id=%s) — marking run as FAILED",
+            run.experiment_id,
+            run.pk,
+            request_id,
+        )
+        from cms.experiments.schemas import RunStatus
+
+        run.error_message = "Failed to publish range provisioning notification"
+        run.save(update_fields=["error_message"])
+        run.transition_to(RunStatus.FAILED)
 
 
 # =============================================================================

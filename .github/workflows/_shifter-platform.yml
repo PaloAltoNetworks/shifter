@@ -360,7 +360,14 @@ jobs:
           [ -n "$GUACAMOLE_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
           [ -n "$GUACAMOLE_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
           [ -n "$GUACAMOLE_API_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
-          COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
+          # Add localhost to ALLOWED_HOSTS for dev (enables SSM tunnel testing)
+          # PS_PREFIX comes from Parameter Store, not user input - safe to use
+          if [[ "$PS_PREFIX" == *"/dev/"* ]]; then
+            COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME,localhost,127.0.0.1"
+          else
+            COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME"
+          fi
+          COMMON_ENV="$COMMON_ENV -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
           COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME -e PULUMI_ECS_CLUSTER_ARN=$PULUMI_ECS_CLUSTER_ARN"
           COMMON_ENV="$COMMON_ENV -e PULUMI_TASK_DEFINITION_ARN=$PULUMI_TASK_DEFINITION_ARN"
           COMMON_ENV="$COMMON_ENV -e PULUMI_ECS_SECURITY_GROUP_ID=$PULUMI_ECS_SECURITY_GROUP_ID"
@@ -401,7 +408,22 @@ jobs:
           rm -f "$PARAMS_FILE"
 
           echo "SSM Command ID: $COMMAND_ID"
-          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+          echo "Waiting for deployment (timeout: 15 minutes)..."
+          SECONDS_WAITED=0
+          TIMEOUT=900
+          while true; do
+            aws ssm wait command-executed \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --cli-read-timeout 30 \
+              --cli-connect-timeout 30 && break
+            SECONDS_WAITED=$((SECONDS_WAITED + 100))
+            if [ $SECONDS_WAITED -ge $TIMEOUT ]; then
+              echo "Waiter timed out after ${TIMEOUT}s"
+              break
+            fi
+            echo "Still waiting... (~${SECONDS_WAITED}s elapsed)"
+          done
           STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
           if [ "$STATUS" != "Success" ]; then
             echo "Deployment failed!"

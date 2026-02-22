@@ -94,7 +94,23 @@ When provisioning reaches "Action Required":
 3. Wait for final configuration (up to 15 minutes)
 4. Success message appears when ready
 
-## Step 7: Launch NGFW-Enabled Range
+## Step 7: Access NGFW Management (Optional)
+
+Once your NGFW is ready, you can access the management interface:
+
+1. Go to **Assets > NGFWs**
+2. Click on your NGFW to view details
+3. Under **Management Access**:
+   - Click **Open CLI** for command-line access
+   - View **GUI Access** instructions for web interface
+
+This is useful for:
+- Verifying configuration changes
+- Troubleshooting connectivity
+- Checking security policies
+- Reviewing logs directly on the firewall
+
+## Step 8: Launch NGFW-Enabled Range
 
 1. Go to **Ranges**
 2. Select **Basic Range with NGFW** or **Cortex BYOT**
@@ -102,6 +118,13 @@ When provisioning reaches "Action Required":
 4. Click **Launch Range**
 
 ## Verifying the Setup
+
+**On the NGFW (via CLI):**
+
+- Click **Open CLI** from the NGFW detail page
+- Check traffic logs: `show traffic`
+- View security policies: `show running security-policy-match`
+- Monitor sessions: `show session all`
 
 **In your range:**
 
@@ -130,6 +153,7 @@ When provisioning reaches "Action Required":
 **No network alerts in XDR/XSIAM?**
 - Verify NGFW shows as connected in XDR/XSIAM settings
 - Check log forwarding is configured in SCM
+- Use **Open CLI** to verify traffic is passing through: `show traffic`
 - Generate obvious traffic (not just ICMP)
 
 **Range launch fails with NGFW?**

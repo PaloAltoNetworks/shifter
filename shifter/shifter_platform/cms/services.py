@@ -214,7 +214,8 @@ def list_agents(user: User) -> list[dict[str, Any]]:
         user: User whose agents to retrieve
 
     Returns:
-        List of agent dicts with keys: id, name, os_name, os_slug, file_size_mb
+        List of agent dicts with keys: id, name, os_name, os_slug, file_size_mb,
+        original_filename, created_at, agent_type, agent_type_display
 
     Raises:
         TypeError: If user is None or invalid type
@@ -272,6 +273,8 @@ def list_agents(user: User) -> list[dict[str, Any]]:
                 "file_size_mb": agent.file_size_mb,
                 "original_filename": agent.original_filename,
                 "created_at": agent.created_at,
+                "agent_type": agent.agent_type,
+                "agent_type_display": agent.get_agent_type_display(),
             }
 
             # Validate dict values are non-empty and correct types
@@ -2448,7 +2451,13 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
 # =============================================================================
 
 
-def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dict[str, Any]:
+def initiate_upload(
+    user: User,
+    name: str,
+    filename: str,
+    file_size: int,
+    agent_type: str = "xdr",
+) -> dict[str, Any]:
     """Validate and generate presigned URL for direct S3 upload.
 
     Validates user quota, file extension, and generates all components needed
@@ -2459,6 +2468,7 @@ def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dic
         name: Display name for the agent
         filename: Original filename (used for extension validation)
         file_size: Expected file size in bytes
+        agent_type: Type of agent (xdr, xdr_collector, cloud_identity_engine)
 
     Returns:
         Dict containing:
@@ -2615,6 +2625,7 @@ def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dic
             filename=filename,
             os_slug=file_format.os_slug,
             file_size=file_size,
+            agent_type=agent_type,
         )
 
         logger.debug(
@@ -2747,6 +2758,7 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
             os_slug=payload["os_slug"],
             file_size=expected_size,
             upload_method="presigned",
+            agent_type=payload.get("agent_type", "xdr"),
         )
 
         logger.debug(

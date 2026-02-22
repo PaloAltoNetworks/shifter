@@ -34,9 +34,7 @@ class RequestRangeProvisioningTest(TestCase):
 
     @classmethod
     def setUpTestData(cls) -> None:
-        cls.user = User.objects.create_user(
-            username="prov_user", password=TEST_PASSWORD, is_staff=True
-        )
+        cls.user = User.objects.create_user(username="prov_user", password=TEST_PASSWORD, is_staff=True)
         cls.windows_os = OperatingSystem.objects.get(slug="windows")
         cls.linux_os = OperatingSystem.objects.get(slug="linux-debian")
 
@@ -187,9 +185,7 @@ class RequestRangeProvisioningTest(TestCase):
     def test_provisions_scenario_without_agent(self, mock_engine: object) -> None:
         """Scenarios that don't require agents can be provisioned without one."""
         # cortex_deployment_experience has xdr_agent=false on all instances
-        exp, run = self._create_provisioning_run(
-            scenario_id="cortex_deployment_experience", agent=None
-        )
+        exp, run = self._create_provisioning_run(scenario_id="cortex_deployment_experience", agent=None)
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
@@ -267,9 +263,7 @@ class RequestRangeProvisioningTest(TestCase):
     def test_ad_attack_lab_produces_three_instances(self, mock_engine: object) -> None:
         """AD Attack Lab hydrates with attacker, DC, and victim."""
         agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(
-            scenario_id="ad_attack_lab", agent=agent
-        )
+        exp, run = self._create_provisioning_run(scenario_id="ad_attack_lab", agent=agent)
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
@@ -285,9 +279,7 @@ class RequestRangeProvisioningTest(TestCase):
     def test_ad_attack_lab_dc_has_domain_config(self, mock_engine: object) -> None:
         """AD Attack Lab DC instance has dc_config with domain settings."""
         agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(
-            scenario_id="ad_attack_lab", agent=agent
-        )
+        exp, run = self._create_provisioning_run(scenario_id="ad_attack_lab", agent=agent)
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)

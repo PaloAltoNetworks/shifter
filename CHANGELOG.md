@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.5] - 2026-02-21
+
+### Added
+- MCP tools for SSM tunnel testing: start_portal_test_tunnel, stop_portal_test_tunnel
+- localhost to ALLOWED_HOSTS in dev for tunnel access
+
 ## [2.2.4] - 2026-02-21
 
 ### Changed

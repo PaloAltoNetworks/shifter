@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _get_ecs_client() -> object:
+def _get_ecs_client() -> Any:
     """Get boto3 ECS client.
 
     Returns:
@@ -52,9 +52,9 @@ def _get_ecs_config() -> tuple[str, str, str, list[str]] | None:
         or None if configuration is incomplete.
     """
     cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
-    task_def_arn: str = getattr(
-        settings, "EXPERIMENT_TASK_DEFINITION_ARN", ""
-    ) or getattr(settings, "PULUMI_TASK_DEFINITION_ARN", "")
+    task_def_arn: str = getattr(settings, "EXPERIMENT_TASK_DEFINITION_ARN", "") or getattr(
+        settings, "PULUMI_TASK_DEFINITION_ARN", ""
+    )
     security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
     subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
 
@@ -123,18 +123,23 @@ def start_experiment_task(
     container_command = [
         "experiment",
         command,
-        "--experiment-id", str(experiment_id),
-        "--run-id", str(run_id),
-        "--request-id", str(request_id),
+        "--experiment-id",
+        str(experiment_id),
+        "--run-id",
+        str(run_id),
+        "--request-id",
+        str(request_id),
     ]
 
     # Build environment overrides for payload
     env_overrides: list[dict[str, str]] = []
     if payload is not None:
-        env_overrides.append({
-            "name": "EXPERIMENT_PAYLOAD",
-            "value": json.dumps(payload),
-        })
+        env_overrides.append(
+            {
+                "name": "EXPERIMENT_PAYLOAD",
+                "value": json.dumps(payload),
+            }
+        )
 
     logger.info(
         "Starting experiment ECS task: experiment=%d run=%d request_id=%s command=%s",
@@ -154,6 +159,8 @@ def start_experiment_task(
         container_override["environment"] = env_overrides
 
     try:
+        # Boto3 automatically retries transient failures (network errors, throttling)
+        # with exponential backoff (default: 5 attempts). No additional retry logic needed.
         response = ecs.run_task(
             cluster=cluster_arn,
             taskDefinition=task_def_arn,
@@ -165,9 +172,7 @@ def start_experiment_task(
                     "assignPublicIp": "DISABLED",
                 }
             },
-            overrides={
-                "containerOverrides": [container_override]
-            },
+            overrides={"containerOverrides": [container_override]},
         )
 
         if not response.get("tasks"):

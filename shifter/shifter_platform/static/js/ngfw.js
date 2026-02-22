@@ -309,7 +309,7 @@ class NGFWWizardManager {
                 const data = JSON.parse(event.data);
                 console.log('NGFW status update:', data);
 
-                if (data.status === 'ready' || data.status === 'active') {
+                if (data.status === 'ready') {
                     this.showSuccess();
                     this.ws.close();
                 } else if (data.status === 'failed') {

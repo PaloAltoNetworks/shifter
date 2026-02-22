@@ -15,7 +15,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ("cms", "0022_add_agent_type"),
+        ("cms", "0021_backfill_rangeinstance_requests"),
     ]
 
     operations = [

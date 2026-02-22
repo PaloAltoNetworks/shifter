@@ -266,11 +266,11 @@ describe('NGFWWizardManager', () => {
             expect(mockWebSocket.close).toHaveBeenCalled();
         });
 
-        test('WebSocket onmessage shows success on active status', () => {
+        test('WebSocket onmessage shows success on ready status', () => {
             wizard.ngfwId = 42;
             wizard.connectWebSocket();
 
-            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'active' }) });
+            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'ready' }) });
 
             expect(document.getElementById('success-state').style.display).toBe('block');
         });

@@ -61,6 +61,7 @@ function err(e) {
 const tunnels = {}; // env -> { process }
 const credentials = {}; // env -> { username, password, dbname }
 const pools = {}; // env -> pg.Pool
+const portalTunnels = {}; // env -> { process, port }
 
 async function isPortOpen(port) {
   return new Promise((resolve) => {
@@ -662,6 +663,121 @@ server.tool(
       return ok(
         `Status: ${result.Status}\n\n--- stdout ---\n${result.StandardOutputContent}\n--- stderr ---\n${result.StandardErrorContent}`
       );
+    } catch (e) {
+      return err(e);
+    }
+  }
+);
+
+server.tool(
+  "start_portal_test_tunnel",
+  "Start SSM tunnel to dev portal for testing. Enables dev_login access bypassing Cognito/MFA. Returns local URL.",
+  {
+    env: z.literal("dev").describe("Environment (only 'dev' allowed)"),
+    local_port: z.number().int().min(1024).max(65535).optional().describe("Local port (default: 8000)"),
+  },
+  async ({ env, local_port = 8000 }) => {
+    try {
+      if (portalTunnels[env]) {
+        return ok(`Tunnel already running on port ${portalTunnels[env].port}. Access at http://localhost:${portalTunnels[env].port}/dev-login/`);
+      }
+
+      const portInUse = await isPortOpen(local_port);
+      if (portInUse) {
+        return err(new Error(`Port ${local_port} already in use. Choose different port or stop existing tunnel.`));
+      }
+
+      const profile = getProfile(env);
+      const instanceId = execSync(
+        `aws ec2 describe-instances --filters "Name=tag:Name,Values=${env}-portal-ec2" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text --region "${REGION}" --profile "${profile}"`,
+        { encoding: "utf-8", timeout: 30000 }
+      ).trim();
+
+      if (!instanceId || instanceId === "None") {
+        return err(new Error(`Could not find running ${env} portal EC2 instance`));
+      }
+
+      const tunnelProc = spawn("aws", [
+        "ssm", "start-session",
+        "--target", instanceId,
+        "--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
+        "--parameters", JSON.stringify({ host: ["localhost"], portNumber: ["8000"], localPortNumber: [local_port.toString()] }),
+        "--profile", profile,
+        "--region", REGION,
+      ], { stdio: ["ignore", "pipe", "pipe"] });
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          tunnelProc.kill();
+          reject(new Error("Tunnel startup timeout"));
+        }, 10000);
+
+        let output = "";
+        tunnelProc.stdout.on("data", (data) => {
+          output += data.toString();
+          if (output.includes("Waiting for connections")) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        });
+
+        tunnelProc.stderr.on("data", (data) => {
+          const msg = data.toString();
+          if (msg.includes("error") || msg.includes("failed")) {
+            clearTimeout(timeout);
+            reject(new Error(`Tunnel failed: ${msg}`));
+          }
+        });
+
+        tunnelProc.on("error", (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+
+        tunnelProc.on("exit", (code) => {
+          if (code !== 0 && code !== null) {
+            clearTimeout(timeout);
+            reject(new Error(`Tunnel exited with code ${code}`));
+          }
+        });
+      });
+
+      portalTunnels[env] = { process: tunnelProc, port: local_port };
+
+      return ok(
+        `Portal test tunnel started!\n\n` +
+        `Access at: http://localhost:${local_port}/dev-login/\n\n` +
+        `NOTES:\n` +
+        `- Bypasses Cognito/MFA (dev_login checks ENVIRONMENT='development')\n` +
+        `- If 400 error, ensure ALLOWED_HOSTS includes 'localhost' in dev\n` +
+        `- Use stop_portal_test_tunnel when done\n` +
+        `- Stays active until stopped or MCP restart`
+      );
+    } catch (e) {
+      if (portalTunnels[env]) {
+        portalTunnels[env].process.kill();
+        delete portalTunnels[env];
+      }
+      return err(e);
+    }
+  }
+);
+
+server.tool(
+  "stop_portal_test_tunnel",
+  "Stop SSM tunnel to dev portal",
+  {
+    env: z.literal("dev").describe("Environment (only 'dev' allowed)"),
+  },
+  async ({ env }) => {
+    try {
+      if (!portalTunnels[env]) {
+        return ok("No tunnel running");
+      }
+      portalTunnels[env].process.kill();
+      const port = portalTunnels[env].port;
+      delete portalTunnels[env];
+      return ok(`Portal test tunnel stopped (was on port ${port})`);
     } catch (e) {
       return err(e);
     }

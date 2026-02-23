@@ -21,3 +21,7 @@ class ExperimentStateError(ExperimentError):
 
 class ArtifactError(ExperimentError):
     """Raised when artifact operations fail."""
+
+
+class ExecutionPlanError(ExperimentError):
+    """Raised when execution plan cannot be built from provisioned instances."""

@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.9] - 2026-02-22
+
+### Fixed
+- Experiment runner integration fixes
+
+## [2.2.8] - 2026-02-22
+
+### Changed
+- Finish experiment runner integration
+
+## [2.2.7] - 2026-02-21
+
+### Added
+- Scenario Editor UAT plans
+
+### Fixed
+- Role enum validation for ScenarioTemplate
+
+## [2.2.6] - 2026-02-21
+
+### Changed
+- Range pause/unpause uses Ready instead of Active status
+
+## [2.2.5] - 2026-02-21
+
+### Added
+- MCP tools for SSM tunnel testing: start_portal_test_tunnel, stop_portal_test_tunnel
+- localhost to ALLOWED_HOSTS in dev for tunnel access
+
+## [2.2.4] - 2026-02-21
+
+### Changed
+- Enable dev_login in deployed dev environment for programmatic testing via SSM tunnel
+
+## [2.2.3] - 2026-02-21
+
+### Fixed
+- Broken migration chain causes Django crash loop
+
+## [2.2.2] - 2026-02-17
+
+### Fixed
+- Deploy script SSM waiter timeout - increased max attempts from 20 to 60 (15 minutes)
+
 ## [2.2.1] - 2026-02-16
 
 ### Changed

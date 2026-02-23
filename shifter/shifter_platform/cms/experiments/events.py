@@ -24,12 +24,14 @@ class ExperimentEventError(Exception):
 def _get_experiments_queue_url() -> str | None:
     """Get the experiments SQS queue URL from settings.
 
+    Experiments use the cms queue since they're part of the cms module.
+
     Returns:
         Queue URL string, or None if not configured.
     """
     config: dict[str, Any] = getattr(settings, "SQS_QUEUE_CONFIG", {})
-    experiments_config: dict[str, str] = config.get("experiments", {})
-    url: str = experiments_config.get("url", "")
+    cms_config: dict[str, str] = config.get("cms", {})
+    url: str = cms_config.get("url", "")
     return url or None
 
 
@@ -63,11 +65,9 @@ def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
     """
     queue_url = _get_experiments_queue_url()
     if queue_url is None:
-        logger.warning(
-            "publish_experiment_event: SQS_EXPERIMENTS_URL not configured, cannot publish event_type=%s",
-            event_type,
-        )
-        return
+        error_msg = f"Cannot publish experiment event {event_type}: SQS_CMS_URL not configured"
+        logger.error(error_msg)
+        raise ExperimentEventError(error_msg)
 
     message_body = {
         "event_type": event_type,

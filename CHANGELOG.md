@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.9] - 2026-02-22
+
+### Fixed
+- Experiment runner integration fixes
+
+## [2.2.8] - 2026-02-22
+
+### Changed
+- Finish experiment runner integration
+
+## [2.2.7] - 2026-02-21
+
+### Added
+- Scenario Editor UAT plans
+
+### Fixed
+- Role enum validation for ScenarioTemplate
+
+## [2.2.6] - 2026-02-21
+
+### Changed
+- Range pause/unpause uses Ready instead of Active status
+
 ## [2.2.5] - 2026-02-21
 
 ### Added

@@ -6,6 +6,8 @@ cms/scenarios/templates/. They provide type validation and default values.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, field_validator, model_validator
 
 
@@ -35,8 +37,8 @@ class InstanceConfig(BaseModel):
     """
 
     name: str
-    role: str
-    os_type: str
+    role: Literal["attacker", "victim", "dc"]
+    os_type: Literal["kali", "windows", "ubuntu", "from_agent"]
     xdr_agent: bool = False
     domain_controller: bool = False
     join_domain: bool = False

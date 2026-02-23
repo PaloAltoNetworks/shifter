@@ -5,6 +5,7 @@ import json
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
+from django.urls import reverse
 
 from cms.models import Scenario
 
@@ -35,8 +36,9 @@ class TestScenarioListView:
 
     def test_non_staff_redirected(self, regular_client):
         response = regular_client.get(VIEW_BASE)
-        # threat_research_required redirects non-authorised users
+        # threat_research_required redirects unauthorized users to dashboard
         assert response.status_code == 302
+        assert response.url == reverse("mission_control:dashboard")
 
     def test_unauthenticated_redirected(self):
         client = Client()
@@ -75,6 +77,13 @@ class TestThreatResearchGroupAccess:
     def test_regular_user_still_blocked(self, regular_client):
         response = regular_client.get(VIEW_BASE)
         assert response.status_code == 302
+        assert response.url == reverse("mission_control:dashboard")
+
+    def test_regular_user_sees_permission_denied_message(self, regular_client):
+        response = regular_client.get(VIEW_BASE, follow=True)
+        assert response.status_code == 200
+        msgs = list(response.context["messages"])
+        assert any("permission" in str(m).lower() for m in msgs)
 
 
 class TestScenarioDetailView:

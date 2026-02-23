@@ -381,6 +381,9 @@ temp/
 
 risks/
 
+# UAT test files
+uat/large.py
+
 # GitHub Runner
 platform/terraform/global/github-runner/*.zip
 

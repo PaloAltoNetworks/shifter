@@ -144,6 +144,13 @@
                     </select>
                     <div class="form-hint">Select the infrastructure scenario template</div>
                 </div>
+                <div class="form-group">
+                    <label for="agent_id">Windows Agent <span class="required">*</span></label>
+                    <select id="agent_id" name="agent_id" required>
+                        <option value="">-- Select agent --</option>
+                    </select>
+                    <div class="form-hint">XDR agent for Windows instances</div>
+                </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="total_runs">Total Runs <span class="required">*</span></label>
@@ -182,6 +189,7 @@
 <script>
 (function() {
     const scenarioSelect = document.getElementById('scenario_id');
+    const agentSelect = document.getElementById('agent_id');
     const scriptAssignments = document.getElementById('script-assignments');
     const addScriptBtn = document.getElementById('add-script-btn');
     const scriptsJsonInput = document.getElementById('scripts_json');
@@ -190,6 +198,23 @@
     let instances = [];
     let cachedScripts = null;
     const allowedProperties = ['ip', 'name', 'instance_id'];
+
+    // Load agents on page load
+    fetch('{% url "mission_control:list_agents" %}')
+        .then(r => r.json())
+        .then(data => {
+            if (data.agents && data.agents.length > 0) {
+                data.agents.forEach(agent => {
+                    const option = document.createElement('option');
+                    option.value = agent.id;
+                    option.textContent = agent.name + ' (' + agent.os + ')';
+                    agentSelect.appendChild(option);
+                });
+            }
+        })
+        .catch(() => {
+            console.error('Failed to load agents');
+        });
 
     function fetchScripts() {
         if (cachedScripts !== null) return Promise.resolve(cachedScripts);

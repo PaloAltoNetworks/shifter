@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.11] - 2026-02-23
+
+### Fixed
+- Threat Research RBAC sidebar visibility and auth redirect
+
+## [2.2.10] - 2026-02-23
+
+### Added
+- Threat Research RBAC group
+- Threat Research access to Experiment Manager and Scenario Editor
+
 ## [2.2.9] - 2026-02-22
 
 ### Fixed

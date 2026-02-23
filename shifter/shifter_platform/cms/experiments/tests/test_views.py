@@ -29,7 +29,8 @@ class StaffAccessTest(TestCase):
     def test_experiment_list_requires_authorization(self):
         self.client.login(username="view_user", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:experiment_list"))
-        assert resp.status_code == 302  # Redirected to login/admin
+        assert resp.status_code == 302
+        assert resp.url == reverse("mission_control:dashboard")
 
     def test_experiment_list_staff_ok(self):
         self.client.login(username="view_staff", password=TEST_PASSWORD)
@@ -40,11 +41,19 @@ class StaffAccessTest(TestCase):
         self.client.login(username="view_user", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:script_list"))
         assert resp.status_code == 302
+        assert resp.url == reverse("mission_control:dashboard")
 
     def test_script_list_staff_ok(self):
         self.client.login(username="view_staff", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:script_list"))
         assert resp.status_code == 200
+
+    def test_unauthorized_user_sees_permission_denied_message(self):
+        self.client.login(username="view_user", password=TEST_PASSWORD)
+        resp = self.client.get(reverse("experiments:experiment_list"), follow=True)
+        assert resp.status_code == 200
+        msgs = list(resp.context["messages"])
+        assert any("permission" in str(m).lower() for m in msgs)
 
 
 class ThreatResearchAccessTest(TestCase):
@@ -52,12 +61,8 @@ class ThreatResearchAccessTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.regular_user = User.objects.create_user(
-            username="tr_regular", password=TEST_PASSWORD, is_staff=False
-        )
-        cls.threat_user = User.objects.create_user(
-            username="tr_threat", password=TEST_PASSWORD, is_staff=False
-        )
+        cls.regular_user = User.objects.create_user(username="tr_regular", password=TEST_PASSWORD, is_staff=False)
+        cls.threat_user = User.objects.create_user(username="tr_threat", password=TEST_PASSWORD, is_staff=False)
         group, _ = Group.objects.get_or_create(name=THREAT_RESEARCH_GROUP)
         cls.threat_user.groups.add(group)
 
@@ -75,11 +80,13 @@ class ThreatResearchAccessTest(TestCase):
         self.client.login(username="tr_regular", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:experiment_list"))
         assert resp.status_code == 302
+        assert resp.url == reverse("mission_control:dashboard")
 
     def test_regular_user_still_blocked_from_script_list(self):
         self.client.login(username="tr_regular", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:script_list"))
         assert resp.status_code == 302
+        assert resp.url == reverse("mission_control:dashboard")
 
 
 class ExperimentListViewTest(TestCase):

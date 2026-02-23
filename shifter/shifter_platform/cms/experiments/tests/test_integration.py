@@ -1,6 +1,7 @@
 """Integration tests for experiment lifecycle.
 
 Tests end-to-end flows through services and orchestrator.
+Engine calls are mocked since integration tests focus on lifecycle state transitions.
 """
 
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from cms.experiments import services
 from cms.experiments.models import ExperimentRun, ScriptAsset
 from cms.experiments.orchestrator import ExperimentOrchestrator
 from cms.experiments.schemas import ExperimentCreateInput, ExperimentStatus, RunStatus
+from cms.models import AgentConfig, OperatingSystem
 
 # Test password constant for all test users
 TEST_PASSWORD = "test"  # nosec B105
@@ -26,12 +28,24 @@ class ExperimentLifecycleTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="lifecycle_user", password=TEST_PASSWORD, is_staff=True)
+        cls.windows_os = OperatingSystem.objects.get(slug="windows")
+        cls.agent = AgentConfig.objects.create(
+            user=cls.user,
+            name="Lifecycle Agent",
+            os=cls.windows_os,
+            s3_key="agents/test/lifecycle.msi",
+            original_filename="lifecycle.msi",
+            file_size_bytes=5_000_000,
+            sha256_hash="abc123",
+        )
 
-    def test_full_lifecycle(self):
+    @patch("cms.experiments.orchestrator.engine_create_range")
+    def test_full_lifecycle(self, mock_engine):
         # 1. Create experiment
         data = ExperimentCreateInput(
             name="Lifecycle Test",
             scenario_id="basic",
+            agent_id=self.agent.pk,
             total_runs=2,
             max_parallel_runs=1,
         )
@@ -92,11 +106,13 @@ class ExperimentLifecycleTest(TestCase):
         assert experiment.status == ExperimentStatus.COMPLETED.value
         assert experiment.completed_at is not None
 
-    def test_lifecycle_with_failure(self):
+    @patch("cms.experiments.orchestrator.engine_create_range")
+    def test_lifecycle_with_failure(self, mock_engine):
         """If one run fails and one succeeds, experiment still completes."""
         data = ExperimentCreateInput(
             name="Failure Lifecycle",
             scenario_id="basic",
+            agent_id=self.agent.pk,
             total_runs=2,
             max_parallel_runs=2,
         )
@@ -109,7 +125,7 @@ class ExperimentLifecycleTest(TestCase):
 
         runs = ExperimentRun.objects.filter(experiment=experiment).order_by("run_number")
 
-        # Run 1 fails
+        # Run 1 fails via handle_run_failed (simulates external failure)
         orch.handle_run_failed(runs[0].pk, "SSM timeout")
         runs[0].refresh_from_db()
         assert runs[0].status == RunStatus.FAILED.value

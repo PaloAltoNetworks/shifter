@@ -561,9 +561,9 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
 def get_user_ngfw_data(user_id: int) -> dict | None:
     """Get NGFW data for a user (if they have one provisioned).
 
-    Queries for a ready/active NGFW Instance belonging to this user.
-    Includes 'stopping' status because range provisioner will wait for
-    stop to complete, then start the NGFW.
+    Queries for a ready/paused NGFW Instance belonging to this user.
+    Includes 'pausing' status because range provisioner will wait for
+    pause to complete, then resume the NGFW.
 
     Args:
         user_id: Django User ID.
@@ -583,7 +583,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
             JOIN engine_request r ON i.request_id = r.id
             WHERE r.user_id = %s
               AND i.role = 'ngfw'
-              AND i.status IN ('ready', 'active', 'stopped', 'stopping', 'starting')
+              AND i.status IN ('ready', 'paused', 'pausing', 'resuming')
             ORDER BY i.created_at DESC
             LIMIT 1
             """,
@@ -610,7 +610,7 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
 def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
     """Remove subnet addresses and security rules from user's NGFW.
 
-    Starts the NGFW if stopped, waits for SSH, then runs the remove plan.
+    Resumes the NGFW if paused, waits for SSH, then runs the remove plan.
 
     Args:
         user_id: Django User ID who owns the NGFW.
@@ -635,10 +635,10 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
         logger.warning("NGFW missing management_ip or ssh_key, skipping removal")
         return
 
-    # NGFW should NEVER be stopped while ranges are active - this indicates a bug
-    if status == "stopped":
+    # NGFW should NEVER be paused while ranges are active - this indicates a bug
+    if status == "paused":
         logger.error(
-            "NGFW is stopped during range destroy - this should never happen! "
+            "NGFW is paused during range destroy - this should never happen! "
             "range_id=%s user_id=%s ngfw_request_id=%s. Skipping NGFW cleanup.",
             range_id,
             user_id,
@@ -823,7 +823,7 @@ def get_range_data_by_request_id(request_id: str) -> dict:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status IN ('active', 'ready', 'stopped', 'stopping')
+                  AND ei.status IN ('ready', 'paused', 'pausing', 'resuming')
                   AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
@@ -1890,17 +1890,17 @@ def run_pulumi(operation: str, request_id: str) -> None:
                 ngfw_data["management_ip"],
             )
 
-            # Start NGFW if stopped/stopping (must be running for subnet config)
+            # Resume NGFW if paused/pausing (must be running for subnet config)
             ngfw_status = ngfw_data.get("status")
-            if ngfw_status in ("stopped", "stopping"):
+            if ngfw_status in ("paused", "pausing"):
                 ec2_instance_id = ngfw_data.get("ec2_instance_id")
-                if ngfw_status == "stopping" and ec2_instance_id:
-                    # Wait for stop to complete before starting
-                    logger.info("NGFW is stopping, waiting for stop to complete...")
+                if ngfw_status == "pausing" and ec2_instance_id:
+                    # Wait for pause to complete before resuming
+                    logger.info("NGFW is pausing, waiting for pause to complete...")
                     aws_executor = AWSExecutor()
                     aws_executor.wait_for_stopped(ec2_instance_id)
-                    logger.info("NGFW stop complete, now starting...")
-                logger.info("Starting stopped NGFW for range provisioning...")
+                    logger.info("NGFW pause complete, now resuming...")
+                logger.info("Resuming paused NGFW for range provisioning...")
                 run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
 
     try:
@@ -2305,15 +2305,15 @@ def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, 
                 logger.error("Failed to mark range %d as destroyed in DB: %s", range_id, e)
                 # Don't raise - AWS resources are gone, DB inconsistency is better than stuck
 
-        # Always attempt NGFW auto-stop (soft fail)
+        # Always attempt NGFW auto-pause (soft fail)
         try:
             if not user_has_active_ranges(user_id, range_id):
                 ngfw_data = get_user_ngfw_data(user_id)
-                if ngfw_data and ngfw_data["status"] == "active":
-                    logger.info("No other active ranges for user %s, stopping NGFW", user_id)
+                if ngfw_data and ngfw_data["status"] == "ready":
+                    logger.info("No other active ranges for user %s, pausing NGFW", user_id)
                     run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
         except Exception as e:
-            logger.warning("Failed to stop NGFW (non-fatal): %s", e)
+            logger.warning("Failed to pause NGFW (non-fatal): %s", e)
 
     # Publish destroyed event only on full success
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
@@ -2340,20 +2340,20 @@ def run_range_terraform(operation: str, request_id: str) -> None:
     user_id = range_data["user_id"]
     range_spec = range_data.get("spec", {})
 
-    # If NGFW is enabled, start it if stopped (must be running for subnet config)
+    # If NGFW is enabled, resume it if paused (must be running for subnet config)
     if range_spec.get("ngfw", False):
         ngfw_data = get_user_ngfw_data(user_id)
         if ngfw_data and ngfw_data.get("management_ip"):
             logger.info("NGFW enabled for range %s", range_id)
             ngfw_status = ngfw_data.get("status")
             ec2_instance_id = ngfw_data.get("ec2_instance_id")
-            if ngfw_status in ("stopped", "stopping", "starting"):
-                if ngfw_status == "stopping" and ec2_instance_id:
-                    logger.info("NGFW is stopping, waiting for stop to complete...")
+            if ngfw_status in ("paused", "pausing", "resuming"):
+                if ngfw_status == "pausing" and ec2_instance_id:
+                    logger.info("NGFW is pausing, waiting for pause to complete...")
                     aws_executor = AWSExecutor()
                     aws_executor.wait_for_stopped(ec2_instance_id)
-                elif ngfw_status == "starting" and ec2_instance_id:
-                    # Status stuck in 'starting' - check actual EC2 state
+                elif ngfw_status == "resuming" and ec2_instance_id:
+                    # Status stuck in 'resuming' - check actual EC2 state
                     aws_executor = AWSExecutor()
                     result = aws_executor.describe_instance(ec2_instance_id)
                     ec2_state = None
@@ -2363,17 +2363,17 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                         if reservations and reservations[0].get("Instances"):
                             ec2_state = reservations[0]["Instances"][0].get("State", {}).get("Name")
                     if ec2_state == "stopped":
-                        logger.info("NGFW stuck in 'starting' but EC2 is stopped, restarting...")
+                        logger.info("NGFW stuck in 'resuming' but EC2 is stopped, resuming...")
                         run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
                     elif ec2_state == "running":
-                        logger.info("NGFW starting, EC2 already running")
+                        logger.info("NGFW resuming, EC2 already running")
                         # Already running, continue to provision
                     elif ec2_state == "pending":
-                        logger.info("NGFW starting, waiting for EC2 to be running...")
+                        logger.info("NGFW resuming, waiting for EC2 to be running...")
                         aws_executor.wait_for_running(ec2_instance_id)
                         # Now running, continue to provision
                 else:
-                    logger.info("Starting stopped NGFW for range provisioning...")
+                    logger.info("Resuming paused NGFW for range provisioning...")
                     run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
 
     try:
@@ -2594,15 +2594,15 @@ def _run_terraform_destroy(
             except Exception as e:
                 logger.error("Failed to mark range %d as destroyed: %s", range_id, e)
 
-        # Auto-stop NGFW if no other active ranges
+        # Auto-pause NGFW if no other active ranges
         try:
             if not user_has_active_ranges(user_id, range_id):
                 ngfw_data = get_user_ngfw_data(user_id)
-                if ngfw_data and ngfw_data["status"] == "active":
-                    logger.info("No other active ranges, stopping NGFW")
+                if ngfw_data and ngfw_data["status"] == "ready":
+                    logger.info("No other active ranges, pausing NGFW")
                     run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
         except Exception as e:
-            logger.warning("Failed to stop NGFW (non-fatal): %s", e)
+            logger.warning("Failed to pause NGFW (non-fatal): %s", e)
 
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 
@@ -2755,8 +2755,8 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
 
     # Status transitions for each operation
     status_map = {
-        "start": ("starting", "active"),
-        "stop": ("stopping", "stopped"),
+        "start": ("resuming", "ready"),
+        "stop": ("pausing", "paused"),
     }
 
     if operation not in status_map:
